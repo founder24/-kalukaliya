@@ -510,7 +510,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       headers: adminHeaders(adminToken), withCredentials: true,
     })
       .then((r) => setAwsCredits(r.data))
-      .catch(() => setAwsCredits({ _error: true }))
+      .catch((err) => setAwsCredits(err?.response?.status === 404 ? { configured: false } : { _error: true }))
       .finally(() => setAwsCreditsLoading(false));
   }, [adminToken]);
 
@@ -524,7 +524,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       headers: adminHeaders(adminToken), withCredentials: true,
     })
       .then((r) => setAzureCredits(r.data))
-      .catch(() => setAzureCredits({ _error: true }))
+      .catch((err) => setAzureCredits(err?.response?.status === 404 ? { configured: false } : { _error: true }))
       .finally(() => setAzureCreditsLoading(false));
   }, [adminToken]);
 
@@ -538,7 +538,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       headers: adminHeaders(adminToken), withCredentials: true,
     })
       .then((r) => setAxiomCredits(r.data))
-      .catch(() => setAxiomCredits({ _error: true }))
+      .catch((err) => setAxiomCredits(err?.response?.status === 404 ? { configured: false } : { _error: true }))
       .finally(() => setAxiomCreditsLoading(false));
   }, [adminToken]);
 
@@ -552,7 +552,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       headers: adminHeaders(adminToken), withCredentials: true,
     })
       .then((r) => setSentryCredits(r.data))
-      .catch(() => setSentryCredits({ _error: true }))
+      .catch((err) => setSentryCredits(err?.response?.status === 404 ? { configured: false } : { _error: true }))
       .finally(() => setSentryCreditsLoading(false));
   }, [adminToken]);
 

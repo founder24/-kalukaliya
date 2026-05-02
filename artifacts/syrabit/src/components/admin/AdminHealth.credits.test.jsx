@@ -117,6 +117,24 @@ describe('AdminHealth — AWS Activate credit panel', () => {
     expect(screen.getByText(/Set AWS_ACCESS_KEY_ID/)).toBeInTheDocument();
   });
 
+  it('shows "not configured" state (not error banner) when API responds with 404', async () => {
+    axiosGet.mockImplementation((url) => {
+      if (url.includes('billing/aws-activate')) {
+        const err = new Error('Not Found');
+        err.response = { status: 404 };
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await renderAdmin();
+
+    await screen.findByTestId('aws-credit-panel');
+    // Should show "not configured" UI — NOT the generic error banner
+    expect(screen.getByText('AWS cost explorer not configured')).toBeInTheDocument();
+    expect(screen.getByText(/Set AWS_ACCESS_KEY_ID/)).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load AWS credit data/)).not.toBeInTheDocument();
+  });
+
   it('renders grant total, spend MTD, remaining, and runway values when configured', async () => {
     axiosGet.mockImplementation(makeMock({
       'billing/aws-activate': {
@@ -216,6 +234,24 @@ describe('AdminHealth — Azure for Startups credit panel', () => {
     expect(screen.getByTestId('azure-credit-heading')).toHaveTextContent('Azure for Startups');
     expect(screen.getByText('Azure Cost Management not configured')).toBeInTheDocument();
     expect(screen.getByText(/Create an Azure service principal/)).toBeInTheDocument();
+  });
+
+  it('shows "not configured" state (not error banner) when API responds with 404', async () => {
+    axiosGet.mockImplementation((url) => {
+      if (url.includes('billing/azure-startups')) {
+        const err = new Error('Not Found');
+        err.response = { status: 404 };
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await renderAdmin();
+
+    await screen.findByTestId('azure-credit-panel');
+    // Should show "not configured" UI — NOT the generic error banner
+    expect(screen.getByText('Azure Cost Management not configured')).toBeInTheDocument();
+    expect(screen.getByText(/Create an Azure service principal/)).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load Azure credit data/)).not.toBeInTheDocument();
   });
 
   it('renders grant total, spend MTD, remaining, and runway values when configured', async () => {
