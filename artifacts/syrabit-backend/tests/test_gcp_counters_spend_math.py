@@ -181,6 +181,38 @@ def test_snapshot_period_and_metadata():
     assert "services" in s
 
 
+def test_stt_increments_on_successful_call_even_when_empty():
+    """inc_stt must fire on every successful API call, not only when transcript non-empty.
+
+    This mirrors the post-HTTP-success placement in google_stt.py where
+    the counter increments BEFORE the 'if transcript:' guard.
+    """
+    mod = _fresh_module()
+    _reset(mod)
+    mod.inc_stt(0.25)
+    s = mod.snapshot()
+    assert s["services"]["stt"]["calls"] == 1, (
+        "STT counter must increment even when the resulting transcript is empty"
+    )
+    assert s["services"]["stt"]["audio_minutes"] > 0
+
+
+def test_translate_increments_on_successful_call_even_when_empty():
+    """inc_translate must fire on every successful API call, not only when result non-empty.
+
+    This mirrors the post-HTTP-success placement in google_translate.py where
+    the counter increments BEFORE the 'if result:' guard.
+    """
+    mod = _fresh_module()
+    _reset(mod)
+    mod.inc_translate(100)
+    s = mod.snapshot()
+    assert s["services"]["translate"]["calls"] == 1, (
+        "Translation counter must increment even when translatedText is empty"
+    )
+    assert s["services"]["translate"]["chars"] == 100
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

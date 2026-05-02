@@ -219,19 +219,21 @@ async def transcribe_indic(
             parts.append(alts[0].get("transcript", ""))
 
     transcript = " ".join(p for p in parts if p).strip()
+
+    try:
+        from providers.gcp_counters import inc_stt as _inc_stt
+        if audio_encoding and audio_encoding.upper() == "LINEAR16":
+            _dur_s = len(audio_bytes) / max(sample_rate_hz * 2, 1)
+        else:
+            _dur_s = len(audio_bytes) / 32000.0
+        _dur_s = max(15.0, _dur_s)
+        _inc_stt(_dur_s / 60.0)
+    except Exception:
+        pass
+
     if transcript:
         logger.info(
             "[google-stt] Chirp_2 lang=%s audio=%d bytes transcript=%d chars (%.0fms)",
             lang, len(audio_bytes), len(transcript), elapsed_ms,
         )
-        try:
-            from providers.gcp_counters import inc_stt as _inc_stt
-            if audio_encoding and audio_encoding.upper() == "LINEAR16":
-                _dur_s = len(audio_bytes) / max(sample_rate_hz * 2, 1)
-            else:
-                _dur_s = len(audio_bytes) / 32000.0
-            _dur_s = max(15.0, _dur_s)
-            _inc_stt(_dur_s / 60.0)
-        except Exception:
-            pass
     return transcript or None
