@@ -49,6 +49,28 @@ spec:
                 secretKeyRef:
                   name: backend-railway-url
                   key: latest
+            - name: BACKEND_CLOUDRUN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-cloudrun-url
+                  key: latest
+            # JSON map of tenant host → "railway"|"cloudrun".
+            # Example: {"app.syrabit.ai":"cloudrun","api.syrabit.ai":"railway"}
+            # Leave empty to rely solely on CLOUDRUN_HOST_PATTERN or default.
+            - name: TENANT_ROUTES
+              valueFrom:
+                secretKeyRef:
+                  name: dispatch-tenant-routes
+                  key: latest
+                  optional: true
+            # Regex: tenant hosts matching this pattern are sent to Cloud Run.
+            # Example: ^(app|api|internal)\.syrabit\.ai$
+            - name: CLOUDRUN_HOST_PATTERN
+              valueFrom:
+                secretKeyRef:
+                  name: dispatch-cloudrun-host-pattern
+                  key: latest
+                  optional: true
           resources:
             limits:
               cpu: "1"
