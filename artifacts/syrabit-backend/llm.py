@@ -1583,9 +1583,10 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
     via call_with_provider_fallback → _dispatch_llm_for_feature.
 
     Weighted provider priority: Vertex (Gemini 2.5 Flash, weight 2000) →
-    Bedrock (weight 1000, Phase 2) → Workers AI (fallback, weight 0).
+    Bedrock (weight 1000) → Azure OpenAI (weight 1) → Workers AI (weight 0, last-resort).
 
-    Falls back to the static _RAG_PROVIDERS pool if all feature-key providers fail.
+    Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
+    (Groq, Cerebras, Gemini direct) can be introduced after the weighted pool exhausts.
     """
     try:
         return await call_with_provider_fallback(
@@ -1594,11 +1595,10 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
         )
     except Exception as exc:
         logger.warning(
-            "call_llm_for_rag feature dispatch failed (%s) — falling back to legacy provider list",
+            "call_llm_for_rag feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,
         )
-        primary_model = _RAG_PROVIDERS[0]["default_model"] if _RAG_PROVIDERS else None
-        return await _call_llm_raw(messages, model=primary_model, max_tokens=max_tokens, provider_list=_RAG_PROVIDERS)
+        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
 
 
 async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048) -> str:
@@ -1629,10 +1629,10 @@ async def call_llm_api_content(messages: list, model: str = None, max_tokens: in
     """LLM call for admin content generation via PROVIDER_PRIORITY weighted dispatch.
 
     Feature key: "content" — Vertex (Gemini 2.5 Flash, weight 2000) →
-    Bedrock (weight 1000, Phase 2) → Workers AI (fallback, weight 0).
+    Bedrock (weight 1000) → Azure OpenAI (weight 1) → Workers AI (weight 0, last-resort).
 
-    Falls back to the dedicated content batcher (300ms window, admin semaphore)
-    if all feature-key providers are exhausted or fail.
+    Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
+    (Gemini direct, Cerebras) can be introduced after the weighted pool exhausts.
     """
     try:
         return await call_with_provider_fallback(
@@ -1641,12 +1641,10 @@ async def call_llm_api_content(messages: list, model: str = None, max_tokens: in
         )
     except Exception as exc:
         logger.warning(
-            "call_llm_api_content feature dispatch failed (%s) — falling back to legacy content batcher",
+            "call_llm_api_content feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,
         )
-        if model is None and _LLM_PROVIDERS_CONTENT:
-            model = _LLM_PROVIDERS_CONTENT[0]["default_model"]
-        return await _content_batcher.call(messages, model, max_tokens, provider_list=_LLM_PROVIDERS_CONTENT, use_admin_sem=True)
+        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
 
 
 async def call_llm_api_content_with_retry(
@@ -1695,10 +1693,10 @@ async def call_llm_api_chat(
 
     Feature key: "english_rag_chat" (default) or "assamese_rag_chat" when lang="as".
     Weighted priority: Vertex (Gemini 2.5 Flash, weight 2000) →
-    Bedrock (weight 1000, Phase 2) → Workers AI (fallback, weight 0).
+    Bedrock (weight 1000) → Azure OpenAI (weight 1) → Workers AI (weight 0, last-resort).
 
-    Falls back to the SmartKeyPool _LLM_PROVIDERS_CHAT batcher if all
-    feature-key providers are exhausted or fail.
+    Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
+    (Groq, Cerebras) can be introduced after the weighted pool exhausts.
     """
     feature = "assamese_rag_chat" if lang == "as" else "english_rag_chat"
     try:
@@ -1708,10 +1706,10 @@ async def call_llm_api_chat(
         )
     except Exception as exc:
         logger.warning(
-            "call_llm_api_chat feature dispatch failed (%s) — falling back to SmartKeyPool batcher",
+            "call_llm_api_chat feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,
         )
-        return await _llm_batcher.call(messages, model, max_tokens, provider_list=_LLM_PROVIDERS_CHAT)
+        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
 
 
 _THINK_BUDGET_HINT = "/think in one sentence. Answer immediately.\n"

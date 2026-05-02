@@ -395,6 +395,86 @@ def test_safety_auto_enabled_when_cf_gateway_is_configured():
     )
 
 
+def test_chat_content_rag_hard_fallback_is_workers_ai_only():
+    """call_llm_api_chat, call_llm_api_content, and call_llm_for_rag must NOT fall back
+    to legacy provider lists (Groq/Cerebras/Gemini direct).
+
+    When call_with_provider_fallback raises (all PROVIDER_PRIORITY providers exhausted),
+    the final _call_llm_raw call must use _LLM_PROVIDERS_WORKERS_ONLY — never
+    _LLM_PROVIDERS_CHAT, _LLM_PROVIDERS_CONTENT, or _RAG_PROVIDERS.
+    """
+    import inspect
+    import llm as _llm_mod
+
+    for fn_name in ("call_llm_api_chat", "call_llm_api_content", "call_llm_for_rag"):
+        src = inspect.getsource(getattr(_llm_mod, fn_name))
+        assert "_LLM_PROVIDERS_WORKERS_ONLY" in src, (
+            f"{fn_name}: hard fallback must use _LLM_PROVIDERS_WORKERS_ONLY, not a legacy provider list"
+        )
+        for banned in ("_LLM_PROVIDERS_CHAT", "_LLM_PROVIDERS_CONTENT", "_RAG_PROVIDERS",
+                       "_llm_batcher.call", "_content_batcher.call"):
+            exc_section = src[src.find("except Exception"):]
+            assert banned not in exc_section, (
+                f"{fn_name}: except-block must not reference {banned!r} — "
+                f"would reintroduce non-PROVIDER_PRIORITY providers as fallback"
+            )
+    print("  PASS: chat/content/rag hard fallback constrained to _LLM_PROVIDERS_WORKERS_ONLY")
+
+
+def test_chat_fallback_calls_workers_ai_raw_at_runtime():
+    """When call_with_provider_fallback raises, call_llm_api_chat must call
+    _call_llm_raw with _LLM_PROVIDERS_WORKERS_ONLY — not the chat batcher."""
+    from llm import call_llm_api_chat, _LLM_PROVIDERS_WORKERS_ONLY
+    raw_stub = mock.AsyncMock(return_value="workers-ai-response")
+    with mock.patch("llm.call_with_provider_fallback", side_effect=RuntimeError("all exhausted")):
+        with mock.patch("llm._call_llm_raw", raw_stub):
+            result = asyncio.run(call_llm_api_chat([{"role": "user", "content": "hi"}]))
+    assert result == "workers-ai-response", f"Expected workers_ai response, got {result!r}"
+    raw_stub.assert_called_once()
+    call_kwargs = raw_stub.call_args
+    provider_list_arg = call_kwargs.kwargs.get("provider_list") or call_kwargs.args[-1]
+    assert provider_list_arg is _LLM_PROVIDERS_WORKERS_ONLY, (
+        "chat fallback must pass _LLM_PROVIDERS_WORKERS_ONLY to _call_llm_raw"
+    )
+    print("  PASS: call_llm_api_chat hard fallback calls _call_llm_raw(provider_list=_LLM_PROVIDERS_WORKERS_ONLY)")
+
+
+def test_content_fallback_calls_workers_ai_raw_at_runtime():
+    """When call_with_provider_fallback raises, call_llm_api_content must call
+    _call_llm_raw with _LLM_PROVIDERS_WORKERS_ONLY — not the content batcher."""
+    from llm import call_llm_api_content, _LLM_PROVIDERS_WORKERS_ONLY
+    raw_stub = mock.AsyncMock(return_value="workers-ai-content")
+    with mock.patch("llm.call_with_provider_fallback", side_effect=RuntimeError("all exhausted")):
+        with mock.patch("llm._call_llm_raw", raw_stub):
+            result = asyncio.run(call_llm_api_content([{"role": "user", "content": "generate"}]))
+    assert result == "workers-ai-content", f"Expected workers_ai response, got {result!r}"
+    raw_stub.assert_called_once()
+    call_kwargs = raw_stub.call_args
+    provider_list_arg = call_kwargs.kwargs.get("provider_list") or call_kwargs.args[-1]
+    assert provider_list_arg is _LLM_PROVIDERS_WORKERS_ONLY, (
+        "content fallback must pass _LLM_PROVIDERS_WORKERS_ONLY to _call_llm_raw"
+    )
+    print("  PASS: call_llm_api_content hard fallback calls _call_llm_raw(provider_list=_LLM_PROVIDERS_WORKERS_ONLY)")
+
+
+def test_rag_fallback_calls_workers_ai_raw_at_runtime():
+    """When call_with_provider_fallback raises, call_llm_for_rag must call
+    _call_llm_raw with _LLM_PROVIDERS_WORKERS_ONLY — not _RAG_PROVIDERS."""
+    from llm import call_llm_for_rag, _LLM_PROVIDERS_WORKERS_ONLY
+    raw_stub = mock.AsyncMock(return_value="workers-ai-rag")
+    with mock.patch("llm.call_with_provider_fallback", side_effect=RuntimeError("all exhausted")):
+        with mock.patch("llm._call_llm_raw", raw_stub):
+            result = asyncio.run(call_llm_for_rag([{"role": "user", "content": "answer"}]))
+    assert result == "workers-ai-rag", f"Expected workers_ai response, got {result!r}"
+    raw_stub.assert_called_once()
+    call_kwargs = raw_stub.call_args
+    provider_list_arg = call_kwargs.kwargs.get("provider_list") or call_kwargs.args[-1]
+    assert provider_list_arg is _LLM_PROVIDERS_WORKERS_ONLY, (
+        "rag fallback must pass _LLM_PROVIDERS_WORKERS_ONLY to _call_llm_raw"
+    )
+    print("  PASS: call_llm_for_rag hard fallback calls _call_llm_raw(provider_list=_LLM_PROVIDERS_WORKERS_ONLY)")
+
+
 if __name__ == "__main__":
     tests = [
         test_all_15_feature_keys_present,
@@ -424,6 +504,10 @@ if __name__ == "__main__":
         test_safety_feature_key_priority_has_bedrock_first,
         test_llm_safety_check_async_and_env_gated,
         test_safety_auto_enabled_when_cf_gateway_is_configured,
+        test_chat_content_rag_hard_fallback_is_workers_ai_only,
+        test_chat_fallback_calls_workers_ai_raw_at_runtime,
+        test_content_fallback_calls_workers_ai_raw_at_runtime,
+        test_rag_fallback_calls_workers_ai_raw_at_runtime,
     ]
     failed = 0
     for t in tests:
