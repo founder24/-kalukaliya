@@ -32,16 +32,27 @@ from config import (
     CF_CACHE_TTL,
     CF_AI_GATEWAY_TOKEN,
     BYOK_PLACEHOLDER,
+    cf_gateway_url,
+    is_cf_gateway_up,
 )
 
 logger = logging.getLogger("providers.assemblyai")
 
 _API_KEY    = _ASSEMBLYAI_KEY
 _MODEL      = ASSEMBLYAI_STT_MODEL
-_BASE_URL   = "https://api.assemblyai.com"
+_DIRECT_BASE = "https://api.assemblyai.com"
 _TIMEOUT_S  = 180.0    # upload + transcription can take up to 3 minutes
 
 ENABLED: bool = bool(_API_KEY and _API_KEY != BYOK_PLACEHOLDER) or (CF_GATEWAY_ENABLED and bool(_API_KEY))
+
+
+def _base_url() -> str:
+    """Return the AssemblyAI base URL — CF AI Gateway when enabled, direct otherwise."""
+    if is_cf_gateway_up():
+        gw = cf_gateway_url("assemblyai")
+        if gw:
+            return gw
+    return _DIRECT_BASE
 
 _POLL_INTERVAL_S = 3.0   # seconds between status polls
 _MAX_POLLS       = 60    # 60 × 3s = 3 minutes max
@@ -120,11 +131,12 @@ async def transcribe(
     api_lang = _LANG_FALLBACK.get(language_code or "", language_code)
 
     t0 = time.perf_counter()
+    base = _base_url()
 
     # Step 1 — upload audio bytes.
     try:
         up_resp = await client.post(
-            f"{_BASE_URL}/v2/upload",
+            f"{base}/v2/upload",
             headers={**headers, "Content-Type": "application/octet-stream"},
             content=audio_bytes,
         )
@@ -149,7 +161,7 @@ async def transcribe(
 
     try:
         job_resp = await client.post(
-            f"{_BASE_URL}/v2/transcript",
+            f"{base}/v2/transcript",
             headers=headers,
             json=payload,
         )
@@ -163,7 +175,7 @@ async def transcribe(
         raise RuntimeError(f"AssemblyAI transcript submit error: {exc}")
 
     # Step 3 — poll until complete.
-    poll_url = f"{_BASE_URL}/v2/transcript/{job_id}"
+    poll_url = f"{base}/v2/transcript/{job_id}"
     for poll_n in range(_MAX_POLLS):
         await asyncio.sleep(_POLL_INTERVAL_S)
         try:
@@ -201,7 +213,7 @@ async def health_check() -> dict:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{_BASE_URL}/v2/transcript?limit=1",
+            f"{_base_url()}/v2/transcript?limit=1",
             headers=_headers(),
             timeout=5.0,
         )

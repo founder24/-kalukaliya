@@ -1451,6 +1451,39 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
     return (canonical, model)
 
 
+async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: int) -> str:
+    """Dispatch a chat LLM call to the named Task #250 provider.
+
+    Used as the ``attempt_fn`` argument to ``call_with_provider_fallback`` so
+    that chat/content/RAG entrypoints route through the weighted pool.
+
+    Raises ``RuntimeError`` for Phase-2 providers (bedrock, azure_openai) that
+    are not yet wired as full client modules (see Task #256).
+
+    Falls back to the Workers AI SmartKeyPool batcher for ``workers_ai`` and
+    any unrecognised provider name.
+    """
+    if provider == "vertex":
+        if not _GEMINI_KEY:
+            raise RuntimeError("vertex: GEMINI_API_KEY not available")
+        return await _call_gemini(messages, _GEMINI_KEY, "gemini-2.5-flash", max_tokens)
+
+    if provider == "sarvam":
+        sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
+        if not sarvam_slot:
+            raise RuntimeError("sarvam: no Sarvam LLM key available")
+        return await _call_sarvam_llm(messages, sarvam_slot["key"], "sarvam-m", max_tokens)
+
+    if provider in ("bedrock", "azure_openai"):
+        # Phase 2 — client modules not yet wired (Task #256).
+        # call_with_provider_fallback will catch this RuntimeError, add the
+        # provider to the exclude set, and draw the next weighted candidate.
+        raise RuntimeError(f"{provider}: client not yet wired (Phase 2 — Task #256)")
+
+    # workers_ai or any unknown provider → SmartKeyPool chat dispatch.
+    return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_CHAT)
+
+
 async def call_with_provider_fallback(
     feature: str,
     lang: str,
@@ -1528,18 +1561,26 @@ if _CF_AI_ENABLED:
 async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
     """LLM call optimised for RAG answer synthesis.
 
-    Provider priority: Groq → Cerebras qwen-3-235b → Gemini 2.5-flash → Workers AI 70B.
-    Groq leads for speed (1.6s avg). Gemini is quality fallback with 12s timeout
-    to accommodate thinking-mode responses. RAG path timeout is 12s (vs 6s general).
+    Dispatches through PROVIDER_PRIORITY["english_rag_chat"] weighted round-robin
+    via call_with_provider_fallback → _dispatch_llm_for_feature.
 
-    Use this instead of ``call_llm_api_chat`` for any endpoint that retrieves
-    context before generation (PYQ solve, notes Q&A, semantic search answer).
+    Weighted provider priority: Vertex (Gemini 2.5 Flash, weight 2000) →
+    Bedrock (weight 1000, Phase 2) → Workers AI (fallback, weight 0).
+
+    Falls back to the static _RAG_PROVIDERS pool if all feature-key providers fail.
     """
-    # Explicitly pass the first provider's model so _call_llm_raw resolves
-    # the correct primary immediately instead of falling back to the global
-    # LLM_MODEL default which may map to a different provider.
-    primary_model = _RAG_PROVIDERS[0]["default_model"] if _RAG_PROVIDERS else None
-    return await _call_llm_raw(messages, model=primary_model, max_tokens=max_tokens, provider_list=_RAG_PROVIDERS)
+    try:
+        return await call_with_provider_fallback(
+            "english_rag_chat", "en",
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens),
+        )
+    except Exception as exc:
+        logger.warning(
+            "call_llm_for_rag feature dispatch failed (%s) — falling back to legacy provider list",
+            exc,
+        )
+        primary_model = _RAG_PROVIDERS[0]["default_model"] if _RAG_PROVIDERS else None
+        return await _call_llm_raw(messages, model=primary_model, max_tokens=max_tokens, provider_list=_RAG_PROVIDERS)
 
 
 async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048) -> str:
@@ -1567,19 +1608,27 @@ logger.info(
 )
 
 async def call_llm_api_content(messages: list, model: str = None, max_tokens: int = 3072) -> str:
-    """LLM call for admin content generation — Cerebras qwen-3-235b preferred
-    (fast + high quality), Gemini 2.5 Flash as fallback.
+    """LLM call for admin content generation via PROVIDER_PRIORITY weighted dispatch.
 
-    Sarvam was previously the secondary slot here but has been removed — admin
-    content generation runs across all languages, and Sarvam quota is now
-    reserved exclusively for the Assamese chat + translate paths (see
-    `_SARVAM_PROVIDERS` rationale at the top of this module).
+    Feature key: "content" — Vertex (Gemini 2.5 Flash, weight 2000) →
+    Bedrock (weight 1000, Phase 2) → Workers AI (fallback, weight 0).
 
-    Uses dedicated content batcher with 300ms batch window (vs 5ms for chat).
-    Retries with exponential backoff instead of instant failover."""
-    if model is None and _LLM_PROVIDERS_CONTENT:
-        model = _LLM_PROVIDERS_CONTENT[0]["default_model"]
-    return await _content_batcher.call(messages, model, max_tokens, provider_list=_LLM_PROVIDERS_CONTENT, use_admin_sem=True)
+    Falls back to the dedicated content batcher (300ms window, admin semaphore)
+    if all feature-key providers are exhausted or fail.
+    """
+    try:
+        return await call_with_provider_fallback(
+            "content", "en",
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens),
+        )
+    except Exception as exc:
+        logger.warning(
+            "call_llm_api_content feature dispatch failed (%s) — falling back to legacy content batcher",
+            exc,
+        )
+        if model is None and _LLM_PROVIDERS_CONTENT:
+            model = _LLM_PROVIDERS_CONTENT[0]["default_model"]
+        return await _content_batcher.call(messages, model, max_tokens, provider_list=_LLM_PROVIDERS_CONTENT, use_admin_sem=True)
 
 
 async def call_llm_api_content_with_retry(
@@ -1618,9 +1667,33 @@ async def call_llm_api_content_with_retry(
                 await asyncio.sleep(backoff)
     raise last_err or HTTPException(status_code=503, detail="Content generation failed after retries")
 
-async def call_llm_api_chat(messages: list, model: str = None, max_tokens: int = 2048) -> str:
-    """LLM call for student chat — excludes Emergent provider (admin-only)."""
-    return await _llm_batcher.call(messages, model, max_tokens, provider_list=_LLM_PROVIDERS_CHAT)
+async def call_llm_api_chat(
+    messages: list,
+    model: str = None,
+    max_tokens: int = 2048,
+    lang: str = "en",
+) -> str:
+    """LLM call for student chat via PROVIDER_PRIORITY weighted dispatch.
+
+    Feature key: "english_rag_chat" (default) or "assamese_rag_chat" when lang="as".
+    Weighted priority: Vertex (Gemini 2.5 Flash, weight 2000) →
+    Bedrock (weight 1000, Phase 2) → Workers AI (fallback, weight 0).
+
+    Falls back to the SmartKeyPool _LLM_PROVIDERS_CHAT batcher if all
+    feature-key providers are exhausted or fail.
+    """
+    feature = "assamese_rag_chat" if lang == "as" else "english_rag_chat"
+    try:
+        return await call_with_provider_fallback(
+            feature, lang,
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens),
+        )
+    except Exception as exc:
+        logger.warning(
+            "call_llm_api_chat feature dispatch failed (%s) — falling back to SmartKeyPool batcher",
+            exc,
+        )
+        return await _llm_batcher.call(messages, model, max_tokens, provider_list=_LLM_PROVIDERS_CHAT)
 
 
 _THINK_BUDGET_HINT = "/think in one sentence. Answer immediately.\n"
