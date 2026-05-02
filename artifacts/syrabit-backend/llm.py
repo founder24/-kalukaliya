@@ -2871,8 +2871,6 @@ async def call_embed_with_dispatch(
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
                 return await _cf_embed(text)
-            elif provider in ("cohere", "pinecone_ai"):
-                raise RuntimeError(f"embed via {provider!r} not yet implemented (Phase 2)")
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
@@ -2981,8 +2979,6 @@ async def call_search_rag_with_dispatch(
                     {"title": r.title, "url": r.url, "text": (r.text or "")[:500]}
                     for r in (results.results or [])
                 ]
-            elif provider == "tavily":
-                raise RuntimeError("tavily search not yet implemented (Phase 2)")
             elif provider == "workers_ai":
                 raise RuntimeError("live web search not available via workers_ai (no search endpoint)")
             else:
@@ -3001,11 +2997,16 @@ async def call_rerank_with_dispatch(
 ) -> list:
     """Rerank *docs* via the weighted provider selected for 'rerank'.
 
-    Priority (PROVIDER_PRIORITY['rerank']): cohere(1000) → pinecone_ai(500) → workers_ai(0)
+    Priority (PROVIDER_PRIORITY['rerank']): workers_ai(0, last-resort)
+
+    Cohere and Pinecone rerank clients are Phase 2 (Task #257) and not yet
+    wired — they are NOT listed in PROVIDER_PRIORITY['rerank'].  When workers_ai
+    is selected it also has no rerank endpoint, so the function always falls
+    through and returns *docs* unranked as a graceful degradation.
 
     Each doc should be a string or a dict with a 'text' key.
-    Returns the docs list reordered by relevance (most relevant first).
-    Falls back to returning docs unchanged if all providers fail.
+    Returns the docs list reordered by relevance (most relevant first),
+    or the original list unchanged if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP
     exclude: frozenset = frozenset()
@@ -3014,9 +3015,7 @@ async def call_rerank_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider("rerank", lang=lang, exclude=exclude)
         try:
-            if provider in ("cohere", "pinecone_ai"):
-                raise RuntimeError(f"rerank via {provider!r} not yet implemented (Phase 2)")
-            elif provider == "workers_ai":
+            if provider == "workers_ai":
                 raise RuntimeError("rerank via workers_ai: no rerank endpoint available")
             else:
                 raise RuntimeError(f"rerank: unknown provider {provider!r}")
@@ -3036,7 +3035,10 @@ async def call_vision_with_dispatch(
 ) -> str:
     """Analyse *b64_image* via the weighted provider selected for 'vision'.
 
-    Priority (PROVIDER_PRIORITY['vision']): vertex(2000) → bedrock(1000) → workers_ai(0)
+    Priority (PROVIDER_PRIORITY['vision']): vertex(2000) → workers_ai(0)
+
+    bedrock and azure_openai are Phase 2 (Task #256) and excluded from
+    PROVIDER_PRIORITY['vision'] until their vision clients are wired.
 
     Returns the model's text response.
     Raises RuntimeError if all providers fail.
@@ -3064,8 +3066,6 @@ async def call_vision_with_dispatch(
                     }
                 ]
                 return await _call_gemini(vision_messages, _GEMINI_KEY, "gemini-2.5-flash", 1024)
-            elif provider in ("bedrock", "azure_openai"):
-                raise RuntimeError(f"vision via {provider!r} not yet implemented (Phase 2)")
             elif provider == "workers_ai":
                 raise RuntimeError("vision via workers_ai: no multimodal endpoint configured")
             else:

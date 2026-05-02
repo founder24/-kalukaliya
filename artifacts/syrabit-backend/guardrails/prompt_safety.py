@@ -83,7 +83,27 @@ def evaluate_prompt_safety(prompt: str) -> Tuple[Optional[str], Optional[str], O
     return (text, None, None)
 
 
-_ENABLE_LLM_SAFETY = _os.environ.get("ENABLE_LLM_SAFETY_CHECK", "false").lower() == "true"
+def _default_llm_safety_enabled() -> bool:
+    """Enable LLM safety check by default when the CF AI Gateway is reachable
+    (meaning Bedrock BYOK is available for the safety feature key).
+
+    Can be overridden in either direction via the ENABLE_LLM_SAFETY_CHECK env var:
+      ENABLE_LLM_SAFETY_CHECK=true  → always on
+      ENABLE_LLM_SAFETY_CHECK=false → always off
+    """
+    env_val = _os.environ.get("ENABLE_LLM_SAFETY_CHECK", "").strip().lower()
+    if env_val == "true":
+        return True
+    if env_val == "false":
+        return False
+    try:
+        from config import is_cf_gateway_up
+        return is_cf_gateway_up()
+    except Exception:
+        return False
+
+
+_ENABLE_LLM_SAFETY: bool = _default_llm_safety_enabled()
 
 _SAFETY_SYSTEM_PROMPT = (
     "You are a content safety classifier for an educational AI assistant used by K-12 students. "
