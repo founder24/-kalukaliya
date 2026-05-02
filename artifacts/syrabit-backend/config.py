@@ -1071,10 +1071,10 @@ PROVIDER_PRIORITY: dict = {
 }
 
 PROVIDER_CREDITS: dict = {
-    "vertex":            100,   # Google Cloud for Startups — $2k (low weight: last-resort for Assamese, not in English pools)
+    "vertex":           2000,   # Google Cloud for Startups — $2k
     "bedrock":          1000,   # AWS Activate — $1k
-    "azure_openai":     2500,   # Azure for Startups — $2.5k credits; primary for english_rag_chat + content (Task #267)
-    "sarvam":           2000,   # Sarvam startup credits — $500 (weight raised so it leads assamese_rag_chat pool)
+    "azure_openai":     2500,   # Azure for Startups — $2.5k; primary for english_rag_chat + content (Task #267)
+    "sarvam":            500,   # Sarvam startup credits — $500
     "cartesia":          500,   # Cartesia startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
@@ -1082,9 +1082,33 @@ PROVIDER_CREDITS: dict = {
     "pinecone_ai":       500,   # Pinecone startup credits — $500
     "exa_ai":           1000,   # Exa startup credits — $1k
     "tavily":            500,   # Tavily startup credits — $500
-    "mongodb_atlas":       0,   # MongoDB Atlas free tier — weight 0 (fallback only, like workers_ai)
-    "workers_ai":          0,   # Cloudflare free tier — absolute last resort, never in rotation pool
-    "workers_ai_indic": 3000,   # CF Workers AI IndicTrans2 — primary for assamese_content + translate; second for assamese_rag_chat
+    "mongodb_atlas":       0,   # MongoDB Atlas free tier — weight 0 (fallback only)
+    "workers_ai":          0,   # Cloudflare free tier — absolute last resort
+    "workers_ai_indic":    0,   # CF Workers AI IndicTrans2 — weight comes from POOL_WEIGHTS per-pool overrides
+}
+
+# Per-pool weight overrides — take precedence over PROVIDER_CREDITS in select_provider.
+# Use this when a provider should have a different priority in one pool vs. the global default.
+# Assamese pools need fine-grained ordering that can't be expressed with a single global weight:
+#   assamese_content:  IndicTrans2 (3000) → Sarvam (2000) → Vertex (100, true last resort)
+#   assamese_rag_chat: Sarvam (3000) → IndicTrans2 (2000) → Vertex (100, true last resort)
+#   translate:         IndicTrans2 (3000) → Sarvam (2000) → Vertex (100, true last resort)
+POOL_WEIGHTS: dict[str, dict[str, int]] = {
+    "assamese_content": {
+        "workers_ai_indic": 3000,   # primary — purpose-built Indic neural MT
+        "sarvam":           2000,   # second
+        "vertex":            100,   # last resort only
+    },
+    "assamese_rag_chat": {
+        "sarvam":           3000,   # primary — best for Assamese conversational
+        "workers_ai_indic": 2000,   # second
+        "vertex":            100,   # last resort only
+    },
+    "translate": {
+        "workers_ai_indic": 3000,   # primary — dedicated Indic MT model
+        "sarvam":           2000,   # second
+        "vertex":            100,   # last resort only
+    },
 }
 
 SEED_DATA = {
