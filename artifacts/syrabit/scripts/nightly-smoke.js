@@ -26,7 +26,7 @@
  *                              degrades to a warning (non-blocking).
  *                              All other GSC errors (bad credential, API error,
  *                              permission denied) are hard failures.
- *                              See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
+ *                              See CRAWLABILITY_RUNBOOK.md § 8 for setup steps.
  *   GSC_SITE_URL             — GSC property URL (default: https://syrabit.ai/)
  *   GSC_INDEXED_URL_FLOOR    — Minimum total indexed URL count (default: 50)
  *   GSC_DROP_THRESHOLD_PCT   — Day-over-day drop % that triggers a hard failure
@@ -767,12 +767,20 @@ async function main() {
   //   • GSC_SERVICE_ACCOUNT_JSON missing → warn() only (non-blocking)
   //   • All other errors (bad credential, JWT failure, API error, 403,
   //     no sitemaps found) → failures.push() (hard failure)
-  // See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
+  // See CRAWLABILITY_RUNBOOK.md § 8 for setup steps.
   {
     const GSC_SA_JSON       = process.env.GSC_SERVICE_ACCOUNT_JSON || '';
     const GSC_SITE_URL      = process.env.GSC_SITE_URL      || 'https://syrabit.ai/';
-    const GSC_INDEXED_FLOOR = parseInt(process.env.GSC_INDEXED_URL_FLOOR    || '50', 10);
-    const GSC_DROP_PCT      = parseInt(process.env.GSC_DROP_THRESHOLD_PCT   || '10', 10);
+    const _gscFloorRaw  = process.env.GSC_INDEXED_URL_FLOOR  || '50';
+    const _gscDropRaw   = process.env.GSC_DROP_THRESHOLD_PCT || '10';
+    const GSC_INDEXED_FLOOR = parseInt(_gscFloorRaw,  10);
+    const GSC_DROP_PCT      = parseInt(_gscDropRaw,   10);
+    if (isNaN(GSC_INDEXED_FLOOR) || GSC_INDEXED_FLOOR < 0) {
+      failures.push(`GSC Coverage: GSC_INDEXED_URL_FLOOR="${_gscFloorRaw}" is not a valid non-negative integer`);
+    }
+    if (isNaN(GSC_DROP_PCT) || GSC_DROP_PCT < 0 || GSC_DROP_PCT > 100) {
+      failures.push(`GSC Coverage: GSC_DROP_THRESHOLD_PCT="${_gscDropRaw}" must be an integer 0–100`);
+    }
     const REDIS_URL         = process.env.UPSTASH_REDIS_REST_URL            || '';
     const REDIS_TOKEN       = process.env.UPSTASH_REDIS_REST_TOKEN          || '';
     const REDIS_KEY         = 'gsc_indexed_count';
@@ -784,11 +792,13 @@ async function main() {
         'GSC Coverage check',
         'GSC_SERVICE_ACCOUNT_JSON not set — skipping. ' +
         'Set the env var to activate nightly indexing regression detection ' +
-        '(see CRAWLABILITY_RUNBOOK.md § 9).',
+        '(see CRAWLABILITY_RUNBOOK.md § 8).',
       );
     } else {
       // Helper: read previous indexed count from Upstash Redis.
       // Returns null when Redis is not configured or the key doesn't exist yet.
+      // Emits a warning (not a failure) when Redis is configured but the
+      // request fails — this makes delta-check degradation visible in CI logs.
       async function rediGet() {
         if (!REDIS_URL || !REDIS_TOKEN) return null;
         try {
@@ -796,22 +806,35 @@ async function main() {
             headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
             signal: AbortSignal.timeout(5000),
           });
+          if (!r.ok) {
+            warn('GSC Coverage (Redis GET)', `HTTP ${r.status} — delta check will be skipped this run`);
+            return null;
+          }
           const j = await r.json();
           const v = parseInt(j.result, 10);
           return isNaN(v) ? null : v;
-        } catch { return null; }
+        } catch (e) {
+          warn('GSC Coverage (Redis GET)', `${e.message} — delta check will be skipped this run`);
+          return null;
+        }
       }
 
       // Helper: persist current indexed count to Upstash Redis.
-      // Silently skips when Redis is not configured.
+      // Skips silently when Redis is not configured; warns on error so
+      // a broken write doesn't silently disable future delta checks.
       async function rediSet(value) {
         if (!REDIS_URL || !REDIS_TOKEN) return;
         try {
-          await fetch(`${REDIS_URL}/set/${REDIS_KEY}/${value}`, {
+          const r = await fetch(`${REDIS_URL}/set/${REDIS_KEY}/${value}`, {
             headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
             signal: AbortSignal.timeout(5000),
           });
-        } catch { /* non-critical */ }
+          if (!r.ok) {
+            warn('GSC Coverage (Redis SET)', `HTTP ${r.status} — next run's delta check may use a stale baseline`);
+          }
+        } catch (e) {
+          warn('GSC Coverage (Redis SET)', `${e.message} — next run's delta check may use a stale baseline`);
+        }
       }
 
       try {
@@ -886,7 +909,7 @@ async function main() {
             `GSC Coverage: 403 Forbidden — service account "${client_email}" ` +
             `needs "Restricted" (read) access on property "${GSC_SITE_URL}". ` +
             'Grant access via GSC → Settings → Users and permissions ' +
-            '(CRAWLABILITY_RUNBOOK.md § 9c).',
+            '(CRAWLABILITY_RUNBOOK.md § 8c).',
           );
           console.log('  ✗  GSC Sitemaps API: 403 Forbidden');
           throw null;
