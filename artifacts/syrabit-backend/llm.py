@@ -2,7 +2,7 @@
 import os, re, json, asyncio, uuid, time, logging, httpx, hashlib
 import openai as _oai
 
-_INDIC_LANG_CODES = frozenset({"as"})
+_INDIC_LANG_CODES = frozenset({"as", "hi", "bn", "hi-in", "bn-in", "as-in"})
 
 def _is_indic_lang(lang: str | None) -> bool:
     return bool(lang and lang.lower().strip() in _INDIC_LANG_CODES)
@@ -35,7 +35,10 @@ _MODEL_MAX_OUTPUT_TOKENS = {
 # Deprecated / renamed models — resolved before the provider call so we
 # never send a stale model name to the upstream API.
 _MODEL_ALIASES: dict[str, str] = {
-    "gemini-2.0-flash": "gemini-2.5-flash",
+    # Task #247: gemini-2.0-flash is kept as a valid model ID in the SLM pool
+    # (position-2 fallback), so we do NOT alias it to gemini-2.5-flash here.
+    # The existing slot entry uses "gemini-2.0-flash" directly with the Gemini
+    # provider which resolves it through the _stream_gemini path.
 }
 
 def _clamp_max_tokens(model: str, max_tokens: int) -> int:
@@ -507,10 +510,15 @@ _SLM_SLOT_CANDIDATES = [
     ("workers-ai",  "@cf/meta/llama-3.2-3b-instruct",                 128, 3),
     # Tier 4: Workers AI llama-3.1-8b — fast 8B fallback.
     ("workers-ai",  "@cf/meta/llama-3.1-8b-instruct-fp8",              64, 4),
-    # Tier 5: Groq llama-4-scout — external fallback when Workers AI is saturated.
-    ("groq",        "meta-llama/llama-4-scout-17b-16e-instruct",        4, 5),
-    # Tier 6: Cerebras llama3.1-8b — secondary external fallback.
-    ("cerebras",    "llama3.1-8b",                                       4, 6),
+    # Tier 5: Gemini 2.0 Flash — position-2 GCP fallback (Task #247).
+    # Activates only when Workers AI load > 0.80 (effective_priority boost).
+    # Consumes GCP credits; intentionally NOT a primary slot.
+    # RPM cap: 600 (AI Studio Tier 1) → shared with _GEMINI_KEY.
+    ("gemini",      "gemini-2.0-flash",                                  4, 5),
+    # Tier 6: Groq llama-4-scout — external fallback when Workers AI is saturated.
+    ("groq",        "meta-llama/llama-4-scout-17b-16e-instruct",         4, 6),
+    # Tier 7: Cerebras llama3.1-8b — secondary external fallback.
+    ("cerebras",    "llama3.1-8b",                                        4, 7),
 ]
 
 # Content SmartKeyPool — serves `_CONTENT_INTENTS` (notes, important_questions,
@@ -665,6 +673,22 @@ class _SmartKeyPool:
     def _record_request(self, slot):
         slot["rpm_window"].append(time.time())
 
+    # Task #247: Workers AI aggregate load threshold below which Gemini is
+    # heavily penalized so it NEVER pre-empts Workers AI. Only when Workers
+    # AI is above this utilization does Gemini become a live fallback.
+    _GEMINI_WAI_LOAD_THRESHOLD = 0.80
+    # Penalty added to Gemini priority when Workers AI load < threshold.
+    # 50 >> any Workers AI slot (0–4) so Workers AI always wins below 80%.
+    _GEMINI_WAI_PENALTY = 50
+
+    def _workers_ai_aggregate_load(self) -> float:
+        """Return fractional aggregate load (0.0–1.0+) across all Workers AI slots."""
+        wai_slots = [s for s in self._slots if s["provider"] == "workers-ai"]
+        if not wai_slots:
+            return 0.0
+        total_ratio = sum(self._rpm_ratio(s) for s in wai_slots)
+        return total_ratio / len(wai_slots)
+
     def _effective_priority(self, slot):
         ratio = self._rpm_ratio(slot)
         base = slot["base_priority"]
@@ -672,6 +696,13 @@ class _SmartKeyPool:
             return base + 100
         if ratio >= self._RPM_SOFT_THRESHOLD:
             return base + 10
+        # Task #247: Gemini 2.0 Flash is position-2 external fallback.
+        # Penalize it until Workers AI aggregate load exceeds 80%, ensuring it
+        # is not used before we actually need the GCP credit budget.
+        if slot["provider"] == "gemini":
+            wai_load = self._workers_ai_aggregate_load()
+            if wai_load < self._GEMINI_WAI_LOAD_THRESHOLD:
+                return base + self._GEMINI_WAI_PENALTY
         return base
 
     def pick(self, exclude_ids: set = None):

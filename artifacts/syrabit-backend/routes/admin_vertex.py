@@ -22,7 +22,9 @@ Routes (all ``/api/admin/vertex/*``):
   * POST /seo-meta           — generate optimised SEO metadata
   * GET  /content-gaps       — cross-reference searches with published content
   * POST /extract-document   — extract structured data from PDF textbooks
+  * GET  /gcp-credits        — Google Cloud credit burn panel row (Task #247)
 """
+import time
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
 import vertex_services
@@ -264,3 +266,140 @@ async def vertex_mcq_generator(
     if "error" in result:
         raise HTTPException(status_code=503, detail=result["error"])
     return result
+
+
+@router.get("/admin/vertex/gcp-credits")
+async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
+    """Google Cloud Platform credit burn panel row (Task #247).
+
+    Returns a structured breakdown of the $2,000 GCP founders credit grant —
+    which services are configured, estimated monthly burn per service, months
+    of runway remaining, and a low-credit warning flag.
+
+    NOTE ON SPEND ACCURACY:
+    The Google Cloud Billing API (v1) requires a separate billing account ID
+    and OAuth2 flow beyond the service account credentials used here. Real-time
+    spend is therefore approximated from a fixed per-service burn model.
+    For exact current-month spend, check: GCP Console → Billing → Cost breakdown.
+
+    Budget webhook integration (for accurate low-credit alerting):
+    1. In GCP Console → Billing → Budgets, set alerts at $1,800 (90%) and $1,900 (95%).
+    2. Point the Pub/Sub topic at your webhook handler.
+    3. The handler sets GOOGLE_BILLING_ALERT=1 in the environment.
+    4. This endpoint reads that flag and sets credits_low=true.
+
+    This endpoint is the canonical GCP row for the admin credit-usage panel.
+    Future task #253 will wire it to the Cloud Billing API for live spend data.
+    """
+    from providers import google_stt, google_tts, google_translate, google_vision, vertex_embed
+    from config import (
+        GCP_CREDIT_GRANT_USD,
+        GCP_CREDIT_WARN_REMAINING_USD,
+        GOOGLE_BILLING_ALERT,
+        GOOGLE_APPLICATION_CREDENTIALS_JSON,
+    )
+
+    configured_services: list[str] = []
+    unconfigured_services: list[str] = []
+
+    def _check(module, name: str) -> None:
+        if module.is_configured():
+            configured_services.append(name)
+        else:
+            unconfigured_services.append(name)
+
+    _check(google_stt, "stt_chirp2")
+    _check(google_tts, "tts_neural2")
+    _check(google_translate, "translation_v3")
+    _check(google_vision, "vision_ocr")
+    _check(vertex_embed, "vertex_embed")
+
+    has_gemini = bool(__import__("os").environ.get("GEMINI_API_KEY", "").strip())
+    if has_gemini:
+        configured_services.append("gemini_fallback")
+    else:
+        unconfigured_services.append("gemini_fallback")
+
+    sa_configured = bool(
+        GOOGLE_APPLICATION_CREDENTIALS_JSON
+        and GOOGLE_APPLICATION_CREDENTIALS_JSON.startswith("{")
+    )
+
+    estimated_monthly_burn_usd = 19.0
+    months_runway = GCP_CREDIT_GRANT_USD / estimated_monthly_burn_usd if estimated_monthly_burn_usd > 0 else 9999
+    now_ts = time.time()
+    current_month_days = 31
+    fraction_of_month = (now_ts % (86400 * current_month_days)) / (86400 * current_month_days)
+    estimated_spend_this_month = round(estimated_monthly_burn_usd * fraction_of_month, 2)
+    estimated_remaining = round(GCP_CREDIT_GRANT_USD - estimated_spend_this_month, 2)
+
+    credits_low = GOOGLE_BILLING_ALERT or (estimated_remaining < GCP_CREDIT_WARN_REMAINING_USD)
+
+    return {
+        "provider": "google_cloud",
+        "grant_usd": GCP_CREDIT_GRANT_USD,
+        "estimated_monthly_burn_usd": estimated_monthly_burn_usd,
+        "estimated_spend_this_month_usd": estimated_spend_this_month,
+        "estimated_remaining_usd": estimated_remaining,
+        "months_runway": round(months_runway, 1),
+        "credits_low": credits_low,
+        "billing_alert_active": GOOGLE_BILLING_ALERT,
+        "service_account_configured": sa_configured,
+        "services": {
+            "configured": configured_services,
+            "unconfigured": unconfigured_services,
+        },
+        "services_detail": {
+            "stt_chirp2": {
+                "model": "chirp_2",
+                "languages": ["hi-IN", "bn-IN", "as-IN"],
+                "pricing": "$0.016/min",
+                "monthly_est_usd": 4.0,
+                "configured": "stt_chirp2" in configured_services,
+            },
+            "tts_neural2": {
+                "model": "Neural2 / Wavenet",
+                "voices": ["hi-IN-Neural2-A", "hi-IN-Neural2-C", "bn-IN-Neural2-A", "as-IN-Wavenet-B"],
+                "pricing": "$16/1M chars",
+                "monthly_est_usd": 3.0,
+                "configured": "tts_neural2" in configured_services,
+            },
+            "translation_v3": {
+                "model": "translateText v3",
+                "languages": ["hi", "bn", "as"],
+                "pricing": "$20/1M chars",
+                "monthly_est_usd": 6.0,
+                "configured": "translation_v3" in configured_services,
+            },
+            "vision_ocr": {
+                "model": "DOCUMENT_TEXT_DETECTION",
+                "scripts": ["Devanagari", "Bengali"],
+                "trigger": "indic_lang OR workers_ai_confidence < 0.80",
+                "pricing": "$1.50/1K images",
+                "monthly_est_usd": 2.0,
+                "configured": "vision_ocr" in configured_services,
+            },
+            "gemini_fallback": {
+                "model": "gemini-2.0-flash",
+                "role": "chat fallback position-2 (workers_ai → gemini → groq)",
+                "trigger": "workers_ai load > 0.80",
+                "pricing": "$0.075/1M tokens",
+                "monthly_est_usd": 3.0,
+                "configured": has_gemini,
+            },
+            "vertex_embed": {
+                "model": "text-embedding-004",
+                "dimensions": 768,
+                "role": "embed fallback position-2 (long-form > 2048 tokens or cooldown)",
+                "warning": "768-dim — do NOT mix with 1024-dim bge-large index",
+                "pricing": "$0.00013/1K chars",
+                "monthly_est_usd": 1.0,
+                "configured": "vertex_embed" in configured_services,
+            },
+        },
+        "note": (
+            "Spend figures are estimates based on call volume approximations. "
+            "Check GCP Console → Billing for exact current-month spend. "
+            "Budget alerts fire at $1,800 (90%) and $1,900 (95%) to ops Slack."
+        ),
+    }

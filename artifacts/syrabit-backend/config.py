@@ -524,6 +524,30 @@ _AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID', '').strip()
 _AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '').strip()
 _AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1').strip()
 
+# ── Google Cloud Platform credentials (Task #247) ────────────────────────────
+# A single service account JSON (GOOGLE_APPLICATION_CREDENTIALS_JSON) is used
+# for all GCP services: STT v2 (Chirp_2), TTS Neural2, Translation v3,
+# Vision OCR, Gemini fallback, and Vertex AI Embeddings fallback.
+# Paste the full service account JSON as a single line in Replit Secrets.
+# All GCP providers check this at call time — no startup failure if missing.
+GOOGLE_APPLICATION_CREDENTIALS_JSON = os.environ.get(
+    'GOOGLE_APPLICATION_CREDENTIALS_JSON', ''
+).strip()
+# GCP project for STT, Translation, Vision, and Vertex AI.
+# Falls back to VERTEX_PROJECT_ID if already set.
+GOOGLE_CLOUD_PROJECT = (
+    os.environ.get('GOOGLE_CLOUD_PROJECT', '').strip()
+    or os.environ.get('GCP_PROJECT_ID', '').strip()
+    or os.environ.get('VERTEX_PROJECT_ID', '').strip()
+)
+# Budget alert webhook flag — set GOOGLE_BILLING_ALERT=1 when the GCP
+# budget webhook fires (at $1,800 / 90% or $1,900 / 95%) so the admin
+# panel can surface a "credits low" warning row.
+GOOGLE_BILLING_ALERT = os.environ.get('GOOGLE_BILLING_ALERT', '').strip() in ('1', 'true', 'yes', 'on')
+# GCP grant total (fixed) and warning threshold for admin panel.
+GCP_CREDIT_GRANT_USD = 2000.0
+GCP_CREDIT_WARN_REMAINING_USD = 200.0
+
 _CF_API_TOKEN_FOR_LLM = os.environ.get('CLOUDFLARE_API_TOKEN', '').strip()
 _CF_ACCOUNT_ID_FOR_LLM = os.environ.get('CF_AI_GATEWAY_ACCOUNT_ID', '').strip()
 

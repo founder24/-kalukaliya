@@ -2,8 +2,11 @@
 routes.voice — Voice API endpoints (TTS, STT, two-leg voice dispatch).
 
 POST /api/voice/tts
-  Text-to-speech via PROVIDER_PRIORITY weighted round-robin with fallback-without-
-  replacement. Weighted pool: Cartesia → ElevenLabs → Workers AI Deepgram.
+  Converts text to speech.
+  - Indic languages (hi, bn, as): Google Cloud TTS Neural2 (Task #247).
+    Falls back to Cartesia → ElevenLabs → Workers AI Deepgram on failure.
+  - English/other: PROVIDER_PRIORITY weighted round-robin with
+    fallback-without-replacement. Weighted pool: Cartesia → ElevenLabs → Workers AI.
   Returns audio/mpeg bytes (mp3).
 
 POST /api/voice/stt
@@ -14,7 +17,7 @@ POST /api/voice/stt
 POST /api/voice/voice
   Two-leg independent-selection pipeline:
     Leg 1 (STT) — select_provider("stt") with per-leg fallback-without-replacement
-    Leg 2 (TTS) — select_provider("tts") with per-leg fallback-without-replacement
+    Leg 2 (TTS) — Google Neural2 for Indic; select_provider("tts") round-robin for others
   LLM reply generated between the two legs.
   Returns { transcript, reply_text, audio_b64 }.
 
@@ -22,7 +25,8 @@ GET  /api/voice/voices
   Lists available Cartesia voices (for admin UI to pick a voice ID).
 
 GET  /api/voice/health
-  Reports readiness of all voice providers (Cartesia, ElevenLabs, AssemblyAI, Workers AI).
+  Reports readiness of all voice providers (Cartesia, ElevenLabs, AssemblyAI,
+  Workers AI, Google TTS/STT).
 """
 from __future__ import annotations
 
@@ -41,6 +45,7 @@ logger = logging.getLogger("routes.voice")
 
 router = APIRouter(tags=["voice"])
 
+_GOOGLE_TTS_LANGS = frozenset({"hi", "bn", "as", "hi-in", "bn-in", "as-in"})
 
 
 class TtsRequest(BaseModel):
@@ -48,6 +53,7 @@ class TtsRequest(BaseModel):
     voice_id: Optional[str] = Field(None, description="Cartesia or ElevenLabs voice ID (uses env var default if omitted)")
     language: str = Field("en", description="BCP-47 language code (en, hi, as, bn, ...)")
     model_id: Optional[str] = Field(None, description="TTS model ID (Cartesia default: sonic-2)")
+    gender: str = Field("female", description="TTS voice gender for Indic (Google Neural2): female or male")
 
 
 class VoiceRequest(BaseModel):
@@ -137,16 +143,10 @@ async def _synthesize_with_fallback(
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
             elif provider == "vertex":
-                # Google Cloud TTS not wired in this codebase (Task #256).
-                # Listed per authoritative matrix; excluded gracefully.
                 raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired (Task #256)")
             elif provider == "bedrock":
-                # AWS Bedrock has no TTS API (Task #256).
-                # Listed per authoritative matrix; excluded gracefully.
                 raise RuntimeError("TTS not supported by 'bedrock' — no Bedrock TTS endpoint (Task #256)")
             elif provider == "azure_openai":
-                # Azure Speech TTS not wired (Task #256).
-                # Listed per authoritative matrix; excluded gracefully.
                 raise RuntimeError("TTS not supported by 'azure_openai' — Azure Speech not wired (Task #256)")
             else:
                 raise RuntimeError(f"TTS: unknown provider {provider!r}")
@@ -182,13 +182,10 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)
             elif provider == "vertex":
-                # Google Cloud STT not wired (Task #256). Listed per authoritative matrix.
                 raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired (Task #256)")
             elif provider == "bedrock":
-                # AWS Bedrock has no STT API (Task #256). Listed per authoritative matrix.
                 raise RuntimeError("STT not supported by 'bedrock' — no Bedrock STT endpoint (Task #256)")
             elif provider == "azure_openai":
-                # Azure Speech STT not wired (Task #256). Listed per authoritative matrix.
                 raise RuntimeError("STT not supported by 'azure_openai' — Azure Speech not wired (Task #256)")
             else:
                 raise RuntimeError(f"STT: unknown provider {provider!r}")
@@ -209,10 +206,11 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 @router.post(
     "/voice/tts",
     response_class=Response,
-    summary="Text-to-speech (weighted round-robin: Cartesia → ElevenLabs → Workers AI)",
+    summary="Text-to-speech (Indic: Google Neural2; English: Cartesia → ElevenLabs → Workers AI)",
     description=(
-        "Convert text to speech using the PROVIDER_PRIORITY weighted round-robin "
-        "with fallback-without-replacement. "
+        "Convert text to speech. For Indic languages (hi, bn, as) uses "
+        "Google Cloud TTS Neural2 (Task #247) before falling back to the "
+        "PROVIDER_PRIORITY weighted round-robin with fallback-without-replacement. "
         "Weighted pool: Cartesia(500) → ElevenLabs(500) → Workers AI(last-resort). "
         "Returns mp3 audio bytes."
     ),
@@ -221,6 +219,39 @@ async def text_to_speech(
     body: TtsRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    lang_key = body.language.lower().strip()
+
+    # Task #247: Google Neural2 dispatch for Indic languages.
+    # Runs before the existing weighted round-robin so GCP credits are
+    # consumed for Indic TTS — Cartesia has no native Indic voices anyway.
+    if lang_key in _GOOGLE_TTS_LANGS:
+        from providers import google_tts
+        if google_tts.is_configured():
+            try:
+                audio_bytes = await google_tts.synthesize(
+                    body.text,
+                    lang=lang_key,
+                    gender=body.gender,
+                )
+                if audio_bytes:
+                    return Response(
+                        content=audio_bytes,
+                        media_type="audio/mpeg",
+                        headers={
+                            "Content-Disposition": 'inline; filename="speech.mp3"',
+                            "Cache-Control": "public, max-age=3600",
+                            "X-TTS-Provider": "google_neural2",
+                            "X-TTS-Lang": lang_key,
+                            "X-TTS-Chars": str(len(body.text)),
+                            "X-TTS-Bytes": str(len(audio_bytes)),
+                        },
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[voice-tts] Google Neural2 failed for %s: %s — falling back to round-robin",
+                    lang_key, exc,
+                )
+
     try:
         audio_bytes = await _synthesize_with_fallback(
             body.text,
@@ -244,6 +275,7 @@ async def text_to_speech(
         headers={
             "Content-Disposition": 'inline; filename="speech.mp3"',
             "Cache-Control": "public, max-age=3600",
+            "X-TTS-Provider": "cartesia",
             "X-TTS-Chars": str(len(body.text)),
             "X-TTS-Bytes": str(len(audio_bytes)),
         },
@@ -287,8 +319,8 @@ async def speech_to_text(
         "**Leg 1 — STT** (select_provider('stt') with fallback-without-replacement):\n"
         "  AssemblyAI(1000) → Workers AI Whisper(last-resort)\n\n"
         "**LLM** — generate reply via call_llm_api_chat\n\n"
-        "**Leg 2 — TTS** (select_provider('tts') with fallback-without-replacement):\n"
-        "  Cartesia(500) → ElevenLabs(500) → Workers AI Deepgram(last-resort)\n\n"
+        "**Leg 2 — TTS** (Google Neural2 for Indic; select_provider('tts') round-robin for others):\n"
+        "  Indic: Google Neural2 → Cartesia(500) → ElevenLabs(500) → Workers AI Deepgram(last-resort)\n\n"
         "Returns { transcript, reply_text, audio_b64, language }."
     ),
 )
@@ -316,7 +348,7 @@ async def voice_pipeline(
     #
     # Dispatch pools:
     #   STT leg: assemblyai(1000) → vertex(2k,skip) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
-    #   TTS leg: cartesia(500) → elevenlabs(500) → vertex(2k,skip) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
+    #   TTS leg: google_neural2(Indic first) → cartesia(500) → elevenlabs(500) → vertex(2k,skip) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
 
     from llm import select_provider as _sp
 
@@ -355,7 +387,7 @@ async def voice_pipeline(
         logger.error("Voice pipeline LLM step failed: %s", exc)
         raise HTTPException(status_code=502, detail="LLM reply generation failed.")
 
-    # ── TTS leg: independent per-leg weighted fallback-without-replacement ─────
+    # ── TTS leg: Google Neural2 for Indic; weighted fallback-without-replacement for others ──
     # _tts_hint carries the pre-selected provider (drawn concurrently with STT).
     # _synthesize_with_fallback re-draws from the full pool; the hint is advisory.
     audio_b64 = ""
@@ -393,12 +425,12 @@ async def list_voices(current_user: dict = Depends(get_current_user)):
 @router.get(
     "/voice/health",
     summary="Voice provider health check",
-    description="Reports readiness of Cartesia, ElevenLabs, AssemblyAI, and Workers AI.",
+    description="Reports readiness of Cartesia, ElevenLabs, AssemblyAI, Workers AI, and Google TTS/STT providers.",
 )
 async def voice_health():
     from providers import cartesia, assemblyai, elevenlabs
 
-    cartesia_task  = asyncio.create_task(cartesia.health_check())
+    cartesia_task   = asyncio.create_task(cartesia.health_check())
     assemblyai_task = asyncio.create_task(assemblyai.health_check())
     elevenlabs_task = asyncio.create_task(elevenlabs.health_check())
 
@@ -418,9 +450,16 @@ async def voice_health():
     except Exception:
         workers_ai_ok = False
 
+    from providers import google_stt as _gstt, google_tts as _gtts
+    google_health = {
+        "stt_chirp2": {"ok": _gstt.is_configured(), "model": "chirp_2", "langs": ["hi-IN", "bn-IN", "as-IN"]},
+        "tts_neural2": {"ok": _gtts.is_configured(), "voices": ["hi-IN-Neural2-A", "bn-IN-Neural2-A", "as-IN-Wavenet-B"]},
+    }
+
     return {
         "cartesia":   cartesia_health,
         "elevenlabs": elevenlabs_health,
         "assemblyai": assemblyai_health,
         "workers_ai": {"ok": workers_ai_ok, "model": "@cf/openai/whisper-large-v3-turbo"},
+        "google":     google_health,
     }

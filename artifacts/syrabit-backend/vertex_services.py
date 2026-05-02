@@ -342,6 +342,11 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
        (NOTE: requires ALL content to have been indexed with Cohere vectors;
         re-run the embedding pipeline after switching.)
     2. Workers AI BGE-large-en-v1.5 (default primary)
+    3. Vertex AI text-embedding-004 (fallback for long-form content > 2048 tokens
+       or when Workers AI embed is in cooldown) — Task #247.
+       WARNING: Vertex vectors are 768-dim and in a different embedding space;
+       results are only useful for standalone long-doc similarity, not for
+       mixing with the main 1024-dim Vectorize index.
     """
     if not text:
         return None
@@ -361,11 +366,23 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
     if _COHERE_PRIMARY:
         vec = await _cohere_primary_embed(text, task_type)
         if vec is None:
-            # Fall back to Workers AI if Cohere fails
             logger.debug("[embed] Cohere primary failed — falling back to Workers AI")
             vec = await _workers_ai_primary_embed(text)
     else:
         vec = await _workers_ai_primary_embed(text)
+
+    # Vertex AI embed fallback (Task #247) — for long-form content or when
+    # Workers AI embed is in cooldown. NOTE: Vertex text-embedding-004 is
+    # 768-dim; results must NOT be mixed with 1024-dim bge-large vectors in
+    # the main Vectorize index. Use only for standalone long-doc similarity.
+    if vec is None:
+        from providers import vertex_embed as _vx_embed
+        if _vx_embed.is_configured() and (
+            _vx_embed.is_long_form(text) or is_embed_cooldown_active()
+        ):
+            logger.debug("[embed] Vertex AI embed fallback triggered (long_form=%s, cooldown=%s)",
+                         _vx_embed.is_long_form(text), is_embed_cooldown_active())
+            vec = await _vx_embed.embed_text(text, task_type)
 
     try:
         if _ek and vec and _embedding_cache is not None:
@@ -428,12 +445,27 @@ _LANG_NAMES = {
 
 
 async def translate(text: str, target_lang: str = "as", source_lang: str = "en") -> Optional[str]:
-    """Translate text to an Indic language using Workers AI indictrans2.
+    """Translate text to an Indic language.
 
-    Falls back to an LLM prompt for languages not covered by indictrans2.
+    Priority for Indic targets (hi, bn, as):
+      1. Google Cloud Translation v3 (primary — most accurate for Indic scripts)
+      2. Workers AI indictrans2 (fallback)
+      3. LLM prompt fallback (last resort)
+
+    Non-Indic targets bypass Google Translation entirely and go straight
+    to Workers AI indictrans2.
     """
     if not text:
         return None
+
+    from providers import google_translate as _gt
+    if _gt.is_configured() and _gt.is_indic_target(target_lang):
+        try:
+            result = await _gt.translate(text, target_lang=target_lang, source_lang=source_lang)
+            if result:
+                return result
+        except Exception as exc:
+            logger.warning("[google-translate] primary failed, falling back to Workers AI: %s", str(exc)[:150])
 
     from providers.cloudflare_ai import translate as _cf_translate
     try:
@@ -520,27 +552,85 @@ async def analyze_thumbnail(
 # 3b. OCR
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def ocr_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    """Extract text from an AHSEC/SEBA question paper or textbook image."""
-    if not _ok():
-        return {"error": "Workers AI not configured"}
-    prompt = (
-        "You are an OCR engine for AHSEC/SEBA educational content. "
-        "Extract ALL visible text from this image exactly as written, preserving "
-        "question numbers, sub-parts, mathematical notation, and formatting. "
-        "Structure the output as:\n"
-        "- Detected content type (question paper / textbook / notes)\n"
-        "- Extracted text (verbatim)\n"
-        "- Structured questions list (if applicable): [{number, text, marks, sub_parts:[]}]\n"
-        "Return JSON: {content_type, raw_text, questions, word_count}"
+async def ocr_image(
+    image_bytes: bytes,
+    mime_type: str = "image/jpeg",
+    lang: Optional[str] = None,
+) -> dict:
+    """Extract text from an AHSEC/SEBA question paper or textbook image.
+
+    Google Cloud Vision DOCUMENT_TEXT_DETECTION is used when:
+      - detected/requested language is Indic (Devanagari or Bengali script), OR
+      - Workers AI vision confidence < 0.80.
+    Workers AI vision is always tried first as it is free on the CF plan.
+    """
+    from providers import google_vision as _gv
+
+    _workers_ai_confidence: Optional[float] = None
+    _workers_ai_text: Optional[str] = None
+
+    if _ok():
+        prompt = (
+            "You are an OCR engine for AHSEC/SEBA educational content. "
+            "Extract ALL visible text from this image exactly as written, preserving "
+            "question numbers, sub-parts, mathematical notation, and formatting. "
+            "Structure the output as:\n"
+            "- Detected content type (question paper / textbook / notes)\n"
+            "- Extracted text (verbatim)\n"
+            "- Structured questions list (if applicable): [{number, text, marks, sub_parts:[]}]\n"
+            "Return JSON: {content_type, raw_text, questions, word_count, confidence}"
+        )
+        raw = await analyze_image(image_bytes, mime_type=mime_type, prompt=prompt)
+        if raw:
+            try:
+                parsed = json.loads(_clean_json(raw))
+                _workers_ai_confidence = float(parsed.get("confidence", 1.0))
+                _workers_ai_text = parsed.get("raw_text", "")
+            except Exception:
+                _workers_ai_text = raw
+                _workers_ai_confidence = 0.5
+
+    use_google = _gv.should_use_google_vision(
+        lang=lang,
+        workers_ai_confidence=_workers_ai_confidence,
     )
-    raw = await analyze_image(image_bytes, mime_type=mime_type, prompt=prompt)
-    if not raw:
-        return {"error": "OCR failed"}
-    try:
-        return json.loads(_clean_json(raw))
-    except Exception:
-        return {"raw_text": raw, "content_type": "extracted", "questions": [], "word_count": len(raw.split())}
+
+    if use_google and _gv.is_configured():
+        logger.info(
+            "[ocr] Routing to Google Vision DOCUMENT_TEXT_DETECTION "
+            "(lang=%s, wai_confidence=%s)",
+            lang,
+            f"{_workers_ai_confidence:.2f}" if _workers_ai_confidence is not None else "N/A",
+        )
+        gv_result = await _gv.ocr_document(image_bytes, mime_type=mime_type, lang=lang)
+        if "error" not in gv_result and gv_result.get("text"):
+            text = gv_result["text"]
+            return {
+                "raw_text": text,
+                "content_type": "extracted",
+                "questions": [],
+                "word_count": len(text.split()),
+                "provider": "google_vision",
+                "confidence": gv_result.get("confidence", 1.0),
+                "pages": gv_result.get("pages", 1),
+            }
+        logger.warning("[ocr] Google Vision failed: %s — using Workers AI result", gv_result.get("error"))
+
+    if _workers_ai_text:
+        try:
+            parsed_result = json.loads(_clean_json(_workers_ai_text))
+            parsed_result["provider"] = "workers_ai"
+            return parsed_result
+        except Exception:
+            return {
+                "raw_text": _workers_ai_text,
+                "content_type": "extracted",
+                "questions": [],
+                "word_count": len(_workers_ai_text.split()),
+                "provider": "workers_ai",
+            }
+
+    return {"error": "OCR failed — both Workers AI and Google Vision unavailable"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

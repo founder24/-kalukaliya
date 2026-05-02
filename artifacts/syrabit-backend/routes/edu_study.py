@@ -2534,35 +2534,64 @@ async def voice_status():
     }
 
 
+_GOOGLE_STT_INDIC_LANGS = frozenset({"hi", "hi-in", "bn", "bn-in", "as", "as-in"})
+
+
 @router.post("/edu/stt")
 async def edu_stt(audio: UploadFile = File(...), language: str = Form("en-IN"),
                   request: Request = None, user=Depends(get_current_user_optional)):
-    """Server-side fallback STT via Sarvam Saaras. Browser SpeechRecognition
-    is preferred on the client; this exists for browsers without it."""
-    if sarvam_client is None:
-        raise HTTPException(status_code=503, detail="stt_unavailable")
+    """Server-side fallback STT.
+
+    Priority:
+    - Indic (hi, bn, as): Google Cloud Chirp_2 STT (Task #247) → Sarvam Saaras → Workers AI Whisper
+    - English/other: Sarvam Saaras → Workers AI Whisper
+    Browser SpeechRecognition is preferred on the client; this endpoint is the server-side fallback.
+    """
+    import time as _t_stt
+    _stt_t0 = _t_stt.perf_counter()
+
     if request is not None:
         ip = _client_ip(request)
         if not check_rate_limit(f"edu_stt:{ip}", max_requests=30, window_seconds=60):
             raise HTTPException(status_code=429, detail="STT rate limit exceeded.")
+
     body = await audio.read()
     if not body or len(body) > 4 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="audio_size_invalid")
+
+    lang_key = (language or "en-IN").lower().strip()
+
+    if lang_key in _GOOGLE_STT_INDIC_LANGS:
+        try:
+            from providers import google_stt as _gstt
+            if _gstt.is_configured():
+                transcript = await _gstt.transcribe_indic(
+                    body,
+                    language_code=lang_key,
+                    audio_encoding=audio.content_type or "LINEAR16",
+                )
+                if transcript:
+                    _gstt_ms = int((_t_stt.perf_counter() - _stt_t0) * 1000)
+                    logger.info("[edu_stt] Google Chirp_2 lang=%s chars=%d ms=%d", lang_key, len(transcript), _gstt_ms)
+                    return {"ok": True, "text": transcript, "language": language, "provider": "google_chirp2"}
+        except Exception as _gstt_err:
+            logger.warning("[edu_stt] Google Chirp_2 failed for %s: %s", lang_key, str(_gstt_err)[:150])
+
+    if sarvam_client is None:
+        raise HTTPException(status_code=503, detail="stt_unavailable")
+
     files = {"file": (audio.filename or "speech.wav",
                       body, audio.content_type or "audio/wav")}
     data = {"language_code": language or "en-IN", "model": "saaras:v2"}
-    import time as _t_stt
-    _stt_t0 = _t_stt.perf_counter()
     primary_err: Exception | None = None
+    resp = None
     try:
         resp = await sarvam_client.post("/speech-to-text", files=files, data=data)
     except Exception as e:
         logger.warning(f"[edu_stt] sarvam call failed: {e}")
         primary_err = e
-        resp = None
     if resp is not None and resp.status_code >= 400:
         logger.warning(f"[edu_stt] provider {resp.status_code}: {resp.text[:300]}")
-        # Synthesise an HTTPStatusError so the policy can decide if it's retryable.
         try:
             resp.raise_for_status()
         except Exception as e:
@@ -2585,13 +2614,12 @@ async def edu_stt(audio: UploadFile = File(...), language: str = Form("en-IN"),
                             "provider": "workers-ai"}
         except Exception as _wai_err:  # noqa: BLE001
             logger.warning(f"[workers-ai] stt fallback skipped: {type(_wai_err).__name__}: {str(_wai_err)[:150]}")
-        # Original error class is preserved by raising the original 502.
         raise HTTPException(status_code=502,
                             detail="stt_provider_failed" if resp is None else "stt_provider_error")
 
     payload = resp.json()
     text = payload.get("transcript") or payload.get("text") or ""
-    return {"ok": True, "text": text, "language": payload.get("language_code", language)}
+    return {"ok": True, "text": text, "language": payload.get("language_code", language), "provider": "sarvam"}
 
 
 __all__ = ["router"]
