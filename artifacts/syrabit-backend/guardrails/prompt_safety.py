@@ -3,10 +3,21 @@
 Catches prompt injection, academic cheating, and sensitive/harmful content
 before prompts reach the LLM.  Also provides streaming output validation.
 
-LLM-based secondary safety check (Task #250):
+LLM-based secondary safety check (Task #257):
     ``llm_classify_safety(prompt)`` routes to ``select_provider("safety")``
     (Bedrock first with weight 1000, Workers AI as fallback) via
     ``call_with_provider_fallback`` for async, weighted secondary classification.
+
+    Provider dispatch:
+      - ``bedrock``     (weight=1000): AWS Bedrock Converse API (Claude 3.5 Haiku)
+        via Cloudflare AI Gateway BYOK.  A system prompt instructs the model to
+        reply with exactly one word — ``SAFE`` or ``UNSAFE``.  This is NOT the
+        Amazon Bedrock Guardrails managed service; it is a plain chat completion
+        to a Claude model that acts as a safety classifier.
+      - ``workers_ai``  (weight=0, last-resort): Cloudflare Workers AI
+        ``@cf/meta/llama-guard-3-8b`` via ``providers.cloudflare_ai.is_safe()``.
+        Llama Guard 3 is a purpose-built safety classifier — it needs no system
+        prompt and returns ``safe``/``unsafe`` natively.
 """
 import os as _os
 import re, logging
@@ -117,12 +128,15 @@ async def llm_classify_safety(prompt: str) -> Optional[str]:
     """Secondary LLM-based safety classification via PROVIDER_PRIORITY['safety'].
 
     Uses ``call_with_provider_fallback("safety", ...)`` which routes to:
-      - Bedrock (weight 1000, Claude 3.5 Haiku via CF AI Gateway BYOK)
-      - Workers AI (weight 0, last-resort fallback)
+      - Bedrock (weight 1000, Claude 3.5 Haiku via CF AI Gateway BYOK) — chat
+        completion with a system prompt that asks for SAFE / UNSAFE verdict.
+      - Workers AI (weight 0, last-resort fallback) — llama-guard-3-8b via
+        ``providers.cloudflare_ai.is_safe()``, which is purpose-built for safety
+        classification and returns a boolean verdict without a system prompt.
 
     Returns None if the prompt is SAFE (or if the check is disabled/fails).
     Returns a block-reason string like "blocked:llm_safety" if the prompt
-    is classified UNSAFE by the LLM.
+    is classified UNSAFE.
 
     Gated on ``ENABLE_LLM_SAFETY_CHECK=true`` env var (default: off) so the
     regex-only fast path remains the default until Bedrock BYOK is verified.
@@ -133,18 +147,39 @@ async def llm_classify_safety(prompt: str) -> Optional[str]:
         return None
     try:
         from llm import call_with_provider_fallback, _dispatch_llm_for_feature
-        messages = [
+
+        _messages = [
             {"role": "system", "content": _SAFETY_SYSTEM_PROMPT},
             {"role": "user", "content": prompt[:2000]},
         ]
+
+        async def _safety_attempt(provider: str) -> str:
+            if provider == "workers_ai":
+                from providers.cloudflare_ai import is_safe as _cf_is_safe
+                safe = await _cf_is_safe(prompt[:4000])
+                verdict_str = "SAFE" if safe else "UNSAFE"
+                logger.debug(
+                    "[guardrails] safety verdict=%s provider=workers_ai (llama-guard-3-8b)",
+                    verdict_str,
+                )
+                return verdict_str
+            result = await _dispatch_llm_for_feature(_messages, provider, 16)
+            logger.debug(
+                "[guardrails] safety verdict=%s provider=%s (bedrock-converse)",
+                (result or "").strip()[:8],
+                provider,
+            )
+            return result
+
         verdict = await call_with_provider_fallback(
             "safety", "en",
-            lambda p: _dispatch_llm_for_feature(messages, p, 16),
+            _safety_attempt,
         )
         verdict = (verdict or "").strip().upper()
         if verdict.startswith("UNSAFE"):
             logger.warning("[guardrails] LLM safety check BLOCKED: %s", prompt[:120])
             return "blocked:llm_safety"
+        logger.debug("[guardrails] LLM safety check PASSED for prompt (len=%d)", len(prompt))
         return None
     except Exception as exc:
         logger.debug("[guardrails] LLM safety check failed (non-fatal): %s", exc)
