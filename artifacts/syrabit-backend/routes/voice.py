@@ -115,17 +115,12 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    All providers in PROVIDER_PRIORITY["tts"] participate in the weighted draw.
-    Providers without a TTS endpoint (vertex, bedrock, azure_openai) raise
-    RuntimeError which the fallback loop catches and removes from the pool,
-    then redraws from the remaining weighted candidates.
+    PROVIDER_PRIORITY["tts"]: cartesia(500) → elevenlabs(500) → azure_openai(1) → workers_ai(0)
 
-    Fallback sequence (by PROVIDER_CREDITS weight):
-      cartesia(500) → elevenlabs(500) → vertex(2000) → bedrock(1000) →
-      azure_openai(1) → workers_ai(last-resort, weight=0)
-
-    vertex/bedrock/azure_openai entries are drawn by the weighted pool but fail
-    gracefully so the next candidate is tried without manual skipping.
+    azure_openai is listed as mandated second-to-last per the authoritative provider matrix.
+    Its TTS endpoint is not yet wired (Task #256); raises RuntimeError which the fallback
+    loop catches, excludes it from the pool, and redraws from remaining candidates.
+    vertex/bedrock are NOT in the tts priority list (no TTS endpoint planned, Phase 2).
     """
     from llm import select_provider
 
@@ -159,13 +154,12 @@ async def _synthesize_with_fallback(
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    All providers in PROVIDER_PRIORITY["stt"] participate in the weighted draw.
-    Providers without an STT endpoint (vertex, bedrock, azure_openai) raise
-    RuntimeError which the fallback loop catches and removes from the pool.
+    PROVIDER_PRIORITY["stt"]: assemblyai(1000) → azure_openai(1) → workers_ai(0)
 
-    Fallback sequence (by PROVIDER_CREDITS weight):
-      assemblyai(1000) → vertex(2000) → bedrock(1000) →
-      azure_openai(1) → workers_ai(last-resort, weight=0)
+    azure_openai is listed as mandated second-to-last per the authoritative provider matrix.
+    Its STT endpoint is not yet wired (Task #256); raises RuntimeError which the fallback
+    loop catches, excludes it from the pool, and redraws from remaining candidates.
+    vertex/bedrock are NOT in the stt priority list (no STT endpoint planned, Phase 2).
     """
     from llm import select_provider
 

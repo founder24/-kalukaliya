@@ -920,40 +920,16 @@ _VISION_ANALYSIS_PROMPT = (
 async def _analyze_with_groq_vision(b64_img: str, mime: str = "image/jpeg") -> dict:
     """Analyse a book-cover image via PROVIDER_PRIORITY['vision'] weighted dispatch.
 
-    Primary path: call_vision_with_dispatch (vertex/Gemini → bedrock → workers_ai).
-    Fallback: Groq llama-4-scout direct call (legacy path, used when dispatch exhausts all providers).
+    Routes through call_vision_with_dispatch: Vertex/Gemini (weight 2000) →
+    Azure OpenAI (weight 1, 2nd-to-last) → Workers AI (weight 0, last-resort).
+    Returns {} if all providers fail — no Groq/OpenRouter fallback.
     """
     raw = None
     try:
         from llm import call_vision_with_dispatch
         raw = await call_vision_with_dispatch(b64_img, _VISION_ANALYSIS_PROMPT, lang="en", mime_type=mime)
     except Exception as _ve:
-        logger.debug("Vision dispatch failed: %s — trying Groq fallback", _ve)
-
-    if raw is None and _GROQ_KEY:
-        try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=30) as _c:
-                resp = await _c.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {_GROQ_KEY}", "Content-Type": "application/json"},
-                    json={
-                        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-                        "messages": [{
-                            "role": "user",
-                            "content": [
-                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_img}"}},
-                                {"type": "text", "text": _VISION_ANALYSIS_PROMPT},
-                            ],
-                        }],
-                        "max_tokens": 600,
-                        "temperature": 0.05,
-                    },
-                )
-            if resp.status_code == 200:
-                raw = resp.json()["choices"][0]["message"]["content"]
-        except Exception as _ge:
-            logger.warning(f"Groq vision fallback failed: {_ge}")
+        logger.warning("Vision dispatch exhausted all providers: %s", _ve)
 
     if raw:
         try:

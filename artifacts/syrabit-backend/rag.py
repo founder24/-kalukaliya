@@ -501,91 +501,103 @@ async def _fetch_chunks_semantic(
     query: str,
     limit: int = 10,
     subject_id: Optional[str] = None,
+    lang: str = "en",
 ) -> list:
-    """Semantic retrieval: embed query → Pinecone vector search → fetch chapters from MongoDB.
+    """Semantic retrieval driven by PROVIDER_PRIORITY['vector_search'].
 
-    Uses Pinecone serverless (syrabit-ahsec index) as the primary vector store.
-    Falls back to Atlas $vectorSearch when Pinecone is not configured (PINECONE_KEY
-    not set) or returns no results, so the old path stays warm during validation.
+    Dispatch order (PROVIDER_PRIORITY['vector_search']):
+      pinecone_ai (500) → mongodb_atlas (0, weight-0 fallback) → vertex (2k) → workers_ai (0)
+
+    select_provider("vector_search") draws a weighted provider.  Each provider maps to:
+      - pinecone_ai:   Pinecone serverless $vectorSearch (syrabit-ahsec index)
+      - mongodb_atlas: Atlas $vectorSearch aggregation (weight-0, only when Pinecone unavailable)
+      - vertex:        vertex_services.embed_text + Atlas $vectorSearch (Gemini embed space)
+      - workers_ai:    no vector endpoint — returns [] immediately
 
     Returns chapter dicts in the same shape as the keyword-search path so they
-    can be deduplicated and reranked together.
+    can be deduplicated and reranked together downstream.
     """
     try:
-        # Embed the query using Cohere embed-multilingual-v3.0 (1024-dim) — the
-        # same model used for document ingestion in chunk_embedder.py — so query
-        # and chunk vectors are in the same embedding space and Pinecone's 1024-dim
-        # index dimensions match.  Pinecone's multilingual-e5-large (768-dim) would
-        # cause a dimension mismatch against the stored 1024-dim Cohere vectors.
-        q_vec: Optional[list] = None
-        try:
-            from providers.cohere import embed_query as _cohere_embed_query, ENABLED as _cohere_on
-            if _cohere_on:
-                q_vec = await asyncio.wait_for(
-                    _cohere_embed_query(query),
-                    timeout=4.0,
-                )
-        except Exception as _cohere_qerr:
-            logger.debug("[INTERNAL_RAG] Cohere query embed failed, falling back to Pinecone: %s", _cohere_qerr)
+        from llm import select_provider as _select_vs_provider
+        _vs_provider = _select_vs_provider("vector_search", lang=lang)
+        logger.debug("[VECTOR_SEARCH] dispatch selected provider=%r for query='%s'", _vs_provider, query[:40])
+    except Exception:
+        _vs_provider = "pinecone_ai"
 
-        # Note: Do NOT fall back to Pinecone Inference (multilingual-e5-large,
-        # 768-dim default) for query embedding — it would produce dimension-mismatch
-        # errors against the 1024-dim syrabit-ahsec index. Semantic search is
-        # simply skipped when Cohere is unavailable; keyword search + reranking
-        # still function normally via _fetch_internal_chapters.
+    # ── Query embedding ──────────────────────────────────────────────────────
+    # Embed using the provider appropriate for the selected vector store.
+    # Cohere (1024-dim) is required when Pinecone's syrabit-ahsec index was
+    # built with Cohere vectors — do NOT fall back to Pinecone Inference
+    # (768-dim), which causes a dimension mismatch.
+    try:
+        q_vec: Optional[list] = None
+
+        if _vs_provider in ("pinecone_ai", "mongodb_atlas"):
+            try:
+                from providers.cohere import embed_query as _cohere_embed_query, ENABLED as _cohere_on
+                if _cohere_on:
+                    q_vec = await asyncio.wait_for(_cohere_embed_query(query), timeout=4.0)
+            except Exception as _ce:
+                logger.debug("[VECTOR_SEARCH] Cohere query embed failed: %s", _ce)
+
+        elif _vs_provider == "vertex":
+            try:
+                import vertex_services as _vs
+                q_vec = await asyncio.wait_for(
+                    _vs.embed_text(query, task_type="RETRIEVAL_QUERY"), timeout=5.0
+                )
+            except Exception as _ve:
+                logger.debug("[VECTOR_SEARCH] Vertex query embed failed: %s", _ve)
+
         if not q_vec:
-            logger.debug("[INTERNAL_RAG] Query embedding unavailable — skipping semantic search")
+            logger.debug("[VECTOR_SEARCH] Query embedding unavailable for provider=%r — skipping semantic", _vs_provider)
             return []
 
         # ── Primary: Pinecone serverless vector search ────────────────────────
-        # subject_id filter uses Pinecone metadata filter syntax ($eq).
         pc_filter: Optional[dict] = None
         if subject_id:
             pc_filter = {"subject_id": {"$eq": subject_id}}
 
         raw: list = []
-        try:
-            from retrievers.pinecone_vector import PineconeVectorRetriever
-            _pc_retriever = PineconeVectorRetriever()
-            if _pc_retriever.is_configured():
-                matches = await asyncio.wait_for(
-                    _pc_retriever.query(
-                        q_vec,
-                        top_k=limit,
-                        metadata_filter=pc_filter,
-                        return_metadata=True,
-                    ),
-                    timeout=5.0,
-                )
-                # Normalise to the same shape the Atlas pipeline produced:
-                # {"chapter_id": str, "subject_id": str, "_vs_score": float}
-                raw = [
-                    {
-                        "chapter_id":    m["metadata"].get("chapter_id", ""),
-                        "chapter_title": m["metadata"].get("chapter_title", ""),
-                        "subject_id":    m["metadata"].get("subject_id", ""),
-                        "_vs_score":     m["score"],
-                    }
-                    for m in matches
-                    if m.get("metadata", {}).get("chapter_id")
-                ]
-                logger.debug(
-                    "[INTERNAL_RAG] Pinecone semantic: %d matches for '%s'",
-                    len(raw), query[:50],
-                )
-        except Exception as _pc_err:
-            logger.debug("[INTERNAL_RAG] Pinecone query failed, will try Atlas fallback: %s", _pc_err)
 
-        # ── Fallback: MongoDB Atlas $vectorSearch (kept warm during validation) ─
-        # Gated by PINECONE_ATLAS_FALLBACK env var (default: true).
-        # Once Pinecone parity is validated, set PINECONE_ATLAS_FALLBACK=false
-        # to stop hitting Atlas $vectorSearch entirely (Pinecone-only mode).
+        if _vs_provider == "pinecone_ai":
+            try:
+                from retrievers.pinecone_vector import PineconeVectorRetriever
+                _pc_retriever = PineconeVectorRetriever()
+                if _pc_retriever.is_configured():
+                    matches = await asyncio.wait_for(
+                        _pc_retriever.query(
+                            q_vec,
+                            top_k=limit,
+                            metadata_filter=pc_filter,
+                            return_metadata=True,
+                        ),
+                        timeout=5.0,
+                    )
+                    raw = [
+                        {
+                            "chapter_id":    m["metadata"].get("chapter_id", ""),
+                            "chapter_title": m["metadata"].get("chapter_title", ""),
+                            "subject_id":    m["metadata"].get("subject_id", ""),
+                            "_vs_score":     m["score"],
+                        }
+                        for m in matches
+                        if m.get("metadata", {}).get("chapter_id")
+                    ]
+                    logger.debug("[VECTOR_SEARCH] pinecone_ai: %d matches for '%s'", len(raw), query[:50])
+            except Exception as _pc_err:
+                logger.debug("[VECTOR_SEARCH] pinecone_ai failed — will try Atlas fallback: %s", _pc_err)
+
+        # ── Fallback: MongoDB Atlas $vectorSearch ─────────────────────────────
+        # Runs when: (a) pinecone_ai selected but returned 0 results or failed,
+        # (b) mongodb_atlas explicitly selected (weight-0 provider), or
+        # (c) vertex selected (embed via Vertex, search via Atlas $vectorSearch).
         import os as _os
         _atlas_fallback_enabled = _os.environ.get(
             "PINECONE_ATLAS_FALLBACK", "true"
         ).strip().lower() not in ("0", "false", "no")
 
-        if not raw and _atlas_fallback_enabled:
+        if not raw and (_vs_provider in ("mongodb_atlas", "vertex") or _atlas_fallback_enabled):
             try:
                 vs_filter: dict = {}
                 if subject_id:

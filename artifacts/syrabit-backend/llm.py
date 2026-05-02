@@ -2869,6 +2869,10 @@ async def call_embed_with_dispatch(
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
                 return await _cf_embed(text)
+            elif provider == "azure_openai":
+                # Azure OpenAI embeddings endpoint not wired (Task #257).
+                # Listed as mandated second-to-last; excluded gracefully via RuntimeError.
+                raise RuntimeError("azure_openai embed endpoint not wired (Task #257)")
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
@@ -2923,6 +2927,13 @@ async def call_translate_with_dispatch(
                     {"role": "user", "content": text},
                 ]
                 return await _call_gemini(prompt, _GEMINI_KEY, "gemini-2.5-flash", 2048)
+            elif provider == "azure_openai":
+                from providers import azure_openai as _az_prov
+                _az_translate_msgs = [
+                    {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
+                    {"role": "user", "content": text},
+                ]
+                return await _az_prov.call_chat(_az_translate_msgs, max_tokens=2048)
             elif provider == "workers_ai":
                 prompt = [
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
@@ -3013,7 +3024,11 @@ async def call_rerank_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider("rerank", lang=lang, exclude=exclude)
         try:
-            if provider == "workers_ai":
+            if provider == "azure_openai":
+                # Azure OpenAI rerank not wired (Task #257); listed as mandated
+                # second-to-last — excluded gracefully via RuntimeError.
+                raise RuntimeError("azure_openai rerank not wired (Task #257)")
+            elif provider == "workers_ai":
                 raise RuntimeError("rerank via workers_ai: no rerank endpoint available")
             else:
                 raise RuntimeError(f"rerank: unknown provider {provider!r}")
@@ -3064,6 +3079,21 @@ async def call_vision_with_dispatch(
                     }
                 ]
                 return await _call_gemini(vision_messages, _GEMINI_KEY, "gemini-2.5-flash", 1024)
+            elif provider == "azure_openai":
+                from providers import azure_openai as _az_prov
+                _az_vision_msgs = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime_type};base64,{b64_image}"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ]
+                return await _az_prov.call_chat(_az_vision_msgs, max_tokens=1024)
             elif provider == "workers_ai":
                 raise RuntimeError("vision via workers_ai: no multimodal endpoint configured")
             else:

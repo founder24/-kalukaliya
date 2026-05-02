@@ -97,64 +97,83 @@ def test_workers_ai_fallback_pool_is_workers_only():
 
 # ── PROVIDER_PRIORITY correctness — only wired providers ─────────────────────
 
-def test_tts_stt_priority_excludes_unwired_providers():
-    """vertex/bedrock/azure_openai must not be in tts/stt/voice priority lists.
+def test_tts_stt_priority_structure():
+    """tts/stt/voice priority lists must follow the authoritative provider matrix.
 
-    Those providers have no TTS/STT endpoint wired in _synthesize_with_fallback
-    or _transcribe_with_fallback (Phase 2: Task #256).  Listing them causes
-    avoidable failed attempts before falling through to workers_ai.
+    Per the task spec, azure_openai is mandated second-to-last (weight=1) in ALL
+    feature chains before workers_ai.  vertex/bedrock TTS/STT are NOT wired
+    (Task #256) and must NOT appear in the tts/stt/voice pools.
+    azure_openai TTS/STT raises RuntimeError and is excluded gracefully by the
+    fallback loop — it is listed for authoritative matrix compliance.
     """
-    _unwired = {"vertex", "bedrock", "azure_openai"}
+    _not_allowed = {"vertex", "bedrock"}
     for feature in ("tts", "stt", "voice"):
-        pool = set(PROVIDER_PRIORITY.get(feature, []))
-        overlap = pool & _unwired
+        pool = PROVIDER_PRIORITY.get(feature, [])
+        pool_set = set(pool)
+        overlap = pool_set & _not_allowed
         assert not overlap, (
-            f"PROVIDER_PRIORITY['{feature}'] contains unwired voice providers: {overlap}. "
-            f"Remove them until their TTS/STT clients are implemented (Task #256)."
+            f"PROVIDER_PRIORITY['{feature}'] contains providers with no TTS/STT endpoint: {overlap}."
         )
-    print("  PASS: tts/stt/voice priority lists exclude vertex/bedrock/azure_openai")
+        assert "workers_ai" in pool_set, f"{feature}: workers_ai must be in the pool as last-resort"
+        assert pool[-1] == "workers_ai", f"{feature}: workers_ai must be last in priority list"
+        if "azure_openai" in pool_set:
+            assert pool[-2] == "azure_openai", (
+                f"{feature}: azure_openai must be second-to-last (mandated by authoritative matrix)"
+            )
+    print("  PASS: tts/stt/voice priority list structure valid — azure_openai second-to-last, vertex/bedrock excluded")
 
 
-def test_embed_priority_is_vertex_and_workers_only():
-    """embed priority must contain only vertex and workers_ai.
+def test_embed_priority_structure():
+    """embed priority must have vertex first and workers_ai last with azure_openai second-to-last.
 
-    cohere/pinecone/bedrock/azure_openai embed clients are Phase 2 (Task #257).
+    Per the authoritative provider matrix, azure_openai is second-to-last in ALL chains.
+    cohere/pinecone/bedrock embed clients Phase 2 (Task #257) — must NOT be listed.
     """
     embed_pool = PROVIDER_PRIORITY.get("embed", [])
-    allowed = {"vertex", "workers_ai"}
-    unexpected = set(embed_pool) - allowed
-    assert not unexpected, (
-        f"PROVIDER_PRIORITY['embed'] contains Phase-2 providers: {unexpected}. "
+    pool_set = set(embed_pool)
+    not_allowed = {"cohere", "pinecone_ai", "bedrock"}
+    overlap = pool_set & not_allowed
+    assert not overlap, (
+        f"PROVIDER_PRIORITY['embed'] contains Phase-2 providers: {overlap}. "
         f"Remove them until their embed clients are wired (Task #257)."
     )
-    assert "vertex" in embed_pool, "embed priority must include vertex"
-    assert "workers_ai" in embed_pool, "embed priority must include workers_ai as last-resort"
-    print(f"  PASS: PROVIDER_PRIORITY['embed'] = {embed_pool} (vertex + workers_ai only)")
+    assert "vertex" in pool_set, "embed priority must include vertex"
+    assert "workers_ai" in pool_set, "embed priority must include workers_ai as last-resort"
+    assert embed_pool[-1] == "workers_ai", "embed: workers_ai must be last"
+    print(f"  PASS: PROVIDER_PRIORITY['embed'] = {embed_pool} (azure_openai second-to-last, bedrock/cohere/pinecone excluded)")
 
 
-def test_translate_priority_excludes_bedrock_azure():
-    """bedrock/azure_openai must not be in translate priority — no translate endpoint wired."""
+def test_translate_priority_excludes_bedrock():
+    """bedrock must not be in translate priority — no translate endpoint wired.
+
+    azure_openai IS listed as mandated second-to-last; translate routes via
+    providers.azure_openai.call_chat with translation system prompt.
+    """
     translate_pool = PROVIDER_PRIORITY.get("translate", [])
-    unwired = {"bedrock", "azure_openai"}
-    overlap = set(translate_pool) & unwired
-    assert not overlap, (
-        f"PROVIDER_PRIORITY['translate'] contains providers with no translate endpoint: {overlap}."
+    pool_set = set(translate_pool)
+    assert "bedrock" not in pool_set, (
+        f"PROVIDER_PRIORITY['translate'] contains bedrock which has no translate endpoint."
     )
-    assert "sarvam" in translate_pool or "vertex" in translate_pool, \
+    assert "sarvam" in pool_set or "vertex" in pool_set, \
         "translate priority must contain at least sarvam or vertex"
-    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (no unwired bedrock/azure)")
+    assert translate_pool[-1] == "workers_ai", "translate: workers_ai must be last"
+    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (bedrock excluded, azure second-to-last)")
 
 
-def test_vision_priority_excludes_bedrock_azure():
-    """bedrock/azure_openai must not be in vision priority — vision path not wired for them."""
+def test_vision_priority_excludes_bedrock():
+    """bedrock must not be in vision priority — vision path not wired for bedrock.
+
+    azure_openai IS listed as mandated second-to-last; vision routes via
+    providers.azure_openai.call_chat with image_url content (GPT-4o compatible).
+    """
     vision_pool = PROVIDER_PRIORITY.get("vision", [])
-    unwired = {"bedrock", "azure_openai"}
-    overlap = set(vision_pool) & unwired
-    assert not overlap, (
-        f"PROVIDER_PRIORITY['vision'] contains providers with no vision dispatch: {overlap}."
+    pool_set = set(vision_pool)
+    assert "bedrock" not in pool_set, (
+        f"PROVIDER_PRIORITY['vision'] contains bedrock which has no vision dispatch wired."
     )
-    assert "vertex" in vision_pool, "vision priority must include vertex (Gemini vision)"
-    print(f"  PASS: PROVIDER_PRIORITY['vision'] = {vision_pool} (no unwired bedrock/azure)")
+    assert "vertex" in pool_set, "vision priority must include vertex (Gemini vision)"
+    assert vision_pool[-1] == "workers_ai", "vision: workers_ai must be last"
+    print(f"  PASS: PROVIDER_PRIORITY['vision'] = {vision_pool} (bedrock excluded, azure second-to-last)")
 
 
 def test_no_phase2_stub_providers_in_live_search():
@@ -484,10 +503,10 @@ if __name__ == "__main__":
         test_assamese_rag_chat_can_select_sarvam,
         test_english_rag_chat_never_selects_sarvam_when_lang_en,
         test_workers_ai_fallback_pool_is_workers_only,
-        test_tts_stt_priority_excludes_unwired_providers,
-        test_embed_priority_is_vertex_and_workers_only,
-        test_translate_priority_excludes_bedrock_azure,
-        test_vision_priority_excludes_bedrock_azure,
+        test_tts_stt_priority_structure,
+        test_embed_priority_structure,
+        test_translate_priority_excludes_bedrock,
+        test_vision_priority_excludes_bedrock,
         test_no_phase2_stub_providers_in_live_search,
         test_assemblyai_uses_cf_gateway_url,
         test_bedrock_uses_cf_gateway_slug,
