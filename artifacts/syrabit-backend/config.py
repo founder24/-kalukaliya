@@ -1023,15 +1023,16 @@ PROVIDER_PRIORITY: dict = {
     #   Vertex removed from this pool; Azure is now primary for English because gpt-4.1-mini
     #   has the highest production TPS on Azure and $2.5k credits are consumed first.
     "english_rag_chat":  ["azure_openai", "bedrock", "workers_ai"],
-    # Assamese chat (Task #267):
-    #   Sarvam (sarvam-m) → Vertex / Gemini (gemini-2.5-flash) → Workers AI IndicTrans2 last resort.
-    #   IndicTrans2 is purpose-built for Indic → handles last-resort Assamese when both LLMs fail.
-    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
+    # Assamese chat:
+    #   Sarvam (sarvam-m, 500) → Workers AI IndicTrans2 (800) → Vertex / Gemini (2000) last resort.
+    #   Sarvam is purpose-built for Indian languages and leads; IndicTrans2 second; Gemini last.
+    "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
     # Long-form content generation (Task #267): mirrors english_rag_chat.
     "content":           ["azure_openai", "bedrock", "workers_ai"],
-    # Assamese content translation (Task #267):
-    #   Gemini 2.5 Flash is best multilingual TPS for translation → IndicTrans2 (en-indic) last resort.
-    "assamese_content":  ["vertex", "workers_ai_indic"],
+    # Assamese content generation:
+    #   Workers AI IndicTrans2 (800, primary) → Sarvam (500) → Vertex / Gemini (2000, last resort).
+    #   IndicTrans2 leads for Assamese content; Sarvam second; Gemini fallback.
+    "assamese_content":  ["workers_ai_indic", "sarvam", "vertex"],
     # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Vertex (2k, RuntimeError→skip) →
     # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
     # vertex/bedrock TTS endpoints not wired — listed per authoritative matrix; excluded
@@ -1052,10 +1053,10 @@ PROVIDER_PRIORITY: dict = {
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex (2k) → Workers AI.
     # Dispatch wired in rag._fetch_chunks_semantic via select_provider("vector_search").
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
-    # Translation (Task #267): Assamese path.
-    #   Vertex / Gemini (gemini-2.5-flash) → Workers AI IndicTrans2 (en-indic-1b) last resort.
-    #   Sarvam translate:v1 is called directly in ai_chat.py before this pool is consulted.
-    "translate":         ["vertex", "workers_ai_indic"],
+    # Translation: Assamese path.
+    #   Workers AI IndicTrans2 (800, primary) → Sarvam (500) → Vertex / Gemini (2000, last resort).
+    #   IndicTrans2 is the dedicated neural MT model for Indic languages; leads this pool.
+    "translate":         ["workers_ai_indic", "sarvam", "vertex"],
     # Vision / OCR: Vertex (2k) → Bedrock (1k, Claude multimodal via call_converse_vision) →
     # Azure OpenAI (1, via call_chat with image_url) → Workers AI.
     "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
@@ -1070,10 +1071,10 @@ PROVIDER_PRIORITY: dict = {
 }
 
 PROVIDER_CREDITS: dict = {
-    "vertex":           2000,   # Google Cloud for Startups — $2k
+    "vertex":            100,   # Google Cloud for Startups — $2k (low weight: last-resort for Assamese, not in English pools)
     "bedrock":          1000,   # AWS Activate — $1k
     "azure_openai":     2500,   # Azure for Startups — $2.5k credits; primary for english_rag_chat + content (Task #267)
-    "sarvam":            500,   # Sarvam startup credits — $500
+    "sarvam":           2000,   # Sarvam startup credits — $500 (weight raised so it leads assamese_rag_chat pool)
     "cartesia":          500,   # Cartesia startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
@@ -1083,7 +1084,7 @@ PROVIDER_CREDITS: dict = {
     "tavily":            500,   # Tavily startup credits — $500
     "mongodb_atlas":       0,   # MongoDB Atlas free tier — weight 0 (fallback only, like workers_ai)
     "workers_ai":          0,   # Cloudflare free tier — absolute last resort, never in rotation pool
-    "workers_ai_indic":    0,   # CF Workers AI IndicTrans2 — last resort for Assamese pools only
+    "workers_ai_indic": 3000,   # CF Workers AI IndicTrans2 — primary for assamese_content + translate; second for assamese_rag_chat
 }
 
 SEED_DATA = {

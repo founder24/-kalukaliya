@@ -1535,20 +1535,28 @@ async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: i
         return await _az_chat(messages, model="gpt-4.1-mini", max_tokens=max_tokens)
 
     if provider == "workers_ai_indic":
-        # CF Workers AI IndicTrans2 — Assamese last resort (Task #267).
-        # Extracts the last user message text and translates to Assamese.
-        # Direction: English → Assamese (en-indic-1b).  For chat responses the
-        # caller has already produced English output; IndicTrans2 translates it.
+        # CF Workers AI IndicTrans2 (Task #267).
+        # Direction depends on the caller's feature context:
+        #   assamese_rag_chat  → user writes in Assamese → translate indic→en before LLM
+        #                        OR translate LLM English reply → Assamese (indic-en model).
+        #   assamese_content / translate → source is English → en→indic model.
+        # _dispatch_llm_for_feature is called from call_with_provider_fallback which
+        # passes a feature tag via the closure's `feature` variable. We detect context
+        # by inspecting the last message role:
+        #   last message is "user"      → input is Assamese query → direction=indic-en
+        #   last message is "assistant" → output is English reply → direction=en-indic
         from providers.workers_indic import call_indic_trans as _indic_trans
-        # Extract the last user message to pass as source text.
         src_text = ""
+        last_role = "user"
         for m in reversed(messages):
             if m.get("role") in ("user", "assistant") and m.get("content"):
                 src_text = str(m["content"])
+                last_role = m.get("role", "user")
                 break
         if not src_text:
             raise RuntimeError("workers_ai_indic: no source text in messages")
-        return await _indic_trans(src_text, direction="en-indic")
+        direction = "indic-en" if last_role == "user" else "en-indic"
+        return await _indic_trans(src_text, direction=direction)
 
     # workers_ai or any unknown provider → Workers-AI-only dispatch.
     # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
@@ -2970,10 +2978,10 @@ async def call_translate_with_dispatch(
     """Translate *text* via the weighted provider selected for 'translate'.
 
     Priority (PROVIDER_PRIORITY['translate']):
-      sarvam(500) → vertex(2000) → bedrock(1000, call_converse) → azure_openai(1, call_chat) → workers_ai(0)
+      workers_ai_indic (800, IndicTrans2 en→indic-1b, primary)
+      → sarvam (500, translate REST API)
+      → vertex (2000, Gemini 2.5 Flash, last resort)
 
-    bedrock: routes via providers.bedrock.call_converse with translation system prompt.
-    azure_openai: routes via providers.azure_openai.call_chat with translation system prompt.
     Returns the translated string or raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP
@@ -3018,6 +3026,10 @@ async def call_translate_with_dispatch(
                 # Falls back to RuntimeError if AZURE_TRANSLATOR_KEY not configured.
                 from providers.azure_openai import call_translate as _az_translate
                 return await _az_translate(text, target_lang=target_lang, source_lang=source_lang)
+            elif provider == "workers_ai_indic":
+                # IndicTrans2 en→indic-1b — primary for Assamese translation pool.
+                from providers.workers_indic import call_indic_trans as _indic_trans
+                return await _indic_trans(text, direction="en-indic")
             elif provider == "workers_ai":
                 prompt = [
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
