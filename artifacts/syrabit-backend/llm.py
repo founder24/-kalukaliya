@@ -1271,15 +1271,29 @@ _TASK_ROUTE: dict[str, tuple] = {
 }
 
 
-def route_for_task(task: str) -> tuple[str, str]:
+def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
     """Return (provider, model) for the given abstract task type.
 
+    For the 15 Task #250 feature keys (``english_rag_chat``, ``assamese_rag_chat``,
+    ``content``, ``assamese_content``, ``tts``, ``stt``, ``voice``, ``embed``,
+    ``rerank``, ``vector_search``, ``translate``, ``vision``, ``safety``,
+    ``search_rag``, ``live_search``) the selection is done via ``select_provider``
+    so traffic is distributed according to ``PROVIDER_CREDITS`` weights.
+
+    Legacy task keys (``fast``, ``rag_answer``, ``content``, etc.) continue to
+    work via the static ``_TASK_ROUTE`` dict for backward compatibility with
+    existing call sites that have not yet been migrated to feature-key strings.
+
     Falls back to Workers AI 70B for unknown task names.
+
     Usage::
 
-        provider, model = route_for_task("rag_answer")
-        result = await _call_single_provider(msgs, provider, key, model, 1024)
+        provider, model = route_for_task("english_rag_chat", lang="en")
+        provider, model = route_for_task("rag_answer")   # legacy static route
     """
+    from config import PROVIDER_PRIORITY
+    if task in PROVIDER_PRIORITY:
+        return route_for_feature(task, lang=lang)
     return _TASK_ROUTE.get(task, ("workers-ai", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"))
 
 
@@ -1417,6 +1431,85 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
 
     logger.warning("select_provider: feature=%s — no provider available, defaulting to workers_ai", feature)
     return "workers_ai"
+
+
+def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
+    """Return (canonical_provider, model) for a Task #250 feature key via select_provider.
+
+    Bridges the semantic feature-key system into the existing (provider, model)
+    tuple used by _call_single_provider and route_for_task callers.
+
+    Example::
+
+        provider, model = route_for_feature("english_rag_chat")
+        # → ("gemini", "gemini-2.5-flash") when vertex is selected, or
+        #   ("workers-ai", "@cf/meta/llama-3.3-70b-instruct-fp8-fast") as fallback.
+    """
+    provider_name = select_provider(feature, lang=lang)
+    canonical = _PROVIDER_CANONICAL.get(provider_name, provider_name)
+    model = _PROVIDER_DEFAULT_MODELS.get(provider_name, "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    return (canonical, model)
+
+
+async def call_with_provider_fallback(
+    feature: str,
+    lang: str,
+    attempt_fn,
+    max_attempts: int = 6,
+):
+    """Weighted fallback-without-replacement execution for *feature*.
+
+    Draws a provider via ``select_provider``, calls ``attempt_fn(provider_name)``,
+    and on 429 / connection error removes that provider from the pool and retries
+    with the next weighted draw.  This implements the "exclude" loop described in
+    the Task #250 spec.
+
+    Args:
+        feature:     Feature key (e.g. ``"english_rag_chat"``).
+        lang:        BCP-47 language code (used by select_provider for sarvam guard).
+        attempt_fn:  ``async def fn(provider: str) -> result`` — may raise any exception.
+        max_attempts: Maximum draws before raising the last exception.
+
+    Returns:
+        The return value of the first successful ``attempt_fn`` call.
+
+    Raises:
+        RuntimeError: If all attempts fail.
+
+    Example::
+
+        result = await call_with_provider_fallback(
+            "english_rag_chat", "en",
+            lambda p: _call_single_provider(msgs, _PROVIDER_CANONICAL[p], key, _PROVIDER_DEFAULT_MODELS[p], 512),
+        )
+    """
+    import httpx as _httpx
+    exclude: frozenset = frozenset()
+    last_exc: Exception = RuntimeError(f"No providers available for feature={feature}")
+
+    for attempt in range(max_attempts):
+        provider = select_provider(feature, lang=lang, exclude=exclude)
+        try:
+            return await attempt_fn(provider)
+        except _httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (429, 502, 503, 504):
+                logger.warning(
+                    "call_with_provider_fallback: feature=%s provider=%s HTTP %d — removing from pool",
+                    feature, provider, exc.response.status_code,
+                )
+                exclude = exclude | {provider}
+                last_exc = exc
+                continue
+            raise
+        except Exception as exc:
+            logger.warning(
+                "call_with_provider_fallback: feature=%s provider=%s error=%s — removing from pool",
+                feature, provider, exc,
+            )
+            exclude = exclude | {provider}
+            last_exc = exc
+
+    raise RuntimeError(f"All providers exhausted for feature={feature}: {last_exc}") from last_exc
 
 
 # ── RAG-quality call path ───────────────────────────────────────────────────────

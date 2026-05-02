@@ -2,28 +2,31 @@
 routes.voice — Voice API endpoints (TTS, STT, two-leg voice dispatch).
 
 POST /api/voice/tts
-  Text-to-speech via the PROVIDER_PRIORITY weighted round-robin.
-  Primary: Cartesia Sonic-2. Falls back to Workers AI Deepgram.
+  Text-to-speech via PROVIDER_PRIORITY weighted round-robin with fallback-without-
+  replacement. Weighted pool: Cartesia → ElevenLabs → Workers AI Deepgram.
   Returns audio/mpeg bytes (mp3).
 
 POST /api/voice/stt
-  Speech-to-text via the PROVIDER_PRIORITY weighted round-robin.
-  Primary: AssemblyAI "best". Falls back to Workers AI Whisper.
-  Accepts multipart/form-data with an audio file.
+  Speech-to-text via PROVIDER_PRIORITY weighted round-robin with fallback-without-
+  replacement. Weighted pool: AssemblyAI → Workers AI Whisper.
+  Accepts multipart/form-data with an 'audio' file field.
 
 POST /api/voice/voice
-  Two-leg concurrent dispatch: STT (assemblyai → workers_ai) in parallel
-  with prompt processing, then TTS (cartesia → elevenlabs → workers_ai)
-  on the reply. Returns { transcript, reply_text, audio_b64 }.
+  Two-leg independent-selection pipeline:
+    Leg 1 (STT) — select_provider("stt") with per-leg fallback-without-replacement
+    Leg 2 (TTS) — select_provider("tts") with per-leg fallback-without-replacement
+  LLM reply generated between the two legs.
+  Returns { transcript, reply_text, audio_b64 }.
 
 GET  /api/voice/voices
   Lists available Cartesia voices (for admin UI to pick a voice ID).
 
 GET  /api/voice/health
-  Reports readiness of all voice providers.
+  Reports readiness of all voice providers (Cartesia, ElevenLabs, AssemblyAI, Workers AI).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Optional
@@ -38,32 +41,32 @@ logger = logging.getLogger("routes.voice")
 
 router = APIRouter(tags=["voice"])
 
+# Providers not yet wired as full clients (Phase 2 — Task #256).
+# select_provider may draw these names; we skip them gracefully and try the next.
+_TTS_NOT_IMPLEMENTED = frozenset({"vertex", "bedrock", "azure_openai"})
+_STT_NOT_IMPLEMENTED = frozenset({"vertex", "bedrock", "azure_openai"})
+
 
 class TtsRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000, description="Text to synthesize")
-    voice_id: Optional[str] = Field(None, description="Cartesia voice UUID (uses CARTESIA_VOICE_ID default if omitted)")
+    voice_id: Optional[str] = Field(None, description="Cartesia or ElevenLabs voice ID (uses env var default if omitted)")
     language: str = Field("en", description="BCP-47 language code (en, hi, as, bn, ...)")
-    model_id: Optional[str] = Field(None, description="Cartesia model ID (default: sonic-2)")
+    model_id: Optional[str] = Field(None, description="TTS model ID (Cartesia default: sonic-2)")
 
 
 class VoiceRequest(BaseModel):
     language: str = Field("en", description="BCP-47 language code for STT + TTS")
-    voice_id: Optional[str] = Field(None, description="Cartesia voice UUID for TTS")
+    voice_id: Optional[str] = Field(None, description="TTS voice ID (Cartesia or ElevenLabs)")
     system_prompt: Optional[str] = Field(None, description="System prompt for the LLM reply step")
 
 
-# ── TTS helpers ───────────────────────────────────────────────────────────────
+# ── Individual provider TTS callers ───────────────────────────────────────────
 
-async def _tts_cartesia(
-    text: str,
-    voice_id: Optional[str],
-    model_id: Optional[str],
-    language: str,
-) -> bytes:
-    """Attempt TTS via Cartesia. Raises on failure."""
+async def _tts_cartesia(text: str, voice_id: Optional[str], model_id: Optional[str], language: str) -> bytes:
+    """TTS via Cartesia Sonic-2. Raises RuntimeError on failure."""
     from providers import cartesia
     if not cartesia.ENABLED:
-        raise RuntimeError("Cartesia not available")
+        raise RuntimeError("Cartesia TTS not available (CARTESIA_API_KEY not set)")
     return await cartesia.synthesize(
         text,
         voice_id=voice_id or None,
@@ -72,11 +75,41 @@ async def _tts_cartesia(
     )
 
 
-async def _tts_workers_ai(text: str, language: str) -> bytes:
-    """Fallback TTS via Workers AI Deepgram Aura model. Returns mp3 bytes."""
-    from providers.cloudflare_ai import speak as _cf_speak
-    return await _cf_speak(text, lang=language[:2])
+async def _tts_elevenlabs(text: str, voice_id: Optional[str], language: str) -> bytes:
+    """TTS via ElevenLabs eleven_multilingual_v2. Raises RuntimeError on failure."""
+    from providers import elevenlabs
+    if not elevenlabs.ENABLED:
+        raise RuntimeError("ElevenLabs TTS not available (ELEVENLABS_API_KEY not set)")
+    return await elevenlabs.synthesize(
+        text,
+        voice_id=voice_id or None,
+        language_code=language[:2] if language else None,
+    )
 
+
+async def _tts_workers_ai(text: str, language: str) -> bytes:
+    """Fallback TTS via Workers AI Deepgram Aura. Raises RuntimeError on failure."""
+    from providers.cloudflare_ai import speak as _cf_speak
+    return await _cf_speak(text, lang=language[:2] if language else "en")
+
+
+# ── Individual provider STT callers ───────────────────────────────────────────
+
+async def _stt_assemblyai(audio_bytes: bytes, language: str) -> str:
+    """STT via AssemblyAI 'best' model. Raises RuntimeError on failure."""
+    from providers import assemblyai
+    if not assemblyai.ENABLED:
+        raise RuntimeError("AssemblyAI STT not available (ASSEMBLYAI_API_KEY not set)")
+    return await assemblyai.transcribe(audio_bytes, language_code=language or None)
+
+
+async def _stt_workers_ai(audio_bytes: bytes) -> str:
+    """Fallback STT via Workers AI Whisper-large-v3-turbo. Raises RuntimeError on failure."""
+    from providers.cloudflare_ai import transcribe as _cf_transcribe
+    return await _cf_transcribe(audio_bytes)
+
+
+# ── Weighted fallback-without-replacement dispatch ─────────────────────────────
 
 async def _synthesize_with_fallback(
     text: str,
@@ -84,74 +117,95 @@ async def _synthesize_with_fallback(
     model_id: Optional[str],
     language: str,
 ) -> bytes:
-    """TTS with weighted round-robin: cartesia → elevenlabs → workers_ai.
+    """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    Uses select_provider("tts") for the primary pick, then falls back
-    through the PROVIDER_PRIORITY order on error.
+    Each call to select_provider draws from the weighted pool excluding
+    providers that have already failed this request.  Phase-2 providers
+    (vertex, bedrock, azure_openai) are skipped immediately with a warning
+    until their client modules are wired in Task #256.
+
+    Fallback sequence (by PROVIDER_CREDITS weight then list order):
+      cartesia(500) → elevenlabs(500) → vertex(2000, skip) →
+      bedrock(1000, skip) → azure_openai(1, skip) → workers_ai(last-resort)
     """
     from llm import select_provider
-    tried: set = set()
 
-    # First attempt: weighted draw from select_provider.
-    primary = select_provider("tts", lang=language)
-    tried.add(primary)
+    exclude: frozenset = frozenset()
+    max_attempts = len(_TTS_NOT_IMPLEMENTED) + 4  # enough room to exhaust skips + real tries
 
-    for provider in [primary] + ["cartesia", "workers_ai"]:
-        if provider in tried and provider != primary:
+    for _ in range(max_attempts):
+        provider = select_provider("tts", lang=language, exclude=exclude)
+
+        if provider in _TTS_NOT_IMPLEMENTED:
+            logger.debug("TTS: skipping %s (client not yet wired — Phase 2/Task #256)", provider)
+            exclude = exclude | {provider}
             continue
-        tried.add(provider)
+
         try:
-            if provider in ("cartesia", "elevenlabs"):
+            if provider == "cartesia":
                 return await _tts_cartesia(text, voice_id, model_id, language)
-            if provider == "workers_ai":
+            elif provider == "elevenlabs":
+                return await _tts_elevenlabs(text, voice_id, language)
+            elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
+            else:
+                # Unknown provider — skip.
+                logger.warning("TTS: unknown provider %r returned by select_provider, skipping", provider)
+                exclude = exclude | {provider}
+                continue
         except Exception as exc:
-            logger.warning("TTS %s failed: %s", provider, exc)
-            continue
+            logger.warning("TTS %s failed: %s — removing from pool and retrying", provider, exc)
+            exclude = exclude | {provider}
 
-    # Last-resort: Workers AI fallback.
+    # Absolute last resort: Workers AI regardless of exclusion list.
+    logger.error("TTS: all providers exhausted, forcing Workers AI fallback")
     return await _tts_workers_ai(text, language)
 
 
-# ── STT helpers ───────────────────────────────────────────────────────────────
-
-async def _stt_assemblyai(audio_bytes: bytes, language: str) -> str:
-    """STT via AssemblyAI. Raises on failure."""
-    from providers import assemblyai
-    if not assemblyai.ENABLED:
-        raise RuntimeError("AssemblyAI not available")
-    return await assemblyai.transcribe(audio_bytes, language_code=language or None)
-
-
-async def _stt_workers_ai(audio_bytes: bytes) -> str:
-    """Fallback STT via Workers AI Whisper. Returns transcript string."""
-    from providers.cloudflare_ai import transcribe as _cf_transcribe
-    return await _cf_transcribe(audio_bytes)
-
-
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
-    """STT with weighted round-robin: assemblyai → workers_ai.
+    """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    Uses select_provider("stt") for the primary pick.
+    Each call to select_provider draws from the weighted pool excluding
+    providers that have already failed this request.  Phase-2 providers
+    (vertex, bedrock, azure_openai) are skipped immediately with a warning
+    until their client modules are wired in Task #256.
+
+    Fallback sequence (by PROVIDER_CREDITS weight then list order):
+      assemblyai(1000) → vertex(2000, skip) → bedrock(1000, skip) →
+      azure_openai(1, skip) → workers_ai(last-resort)
     """
     from llm import select_provider
-    primary = select_provider("stt", lang=language)
-    tried: set = {primary}
 
-    try:
-        if primary == "assemblyai":
-            return await _stt_assemblyai(audio_bytes, language)
-        elif primary == "workers_ai":
-            return await _stt_workers_ai(audio_bytes)
-    except Exception as exc:
-        logger.warning("STT %s failed: %s — trying Workers AI fallback", primary, exc)
+    exclude: frozenset = frozenset()
+    max_attempts = len(_STT_NOT_IMPLEMENTED) + 3
 
-    # Fallback to Workers AI Whisper.
+    for _ in range(max_attempts):
+        provider = select_provider("stt", lang=language, exclude=exclude)
+
+        if provider in _STT_NOT_IMPLEMENTED:
+            logger.debug("STT: skipping %s (client not yet wired — Phase 2/Task #256)", provider)
+            exclude = exclude | {provider}
+            continue
+
+        try:
+            if provider == "assemblyai":
+                return await _stt_assemblyai(audio_bytes, language)
+            elif provider == "workers_ai":
+                return await _stt_workers_ai(audio_bytes)
+            else:
+                logger.warning("STT: unknown provider %r returned by select_provider, skipping", provider)
+                exclude = exclude | {provider}
+                continue
+        except Exception as exc:
+            logger.warning("STT %s failed: %s — removing from pool and retrying", provider, exc)
+            exclude = exclude | {provider}
+
+    # Absolute last resort.
+    logger.error("STT: all providers exhausted, forcing Workers AI fallback")
     try:
         return await _stt_workers_ai(audio_bytes)
     except Exception as exc:
-        logger.error("STT Workers AI fallback also failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Speech recognition failed.")
+        raise HTTPException(status_code=502, detail="Speech recognition failed — all providers exhausted.")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -159,10 +213,11 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 @router.post(
     "/voice/tts",
     response_class=Response,
-    summary="Text-to-speech (weighted: Cartesia → Workers AI)",
+    summary="Text-to-speech (weighted round-robin: Cartesia → ElevenLabs → Workers AI)",
     description=(
-        "Convert text to speech using the PROVIDER_PRIORITY weighted round-robin. "
-        "Primary: Cartesia Sonic-2. Fallback: Workers AI Deepgram Aura. "
+        "Convert text to speech using the PROVIDER_PRIORITY weighted round-robin "
+        "with fallback-without-replacement. "
+        "Weighted pool: Cartesia(500) → ElevenLabs(500) → Workers AI(last-resort). "
         "Returns mp3 audio bytes."
     ),
 )
@@ -201,11 +256,12 @@ async def text_to_speech(
 
 @router.post(
     "/voice/stt",
-    summary="Speech-to-text (weighted: AssemblyAI → Workers AI Whisper)",
+    summary="Speech-to-text (weighted round-robin: AssemblyAI → Workers AI Whisper)",
     description=(
-        "Transcribe audio using the PROVIDER_PRIORITY weighted round-robin. "
-        "Primary: AssemblyAI 'best' model. Fallback: Workers AI Whisper-large-v3-turbo. "
-        "Accepts multipart/form-data with 'audio' file field."
+        "Transcribe audio using the PROVIDER_PRIORITY weighted round-robin "
+        "with fallback-without-replacement. "
+        "Weighted pool: AssemblyAI(1000) → Workers AI Whisper(last-resort). "
+        "Accepts multipart/form-data with an 'audio' file field."
     ),
 )
 async def speech_to_text(
@@ -229,63 +285,62 @@ async def speech_to_text(
 
 @router.post(
     "/voice/voice",
-    summary="Two-leg voice pipeline (STT + LLM + TTS)",
+    summary="Two-leg voice pipeline (STT leg + LLM + TTS leg)",
     description=(
-        "Full voice pipeline: (1) Transcribe audio via STT (AssemblyAI → Workers AI Whisper), "
-        "(2) Generate a reply via the chat LLM, "
-        "(3) Synthesize the reply via TTS (Cartesia → Workers AI Deepgram). "
-        "Returns { transcript, reply_text, audio_b64 }."
+        "Full voice pipeline with independent per-leg weighted provider selection:\n\n"
+        "**Leg 1 — STT** (select_provider('stt') with fallback-without-replacement):\n"
+        "  AssemblyAI(1000) → Workers AI Whisper(last-resort)\n\n"
+        "**LLM** — generate reply via call_llm_api_chat\n\n"
+        "**Leg 2 — TTS** (select_provider('tts') with fallback-without-replacement):\n"
+        "  Cartesia(500) → ElevenLabs(500) → Workers AI Deepgram(last-resort)\n\n"
+        "Returns { transcript, reply_text, audio_b64, language }."
     ),
 )
 async def voice_pipeline(
-    audio: UploadFile = File(..., description="Audio file for STT"),
-    language: str = Form("en", description="BCP-47 language code"),
-    voice_id: Optional[str] = Form(None, description="Cartesia voice UUID"),
-    system_prompt: Optional[str] = Form(None, description="System prompt for the LLM"),
+    audio: UploadFile = File(..., description="Audio file for STT leg"),
+    language: str = Form("en", description="BCP-47 language code for both STT and TTS legs"),
+    voice_id: Optional[str] = Form(None, description="TTS voice ID (Cartesia or ElevenLabs)"),
+    system_prompt: Optional[str] = Form(None, description="System prompt injected before the user transcript"),
     current_user: dict = Depends(get_current_user),
 ):
-    import asyncio as _asyncio
-
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file.")
     if len(audio_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB).")
 
-    # Leg 1 — STT: transcribe the audio.
+    # ── Leg 1: STT — transcribe audio with independent per-leg weighted selection ──
     try:
         transcript = await _transcribe_with_fallback(audio_bytes, language)
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Voice pipeline STT failed: %s", exc)
+        logger.error("Voice pipeline STT leg failed: %s", exc)
         raise HTTPException(status_code=502, detail="Speech recognition failed.")
 
     if not transcript or not transcript.strip():
-        return {"transcript": "", "reply_text": "", "audio_b64": ""}
+        return {"transcript": "", "reply_text": "", "audio_b64": "", "language": language}
 
-    # Leg 2 — LLM: generate a reply.
+    # ── LLM: generate a conversational reply ──────────────────────────────────
     try:
         from llm import call_llm_api_chat
-        feature = "assamese_rag_chat" if language == "as" else "english_rag_chat"
-        msgs = []
+        msgs: list = []
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})
         msgs.append({"role": "user", "content": transcript.strip()})
-        reply_text = await call_llm_api_chat(msgs, max_tokens=512)
-        if hasattr(reply_text, "__str__"):
-            reply_text = str(reply_text)
+        reply_text = str(await call_llm_api_chat(msgs, max_tokens=512))
     except Exception as exc:
-        logger.error("Voice pipeline LLM failed: %s", exc)
+        logger.error("Voice pipeline LLM step failed: %s", exc)
         raise HTTPException(status_code=502, detail="LLM reply generation failed.")
 
-    # Leg 3 — TTS: synthesize the reply.
+    # ── Leg 2: TTS — synthesize reply with independent per-leg weighted selection ──
+    audio_b64 = ""
     try:
         audio_out = await _synthesize_with_fallback(reply_text, voice_id, None, language)
         audio_b64 = base64.b64encode(audio_out).decode("ascii")
     except Exception as exc:
-        logger.warning("Voice pipeline TTS failed (returning text only): %s", exc)
-        audio_b64 = ""
+        # TTS failure is non-fatal: return transcript + text reply without audio.
+        logger.warning("Voice pipeline TTS leg failed (returning text-only): %s", exc)
 
     return {
         "transcript": transcript,
@@ -298,7 +353,7 @@ async def voice_pipeline(
 @router.get(
     "/voice/voices",
     summary="List available Cartesia voices",
-    description="Returns all voices available in the Cartesia Voice Library.",
+    description="Returns all voices from the Cartesia Voice Library for UI selection.",
 )
 async def list_voices(current_user: dict = Depends(get_current_user)):
     from providers import cartesia
@@ -314,36 +369,34 @@ async def list_voices(current_user: dict = Depends(get_current_user)):
 @router.get(
     "/voice/health",
     summary="Voice provider health check",
-    description="Reports readiness of Cartesia, AssemblyAI, and Workers AI voice providers.",
+    description="Reports readiness of Cartesia, ElevenLabs, AssemblyAI, and Workers AI.",
 )
 async def voice_health():
-    import asyncio as _asyncio
-    from providers import cartesia
-    from providers import assemblyai
+    from providers import cartesia, assemblyai, elevenlabs
 
-    cartesia_task = _asyncio.create_task(cartesia.health_check())
-    assemblyai_task = _asyncio.create_task(assemblyai.health_check())
+    cartesia_task  = asyncio.create_task(cartesia.health_check())
+    assemblyai_task = asyncio.create_task(assemblyai.health_check())
+    elevenlabs_task = asyncio.create_task(elevenlabs.health_check())
 
-    cartesia_health, assemblyai_health = await _asyncio.gather(
-        cartesia_task, assemblyai_task, return_exceptions=True
+    cartesia_health, assemblyai_health, elevenlabs_health = await asyncio.gather(
+        cartesia_task, assemblyai_task, elevenlabs_task, return_exceptions=True
     )
     if isinstance(cartesia_health, Exception):
         cartesia_health = {"ok": False, "reason": str(cartesia_health)}
     if isinstance(assemblyai_health, Exception):
         assemblyai_health = {"ok": False, "reason": str(assemblyai_health)}
+    if isinstance(elevenlabs_health, Exception):
+        elevenlabs_health = {"ok": False, "reason": str(elevenlabs_health)}
 
     try:
         from providers import cloudflare_ai as _cfai
         workers_ai_ok = _cfai._ENABLED
     except Exception:
         workers_ai_ok = False
-    workers_ai_health = {
-        "ok": workers_ai_ok,
-        "model": "@cf/openai/whisper-large-v3-turbo",
-    }
 
     return {
         "cartesia":   cartesia_health,
+        "elevenlabs": elevenlabs_health,
         "assemblyai": assemblyai_health,
-        "workers_ai": workers_ai_health,
+        "workers_ai": {"ok": workers_ai_ok, "model": "@cf/openai/whisper-large-v3-turbo"},
     }
