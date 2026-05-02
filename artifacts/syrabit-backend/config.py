@@ -31,7 +31,7 @@ __all__ = [
     "_CEREBRAS_KEY", "_CF_PROVIDER_SLUGS", "_CORS_ALLOW_CREDENTIALS",
     "_ELEVENLABS_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID",
     "_GEMINI_KEY", "_GEMINI_KEY_2",
-    "_GROQ_KEY", "_GROQ_KEY_2",
+    "_GROQ_KEY",
     "_OPENAI_KEY", "_OPENROUTER_KEY",
     "_PG_DSN",
     "_SARVAM_LLM_KEY", "_SARVAM_LLM_KEY_2", "_SARVAM_LLM_KEY_3",
@@ -430,7 +430,8 @@ else:
 
 # ── LLM Configuration ─────────────────────────────────────────────────────────
 _GROQ_KEY = os.environ.get('GROQ_API_KEY', '').strip()
-_GROQ_KEY_2 = os.environ.get('GROQ_API_KEY_2', '').strip()
+# GROQ_API_KEY_2 removed — key was deleted from Railway as part of env-var cleanup.
+# CF AI Gateway BYOK (single key, edge-managed retries) replaces secondary key rotation.
 # Gemini re-enabled (2026-04-20) — AI Studio Tier 1 confirmed (2000 RPM/key),
 # CF AI Gateway BYOK verified working for google-ai-studio provider.
 _GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
@@ -517,7 +518,7 @@ if CF_GATEWAY_ENABLED:
     _BASETEN_KEY     = _BASETEN_KEY     or BYOK_PLACEHOLDER
     _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
-    # Secondary/tertiary keys (_GROQ_KEY_2, _GEMINI_KEY_2, _SARVAM_LLM_KEY_2/3)
+    # Secondary/tertiary keys (_GEMINI_KEY_2, _SARVAM_LLM_KEY_2/3)
     # stay empty if not set — CF Gateway manages rate limiting at the edge via
     # the single BYOK key per provider. Delete these from Railway to clean up.
 # LLM_PRIMARY_PROVIDER is the canonical name (PR #36); LLM_PROVIDER kept as alias.

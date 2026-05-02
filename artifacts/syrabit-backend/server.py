@@ -110,7 +110,6 @@ def _validate_env():
     # BYOK, the gateway manages a single provider key at the edge and handles
     # retries. All secondary keys can be deleted from Railway unconditionally.
     _BYOK_SECONDARY = [
-        "GROQ_API_KEY_2",
         "GEMINI_API_KEY_2",
         "SARVAM_API_KEY_2",
         "SARVAM_API_KEY_3",

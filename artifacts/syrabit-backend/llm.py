@@ -49,7 +49,7 @@ from fastapi import HTTPException
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from config import (
     LLM_PROVIDER, LLM_MODEL, OPENAI_API_KEY, SARVAM_THINK_BUFFER,
-    _GROQ_KEY, _GROQ_KEY_2, _GEMINI_KEY, _GEMINI_KEY_2, _OPENAI_KEY,
+    _GROQ_KEY, _GEMINI_KEY, _GEMINI_KEY_2, _OPENAI_KEY,
     _SARVAM_LLM_KEY, _SARVAM_LLM_KEY_2, _SARVAM_LLM_KEY_3, _CEREBRAS_KEY, _OPENROUTER_KEY, _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION,
     is_cf_gateway_up, mark_cf_gateway_down, get_provider_base_url,
     byok_headers, BYOK_PLACEHOLDER,
