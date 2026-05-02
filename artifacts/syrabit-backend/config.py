@@ -1054,9 +1054,10 @@ PROVIDER_PRIORITY: dict = {
     # Dispatch wired in rag._fetch_chunks_semantic via select_provider("vector_search").
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
     # Translation: Assamese path.
-    #   Workers AI IndicTrans2 (800, primary) → Sarvam (500) → Vertex / Gemini (2000, last resort).
-    #   IndicTrans2 is the dedicated neural MT model for Indic languages; leads this pool.
-    "translate":         ["workers_ai_indic", "sarvam", "vertex"],
+    #   sarvam(500) → vertex(2k) → workers_ai_indic(POOL_WEIGHTS 3000, IndicTrans2 en→indic)
+    #   → bedrock(1k, call_converse) → azure_openai(1, call_chat) → workers_ai(0, last resort).
+    #   bedrock + azure_openai retained for contract compatibility (test + call_translate_with_dispatch wired).
+    "translate":         ["sarvam", "vertex", "workers_ai_indic", "bedrock", "azure_openai", "workers_ai"],
     # Vision / OCR: Vertex (2k) → Bedrock (1k, Claude multimodal via call_converse_vision) →
     # Azure OpenAI (1, via call_chat with image_url) → Workers AI.
     "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
@@ -1094,20 +1095,26 @@ PROVIDER_CREDITS: dict = {
 #   assamese_rag_chat: Sarvam (3000) → IndicTrans2 (2000) → Vertex (100, true last resort)
 #   translate:         IndicTrans2 (3000) → Sarvam (2000) → Vertex (100, true last resort)
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
+    # assamese_content: IndicTrans2 primary (3000) → Sarvam second (2000) → Vertex last resort (100).
     "assamese_content": {
         "workers_ai_indic": 3000,   # primary — purpose-built Indic neural MT
         "sarvam":           2000,   # second
         "vertex":            100,   # last resort only
     },
+    # assamese_rag_chat: Sarvam primary (3000) → IndicTrans2 second (2000) → Vertex last resort (100).
     "assamese_rag_chat": {
         "sarvam":           3000,   # primary — best for Assamese conversational
         "workers_ai_indic": 2000,   # second
         "vertex":            100,   # last resort only
     },
+    # translate: IndicTrans2 primary (3000) → Sarvam second (2000) → Vertex (100) →
+    #            bedrock/azure_openai at their global credits → workers_ai(0) absolute last.
     "translate": {
         "workers_ai_indic": 3000,   # primary — dedicated Indic MT model
         "sarvam":           2000,   # second
-        "vertex":            100,   # last resort only
+        "vertex":            100,   # third (low weight)
+        # bedrock (1000) and azure_openai (2500) use global PROVIDER_CREDITS (no override needed)
+        # workers_ai (0) uses global — stays at zero / absolute last resort
     },
 }
 
