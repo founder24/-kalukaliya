@@ -8,16 +8,23 @@
  * degrading cache hit rates, bot filtering, or email security.
  *
  * Required env:
- *   CLOUDFLARE_API_TOKEN  — Zone Settings: Read, Bot Management: Read,
- *                           DNS: Read, Logs: Read, Health Checks: Read,
- *                           Zero Trust: Read (Phase 3), Waiting Room: Read (Phase 3),
- *                           R2: Read (Phase 4), Cache: Read (Phase 4),
- *                           Workers: Read, Durable Objects: Read (Phase 5),
- *                           SSL and Certificates: Read, Zaraz: Read,
- *                           Speed (Observatory): Read (Phase 6)
- *                           (Phase 2–6 checks degrade to warnings on token scope gap)
- *   CLOUDFLARE_ZONE_ID    — syrabit.ai zone (5b8c97df4431491dc7f60ea72fb61871)
- *   CLOUDFLARE_ACCOUNT_ID — Syrabit account (d66e40eac539fff1db270fddf384a5ec)
+ *   CLOUDFLARE_API_TOKEN       — Zone Settings: Read, Bot Management: Read,
+ *                                DNS: Read, Logs: Read, Health Checks: Read,
+ *                                Zero Trust: Read (Phase 3), Waiting Room: Read (Phase 3),
+ *                                R2: Read (Phase 4), Cache: Read (Phase 4),
+ *                                Workers: Read, Durable Objects: Read (Phase 5),
+ *                                SSL and Certificates: Read, Zaraz: Read,
+ *                                Speed (Observatory): Read (Phase 6),
+ *                                Load Balancer: Read (Task #76/87)
+ *                                (Phase 2–6 checks degrade to warnings on token scope gap)
+ *   CLOUDFLARE_ANALYTICS_TOKEN — Backend runtime token (Vectorize, cache purge).
+ *                                Task #87 probes GET /accounts/{id}/vectorize/v2/indexes.
+ *   CLOUDFLARE_PAGES_TOKEN     — Pages CI deploy token.
+ *                                Fallback: CF_PAGES_API_TOKEN (legacy name).
+ *                                Task #87 probes GET /accounts/{id}/pages/projects.
+ *   CLOUDFLARE_ZONE_ID         — syrabit.ai zone (5b8c97df4431491dc7f60ea72fb61871).
+ *                                Required for LB Read zone probe (Task #87).
+ *   CLOUDFLARE_ACCOUNT_ID      — Syrabit account (d66e40eac539fff1db270fddf384a5ec)
  *
  * Optional env (Task #262 — GSC Coverage check):
  *   GSC_SERVICE_ACCOUNT_JSON — Full JSON text of a Google service account key
@@ -706,6 +713,125 @@ async function main() {
     } else {
       failures.push(`Observatory schedule for ${url} (NOT FOUND)`);
       console.log(`  ✗  Observatory schedule (${label}): NOT FOUND — run cloudflare-phase6-apply.js`);
+    }
+  }
+
+  // ── Task #87: Cloudflare token scope verification ────────────────────
+  // Ports verify_cf_tokens.sh into the nightly smoke pipeline so permission
+  // regressions (e.g. a rotated token that lost the Load Balancer:Read scope)
+  // surface overnight — 12 months before they would fail the annual review.
+  //
+  //   Token 1  CLOUDFLARE_API_TOKEN       → GET /user/tokens/verify
+  //   Token 2  CLOUDFLARE_ANALYTICS_TOKEN → GET /accounts/{id}/vectorize/v2/indexes
+  //   Token 3  CLOUDFLARE_PAGES_TOKEN     → GET /accounts/{id}/pages/projects
+  //   Scope 4  LB Read (zone)             → GET /zones/{id}/load_balancers
+  //   Scope 5  LB Read (account)          → GET /accounts/{id}/load_balancers/pools
+  //
+  // To fix a FAIL: go to dash.cloudflare.com/profile/api-tokens, edit the
+  // named token, add the missing permission, save, then re-run this script.
+  console.log('\nTask #87 — CF token scope verification:');
+  {
+    const CF_ANALYTICS_TOKEN = process.env.CLOUDFLARE_ANALYTICS_TOKEN || '';
+    const CF_PAGES_TOKEN     = process.env.CLOUDFLARE_PAGES_TOKEN     ||
+                               process.env.CF_PAGES_API_TOKEN         || '';
+
+    // Helper: probe a URL with a given bearer token; never throws.
+    async function cfTokenProbe(url, token) {
+      try {
+        const r = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(15000),
+        });
+        return { ok: r.status >= 200 && r.status < 300, status: r.status };
+      } catch (e) {
+        return { ok: false, status: 0 };
+      }
+    }
+
+    // 1) Deploy token — CLOUDFLARE_API_TOKEN (already required; probe verifies it is
+    //    still valid in isolation, not just used as-is throughout the script).
+    {
+      const r = await cfTokenProbe(`${API}/user/tokens/verify`, TOKEN);
+      const mark = r.ok ? '✓' : '✗';
+      console.log(`  ${mark}  CLOUDFLARE_API_TOKEN (deploy/Wrangler): HTTP ${r.status}`);
+      if (!r.ok) failures.push(
+        `CLOUDFLARE_API_TOKEN validity probe failed (HTTP ${r.status}) — token may be revoked or malformed`,
+      );
+    }
+
+    // 2) Runtime token — CLOUDFLARE_ANALYTICS_TOKEN (Vectorize, cache purge).
+    if (!CF_ANALYTICS_TOKEN) {
+      warn(
+        'CLOUDFLARE_ANALYTICS_TOKEN (runtime/Vectorize)',
+        'env var not set — backend Vectorize REST calls will fail at runtime. ' +
+        'Set the token in CI secrets.',
+      );
+    } else {
+      const r = await cfTokenProbe(
+        `${API}/accounts/${ACCOUNT_ID}/vectorize/v2/indexes`,
+        CF_ANALYTICS_TOKEN,
+      );
+      const mark = r.ok ? '✓' : '✗';
+      console.log(`  ${mark}  CLOUDFLARE_ANALYTICS_TOKEN (runtime/Vectorize): HTTP ${r.status}`);
+      if (!r.ok) failures.push(
+        `CLOUDFLARE_ANALYTICS_TOKEN probe failed (HTTP ${r.status}) — ` +
+        `token may be missing Account > Vectorize:Read. ` +
+        `Edit at dash.cloudflare.com/profile/api-tokens.`,
+      );
+    }
+
+    // 3) Pages CI token — CLOUDFLARE_PAGES_TOKEN (wrangler pages deploy).
+    if (!CF_PAGES_TOKEN) {
+      warn(
+        'CLOUDFLARE_PAGES_TOKEN (Pages CI)',
+        'env var not set — Pages deploys will fall back to the legacy CF_PAGES_API_TOKEN ' +
+        'if present, but the spec-named var should be set. ' +
+        'Set CLOUDFLARE_PAGES_TOKEN in CI secrets.',
+      );
+    } else {
+      const r = await cfTokenProbe(
+        `${API}/accounts/${ACCOUNT_ID}/pages/projects`,
+        CF_PAGES_TOKEN,
+      );
+      const mark = r.ok ? '✓' : '✗';
+      console.log(`  ${mark}  CLOUDFLARE_PAGES_TOKEN (Pages CI): HTTP ${r.status}`);
+      if (!r.ok) failures.push(
+        `CLOUDFLARE_PAGES_TOKEN probe failed (HTTP ${r.status}) — ` +
+        `token may be missing Account > Cloudflare Pages:Edit. ` +
+        `Edit at dash.cloudflare.com/profile/api-tokens.`,
+      );
+    }
+
+    // 4 & 5) Load Balancer Read scope on CLOUDFLARE_API_TOKEN — Task #76.
+    //   The 2026 annual review (Task #66) hit a 403 here because LB:Read was
+    //   absent.  Both zone-level and account-level probes must pass.
+    //   Fix: add "Zone > Load Balancer: Read" and "Account > Load Balancer: Read"
+    //   to CLOUDFLARE_API_TOKEN at dash.cloudflare.com/profile/api-tokens.
+    if (!ZONE_ID) {
+      warn(
+        'LB Read scope — zone probe (Task #76)',
+        'CLOUDFLARE_ZONE_ID not set — set to 5b8c97df4431491dc7f60ea72fb61871 for the full probe',
+      );
+    } else {
+      const r = await cfTokenProbe(`${API}/zones/${ZONE_ID}/load_balancers`, TOKEN);
+      const mark = r.ok ? '✓' : '✗';
+      console.log(`  ${mark}  CLOUDFLARE_API_TOKEN — LB Read scope (zone): HTTP ${r.status}`);
+      if (!r.ok) failures.push(
+        `CLOUDFLARE_API_TOKEN missing Load Balancer:Read scope (zone) — HTTP ${r.status}. ` +
+        `Add "Zone > Load Balancer: Read" at dash.cloudflare.com/profile/api-tokens.`,
+      );
+    }
+    {
+      const r = await cfTokenProbe(
+        `${API}/accounts/${ACCOUNT_ID}/load_balancers/pools`,
+        TOKEN,
+      );
+      const mark = r.ok ? '✓' : '✗';
+      console.log(`  ${mark}  CLOUDFLARE_API_TOKEN — LB Read scope (account): HTTP ${r.status}`);
+      if (!r.ok) failures.push(
+        `CLOUDFLARE_API_TOKEN missing Load Balancer:Read scope (account) — HTTP ${r.status}. ` +
+        `Add "Account > Load Balancer: Read" at dash.cloudflare.com/profile/api-tokens.`,
+      );
     }
   }
 
