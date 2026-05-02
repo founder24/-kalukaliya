@@ -1283,6 +1283,142 @@ def route_for_task(task: str) -> tuple[str, str]:
     return _TASK_ROUTE.get(task, ("workers-ai", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"))
 
 
+# ── PROVIDER_PRIORITY weighted round-robin dispatch (Task #250) ───────────────
+# Maps provider names (as used in PROVIDER_PRIORITY) to their default LLM
+# model identifiers.  For non-LLM providers (cartesia, assemblyai, cohere,
+# pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
+# the actual API call goes through the provider's own client module.
+_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "vertex":       "gemini-2.5-flash",                          # Vertex AI Gemini
+    "bedrock":      "amazon.nova-lite-v1:0",                     # AWS Bedrock Nova Lite
+    "azure_openai": "gpt-4o-mini",                               # Azure OpenAI GPT-4o-mini
+    "sarvam":       "sarvam-m",                                  # Sarvam LLM (Indic)
+    "cartesia":     "sonic-2",                                   # Cartesia TTS
+    "elevenlabs":   "eleven_multilingual_v2",                    # ElevenLabs TTS
+    "assemblyai":   "best",                                      # AssemblyAI STT
+    "cohere":       "embed-multilingual-v3.0",                   # Cohere Embed
+    "pinecone_ai":  "llama-text-embed-v2",                       # Pinecone embed/rerank
+    "exa_ai":       "exa",                                       # Exa neural search
+    "tavily":       "tavily-search",                             # Tavily search
+    "mongodb_atlas": "vector-search",                            # Atlas $vectorSearch (fallback)
+    "workers_ai":   "@cf/meta/llama-3.3-70b-instruct-fp8-fast",  # CF Workers AI (last resort)
+}
+
+# Maps provider names to the canonical provider string used by _call_single_provider.
+# This bridges Task #250's semantic provider names to llm.py's internal strings.
+_PROVIDER_CANONICAL: dict[str, str] = {
+    "vertex":       "gemini",       # Vertex Gemini = gemini provider
+    "bedrock":      "bedrock",
+    "azure_openai": "openai",       # Azure OpenAI is OpenAI-compatible
+    "sarvam":       "sarvam",
+    "cartesia":     "cartesia",
+    "elevenlabs":   "elevenlabs",
+    "assemblyai":   "assemblyai",
+    "cohere":       "cohere",
+    "pinecone_ai":  "pinecone_ai",
+    "exa_ai":       "exa_ai",
+    "tavily":       "tavily",
+    "mongodb_atlas": "mongodb_atlas",
+    "workers_ai":   "workers-ai",
+}
+
+# CF AI Gateway saturation threshold — providers above this RPM ratio are
+# temporarily deprioritized in the weighted draw (same threshold as SLM pool).
+_SELECT_SATURATION_THRESHOLD = 0.80
+
+
+def _get_provider_saturation(provider_name: str) -> float:
+    """Return current RPM saturation ratio (0.0–1.0) for a provider.
+
+    Reads from the SmartKeyPool's rpm_window for workers-ai, and from
+    the in-process 429 burst counter for other providers (gemini, groq).
+    Returns 0.0 (not saturated) for providers not tracked by the pool.
+    """
+    canonical = _PROVIDER_CANONICAL.get(provider_name, provider_name)
+    if canonical == "workers-ai":
+        # Use the SLM pool's aggregate RPM ratio across all Workers AI slots.
+        ratios = [
+            _slm_pool._rpm_ratio(s)
+            for s in _slm_pool.all_slots
+            if s.get("provider") == "workers-ai"
+        ]
+        return max(ratios) if ratios else 0.0
+    # For other providers, use the 429 burst counter as a proxy:
+    # ≥ 5 bursts in 60s → treat as saturated (0.85+).
+    burst = get_provider_429_burst_inprocess(canonical, window_seconds=60)
+    if burst >= 5:
+        return 0.90
+    if burst >= 2:
+        return 0.70
+    return 0.0
+
+
+def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset()) -> str:
+    """Weighted round-robin provider selection for *feature*.
+
+    Algorithm:
+    1. Build candidate pool from ``PROVIDER_PRIORITY[feature]``.
+    2. Filter out:
+       - providers with ``PROVIDER_CREDITS == 0`` (last-resort only).
+       - providers in *exclude* (already failed in this request).
+       - providers exceeding ``_SELECT_SATURATION_THRESHOLD`` RPM saturation.
+    3. For ``assamese_rag_chat`` / ``assamese_content``: only include
+       ``sarvam`` when ``lang == "as"``.
+    4. Draw one provider with ``random.choices(pool, weights)``.
+    5. If pool is empty, fall back to weight-0 providers in fallback order
+       (``mongodb_atlas`` for ``vector_search``, then ``workers_ai`` for all).
+
+    Returns the selected provider *name* (e.g. ``"vertex"``, ``"sarvam"``).
+    Returns ``"workers_ai"`` when all else fails.
+    """
+    import random as _random
+    from config import PROVIDER_PRIORITY, PROVIDER_CREDITS
+
+    candidates = PROVIDER_PRIORITY.get(feature, ["workers_ai"])
+    _is_assamese_feature = feature in ("assamese_rag_chat", "assamese_content")
+
+    pool: list[str] = []
+    weights: list[int] = []
+
+    for p in candidates:
+        credit = PROVIDER_CREDITS.get(p, 0)
+        if credit == 0:
+            continue                                   # weight-0 → fallback only
+        if p in exclude:
+            continue                                   # already failed
+        if _is_assamese_feature and p == "sarvam" and lang.lower().strip() != "as":
+            continue                                   # Sarvam reserved for Assamese only
+        saturation = _get_provider_saturation(p)
+        if saturation >= _SELECT_SATURATION_THRESHOLD:
+            logger.info(
+                "select_provider: skipping %s for feature=%s — saturated (%.0f%%)",
+                p, feature, saturation * 100,
+            )
+            continue
+        pool.append(p)
+        weights.append(credit)
+
+    if pool:
+        chosen = _random.choices(pool, weights=weights, k=1)[0]
+        logger.debug("select_provider: feature=%s lang=%s → %s (pool=%s)", feature, lang, chosen, pool)
+        return chosen
+
+    # Pool exhausted — try weight-0 fallbacks in list order.
+    for p in candidates:
+        credit = PROVIDER_CREDITS.get(p, 0)
+        if credit != 0:
+            continue                                   # already tried
+        if p in exclude:
+            continue
+        if p == "mongodb_atlas" and feature != "vector_search":
+            continue                                   # Atlas only for vector_search
+        logger.info("select_provider: feature=%s — all weighted providers exhausted, using fallback %s", feature, p)
+        return p
+
+    logger.warning("select_provider: feature=%s — no provider available, defaulting to workers_ai", feature)
+    return "workers_ai"
+
+
 # ── RAG-quality call path ───────────────────────────────────────────────────────
 # Gemini 2.5 Flash is the best available model for RAG synthesis:
 #   • native long-context window (1M tokens)

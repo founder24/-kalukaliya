@@ -1924,6 +1924,9 @@ api.include_router(admin_entity_seo_router)
 from routes.voice import router as voice_router
 api.include_router(voice_router)
 
+from routes.admin_credits import router as admin_credits_router
+api.include_router(admin_credits_router)
+
 from llm import call_llm_api_content
 from auth_deps import get_admin_user
 

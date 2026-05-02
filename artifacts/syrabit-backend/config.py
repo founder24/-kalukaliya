@@ -16,6 +16,7 @@ __all__ = [
     "JWT_EXPIRE_MINUTES", "JWT_REFRESH_EXPIRE_MINUTES", "JWT_SECRET",
     "LLM_MODEL", "LLM_PROVIDER",
     "MONGO_URL", "OPENAI_API_KEY", "PLAN_LIMITS",
+    "PROVIDER_PRIORITY", "PROVIDER_CREDITS",
     "REDIS_AI_CACHE_TTL", "REDIS_TOKEN", "REDIS_URL",
     "MEMORYSTORE_REDIS_URL", "REDIS_AI_CACHE_NAMESPACE",
     "REDIS_AI_CACHE_MAX_ENTRY_BYTES",
@@ -25,8 +26,10 @@ __all__ = [
     "SARVAM_TRANSLATE_KEY",
     "SECURE_COOKIES", "SEED_DATA", "SLOW_QUERY_THRESHOLD_MS",
     "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_URL",
+    "_ASSEMBLYAI_KEY", "ASSEMBLYAI_STT_MODEL",
     "_AWS_ACCESS_KEY", "_AWS_REGION", "_AWS_SECRET_KEY",
     "_CEREBRAS_KEY", "_CF_PROVIDER_SLUGS", "_CORS_ALLOW_CREDENTIALS",
+    "_ELEVENLABS_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID",
     "_GEMINI_KEY", "_GEMINI_KEY_2",
     "_GROQ_KEY", "_GROQ_KEY_2",
     "_OPENAI_KEY", "_OPENROUTER_KEY",
@@ -304,6 +307,8 @@ _CF_PROVIDER_SLUGS = {
     "cohere":      "cohere/v1",      # Embeddings/RAG — embed-multilingual-v3.0 (1024-dim)
     "cartesia":    "cartesia/v1",    # Voice TTS — Sonic-2 model
     "baseten":     "baseten/v1",     # Fine-tuned EdTech LLMs — OpenAI-compatible endpoint
+    "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
+    "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
 }
 
 _DIRECT_PROVIDER_URLS = {
@@ -438,10 +443,19 @@ _OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '').strip()
 # Baseten model selection: BASETEN_MODEL_ID is the deployment ID shown in
 # the Baseten dashboard (e.g. "xyz123abc"). Required to use Baseten even in
 # BYOK mode — it is sent as the "model" field in the chat/completions body.
-_COHERE_KEY    = os.environ.get('COHERE_API_KEY',    '').strip()
-_CARTESIA_KEY  = os.environ.get('CARTESIA_API_KEY',  '').strip()
-_BASETEN_KEY   = os.environ.get('BASETEN_API_KEY',   '').strip()
-BASETEN_MODEL_ID = os.environ.get('BASETEN_MODEL_ID', '').strip()
+_COHERE_KEY       = os.environ.get('COHERE_API_KEY',       '').strip()
+_CARTESIA_KEY     = os.environ.get('CARTESIA_API_KEY',     '').strip()
+_BASETEN_KEY      = os.environ.get('BASETEN_API_KEY',      '').strip()
+_ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
+_ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
+BASETEN_MODEL_ID  = os.environ.get('BASETEN_MODEL_ID', '').strip()
+
+# AssemblyAI STT config
+ASSEMBLYAI_STT_MODEL = os.environ.get('ASSEMBLYAI_STT_MODEL', 'best').strip() or 'best'
+
+# ElevenLabs TTS config
+ELEVENLABS_VOICE_ID = os.environ.get('ELEVENLABS_VOICE_ID', '').strip()
+ELEVENLABS_MODEL_ID = os.environ.get('ELEVENLABS_MODEL_ID', 'eleven_multilingual_v2').strip() or 'eleven_multilingual_v2'
 
 # Cohere embed config
 COHERE_EMBED_MODEL   = os.environ.get('COHERE_EMBED_MODEL',   'embed-multilingual-v3.0').strip() or 'embed-multilingual-v3.0'
@@ -487,9 +501,11 @@ if CF_GATEWAY_ENABLED:
     _OPENAI_KEY   = _OPENAI_KEY   or BYOK_PLACEHOLDER  # CF slug: openai/v1
     # New providers: BYOK allows the CF gateway to inject keys stored in
     # the CF dashboard, so the local env var is optional in production.
-    _COHERE_KEY   = _COHERE_KEY   or BYOK_PLACEHOLDER
-    _CARTESIA_KEY = _CARTESIA_KEY or BYOK_PLACEHOLDER
-    _BASETEN_KEY  = _BASETEN_KEY  or BYOK_PLACEHOLDER
+    _COHERE_KEY      = _COHERE_KEY      or BYOK_PLACEHOLDER
+    _CARTESIA_KEY    = _CARTESIA_KEY    or BYOK_PLACEHOLDER
+    _BASETEN_KEY     = _BASETEN_KEY     or BYOK_PLACEHOLDER
+    _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
+    _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
     # Secondary/tertiary keys (_GROQ_KEY_2, _GEMINI_KEY_2, _SARVAM_LLM_KEY_2/3)
     # stay empty if not set — CF Gateway manages rate limiting at the edge via
     # the single BYOK key per provider. Delete these from Railway to clean up.
@@ -848,6 +864,78 @@ PLAN_PRICES = {
     "free":    {"price": 0,   "label": "Free",    "description": "30 credits/day · zero document access"},
     "starter": {"price": 99,  "label": "Starter", "description": "500 credits/day · limited document access"},
     "pro":     {"price": 999, "label": "Pro",      "description": "4,000 credits/day · full document access"},
+}
+
+# ── Provider Priority & Credits (Task #250) ──────────────────────────────────
+# PROVIDER_PRIORITY: ordered fallback sequence per feature. The rotation pool
+# draws by *weight* (not by list position); list order only matters after all
+# weighted providers are exhausted (last-resort fallback sequence).
+#
+# PROVIDER_CREDITS: startup-programme credit amounts (USD). These become the
+# draw weights for weighted round-robin. weight=0 means "never in rotation
+# pool — last-resort fallback only".
+#
+# Credit reference table (minimum confirmed startup-programme amounts):
+#   vertex        Google Cloud for Startups          $2,000
+#   bedrock       AWS Activate                       $1,000
+#   azure_openai  Azure for Startups                 $2,500  → fixed weight 1 (second-to-last)
+#   sarvam        Sarvam startup credits             $500
+#   cartesia      Cartesia startup credits           $500
+#   elevenlabs    ElevenLabs startup credits         $500
+#   assemblyai    AssemblyAI startup credits         $1,000
+#   cohere        Cohere startup credits             $1,000
+#   pinecone_ai   Pinecone startup credits           $500
+#   exa_ai        Exa startup credits                $1,000
+#   tavily        Tavily startup credits             $500
+#   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
+#   workers_ai    Cloudflare free tier               $0  (absolute last resort)
+PROVIDER_PRIORITY: dict = {
+    # English chat + RAG: Vertex (2k) → Bedrock (1k) → Azure (1, 2nd-to-last) → Workers AI (0, last)
+    "english_rag_chat":  ["vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Assamese chat: Sarvam first (Indic grounding), then English fallbacks
+    "assamese_rag_chat": ["sarvam", "vertex", "azure_openai", "workers_ai"],
+    # Long-form content (notes, MCQs, PYQs): same as English chat
+    "content":           ["vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Assamese content generation: Sarvam first
+    "assamese_content":  ["sarvam", "vertex", "azure_openai", "workers_ai"],
+    # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Vertex → Bedrock → Azure → Workers AI
+    "tts":               ["cartesia", "elevenlabs", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Speech-to-text: AssemblyAI (1k) → Vertex → Bedrock → Azure → Workers AI
+    "stt":               ["assemblyai", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Combined voice pipeline (STT + TTS legs)
+    "voice":             ["assemblyai", "cartesia", "elevenlabs", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Embeddings: Cohere multilingual (1k) → Vertex → Bedrock → Azure → Workers AI
+    "embed":             ["cohere", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Reranking: Pinecone (500) → Cohere → Azure → Workers AI
+    "rerank":            ["pinecone_ai", "cohere", "azure_openai", "workers_ai"],
+    # Vector search: Pinecone (500) → MongoDB Atlas (0, fallback) → Vertex → Workers AI
+    "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
+    # Translation: Sarvam (500) → Vertex → Bedrock → Azure → Workers AI
+    "translate":         ["sarvam", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Vision / OCR: Vertex (2k) → Bedrock → Azure → Workers AI
+    "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Safety checks: Bedrock Guardrails (1k) → Workers AI llama-guard (last resort)
+    "safety":            ["bedrock", "workers_ai"],
+    # RAG search with external web results: Exa (1k) → Workers AI
+    "search_rag":        ["exa_ai", "workers_ai"],
+    # Live / real-time search: Exa (1k) → Tavily (500) → Workers AI
+    "live_search":       ["exa_ai", "tavily", "workers_ai"],
+}
+
+PROVIDER_CREDITS: dict = {
+    "vertex":        2000,   # Google Cloud for Startups — $2k
+    "bedrock":       1000,   # AWS Activate — $1k
+    "azure_openai":     1,   # Azure for Startups — fixed minimum, always second-to-last before workers_ai
+    "sarvam":         500,   # Sarvam startup credits — $500
+    "cartesia":       500,   # Cartesia startup credits — $500
+    "elevenlabs":     500,   # ElevenLabs startup credits — $500
+    "assemblyai":    1000,   # AssemblyAI startup credits — $1k
+    "cohere":        1000,   # Cohere startup credits — $1k
+    "pinecone_ai":    500,   # Pinecone startup credits — $500
+    "exa_ai":        1000,   # Exa startup credits — $1k
+    "tavily":         500,   # Tavily startup credits — $500
+    "mongodb_atlas":    0,   # MongoDB Atlas free tier — weight 0 (fallback only, like workers_ai)
+    "workers_ai":       0,   # Cloudflare free tier — absolute last resort, never in rotation pool
 }
 
 SEED_DATA = {
