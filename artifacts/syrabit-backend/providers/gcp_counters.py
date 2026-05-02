@@ -23,7 +23,7 @@ _PRICES = {
     "tts":       {"unit": "1M_chars", "usd_per_unit": 16.0},
     "translate": {"unit": "1M_chars", "usd_per_unit": 20.0},
     "vision":    {"unit": "1K_images","usd_per_unit": 1.50},
-    "embed":     {"unit": "1K_chars", "usd_per_unit": 0.13},
+    "embed":     {"unit": "1K_chars", "usd_per_unit": 0.00013},
 }
 
 _counters: dict[str, dict] = {
