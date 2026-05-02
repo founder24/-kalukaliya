@@ -740,6 +740,7 @@ async def admin_credits_smoke_test(
 #   SENTRY_ERRORS_LIMIT            — fallback: plan quota (default 50000)
 #   SENTRY_PLAN                    — fallback: plan name (default "Team")
 
+import asyncio as _asyncio
 import datetime as _dt
 import os as _os
 
@@ -754,14 +755,143 @@ def _days_until_expiry(date_str: str | None) -> int | None:
         return None
 
 
+def _runway(remaining: float, spend_mtd: float | None, grant_usd: float) -> float | None:
+    if spend_mtd and spend_mtd > 0:
+        return round(remaining / spend_mtd, 1)
+    if remaining >= grant_usd * 0.99:
+        return 999.0
+    return None
+
+
+# ── AWS Cost Explorer live pull ───────────────────────────────────────────────
+
+def _aws_cost_explorer_mtd_spend_sync() -> float:
+    """Blocking boto3 call — must be run in a thread via asyncio.to_thread().
+
+    Calls ce:GetCostAndUsage for the current month-to-date window.
+    Uses boto3 Session with explicit credentials when AWS_ACCESS_KEY_ID is set;
+    falls back to the ambient IAM role/instance profile when not.
+
+    Requires IAM permission: ce:GetCostAndUsage on resource *.
+    """
+    import boto3  # noqa: PLC0415
+
+    today = _dt.date.today()
+    start = today.replace(day=1).isoformat()
+    # Cost Explorer end date is exclusive; use tomorrow so today's data is included.
+    end = (today + _dt.timedelta(days=1)).isoformat()
+
+    # If start == end (1st of month at midnight) the API would reject the call.
+    if start == end:
+        return 0.0
+
+    kwargs: dict = {}
+    access_key = _os.environ.get("AWS_ACCESS_KEY_ID")
+    if access_key:
+        kwargs["aws_access_key_id"] = access_key
+        kwargs["aws_secret_access_key"] = _os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+        kwargs["region_name"] = _os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+
+    ce = boto3.Session(**kwargs).client("ce", region_name="us-east-1")
+    resp = ce.get_cost_and_usage(
+        TimePeriod={"Start": start, "End": end},
+        Granularity="MONTHLY",
+        Metrics=["UnblendedCost"],
+    )
+    total = sum(
+        float(r["Total"]["UnblendedCost"]["Amount"])
+        for r in resp.get("ResultsByTime", [])
+    )
+    return round(total, 2)
+
+
+async def _aws_cost_explorer_mtd_spend() -> float | None:
+    """Async wrapper; returns None on any error."""
+    try:
+        return await _asyncio.to_thread(_aws_cost_explorer_mtd_spend_sync)
+    except Exception as exc:
+        logger.warning("[admin-billing/aws] Cost Explorer error: %s", exc)
+        return None
+
+
+# ── Azure Cost Management live pull ──────────────────────────────────────────
+
+async def _azure_get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
+    """Exchange Azure AD client credentials for an access token."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+            data={
+                "grant_type":    "client_credentials",
+                "client_id":     client_id,
+                "client_secret": client_secret,
+                "scope":         "https://management.azure.com/.default",
+            },
+        )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+async def _azure_cost_management_mtd_spend(
+    subscription_id: str,
+    tenant_id: str,
+    client_id: str,
+    client_secret: str,
+) -> float | None:
+    """Returns total pre-tax cost (USD) for the current month-to-date.
+
+    Uses the Azure Cost Management query API.
+    Requires the service principal to have Billing Reader on the subscription.
+    Returns None on any error so callers fall back to env-var overrides.
+    """
+    try:
+        access_token = await _azure_get_token(tenant_id, client_id, client_secret)
+        today = _dt.date.today()
+        first = today.replace(day=1).isoformat()
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"https://management.azure.com/subscriptions/{subscription_id}"
+                "/providers/Microsoft.CostManagement/query"
+                "?api-version=2023-11-01",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "type":       "ActualCost",
+                    "timeframe":  "Custom",
+                    "timePeriod": {"from": first, "to": today.isoformat()},
+                    "dataset": {
+                        "granularity": "None",
+                        "aggregation": {
+                            "totalCost": {"name": "PreTaxCost", "function": "Sum"},
+                        },
+                    },
+                },
+            )
+        resp.raise_for_status()
+        rows = resp.json().get("properties", {}).get("rows", [])
+        return round(float(rows[0][0]), 2) if rows else 0.0
+    except Exception as exc:
+        logger.warning("[admin-billing/azure] Cost Management error: %s", exc)
+        return None
+
+
+# ── Route handlers ─────────────────────────────────────────────────────────────
+
 @router.get(
     "/admin/billing/aws-activate",
-    summary="AWS Activate credit burn panel (Task #263)",
+    summary="AWS Activate credit burn panel (Task #263/264)",
     description=(
         "Returns current AWS Activate credit balance and runway. "
-        "Reads AWS_ACTIVATE_GRANT_USD, AWS_ACTIVATE_REMAINING_USD, "
-        "AWS_ACTIVATE_SPEND_MTD, AWS_ACTIVATE_EXPIRY from environment. "
-        "Returns {configured: false} when the grant env var is absent."
+        "When AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY are set (or an IAM role "
+        "is attached), month-to-date spend is pulled live from AWS Cost Explorer "
+        "(ce:GetCostAndUsage). Remaining credits are computed as "
+        "AWS_ACTIVATE_GRANT_USD minus live MTD spend. "
+        "Falls back to manually-maintained env-var overrides when credentials are "
+        "absent or the API call fails. "
+        "Returns {configured: false} when AWS_ACTIVATE_GRANT_USD is not set."
     ),
 )
 async def admin_billing_aws_activate(
@@ -772,20 +902,34 @@ async def admin_billing_aws_activate(
         return {"configured": False}
 
     grant_usd = float(grant_str)
-    remaining_str = _os.environ.get("AWS_ACTIVATE_REMAINING_USD")
-    remaining = float(remaining_str) if remaining_str else grant_usd
-    spend_mtd_str = _os.environ.get("AWS_ACTIVATE_SPEND_MTD")
-    spend_mtd: float | None = float(spend_mtd_str) if spend_mtd_str else None
     expiry_date = _os.environ.get("AWS_ACTIVATE_EXPIRY")
     days_until = _days_until_expiry(expiry_date)
+
+    # Attempt live Cost Explorer pull when credentials are available.
+    live_spend: float | None = None
+    has_credentials = bool(
+        _os.environ.get("AWS_ACCESS_KEY_ID") or _os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+    )
+    if has_credentials:
+        live_spend = await _aws_cost_explorer_mtd_spend()
+
+    if live_spend is not None:
+        spend_mtd: float | None = live_spend
+        # Remaining = grant minus cumulative spend (live MTD only covers current month;
+        # operator sets AWS_ACTIVATE_CUMULATIVE_SPEND_USD for prior months if needed).
+        prior_str = _os.environ.get("AWS_ACTIVATE_CUMULATIVE_SPEND_USD")
+        prior = float(prior_str) if prior_str else 0.0
+        remaining = max(0.0, grant_usd - prior - live_spend)
+        data_source = "live"
+    else:
+        # Env-var fallback.
+        remaining_str = _os.environ.get("AWS_ACTIVATE_REMAINING_USD")
+        remaining = float(remaining_str) if remaining_str else grant_usd
+        spend_mtd_str = _os.environ.get("AWS_ACTIVATE_SPEND_MTD")
+        spend_mtd = float(spend_mtd_str) if spend_mtd_str else None
+        data_source = "env_override"
+
     credits_low = remaining < grant_usd * 0.20
-
-    months_runway: float | None = None
-    if spend_mtd and spend_mtd > 0:
-        months_runway = round(remaining / spend_mtd, 1)
-    elif remaining >= grant_usd * 0.99:
-        months_runway = 999.0
-
     return {
         "configured":             True,
         "credits_low":            credits_low,
@@ -793,26 +937,30 @@ async def admin_billing_aws_activate(
         "grant_usd":              grant_usd,
         "spend_mtd_usd":          spend_mtd,
         "estimated_remaining_usd": remaining,
-        "months_runway":          months_runway,
+        "months_runway":          _runway(remaining, spend_mtd, grant_usd),
         "expiry_date":            expiry_date,
         "days_until_expiry":      days_until,
         "services":               ["Lambda", "SES", "Route 53", "CloudFront", "Bedrock"],
+        "data_source":            data_source,
         "note": (
-            "Update AWS_ACTIVATE_REMAINING_USD and AWS_ACTIVATE_SPEND_MTD "
-            "to reflect the current credit state. Set AWS_ACTIVATE_GRANT_USD "
-            "and AWS_ACTIVATE_EXPIRY once when the programme activates."
+            "Set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (ce:GetCostAndUsage) "
+            "for live Cost Explorer data. Without credentials, update "
+            "AWS_ACTIVATE_REMAINING_USD / AWS_ACTIVATE_SPEND_MTD manually."
         ),
     }
 
 
 @router.get(
     "/admin/billing/azure-startups",
-    summary="Azure for Startups credit burn panel (Task #263)",
+    summary="Azure for Startups credit burn panel (Task #263/264)",
     description=(
         "Returns current Azure for Startups credit balance and runway. "
-        "Reads AZURE_ACTIVATE_GRANT_USD, AZURE_ACTIVATE_REMAINING_USD, "
-        "AZURE_ACTIVATE_SPEND_MTD, AZURE_ACTIVATE_EXPIRY from environment. "
-        "Returns {configured: false} when the grant env var is absent."
+        "When AZURE_CLIENT_ID + AZURE_CLIENT_SECRET + AZURE_TENANT_ID + "
+        "AZURE_SUBSCRIPTION_ID are set, month-to-date spend is fetched live "
+        "from the Azure Cost Management query API. Remaining credits are computed "
+        "as AZURE_ACTIVATE_GRANT_USD minus live MTD spend. "
+        "Falls back to manually-maintained env-var overrides on API failure. "
+        "Returns {configured: false} when AZURE_ACTIVATE_GRANT_USD is not set."
     ),
 )
 async def admin_billing_azure_startups(
@@ -823,20 +971,35 @@ async def admin_billing_azure_startups(
         return {"configured": False}
 
     grant_usd = float(grant_str)
-    remaining_str = _os.environ.get("AZURE_ACTIVATE_REMAINING_USD")
-    remaining = float(remaining_str) if remaining_str else grant_usd
-    spend_mtd_str = _os.environ.get("AZURE_ACTIVATE_SPEND_MTD")
-    spend_mtd: float | None = float(spend_mtd_str) if spend_mtd_str else None
     expiry_date = _os.environ.get("AZURE_ACTIVATE_EXPIRY")
     days_until = _days_until_expiry(expiry_date)
+
+    # Attempt live Azure Cost Management pull.
+    tenant_id     = _os.environ.get("AZURE_TENANT_ID")
+    client_id     = _os.environ.get("AZURE_CLIENT_ID")
+    client_secret = _os.environ.get("AZURE_CLIENT_SECRET")
+    subscription  = _os.environ.get("AZURE_SUBSCRIPTION_ID")
+
+    live_spend: float | None = None
+    if tenant_id and client_id and client_secret and subscription:
+        live_spend = await _azure_cost_management_mtd_spend(
+            subscription, tenant_id, client_id, client_secret
+        )
+
+    if live_spend is not None:
+        spend_mtd: float | None = live_spend
+        prior_str = _os.environ.get("AZURE_ACTIVATE_CUMULATIVE_SPEND_USD")
+        prior = float(prior_str) if prior_str else 0.0
+        remaining = max(0.0, grant_usd - prior - live_spend)
+        data_source = "live"
+    else:
+        remaining_str = _os.environ.get("AZURE_ACTIVATE_REMAINING_USD")
+        remaining = float(remaining_str) if remaining_str else grant_usd
+        spend_mtd_str = _os.environ.get("AZURE_ACTIVATE_SPEND_MTD")
+        spend_mtd = float(spend_mtd_str) if spend_mtd_str else None
+        data_source = "env_override"
+
     credits_low = remaining < grant_usd * 0.20
-
-    months_runway: float | None = None
-    if spend_mtd and spend_mtd > 0:
-        months_runway = round(remaining / spend_mtd, 1)
-    elif remaining >= grant_usd * 0.99:
-        months_runway = 999.0
-
     return {
         "configured":             True,
         "credits_low":            credits_low,
@@ -844,14 +1007,16 @@ async def admin_billing_azure_startups(
         "grant_usd":              grant_usd,
         "spend_mtd_usd":          spend_mtd,
         "estimated_remaining_usd": remaining,
-        "months_runway":          months_runway,
+        "months_runway":          _runway(remaining, spend_mtd, grant_usd),
         "expiry_date":            expiry_date,
         "days_until_expiry":      days_until,
         "services":               ["Front Door", "Cosmos DB", "DDoS Protection", "Monitor"],
+        "data_source":            data_source,
         "note": (
-            "Update AZURE_ACTIVATE_REMAINING_USD and AZURE_ACTIVATE_SPEND_MTD "
-            "to reflect the current credit state. Set AZURE_ACTIVATE_GRANT_USD "
-            "and AZURE_ACTIVATE_EXPIRY once when the programme activates."
+            "Set AZURE_CLIENT_ID + AZURE_CLIENT_SECRET + AZURE_TENANT_ID + "
+            "AZURE_SUBSCRIPTION_ID (Billing Reader role) for live Cost Management data. "
+            "Without credentials, update AZURE_ACTIVATE_REMAINING_USD / "
+            "AZURE_ACTIVATE_SPEND_MTD manually."
         ),
     }
 
