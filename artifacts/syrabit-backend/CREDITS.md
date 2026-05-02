@@ -63,6 +63,87 @@ Embeddings:  workers_ai(bge-large-en-v1.5, 1024-dim) [primary]
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID (optional — auto-detected from service account JSON if not set). |
 | `GEMINI_API_KEY` | Google AI Studio key for Gemini 2.0 Flash chat fallback (already set for CF BYOK). |
 | `GOOGLE_BILLING_ALERT` | Set to `1` when the GCP budget webhook fires to surface admin panel warning. |
+| `GOOGLE_BILLING_ACCOUNT_ID` | **Task #253** — Billing account ID (format: `XXXXXX-XXXXXX-XXXXXX`). Found in GCP Console → Billing → Account overview. Enables live budget data from the Cloud Billing Budget API. |
+
+### Live Billing Data Setup (Task #253)
+
+The `/api/admin/vertex/gcp-credits` endpoint queries the **Cloud Billing Budget API**
+(`billingbudgets.googleapis.com/v1`) for real budget thresholds when
+`GOOGLE_BILLING_ACCOUNT_ID` is set. Without it the endpoint falls back to the
+static $19/month estimate.
+
+**One-time setup:**
+
+1. **Find your billing account ID:** GCP Console → Billing → Account overview.
+   Copy the ID in the format `XXXXXX-XXXXXX-XXXXXX`.
+
+2. **Set the secret:** Add `GOOGLE_BILLING_ACCOUNT_ID=XXXXXX-XXXXXX-XXXXXX` to
+   Replit Secrets (or Railway env vars).
+
+3. **Grant permission to the service account:**
+   - GCP Console → Billing → Account management → Permissions
+   - Add the service account email (from `GOOGLE_APPLICATION_CREDENTIALS_JSON` →
+     `client_email` field) with role **`Billing Account Viewer`** (`roles/billing.viewer`)
+   - This is a *billing account* permission — not a project IAM binding.
+
+4. **Enable the Budget API on the project:**
+   - GCP Console → APIs & Services → Enable APIs
+   - Enable: **Cloud Billing Budget API** (`billingbudgets.googleapis.com`)
+   - Also ensure: **Cloud Billing API** (`cloudbilling.googleapis.com`) is enabled
+
+5. **Verify:** Call `GET /api/admin/vertex/gcp-credits` and check `live_data: true`
+   in the response. If `billing_api_error` is set, follow the error message.
+
+**What the live data provides:**
+- `budget_warn_threshold_usd` / `budget_critical_threshold_usd` — auto-read from
+  Budget API threshold rules (replaces hardcoded values)
+- `spend_mtd_usd` — real month-to-date spend if the Budget API exposes `currentSpend`
+  (availability depends on billing account configuration)
+- `billing_account_name` / `billing_account_open` — billing account status
+- `budgets[]` — full list of budgets with thresholds for the account
+
+**Note on per-service spend:** Budget thresholds are always read live from the
+Budget API when `GOOGLE_BILLING_ACCOUNT_ID` is set. For real per-service spend
+(`services_detail[*].spend_mtd_usd` with `spend_is_live: true`), BigQuery
+Billing Export must also be enabled — see the section below.
+
+### BigQuery Billing Export Setup (for real per-service spend)
+
+Enabling GCP Billing Export to BigQuery is the only way to get genuine per-service
+MTD spend from the API.  Without it, per-service figures in `services_detail` are
+proportional estimates (clearly labeled with `spend_is_live: false`).
+
+**One-time BigQuery setup:**
+
+1. **Enable BigQuery export:**
+   GCP Console → Billing → Billing export → BigQuery export → **Enable**
+   Choose a project and dataset name (e.g. `billing_export`).
+
+2. **Grant service account access:**
+   - `roles/bigquery.jobUser` on the GCP project (project IAM)
+   - `roles/bigquery.dataViewer` on the billing export dataset (dataset IAM)
+
+3. **Table name:** The standard table is auto-derived from the billing account ID:
+   `gcp_billing_export_v1_{ACCOUNT_ID_with_underscores}`
+   e.g. for `12A3B4-C5D6E7-F8G9H0` → `gcp_billing_export_v1_12A3B4_C5D6E7_F8G9H0`
+   Override with `GOOGLE_BILLING_BIGQUERY_TABLE` if your setup differs.
+
+4. **Optionally set env vars** (all auto-derived when `GOOGLE_BILLING_ACCOUNT_ID`
+   and `GOOGLE_CLOUD_PROJECT` are set):
+
+   | Env Var | Default | Description |
+   |---------|---------|-------------|
+   | `GOOGLE_BILLING_BIGQUERY_PROJECT` | `GOOGLE_CLOUD_PROJECT` | Project with the export dataset |
+   | `GOOGLE_BILLING_BIGQUERY_DATASET` | `billing_export` | Dataset name |
+   | `GOOGLE_BILLING_BIGQUERY_TABLE` | auto-derived | Table name |
+   | `GOOGLE_BILLING_BIGQUERY_LOCATION` | `US` | Dataset region (e.g. `EU`, `us-central1`) |
+
+5. **Verify:** Call `GET /api/admin/vertex/gcp-credits` and check `live_spend_data: true`
+   and `spend_mtd_source: "bigquery_billing_export"` in the response.
+
+**Note:** The BigQuery export typically has a 1–2 day lag, so spend figures reflect
+costs up to ~48 hours ago, not real-time. For real-time alerting use the Budget API
+webhook flow below.
 
 ### Budget Alert Setup (Google Cloud Console)
 
@@ -72,6 +153,9 @@ Embeddings:  workers_ai(bge-large-en-v1.5, 1024-dim) [primary]
    - **$1,900 (95%)** — critical threshold
 3. Set Pub/Sub topic to forward to the ops Slack channel webhook
 4. When the webhook fires, set `GOOGLE_BILLING_ALERT=1` in the Railway/Replit environment
+5. **With Task #253 live data enabled:** the thresholds are auto-read from the budget
+   and `GOOGLE_BILLING_ALERT` is only needed as a real-time override when a Pub/Sub
+   notification fires between polling cycles.
 
 ---
 

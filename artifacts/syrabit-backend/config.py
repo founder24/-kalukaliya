@@ -39,6 +39,11 @@ __all__ = [
     "cf_gateway_url", "get_provider_base_url",
     "is_cf_gateway_up", "mark_cf_gateway_down",
     "Configurator",
+    "GOOGLE_BILLING_ACCOUNT_ID",
+    "GOOGLE_BILLING_BIGQUERY_PROJECT",
+    "GOOGLE_BILLING_BIGQUERY_DATASET",
+    "GOOGLE_BILLING_BIGQUERY_TABLE",
+    "GOOGLE_BILLING_BIGQUERY_LOCATION",
 ]
 
 ROOT_DIR = Path(__file__).parent
@@ -547,6 +552,40 @@ GOOGLE_BILLING_ALERT = os.environ.get('GOOGLE_BILLING_ALERT', '').strip() in ('1
 # GCP grant total (fixed) and warning threshold for admin panel.
 GCP_CREDIT_GRANT_USD = 2000.0
 GCP_CREDIT_WARN_REMAINING_USD = 200.0
+# Billing account ID for the Cloud Billing Budget API (Task #253).
+# Format: "XXXXXX-XXXXXX-XXXXXX" (find in GCP Console → Billing → Account overview).
+# When set, /api/admin/vertex/gcp-credits reads real budget thresholds and
+# month-to-date spend from the Cloud Billing Budget API instead of using static
+# estimates. The service account (GOOGLE_APPLICATION_CREDENTIALS_JSON) must have
+# roles/billing.viewer (or billing.budgets.get) on the billing account.
+GOOGLE_BILLING_ACCOUNT_ID = os.environ.get('GOOGLE_BILLING_ACCOUNT_ID', '').strip()
+# BigQuery Billing Export config (Task #253) — optional, needed for per-service spend.
+# Standard export table name: gcp_billing_export_v1_{ACCOUNT_ID_underscored}
+# e.g. for account 12A3B4-C5D6E7-F8G9H0 → gcp_billing_export_v1_12A3B4_C5D6E7_F8G9H0
+# Set these if you have enabled GCP Billing Export to BigQuery:
+#   GCP Console → Billing → Billing export → BigQuery export → Enable
+GOOGLE_BILLING_BIGQUERY_PROJECT = (
+    os.environ.get('GOOGLE_BILLING_BIGQUERY_PROJECT', '').strip()
+    or GOOGLE_CLOUD_PROJECT
+)
+GOOGLE_BILLING_BIGQUERY_DATASET = os.environ.get(
+    'GOOGLE_BILLING_BIGQUERY_DATASET', 'billing_export'
+).strip() or 'billing_export'
+_bq_table_default = (
+    'gcp_billing_export_v1_' + GOOGLE_BILLING_ACCOUNT_ID.replace('-', '_')
+    if GOOGLE_BILLING_ACCOUNT_ID else ''
+)
+GOOGLE_BILLING_BIGQUERY_TABLE = (
+    os.environ.get('GOOGLE_BILLING_BIGQUERY_TABLE', '').strip()
+    or _bq_table_default
+)
+# BigQuery dataset location — must match where the billing export dataset lives.
+# Common values: "US" (multi-region, GCP default), "EU", "us-central1", etc.
+# Override if your billing export dataset is in a non-US region/multi-region.
+GOOGLE_BILLING_BIGQUERY_LOCATION = (
+    os.environ.get('GOOGLE_BILLING_BIGQUERY_LOCATION', 'US').strip().upper()
+    or 'US'
+)
 
 _CF_API_TOKEN_FOR_LLM = os.environ.get('CLOUDFLARE_API_TOKEN', '').strip()
 _CF_ACCOUNT_ID_FOR_LLM = os.environ.get('CF_AI_GATEWAY_ACCOUNT_ID', '').strip()

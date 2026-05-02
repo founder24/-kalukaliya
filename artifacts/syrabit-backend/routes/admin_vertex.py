@@ -24,6 +24,7 @@ Routes (all ``/api/admin/vertex/*``):
   * POST /extract-document   — extract structured data from PDF textbooks
   * GET  /gcp-credits        — Google Cloud credit burn panel row (Task #247)
 """
+import asyncio
 import time
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
@@ -270,20 +271,43 @@ async def vertex_mcq_generator(
 
 @router.get("/admin/vertex/gcp-credits")
 async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
-    """Google Cloud Platform credit burn panel row (Task #247 / #254).
+    """Google Cloud Platform credit burn panel row (Task #247 / #253 / #254).
 
-    Returns a structured breakdown of the $2,000 GCP founders credit grant.
-    Spend is derived from real in-process call counters (Task #254) incremented
-    on each successful provider call. Counters reset at the start of each calendar
-    month, and reset to zero on process restart (see counters.counters_reset_on_restart).
+    Live data is sourced from up to three GCP APIs (all optional, independent):
 
-    Budget webhook integration (for accurate low-credit alerting):
+    1. Cloud Billing Budget API  — budget total + alert thresholds.
+       Requires: GOOGLE_BILLING_ACCOUNT_ID + roles/billing.viewer on the account.
+       Reflects in: live_budget_data=true, budget_warn_threshold_usd (auto-read).
+
+    2. Cloud Billing API         — billing account status verification.
+       Requires: same as above.
+       Reflects in: billing_account_name, billing_account_open.
+
+    3. BigQuery Billing Export   — real per-service month-to-date spend.
+       Requires: GOOGLE_BILLING_ACCOUNT_ID + GCP Billing Export enabled to BigQuery
+       (GCP Console → Billing → Billing export → BigQuery export → Enable).
+       The service account needs roles/bigquery.jobUser + roles/bigquery.dataViewer.
+       Reflects in: live_spend_data=true, services_detail[*].spend_mtd_usd (real).
+
+    In-process call counters (Task #254) are always available: incremented on each
+    successful GCP provider call, reset at month start and on process restart.
+    See counters.counters_reset_on_restart.
+
+    Budget webhook integration:
     1. In GCP Console → Billing → Budgets, set alerts at $1,800 (90%) and $1,900 (95%).
     2. Point the Pub/Sub topic at your webhook handler.
     3. The handler sets GOOGLE_BILLING_ALERT=1 in the environment.
     4. This endpoint reads that flag and sets credits_low=true.
+
+    When live data is unavailable for a source the endpoint falls back gracefully:
+    - Budget thresholds → hardcoded 90% / 95% of GCP_CREDIT_GRANT_USD.
+    - MTD spend → proportional estimate based on $19/month model.
+    - Per-service spend → proportional allocation from MTD total.
     """
+    import calendar as _cal
+    import datetime as _dt
     import os
+    import gcp_billing
     from providers import google_stt, google_tts, google_translate, google_vision, vertex_embed
     from providers.gcp_counters import snapshot as _counters_snapshot
     from config import (
@@ -291,6 +315,11 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
         GCP_CREDIT_WARN_REMAINING_USD,
         GOOGLE_BILLING_ALERT,
         GOOGLE_APPLICATION_CREDENTIALS_JSON,
+        GOOGLE_BILLING_ACCOUNT_ID,
+        GOOGLE_BILLING_BIGQUERY_PROJECT,
+        GOOGLE_BILLING_BIGQUERY_DATASET,
+        GOOGLE_BILLING_BIGQUERY_TABLE,
+        GOOGLE_BILLING_BIGQUERY_LOCATION,
     )
 
     counters = _counters_snapshot()
@@ -323,34 +352,145 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     )
 
     actual_spend_this_month = counters["total_estimated_spend_usd"]
-    estimated_remaining = round(GCP_CREDIT_GRANT_USD - actual_spend_this_month, 4)
 
-    from datetime import datetime, timezone as _tz
-    _now = datetime.now(tz=_tz.utc)
+    _now = _dt.datetime.now(tz=_dt.timezone.utc)
     _days_in_month = 28 if _now.month == 2 else (30 if _now.month in {4, 6, 9, 11} else 31)
     _day_fraction = max(_now.day / _days_in_month, 1 / _days_in_month)
-    monthly_burn_rate = actual_spend_this_month / _day_fraction if actual_spend_this_month > 0 else 0.0
-    months_runway = (
-        round(estimated_remaining / monthly_burn_rate, 1)
-        if monthly_burn_rate > 0
-        else 9999.0
+    counter_burn_rate = actual_spend_this_month / _day_fraction if actual_spend_this_month > 0 else 0.0
+
+    _SERVICE_BURN_WEIGHTS: dict[str, float] = {
+        "stt_chirp2":      4.0,
+        "tts_neural2":     3.0,
+        "translation_v3":  6.0,
+        "vision_ocr":      2.0,
+        "gemini_fallback": 3.0,
+        "vertex_embed":    1.0,
+    }
+    _TOTAL_WEIGHT = sum(_SERVICE_BURN_WEIGHTS.values())
+    _BASE_MONTHLY_BURN_USD = 19.0
+
+    billing_summary, svc_spend = await asyncio.gather(
+        gcp_billing.get_billing_summary(GOOGLE_BILLING_ACCOUNT_ID),
+        gcp_billing.get_service_spend(
+            GOOGLE_BILLING_BIGQUERY_PROJECT,
+            GOOGLE_BILLING_BIGQUERY_DATASET,
+            GOOGLE_BILLING_BIGQUERY_TABLE,
+            location=GOOGLE_BILLING_BIGQUERY_LOCATION,
+        ),
     )
 
-    credits_low = GOOGLE_BILLING_ALERT or (estimated_remaining < GCP_CREDIT_WARN_REMAINING_USD)
+    live_budget_data: bool = billing_summary["live_budget_data"]
+    live_spend_data: bool = svc_spend["live_spend_data"]
+
+    today = _dt.datetime.utcnow()
+    days_in_month = _cal.monthrange(today.year, today.month)[1]
+    fraction_elapsed = max(today.day / days_in_month, 0.001)
+
+    if live_spend_data:
+        total_spend_mtd: float = float(svc_spend["total_spend_usd"])
+    elif live_budget_data and billing_summary.get("spend_mtd_usd_from_budget") is not None:
+        total_spend_mtd = float(billing_summary["spend_mtd_usd_from_budget"])
+    else:
+        total_spend_mtd = round(_BASE_MONTHLY_BURN_USD * fraction_elapsed, 2)
+
+    if live_budget_data and billing_summary.get("warn_threshold_usd") is not None:
+        warn_threshold_usd: float = float(billing_summary["warn_threshold_usd"])
+        crit_threshold_usd = billing_summary.get("critical_threshold_usd")
+    else:
+        warn_threshold_usd = GCP_CREDIT_GRANT_USD - GCP_CREDIT_WARN_REMAINING_USD
+        crit_threshold_usd = GCP_CREDIT_GRANT_USD * 0.95
+
+    grant_usd = billing_summary.get("budget_usd") or GCP_CREDIT_GRANT_USD
+    estimated_remaining = round(grant_usd - total_spend_mtd, 2)
+
+    monthly_run_rate = total_spend_mtd / fraction_elapsed if fraction_elapsed > 0 else _BASE_MONTHLY_BURN_USD
+    months_runway = (estimated_remaining / monthly_run_rate) if monthly_run_rate > 0 else 9999.0
+
+    credits_low = (
+        GOOGLE_BILLING_ALERT
+        or total_spend_mtd >= warn_threshold_usd
+        or estimated_remaining < GCP_CREDIT_WARN_REMAINING_USD
+    )
+
+    def _svc_spend_mtd(service: str) -> tuple[float, bool]:
+        """Return (spend_mtd_usd, is_live) for a service."""
+        if live_spend_data:
+            real = svc_spend["services"].get(service)
+            if real is not None:
+                return round(real, 4), True
+        weight = _SERVICE_BURN_WEIGHTS.get(service, 0.0)
+        est = round(total_spend_mtd * (weight / _TOTAL_WEIGHT), 4) if _TOTAL_WEIGHT else 0.0
+        return est, False
+
+    _stt_spend, _stt_live = _svc_spend_mtd("stt_chirp2")
+    _tts_spend, _tts_live = _svc_spend_mtd("tts_neural2")
+    _tr_spend, _tr_live = _svc_spend_mtd("translation_v3")
+    _vis_spend, _vis_live = _svc_spend_mtd("vision_ocr")
+    _gem_spend, _gem_live = _svc_spend_mtd("gemini_fallback")
+    _vx_spend, _vx_live = _svc_spend_mtd("vertex_embed")
+
+    if live_spend_data:
+        spend_note = (
+            "Month-to-date spend sourced from BigQuery Billing Export — real per-service "
+            "figures from the GCP standard billing export table. "
+            "Budget alert thresholds sourced from Cloud Billing Budget API. "
+            "In-process counters (spend_this_month_usd) also available for real-time session view."
+        )
+    elif live_budget_data and billing_summary.get("spend_mtd_usd_from_budget") is not None:
+        spend_note = (
+            "Total MTD spend sourced from Cloud Billing Budget API (currentSpend field). "
+            "Per-service breakdown is proportionally allocated from the total using "
+            "historical burn-rate weights. Enable BigQuery Billing Export for exact "
+            "per-service figures."
+        )
+    elif live_budget_data:
+        spend_note = (
+            "Budget thresholds sourced from Cloud Billing Budget API. "
+            "MTD spend is a calendar-based estimate ($19/month baseline) — enable "
+            "GCP Billing Export to BigQuery for real per-service spend figures."
+        )
+    else:
+        spend_note = (
+            "GOOGLE_BILLING_ACCOUNT_ID not set or Budget API unreachable — all figures "
+            "are estimates based on a $19/month burn model. Set GOOGLE_BILLING_ACCOUNT_ID "
+            "and grant roles/billing.viewer to enable live budget data. Enable GCP Billing "
+            "Export to BigQuery for real per-service MTD spend."
+        )
 
     return {
         "provider": "google_cloud",
-        "grant_usd": GCP_CREDIT_GRANT_USD,
+        "grant_usd": grant_usd,
+        "live_budget_data": live_budget_data,
+        "live_spend_data": live_spend_data,
+        "billing_account_id": GOOGLE_BILLING_ACCOUNT_ID or None,
+        "billing_account_name": billing_summary.get("billing_account_name"),
+        "billing_account_open": billing_summary.get("billing_account_open"),
+        "billing_account_configured": billing_summary.get("billing_account_configured", False),
+        "billing_api_error": billing_summary.get("error"),
+        "spend_api_error": svc_spend.get("error") if not live_spend_data else None,
+        "bq_configured": svc_spend.get("bq_configured", False),
+        "bq_location": GOOGLE_BILLING_BIGQUERY_LOCATION,
         "spend_this_month_usd": actual_spend_this_month,
+        "spend_mtd_usd": round(total_spend_mtd, 4),
+        "spend_mtd_source": (
+            "bigquery_billing_export" if live_spend_data
+            else "budget_api_current_spend" if (live_budget_data and billing_summary.get("spend_mtd_usd_from_budget") is not None)
+            else "estimated"
+        ),
+        "estimated_monthly_burn_usd": round(monthly_run_rate, 2),
         "estimated_remaining_usd": estimated_remaining,
-        "months_runway": months_runway,
+        "months_runway": round(months_runway, 1),
+        "budget_warn_threshold_usd": warn_threshold_usd,
+        "budget_critical_threshold_usd": crit_threshold_usd,
         "credits_low": credits_low,
         "billing_alert_active": GOOGLE_BILLING_ALERT,
         "service_account_configured": sa_configured,
+        "budgets": billing_summary.get("budgets", []),
         "counters": {
             "period": counters["period"],
             "process_uptime_hours": counters["process_uptime_hours"],
             "counters_reset_on_restart": counters["counters_reset_on_restart"],
+            "counter_burn_rate_usd_per_month": round(counter_burn_rate, 2),
         },
         "services": {
             "configured": configured_services,
@@ -361,27 +501,36 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "model": "chirp_2",
                 "languages": ["hi-IN", "bn-IN", "as-IN"],
                 "pricing": "$0.016/min",
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["stt_chirp2"],
                 "calls_this_month": svc_counters["stt"]["calls"],
                 "audio_minutes_this_month": round(svc_counters["stt"].get("audio_minutes", 0.0), 2),
                 "spend_this_month_usd": svc_counters["stt"]["estimated_spend_usd"],
+                "spend_mtd_usd": _stt_spend,
+                "spend_is_live": _stt_live,
                 "configured": "stt_chirp2" in configured_services,
             },
             "tts_neural2": {
                 "model": "Neural2 / Wavenet",
                 "voices": ["hi-IN-Neural2-A", "hi-IN-Neural2-C", "bn-IN-Neural2-A", "as-IN-Wavenet-B"],
                 "pricing": "$16/1M chars",
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["tts_neural2"],
                 "calls_this_month": svc_counters["tts"]["calls"],
                 "chars_this_month": svc_counters["tts"].get("chars", 0),
                 "spend_this_month_usd": svc_counters["tts"]["estimated_spend_usd"],
+                "spend_mtd_usd": _tts_spend,
+                "spend_is_live": _tts_live,
                 "configured": "tts_neural2" in configured_services,
             },
             "translation_v3": {
                 "model": "translateText v3",
                 "languages": ["hi", "bn", "as"],
                 "pricing": "$20/1M chars",
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["translation_v3"],
                 "calls_this_month": svc_counters["translate"]["calls"],
                 "chars_this_month": svc_counters["translate"].get("chars", 0),
                 "spend_this_month_usd": svc_counters["translate"]["estimated_spend_usd"],
+                "spend_mtd_usd": _tr_spend,
+                "spend_is_live": _tr_live,
                 "configured": "translation_v3" in configured_services,
             },
             "vision_ocr": {
@@ -389,9 +538,12 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "scripts": ["Devanagari", "Bengali"],
                 "trigger": "indic_lang OR workers_ai_confidence < 0.80",
                 "pricing": "$1.50/1K images",
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["vision_ocr"],
                 "calls_this_month": svc_counters["vision"]["calls"],
                 "images_this_month": svc_counters["vision"].get("images", 0),
                 "spend_this_month_usd": svc_counters["vision"]["estimated_spend_usd"],
+                "spend_mtd_usd": _vis_spend,
+                "spend_is_live": _vis_live,
                 "configured": "vision_ocr" in configured_services,
             },
             "gemini_fallback": {
@@ -399,7 +551,10 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "role": "chat fallback position-2 (workers_ai → gemini → groq)",
                 "trigger": "workers_ai load > 0.80",
                 "pricing": "$0.075/1M tokens",
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["gemini_fallback"],
                 "note": "Token counters not tracked in-process (Gemini billed via GCP Console)",
+                "spend_mtd_usd": _gem_spend,
+                "spend_is_live": _gem_live,
                 "configured": has_gemini,
             },
             "vertex_embed": {
@@ -408,16 +563,14 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "role": "embed fallback for long-form > 2048 tokens or cooldown",
                 "warning": "768-dim — do NOT mix with 1024-dim bge-large index",
                 "pricing": "$0.00013/1K chars",
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["vertex_embed"],
                 "calls_this_month": svc_counters["embed"]["calls"],
                 "chars_this_month": svc_counters["embed"].get("chars", 0),
                 "spend_this_month_usd": svc_counters["embed"]["estimated_spend_usd"],
+                "spend_mtd_usd": _vx_spend,
+                "spend_is_live": _vx_live,
                 "configured": "vertex_embed" in configured_services,
             },
         },
-        "note": (
-            "spend_this_month_usd is derived from in-process call counters (calls × unit price). "
-            "Counters reset at month start and on process restart. "
-            "For exact billing, check GCP Console → Billing → Cost breakdown. "
-            "Budget alerts fire at $1,800 (90%) and $1,900 (95%)."
-        ),
+        "note": spend_note,
     }
