@@ -54,122 +54,35 @@ const NETWORKS = {
 // top, mid and end slots on PYQ; top, mid, after-PYQs, after-flashcards,
 // end and a desktop sidebar on Notes. All other routes (chat, library,
 // browser, chapter) stay ad-free — see `scripts/verify-no-ads.mjs`.
+//
+// ALL placements are wired to Google AdSense (the only active network).
+// adpushup, adsterra, and propellerads are hard-disabled in DISABLED_NETWORKS,
+// so those three networks are kept for future reference only.
+//
+// Placement key taxonomy mirrors the JSX callsites in LearnPage / PYQReplicaPage:
+//   learn.topOfContent / learn.inContent / learn.afterPyqs /
+//   learn.afterFlashcards / learn.endOfContent / learn.sidebar
+//   pyq.topOfContent  / pyq.inContent  / pyq.endOfContent
+//
+// Display slots (top, end, sidebar):
+//   adFormat="auto" + data-full-width-responsive → Google picks IAB size
+//   (320×50 banner or 300×250 rectangle on mobile). Reserved minHeight
+//   prevents CLS during the first-paint window.
+//
+// In-article fluid slots (inContent, afterPyqs, afterFlashcards):
+//   adFormat="fluid" + adLayout="in-article" → Google controls height
+//   entirely. No minHeight reserved — the slot collapses to nothing when
+//   Google decides not to fill it, which is the correct mobile behaviour.
 const PLACEMENTS = {
-  // ── PYQ pages — premium display demand (AdPushup / Magnite). ──────────────
+  // ── PYQ pages ─────────────────────────────────────────────────────────────
   'pyq.topOfContent': {
-    network: 'adpushup',
-    slotId: env.VITE_ADS_ADPUSHUP_PYQ_TOP_ZONE || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'pyq.inContent': {
-    network: 'adpushup',
-    slotId: env.VITE_ADS_ADPUSHUP_PYQ_INCONTENT_ZONE || '',
-    height: 280,
-    label: 'Advertisement',
-  },
-  'pyq.endOfContent': {
-    network: 'adpushup',
-    slotId: env.VITE_ADS_ADPUSHUP_PYQ_END_ZONE || '',
-    height: 280,
-    label: 'Advertisement',
-  },
-
-  // ── Notes / Learn pages — Adsterra (in-content) + PropellerAds (end). ─────
-  'learn.topOfContent': {
-    network: 'adsterra',
-    slotId: env.VITE_ADS_ADSTERRA_LEARN_TOP_ZONE || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'learn.inContent': {
-    network: 'adsterra',
-    slotId: env.VITE_ADS_ADSTERRA_LEARN_INCONTENT_ZONE || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'learn.afterPyqs': {
-    network: 'propellerads',
-    slotId: env.VITE_ADS_PROPELLERADS_LEARN_AFTER_PYQS_ZONE || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'learn.afterFlashcards': {
-    network: 'adsterra',
-    slotId: env.VITE_ADS_ADSTERRA_LEARN_AFTER_FLASHCARDS_ZONE || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'learn.endOfContent': {
-    network: 'propellerads',
-    slotId: env.VITE_ADS_PROPELLERADS_LEARN_END_ZONE || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  // Desktop-only sidebar skyscraper. The page only mounts this slot at
-  // `lg:` breakpoints, so mobile/tablet viewports never reserve the
-  // 600px column.
-  'learn.sidebar': {
-    network: 'adsterra',
-    slotId: env.VITE_ADS_ADSTERRA_LEARN_SIDEBAR_ZONE || '',
-    height: 600,
-    label: 'Advertisement',
-  },
-
-  // ── AdSense per-slot units (Task #550) ────────────────────────────────────
-  // Optional manual AdSense placements. Stay disabled (no reserved
-  // space, no script tag) until the per-slot `data-ad-slot` env var is
-  // provided. AdSense Auto Ads runs unconditionally on the same routes
-  // via `useAdsenseAutoAds`, so leaving these empty still nets full
-  // AdSense coverage on Notes + PYQ — the per-slot keys are an
-  // override for ad-ops to target specific positions if/when desired.
-  // Display units — fixed-height banner areas (top, end, sidebar).
-  // adFormat "auto" + full-width-responsive lets Google pick the best
-  // IAB size (typically 320×50 mobile banner or 300×250 rectangle).
-  'pyq.adsense.top': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_PYQ_TOP_SLOT || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
   },
-  'pyq.adsense.end': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_PYQ_END_SLOT || '',
-    height: 250,
-    label: 'Advertisement',
-    adFormat: 'auto',
-  },
-  'learn.adsense.top': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_TOP_SLOT || '',
-    height: 250,
-    label: 'Advertisement',
-    adFormat: 'auto',
-  },
-  'learn.adsense.end': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_END_SLOT || '',
-    height: 250,
-    label: 'Advertisement',
-    adFormat: 'auto',
-  },
-  // Desktop-only skyscraper — hidden on mobile via `hidden lg:flex` in LearnPage.
-  'learn.adsense.sidebar': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_SIDEBAR_SLOT || '',
-    height: 600,
-    label: 'Advertisement',
-    adFormat: 'auto',
-  },
-
-  // In-article fluid units — mid-content slots served between paragraphs.
-  // adFormat "fluid" + adLayout "in-article" is Google's recommended
-  // format for mobile reading: the ad matches the surrounding text width,
-  // Google picks the height, and there is NO reserved minHeight so the
-  // page never holds blank space when Google decides not to fill the slot.
-  // These placements account for the majority of impressions on mobile.
-  'pyq.adsense.inContent': {
+  'pyq.inContent': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT || '',
     height: 0,
@@ -177,7 +90,23 @@ const PLACEMENTS = {
     adFormat: 'fluid',
     adLayout: 'in-article',
   },
-  'learn.adsense.inContent': {
+  'pyq.endOfContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_PYQ_END_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+
+  // ── Notes / Learn pages ────────────────────────────────────────────────────
+  'learn.topOfContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_TOP_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  'learn.inContent': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_LEARN_INCONTENT_SLOT || '',
     height: 0,
@@ -185,7 +114,7 @@ const PLACEMENTS = {
     adFormat: 'fluid',
     adLayout: 'in-article',
   },
-  'learn.adsense.afterPyqs': {
+  'learn.afterPyqs': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_PYQS_SLOT || '',
     height: 0,
@@ -193,13 +122,29 @@ const PLACEMENTS = {
     adFormat: 'fluid',
     adLayout: 'in-article',
   },
-  'learn.adsense.afterFlashcards': {
+  'learn.afterFlashcards': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_FLASHCARDS_SLOT || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
     adLayout: 'in-article',
+  },
+  'learn.endOfContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_END_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  // Desktop-only sidebar skyscraper — hidden on mobile via `hidden lg:flex`
+  // in LearnPage so mobile/tablet viewports never reserve the 600px column.
+  'learn.sidebar': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_SIDEBAR_SLOT || '',
+    height: 600,
+    label: 'Advertisement',
+    adFormat: 'auto',
   },
 };
 
