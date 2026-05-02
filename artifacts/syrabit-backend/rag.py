@@ -497,147 +497,151 @@ def _extract_relevant_sections(document_text: str, query: str, char_limit: int =
     return document_text[:char_limit]
 
 
+async def _try_vector_provider(
+    provider: str,
+    query: str,
+    limit: int,
+    subject_id: Optional[str],
+) -> list:
+    """Attempt vector search with a single named provider.
+
+    Returns raw match dicts (each with chapter_id, chapter_title, subject_id,
+    _vs_score) or raises RuntimeError so the caller's fallback loop can exclude
+    the provider and redraw from the remaining weighted pool.
+
+    Embed strategy per provider:
+      - pinecone_ai   → Cohere embed (1024-dim, matches syrabit-ahsec index)
+      - mongodb_atlas → Cohere embed (1024-dim, matches Atlas embedding space)
+      - vertex        → vertex_services.embed_text (Gemini RETRIEVAL_QUERY)
+      - workers_ai    → raises immediately (no vector endpoint available)
+    """
+    # ── 1. Embed the query using the provider's required embedding model ───────
+    q_vec: Optional[list] = None
+
+    if provider in ("pinecone_ai", "mongodb_atlas"):
+        # Cohere 1024-dim vectors match both Pinecone and Atlas indexes.
+        # Do NOT substitute Pinecone Inference (768-dim) — dimension mismatch.
+        from providers.cohere import embed_query as _cohere_embed, ENABLED as _cohere_on
+        if not _cohere_on:
+            raise RuntimeError(f"{provider}: Cohere embeddings not configured (VOYAGE_API_KEY missing?)")
+        q_vec = await asyncio.wait_for(_cohere_embed(query), timeout=4.0)
+
+    elif provider == "vertex":
+        import vertex_services as _vtx_svc
+        q_vec = await asyncio.wait_for(
+            _vtx_svc.embed_text(query, task_type="RETRIEVAL_QUERY"), timeout=5.0
+        )
+
+    elif provider == "workers_ai":
+        raise RuntimeError("workers_ai: no vector search endpoint available")
+
+    else:
+        raise RuntimeError(f"vector_search: unknown provider {provider!r}")
+
+    if not q_vec:
+        raise RuntimeError(f"{provider}: embed_query returned empty vector")
+
+    # ── 2. Query the appropriate vector store ─────────────────────────────────
+    pc_filter: Optional[dict] = {"subject_id": {"$eq": subject_id}} if subject_id else None
+    vs_filter: dict = {"subject_id": {"$eq": subject_id}} if subject_id else {}
+
+    if provider == "pinecone_ai":
+        from retrievers.pinecone_vector import PineconeVectorRetriever
+        _pc = PineconeVectorRetriever()
+        if not _pc.is_configured():
+            raise RuntimeError("pinecone_ai: PineconeVectorRetriever not configured")
+        matches = await asyncio.wait_for(
+            _pc.query(q_vec, top_k=limit, metadata_filter=pc_filter, return_metadata=True),
+            timeout=5.0,
+        )
+        return [
+            {
+                "chapter_id":    m["metadata"].get("chapter_id", ""),
+                "chapter_title": m["metadata"].get("chapter_title", ""),
+                "subject_id":    m["metadata"].get("subject_id", ""),
+                "_vs_score":     m["score"],
+            }
+            for m in matches
+            if m.get("metadata", {}).get("chapter_id")
+        ]
+
+    elif provider in ("mongodb_atlas", "vertex"):
+        # Both Atlas and Vertex embed routes query Atlas $vectorSearch.
+        pipeline: list = [
+            {
+                "$vectorSearch": {
+                    "index": "vector_index",
+                    "path": "embedding",
+                    "queryVector": q_vec,
+                    "numCandidates": min(limit * 15, 500),
+                    "limit": limit,
+                    **({"filter": vs_filter} if vs_filter else {}),
+                }
+            },
+            {"$addFields": {"_vs_score": {"$meta": "vectorSearchScore"}}},
+            {"$project": {
+                "_id": 0, "chapter_id": 1, "chapter_title": 1,
+                "subject_id": 1, "_vs_score": 1,
+            }},
+        ]
+        return await db.chunks.aggregate(pipeline).to_list(length=limit)
+
+    raise RuntimeError(f"vector_search: unhandled provider branch {provider!r}")
+
+
 async def _fetch_chunks_semantic(
     query: str,
     limit: int = 10,
     subject_id: Optional[str] = None,
     lang: str = "en",
 ) -> list:
-    """Semantic retrieval driven by PROVIDER_PRIORITY['vector_search'].
+    """Semantic retrieval with weighted fallback-without-replacement via PROVIDER_PRIORITY['vector_search'].
 
-    Dispatch order (PROVIDER_PRIORITY['vector_search']):
-      pinecone_ai (500) → mongodb_atlas (0, weight-0 fallback) → vertex (2k) → workers_ai (0)
+    Dispatch order (by PROVIDER_CREDITS weight):
+      vertex(2000) → pinecone_ai(500) → mongodb_atlas(0) → workers_ai(0)
 
-    select_provider("vector_search") draws a weighted provider.  Each provider maps to:
-      - pinecone_ai:   Pinecone serverless $vectorSearch (syrabit-ahsec index)
-      - mongodb_atlas: Atlas $vectorSearch aggregation (weight-0, only when Pinecone unavailable)
-      - vertex:        vertex_services.embed_text + Atlas $vectorSearch (Gemini embed space)
-      - workers_ai:    no vector endpoint — returns [] immediately
+    select_provider("vector_search") draws a weighted provider without replacement.
+    Each failed or zero-result attempt excludes that provider and redraws from the
+    remaining weighted pool — identical fallback semantics to all other dispatch functions.
+
+      - vertex        → Gemini embed + Atlas $vectorSearch
+      - pinecone_ai   → Cohere embed + Pinecone serverless $vectorSearch
+      - mongodb_atlas → Cohere embed + Atlas $vectorSearch (weight-0, last resort before workers_ai)
+      - workers_ai    → no vector endpoint; excluded immediately
 
     Returns chapter dicts in the same shape as the keyword-search path so they
     can be deduplicated and reranked together downstream.
     """
-    try:
-        from llm import select_provider as _select_vs_provider
-        _vs_provider = _select_vs_provider("vector_search", lang=lang)
-        logger.debug("[VECTOR_SEARCH] dispatch selected provider=%r for query='%s'", _vs_provider, query[:40])
-    except Exception:
-        _vs_provider = "pinecone_ai"
+    from llm import select_provider as _select_vs
+    from config import PROVIDER_PRIORITY as _PP
 
-    # ── Query embedding ──────────────────────────────────────────────────────
-    # Embed using the provider appropriate for the selected vector store.
-    # Cohere (1024-dim) is required when Pinecone's syrabit-ahsec index was
-    # built with Cohere vectors — do NOT fall back to Pinecone Inference
-    # (768-dim), which causes a dimension mismatch.
-    try:
-        q_vec: Optional[list] = None
+    exclude: frozenset = frozenset()
+    max_attempts = len(_PP.get("vector_search", [])) + 1
 
-        if _vs_provider in ("pinecone_ai", "mongodb_atlas"):
-            try:
-                from providers.cohere import embed_query as _cohere_embed_query, ENABLED as _cohere_on
-                if _cohere_on:
-                    q_vec = await asyncio.wait_for(_cohere_embed_query(query), timeout=4.0)
-            except Exception as _ce:
-                logger.debug("[VECTOR_SEARCH] Cohere query embed failed: %s", _ce)
+    for _ in range(max_attempts):
+        try:
+            provider = _select_vs("vector_search", lang=lang, exclude=exclude)
+        except Exception:
+            break
 
-        elif _vs_provider == "vertex":
-            try:
-                import vertex_services as _vs
-                q_vec = await asyncio.wait_for(
-                    _vs.embed_text(query, task_type="RETRIEVAL_QUERY"), timeout=5.0
-                )
-            except Exception as _ve:
-                logger.debug("[VECTOR_SEARCH] Vertex query embed failed: %s", _ve)
-
-        if not q_vec:
-            logger.debug("[VECTOR_SEARCH] Query embedding unavailable for provider=%r — skipping semantic", _vs_provider)
-            return []
-
-        # ── Primary: Pinecone serverless vector search ────────────────────────
-        pc_filter: Optional[dict] = None
-        if subject_id:
-            pc_filter = {"subject_id": {"$eq": subject_id}}
-
-        raw: list = []
-
-        if _vs_provider == "pinecone_ai":
-            try:
-                from retrievers.pinecone_vector import PineconeVectorRetriever
-                _pc_retriever = PineconeVectorRetriever()
-                if _pc_retriever.is_configured():
-                    matches = await asyncio.wait_for(
-                        _pc_retriever.query(
-                            q_vec,
-                            top_k=limit,
-                            metadata_filter=pc_filter,
-                            return_metadata=True,
-                        ),
-                        timeout=5.0,
-                    )
-                    raw = [
-                        {
-                            "chapter_id":    m["metadata"].get("chapter_id", ""),
-                            "chapter_title": m["metadata"].get("chapter_title", ""),
-                            "subject_id":    m["metadata"].get("subject_id", ""),
-                            "_vs_score":     m["score"],
-                        }
-                        for m in matches
-                        if m.get("metadata", {}).get("chapter_id")
-                    ]
-                    logger.debug("[VECTOR_SEARCH] pinecone_ai: %d matches for '%s'", len(raw), query[:50])
-            except Exception as _pc_err:
-                logger.debug("[VECTOR_SEARCH] pinecone_ai failed — will try Atlas fallback: %s", _pc_err)
-
-        # ── Fallback: MongoDB Atlas $vectorSearch ─────────────────────────────
-        # Runs when: (a) pinecone_ai selected but returned 0 results or failed,
-        # (b) mongodb_atlas explicitly selected (weight-0 provider), or
-        # (c) vertex selected (embed via Vertex, search via Atlas $vectorSearch).
-        import os as _os
-        _atlas_fallback_enabled = _os.environ.get(
-            "PINECONE_ATLAS_FALLBACK", "true"
-        ).strip().lower() not in ("0", "false", "no")
-
-        if not raw and (_vs_provider in ("mongodb_atlas", "vertex") or _atlas_fallback_enabled):
-            try:
-                vs_filter: dict = {}
-                if subject_id:
-                    vs_filter = {"subject_id": {"$eq": subject_id}}
-
-                pipeline: list = [
-                    {
-                        "$vectorSearch": {
-                            "index": "vector_index",
-                            "path": "embedding",
-                            "queryVector": q_vec,
-                            "numCandidates": min(limit * 15, 500),
-                            "limit": limit,
-                            **({"filter": vs_filter} if vs_filter else {}),
-                        }
-                    },
-                    {"$addFields": {"_vs_score": {"$meta": "vectorSearchScore"}}},
-                    {"$project": {
-                        "_id": 0,
-                        "chapter_id": 1,
-                        "chapter_title": 1,
-                        "subject_id": 1,
-                        "_vs_score": 1,
-                    }},
-                ]
-                raw = await db.chunks.aggregate(pipeline).to_list(length=limit)
-                if raw:
-                    logger.debug(
-                        "[INTERNAL_RAG] Atlas $vectorSearch fallback: %d hits for '%s'",
-                        len(raw), query[:50],
-                    )
-            except Exception as _atlas_err:
-                logger.debug("[INTERNAL_RAG] Atlas $vectorSearch fallback also failed: %s", _atlas_err)
+        try:
+            raw = await _try_vector_provider(provider, query, limit, subject_id)
+        except Exception as exc:
+            logger.debug("[VECTOR_SEARCH] %s failed: %s — excluding, retrying", provider, exc)
+            exclude = exclude | {provider}
+            continue
 
         if not raw:
-            return []
+            logger.debug("[VECTOR_SEARCH] %s: 0 matches — excluding, retrying", provider)
+            exclude = exclude | {provider}
+            continue
 
+        # ── Resolve chapter documents from raw match metadata ─────────────────
         chapter_ids = list({r["chapter_id"] for r in raw if r.get("chapter_id")})
         if not chapter_ids:
-            return []
+            logger.debug("[VECTOR_SEARCH] %s: no valid chapter_ids in %d matches", provider, len(raw))
+            exclude = exclude | {provider}
+            continue
 
         ch_docs = await db.chapters.find(
             {"id": {"$in": chapter_ids}, "status": "published"},
@@ -655,14 +659,22 @@ async def _fetch_chunks_semantic(
             seen.add(cid)
             result.append(chapters_map[cid])
 
+        if result:
+            logger.debug(
+                "[INTERNAL_RAG] Semantic [%s]: %d chunk hits → %d unique chapters for '%s'",
+                provider, len(raw), len(result), query[:50],
+            )
+            return result
+
+        # Provider returned matches but all chapter_ids had no published chapter docs.
         logger.debug(
-            "[INTERNAL_RAG] Semantic: %d chunk hits → %d unique chapters for '%s'",
-            len(raw), len(result), query[:50],
+            "[VECTOR_SEARCH] %s: %d raw hits but 0 published chapters — excluding, retrying",
+            provider, len(raw),
         )
-        return result
-    except Exception as _se:
-        logger.debug("[INTERNAL_RAG] Semantic search failed: %s", _se)
-        return []
+        exclude = exclude | {provider}
+
+    logger.debug("[INTERNAL_RAG] Semantic: all vector_search providers exhausted for '%s'", query[:50])
+    return []
 
 
 async def _fetch_internal_chapters(

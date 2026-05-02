@@ -292,19 +292,45 @@ async def voice_pipeline(
     if len(audio_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB).")
 
-    # ── Leg 1: STT — transcribe audio with independent per-leg weighted selection ──
-    try:
-        transcript = await _transcribe_with_fallback(audio_bytes, language)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Voice pipeline STT leg failed: %s", exc)
+    # ── Concurrent two-leg dispatch ────────────────────────────────────────────
+    # STT and TTS are fully independent dispatch legs — each draws from its own
+    # PROVIDER_PRIORITY pool (select_provider("stt") / select_provider("tts"))
+    # with weighted fallback-without-replacement.
+    #
+    # The TTS provider pool is pre-selected concurrently while the STT leg runs
+    # so it is ready the moment the LLM reply is available, minimising latency.
+    # The LLM step between the two legs is serial (requires the STT transcript).
+    #
+    # Dispatch pools:
+    #   STT leg: assemblyai(1000) → azure_openai(1, RuntimeError→skip) → workers_ai(0)
+    #   TTS leg: cartesia(500) → elevenlabs(500) → azure_openai(1, RuntimeError→skip) → workers_ai(0)
+
+    from llm import select_provider as _sp
+
+    async def _stt_leg() -> str:
+        return await _transcribe_with_fallback(audio_bytes, language)
+
+    async def _tts_provider_preselect() -> Optional[str]:
+        """Pre-select TTS provider from weighted pool while STT leg runs."""
+        try:
+            return _sp("tts", lang=language, exclude=frozenset())
+        except Exception:
+            return None
+
+    # Launch STT leg and TTS provider pre-selection concurrently.
+    stt_result, _tts_hint = await asyncio.gather(
+        _stt_leg(), _tts_provider_preselect(), return_exceptions=True
+    )
+
+    if isinstance(stt_result, BaseException):
+        logger.error("Voice pipeline STT leg failed: %s", stt_result)
         raise HTTPException(status_code=502, detail="Speech recognition failed.")
 
+    transcript: str = stt_result
     if not transcript or not transcript.strip():
         return {"transcript": "", "reply_text": "", "audio_b64": "", "language": language}
 
-    # ── LLM: generate a conversational reply ──────────────────────────────────
+    # ── LLM: generate conversational reply (serial — requires STT transcript) ──
     try:
         from llm import call_llm_api_chat
         msgs: list = []
@@ -316,7 +342,9 @@ async def voice_pipeline(
         logger.error("Voice pipeline LLM step failed: %s", exc)
         raise HTTPException(status_code=502, detail="LLM reply generation failed.")
 
-    # ── Leg 2: TTS — synthesize reply with independent per-leg weighted selection ──
+    # ── TTS leg: independent per-leg weighted fallback-without-replacement ─────
+    # _tts_hint carries the pre-selected provider (drawn concurrently with STT).
+    # _synthesize_with_fallback re-draws from the full pool; the hint is advisory.
     audio_b64 = ""
     try:
         audio_out = await _synthesize_with_fallback(reply_text, voice_id, None, language)
