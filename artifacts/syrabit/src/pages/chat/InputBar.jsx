@@ -162,6 +162,23 @@ export function InputBar({
     clearAttachedImage();
   }, [ocrLoading, sendMsg, input, clearAttachedImage]);
 
+  // F2: Speculative warm-query — pre-fetch RAG chapters while the user is typing.
+  // Fires 800 ms after the last keystroke when ≥15 chars are present and a
+  // subject is selected. Best-effort: errors are silently discarded.
+  useEffect(() => {
+    const q = (input || '').trim();
+    if (q.length < 15 || !subject?.id || isLoading) return;
+    const timer = setTimeout(() => {
+      fetch(`${API_BASE}/ai/warm-query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ query: q, subject_id: subject.id, subject_name: subject.name }),
+      }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [input, subject, isLoading]);
+
   const sendDisabled = !input.trim() || isOutOfCredits || ocrLoading;
 
   return (

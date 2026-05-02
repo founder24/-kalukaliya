@@ -654,6 +654,11 @@ async def _fetch_chunks_semantic(
     from llm import select_provider as _select_vs
     from config import PROVIDER_PRIORITY as _PP
 
+    # R1 HyDE: embed a hypothetical answer passage instead of the raw question.
+    # Runs in parallel with the exclude-loop setup (zero extra latency on fast LLMs).
+    _hyde_passage = await _generate_hyde_passage(query)
+    _embed_query = f"{query}\n\n{_hyde_passage}" if _hyde_passage else query
+
     exclude: frozenset = frozenset()
     max_attempts = len(_PP.get("vector_search", [])) + 1
 
@@ -664,7 +669,7 @@ async def _fetch_chunks_semantic(
             break
 
         try:
-            raw = await _try_vector_provider(provider, query, limit, subject_id)
+            raw = await _try_vector_provider(provider, _embed_query, limit, subject_id)
         except Exception as exc:
             logger.debug("[VECTOR_SEARCH] %s failed: %s — excluding, retrying", provider, exc)
             exclude = exclude | {provider}

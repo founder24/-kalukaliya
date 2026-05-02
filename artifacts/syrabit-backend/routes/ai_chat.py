@@ -1800,6 +1800,24 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
 
     _PRE_LLM_BUDGET = 0.15
 
+    # F2: Warm-cache helper — returns pre-fetched chapters from the /ai/warm-query
+    # endpoint if the user typed the same query ≥800ms before hitting send.
+    async def _fetch_chapters_warm_first():
+        import hashlib as _hl, json as _json
+        _sid = msg.subject_id or ""
+        _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
+        if redis_client:
+            try:
+                _wdata = redis_client.get(_wkey)
+                if _wdata:
+                    _parsed = _json.loads(_wdata)
+                    if _parsed:
+                        logger.debug("[F2-WARM] Phase-0 cache hit — skipping _fetch_internal_chapters call")
+                        return _parsed
+            except Exception:
+                pass
+        return await _fetch_internal_chapters(msg.message, subject_id=msg.subject_id, subject_name=msg.subject_name)
+
     # Speculative web search runs OUTSIDE the Phase-0 budget so the 150ms cap
     # doesn't kill it before HTTP can return (Task #282 T003/T005). It still
     # has its own internal 1.5s wait_for inside _early_web_search, so it
@@ -1822,7 +1840,7 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             asyncio.create_task(_fetch_doc()),
             asyncio.create_task(_fetch_followup_info()),
             asyncio.create_task(_prefetch_history()),
-            asyncio.create_task(_fetch_internal_chapters(msg.message, subject_id=msg.subject_id, subject_name=msg.subject_name) if (msg.subject_id or msg.subject_name) else asyncio.sleep(0)),
+            asyncio.create_task(_fetch_chapters_warm_first() if (msg.subject_id or msg.subject_name) else asyncio.sleep(0)),
         ]
         _defaults_pre = [None, None, None, None, None, []]
 
@@ -2514,10 +2532,12 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                             except Exception:
                                 pass
                             _first_token_logged = True
+                        _roll_piece = ""  # S1: reset per-chunk accumulator
                         try:
                             data = json.loads(chunk[6:])
                             _piece = data.get("content", "")
                             _tuned = _tune_response_stream(_piece, _stream_intent, _tune_buf)
+                            _roll_piece = _tuned  # S1: capture for rolling buffer
                             full_response.append(_tuned)
                             _output_buf += _tuned
                             if _tuned != _piece:
@@ -2534,7 +2554,23 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                     if _output_violation:
                         break
                     if _indic_buffer_mode:
-                        _indic_pending_chunks.append(chunk)
+                        if '"content"' in chunk and _sarvam_target and _roll_piece:
+                            # S1: accumulate English content; translate at threshold boundary
+                            _rolling_en_buf += _roll_piece
+                            if len(_rolling_en_buf) >= _ROLL_CHUNK_CHARS:
+                                try:
+                                    _tr_rolled = await _assamese_translate_gemini_main_sarvam_polish(
+                                        _rolling_en_buf, target_lang_code=_sarvam_target,
+                                    )
+                                    if _tr_rolled:
+                                        _rolling_as_chunks.append(_tr_rolled)
+                                        yield f"data: {json.dumps({'content': _tr_rolled})}\n\n"
+                                except Exception as _roll_err:
+                                    logger.debug("[S1-ROLL] chunk translate error: %s", _roll_err)
+                                _rolling_en_buf = ""
+                        else:
+                            # Non-content events (metadata, SSE markers) buffered for later
+                            _indic_pending_chunks.append(chunk)
                     else:
                         yield chunk
                     _bp_count += 1
@@ -2544,6 +2580,18 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                 # after this point (Indic sanitize, cache write, persist,
                 # log fan-out) is `chat.post_processing`.
                 _t_llm_end = _time_mod.time()
+                # S1: flush any remaining English in the rolling buffer (tail of response)
+                if _indic_buffer_mode and _rolling_en_buf and _sarvam_target:
+                    try:
+                        _tr_tail = await _assamese_translate_gemini_main_sarvam_polish(
+                            _rolling_en_buf, target_lang_code=_sarvam_target,
+                        )
+                        if _tr_tail:
+                            _rolling_as_chunks.append(_tr_tail)
+                            yield f"data: {json.dumps({'content': _tr_tail})}\n\n"
+                    except Exception as _tail_err:
+                        logger.debug("[S1-ROLL] tail flush error: %s", _tail_err)
+                    _rolling_en_buf = ""
                 if _output_violation:
                     full_response.clear()
                     _fallback = "I need to stop here — my response was heading in a direction that doesn't align with my guidelines. Please try rephrasing your question."
@@ -2594,7 +2642,9 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
 
                     _cleaned_indic, _asm_diag = await _sanitize_asm_async(
                         _raw_indic,
-                        regenerate_callable=_regenerate_indic,
+                        # S1 rolling mode: content already yielded — retraction not
+                        # possible, so skip regeneration (diagnostics still run).
+                        regenerate_callable=None if _rolling_as_chunks else _regenerate_indic,
                         translate_callable=_make_assamese_translate_callable(_sarvam_target or "as-IN"),
                         trace={
                             "conversation_id": conv_id or msg.conversation_id or None,
@@ -2618,7 +2668,15 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                         logger.info(_asm_log)
                     else:
                         logger.warning(_asm_log)
-                    if _asm_action not in (None, "noop") or _asm_diag.get("regenerated"):
+                    if _rolling_as_chunks:
+                        # S1 rolling mode: content already yielded in translated chunks;
+                        # update full_response with assembled Assamese for cache storage.
+                        full_response.clear()
+                        full_response.append("".join(_rolling_as_chunks))
+                        # Yield any buffered non-content events (metadata SSE markers)
+                        for _pc in _indic_pending_chunks:
+                            yield _pc
+                    elif _asm_action not in (None, "noop") or _asm_diag.get("regenerated"):
                         full_response.clear()
                         full_response.append(_cleaned_indic)
                         _CHUNK_SIZE_INDIC = 300
@@ -3020,6 +3078,50 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+# ─────────────────────────────────────────────
+# F2: SPECULATIVE WARM-QUERY  — /api/ai/warm-query
+# Fired by the frontend on a typing pause (≥15 chars, ≥800ms idle).
+# Pre-fetches internal chapters into Redis so the next /ai/chat request
+# can skip _fetch_internal_chapters entirely in Phase 0.
+# ─────────────────────────────────────────────
+@router.post("/ai/warm-query", status_code=202)
+async def warm_query_endpoint(request: Request):
+    """F2: Pre-fetch RAG chapters for a query being typed; cache for 20 s."""
+    import hashlib as _hl, json as _json
+    try:
+        _body = await request.json()
+    except Exception:
+        return {"status": "skip"}
+    query = (_body.get("query") or "").strip()
+    _subject_id = _body.get("subject_id") or None
+    _subject_name = _body.get("subject_name") or None
+    if len(query) < 15 or not (_subject_id or _subject_name):
+        return {"status": "skip"}
+
+    _sid = _subject_id or ""
+    _wkey = f"warm_ch:{_hl.md5(f'{query}|{_sid}'.encode()).hexdigest()}"
+
+    # Skip if already warmed for this exact query
+    if redis_client:
+        try:
+            if redis_client.exists(_wkey):
+                return {"status": "cached"}
+        except Exception:
+            pass
+
+    async def _bg_prefetch():
+        try:
+            chapters = await _fetch_internal_chapters(query, subject_id=_subject_id, subject_name=_subject_name)
+            if chapters and redis_client:
+                redis_client.setex(_wkey, 20, _json.dumps(chapters))
+                logger.debug("[F2-WARM] Pre-fetched %d chapters for warm key", len(chapters))
+        except Exception as _e:
+            logger.debug("[F2-WARM] Background prefetch error (non-fatal): %s", _e)
+
+    asyncio.create_task(_bg_prefetch())
+    return {"status": "warming"}
+
 
 # ─────────────────────────────────────────────
 # PUBLIC SEARCH API  — /api/v1/search
