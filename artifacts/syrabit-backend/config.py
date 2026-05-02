@@ -1028,8 +1028,11 @@ PROVIDER_PRIORITY: dict = {
     #   POOL_WEIGHTS gives sarvam=3000, workers_ai_indic=2000, vertex=100 so sarvam leads
     #   in probability draws; workers_ai_indic is terminal but draws frequently as second choice.
     "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
-    # Long-form content generation (Task #267): mirrors english_rag_chat.
-    "content":           ["azure_openai", "bedrock", "workers_ai"],
+    # Long-form content / notes generation:
+    #   Vertex / Gemini (primary) → Azure OpenAI → Bedrock → Workers AI (last resort).
+    #   Gemini 2.5 Flash leads because of its 1M-token context window — ideal for notes.
+    #   POOL_WEIGHTS["content"] gives vertex=5000 so it draws ~56% vs azure ~28% vs bedrock ~14%.
+    "content":           ["vertex", "azure_openai", "bedrock", "workers_ai"],
     # Assamese content generation (Task #267 + user update):
     #   Vertex → workers_ai_indic (terminal last resort).
     #   POOL_WEIGHTS gives workers_ai_indic=3000, sarvam=2000, vertex=100 so IndicTrans2
@@ -1097,6 +1100,14 @@ PROVIDER_CREDITS: dict = {
 #   assamese_rag_chat: Sarvam (3000) → IndicTrans2 (2000) → Vertex (100, true last resort)
 #   translate:         IndicTrans2 (3000) → Sarvam (2000) → Vertex (100, true last resort)
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
+    # content (notes/important_questions/pyq generation):
+    #   Vertex/Gemini primary (5000) — 1M-token context ideal for long notes.
+    #   Azure OpenAI second (2500), Bedrock third (1000), Workers AI last resort (0).
+    "content": {
+        "vertex":       5000,   # primary — Gemini 2.5 Flash, best for long-form notes
+        "azure_openai": 2500,   # second
+        "bedrock":      1000,   # third
+    },
     # assamese_content: IndicTrans2 primary (3000) → Sarvam second (2000) → Vertex last resort (100).
     "assamese_content": {
         "workers_ai_indic": 3000,   # primary — purpose-built Indic neural MT

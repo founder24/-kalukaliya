@@ -1690,14 +1690,16 @@ logger.info(
 )
 
 async def call_llm_api_content(messages: list, model: str = None, max_tokens: int = 3072) -> str:
-    """LLM call for admin content generation via PROVIDER_PRIORITY weighted dispatch.
+    """LLM call for admin content / notes generation via PROVIDER_PRIORITY weighted dispatch.
 
-    Feature key: "content" — Task #267 chain:
-      Azure OpenAI (gpt-4.1-mini, weight 2500) → Bedrock (nova-micro, weight 1000)
-      → Workers AI (llama-3.3-70b, weight 0, last-resort).
+    Feature key: "content" — chain (POOL_WEIGHTS["content"] in config.py):
+      Vertex / Gemini 2.5 Flash (weight 5000, ~58%) → Azure OpenAI gpt-4.1-mini (weight 2500, ~29%)
+      → Bedrock nova-micro (weight 1000, ~12%) → Workers AI llama-3.3-70b (weight 0, last-resort).
+
+    Gemini leads because its 1M-token context window is ideal for long-form notes generation.
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
-    (Gemini direct, Cerebras) can be introduced after the weighted pool exhausts.
+    can be introduced after the weighted pool exhausts.
     """
     try:
         return await call_with_provider_fallback(
