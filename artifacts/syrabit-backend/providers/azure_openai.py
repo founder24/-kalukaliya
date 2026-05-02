@@ -116,9 +116,11 @@ async def call_chat(
     if not base:
         raise RuntimeError("azure_openai: CF AI Gateway is down or azure-openai slug not configured")
 
-    url = f"{base}/chat/completions?api-version={_API_VERSION}"
+    # Azure OpenAI requires the deployment name in the URL path.
+    # CF AI Gateway forwards: {gateway}/openai/deployments/{deployment}/chat/completions
+    deployment = model or _MODEL
+    url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
     body = {
-        "model": model or _MODEL,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.1,

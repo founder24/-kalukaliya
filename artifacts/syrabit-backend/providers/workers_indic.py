@@ -141,8 +141,13 @@ async def call_indic_trans(
         raise RuntimeError(f"workers_indic: connection error — {exc}")
 
     data = resp.json()
+    result_obj = data.get("result") or {}
+    # CF Workers AI IndicTrans2 returns translations as either:
+    #   result.translated_text  (string)  — older CF format
+    #   result.translations     (list)    — current CF format
     translated: str = (
-        (data.get("result") or {}).get("translated_text")
+        result_obj.get("translated_text")
+        or (result_obj.get("translations") or [None])[0]
         or data.get("translated_text")
         or ""
     )
