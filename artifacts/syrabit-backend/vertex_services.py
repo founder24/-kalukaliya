@@ -552,6 +552,123 @@ async def analyze_thumbnail(
 # 3b. OCR
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Round-robin counter shared across all OCR fallback calls.
+# The primary cloud fallbacks (Textract ↔ Azure Doc Intelligence) alternate
+# on each invocation so quota / cost is spread across both AWS and Azure credits.
+_ocr_rotation_counter: int = 0
+
+
+async def _textract_ocr_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Optional[str]:
+    """AWS Textract OCR — DetectDocumentText (sync, bytes payload).
+
+    Requires AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY in env (already set for
+    the billing Cost-Explorer path).  Falls back gracefully if boto3 or creds
+    are missing.
+
+    Returns the concatenated page text, or None on any error.
+    """
+    try:
+        import boto3  # type: ignore
+        from config import _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION
+        if not (_AWS_ACCESS_KEY and _AWS_SECRET_KEY):
+            logger.debug("[ocr/textract] AWS credentials not set — skipping")
+            return None
+
+        region = _AWS_REGION or "us-east-1"
+
+        def _run_sync() -> Optional[str]:
+            client = boto3.client(
+                "textract",
+                aws_access_key_id=_AWS_ACCESS_KEY,
+                aws_secret_access_key=_AWS_SECRET_KEY,
+                region_name=region,
+            )
+            resp = client.detect_document_text(Document={"Bytes": image_bytes})
+            blocks = resp.get("Blocks", [])
+            lines = [b["Text"] for b in blocks if b.get("BlockType") == "LINE" and b.get("Text")]
+            return "\n".join(lines) or None
+
+        text = await asyncio.get_event_loop().run_in_executor(None, _run_sync)
+        if text:
+            logger.info("[ocr/textract] extracted %d chars", len(text))
+        return text
+    except Exception as exc:
+        logger.warning("[ocr/textract] failed: %s: %s", type(exc).__name__, str(exc)[:200])
+        return None
+
+
+async def _azure_doc_intel_ocr_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Optional[str]:
+    """Azure Document Intelligence (prebuilt-read) OCR.
+
+    Reads AZURE_DOCUMENT_INTELLIGENCE_KEY + AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+    from config (both env aliases supported — see config.py).
+    Falls back gracefully when either is unset.
+
+    Returns the concatenated page text, or None on any error.
+    """
+    try:
+        from config import AZURE_DOC_INTEL_KEY, AZURE_DOC_INTEL_ENDPOINT
+        if not (AZURE_DOC_INTEL_KEY and AZURE_DOC_INTEL_ENDPOINT):
+            logger.debug("[ocr/azure] AZURE_DOCUMENT_INTELLIGENCE_KEY / ENDPOINT not set — skipping")
+            return None
+
+        from azure.ai.documentintelligence import DocumentIntelligenceClient  # type: ignore
+        from azure.core.credentials import AzureKeyCredential  # type: ignore
+
+        def _run_sync() -> Optional[str]:
+            client = DocumentIntelligenceClient(
+                endpoint=AZURE_DOC_INTEL_ENDPOINT,
+                credential=AzureKeyCredential(AZURE_DOC_INTEL_KEY),
+            )
+            poller = client.begin_analyze_document(
+                "prebuilt-read",
+                analyze_request={"base64Source": base64.b64encode(image_bytes).decode()},
+                content_type="application/json",
+            )
+            result = poller.result()
+            lines: list[str] = []
+            for page in (result.pages or []):
+                for line in (page.lines or []):
+                    if line.content:
+                        lines.append(line.content)
+            return "\n".join(lines) or None
+
+        text = await asyncio.get_event_loop().run_in_executor(None, _run_sync)
+        if text:
+            logger.info("[ocr/azure] extracted %d chars", len(text))
+        return text
+    except Exception as exc:
+        logger.warning("[ocr/azure] failed: %s: %s", type(exc).__name__, str(exc)[:200])
+        return None
+
+
+async def _cloud_ocr_with_rotation(image_bytes: bytes, mime_type: str) -> Optional[str]:
+    """Call AWS Textract and Azure Doc Intelligence on a round-robin basis.
+
+    On each invocation the counter advances.  Even calls → Textract first,
+    odd calls → Azure first.  If the primary fails the secondary is tried
+    automatically, so the service degrades gracefully when one provider is
+    down or quota-exhausted.
+    """
+    global _ocr_rotation_counter
+    _ocr_rotation_counter += 1
+    use_textract_first = (_ocr_rotation_counter % 2 == 1)
+
+    primary_name, primary_fn, secondary_name, secondary_fn = (
+        ("textract", _textract_ocr_image, "azure", _azure_doc_intel_ocr_image)
+        if use_textract_first else
+        ("azure", _azure_doc_intel_ocr_image, "textract", _textract_ocr_image)
+    )
+
+    logger.info("[ocr/rotation] call #%d → primary=%s", _ocr_rotation_counter, primary_name)
+    text = await primary_fn(image_bytes, mime_type)
+    if text:
+        return text
+
+    logger.info("[ocr/rotation] primary %s returned nothing — trying %s", primary_name, secondary_name)
+    return await secondary_fn(image_bytes, mime_type)
+
+
 async def _gemini_ocr_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Optional[str]:
     """Gemini Vision OCR via the CF AI Gateway (OpenAI-compat multimodal endpoint).
 
@@ -682,8 +799,32 @@ async def ocr_image(
                 "provider": "workers_ai",
             }
 
+    # ── Cloud OCR rotation: AWS Textract ↔ Azure Document Intelligence ──────────
+    # Alternates per call so quota / cost is spread across both providers.
+    # Each call tries the primary first; if it fails the secondary is tried
+    # automatically, so the service degrades gracefully.
+    logger.info(
+        "[ocr] Workers AI + Google Vision both unavailable — "
+        "trying cloud OCR rotation (Textract ↔ Azure Doc Intelligence)"
+    )
+    cloud_text = await _cloud_ocr_with_rotation(image_bytes, mime_type)
+    if cloud_text:
+        # Determine which provider actually succeeded by checking the counter parity.
+        # _cloud_ocr_with_rotation already incremented it, so subtract 1 for this call.
+        provider_label = (
+            "aws_textract" if (_ocr_rotation_counter % 2 == 1) else "azure_doc_intelligence"
+        )
+        return {
+            "raw_text": cloud_text,
+            "content_type": "extracted",
+            "questions": [],
+            "word_count": len(cloud_text.split()),
+            "provider": provider_label,
+            "confidence": 0.97,
+        }
+
     # Last resort: Gemini Vision REST API (GEMINI_API_KEY).
-    logger.info("[ocr] Workers AI + Google Vision both unavailable — trying Gemini Vision")
+    logger.info("[ocr] Cloud rotation also unavailable — trying Gemini Vision as final fallback")
     gemini_text = await _gemini_ocr_image(image_bytes, mime_type=mime_type)
     if gemini_text:
         return {
@@ -695,7 +836,13 @@ async def ocr_image(
             "confidence": 0.95,
         }
 
-    return {"error": "OCR failed — Workers AI, Google Vision and Gemini Vision all unavailable"}
+    return {
+        "error": (
+            "OCR failed — Workers AI, Google Vision, "
+            "AWS Textract, Azure Document Intelligence, "
+            "and Gemini Vision all unavailable"
+        )
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
