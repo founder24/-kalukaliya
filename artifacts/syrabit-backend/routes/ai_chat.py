@@ -990,7 +990,7 @@ async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depend
     if answer is None:
         _t_llm_start = _time_mod.time()
         try:
-            answer = await call_llm_api_chat(messages, model=_ns_model, max_tokens=max_tokens)
+            answer = await call_llm_api_chat(messages, model=_ns_model, max_tokens=max_tokens, lang=_ns_resp_lang or "en")
             _llm_elapsed_ms = (_time_mod.time() - _t_llm_start) * 1000
             await ai_cache_aset(cache_key, answer, _cache_ttl, saved_ms=_llm_elapsed_ms)
             _ai_response_cache[cache_key] = answer

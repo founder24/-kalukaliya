@@ -432,6 +432,13 @@ if _GEMINI_KEY:
 if _CEREBRAS_KEY:
     _LLM_PROVIDERS_CHAT.append({"provider": "cerebras", "key": _CEREBRAS_KEY, "default_model": "llama3.1-8b"})
 
+# Workers-AI-only slice of _LLM_PROVIDERS_CHAT — used as the ``workers_ai``
+# fallback inside _dispatch_llm_for_feature so that PROVIDER_PRIORITY routing
+# never spills into Groq / Cerebras / Gemini on the fall-through path.
+_LLM_PROVIDERS_WORKERS_ONLY: list[dict] = [
+    p for p in _LLM_PROVIDERS_CHAT if p["provider"] == "workers-ai"
+]
+
 _MODEL_PROVIDER_MAP = {
     "sarvam-m": "sarvam",
     "sarvam-30b": "sarvam",
@@ -1480,8 +1487,13 @@ async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: i
         # provider to the exclude set, and draw the next weighted candidate.
         raise RuntimeError(f"{provider}: client not yet wired (Phase 2 — Task #256)")
 
-    # workers_ai or any unknown provider → SmartKeyPool chat dispatch.
-    return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_CHAT)
+    # workers_ai or any unknown provider → Workers-AI-only dispatch.
+    # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
+    # Gemini) cannot re-enter routing via this fallback path — they are absent
+    # from PROVIDER_PRIORITY and must stay out of the weighted dispatch chain.
+    if not _LLM_PROVIDERS_WORKERS_ONLY:
+        raise RuntimeError("workers_ai: Cloudflare AI (CF_AI_ENABLED) is not configured")
+    return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
 
 
 async def call_with_provider_fallback(

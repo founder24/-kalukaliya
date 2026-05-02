@@ -328,7 +328,7 @@ async def voice_pipeline(
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})
         msgs.append({"role": "user", "content": transcript.strip()})
-        reply_text = str(await call_llm_api_chat(msgs, max_tokens=512))
+        reply_text = str(await call_llm_api_chat(msgs, max_tokens=512, lang=(language or "en")[:2]))
     except Exception as exc:
         logger.error("Voice pipeline LLM step failed: %s", exc)
         raise HTTPException(status_code=502, detail="LLM reply generation failed.")
