@@ -163,7 +163,7 @@ async def llm_classify_safety(prompt: str) -> Optional[str]:
                     verdict_str,
                 )
                 return verdict_str
-            result = await _dispatch_llm_for_feature(_messages, provider, 16)
+            result = await _dispatch_llm_for_feature(_messages, provider, 16, feature="safety")
             logger.debug(
                 "[guardrails] safety verdict=%s provider=%s (bedrock-converse)",
                 (result or "").strip()[:8],

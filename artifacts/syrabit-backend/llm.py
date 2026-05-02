@@ -1501,11 +1501,33 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
     return (canonical, model)
 
 
-async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: int) -> str:
+_INDICTRANS_VALID_FEATURES: frozenset = frozenset({
+    "assamese_content", "translate",
+})
+"""Features where workers_ai_indic (IndicTrans2) is a valid translation provider.
+
+Chat/safety features are NOT in this set.  When workers_ai_indic is drawn for a
+pool outside this set it raises RuntimeError immediately so call_with_provider_fallback
+excludes it and moves to the next provider (Workers AI llama-3.3-70b).
+"""
+
+
+async def _dispatch_llm_for_feature(
+    messages: list,
+    provider: str,
+    max_tokens: int,
+    *,
+    feature: str = "",
+) -> str:
     """Dispatch a chat LLM call to the named Task #250 provider.
 
     Used as the ``attempt_fn`` argument to ``call_with_provider_fallback`` so
     that chat/content/RAG entrypoints route through the weighted pool.
+
+    ``feature`` is the PROVIDER_PRIORITY key being served (e.g. ``"content"``,
+    ``"assamese_rag_chat"``).  It is used to guard ``workers_ai_indic``:
+    IndicTrans2 is a translation model — it must not be called for chat/safety
+    pools where the caller expects a generated natural-language answer.
 
     Raises ``RuntimeError`` for Phase-2 providers (bedrock, azure_openai) that
     are not yet wired as full client modules (see Task #256).
@@ -1538,21 +1560,24 @@ async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: i
         return await _az_chat(messages, model="gpt-4.1-mini", max_tokens=max_tokens)
 
     if provider == "workers_ai_indic":
-        # CF Workers AI IndicTrans2 — Assamese last resort (Task #267).
-        # Used exclusively as a TRANSLATION step, never as a chat answer generator.
-        # This branch is only reached from translation/content pipelines:
-        #   assamese_content / translate → en→indic (English source text → Assamese output).
-        # For assamese_rag_chat the chat must generate an answer, not just translate;
-        # workers_ai_indic is not a conversational LLM — fall through to workers_ai for chat.
+        # CF Workers AI IndicTrans2 — translation-only provider (Task #267).
+        # Valid only for assamese_content and translate pools where the caller
+        # needs English→Assamese text translation, NOT a conversational answer.
+        # Any other feature (chat, safety, content…) gets a RuntimeError so that
+        # call_with_provider_fallback excludes IndicTrans2 and moves to workers_ai.
+        if feature not in _INDICTRANS_VALID_FEATURES:
+            raise RuntimeError(
+                f"workers_ai_indic: translation model not valid for feature={feature!r}; "
+                "routing to workers_ai instead"
+            )
         from providers.workers_indic import call_indic_trans as _indic_trans
-        # Extract the last user message as translation source.
+        # Extract the last user message as the English source text to translate.
         src_text = ""
         for m in reversed(messages):
             if m.get("role") == "user" and m.get("content"):
                 src_text = str(m["content"])
                 break
         if not src_text:
-            # No user message — not a translation context; let workers_ai handle it.
             raise RuntimeError("workers_ai_indic: no user message to translate; route to workers_ai")
         return await _indic_trans(src_text, direction="en-indic")
 
@@ -1655,7 +1680,7 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
     try:
         return await call_with_provider_fallback(
             "english_rag_chat", "en",
-            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens),
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature="english_rag_chat"),
         )
     except Exception as exc:
         logger.warning(
@@ -1704,7 +1729,7 @@ async def call_llm_api_content(messages: list, model: str = None, max_tokens: in
     try:
         return await call_with_provider_fallback(
             "content", "en",
-            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens),
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature="content"),
         )
     except Exception as exc:
         logger.warning(
@@ -1775,7 +1800,7 @@ async def call_llm_api_chat(
     try:
         return await call_with_provider_fallback(
             feature, lang,
-            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens),
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature=feature),
         )
     except Exception as exc:
         logger.warning(

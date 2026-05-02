@@ -436,7 +436,7 @@ def test_llm_classify_safety_bedrock_safe_verdict():
         async def _mock_fallback(feature, lang, attempt_fn, max_attempts=6):
             return await attempt_fn("bedrock")
 
-        async def _mock_dispatch(messages, provider, max_tokens):
+        async def _mock_dispatch(messages, provider, max_tokens, *, feature=""):
             return "SAFE"
 
         import llm as _llm_mod
@@ -465,7 +465,7 @@ def test_llm_classify_safety_bedrock_unsafe_verdict():
         async def _mock_fallback(feature, lang, attempt_fn, max_attempts=6):
             return await attempt_fn("bedrock")
 
-        async def _mock_dispatch(messages, provider, max_tokens):
+        async def _mock_dispatch(messages, provider, max_tokens, *, feature=""):
             return "UNSAFE"
 
         import llm as _llm_mod
@@ -571,7 +571,7 @@ def test_llm_classify_safety_bedrock_fail_falls_through_to_workers_ai():
             except Exception:
                 return await attempt_fn("workers_ai")
 
-        async def _mock_dispatch(messages, provider, max_tokens):
+        async def _mock_dispatch(messages, provider, max_tokens, *, feature=""):
             raise RuntimeError("bedrock: CF gateway down (simulated)")
 
         import providers.cloudflare_ai as _cfai
@@ -600,6 +600,37 @@ def test_llm_classify_safety_bedrock_fail_falls_through_to_workers_ai():
     finally:
         _ps._ENABLE_LLM_SAFETY = orig
     print("  PASS: bedrock failure → workers_ai llama-guard-3 fallback reached")
+
+
+def test_workers_ai_indic_raises_for_chat_features():
+    """_dispatch_llm_for_feature must raise RuntimeError when workers_ai_indic is called
+    for a chat/safety feature (not a translation pool).
+
+    IndicTrans2 is a translation model — calling it for assamese_rag_chat would
+    attempt to translate the Assamese user message en→indic (treating Assamese as
+    English), producing garbage.  The guard must cause call_with_provider_fallback
+    to exclude workers_ai_indic and fall through to workers_ai for chat.
+    """
+    from llm import _dispatch_llm_for_feature, _INDICTRANS_VALID_FEATURES
+
+    msgs = [{"role": "user", "content": "অসমৰ ৰাজধানী কি?"}]
+
+    chat_features = ["assamese_rag_chat", "english_rag_chat", "safety", "content", ""]
+    for feat in chat_features:
+        assert feat not in _INDICTRANS_VALID_FEATURES, (
+            f"{feat!r} should NOT be in _INDICTRANS_VALID_FEATURES"
+        )
+        try:
+            asyncio.run(_dispatch_llm_for_feature(msgs, "workers_ai_indic", 16, feature=feat))
+            assert False, f"Expected RuntimeError for feature={feat!r}, but no exception was raised"
+        except RuntimeError as exc:
+            assert "not valid for feature" in str(exc) or "translation model" in str(exc), (
+                f"Unexpected RuntimeError message for feature={feat!r}: {exc}"
+            )
+
+    valid_features = list(_INDICTRANS_VALID_FEATURES)
+    print(f"  PASS: workers_ai_indic raises RuntimeError for chat features {chat_features!r}")
+    print(f"  PASS: workers_ai_indic is valid only for translation features {valid_features!r}")
 
 
 def test_chat_content_rag_hard_fallback_is_workers_ai_only():
@@ -1046,6 +1077,7 @@ if __name__ == "__main__":
         test_safety_feature_key_priority_has_bedrock_first,
         test_llm_safety_check_async_and_env_gated,
         test_safety_auto_enabled_when_cf_gateway_is_configured,
+        test_workers_ai_indic_raises_for_chat_features,
         test_chat_content_rag_hard_fallback_is_workers_ai_only,
         test_chat_fallback_calls_workers_ai_raw_at_runtime,
         test_content_fallback_calls_workers_ai_raw_at_runtime,
