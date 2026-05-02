@@ -4762,22 +4762,36 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
 
         elapsed = round((time.time() - start) * 1000, 1)
 
-        # Workers AI 429 burst — cross-worker via Redis, in-process fallback.
+        # Workers AI / Groq / Gemini 429 burst — cross-worker via Redis, in-process fallback.
         _wai_burst_60 = 0
         _wai_burst_180 = 0
         _wai_threshold = 5
+        _groq_burst_60 = 0
+        _groq_burst_180 = 0
+        _groq_threshold = 5
+        _gemini_burst_60 = 0
+        _gemini_burst_180 = 0
+        _gemini_threshold = 5
         try:
             from llm import get_workers_ai_429_burst as _get_wai_burst
             from llm import get_workers_ai_429_burst_inprocess as _get_wai_burst_ip
+            from llm import get_provider_429_burst as _get_p_burst
+            from llm import get_provider_429_burst_inprocess as _get_p_burst_ip
             # burst_60s: in-process timestamps (exact 60s, single-worker)
             # burst_180s: Redis counter (cross-worker, 180s TTL) with in-process fallback
             _wai_burst_60 = _get_wai_burst_ip(60)
             _wai_burst_180 = _get_wai_burst(180)
+            _groq_burst_60 = _get_p_burst_ip("groq", 60)
+            _groq_burst_180 = _get_p_burst("groq", 180)
+            _gemini_burst_60 = _get_p_burst_ip("gemini", 60)
+            _gemini_burst_180 = _get_p_burst("gemini", 180)
         except Exception:
             pass
         try:
             from metrics import _ALERT_THRESHOLDS as _at
             _wai_threshold = int(_at.get("workers_ai_429_burst_threshold", 5))
+            _groq_threshold = int(_at.get("groq_429_burst_threshold", 5))
+            _gemini_threshold = int(_at.get("gemini_429_burst_threshold", 5))
         except Exception:
             pass
 
@@ -4794,6 +4808,18 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
                 "burst_180s": _wai_burst_180,
                 "alert_threshold": _wai_threshold,
                 "throttled": _wai_burst_60 >= _wai_threshold,
+            },
+            "groq_throttle": {
+                "burst_60s": _groq_burst_60,
+                "burst_180s": _groq_burst_180,
+                "alert_threshold": _groq_threshold,
+                "throttled": _groq_burst_60 >= _groq_threshold,
+            },
+            "gemini_throttle": {
+                "burst_60s": _gemini_burst_60,
+                "burst_180s": _gemini_burst_180,
+                "alert_threshold": _gemini_threshold,
+                "throttled": _gemini_burst_60 >= _gemini_threshold,
             },
         }
         _metrics_cache["data"] = result

@@ -969,3 +969,158 @@ class TestGeminiMark429Integration:
         _run(_check())
         dispatch_mock.assert_awaited_once()
         assert dispatch_mock.await_args.args[0] == "gemini_429_burst"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# E. End-to-end alerting loop tests for Groq and Gemini (Task #86)
+#
+# Each test drives a real _alerting_loop iteration (not an inlined copy) by:
+#   1. Patching asyncio.sleep so the startup 60s sleep is instant and the
+#      loop-end 120s sleep raises CancelledError to stop after one pass.
+#   2. Patching get_provider_429_burst to return a controlled burst count.
+#   3. Patching _dispatch_alert to a spy AsyncMock.
+#   4. Patching every other I/O call in the loop body to no-ops so the test
+#      runs in < 1 ms without a live DB or Redis.
+#
+# This catches regressions where the alert_type string or the threshold key
+# name is changed without updating the loop — exactly the gap the code
+# reviewer flagged for checks #9 and #10.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _make_alerting_loop_patches(provider_bursts: dict, *, threshold: int = 5):
+    """Return a context manager that patches the minimum set of
+    _alerting_loop dependencies so one iteration can run in-process.
+
+    *provider_bursts* maps provider name → burst count returned by
+    get_provider_429_burst for that provider; unlisted providers return 0.
+    """
+    import contextlib
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    # asyncio.sleep: return immediately on first call (startup sleep),
+    # raise CancelledError on second call (end-of-loop sleep) to exit.
+    _sleep_call_count = {"n": 0}
+
+    async def _fake_sleep(_duration):
+        _sleep_call_count["n"] += 1
+        if _sleep_call_count["n"] >= 2:
+            raise asyncio.CancelledError
+
+    def _burst_side_effect(provider, *_args, **_kwargs):
+        return provider_bursts.get(provider, 0)
+
+    thresholds = {
+        "workers_ai_429_burst_threshold": threshold,
+        "groq_429_burst_threshold":       threshold,
+        "gemini_429_burst_threshold":      threshold,
+        # keep other checks silent by setting thresholds very high
+        "error_rate_pct":         999,
+        "latency_p95_ms":         999_999,
+        "spoof_rpm":              999_999,
+        "fallback_rate_pct":      999,
+        "collection_growth_per_day": 999_999,
+        "assamese_refresh_stale_seconds": 0,
+        "credit_deduct_fallback_per_min": 0,
+        "cf_access_silent_lockout_hours": 0,
+    }
+
+    db_mock = MagicMock()
+    db_mock.collection_size_history.find = MagicMock(
+        return_value=MagicMock(to_list=AsyncMock(return_value=[]))
+    )
+
+    @contextlib.contextmanager
+    def _ctx():
+        with (
+            patch("asyncio.sleep", side_effect=_fake_sleep),
+            patch.object(metrics_mod, "_ALERT_THRESHOLDS", dict(thresholds)),
+            patch("llm.get_provider_429_burst", side_effect=_burst_side_effect),
+            patch("llm._PROVIDER_429_BURST_WINDOW_S", 180),
+            patch.object(metrics_mod, "_load_alert_settings", AsyncMock()),
+            patch.object(metrics_mod, "_auto_expire_alerts",  AsyncMock()),
+            patch.object(metrics_mod, "db", db_mock),
+        ):
+            yield
+
+    return _ctx
+
+
+async def _run_one_alerting_loop_iteration(provider_bursts: dict,
+                                           threshold: int = 5) -> list[str]:
+    """Run _alerting_loop until CancelledError, collect dispatched alert types."""
+    dispatched: list[str] = []
+
+    async def _spy_dispatch(alert_type, *_a, **_kw):
+        dispatched.append(alert_type)
+
+    ctx = _make_alerting_loop_patches(provider_bursts, threshold=threshold)
+    with ctx():
+        with patch.object(metrics_mod, "_dispatch_alert", side_effect=_spy_dispatch):
+            try:
+                await metrics_mod._alerting_loop()
+            except asyncio.CancelledError:
+                pass
+
+    return dispatched
+
+
+class TestGroqGeminiAlertingLoop:
+    """End-to-end async tests: patch asyncio.sleep, drive a real
+    _alerting_loop iteration, verify the dispatched alert_type string
+    for Groq (check #9) and Gemini (check #10)."""
+
+    def test_groq_alert_loop_fires_correct_alert_type_at_threshold(self):
+        """burst=threshold → loop must dispatch 'groq_429_burst'."""
+        dispatched = _run(_run_one_alerting_loop_iteration({"groq": 5}, threshold=5))
+        assert "groq_429_burst" in dispatched, (
+            f"expected 'groq_429_burst' in dispatched alerts; got {dispatched}"
+        )
+
+    def test_groq_alert_loop_fires_correct_alert_type_above_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration({"groq": 12}, threshold=5))
+        assert "groq_429_burst" in dispatched
+
+    def test_groq_alert_loop_silent_below_threshold(self):
+        """burst < threshold → loop must NOT dispatch 'groq_429_burst'."""
+        dispatched = _run(_run_one_alerting_loop_iteration({"groq": 4}, threshold=5))
+        assert "groq_429_burst" not in dispatched
+
+    def test_groq_alert_loop_silent_when_threshold_zero(self):
+        """threshold=0 disables the check — no dispatch even at burst=100."""
+        dispatched = _run(_run_one_alerting_loop_iteration({"groq": 100}, threshold=0))
+        assert "groq_429_burst" not in dispatched
+
+    def test_gemini_alert_loop_fires_correct_alert_type_at_threshold(self):
+        """burst=threshold → loop must dispatch 'gemini_429_burst'."""
+        dispatched = _run(_run_one_alerting_loop_iteration({"gemini": 5}, threshold=5))
+        assert "gemini_429_burst" in dispatched, (
+            f"expected 'gemini_429_burst' in dispatched alerts; got {dispatched}"
+        )
+
+    def test_gemini_alert_loop_fires_correct_alert_type_above_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration({"gemini": 9}, threshold=5))
+        assert "gemini_429_burst" in dispatched
+
+    def test_gemini_alert_loop_silent_below_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration({"gemini": 3}, threshold=5))
+        assert "gemini_429_burst" not in dispatched
+
+    def test_gemini_alert_loop_silent_when_threshold_zero(self):
+        dispatched = _run(_run_one_alerting_loop_iteration({"gemini": 100}, threshold=0))
+        assert "gemini_429_burst" not in dispatched
+
+    def test_both_groq_and_gemini_fire_in_same_iteration(self):
+        """Both providers throttled simultaneously → both alerts dispatched."""
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"groq": 7, "gemini": 6}, threshold=5
+        ))
+        assert "groq_429_burst" in dispatched
+        assert "gemini_429_burst" in dispatched
+
+    def test_workers_ai_does_not_fire_when_only_groq_is_throttled(self):
+        """Groq burst must not pollute the Workers AI counter in the same iteration."""
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"groq": 10, "workers-ai": 0}, threshold=5
+        ))
+        assert "groq_429_burst" in dispatched
+        assert "workers_ai_429_burst" not in dispatched
