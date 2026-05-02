@@ -1,6 +1,6 @@
 # Crawlability Runbook — Syrabit.ai
 
-Last updated: 2026-05-02 (Task #259)
+Last updated: 2026-05-02 (Task #259, #262)
 
 This document covers the one-time and recurring steps needed to keep
 Syrabit.ai fully crawlable by Google and Bing, and to distinguish real
@@ -176,21 +176,21 @@ bot-traffic dashboards with a single filter.
 
 ---
 
-## 9. GSC API Service Account Setup (for nightly smoke — Task #262)
+## 8. GSC API Service Account Setup (for nightly smoke — Task #262)
 
 The nightly smoke script can query the Google Search Console Sitemaps API to
 assert that the total indexed URL count has not dropped below a configured
 floor. This section covers how to create the service account and wire the
 credential into CI.
 
-### 9a. Create a GCP project and enable the Search Console API
+### 8a. Create a GCP project and enable the Search Console API
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and
    create a new project (or reuse an existing one), e.g. `syrabit-gsc-smoke`.
 2. In the project, go to **APIs & Services → Library** and search for
    **Google Search Console API**. Click **Enable**.
 
-### 9b. Create a service account
+### 8b. Create a service account
 
 1. Go to **APIs & Services → Credentials → Create Credentials →
    Service account**.
@@ -199,7 +199,7 @@ credential into CI.
 3. Click **Done**, then open the service account and go to **Keys →
    Add key → Create new key → JSON**. A `.json` file will download.
 
-### 9c. Grant the service account read access in GSC
+### 8c. Grant the service account read access in GSC
 
 1. Go to [search.google.com/search-console](https://search.google.com/search-console)
    → syrabit.ai property → **Settings → Users and permissions**.
@@ -207,7 +207,7 @@ credential into CI.
    `gsc-nightly-smoke@syrabit-gsc-smoke.iam.gserviceaccount.com`), and
    set permission to **Restricted** (read-only). Save.
 
-### 9d. Add the credential to CI
+### 8d. Add the credential to CI
 
 The smoke script expects the full JSON text (not just the file path) in
 `GSC_SERVICE_ACCOUNT_JSON`. In GitHub Actions, store it as a repository
@@ -218,6 +218,9 @@ env:
   GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
   GSC_SITE_URL: https://syrabit.ai/
   GSC_INDEXED_URL_FLOOR: "50"
+  GSC_DROP_THRESHOLD_PCT: "10"
+  UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+  UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
 ```
 
 To store the secret locally for manual test runs:
@@ -226,12 +229,18 @@ export GSC_SERVICE_ACCOUNT_JSON=$(cat /path/to/syrabit-gsc-smoke-xxxx.json)
 node artifacts/syrabit/scripts/nightly-smoke.js
 ```
 
-### 9e. Tune the floor threshold
+### 8e. Tune the floor and delta thresholds
 
 `GSC_INDEXED_URL_FLOOR` (default `50`) is the minimum total indexed URL
 count summed across all sitemaps. A drop below this triggers a hard failure.
 
-Recommended thresholds:
+`GSC_DROP_THRESHOLD_PCT` (default `10`) is the maximum allowed day-over-day
+percentage drop. A drop from 1 000 → 850 URLs is a 15% drop and would fail
+even if both values are above the floor. The previous count is stored in
+Upstash Redis under the key `gsc_indexed_count`. Delta checking is skipped
+(with an info log) when `UPSTASH_REDIS_REST_URL`/`TOKEN` are not set.
+
+Recommended floor thresholds:
 | Stage | Floor |
 |-------|-------|
 | < 200 content pages | `50` |
@@ -243,7 +252,7 @@ sitemap's `submitted` and `indexed` counts to help calibrate.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
