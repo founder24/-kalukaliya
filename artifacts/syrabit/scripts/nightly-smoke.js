@@ -19,6 +19,16 @@
  *   CLOUDFLARE_ZONE_ID    — syrabit.ai zone (5b8c97df4431491dc7f60ea72fb61871)
  *   CLOUDFLARE_ACCOUNT_ID — Syrabit account (d66e40eac539fff1db270fddf384a5ec)
  *
+ * Optional env (Task #262 — GSC Coverage check):
+ *   GSC_SERVICE_ACCOUNT_JSON — Full JSON text of a Google service account key
+ *                              that has "Search Console API" read access on the
+ *                              syrabit.ai property.  When unset the GSC section
+ *                              degrades to a warning (non-blocking).
+ *                              See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
+ *   GSC_SITE_URL             — GSC property URL (default: https://syrabit.ai/)
+ *   GSC_INDEXED_URL_FLOOR    — Minimum indexed URL count before alerting
+ *                              (default: 50).  Raise when the sitemap grows.
+ *
  * Exit codes:
  *   0  — all assertions passed
  *   1  — one or more assertions failed (details printed to stdout)
@@ -736,6 +746,138 @@ async function main() {
       } else {
         failures.push(`Sitemap HEAD ${path}: fetch failed — ${msg}`);
         console.log(`  ✗  ${path}  fetch error: ${msg}`);
+      }
+    }
+  }
+
+  // ── Task #262: Google Search Console Coverage check ──────────────────
+  // Uses the GSC Webmasters API (service account JWT auth) to read the
+  // Sitemaps report and assert that the total indexed URL count across all
+  // submitted sitemaps is > GSC_INDEXED_URL_FLOOR.  Degrades to a warning
+  // when GSC_SERVICE_ACCOUNT_JSON is not set so CI runs without a credential
+  // are non-blocking.  See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
+  {
+    const GSC_SA_JSON         = process.env.GSC_SERVICE_ACCOUNT_JSON || '';
+    const GSC_SITE_URL        = process.env.GSC_SITE_URL        || 'https://syrabit.ai/';
+    const GSC_INDEXED_FLOOR   = parseInt(process.env.GSC_INDEXED_URL_FLOOR || '50', 10);
+
+    console.log('\nTask #262 — GSC Coverage report check:');
+
+    if (!GSC_SA_JSON) {
+      warn(
+        'GSC Coverage check',
+        'GSC_SERVICE_ACCOUNT_JSON not set — skipping. ' +
+        'Set the env var to activate nightly indexing regression detection ' +
+        '(see CRAWLABILITY_RUNBOOK.md § 9).',
+      );
+    } else {
+      try {
+        // ── Step 1: Parse service account creds ──────────────────────────
+        let saCreds;
+        try {
+          saCreds = JSON.parse(GSC_SA_JSON);
+        } catch (e) {
+          throw new Error(`GSC_SERVICE_ACCOUNT_JSON is not valid JSON: ${e.message}`);
+        }
+        const { client_email, private_key } = saCreds;
+        if (!client_email || !private_key) {
+          throw new Error('GSC_SERVICE_ACCOUNT_JSON is missing client_email or private_key');
+        }
+
+        // ── Step 2: Build a signed JWT for the OAuth2 token exchange ─────
+        const nodeCrypto = await import('node:crypto');
+        const now        = Math.floor(Date.now() / 1000);
+        const jwtHeader  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+        const jwtClaims  = Buffer.from(JSON.stringify({
+          iss:   client_email,
+          scope: 'https://www.googleapis.com/auth/webmasters.readonly',
+          aud:   'https://oauth2.googleapis.com/token',
+          iat:   now,
+          exp:   now + 3600,
+        })).toString('base64url');
+        const sigInput = `${jwtHeader}.${jwtClaims}`;
+        const sig      = nodeCrypto.createSign('RSA-SHA256').update(sigInput).sign(private_key, 'base64url');
+        const signedJwt = `${sigInput}.${sig}`;
+
+        // ── Step 3: Exchange JWT for an access token ──────────────────────
+        const tokenRes  = await fetch('https://oauth2.googleapis.com/token', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body:    new URLSearchParams({
+            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            assertion:  signedJwt,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const tokenJson = await tokenRes.json();
+        if (!tokenJson.access_token) {
+          throw new Error(`GSC token exchange failed (HTTP ${tokenRes.status}): ${JSON.stringify(tokenJson)}`);
+        }
+
+        // ── Step 4: Fetch the Sitemaps report for the property ────────────
+        const siteEncoded = encodeURIComponent(GSC_SITE_URL);
+        const sitemapsRes = await fetch(
+          `https://www.googleapis.com/webmasters/v3/sites/${siteEncoded}/sitemaps`,
+          {
+            headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+            signal:  AbortSignal.timeout(15000),
+          },
+        );
+        const sitemapsJson = await sitemapsRes.json();
+
+        if (sitemapsRes.status === 403) {
+          warn(
+            'GSC Coverage check',
+            `403 Forbidden — service account "${client_email}" needs read access ` +
+            `on property "${GSC_SITE_URL}". Grant "Restricted" access via ` +
+            'GSC → Settings → Users and permissions, then re-run.',
+          );
+        } else if (!sitemapsRes.ok) {
+          throw new Error(`GSC Sitemaps API HTTP ${sitemapsRes.status}: ${JSON.stringify(sitemapsJson)}`);
+        } else {
+          const sitemaps = sitemapsJson.sitemap || [];
+          if (sitemaps.length === 0) {
+            warn(
+              'GSC Coverage check',
+              `No sitemaps found on property "${GSC_SITE_URL}" — ` +
+              'submit sitemap-index.xml via GSC dashboard (CRAWLABILITY_RUNBOOK.md § 2)',
+            );
+          } else {
+            // Sum indexed counts across all sitemaps (parent index rows often
+            // report 0; child sitemaps carry the real counts).
+            let totalIndexed   = 0;
+            let totalSubmitted = 0;
+            for (const sm of sitemaps) {
+              for (const c of (sm.contents || [])) {
+                totalIndexed   += parseInt(c.indexed   || '0', 10);
+                totalSubmitted += parseInt(c.submitted || '0', 10);
+              }
+            }
+            const mark = totalIndexed >= GSC_INDEXED_FLOOR ? '✓' : '✗';
+            console.log(`  ${mark}  Indexed URLs: ${totalIndexed} / submitted: ${totalSubmitted}  (floor: ${GSC_INDEXED_FLOOR})`);
+            if (totalIndexed < GSC_INDEXED_FLOOR) {
+              failures.push(
+                `GSC Coverage: indexed URL count ${totalIndexed} is below floor ${GSC_INDEXED_FLOOR} ` +
+                `— possible indexing regression; check GSC Coverage report for "${GSC_SITE_URL}"`,
+              );
+            }
+            // Per-sitemap detail for diagnosis
+            for (const sm of sitemaps) {
+              const smIdx = (sm.contents || []).reduce((s, c) => s + parseInt(c.indexed   || '0', 10), 0);
+              const smSub = (sm.contents || []).reduce((s, c) => s + parseInt(c.submitted || '0', 10), 0);
+              const smErr = parseInt(sm.errors || '0', 10);
+              const errNote = smErr > 0 ? `  errors=${smErr}` : '';
+              console.log(`       ${sm.path}: submitted=${smSub} indexed=${smIdx}${errNote}`);
+            }
+          }
+        }
+      } catch (e) {
+        const msg = e.message || String(e);
+        if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) {
+          warn('GSC Coverage check', 'request timed out — GSC API may be unreachable from this runner; re-run manually');
+        } else {
+          warn('GSC Coverage check', `unexpected error — ${msg}. Check credential format and network access.`);
+        }
       }
     }
   }

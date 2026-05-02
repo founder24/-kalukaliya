@@ -176,6 +176,73 @@ bot-traffic dashboards with a single filter.
 
 ---
 
+## 9. GSC API Service Account Setup (for nightly smoke — Task #262)
+
+The nightly smoke script can query the Google Search Console Sitemaps API to
+assert that the total indexed URL count has not dropped below a configured
+floor. This section covers how to create the service account and wire the
+credential into CI.
+
+### 9a. Create a GCP project and enable the Search Console API
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and
+   create a new project (or reuse an existing one), e.g. `syrabit-gsc-smoke`.
+2. In the project, go to **APIs & Services → Library** and search for
+   **Google Search Console API**. Click **Enable**.
+
+### 9b. Create a service account
+
+1. Go to **APIs & Services → Credentials → Create Credentials →
+   Service account**.
+2. Name it `gsc-nightly-smoke`, description: "Nightly smoke read access to
+   GSC Sitemaps API". No role needed at project level.
+3. Click **Done**, then open the service account and go to **Keys →
+   Add key → Create new key → JSON**. A `.json` file will download.
+
+### 9c. Grant the service account read access in GSC
+
+1. Go to [search.google.com/search-console](https://search.google.com/search-console)
+   → syrabit.ai property → **Settings → Users and permissions**.
+2. Click **Add user**, enter the service account email (looks like
+   `gsc-nightly-smoke@syrabit-gsc-smoke.iam.gserviceaccount.com`), and
+   set permission to **Restricted** (read-only). Save.
+
+### 9d. Add the credential to CI
+
+The smoke script expects the full JSON text (not just the file path) in
+`GSC_SERVICE_ACCOUNT_JSON`. In GitHub Actions, store it as a repository
+secret and pass it as an env var:
+
+```yaml
+env:
+  GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+  GSC_SITE_URL: https://syrabit.ai/
+  GSC_INDEXED_URL_FLOOR: "50"
+```
+
+To store the secret locally for manual test runs:
+```bash
+export GSC_SERVICE_ACCOUNT_JSON=$(cat /path/to/syrabit-gsc-smoke-xxxx.json)
+node artifacts/syrabit/scripts/nightly-smoke.js
+```
+
+### 9e. Tune the floor threshold
+
+`GSC_INDEXED_URL_FLOOR` (default `50`) is the minimum total indexed URL
+count summed across all sitemaps. A drop below this triggers a hard failure.
+
+Recommended thresholds:
+| Stage | Floor |
+|-------|-------|
+| < 200 content pages | `50` |
+| 200–2 000 pages | `200` |
+| > 2 000 pages | `500` |
+
+Raise the floor quarterly as content grows. The smoke run prints each
+sitemap's `submitted` and `indexed` counts to help calibrate.
+
+---
+
 ## 8. Troubleshooting
 
 | Symptom | Likely cause | Fix |
