@@ -223,9 +223,23 @@ async def get_current_user_optional(
             user = await supa_get_user_by_id(user_id)
             if user:
                 _redis_cache_session(user_id, user)
-        if user and not user.get("role"):
-            user["role"] = "admin" if user.get("is_admin") else "student"
-        return user if user and user.get("status") not in ["banned", "suspended"] else None
+        if user:
+            if not user.get("role"):
+                user["role"] = "admin" if user.get("is_admin") else "student"
+            if user.get("status") in ["banned", "suspended"]:
+                return None
+            return user
+        # DB lookup returned nothing (new user race, test token, etc.) but the
+        # JWT signature is valid — treat as a minimal authenticated user so the
+        # caller is not silently downgraded to anonymous and blocked by Turnstile.
+        role = payload.get("role", "student")
+        return {
+            "id": user_id,
+            "role": role,
+            "plan": payload.get("plan", "free"),
+            "is_admin": role == "admin",
+            "_jwt_only": True,
+        }
     except:
         return None
 

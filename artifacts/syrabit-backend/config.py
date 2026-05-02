@@ -528,7 +528,20 @@ _EXPLICIT_PROVIDER = (
 ).lower()
 _AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID', '').strip()
 _AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '').strip()
-_AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1').strip()
+_AWS_REGION = os.environ.get('AWS_REGION', os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')).strip()
+
+# ── Azure Document Intelligence (OCR fallback) ─────────────────────────────────
+# Set AZURE_DOCUMENT_INTELLIGENCE_KEY and AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+# in Replit Secrets / Railway env.  When unset the Textract↔Azure rotation
+# silently skips Azure and AWS Textract handles every call.
+AZURE_DOC_INTEL_KEY = os.environ.get(
+    'AZURE_DOCUMENT_INTELLIGENCE_KEY',
+    os.environ.get('AZURE_FORM_RECOGNIZER_KEY', '')
+).strip()
+AZURE_DOC_INTEL_ENDPOINT = os.environ.get(
+    'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT',
+    os.environ.get('AZURE_FORM_RECOGNIZER_ENDPOINT', '')
+).strip()
 
 # ── Bedrock feature-service proxy (Task #256) ─────────────────────────────────
 # The bedrock-proxy Cloudflare Worker signs AWS SigV4 requests for services

@@ -1,0 +1,29 @@
+Yes — **AWS and Azure can both be used for OCR**, and each has a strong, production‑ready service:
+
+### 1. AWS for OCR
+
+- **Service**: **Amazon Textract**  
+  - Extracts **text, handwriting, tables, and forms** from PDFs, images, and scanned documents. [sparkco](https://sparkco.ai/blog/aws-textract-vs-azure-document-intelligence-a-deep-dive)
+  - Optimized for **structured documents** like invoices, forms, and receipts. [velocis](https://www.velocis.in/blog/decoding-ocr)
+- **Use‑case fit**:  
+  - If you’re already on AWS and want **high‑accuracy structured‑data OCR** (invoices, forms, exam‑sheet‑style layouts), **Textract is the natural choice**. [aws.amazon](https://aws.amazon.com/textract/)
+
+### 2. Azure for OCR
+
+- **Service**: **Azure AI Document Intelligence (formerly Form Recognizer / Computer Vision OCR)**  
+  - Does **OCR + structured‑data extraction** from forms, invoices, receipts, and documents. [languageline](https://www.languageline.com/en-gb/blog/enterprise-machine-translation-showdown-azure-and-aws-compared-for-scale-cost-and-capability)
+  - Strong **multilingual support** and good quality on messy scans. [ironsoftware](https://ironsoftware.com/csharp/ocr/blog/compare-to-other-components/aws-ocr-vs-azure-ocr/)
+- **Use‑case fit**:  
+  - If you’re using **Azure for Startups / cloud stack**, and want **form‑style + general‑OCR**, **Azure Document Intelligence** is the best option. [cazton](https://cazton.com/blogs/technical/form-recognition-azure-aws-gcp)
+
+### 3. How this fits your stack
+
+- You can plug **Textract** or **Azure Document Intelligence** into your RAG / pipeline as:
+  - A **document‑ingest layer** that turns scanned textbook‑pages / answer‑sheets into **searchable‑text + structured‑data**.  
+- Cost‑wise:
+  - Both are **pay‑per‑use / credit‑friendly**:  
+    - Use **AWS Activate / Azure for Startups credits** to absorb OCR‑costs during ingest / onboarding. [freecodecamp](https://www.freecodecamp.org/news/how-to-get-github-pro-and-replit-hacker-for-free-as-a-student/)
+
+So for Syrabit‑style work (Assam‑board‑style scans, answer‑sheets, etc.):
+
+- **Either AWS Textract or Azure Document Intelligence** is **perfect**; choose the one that **matches your main cloud** (AWS vs Azure) and credits setup. [cazton](https://cazton.com/blogs/technical/form-recognition-azure-aws-gcp)

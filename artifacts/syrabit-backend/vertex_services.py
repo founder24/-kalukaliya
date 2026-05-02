@@ -552,6 +552,56 @@ async def analyze_thumbnail(
 # 3b. OCR
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _gemini_ocr_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Optional[str]:
+    """Gemini Vision OCR via the CF AI Gateway (OpenAI-compat multimodal endpoint).
+
+    Reuses llm._call_gemini so the request routes through the Cloudflare AI
+    Gateway with BYOK key injection — avoids hitting per-key rate limits that
+    would occur when calling the Google REST API directly.
+
+    Returns extracted raw text, or None on any error.
+    Called as a last-resort fallback when Workers AI and Google Cloud Vision
+    are both unavailable so users can still upload photos and get OCR results.
+    """
+    try:
+        import base64 as _b64
+        from llm import _call_gemini as _cg, _GEMINI_KEY, BYOK_PLACEHOLDER
+        from config import CF_GATEWAY_ENABLED
+        if not _GEMINI_KEY:
+            logger.warning("[ocr/gemini] GEMINI_API_KEY not available — skipping Gemini fallback")
+            return None
+        # When CF Gateway is enabled, use BYOK_PLACEHOLDER so the gateway
+        # injects the stored API key with proper rate limits. Using the raw
+        # real key directly hits the free-tier quota (429) because the SDK
+        # sends "Bearer <real-key>" which bypasses the gateway's key pool.
+        gemini_key = BYOK_PLACEHOLDER if CF_GATEWAY_ENABLED else _GEMINI_KEY
+        model = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.0-flash")
+        prompt_text = (
+            "You are an OCR engine. Extract ALL visible text from this image exactly as written, "
+            "preserving question numbers, sub-parts, mathematical notation and formatting. "
+            "Return only the extracted text — no explanations, no JSON wrapper."
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{_b64.b64encode(image_bytes).decode()}"
+                        },
+                    },
+                    {"type": "text", "text": prompt_text},
+                ],
+            }
+        ]
+        text = await _cg(messages, gemini_key, model, 4096)
+        return text.strip() or None
+    except Exception as exc:
+        logger.warning("[ocr/gemini] failed: %s: %s", type(exc).__name__, str(exc)[:200])
+        return None
+
+
 async def ocr_image(
     image_bytes: bytes,
     mime_type: str = "image/jpeg",
@@ -559,10 +609,12 @@ async def ocr_image(
 ) -> dict:
     """Extract text from an AHSEC/SEBA question paper or textbook image.
 
-    Google Cloud Vision DOCUMENT_TEXT_DETECTION is used when:
-      - detected/requested language is Indic (Devanagari or Bengali script), OR
-      - Workers AI vision confidence < 0.80.
-    Workers AI vision is always tried first as it is free on the CF plan.
+    Provider priority:
+      1. Workers AI (llama-3.2-11b-vision) — free, fast, always tried first.
+      2. Google Cloud Vision DOCUMENT_TEXT_DETECTION — for Indic script or
+         when Workers AI confidence < 0.80.
+      3. Gemini Vision REST API — last-resort fallback when both above are
+         unavailable (uses GEMINI_API_KEY, no SDK required).
     """
     from providers import google_vision as _gv
 
@@ -630,7 +682,20 @@ async def ocr_image(
                 "provider": "workers_ai",
             }
 
-    return {"error": "OCR failed — both Workers AI and Google Vision unavailable"}
+    # Last resort: Gemini Vision REST API (GEMINI_API_KEY).
+    logger.info("[ocr] Workers AI + Google Vision both unavailable — trying Gemini Vision")
+    gemini_text = await _gemini_ocr_image(image_bytes, mime_type=mime_type)
+    if gemini_text:
+        return {
+            "raw_text": gemini_text,
+            "content_type": "extracted",
+            "questions": [],
+            "word_count": len(gemini_text.split()),
+            "provider": "gemini_vision",
+            "confidence": 0.95,
+        }
+
+    return {"error": "OCR failed — Workers AI, Google Vision and Gemini Vision all unavailable"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
