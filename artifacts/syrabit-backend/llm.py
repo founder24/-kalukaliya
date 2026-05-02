@@ -1403,7 +1403,10 @@ def _get_provider_saturation(provider_name: str) -> float:
         return max(ratios) if ratios else 0.0
     # For other providers, use the 429 burst counter as a proxy:
     # ≥ 5 bursts in 60s → treat as saturated (0.85+).
-    burst = get_provider_429_burst_inprocess(canonical, window_seconds=60)
+    # NOTE: look up by the original provider_name first (azure_openai, bedrock, gemini, groq)
+    # because _PROVIDER_429_WINDOWS keys use provider_name, not the canonical string.
+    burst_key = provider_name if provider_name in _PROVIDER_429_WINDOWS else canonical
+    burst = get_provider_429_burst_inprocess(burst_key, window_seconds=60)
     if burst >= 5:
         return 0.90
     if burst >= 2:
