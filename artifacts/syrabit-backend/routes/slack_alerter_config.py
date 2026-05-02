@@ -54,6 +54,11 @@ UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK_ENV = "UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK"
 # scope; migrating it here finishes the consolidation so the env-var
 # name lives in exactly one place across the whole codebase.
 SLACK_TRUSTPILOT_WEBHOOK_ENV = "SLACK_TRUSTPILOT_WEBHOOK_URL"
+# Task #258 — CF Gateway slug smoke-test alerter
+# (``routes.admin_credits``) fires when any of the 15 feature-key
+# provider slugs returns non-200 or a connection error during the
+# /admin/credits/smoke-test probe.
+SMOKE_TEST_SLACK_WEBHOOK_ENV = "SMOKE_TEST_SLACK_WEBHOOK"
 
 
 class SlackAlerterConfig(TypedDict):
