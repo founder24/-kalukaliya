@@ -472,6 +472,20 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     }
   }, [adminToken]);
 
+  // Task #255 — GCP credit burn panel row.
+  const [gcpCredits, setGcpCredits] = useState(null);
+  const [gcpCreditsLoading, setGcpCreditsLoading] = useState(false);
+
+  const loadGcpCredits = useCallback(() => {
+    setGcpCreditsLoading(true);
+    axios.get(`${API_BASE}/admin/vertex/gcp-credits`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setGcpCredits(r.data))
+      .catch(() => setGcpCredits({ _error: true }))
+      .finally(() => setGcpCreditsLoading(false));
+  }, [adminToken]);
+
   // Task #918 — paged-on-call audit log per pill, sourced from
   //   * /admin/health/edge-proxy-deploy/cron/alert-history
   //   * /admin/health/cf-waf-drift/cron/alert-history
@@ -591,6 +605,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     // Redis-caches the artifact summary per run_id for 4 hours so the
     // artifact ZIP is not re-downloaded on every poll.
     loadCfAudit();
+    // Task #255 — GCP credit burn panel row.
+    loadGcpCredits();
     const id = setInterval(() => {
       loadTpJsonldReport();
       loadTpJsonldHistory();
@@ -606,6 +622,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadSlackWebhookMissingAlertStates();
       loadSlackWebhookMissingAlertHistories();
       loadCfAudit();
+      loadGcpCredits();
     }, 60000);
     return () => clearInterval(id);
   }, [adminToken, loadTpJsonldReport, loadTpJsonldHistory,
@@ -614,7 +631,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadEdgeProxyDeployCronAlertState, loadCfDriftCronAlertState,
       loadTpCronAlertState, loadUnifiedLogsCfPullCronAlertState,
       loadSlackWebhookMissingAlertStates,
-      loadSlackWebhookMissingAlertHistories, loadCfAudit]);
+      loadSlackWebhookMissingAlertHistories, loadCfAudit, loadGcpCredits]);
 
   // Task #609 — managed AI response cache stats + admin purge controls.
   const [aiCacheStats, setAiCacheStats] = useState(null);
@@ -2933,6 +2950,148 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           loading={cfAuditLoading}
           onRefresh={loadCfAudit}
         />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="GCP Credit Panel">
+        {(() => {
+          const gc = gcpCredits && !gcpCredits._error ? gcpCredits : null;
+          const saConfigured = gc?.service_account_configured ?? false;
+          const creditsLow = gc?.credits_low ?? false;
+          const liveSpend = gc?.live_spend_data ?? false;
+          const liveBudget = gc?.live_budget_data ?? false;
+          const isUnconfigured = !gcpCreditsLoading && (!gc || !saConfigured);
+          const tileCls = creditsLow
+            ? 'bg-red-50 border-red-200'
+            : isUnconfigured
+              ? 'bg-gray-50 border-gray-200'
+              : 'bg-emerald-50 border-emerald-200';
+          const headerCls = creditsLow
+            ? 'text-red-600'
+            : isUnconfigured
+              ? 'text-gray-500'
+              : 'text-emerald-600';
+          return (
+            <div className={`rounded-2xl p-4 border ${tileCls}`} data-testid="gcp-credit-panel">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  creditsLow ? 'bg-red-100' : isUnconfigured ? 'bg-gray-100' : 'bg-emerald-100'
+                }`}>
+                  <DollarSign size={17} className={creditsLow ? 'text-red-500' : isUnconfigured ? 'text-gray-400' : 'text-emerald-500'} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className={`text-sm font-semibold ${headerCls}`} data-testid="gcp-credit-heading">
+                      Google Cloud Credits
+                    </p>
+                    {creditsLow && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide" data-testid="gcp-credits-low-badge">
+                        Credits Low
+                      </span>
+                    )}
+                    {gc && (liveSpend || liveBudget) && (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        liveSpend
+                          ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                          : 'bg-amber-50 text-amber-600 border-amber-200'
+                      }`} data-testid="gcp-data-source-badge">
+                        {liveSpend ? 'Live · BigQuery' : 'Live · Budget API'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {isUnconfigured
+                      ? 'GCP service account not configured'
+                      : gc?.billing_account_name
+                        ? gc.billing_account_name
+                        : gc?.billing_account_id
+                          ? `Account: ${gc.billing_account_id}`
+                          : 'GCP Billing'}
+                  </p>
+                </div>
+                <button
+                  onClick={loadGcpCredits}
+                  disabled={gcpCreditsLoading}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                  data-testid="button-refresh-gcp-credits"
+                  title="Refresh GCP credit data"
+                >
+                  <RefreshCw size={13} className={gcpCreditsLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {gcpCreditsLoading && !gc && (
+                <div className="flex justify-center py-4">
+                  <RefreshCw size={16} className="animate-spin text-gray-300" />
+                </div>
+              )}
+
+              {gcpCredits?._error && (
+                <p className="text-xs text-red-500 mt-1">Failed to load GCP credit data — check backend logs.</p>
+              )}
+
+              {isUnconfigured && !gcpCredits?._error && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-xs text-gray-600 font-medium">Setup instructions:</p>
+                  <ol className="space-y-1">
+                    {[
+                      'Create a GCP service account with roles/billing.viewer',
+                      'Download its JSON key and set GOOGLE_APPLICATION_CREDENTIALS_JSON in your env',
+                      'Set GOOGLE_BILLING_ACCOUNT_ID to enable live budget data',
+                      'Enable BigQuery Billing Export for real per-service spend figures',
+                    ].map((s, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-gray-500">
+                        <span className="w-4 h-4 rounded-full bg-blue-50 flex items-center justify-center text-[9px] font-bold text-blue-600 flex-shrink-0 mt-0.5">{i + 1}</span>
+                        {s}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {gc && saConfigured && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1">
+                  <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Grant Total</p>
+                    <p className="text-sm font-bold font-mono text-gray-900" data-testid="gcp-grant-usd">
+                      ${gc.grant_usd != null ? Number(gc.grant_usd).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Spend MTD</p>
+                    <p className={`text-sm font-bold font-mono ${creditsLow ? 'text-red-600' : 'text-gray-900'}`} data-testid="gcp-spend-mtd">
+                      ${gc.spend_mtd_usd != null ? Number(gc.spend_mtd_usd).toFixed(2) : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Remaining</p>
+                    <p className={`text-sm font-bold font-mono ${creditsLow ? 'text-red-600' : 'text-emerald-600'}`} data-testid="gcp-remaining">
+                      ${gc.estimated_remaining_usd != null ? Number(gc.estimated_remaining_usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Runway</p>
+                    <p className={`text-sm font-bold font-mono ${creditsLow ? 'text-red-600' : 'text-gray-900'}`} data-testid="gcp-runway">
+                      {gc.months_runway != null
+                        ? (gc.months_runway >= 999 ? '∞' : `${Number(gc.months_runway).toFixed(1)} mo`)
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {gc && gc.billing_alert_active && (
+                <div className="flex items-start gap-2 p-2 mt-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <span>GCP billing alert is active — a budget threshold has been breached.</span>
+                </div>
+              )}
+
+              {gc && gc.billing_api_error && (
+                <p className="text-[11px] text-amber-600 mt-2 font-mono break-all">{gc.billing_api_error}</p>
+              )}
+            </div>
+          );
+        })()}
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="Live Traffic Stats">
