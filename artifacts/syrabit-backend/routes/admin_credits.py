@@ -218,6 +218,91 @@ _PROVIDER_PROBE_SPECS: dict[str, dict] = {
     },
 }
 
+# ── Task #263: Cloudflare paid add-on migration status ────────────────────────
+# Static registry of the six paid CF add-ons that are being replaced with
+# startup-credit-covered alternatives (~$50/mo total).  Operators update
+# `status` here (and redeploy) as each migration completes.
+# Statuses: "pending" | "in_progress" | "complete"
+_CF_ADDON_ROWS: list[dict] = [
+    {
+        "service":           "Workers for Platforms",
+        "monthly_cost_usd":  25,
+        "migration_target":  "GCP Cloud Run (asia-south1)",
+        "credit_programme":  "Google Cloud for Startups",
+        "status":            "pending",
+        "notes":             (
+            "Dispatch logic in edge-proxy. Move tenant dispatch to Cloud Run; "
+            "cancel at CF dash → Workers & Pages → Plans."
+        ),
+        "runbook_anchor":    "step-5--workers-paid--workers-for-platforms-30mo",
+    },
+    {
+        "service":           "Workers Paid",
+        "monthly_cost_usd":  5,
+        "migration_target":  "GCP Cloud Run / AWS Lambda (compute-heavy workers) — free tier sufficient for remainder",
+        "credit_programme":  "Google Cloud for Startups / AWS Activate",
+        "status":            "pending",
+        "notes":             (
+            "Verify daily request count < 100k (free tier). Move email-worker "
+            "and bedrock-proxy to Cloud Run, then cancel."
+        ),
+        "runbook_anchor":    "step-5--workers-paid--workers-for-platforms-30mo",
+    },
+    {
+        "service":           "Argo Smart Routing",
+        "monthly_cost_usd":  5,
+        "migration_target":  "GCP Premium Tier network routing (already active)",
+        "credit_programme":  "Google Cloud for Startups",
+        "status":            "pending",
+        "notes":             (
+            "Quickest win. Disable Argo at CF dash → Speed → Optimization → Argo. "
+            "Monitor latency for 48h before confirming."
+        ),
+        "runbook_anchor":    "step-1--argo-smart-routing-quickest-win-5mo",
+    },
+    {
+        "service":           "Basic Load Balancing",
+        "monthly_cost_usd":  5,
+        "migration_target":  "GCP Global HTTPS LB + Route 53 health-check failover",
+        "credit_programme":  "Google Cloud for Startups / AWS Activate",
+        "status":            "pending",
+        "notes":             (
+            "Wire Route 53 failover record for api.syrabit.ai then cancel "
+            "CF LB pool at CF dash → Traffic → Load Balancing."
+        ),
+        "runbook_anchor":    "step-4--basic-load-balancing-5mo",
+    },
+    {
+        "service":           "Cache Reserve",
+        "monthly_cost_usd":  5,
+        "migration_target":  "GCP Cloud CDN (attached to existing Cloud Run LB)",
+        "credit_programme":  "Google Cloud for Startups",
+        "status":            "pending",
+        "notes":             (
+            "Enable Cloud CDN on the Cloud Run backend service; set Cache-Control "
+            "headers on API responses; cancel at CF dash → Caching → Cache Reserve."
+        ),
+        "runbook_anchor":    "step-2--cache-reserve-5mo",
+    },
+    {
+        "service":           "R2 Paid (syrabit-media)",
+        "monthly_cost_usd":  5,
+        "migration_target":  "GCP Cloud Storage (asia-south1)",
+        "credit_programme":  "Google Cloud for Startups",
+        "status":            "pending",
+        "notes":             (
+            "Create GCS bucket syrabit-media asia-south1; sync existing R2 objects; "
+            "update backend upload routes; cancel R2 Paid if monthly bill reaches $0."
+        ),
+        "runbook_anchor":    "step-3--r2-paid-5mo",
+    },
+]
+
+_CF_ADDON_RUNBOOK_URL = (
+    "https://github.com/syrabit/syrabit/blob/main/"
+    "artifacts/syrabit/docs/infra/startup-credits-migration.md"
+)
+
 _SMOKE_PROBE_TIMEOUT_S = 15.0   # per-provider request timeout
 _FEATURE_LANG: dict[str, str] = {
     "assamese_rag_chat": "as",
@@ -466,6 +551,47 @@ async def _post_smoke_slack_alert(failures: list[dict[str, Any]]) -> None:
 
 
 # ── Route handlers ────────────────────────────────────────────────────────────
+
+@router.get(
+    "/admin/credits/cf-addons",
+    summary="Cloudflare paid add-on migration status (Task #263)",
+    description=(
+        "Returns the list of paid Cloudflare add-ons being replaced by startup-credit-covered "
+        "alternatives. Each row shows the service, monthly cost saved, migration target, "
+        "credit programme, and current status (pending / in_progress / complete). "
+        "Total projected savings and per-status counts are included. "
+        "Operators update status in _CF_ADDON_ROWS in admin_credits.py and redeploy."
+    ),
+)
+async def admin_credits_cf_addons(
+    _admin: dict = Depends(get_admin_user),
+):
+    rows = _CF_ADDON_ROWS
+    total_monthly_savings = sum(
+        r["monthly_cost_usd"] for r in rows if r["status"] == "complete"
+    )
+    total_pending_savings = sum(
+        r["monthly_cost_usd"] for r in rows if r["status"] != "complete"
+    )
+    status_counts = {
+        "pending":     sum(1 for r in rows if r["status"] == "pending"),
+        "in_progress": sum(1 for r in rows if r["status"] == "in_progress"),
+        "complete":    sum(1 for r in rows if r["status"] == "complete"),
+    }
+    return {
+        "addons": rows,
+        "total_addons": len(rows),
+        "status_counts": status_counts,
+        "monthly_savings_realised_usd": total_monthly_savings,
+        "monthly_savings_pending_usd": total_pending_savings,
+        "runbook_url": _CF_ADDON_RUNBOOK_URL,
+        "note": (
+            "Update status in _CF_ADDON_ROWS in routes/admin_credits.py and redeploy "
+            "as each migration step completes. Full operator runbook: "
+            "artifacts/syrabit/docs/infra/startup-credits-migration.md"
+        ),
+    }
+
 
 @router.get(
     "/admin/credits/summary",

@@ -486,6 +486,20 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       .finally(() => setGcpCreditsLoading(false));
   }, [adminToken]);
 
+  // Task #263 — CF paid add-on migration status panel.
+  const [cfAddons, setCfAddons] = useState(null);
+  const [cfAddonsLoading, setCfAddonsLoading] = useState(false);
+
+  const loadCfAddons = useCallback(() => {
+    setCfAddonsLoading(true);
+    axios.get(`${API_BASE}/admin/credits/cf-addons`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setCfAddons(r.data))
+      .catch(() => setCfAddons({ _error: true }))
+      .finally(() => setCfAddonsLoading(false));
+  }, [adminToken]);
+
   // Task #918 — paged-on-call audit log per pill, sourced from
   //   * /admin/health/edge-proxy-deploy/cron/alert-history
   //   * /admin/health/cf-waf-drift/cron/alert-history
@@ -607,6 +621,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     loadCfAudit();
     // Task #255 — GCP credit burn panel row.
     loadGcpCredits();
+    // Task #263 — CF paid add-on migration status panel.
+    loadCfAddons();
     const id = setInterval(() => {
       loadTpJsonldReport();
       loadTpJsonldHistory();
@@ -623,6 +639,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadSlackWebhookMissingAlertHistories();
       loadCfAudit();
       loadGcpCredits();
+      loadCfAddons();
     }, 60000);
     return () => clearInterval(id);
   }, [adminToken, loadTpJsonldReport, loadTpJsonldHistory,
@@ -631,7 +648,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadEdgeProxyDeployCronAlertState, loadCfDriftCronAlertState,
       loadTpCronAlertState, loadUnifiedLogsCfPullCronAlertState,
       loadSlackWebhookMissingAlertStates,
-      loadSlackWebhookMissingAlertHistories, loadCfAudit, loadGcpCredits]);
+      loadSlackWebhookMissingAlertHistories, loadCfAudit, loadGcpCredits,
+      loadCfAddons]);
 
   // Task #609 — managed AI response cache stats + admin purge controls.
   const [aiCacheStats, setAiCacheStats] = useState(null);
@@ -3083,6 +3101,148 @@ export default function AdminHealth({ adminToken, onNavigate }) {
 
               {gc && gc.billing_api_error && (
                 <p className="text-[11px] text-amber-600 mt-2 font-mono break-all">{gc.billing_api_error}</p>
+              )}
+            </div>
+          );
+        })()}
+        </SectionErrorBoundary>
+
+        {/* Task #263 — CF paid add-on migration status panel */}
+        <SectionErrorBoundary name="CF Add-on Migration">
+        {(() => {
+          const data = cfAddons && !cfAddons._error ? cfAddons : null;
+          const counts = data?.status_counts ?? { pending: 0, in_progress: 0, complete: 0 };
+          const totalPending = data?.monthly_savings_pending_usd ?? 0;
+          const totalSaved  = data?.monthly_savings_realised_usd ?? 0;
+          const allDone     = data && counts.pending === 0 && counts.in_progress === 0;
+          const anyInProgress = counts.in_progress > 0;
+          const tileCls = allDone
+            ? 'bg-emerald-50 border-emerald-200'
+            : anyInProgress
+              ? 'bg-blue-50 border-blue-200'
+              : 'bg-amber-50 border-amber-200';
+          const headerCls = allDone
+            ? 'text-emerald-700'
+            : anyInProgress
+              ? 'text-blue-700'
+              : 'text-amber-700';
+          const STATUS_STYLE = {
+            complete:    'bg-emerald-100 text-emerald-700 border-emerald-200',
+            in_progress: 'bg-blue-100 text-blue-700 border-blue-200',
+            pending:     'bg-amber-100 text-amber-700 border-amber-200',
+          };
+          const STATUS_LABEL = {
+            complete:    '✅ Complete',
+            in_progress: '🔵 In Progress',
+            pending:     '🟡 Pending',
+          };
+          return (
+            <div className={`rounded-2xl p-4 border ${tileCls}`} data-testid="cf-addon-migration-panel">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  allDone ? 'bg-emerald-100' : anyInProgress ? 'bg-blue-100' : 'bg-amber-100'
+                }`}>
+                  <DollarSign size={17} className={allDone ? 'text-emerald-500' : anyInProgress ? 'text-blue-500' : 'text-amber-500'} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className={`text-sm font-semibold ${headerCls}`} data-testid="cf-addon-heading">
+                      CF Add-on Migration
+                    </p>
+                    {data && (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        allDone
+                          ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`} data-testid="cf-addon-savings-badge">
+                        {allDone ? `$${totalSaved}/mo saved` : `$${totalPending}/mo remaining`}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Replace paid CF add-ons with startup-credit-covered alternatives — Task #263
+                  </p>
+                </div>
+                <button
+                  onClick={loadCfAddons}
+                  disabled={cfAddonsLoading}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                  data-testid="button-refresh-cf-addons"
+                  title="Refresh CF add-on migration status"
+                >
+                  <RefreshCw size={13} className={cfAddonsLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {cfAddonsLoading && !data && (
+                <div className="flex justify-center py-4">
+                  <RefreshCw size={16} className="animate-spin text-gray-300" />
+                </div>
+              )}
+
+              {cfAddons?._error && (
+                <p className="text-xs text-red-500 mt-1">Failed to load CF add-on data — check backend logs.</p>
+              )}
+
+              {data && (
+                <>
+                  {/* Status summary counts */}
+                  <div className="flex gap-2 flex-wrap mb-3">
+                    {[
+                      { key: 'complete',    label: 'Complete' },
+                      { key: 'in_progress', label: 'In Progress' },
+                      { key: 'pending',     label: 'Pending' },
+                    ].map(({ key, label }) => counts[key] > 0 && (
+                      <span key={key} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_STYLE[key]}`}>
+                        {counts[key]} {label}
+                      </span>
+                    ))}
+                    {totalSaved > 0 && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                        ${totalSaved}/mo saved so far
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Add-on rows */}
+                  <div className="space-y-2">
+                    {(data.addons || []).map((addon, i) => (
+                      <div key={i} className="rounded-xl p-3 bg-white/70 border border-white/80 text-xs">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                            <span className="font-semibold text-gray-900 shrink-0">{addon.service}</span>
+                            <span className="font-mono text-gray-500 shrink-0">${addon.monthly_cost_usd}/mo</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 ${STATUS_STYLE[addon.status] ?? STATUS_STYLE.pending}`}>
+                              {STATUS_LABEL[addon.status] ?? addon.status}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-gray-600 mb-0.5">
+                          <span className="text-gray-400">→ </span>{addon.migration_target}
+                        </p>
+                        <p className="text-gray-400">
+                          Covered by: <span className="text-gray-600">{addon.credit_programme}</span>
+                        </p>
+                        {addon.notes && (
+                          <p className="text-gray-400 mt-1 leading-snug">{addon.notes}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {data.runbook_url && (
+                    <a
+                      href={data.runbook_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 mt-3 text-[11px] text-blue-500 hover:text-blue-700 hover:underline"
+                      data-testid="cf-addon-runbook-link"
+                    >
+                      <ExternalLink size={11} />
+                      View migration runbook
+                    </a>
+                  )}
+                </>
               )}
             </div>
           );
