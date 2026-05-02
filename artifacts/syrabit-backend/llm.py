@@ -1433,16 +1433,19 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
     Returns ``"workers_ai"`` when all else fails.
     """
     import random as _random
-    from config import PROVIDER_PRIORITY, PROVIDER_CREDITS
+    from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, POOL_WEIGHTS
 
     candidates = PROVIDER_PRIORITY.get(feature, ["workers_ai"])
     _is_assamese_feature = feature in ("assamese_rag_chat", "assamese_content")
+    # Per-pool weight overrides take precedence over global PROVIDER_CREDITS.
+    # Providers not listed in the override fall back to PROVIDER_CREDITS as usual.
+    _pool_override: dict = POOL_WEIGHTS.get(feature, {})
 
     pool: list[str] = []
     weights: list[int] = []
 
     for p in candidates:
-        credit = PROVIDER_CREDITS.get(p, 0)
+        credit = _pool_override.get(p, PROVIDER_CREDITS.get(p, 0))
         if credit == 0:
             continue                                   # weight-0 → fallback only
         if p in exclude:
