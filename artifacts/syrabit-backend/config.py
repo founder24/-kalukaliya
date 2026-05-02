@@ -1018,15 +1018,20 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG: Vertex (2k) → Bedrock (1k) → Azure (1, 2nd-to-last) → Workers AI (0, last)
-    # All four providers have full chat dispatch in _dispatch_llm_for_feature.
-    "english_rag_chat":  ["vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Assamese chat: Sarvam first (Indic grounding), then English fallbacks with chat dispatch.
-    "assamese_rag_chat": ["sarvam", "vertex", "azure_openai", "workers_ai"],
-    # Long-form content (notes, MCQs, PYQs): same as English chat.
-    "content":           ["vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Assamese content generation: Sarvam first.
-    "assamese_content":  ["sarvam", "vertex", "azure_openai", "workers_ai"],
+    # English chat + RAG (Task #267):
+    #   Azure OpenAI (gpt-4.1-mini, 2.5k) → Bedrock (nova-micro, 1k) → Workers AI (0, last resort).
+    #   Vertex removed from this pool; Azure is now primary for English because gpt-4.1-mini
+    #   has the highest production TPS on Azure and $2.5k credits are consumed first.
+    "english_rag_chat":  ["azure_openai", "bedrock", "workers_ai"],
+    # Assamese chat (Task #267):
+    #   Sarvam (sarvam-m) → Vertex / Gemini (gemini-2.5-flash) → Workers AI IndicTrans2 last resort.
+    #   IndicTrans2 is purpose-built for Indic → handles last-resort Assamese when both LLMs fail.
+    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
+    # Long-form content generation (Task #267): mirrors english_rag_chat.
+    "content":           ["azure_openai", "bedrock", "workers_ai"],
+    # Assamese content translation (Task #267):
+    #   Gemini 2.5 Flash is best multilingual TPS for translation → IndicTrans2 (en-indic) last resort.
+    "assamese_content":  ["vertex", "workers_ai_indic"],
     # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Vertex (2k, RuntimeError→skip) →
     # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
     # vertex/bedrock TTS endpoints not wired — listed per authoritative matrix; excluded
@@ -1047,9 +1052,10 @@ PROVIDER_PRIORITY: dict = {
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex (2k) → Workers AI.
     # Dispatch wired in rag._fetch_chunks_semantic via select_provider("vector_search").
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
-    # Translation: Sarvam (500) → Vertex (2k) → Bedrock (1k, via call_converse) →
-    # Azure OpenAI (1, via call_chat) → Workers AI.
-    "translate":         ["sarvam", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Translation (Task #267): Assamese path.
+    #   Vertex / Gemini (gemini-2.5-flash) → Workers AI IndicTrans2 (en-indic-1b) last resort.
+    #   Sarvam translate:v1 is called directly in ai_chat.py before this pool is consulted.
+    "translate":         ["vertex", "workers_ai_indic"],
     # Vision / OCR: Vertex (2k) → Bedrock (1k, Claude multimodal via call_converse_vision) →
     # Azure OpenAI (1, via call_chat with image_url) → Workers AI.
     "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
@@ -1064,19 +1070,20 @@ PROVIDER_PRIORITY: dict = {
 }
 
 PROVIDER_CREDITS: dict = {
-    "vertex":        2000,   # Google Cloud for Startups — $2k
-    "bedrock":       1000,   # AWS Activate — $1k
-    "azure_openai":     1,   # Azure for Startups — fixed minimum, always second-to-last before workers_ai
-    "sarvam":         500,   # Sarvam startup credits — $500
-    "cartesia":       500,   # Cartesia startup credits — $500
-    "elevenlabs":     500,   # ElevenLabs startup credits — $500
-    "assemblyai":    1000,   # AssemblyAI startup credits — $1k
-    "cohere":        1000,   # Cohere startup credits — $1k
-    "pinecone_ai":    500,   # Pinecone startup credits — $500
-    "exa_ai":        1000,   # Exa startup credits — $1k
-    "tavily":         500,   # Tavily startup credits — $500
-    "mongodb_atlas":    0,   # MongoDB Atlas free tier — weight 0 (fallback only, like workers_ai)
-    "workers_ai":       0,   # Cloudflare free tier — absolute last resort, never in rotation pool
+    "vertex":           2000,   # Google Cloud for Startups — $2k
+    "bedrock":          1000,   # AWS Activate — $1k
+    "azure_openai":        1,   # Azure for Startups — fixed minimum, always second-to-last before workers_ai
+    "sarvam":            500,   # Sarvam startup credits — $500
+    "cartesia":          500,   # Cartesia startup credits — $500
+    "elevenlabs":        500,   # ElevenLabs startup credits — $500
+    "assemblyai":       1000,   # AssemblyAI startup credits — $1k
+    "cohere":           1000,   # Cohere startup credits — $1k
+    "pinecone_ai":       500,   # Pinecone startup credits — $500
+    "exa_ai":           1000,   # Exa startup credits — $1k
+    "tavily":            500,   # Tavily startup credits — $500
+    "mongodb_atlas":       0,   # MongoDB Atlas free tier — weight 0 (fallback only, like workers_ai)
+    "workers_ai":          0,   # Cloudflare free tier — absolute last resort, never in rotation pool
+    "workers_ai_indic":    0,   # CF Workers AI IndicTrans2 — last resort for Assamese pools only
 }
 
 SEED_DATA = {
