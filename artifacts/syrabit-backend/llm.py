@@ -2823,3 +2823,255 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     except Exception as e:
         logger.error(f"LLM streaming error: {type(e).__name__}: {str(e)[:200]}")
         yield f"data: {json.dumps({'error': 'AI service temporarily unavailable'})}\n\n"
+
+
+# ── Non-LLM feature dispatch (embed / translate / search / rerank / vision) ───
+#
+# Each function calls select_provider() for its feature key, then routes to the
+# appropriate provider client.  Providers that don't support the modality raise
+# RuntimeError which the loop treats as a transient failure and retries from the
+# remaining weighted pool (fallback-without-replacement).
+#
+# These entry points are used by:
+#   embed        → syllabus_embedder.py, chunk_embedder.py, vertex_services.py
+#   translate    → admin_pipeline.py, cms_sarvam_health.py
+#   search_rag   → ai_chat.py (RAG retrieval pre-search)
+#   live_search  → ai_chat.py (_early_web_search)
+#   rerank       → rag.py chunk re-scoring
+#   vision       → admin_content.py image analysis
+#   vector_search→ rag.py vector recall
+
+
+async def call_embed_with_dispatch(
+    text: str,
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    lang: str = "en",
+) -> list:
+    """Embed *text* via the weighted provider selected for the 'embed' feature key.
+
+    Priority (PROVIDER_PRIORITY['embed']):
+      vertex(2000) → cohere(500) → pinecone_ai(200) → workers_ai(0)
+
+    Falls back to vertex_services.embed_text() on error.
+    Returns a float list on success, raises RuntimeError if all providers fail.
+    """
+    from config import PROVIDER_PRIORITY as _PP
+    exclude: frozenset = frozenset()
+    max_attempts = len(_PP.get("embed", [])) + 1
+
+    for _ in range(max_attempts):
+        provider = select_provider("embed", lang=lang, exclude=exclude)
+        try:
+            if provider == "vertex":
+                import vertex_services
+                result = await vertex_services.embed_text(text, task_type=task_type)
+                if result is None:
+                    raise RuntimeError("vertex embed_text returned None")
+                return result
+            elif provider == "workers_ai":
+                from providers.cloudflare_ai import embed as _cf_embed
+                return await _cf_embed(text)
+            elif provider in ("cohere", "pinecone_ai"):
+                raise RuntimeError(f"embed via {provider!r} not yet implemented (Phase 2)")
+            else:
+                raise RuntimeError(f"embed: unknown provider {provider!r}")
+        except Exception as exc:
+            logger.warning("embed %s failed: %s — removing from pool", provider, exc)
+            exclude = exclude | {provider}
+
+    raise RuntimeError("embed: all providers exhausted")
+
+
+async def call_translate_with_dispatch(
+    text: str,
+    source_lang: str = "en-IN",
+    target_lang: str = "as-IN",
+    lang: str = "as",
+) -> str:
+    """Translate *text* via the weighted provider selected for 'translate'.
+
+    Priority (PROVIDER_PRIORITY['translate']):
+      sarvam(2000) → vertex(500) → workers_ai(0)
+
+    Returns the translated string or raises RuntimeError if all providers fail.
+    """
+    from config import PROVIDER_PRIORITY as _PP
+    exclude: frozenset = frozenset()
+    max_attempts = len(_PP.get("translate", [])) + 1
+
+    for _ in range(max_attempts):
+        provider = select_provider("translate", lang=lang, exclude=exclude)
+        try:
+            if provider == "sarvam":
+                sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
+                if not sarvam_slot:
+                    raise RuntimeError("sarvam translate: no API key configured")
+                import httpx as _hx
+                resp = await _hx.AsyncClient(timeout=20).post(
+                    "https://api.sarvam.ai/translate",
+                    headers={"API-Subscription-Key": sarvam_slot["key"]},
+                    json={
+                        "input": text,
+                        "source_language_code": source_lang,
+                        "target_language_code": target_lang,
+                        "speaker_gender": "Female",
+                        "mode": "formal",
+                        "enable_preprocessing": True,
+                    },
+                )
+                resp.raise_for_status()
+                return resp.json().get("translated_text") or ""
+            elif provider == "vertex":
+                prompt = [
+                    {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
+                    {"role": "user", "content": text},
+                ]
+                return await _call_gemini(prompt, _GEMINI_KEY, "gemini-2.5-flash", 2048)
+            elif provider == "workers_ai":
+                prompt = [
+                    {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
+                    {"role": "user", "content": text},
+                ]
+                return await _call_llm_raw(_LLM_PROVIDERS_WORKERS_ONLY, prompt, None, 2048)
+            else:
+                raise RuntimeError(f"translate: unknown provider {provider!r}")
+        except Exception as exc:
+            logger.warning("translate %s failed: %s — removing from pool", provider, exc)
+            exclude = exclude | {provider}
+
+    raise RuntimeError("translate: all providers exhausted")
+
+
+async def call_search_rag_with_dispatch(
+    query: str,
+    feature: str = "search_rag",
+    lang: str = "en",
+) -> list:
+    """Search via the weighted provider selected for 'search_rag' or 'live_search'.
+
+    Priority (PROVIDER_PRIORITY['search_rag']):  exa_ai(1000) → workers_ai(0)
+    Priority (PROVIDER_PRIORITY['live_search']): exa_ai(1000) → tavily(500) → workers_ai(0)
+
+    Returns a list of result dicts {title, url, text}.
+    Raises RuntimeError if all providers fail.
+    """
+    if feature not in ("search_rag", "live_search"):
+        feature = "search_rag"
+
+    from config import PROVIDER_PRIORITY as _PP
+    exclude: frozenset = frozenset()
+    max_attempts = len(_PP.get(feature, [])) + 1
+
+    for _ in range(max_attempts):
+        provider = select_provider(feature, lang=lang, exclude=exclude)
+        try:
+            if provider == "exa_ai":
+                import exa_py as _exa
+                from config import _EXA_KEY
+                if not _EXA_KEY:
+                    raise RuntimeError("exa_ai: EXA_API_KEY not configured")
+                client = _exa.Exa(api_key=_EXA_KEY)
+                results = client.search_and_contents(
+                    query,
+                    num_results=5,
+                    use_autoprompt=True,
+                    text=True,
+                )
+                return [
+                    {"title": r.title, "url": r.url, "text": (r.text or "")[:500]}
+                    for r in (results.results or [])
+                ]
+            elif provider == "tavily":
+                raise RuntimeError("tavily search not yet implemented (Phase 2)")
+            elif provider == "workers_ai":
+                raise RuntimeError("live web search not available via workers_ai (no search endpoint)")
+            else:
+                raise RuntimeError(f"search: unknown provider {provider!r}")
+        except Exception as exc:
+            logger.warning("search(%s) %s failed: %s — removing from pool", feature, provider, exc)
+            exclude = exclude | {provider}
+
+    raise RuntimeError(f"search({feature}): all providers exhausted")
+
+
+async def call_rerank_with_dispatch(
+    query: str,
+    docs: list,
+    lang: str = "en",
+) -> list:
+    """Rerank *docs* via the weighted provider selected for 'rerank'.
+
+    Priority (PROVIDER_PRIORITY['rerank']): cohere(1000) → pinecone_ai(500) → workers_ai(0)
+
+    Each doc should be a string or a dict with a 'text' key.
+    Returns the docs list reordered by relevance (most relevant first).
+    Falls back to returning docs unchanged if all providers fail.
+    """
+    from config import PROVIDER_PRIORITY as _PP
+    exclude: frozenset = frozenset()
+    max_attempts = len(_PP.get("rerank", [])) + 1
+
+    for _ in range(max_attempts):
+        provider = select_provider("rerank", lang=lang, exclude=exclude)
+        try:
+            if provider in ("cohere", "pinecone_ai"):
+                raise RuntimeError(f"rerank via {provider!r} not yet implemented (Phase 2)")
+            elif provider == "workers_ai":
+                raise RuntimeError("rerank via workers_ai: no rerank endpoint available")
+            else:
+                raise RuntimeError(f"rerank: unknown provider {provider!r}")
+        except Exception as exc:
+            logger.warning("rerank %s failed: %s — removing from pool", provider, exc)
+            exclude = exclude | {provider}
+
+    logger.warning("rerank: all providers exhausted — returning docs unranked")
+    return docs
+
+
+async def call_vision_with_dispatch(
+    b64_image: str,
+    prompt: str,
+    lang: str = "en",
+    mime_type: str = "image/jpeg",
+) -> str:
+    """Analyse *b64_image* via the weighted provider selected for 'vision'.
+
+    Priority (PROVIDER_PRIORITY['vision']): vertex(2000) → bedrock(1000) → workers_ai(0)
+
+    Returns the model's text response.
+    Raises RuntimeError if all providers fail.
+    """
+    from config import PROVIDER_PRIORITY as _PP
+    exclude: frozenset = frozenset()
+    max_attempts = len(_PP.get("vision", [])) + 1
+
+    for _ in range(max_attempts):
+        provider = select_provider("vision", lang=lang, exclude=exclude)
+        try:
+            if provider == "vertex":
+                if not _GEMINI_KEY:
+                    raise RuntimeError("vertex vision: GEMINI_API_KEY not set")
+                vision_messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime_type};base64,{b64_image}"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ]
+                return await _call_gemini(vision_messages, _GEMINI_KEY, "gemini-2.5-flash", 1024)
+            elif provider in ("bedrock", "azure_openai"):
+                raise RuntimeError(f"vision via {provider!r} not yet implemented (Phase 2)")
+            elif provider == "workers_ai":
+                raise RuntimeError("vision via workers_ai: no multimodal endpoint configured")
+            else:
+                raise RuntimeError(f"vision: unknown provider {provider!r}")
+        except Exception as exc:
+            logger.warning("vision %s failed: %s — removing from pool", provider, exc)
+            exclude = exclude | {provider}
+
+    raise RuntimeError("vision: all providers exhausted")

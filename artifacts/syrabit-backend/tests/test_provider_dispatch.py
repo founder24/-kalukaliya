@@ -4,10 +4,17 @@ Run from the syrabit-backend directory:
     python -m pytest tests/test_provider_dispatch.py -v
 or standalone:
     python tests/test_provider_dispatch.py
+
+Tests use asyncio.run() + unittest.mock stubs to validate runtime dispatch
+paths — not source-text inspection.
 """
 from __future__ import annotations
 
-import sys, os
+import asyncio
+import sys
+import os
+import unittest.mock as mock
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import logging
@@ -111,24 +118,132 @@ def test_azure_openai_uses_cf_gateway_slug():
     print(f"  PASS: azure_openai CF slug resolves to: {slug_url}")
 
 
-def test_all_main_llm_entrypoints_wired():
-    import inspect
-    from llm import call_llm_api_chat, call_llm_for_rag, call_llm_api_content
-    for fn in (call_llm_api_chat, call_llm_for_rag, call_llm_api_content):
-        src = inspect.getsource(fn)
-        assert "call_with_provider_fallback" in src, f"{fn.__name__}: not wired through call_with_provider_fallback"
-        assert "_dispatch_llm_for_feature" in src, f"{fn.__name__}: _dispatch_llm_for_feature not used"
-    print("  PASS: call_llm_api_chat / call_llm_for_rag / call_llm_api_content all wired")
+# ── Runtime dispatch stub tests (replaces source-inspection) ──────────────────
 
-
-def test_dispatch_fn_has_bedrock_and_azure_callers():
-    import inspect
+def test_dispatch_routes_bedrock_at_runtime():
+    """_dispatch_llm_for_feature routes 'bedrock' to providers.bedrock.call_converse."""
     from llm import _dispatch_llm_for_feature
-    src = inspect.getsource(_dispatch_llm_for_feature)
-    assert "bedrock" in src and "call_converse" in src, "bedrock not wired in _dispatch_llm_for_feature"
-    assert "azure_openai" in src and "call_chat" in src, "azure_openai not wired in _dispatch_llm_for_feature"
-    assert "_LLM_PROVIDERS_WORKERS_ONLY" in src, "_LLM_PROVIDERS_WORKERS_ONLY not in dispatch fn"
-    print("  PASS: _dispatch_llm_for_feature has bedrock + azure_openai + workers-only callers")
+    stub = mock.AsyncMock(return_value="bedrock-response")
+    with mock.patch("providers.bedrock.call_converse", stub):
+        result = asyncio.run(
+            _dispatch_llm_for_feature([{"role": "user", "content": "hi"}], "bedrock", 16)
+        )
+    assert result == "bedrock-response", f"Expected bedrock-response, got {result!r}"
+    stub.assert_called_once()
+    print("  PASS: _dispatch_llm_for_feature routes 'bedrock' → providers.bedrock.call_converse at runtime")
+
+
+def test_dispatch_routes_azure_openai_at_runtime():
+    """_dispatch_llm_for_feature routes 'azure_openai' to providers.azure_openai.call_chat."""
+    from llm import _dispatch_llm_for_feature
+    stub = mock.AsyncMock(return_value="azure-response")
+    with mock.patch("providers.azure_openai.call_chat", stub):
+        result = asyncio.run(
+            _dispatch_llm_for_feature([{"role": "user", "content": "hi"}], "azure_openai", 16)
+        )
+    assert result == "azure-response", f"Expected azure-response, got {result!r}"
+    stub.assert_called_once()
+    print("  PASS: _dispatch_llm_for_feature routes 'azure_openai' → providers.azure_openai.call_chat at runtime")
+
+
+def test_call_with_provider_fallback_invokes_attempt_fn():
+    """call_with_provider_fallback calls attempt_fn with the selected provider."""
+    from llm import call_with_provider_fallback
+    calls = []
+
+    async def _stub(provider: str) -> str:
+        calls.append(provider)
+        return f"ok:{provider}"
+
+    result = asyncio.run(call_with_provider_fallback("content", "en", _stub))
+    assert calls, "attempt_fn was never called by call_with_provider_fallback"
+    assert result.startswith("ok:"), f"Unexpected result: {result!r}"
+    print(f"  PASS: call_with_provider_fallback invokes attempt_fn with provider={calls[0]!r}")
+
+
+def test_tts_dispatch_raises_runtimeerror_for_vertex_and_falls_back():
+    """voice._synthesize_with_fallback raises RuntimeError for vertex, recovers to workers_ai.
+
+    select_provider is imported inside _synthesize_with_fallback as
+    ``from llm import select_provider``, so we patch ``llm.select_provider``.
+    """
+    from routes.voice import _synthesize_with_fallback
+    side_effects = iter(["vertex", "workers_ai"])
+
+    def _fake_select(feature, lang="en", exclude=frozenset()):
+        return next(side_effects)
+
+    workers_stub = mock.AsyncMock(return_value=b"audio-bytes")
+    with mock.patch("llm.select_provider", side_effect=_fake_select):
+        with mock.patch("routes.voice._tts_workers_ai", workers_stub):
+            result = asyncio.run(_synthesize_with_fallback("hello", None, None, "en"))
+
+    assert result == b"audio-bytes", "Fallback to workers_ai should return audio bytes"
+    workers_stub.assert_called_once()
+    print("  PASS: TTS vertex raises RuntimeError, fallback recovers to workers_ai at runtime")
+
+
+def test_stt_dispatch_raises_runtimeerror_for_bedrock_and_falls_back():
+    """voice._transcribe_with_fallback raises RuntimeError for bedrock, recovers to workers_ai.
+
+    select_provider is imported inside _transcribe_with_fallback as
+    ``from llm import select_provider``, so we patch ``llm.select_provider``.
+    """
+    from routes.voice import _transcribe_with_fallback
+    side_effects = iter(["bedrock", "workers_ai"])
+
+    def _fake_select(feature, lang="en", exclude=frozenset()):
+        return next(side_effects)
+
+    workers_stub = mock.AsyncMock(return_value="transcript-text")
+    with mock.patch("llm.select_provider", side_effect=_fake_select):
+        with mock.patch("routes.voice._stt_workers_ai", workers_stub):
+            result = asyncio.run(_transcribe_with_fallback(b"audio", "en"))
+
+    assert result == "transcript-text", f"Unexpected result: {result!r}"
+    workers_stub.assert_called_once()
+    print("  PASS: STT bedrock raises RuntimeError, fallback recovers to workers_ai at runtime")
+
+
+def test_embed_dispatch_routes_to_vertex_at_runtime():
+    """call_embed_with_dispatch routes 'embed' → vertex_services.embed_text via select_provider."""
+    from llm import call_embed_with_dispatch
+    embed_stub = mock.AsyncMock(return_value=[0.1, 0.2, 0.3])
+    with mock.patch("llm.select_provider", return_value="vertex"):
+        with mock.patch("vertex_services.embed_text", embed_stub):
+            result = asyncio.run(call_embed_with_dispatch("test text", lang="en"))
+    assert result == [0.1, 0.2, 0.3], f"Expected embedding list, got {result!r}"
+    embed_stub.assert_called_once()
+    print("  PASS: call_embed_with_dispatch routes select_provider('embed')='vertex' → vertex_services.embed_text")
+
+
+def test_translate_dispatch_routes_sarvam_or_vertex():
+    """call_translate_with_dispatch routes 'translate' via select_provider and calls the provider."""
+    from llm import call_translate_with_dispatch
+    gemini_stub = mock.AsyncMock(return_value="translated")
+    with mock.patch("llm.select_provider", return_value="vertex"):
+        with mock.patch("llm._call_gemini", gemini_stub):
+            result = asyncio.run(
+                call_translate_with_dispatch("hello", "en-IN", "as-IN", lang="as")
+            )
+    assert result == "translated", f"Unexpected: {result!r}"
+    gemini_stub.assert_called_once()
+    print("  PASS: call_translate_with_dispatch routes select_provider('translate')='vertex' → _call_gemini")
+
+
+def test_vision_dispatch_routes_vertex_at_runtime():
+    """call_vision_with_dispatch routes 'vision' via select_provider → _call_gemini for vertex."""
+    from llm import call_vision_with_dispatch
+    gemini_stub = mock.AsyncMock(return_value="image analysis")
+    with mock.patch("llm.select_provider", return_value="vertex"):
+        with mock.patch("llm._call_gemini", gemini_stub):
+            with mock.patch("llm._GEMINI_KEY", "fake-key"):
+                result = asyncio.run(
+                    call_vision_with_dispatch("base64data", "Describe this image", lang="en")
+                )
+    assert result == "image analysis", f"Unexpected: {result!r}"
+    gemini_stub.assert_called_once()
+    print("  PASS: call_vision_with_dispatch routes select_provider('vision')='vertex' → _call_gemini")
 
 
 def test_safety_feature_key_priority_has_bedrock_first():
@@ -139,13 +254,13 @@ def test_safety_feature_key_priority_has_bedrock_first():
     print(f"  PASS: safety priority list = {safety_list}")
 
 
-def test_llm_safety_check_is_exported():
+def test_llm_safety_check_async_dispatch():
+    """llm_classify_safety is async and returns None when ENABLE_LLM_SAFETY_CHECK=false (default)."""
     from guardrails.prompt_safety import llm_classify_safety
-    import inspect
-    assert inspect.iscoroutinefunction(llm_classify_safety), "llm_classify_safety must be async"
-    src = inspect.getsource(llm_classify_safety)
-    assert "safety" in src, "llm_classify_safety must reference 'safety' feature key"
-    print("  PASS: guardrails.prompt_safety.llm_classify_safety is async and references safety feature key")
+    assert asyncio.iscoroutinefunction(llm_classify_safety), "llm_classify_safety must be async"
+    result = asyncio.run(llm_classify_safety("normal educational question"))
+    assert result is None, f"Expected None (safety check disabled by default), got {result!r}"
+    print("  PASS: llm_classify_safety is async, returns None when ENABLE_LLM_SAFETY_CHECK=false")
 
 
 if __name__ == "__main__":
@@ -160,10 +275,16 @@ if __name__ == "__main__":
         test_assemblyai_uses_cf_gateway_url,
         test_bedrock_uses_cf_gateway_slug,
         test_azure_openai_uses_cf_gateway_slug,
-        test_all_main_llm_entrypoints_wired,
-        test_dispatch_fn_has_bedrock_and_azure_callers,
+        test_dispatch_routes_bedrock_at_runtime,
+        test_dispatch_routes_azure_openai_at_runtime,
+        test_call_with_provider_fallback_invokes_attempt_fn,
+        test_tts_dispatch_raises_runtimeerror_for_vertex_and_falls_back,
+        test_stt_dispatch_raises_runtimeerror_for_bedrock_and_falls_back,
+        test_embed_dispatch_routes_to_vertex_at_runtime,
+        test_translate_dispatch_routes_sarvam_or_vertex,
+        test_vision_dispatch_routes_vertex_at_runtime,
         test_safety_feature_key_priority_has_bedrock_first,
-        test_llm_safety_check_is_exported,
+        test_llm_safety_check_async_dispatch,
     ]
     failed = 0
     for t in tests:

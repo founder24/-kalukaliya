@@ -41,10 +41,6 @@ logger = logging.getLogger("routes.voice")
 
 router = APIRouter(tags=["voice"])
 
-# Providers not yet wired as full clients (Phase 2 — Task #256).
-# select_provider may draw these names; we skip them gracefully and try the next.
-_TTS_NOT_IMPLEMENTED = frozenset({"vertex", "bedrock", "azure_openai"})
-_STT_NOT_IMPLEMENTED = frozenset({"vertex", "bedrock", "azure_openai"})
 
 
 class TtsRequest(BaseModel):
@@ -119,28 +115,25 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    Each call to select_provider draws from the weighted pool excluding
-    providers that have already failed this request.  Phase-2 providers
-    (vertex, bedrock, azure_openai) are skipped immediately with a warning
-    until their client modules are wired in Task #256.
+    All providers in PROVIDER_PRIORITY["tts"] participate in the weighted draw.
+    Providers without a TTS endpoint (vertex, bedrock, azure_openai) raise
+    RuntimeError which the fallback loop catches and removes from the pool,
+    then redraws from the remaining weighted candidates.
 
-    Fallback sequence (by PROVIDER_CREDITS weight then list order):
-      cartesia(500) → elevenlabs(500) → vertex(2000, skip) →
-      bedrock(1000, skip) → azure_openai(1, skip) → workers_ai(last-resort)
+    Fallback sequence (by PROVIDER_CREDITS weight):
+      cartesia(500) → elevenlabs(500) → vertex(2000) → bedrock(1000) →
+      azure_openai(1) → workers_ai(last-resort, weight=0)
+
+    vertex/bedrock/azure_openai entries are drawn by the weighted pool but fail
+    gracefully so the next candidate is tried without manual skipping.
     """
     from llm import select_provider
 
     exclude: frozenset = frozenset()
-    max_attempts = len(_TTS_NOT_IMPLEMENTED) + 4  # enough room to exhaust skips + real tries
+    max_attempts = 8  # covers all providers in tts priority list
 
     for _ in range(max_attempts):
         provider = select_provider("tts", lang=language, exclude=exclude)
-
-        if provider in _TTS_NOT_IMPLEMENTED:
-            logger.debug("TTS: skipping %s (client not yet wired — Phase 2/Task #256)", provider)
-            exclude = exclude | {provider}
-            continue
-
         try:
             if provider == "cartesia":
                 return await _tts_cartesia(text, voice_id, model_id, language)
@@ -148,11 +141,12 @@ async def _synthesize_with_fallback(
                 return await _tts_elevenlabs(text, voice_id, language)
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
+            elif provider in ("vertex", "bedrock", "azure_openai"):
+                # TTS not available via LLM/generic providers in this scope —
+                # raise so the fallback loop removes them and tries the next.
+                raise RuntimeError(f"TTS not supported by {provider!r} (no TTS endpoint configured)")
             else:
-                # Unknown provider — skip.
-                logger.warning("TTS: unknown provider %r returned by select_provider, skipping", provider)
-                exclude = exclude | {provider}
-                continue
+                raise RuntimeError(f"TTS: unknown provider {provider!r}")
         except Exception as exc:
             logger.warning("TTS %s failed: %s — removing from pool and retrying", provider, exc)
             exclude = exclude | {provider}
@@ -165,37 +159,32 @@ async def _synthesize_with_fallback(
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    Each call to select_provider draws from the weighted pool excluding
-    providers that have already failed this request.  Phase-2 providers
-    (vertex, bedrock, azure_openai) are skipped immediately with a warning
-    until their client modules are wired in Task #256.
+    All providers in PROVIDER_PRIORITY["stt"] participate in the weighted draw.
+    Providers without an STT endpoint (vertex, bedrock, azure_openai) raise
+    RuntimeError which the fallback loop catches and removes from the pool.
 
-    Fallback sequence (by PROVIDER_CREDITS weight then list order):
-      assemblyai(1000) → vertex(2000, skip) → bedrock(1000, skip) →
-      azure_openai(1, skip) → workers_ai(last-resort)
+    Fallback sequence (by PROVIDER_CREDITS weight):
+      assemblyai(1000) → vertex(2000) → bedrock(1000) →
+      azure_openai(1) → workers_ai(last-resort, weight=0)
     """
     from llm import select_provider
 
     exclude: frozenset = frozenset()
-    max_attempts = len(_STT_NOT_IMPLEMENTED) + 3
+    max_attempts = 7  # covers all providers in stt priority list
 
     for _ in range(max_attempts):
         provider = select_provider("stt", lang=language, exclude=exclude)
-
-        if provider in _STT_NOT_IMPLEMENTED:
-            logger.debug("STT: skipping %s (client not yet wired — Phase 2/Task #256)", provider)
-            exclude = exclude | {provider}
-            continue
-
         try:
             if provider == "assemblyai":
                 return await _stt_assemblyai(audio_bytes, language)
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)
+            elif provider in ("vertex", "bedrock", "azure_openai"):
+                # STT not available via LLM/generic providers in this scope —
+                # raise so fallback loop removes them and tries the next candidate.
+                raise RuntimeError(f"STT not supported by {provider!r} (no STT endpoint configured)")
             else:
-                logger.warning("STT: unknown provider %r returned by select_provider, skipping", provider)
-                exclude = exclude | {provider}
-                continue
+                raise RuntimeError(f"STT: unknown provider {provider!r}")
         except Exception as exc:
             logger.warning("STT %s failed: %s — removing from pool and retrying", provider, exc)
             exclude = exclude | {provider}
