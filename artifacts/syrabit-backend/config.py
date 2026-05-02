@@ -1072,7 +1072,7 @@ PROVIDER_PRIORITY: dict = {
 PROVIDER_CREDITS: dict = {
     "vertex":           2000,   # Google Cloud for Startups — $2k
     "bedrock":          1000,   # AWS Activate — $1k
-    "azure_openai":        1,   # Azure for Startups — fixed minimum, always second-to-last before workers_ai
+    "azure_openai":     2500,   # Azure for Startups — $2.5k credits; primary for english_rag_chat + content (Task #267)
     "sarvam":            500,   # Sarvam startup credits — $500
     "cartesia":          500,   # Cartesia startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500

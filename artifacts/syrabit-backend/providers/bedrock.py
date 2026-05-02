@@ -41,7 +41,7 @@ from config import (
 
 logger = logging.getLogger("providers.bedrock")
 
-_MODEL_ID = "anthropic.claude-3-5-haiku-20241022-v1:0"
+_MODEL_ID = "amazon.nova-micro-v1:0"   # Task #267: Nova Micro — fastest/cheapest Bedrock LLM
 _ANTHROPIC_VERSION = "bedrock-2023-05-31"
 _TIMEOUT_S = 30.0
 

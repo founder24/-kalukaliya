@@ -45,7 +45,7 @@ from config import (
 
 logger = logging.getLogger("providers.azure_openai")
 
-_MODEL = _os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+_MODEL = _os.environ.get("AZURE_OPENAI_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"  # Task #267: gpt-4.1-mini — highest TPS on Azure
 _API_VERSION = "2024-02-01"
 _TIMEOUT_S = 30.0
 

@@ -122,14 +122,18 @@ _LLM_PROVIDER_METRICS_MAX = 20_000
 # Providers included: workers-ai, groq, gemini.  Others silently no-op.
 _PROVIDER_429_BURST_WINDOW_S = 180   # shared lookback / Redis TTL for all providers
 _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps]
-    "workers-ai": [],
-    "groq":       [],
-    "gemini":     [],
+    "workers-ai":   [],
+    "groq":         [],
+    "gemini":       [],
+    "azure_openai": [],   # Task #267: azure is now primary for english_rag_chat + content
+    "bedrock":      [],   # Task #267: bedrock is now second-tier for english pools
 }
 _PROVIDER_429_REDIS_KEYS: dict = {
-    "workers-ai": "wai_429_burst",    # keeps existing Redis key for backwards compat
-    "groq":       "groq_429_burst",
-    "gemini":     "gemini_429_burst",
+    "workers-ai":   "wai_429_burst",    # keeps existing Redis key for backwards compat
+    "groq":         "groq_429_burst",
+    "gemini":       "gemini_429_burst",
+    "azure_openai": "azure_429_burst",  # Task #267: burst tracking for Azure primary
+    "bedrock":      "bedrock_429_burst",# Task #267: burst tracking for Bedrock second-tier
 }
 
 # Backwards-compat module-level aliases for code that references these directly
@@ -1341,37 +1345,39 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 # pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    "vertex":       "gemini-2.5-flash",                          # Vertex AI Gemini
-    "bedrock":      "amazon.nova-lite-v1:0",                     # AWS Bedrock Nova Lite
-    "azure_openai": "gpt-4o-mini",                               # Azure OpenAI GPT-4o-mini
-    "sarvam":       "sarvam-m",                                  # Sarvam LLM (Indic)
-    "cartesia":     "sonic-2",                                   # Cartesia TTS
-    "elevenlabs":   "eleven_multilingual_v2",                    # ElevenLabs TTS
-    "assemblyai":   "best",                                      # AssemblyAI STT
-    "cohere":       "embed-multilingual-v3.0",                   # Cohere Embed
-    "pinecone_ai":  "llama-text-embed-v2",                       # Pinecone embed/rerank
-    "exa_ai":       "exa",                                       # Exa neural search
-    "tavily":       "tavily-search",                             # Tavily search
-    "mongodb_atlas": "vector-search",                            # Atlas $vectorSearch (fallback)
-    "workers_ai":   "@cf/meta/llama-3.3-70b-instruct-fp8-fast",  # CF Workers AI (last resort)
+    "vertex":           "gemini-2.5-flash",                          # Vertex AI Gemini 2.5 Flash — highest TPS
+    "bedrock":          "amazon.nova-micro-v1:0",                    # AWS Bedrock Nova Micro — fastest/cheapest Nova (Task #267)
+    "azure_openai":     "gpt-4.1-mini",                              # Azure OpenAI GPT-4.1-mini — highest TPS on Azure (Task #267)
+    "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic)
+    "cartesia":         "sonic-2",                                   # Cartesia TTS
+    "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS
+    "assemblyai":       "best",                                      # AssemblyAI STT
+    "cohere":           "embed-multilingual-v3.0",                   # Cohere Embed
+    "pinecone_ai":      "llama-text-embed-v2",                       # Pinecone embed/rerank
+    "exa_ai":           "exa",                                       # Exa neural search
+    "tavily":           "tavily-search",                             # Tavily search
+    "mongodb_atlas":    "vector-search",                             # Atlas $vectorSearch (fallback)
+    "workers_ai":       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",  # CF Workers AI general LLM (last resort)
+    "workers_ai_indic": "@cf/ai4bharat/indictrans2-en-indic-1b",     # CF Workers AI IndicTrans2 English→Assamese (Task #267)
 }
 
 # Maps provider names to the canonical provider string used by _call_single_provider.
 # This bridges Task #250's semantic provider names to llm.py's internal strings.
 _PROVIDER_CANONICAL: dict[str, str] = {
-    "vertex":       "gemini",       # Vertex Gemini = gemini provider
-    "bedrock":      "bedrock",
-    "azure_openai": "openai",       # Azure OpenAI is OpenAI-compatible
-    "sarvam":       "sarvam",
-    "cartesia":     "cartesia",
-    "elevenlabs":   "elevenlabs",
-    "assemblyai":   "assemblyai",
-    "cohere":       "cohere",
-    "pinecone_ai":  "pinecone_ai",
-    "exa_ai":       "exa_ai",
-    "tavily":       "tavily",
-    "mongodb_atlas": "mongodb_atlas",
-    "workers_ai":   "workers-ai",
+    "vertex":           "gemini",           # Vertex Gemini = gemini provider
+    "bedrock":          "bedrock",
+    "azure_openai":     "openai",           # Azure OpenAI is OpenAI-compatible
+    "sarvam":           "sarvam",
+    "cartesia":         "cartesia",
+    "elevenlabs":       "elevenlabs",
+    "assemblyai":       "assemblyai",
+    "cohere":           "cohere",
+    "pinecone_ai":      "pinecone_ai",
+    "exa_ai":           "exa_ai",
+    "tavily":           "tavily",
+    "mongodb_atlas":    "mongodb_atlas",
+    "workers_ai":       "workers-ai",
+    "workers_ai_indic": "workers-ai-indic",  # CF IndicTrans2 — Assamese last resort (Task #267)
 }
 
 # CF AI Gateway saturation threshold — providers above this RPM ratio are
@@ -1521,8 +1527,25 @@ async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: i
     if provider == "azure_openai":
         # Azure OpenAI chat/completions via CF AI Gateway BYOK (azure-openai slug).
         # CF injects the Azure API key stored in the dashboard.
+        # Model: gpt-4.1-mini — highest TPS on Azure as of 2025 (Task #267).
         from providers.azure_openai import call_chat as _az_chat
-        return await _az_chat(messages, max_tokens=max_tokens)
+        return await _az_chat(messages, model="gpt-4.1-mini", max_tokens=max_tokens)
+
+    if provider == "workers_ai_indic":
+        # CF Workers AI IndicTrans2 — Assamese last resort (Task #267).
+        # Extracts the last user message text and translates to Assamese.
+        # Direction: English → Assamese (en-indic-1b).  For chat responses the
+        # caller has already produced English output; IndicTrans2 translates it.
+        from providers.workers_indic import call_indic_trans as _indic_trans
+        # Extract the last user message to pass as source text.
+        src_text = ""
+        for m in reversed(messages):
+            if m.get("role") in ("user", "assistant") and m.get("content"):
+                src_text = str(m["content"])
+                break
+        if not src_text:
+            raise RuntimeError("workers_ai_indic: no source text in messages")
+        return await _indic_trans(src_text, direction="en-indic")
 
     # workers_ai or any unknown provider → Workers-AI-only dispatch.
     # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
@@ -1613,8 +1636,9 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
     Dispatches through PROVIDER_PRIORITY["english_rag_chat"] weighted round-robin
     via call_with_provider_fallback → _dispatch_llm_for_feature.
 
-    Weighted provider priority: Vertex (Gemini 2.5 Flash, weight 2000) →
-    Bedrock (weight 1000) → Azure OpenAI (weight 1) → Workers AI (weight 0, last-resort).
+    Weighted provider priority (Task #267):
+      Azure OpenAI (gpt-4.1-mini, weight 2500) → Bedrock (nova-micro, weight 1000)
+      → Workers AI (llama-3.3-70b, weight 0, last-resort).
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
     (Groq, Cerebras, Gemini direct) can be introduced after the weighted pool exhausts.
@@ -1659,8 +1683,9 @@ logger.info(
 async def call_llm_api_content(messages: list, model: str = None, max_tokens: int = 3072) -> str:
     """LLM call for admin content generation via PROVIDER_PRIORITY weighted dispatch.
 
-    Feature key: "content" — Vertex (Gemini 2.5 Flash, weight 2000) →
-    Bedrock (weight 1000) → Azure OpenAI (weight 1) → Workers AI (weight 0, last-resort).
+    Feature key: "content" — Task #267 chain:
+      Azure OpenAI (gpt-4.1-mini, weight 2500) → Bedrock (nova-micro, weight 1000)
+      → Workers AI (llama-3.3-70b, weight 0, last-resort).
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
     (Gemini direct, Cerebras) can be introduced after the weighted pool exhausts.
@@ -1723,8 +1748,14 @@ async def call_llm_api_chat(
     """LLM call for student chat via PROVIDER_PRIORITY weighted dispatch.
 
     Feature key: "english_rag_chat" (default) or "assamese_rag_chat" when lang="as".
-    Weighted priority: Vertex (Gemini 2.5 Flash, weight 2000) →
-    Bedrock (weight 1000) → Azure OpenAI (weight 1) → Workers AI (weight 0, last-resort).
+
+    English chain (Task #267):
+      Azure OpenAI (gpt-4.1-mini, weight 2500) → Bedrock (nova-micro, weight 1000)
+      → Workers AI (llama-3.3-70b, weight 0, last-resort).
+
+    Assamese chain (Task #267):
+      Sarvam (sarvam-m, weight 500) → Vertex/Gemini (gemini-2.5-flash, weight 2000)
+      → Workers AI IndicTrans2 (weight 0, last-resort).
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
     (Groq, Cerebras) can be introduced after the weighted pool exhausts.
