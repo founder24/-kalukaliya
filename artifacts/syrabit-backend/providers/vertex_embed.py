@@ -211,6 +211,11 @@ async def embed_text(
         "[vertex-embed] text-embedding-004 dim=%d text=%d chars (%.0fms)",
         len(vec), len(text), elapsed_ms,
     )
+    try:
+        from providers.gcp_counters import inc_embed as _inc_embed
+        _inc_embed(len(text[:32000]))
+    except Exception:
+        pass
     return vec
 
 

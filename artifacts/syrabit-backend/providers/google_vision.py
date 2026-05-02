@@ -245,6 +245,11 @@ async def ocr_document(
         "[google-vision] DOCUMENT_TEXT_DETECTION lang=%s text=%d chars confidence=%.2f pages=%d (%.0fms)",
         lang or "auto", len(text), confidence, page_count, elapsed_ms,
     )
+    try:
+        from providers.gcp_counters import inc_vision as _inc_vision
+        _inc_vision()
+    except Exception:
+        pass
 
     return {
         "text": text,

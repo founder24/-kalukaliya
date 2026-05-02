@@ -207,4 +207,9 @@ async def translate(
             "[google-translate] v3 src=%s tgt=%s chars_in=%d chars_out=%d (%.0fms)",
             src, lang, len(text), len(result), elapsed_ms,
         )
+        try:
+            from providers.gcp_counters import inc_translate as _inc_translate
+            _inc_translate(len(text[:30000]))
+        except Exception:
+            pass
     return result or None

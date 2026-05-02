@@ -270,34 +270,31 @@ async def vertex_mcq_generator(
 
 @router.get("/admin/vertex/gcp-credits")
 async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
-    """Google Cloud Platform credit burn panel row (Task #247).
+    """Google Cloud Platform credit burn panel row (Task #247 / #254).
 
-    Returns a structured breakdown of the $2,000 GCP founders credit grant —
-    which services are configured, estimated monthly burn per service, months
-    of runway remaining, and a low-credit warning flag.
-
-    NOTE ON SPEND ACCURACY:
-    The Google Cloud Billing API (v1) requires a separate billing account ID
-    and OAuth2 flow beyond the service account credentials used here. Real-time
-    spend is therefore approximated from a fixed per-service burn model.
-    For exact current-month spend, check: GCP Console → Billing → Cost breakdown.
+    Returns a structured breakdown of the $2,000 GCP founders credit grant.
+    Spend is derived from real in-process call counters (Task #254) incremented
+    on each successful provider call. Counters reset at the start of each calendar
+    month, and reset to zero on process restart (see counters.counters_reset_on_restart).
 
     Budget webhook integration (for accurate low-credit alerting):
     1. In GCP Console → Billing → Budgets, set alerts at $1,800 (90%) and $1,900 (95%).
     2. Point the Pub/Sub topic at your webhook handler.
     3. The handler sets GOOGLE_BILLING_ALERT=1 in the environment.
     4. This endpoint reads that flag and sets credits_low=true.
-
-    This endpoint is the canonical GCP row for the admin credit-usage panel.
-    Future task #253 will wire it to the Cloud Billing API for live spend data.
     """
+    import os
     from providers import google_stt, google_tts, google_translate, google_vision, vertex_embed
+    from providers.gcp_counters import snapshot as _counters_snapshot
     from config import (
         GCP_CREDIT_GRANT_USD,
         GCP_CREDIT_WARN_REMAINING_USD,
         GOOGLE_BILLING_ALERT,
         GOOGLE_APPLICATION_CREDENTIALS_JSON,
     )
+
+    counters = _counters_snapshot()
+    svc_counters = counters["services"]
 
     configured_services: list[str] = []
     unconfigured_services: list[str] = []
@@ -314,7 +311,7 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     _check(google_vision, "vision_ocr")
     _check(vertex_embed, "vertex_embed")
 
-    has_gemini = bool(__import__("os").environ.get("GEMINI_API_KEY", "").strip())
+    has_gemini = bool(os.environ.get("GEMINI_API_KEY", "").strip())
     if has_gemini:
         configured_services.append("gemini_fallback")
     else:
@@ -325,26 +322,30 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
         and GOOGLE_APPLICATION_CREDENTIALS_JSON.startswith("{")
     )
 
-    estimated_monthly_burn_usd = 19.0
-    months_runway = GCP_CREDIT_GRANT_USD / estimated_monthly_burn_usd if estimated_monthly_burn_usd > 0 else 9999
-    now_ts = time.time()
-    current_month_days = 31
-    fraction_of_month = (now_ts % (86400 * current_month_days)) / (86400 * current_month_days)
-    estimated_spend_this_month = round(estimated_monthly_burn_usd * fraction_of_month, 2)
-    estimated_remaining = round(GCP_CREDIT_GRANT_USD - estimated_spend_this_month, 2)
+    actual_spend_this_month = counters["total_estimated_spend_usd"]
+    estimated_remaining = round(GCP_CREDIT_GRANT_USD - actual_spend_this_month, 4)
+    months_runway = (
+        round(estimated_remaining / actual_spend_this_month, 1)
+        if actual_spend_this_month > 0
+        else 9999.0
+    )
 
     credits_low = GOOGLE_BILLING_ALERT or (estimated_remaining < GCP_CREDIT_WARN_REMAINING_USD)
 
     return {
         "provider": "google_cloud",
         "grant_usd": GCP_CREDIT_GRANT_USD,
-        "estimated_monthly_burn_usd": estimated_monthly_burn_usd,
-        "estimated_spend_this_month_usd": estimated_spend_this_month,
+        "spend_this_month_usd": actual_spend_this_month,
         "estimated_remaining_usd": estimated_remaining,
-        "months_runway": round(months_runway, 1),
+        "months_runway": months_runway,
         "credits_low": credits_low,
         "billing_alert_active": GOOGLE_BILLING_ALERT,
         "service_account_configured": sa_configured,
+        "counters": {
+            "period": counters["period"],
+            "process_uptime_hours": counters["process_uptime_hours"],
+            "counters_reset_on_restart": counters["counters_reset_on_restart"],
+        },
         "services": {
             "configured": configured_services,
             "unconfigured": unconfigured_services,
@@ -354,21 +355,27 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "model": "chirp_2",
                 "languages": ["hi-IN", "bn-IN", "as-IN"],
                 "pricing": "$0.016/min",
-                "monthly_est_usd": 4.0,
+                "calls_this_month": svc_counters["stt"]["calls"],
+                "audio_minutes_this_month": round(svc_counters["stt"].get("audio_minutes", 0.0), 2),
+                "spend_this_month_usd": svc_counters["stt"]["estimated_spend_usd"],
                 "configured": "stt_chirp2" in configured_services,
             },
             "tts_neural2": {
                 "model": "Neural2 / Wavenet",
                 "voices": ["hi-IN-Neural2-A", "hi-IN-Neural2-C", "bn-IN-Neural2-A", "as-IN-Wavenet-B"],
                 "pricing": "$16/1M chars",
-                "monthly_est_usd": 3.0,
+                "calls_this_month": svc_counters["tts"]["calls"],
+                "chars_this_month": svc_counters["tts"].get("chars", 0),
+                "spend_this_month_usd": svc_counters["tts"]["estimated_spend_usd"],
                 "configured": "tts_neural2" in configured_services,
             },
             "translation_v3": {
                 "model": "translateText v3",
                 "languages": ["hi", "bn", "as"],
                 "pricing": "$20/1M chars",
-                "monthly_est_usd": 6.0,
+                "calls_this_month": svc_counters["translate"]["calls"],
+                "chars_this_month": svc_counters["translate"].get("chars", 0),
+                "spend_this_month_usd": svc_counters["translate"]["estimated_spend_usd"],
                 "configured": "translation_v3" in configured_services,
             },
             "vision_ocr": {
@@ -376,7 +383,9 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "scripts": ["Devanagari", "Bengali"],
                 "trigger": "indic_lang OR workers_ai_confidence < 0.80",
                 "pricing": "$1.50/1K images",
-                "monthly_est_usd": 2.0,
+                "calls_this_month": svc_counters["vision"]["calls"],
+                "images_this_month": svc_counters["vision"].get("images", 0),
+                "spend_this_month_usd": svc_counters["vision"]["estimated_spend_usd"],
                 "configured": "vision_ocr" in configured_services,
             },
             "gemini_fallback": {
@@ -384,22 +393,25 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "role": "chat fallback position-2 (workers_ai → gemini → groq)",
                 "trigger": "workers_ai load > 0.80",
                 "pricing": "$0.075/1M tokens",
-                "monthly_est_usd": 3.0,
+                "note": "Token counters not tracked in-process (Gemini billed via GCP Console)",
                 "configured": has_gemini,
             },
             "vertex_embed": {
                 "model": "text-embedding-004",
                 "dimensions": 768,
-                "role": "embed fallback position-2 (long-form > 2048 tokens or cooldown)",
+                "role": "embed fallback for long-form > 2048 tokens or cooldown",
                 "warning": "768-dim — do NOT mix with 1024-dim bge-large index",
                 "pricing": "$0.00013/1K chars",
-                "monthly_est_usd": 1.0,
+                "calls_this_month": svc_counters["embed"]["calls"],
+                "chars_this_month": svc_counters["embed"].get("chars", 0),
+                "spend_this_month_usd": svc_counters["embed"]["estimated_spend_usd"],
                 "configured": "vertex_embed" in configured_services,
             },
         },
         "note": (
-            "Spend figures are estimates based on call volume approximations. "
-            "Check GCP Console → Billing for exact current-month spend. "
-            "Budget alerts fire at $1,800 (90%) and $1,900 (95%) to ops Slack."
+            "spend_this_month_usd is derived from in-process call counters (calls × unit price). "
+            "Counters reset at month start and on process restart. "
+            "For exact billing, check GCP Console → Billing → Cost breakdown. "
+            "Budget alerts fire at $1,800 (90%) and $1,900 (95%)."
         ),
     }

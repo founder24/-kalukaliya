@@ -223,4 +223,9 @@ async def synthesize(
         "[google-tts] Neural2 voice=%s text=%d chars audio=%d bytes (%.0fms)",
         voice_name, len(text), len(audio_bytes), elapsed_ms,
     )
+    try:
+        from providers.gcp_counters import inc_tts as _inc_tts
+        _inc_tts(len(text[:5000]))
+    except Exception:
+        pass
     return audio_bytes
