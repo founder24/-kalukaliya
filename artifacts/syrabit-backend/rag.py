@@ -524,7 +524,7 @@ async def _try_vector_provider(
         from providers.cohere import embed_query as _cohere_embed, ENABLED as _cohere_on
         if not _cohere_on:
             raise RuntimeError(f"{provider}: Cohere embeddings not configured (VOYAGE_API_KEY missing?)")
-        q_vec = await asyncio.wait_for(_cohere_embed(query), timeout=4.0)
+        q_vec = await asyncio.wait_for(_cohere_embed(query), timeout=2.0)
 
     elif provider == "vertex":
         import vertex_services as _vtx_svc
@@ -552,7 +552,7 @@ async def _try_vector_provider(
             raise RuntimeError("pinecone_ai: PineconeVectorRetriever not configured")
         matches = await asyncio.wait_for(
             _pc.query(q_vec, top_k=limit, metadata_filter=pc_filter, return_metadata=True),
-            timeout=5.0,
+            timeout=2.0,
         )
         return [
             {
@@ -589,7 +589,7 @@ async def _try_vector_provider(
     raise RuntimeError(f"vector_search: unhandled provider branch {provider!r}")
 
 
-_HYDE_TIMEOUT = 2.5  # s; skip HyDE silently if LLM is slow
+_HYDE_TIMEOUT = 1.5  # s; skip HyDE silently if LLM is slow
 
 
 async def _generate_hyde_passage(query: str) -> Optional[str]:
@@ -633,20 +633,26 @@ async def _fetch_chunks_semantic(
     limit: int = 10,
     subject_id: Optional[str] = None,
     lang: str = "en",
+    hyde_task: Optional[asyncio.Task] = None,
 ) -> list:
     """Semantic retrieval with weighted fallback-without-replacement via PROVIDER_PRIORITY['vector_search'].
 
-    Dispatch order (by PROVIDER_CREDITS weight):
-      vertex(2000) → pinecone_ai(500) → mongodb_atlas(0) → workers_ai(0)
+    Dispatch order (by PROVIDER_CREDITS weight, now overridden by POOL_WEIGHTS["vector_search"]):
+      pinecone_ai(3000) → vertex(500) → mongodb_atlas(0) → workers_ai(0)
 
     select_provider("vector_search") draws a weighted provider without replacement.
     Each failed or zero-result attempt excludes that provider and redraws from the
     remaining weighted pool — identical fallback semantics to all other dispatch functions.
 
-      - vertex        → Gemini embed + Atlas $vectorSearch
-      - pinecone_ai   → Cohere embed + Pinecone serverless $vectorSearch
-      - mongodb_atlas → Cohere embed + Atlas $vectorSearch (weight-0, last resort before workers_ai)
+      - pinecone_ai   → Cohere embed + Pinecone syrabit-ahsec $vectorSearch  [primary]
+      - vertex        → Gemini embed + Atlas $vectorSearch                    [fallback]
+      - mongodb_atlas → Cohere embed + Atlas $vectorSearch (weight-0, last resort)
       - workers_ai    → no vector endpoint; excluded immediately
+
+    hyde_task: optional pre-started asyncio.Task for _generate_hyde_passage. When provided
+    (started before the asyncio.gather in _fetch_internal_chapters), HyDE runs in parallel
+    with keyword search instead of being serial before the embed step. The task has its own
+    _HYDE_TIMEOUT so awaiting it is always bounded.
 
     Returns chapter dicts in the same shape as the keyword-search path so they
     can be deduplicated and reranked together downstream.
@@ -654,9 +660,16 @@ async def _fetch_chunks_semantic(
     from llm import select_provider as _select_vs
     from config import PROVIDER_PRIORITY as _PP
 
-    # R1 HyDE: embed a hypothetical answer passage instead of the raw question.
-    # Runs in parallel with the exclude-loop setup (zero extra latency on fast LLMs).
-    _hyde_passage = await _generate_hyde_passage(query)
+    # R1 HyDE: use pre-started task if provided (parallel with keyword search),
+    # otherwise start fresh here. _generate_hyde_passage has its own _HYDE_TIMEOUT
+    # so awaiting the task is always bounded to 1.5s.
+    if hyde_task is not None:
+        try:
+            _hyde_passage = await hyde_task
+        except Exception:
+            _hyde_passage = None
+    else:
+        _hyde_passage = await _generate_hyde_passage(query)
     _embed_query = f"{query}\n\n{_hyde_passage}" if _hyde_passage else query
 
     exclude: frozenset = frozenset()
@@ -757,7 +770,16 @@ async def _fetch_internal_chapters(
             _pinecone_enabled = False
 
         # Fetch more candidates when reranker is available
-        fetch_limit = min(limit * 5, 25) if _pinecone_enabled else limit
+        fetch_limit = min(limit * 8, 30) if _pinecone_enabled else limit
+
+        # ── HyDE pre-start (T005) — runs in parallel with keyword search setup ─
+        # Starting HyDE before creating keyword_task gives it a head-start that
+        # overlaps with keyword search execution time (50-150ms). By the time
+        # _fetch_chunks_semantic awaits it, some or all of the LLM call has
+        # already elapsed, cutting the effective HyDE wait inside the semantic leg.
+        _hyde_prefetch: Optional[asyncio.Task] = None
+        if _pinecone_enabled:
+            _hyde_prefetch = asyncio.ensure_future(_generate_hyde_passage(query))
 
         # ── 1. Keyword search: title + content + content_as (Assamese field) ──
         regex_pattern = "|".join(re.escape(kw) for kw in keywords[:6])
@@ -776,7 +798,7 @@ async def _fetch_internal_chapters(
         if _pinecone_enabled:
             kw_chapters, sem_chapters = await asyncio.gather(
                 keyword_task,
-                _fetch_chunks_semantic(query, limit=fetch_limit, subject_id=subject_id),
+                _fetch_chunks_semantic(query, limit=fetch_limit, subject_id=subject_id, hyde_task=_hyde_prefetch),
                 return_exceptions=True,
             )
             if isinstance(kw_chapters, Exception):
@@ -833,7 +855,7 @@ async def _fetch_internal_chapters(
 
                 candidates = await asyncio.wait_for(
                     _pc_rerank(query, candidates, _rerank_text, top_k=limit, min_score=-1.0),
-                    timeout=8.0,
+                    timeout=3.0,
                 )
                 logger.info(
                     "[INTERNAL_RAG] Pinecone reranked → top %d for '%s'",

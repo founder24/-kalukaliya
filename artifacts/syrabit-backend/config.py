@@ -1086,6 +1086,14 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_indic": 3000,   # primary — dedicated Indic MT model, fastest
         "vertex":            100,   # fallback — Gemini handles any edge cases
     },
+    # vector_search: Pinecone curated index primary (3000) → Atlas/Vertex fallback (500).
+    # Pinecone syrabit-ahsec index is chapter-level, Cohere 1024-dim, purpose-built for
+    # Syrabit content → better recall than generic Atlas $vectorSearch with Vertex embeddings.
+    # Previous: vertex=2000, pinecone_ai=500 → Pinecone only ~20% of draws (too low).
+    "vector_search": {
+        "pinecone_ai": 3000,   # primary — curated Syrabit chapter index
+        "vertex":       500,   # fallback — Atlas $vectorSearch with Vertex embeddings
+    },
 }
 
 SEED_DATA = {

@@ -2434,6 +2434,58 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     }
 
     if use_model_raw == "openai/gpt-oss-20b":
+        # ── Azure OpenAI fast-path (T007) ─────────────────────────────────────
+        # When the default English SLM model is requested and Azure is configured
+        # via the CF AI Gateway, attempt Azure GPT-4.1-mini streaming first.
+        # Azure offers better output quality and typically faster TTFT (~200-400ms)
+        # than the Workers AI SLM hedged pool (~400-800ms).
+        # On ANY failure BEFORE the first token → silently fall through to SLM pool.
+        # On mid-stream failure AFTER the first token → emit error and return.
+        if not _indic_mode:
+            try:
+                from providers import azure_openai as _az_prov
+                if _az_prov.ENABLED:
+                    _az_first_token = False
+                    _az_ttft_ms = 0.0
+                    _az_t0 = time.monotonic()
+                    try:
+                        _az_batch = ""
+                        _AZ_BATCH_SIZE = 2
+                        async for token in _az_prov.stream_chat(messages, max_tokens=max_tokens):
+                            if not _az_first_token:
+                                _az_ttft_ms = (time.monotonic() - _az_t0) * 1000
+                                logger.info(f"[AZURE-PERF] TTFT={_az_ttft_ms:.0f}ms model=azure/gpt-4.1-mini")
+                                _az_first_token = True
+                            _az_batch += token
+                            if len(_az_batch) >= _AZ_BATCH_SIZE:
+                                yield f"data: {json.dumps({'content': _az_batch})}\n\n"
+                                _az_batch = ""
+                        if _az_batch:
+                            yield f"data: {json.dumps({'content': _az_batch})}\n\n"
+                        if _az_first_token:
+                            _az_total_ms = (time.monotonic() - _az_t0) * 1000
+                            logger.info(f"[AZURE-PERF] Total={_az_total_ms:.0f}ms model=azure/gpt-4.1-mini")
+                            try:
+                                from chat_speedup_metrics import record_provider_call as _rec_prov
+                                _rec_prov("azure_openai", ttfb_ms=_az_ttft_ms, total_ms=_az_total_ms)
+                            except Exception:
+                                pass
+                            yield f"data: {json.dumps({'__provider': 'azure_openai'})}\n\n"
+                            return
+                        logger.warning("[AZURE-FASTPATH] Empty stream — falling back to SLM pool")
+                    except Exception as _az_err:
+                        if _az_first_token:
+                            logger.warning(f"[AZURE-FASTPATH] Mid-stream error: {type(_az_err).__name__}: {str(_az_err)[:200]}")
+                            yield f"data: {json.dumps({'error': 'AI service interrupted'})}\n\n"
+                            return
+                        logger.warning(f"[AZURE-FASTPATH] Pre-first-token failure: {type(_az_err).__name__}: {str(_az_err)[:200]} — SLM pool fallback")
+                    try:
+                        from chat_speedup_metrics import record_provider_fallback as _rec_fb
+                        _rec_fb("azure_openai", "slm_pool")
+                    except Exception:
+                        pass
+            except ImportError:
+                pass
         _active_pool = _slm_pool
         _input_chars = sum(len(m.get("content", "")) for m in messages)
 

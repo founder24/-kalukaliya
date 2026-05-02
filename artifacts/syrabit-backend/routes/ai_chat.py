@@ -1800,9 +1800,13 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
 
     _PRE_LLM_BUDGET = 0.15
 
-    # F2: Warm-cache helper — returns pre-fetched chapters from the /ai/warm-query
-    # endpoint if the user typed the same query ≥800ms before hitting send.
-    async def _fetch_chapters_warm_first():
+    # F2: Warm-cache helpers — /ai/warm-query endpoint pre-populates Redis
+    # (20s TTL) via the frontend 800ms debounce. Phase 0 only does a fast Redis
+    # check (T006) so the 150ms budget always completes. Phase 2 / resolve_rag_context
+    # handles the full _fetch_internal_chapters call if Redis misses.
+
+    async def _check_warm_redis() -> list:
+        """Redis-only check — completes in <5ms. Used in Phase 0 (150ms budget)."""
         import hashlib as _hl, json as _json
         _sid = msg.subject_id or ""
         _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
@@ -1812,7 +1816,24 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                 if _wdata:
                     _parsed = _json.loads(_wdata)
                     if _parsed:
-                        logger.debug("[F2-WARM] Phase-0 cache hit — skipping _fetch_internal_chapters call")
+                        logger.debug("[F2-WARM] Phase-0 Redis hit — %d chapters cached", len(_parsed))
+                        return _parsed
+            except Exception:
+                pass
+        return []  # cache miss → resolve_rag_context will call _fetch_internal_chapters
+
+    async def _fetch_chapters_warm_first():
+        """Redis check + _fetch_internal_chapters fallback. Kept for Phase 2 if needed."""
+        import hashlib as _hl, json as _json
+        _sid = msg.subject_id or ""
+        _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
+        if redis_client:
+            try:
+                _wdata = redis_client.get(_wkey)
+                if _wdata:
+                    _parsed = _json.loads(_wdata)
+                    if _parsed:
+                        logger.debug("[F2-WARM] Redis hit — skipping _fetch_internal_chapters")
                         return _parsed
             except Exception:
                 pass
@@ -1840,7 +1861,7 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             asyncio.create_task(_fetch_doc()),
             asyncio.create_task(_fetch_followup_info()),
             asyncio.create_task(_prefetch_history()),
-            asyncio.create_task(_fetch_chapters_warm_first() if (msg.subject_id or msg.subject_name) else asyncio.sleep(0)),
+            asyncio.create_task(_check_warm_redis() if (msg.subject_id or msg.subject_name) else asyncio.sleep(0)),
         ]
         _defaults_pre = [None, None, None, None, None, []]
 
@@ -2046,43 +2067,12 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
     _t_phase2_done = _time_mod.time()
     logger.info(f"[STREAM][TIMING] Phase 2 (context): {_t_phase2_done - _t_phase2:.3f}s | total pre-LLM: {_t_phase2_done - _stream_t0:.3f}s")
 
-    # ── WAI chapter classification result ─────────────────────────────────────
-    # The task was started alongside Stage 1.  By the time we reach here
-    # (Phase 0 + resolve_rag_context ≈ 350-600ms), the Workers AI call
-    # (~200-400ms) is often already done.  We give it up to 1.0s of
-    # additional grace before moving on.
+    # ── WAI chapter classification result (T002) ──────────────────────────────
+    # Resolved inside event_stream() so StreamingResponse is returned immediately
+    # and discovery:searching reaches the client ~0ms after submit.
+    # The outer handler no longer awaits the WAI task — event_stream handles it
+    # after yielding the initial discovery:searching/class/subject SSE events.
     _wai_match: Optional[dict] = None
-    if _wai_chapter_task is not None:
-        if _wai_chapter_task.done():
-            try:
-                _wai_match = _wai_chapter_task.result()
-            except Exception:
-                _wai_match = None
-        else:
-            _wai_elapsed = _time_mod.time() - _stream_t0
-            _wai_grace   = max(0.0, 1.0 - _wai_elapsed)
-            if _wai_grace > 0.05:
-                try:
-                    _wai_match = await asyncio.wait_for(_wai_chapter_task, timeout=_wai_grace)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    _wai_match = None
-                    logger.info("[WAI] classify not ready (grace window elapsed) — skipping")
-                except Exception:
-                    _wai_match = None
-            else:
-                _wai_chapter_task.cancel()
-
-    if _wai_match:
-        logger.info(
-            "[WAI] chapter match: '%s' (sim=%.3f, confident=%s)",
-            _wai_match.get("chapter_title"), _wai_match.get("similarity"),
-            _wai_match.get("confident"),
-        )
-        # If RAG didn't find a chapter but WAI did, surface it as rag_chapter_name
-        if not rag_chapter_name and _wai_match.get("chapter_title"):
-            rag_chapter_name = _wai_match["chapter_title"]
-        if not rag_chapter_slug and _wai_match.get("slug"):
-            rag_chapter_slug = _wai_match["slug"]
 
     # ── Build prompt ───────────────────────────────────────────────────────────
     system_prompt = build_rag_system_prompt(
@@ -2332,7 +2322,7 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             pass
 
     async def event_stream():
-        nonlocal full_response
+        nonlocal full_response, rag_chapter_name, rag_chapter_slug
         _credit_saved = False  # set True when answer is committed; controls refund in finally
         try:
             # ── Discovery SSE events ───────────────────────────────────────────
@@ -2349,6 +2339,39 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             _disc_subject = rag_subject_name or (msg.subject_name if msg.subject_name else None)
             if _disc_subject:
                 yield f"data: {json.dumps({'event': 'discovery:subject', 'value': _disc_subject})}\n\n"
+            # ── WAI chapter classification (T002) — resolved here, not in outer handler ──
+            # discovery:searching + class + subject are already in-flight to the client.
+            # Await WAI with remaining grace (up to 1.0s from request start) so that
+            # discovery:chapter and _meta_event include the matched chapter.
+            if _wai_chapter_task is not None:
+                if _wai_chapter_task.done():
+                    try:
+                        _wai_match = _wai_chapter_task.result()
+                    except Exception:
+                        _wai_match = None
+                else:
+                    _wai_elapsed_es = _time_mod.time() - _stream_t0
+                    _wai_grace_es = max(0.0, 1.0 - _wai_elapsed_es)
+                    if _wai_grace_es > 0.02:
+                        try:
+                            _wai_match = await asyncio.wait_for(_wai_chapter_task, timeout=_wai_grace_es)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            _wai_match = None
+                            logger.info("[WAI] classify not ready inside event_stream — skipping")
+                        except Exception:
+                            _wai_match = None
+                    else:
+                        _wai_chapter_task.cancel()
+                if _wai_match:
+                    logger.info(
+                        "[WAI] chapter match: '%s' (sim=%.3f, confident=%s)",
+                        _wai_match.get("chapter_title"), _wai_match.get("similarity"),
+                        _wai_match.get("confident"),
+                    )
+                    if not rag_chapter_name and _wai_match.get("chapter_title"):
+                        rag_chapter_name = _wai_match["chapter_title"]
+                    if not rag_chapter_slug and _wai_match.get("slug"):
+                        rag_chapter_slug = _wai_match["slug"]
             _disc_chapter = rag_chapter_name or (_wai_match.get('chapter_title') if _wai_match else None)
             if _disc_chapter:
                 yield f"data: {json.dumps({'event': 'discovery:chapter', 'value': _disc_chapter})}\n\n"

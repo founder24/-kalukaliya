@@ -27,10 +27,11 @@ Model: gpt-4o-mini (cost-efficient; swap via AZURE_OPENAI_MODEL env var)
 """
 from __future__ import annotations
 
+import json
 import logging
 import os as _os
 import re
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
@@ -141,6 +142,68 @@ async def call_chat(
     data = resp.json()
     content = data["choices"][0]["message"].get("content", "") or ""
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
+
+async def stream_chat(
+    messages: list,
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 2048,
+    timeout_s: float = 20.0,
+) -> AsyncIterator[str]:
+    """Stream tokens from Azure OpenAI chat/completions via CF AI Gateway BYOK.
+
+    Async generator — yields content token strings one at a time.
+    Uses the persistent httpx singleton client (HTTP/2, connection pooling).
+    Raises RuntimeError on gateway error or connection failure.
+    """
+    base = _base_url()
+    if not base:
+        raise RuntimeError("azure_openai: CF AI Gateway is down or azure-openai slug not configured")
+
+    deployment = model or _MODEL
+    url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
+    body = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.1,
+        "stream": True,
+    }
+
+    client = _get_client()
+    try:
+        async with client.stream(
+            "POST", url, headers=_headers(), json=body,
+            timeout=httpx.Timeout(timeout_s),
+        ) as resp:
+            if resp.status_code >= 400:
+                body_bytes = await resp.aread()
+                raise RuntimeError(
+                    f"azure_openai: HTTP {resp.status_code} — {body_bytes.decode()[:200]}"
+                )
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if raw == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(raw)
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    token = delta.get("content") or ""
+                    if token:
+                        yield token
+                except Exception:
+                    continue
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"azure_openai: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
+        raise RuntimeError(f"azure_openai: connection error — {exc}")
 
 
 async def health_check() -> dict:
