@@ -2848,9 +2848,11 @@ async def call_embed_with_dispatch(
     """Embed *text* via the weighted provider selected for the 'embed' feature key.
 
     Priority (PROVIDER_PRIORITY['embed']):
-      vertex(2000) → cohere(500) → pinecone_ai(200) → workers_ai(0)
+      vertex(2000) → bedrock(1000, Titan embed) → cohere(1000) → azure_openai(1, skip) → workers_ai(0)
 
-    Falls back to vertex_services.embed_text() on error.
+    bedrock: Amazon Titan Text Embeddings v1 via CF gateway BYOK (/model/.../invoke).
+    cohere: providers.cohere.embed_query (1024-dim, embed-multilingual-v3.0).
+    azure_openai: embeddings endpoint not wired (Task #257) — excluded gracefully.
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP
@@ -2916,8 +2918,10 @@ async def call_translate_with_dispatch(
     """Translate *text* via the weighted provider selected for 'translate'.
 
     Priority (PROVIDER_PRIORITY['translate']):
-      sarvam(2000) → vertex(500) → workers_ai(0)
+      sarvam(500) → vertex(2000) → bedrock(1000, call_converse) → azure_openai(1, call_chat) → workers_ai(0)
 
+    bedrock: routes via providers.bedrock.call_converse with translation system prompt.
+    azure_openai: routes via providers.azure_openai.call_chat with translation system prompt.
     Returns the translated string or raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP
@@ -3055,12 +3059,13 @@ async def call_rerank_with_dispatch(
 ) -> list:
     """Rerank *docs* via the weighted provider selected for 'rerank'.
 
-    Priority (PROVIDER_PRIORITY['rerank']): workers_ai(0, last-resort)
+    Priority (PROVIDER_PRIORITY['rerank']):
+      pinecone_ai(500) → cohere(1000, skip) → azure_openai(1, skip) → workers_ai(0)
 
-    Cohere and Pinecone rerank clients are Phase 2 (Task #257) and not yet
-    wired — they are NOT listed in PROVIDER_PRIORITY['rerank'].  When workers_ai
-    is selected it also has no rerank endpoint, so the function always falls
-    through and returns *docs* unranked as a graceful degradation.
+    pinecone_ai: providers.pinecone_ai.rerank (bge-reranker-v2-m3, multilingual) — fully wired.
+    cohere: /rerank endpoint not accessible through CF gateway slug (Task #257) — excluded gracefully.
+    azure_openai: rerank not wired (Task #257) — excluded gracefully.
+    workers_ai: no rerank endpoint — excluded gracefully.
 
     Each doc should be a string or a dict with a 'text' key.
     Returns the docs list reordered by relevance (most relevant first),
@@ -3109,10 +3114,13 @@ async def call_vision_with_dispatch(
 ) -> str:
     """Analyse *b64_image* via the weighted provider selected for 'vision'.
 
-    Priority (PROVIDER_PRIORITY['vision']): vertex(2000) → workers_ai(0)
+    Priority (PROVIDER_PRIORITY['vision']):
+      vertex(2000, Gemini) → bedrock(1000, Claude multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
 
-    bedrock and azure_openai are Phase 2 (Task #256) and excluded from
-    PROVIDER_PRIORITY['vision'] until their vision clients are wired.
+    vertex: Gemini 2.5 Flash vision via _call_gemini with image_url content.
+    bedrock: Claude 3.5 Sonnet v2 multimodal via providers.bedrock.call_converse_vision.
+    azure_openai: GPT-4o vision via providers.azure_openai.call_chat with image_url content.
+    workers_ai: no multimodal endpoint — excluded gracefully.
 
     Returns the model's text response.
     Raises RuntimeError if all providers fail.

@@ -315,8 +315,8 @@ async def voice_pipeline(
     # The LLM step between the two legs is serial (requires the STT transcript).
     #
     # Dispatch pools:
-    #   STT leg: assemblyai(1000) → azure_openai(1, RuntimeError→skip) → workers_ai(0)
-    #   TTS leg: cartesia(500) → elevenlabs(500) → azure_openai(1, RuntimeError→skip) → workers_ai(0)
+    #   STT leg: assemblyai(1000) → vertex(2k,skip) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
+    #   TTS leg: cartesia(500) → elevenlabs(500) → vertex(2k,skip) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
 
     from llm import select_provider as _sp
 
