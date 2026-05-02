@@ -24,10 +24,14 @@
  *   1  — one or more assertions failed (details printed to stdout)
  */
 
-const TOKEN      = process.env.CLOUDFLARE_API_TOKEN;
-const ZONE_ID    = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea72fb61871';
-const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || 'd66e40eac539fff1db270fddf384a5ec';
-const API        = 'https://api.cloudflare.com/client/v4';
+const TOKEN        = process.env.CLOUDFLARE_API_TOKEN;
+const ZONE_ID      = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea72fb61871';
+const ACCOUNT_ID   = process.env.CLOUDFLARE_ACCOUNT_ID || 'd66e40eac539fff1db270fddf384a5ec';
+const API          = 'https://api.cloudflare.com/client/v4';
+// Optional: set SLACK_WEBHOOK_URL to receive direct alerts when the smoke run
+// fails. When unset the script still exits with code 1 so CI marks the run
+// failed and sends the standard GitHub failed-workflow email.
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
 
 if (!TOKEN) {
   console.error('CLOUDFLARE_API_TOKEN is not set — aborting smoke run');
@@ -746,6 +750,30 @@ async function main() {
     process.exit(0);
   } else {
     console.error(`\n${failures.length} check(s) FAILED:\n  ${failures.join('\n  ')}`);
+    // ── Slack alert on failure ────────────────────────────────────────────
+    // Fires before exit(1) so the team is paged directly from the smoke run,
+    // not just via the GitHub failed-workflow email.  Set SLACK_WEBHOOK_URL
+    // in CI secrets (or locally) to activate; degrades silently when unset.
+    if (SLACK_WEBHOOK_URL) {
+      try {
+        const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+          ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+          : '(local run)';
+        const text = `:rotating_light: *Nightly smoke FAILED* — ${failures.length} check(s):\n` +
+          failures.map(f => `• ${f}`).join('\n') +
+          `\n<${runUrl}|View run>`;
+        await fetch(SLACK_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        console.log('Slack alert sent.');
+      } catch (e) {
+        console.warn(`Slack alert failed: ${e.message}`);
+      }
+    } else {
+      console.log('(SLACK_WEBHOOK_URL not set — set to receive direct Slack alerts on failure)');
+    }
     process.exit(1);
   }
 }
