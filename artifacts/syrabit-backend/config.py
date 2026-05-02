@@ -992,14 +992,14 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG:
-    #   Azure GPT-4o Mini (primary, 2.5k) → Workers AI (last resort) → Gemini (emergency).
-    #   Rotational to avoid exhausting the primary; all via CF AI Gateway.
-    "english_rag_chat":  ["azure_openai", "workers_ai", "vertex"],
-    # Assamese chat:
-    #   Sarvam (primary, native Indic) → Workers AI IndicTrans2 (neural MT) → Gemini (emergency).
-    #   POOL_WEIGHTS gives sarvam=3000, workers_ai_indic=2000, vertex=100.
-    "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
+    # English chat + RAG (Task #267):
+    #   Azure GPT-4.1-mini (primary, 2.5k) → Bedrock Nova Micro (second, 1k) → Workers AI (last resort).
+    #   POOL_WEIGHTS gives azure_openai=3000, bedrock=1000; workers_ai falls back at weight 0.
+    "english_rag_chat":  ["azure_openai", "bedrock", "workers_ai"],
+    # Assamese chat (Task #267):
+    #   Sarvam (primary, native Indic) → Gemini 2.5 Flash (second) → Workers AI IndicTrans2 (last resort).
+    #   POOL_WEIGHTS gives sarvam=3000, vertex=100; workers_ai_indic falls back at weight 0.
+    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
     # Long-form content / notes generation:
     #   Gemini (primary, 1M-token context) → Azure → AWS Bedrock → Workers AI (last resort).
     #   POOL_WEIGHTS["content"] gives vertex=5000 so Gemini draws ~56%.
@@ -1063,17 +1063,17 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "azure_openai": 2500,   # second
         "bedrock":      1000,   # third
     },
-    # english_rag_chat: Azure primary (3000) → Vertex emergency (100) → Workers AI (0, absolute last resort).
-    # Draw order by weight: azure_openai(3000) → vertex(100) → workers_ai(0 via PROVIDER_CREDITS).
+    # english_rag_chat (Task #267): Azure primary (3000) → Bedrock second (1000) → Workers AI (0, absolute last resort).
+    # Draw order by weight: azure_openai(3000) → bedrock(1000) → workers_ai(0 via PROVIDER_CREDITS).
     "english_rag_chat": {
-        "azure_openai": 3000,   # primary — GPT-4o Mini, highest TPS on Azure
-        "vertex":        100,   # emergency fallback — Gemini when Azure is down
+        "azure_openai": 3000,   # primary — GPT-4.1-mini, highest TPS on Azure
+        "bedrock":      1000,   # second — Nova Micro fallback when Azure is rate-limited
     },
-    # assamese_rag_chat: Sarvam primary (3000) → IndicTrans2 second (2000) → Vertex last resort (100).
+    # assamese_rag_chat (Task #267): Sarvam primary (3000) → Vertex second (100) → IndicTrans2 last resort (0).
+    # workers_ai_indic has no POOL_WEIGHTS override → falls back to PROVIDER_CREDITS=0 (last resort).
     "assamese_rag_chat": {
-        "sarvam":           3000,   # primary — best for Assamese conversational
-        "workers_ai_indic": 2000,   # second — purpose-built Indic neural MT
-        "vertex":            100,   # last resort only
+        "sarvam":  3000,   # primary — best for Assamese conversational
+        "vertex":   100,   # second — Gemini 2.5 Flash emergency fallback
     },
     # assamese_content: Sarvam primary (2000) → Vertex second (100) → IndicTrans2 last resort.
     "assamese_content": {

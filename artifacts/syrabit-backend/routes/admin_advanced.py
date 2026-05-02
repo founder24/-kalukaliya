@@ -1700,6 +1700,68 @@ async def admin_llm_pool_stats(admin: dict = Depends(get_admin_user)):
     }
 
 
+@router.get("/admin/llm/health")
+async def admin_llm_health(admin: dict = Depends(get_admin_user)):
+    """Routing-chain health panel (Task #267 / Task #269).
+
+    Returns:
+      routing_chains  — ordered provider+model list for each key feature pool,
+                        reflecting the Task #267 rewire (azure_openai/gpt-4.1-mini
+                        primary, bedrock/nova-micro second, workers_ai last resort
+                        for English; sarvam primary, vertex/gemini-2.5-flash second,
+                        workers_ai_indic/indictrans2 last resort for Assamese).
+      burst_429       — 180-second sliding-window 429 counters for every tracked
+                        provider, including azure_openai and bedrock.
+      burst_429_60s   — same counters restricted to the last 60 seconds
+                        (in-process timestamp list — accurate short window).
+    """
+    from llm import (
+        _PROVIDER_DEFAULT_MODELS,
+        get_provider_429_burst,
+        get_provider_429_burst_inprocess,
+        _PROVIDER_429_WINDOWS,
+    )
+    from config import PROVIDER_PRIORITY, POOL_WEIGHTS, PROVIDER_CREDITS
+
+    _FEATURE_KEYS = ["english_rag_chat", "assamese_rag_chat"]
+
+    def _build_chain(feature: str) -> list[dict]:
+        providers = PROVIDER_PRIORITY.get(feature, [])
+        pool_override = POOL_WEIGHTS.get(feature, {})
+        chain = []
+        for p in providers:
+            weight = pool_override.get(p, PROVIDER_CREDITS.get(p, 0))
+            chain.append({
+                "provider": p,
+                "model":    _PROVIDER_DEFAULT_MODELS.get(p, "unknown"),
+                "weight":   weight,
+                "role":     (
+                    "primary"    if chain == [] else
+                    "last_resort" if weight == 0 else
+                    "fallback"
+                ),
+            })
+        return chain
+
+    routing_chains = {feat: _build_chain(feat) for feat in _FEATURE_KEYS}
+
+    tracked_providers = list(_PROVIDER_429_WINDOWS.keys())
+    burst_180 = {p: get_provider_429_burst(p) for p in tracked_providers}
+    burst_60   = {p: get_provider_429_burst_inprocess(p, window_seconds=60) for p in tracked_providers}
+
+    return {
+        "routing_chains": routing_chains,
+        "burst_429":      burst_180,
+        "burst_429_60s":  burst_60,
+        "note": (
+            "routing_chains reflects Task #267 rewire: "
+            "english_rag_chat = azure_openai/gpt-4.1-mini → bedrock/nova-micro → workers_ai; "
+            "assamese_rag_chat = sarvam/sarvam-m → vertex/gemini-2.5-flash → workers_ai_indic/indictrans2. "
+            "burst_429 uses Redis when available (180s TTL); burst_429_60s is always in-process."
+        ),
+    }
+
+
 @router.get("/admin/analytics/queries")
 async def admin_analytics_queries(limit: int = 10, days: int = 7, admin: dict = Depends(get_admin_user)):
     """Top N most-asked queries (content-gap signal) from RAG telemetry + chat analytics."""
