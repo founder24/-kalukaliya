@@ -123,59 +123,83 @@ const PLACEMENTS = {
   // via `useAdsenseAutoAds`, so leaving these empty still nets full
   // AdSense coverage on Notes + PYQ — the per-slot keys are an
   // override for ad-ops to target specific positions if/when desired.
+  // Display units — fixed-height banner areas (top, end, sidebar).
+  // adFormat "auto" + full-width-responsive lets Google pick the best
+  // IAB size (typically 320×50 mobile banner or 300×250 rectangle).
   'pyq.adsense.top': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_PYQ_TOP_SLOT || '',
     height: 250,
     label: 'Advertisement',
-  },
-  'pyq.adsense.inContent': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT || '',
-    height: 280,
-    label: 'Advertisement',
+    adFormat: 'auto',
   },
   'pyq.adsense.end': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_PYQ_END_SLOT || '',
-    height: 280,
+    height: 250,
     label: 'Advertisement',
+    adFormat: 'auto',
   },
   'learn.adsense.top': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_LEARN_TOP_SLOT || '',
     height: 250,
     label: 'Advertisement',
-  },
-  'learn.adsense.inContent': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_INCONTENT_SLOT || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'learn.adsense.afterPyqs': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_PYQS_SLOT || '',
-    height: 250,
-    label: 'Advertisement',
-  },
-  'learn.adsense.afterFlashcards': {
-    network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_FLASHCARDS_SLOT || '',
-    height: 250,
-    label: 'Advertisement',
+    adFormat: 'auto',
   },
   'learn.adsense.end': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_LEARN_END_SLOT || '',
     height: 250,
     label: 'Advertisement',
+    adFormat: 'auto',
   },
+  // Desktop-only skyscraper — hidden on mobile via `hidden lg:flex` in LearnPage.
   'learn.adsense.sidebar': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_LEARN_SIDEBAR_SLOT || '',
     height: 600,
     label: 'Advertisement',
+    adFormat: 'auto',
+  },
+
+  // In-article fluid units — mid-content slots served between paragraphs.
+  // adFormat "fluid" + adLayout "in-article" is Google's recommended
+  // format for mobile reading: the ad matches the surrounding text width,
+  // Google picks the height, and there is NO reserved minHeight so the
+  // page never holds blank space when Google decides not to fill the slot.
+  // These placements account for the majority of impressions on mobile.
+  'pyq.adsense.inContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+  'learn.adsense.inContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_INCONTENT_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+  'learn.adsense.afterPyqs': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_PYQS_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+  'learn.adsense.afterFlashcards': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_FLASHCARDS_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
   },
 };
 
@@ -407,6 +431,8 @@ export function getAdConfig(placement) {
     slotId: p.slotId,
     height: p.height,
     label: p.label,
+    adFormat: p.adFormat || 'auto',
+    adLayout: p.adLayout || null,
   };
 }
 

@@ -140,6 +140,11 @@ export default function AdSlot({ placement, className = '', style = {} }) {
   // user who has not granted ad consent must see zero reserved height.
   if (!cfg.enabled || !consentOk) return null;
 
+  // Fluid in-article ads let Google control height entirely — no reserved
+  // minHeight so the page never holds empty space when Google skips the slot.
+  // Display/auto ads reserve their configured height to prevent CLS on load.
+  const isFluid = cfg.adFormat === 'fluid';
+
   return (
     <div
       ref={ref}
@@ -148,29 +153,36 @@ export default function AdSlot({ placement, className = '', style = {} }) {
       data-ad-network={cfg.network}
       aria-label={cfg.label || 'Advertisement'}
       style={{
-        minHeight: `${cfg.height}px`,
         width: '100%',
         display: 'block',
-        margin: '16px 0',
+        // Fluid slots: no height reservation — Google sizes them.
+        // Display slots: reserve configured height to prevent CLS.
+        ...(isFluid ? {} : { minHeight: `${cfg.height}px` }),
+        // Tighter vertical margin on mobile (12px) keeps ad density
+        // comfortable without eating into reading space.
+        margin: '12px 0',
         ...style,
       }}
     >
       {cfg.network === 'adsense' ? (
-        // AdSense per-slot manual unit. The loader script is injected
-        // by the effect above (and de-duped against `useAdsenseAutoAds`
-        // when both are present), then `(adsbygoogle = …).push({})`
-        // tells the network to fill this <ins>.
+        // AdSense per-slot manual unit.
+        // — fluid/in-article: Google picks height; no size constraints set.
+        // — auto/display: full-width-responsive lets Google pick IAB size
+        //   (320×50 banner or 300×250 rectangle on mobile).
         <ins
           className="adsbygoogle"
-          style={{ display: 'block', minHeight: `${cfg.height}px`, width: '100%' }}
+          style={{
+            display: 'block',
+            width: '100%',
+            ...(isFluid ? {} : { minHeight: `${cfg.height}px` }),
+          }}
           data-ad-client={cfg.publisherId}
           data-ad-slot={cfg.slotId}
-          data-ad-format="auto"
-          data-full-width-responsive="true"
+          data-ad-format={cfg.adFormat}
+          {...(cfg.adLayout ? { 'data-ad-layout': cfg.adLayout } : {})}
+          {...(!isFluid ? { 'data-full-width-responsive': 'true' } : {})}
         />
       ) : (
-        // Other networks: deterministic container id so the network can
-        // target it from its injected script.
         <div
           id={`syrabit-ad-${placement.replace(/\./g, '-')}`}
           data-slot-id={cfg.slotId}
