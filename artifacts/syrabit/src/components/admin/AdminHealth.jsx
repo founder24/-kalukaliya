@@ -3311,6 +3311,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             </div>
           );
         })()}
+        </SectionErrorBoundary>
         {/* Task #263 — Startup credit burn panels: AWS Activate, Azure, Axiom, Sentry */}
         <SectionErrorBoundary name="Startup Credit Panels">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
