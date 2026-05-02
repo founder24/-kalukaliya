@@ -4799,8 +4799,11 @@ async def get_sitemap_index():
         '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
     ]
     for name in sitemap_names:
+        # Use root-level aliases (e.g. /sitemap-subjects.xml) rather than
+        # /api/seo/sitemap-subjects.xml so Googlebot follows paths that the
+        # CF Pages Worker intercepts cleanly via SEO_PASSTHROUGH_RE (Task #259).
         lines.append(
-            f"  <sitemap><loc>{BASE_URL}/api/seo/{name}</loc>"
+            f"  <sitemap><loc>{BASE_URL}/{name}</loc>"
             f"<lastmod>{today}</lastmod></sitemap>"
         )
     lines.append("</sitemapindex>")

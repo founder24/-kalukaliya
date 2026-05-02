@@ -58,20 +58,31 @@ const DEFAULT_BACKEND = "https://api.syrabit.ai";
 // the matching backend route and force the correct Content-Type. Cached
 // at the edge for an hour (matches _headers s-maxage).
 const SEO_PASSTHROUGH_RE =
-  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|\.well-known\/ai-plugin\.json)$/i;
+  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|\.well-known\/ai-plugin\.json|api\/seo\/sitemap[a-z0-9_-]*\.xml)$/i;
 // IndexNow keyfiles (32-hex .txt or *indexnow*.txt) are intentionally
 // excluded — they're shipped as static assets in dist/ so the Pages
 // ASSETS pipeline serves them directly. Routing them through the
 // backend hit "Direct origin access denied" because the Pages worker
 // fetches BACKEND_URL without the X-Origin-Auth header that
 // the edge worker injects.
+//
+// Task #259: `/api/seo/sitemap*.xml` paths are also intercepted so
+// that Googlebot can follow sitemap-index child <loc> entries even if
+// they still reference the /api/seo/ prefix. The Worker returns the
+// correct Content-Type: application/xml (not the SPA HTML shell) for
+// both root aliases (/sitemap-subjects.xml) and /api/seo/ sub-paths.
 
-// Map a public path to the corresponding backend path. Sitemaps live
-// under `/api/seo/` on the backend; feeds, llms, robots, .well-known
-// and IndexNow keys are served at the backend root unchanged.
+// Map a public path to the corresponding backend path. Root sitemaps
+// (/sitemap*.xml) are rewritten to /api/seo/<name>. /api/seo/sitemap*.xml
+// sub-paths are already correct and need no rewrite. Feeds, llms, robots
+// and .well-known are served at the backend root unchanged.
 function backendPathForSeo(pathname) {
   if (/^\/sitemap[a-z0-9_-]*\.xml$/i.test(pathname)) {
     return "/api/seo" + pathname;
+  }
+  // /api/seo/sitemap*.xml — already the correct backend path, pass through.
+  if (/^\/api\/seo\/sitemap[a-z0-9_-]*\.xml$/i.test(pathname)) {
+    return pathname;
   }
   // /feed.xml, /feed/<name>.xml, /rss.xml, /llms.txt, /llms-full.txt,
   // /robots.txt, /.well-known/ai-plugin.json, /<key>-indexnow-<…>.txt

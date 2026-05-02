@@ -89,6 +89,12 @@ async function main() {
   const bm = await cfGet(`/zones/${ZONE_ID}/bot_management`);
   assert('sbfm_likely_automated',   bm.result.sbfm_likely_automated,   'managed_challenge');
   assert('content_bots_protection', bm.result.content_bots_protection, 'block');
+  // Task #259: sbfm_verified_bots MUST be 'allow' so Googlebot / Bingbot can
+  // crawl. Any other value (e.g. 'block' or 'managed_challenge') silently drops
+  // all verified-bot traffic and causes zero indexing even when sitemaps are
+  // valid. This is asserted as a hard failure (not a warning) because it is the
+  // single most impactful crawlability knob in the Cloudflare dashboard.
+  assert('sbfm_verified_bots',      bm.result.sbfm_verified_bots,      'allow');
 
   // ── Phase 1: DMARC ────────────────────────────────────────────────────
   console.log('\nPhase 1 — DMARC:');
@@ -680,6 +686,53 @@ async function main() {
     } else {
       failures.push(`Observatory schedule for ${url} (NOT FOUND)`);
       console.log(`  ✗  Observatory schedule (${label}): NOT FOUND — run cloudflare-phase6-apply.js`);
+    }
+  }
+
+  // ── Task #259: Sitemap Content-Type correctness ───────────────────────
+  // HEAD-check every sitemap URL that Googlebot will follow and assert each
+  // returns Content-Type: application/xml (not text/html — the SPA shell).
+  // Tests both the root aliases (Worker SEO_PASSTHROUGH_RE) and the /api/seo/
+  // sub-paths (new regex branch added in Task #259).  Any regression in the
+  // Worker or backend routing that causes a sitemap to return text/html is
+  // caught here before Googlebot silently drops URLs from the index.
+  const SITE_BASE = 'https://syrabit.ai';
+  const sitemapChecks = [
+    '/sitemap-index.xml',
+    '/sitemap-subjects.xml',
+    '/sitemap-pages.xml',
+    '/api/seo/sitemap-subjects.xml',
+    '/api/seo/sitemap-index.xml',
+  ];
+  console.log('\nTask #259 — Sitemap Content-Type checks:');
+  for (const path of sitemapChecks) {
+    try {
+      const r = await fetch(`${SITE_BASE}${path}`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(15000),
+        redirect: 'follow',
+      });
+      const ct = r.headers.get('content-type') || '';
+      const isXml = ct.includes('application/xml') || ct.includes('text/xml');
+      const isHtml = ct.includes('text/html');
+      const mark = (r.status === 200 && isXml) ? '✓' : '✗';
+      const detail = `HTTP ${r.status}  Content-Type: ${ct || '(none)'}`;
+      console.log(`  ${mark}  ${path}  ${detail}`);
+      if (r.status !== 200) {
+        failures.push(`Sitemap ${path}: HTTP ${r.status} (want 200)`);
+      } else if (isHtml) {
+        failures.push(`Sitemap ${path}: Content-Type is text/html — Worker proxy gap; Googlebot receives SPA shell instead of XML`);
+      } else if (!isXml) {
+        failures.push(`Sitemap ${path}: Content-Type "${ct}" is not application/xml`);
+      }
+    } catch (e) {
+      const msg = e.message || String(e);
+      if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) {
+        warn(`Sitemap HEAD ${path}`, 'request timed out — site may be warming up; re-run smoke after 60 s');
+      } else {
+        failures.push(`Sitemap HEAD ${path}: fetch failed — ${msg}`);
+        console.log(`  ✗  ${path}  fetch error: ${msg}`);
+      }
     }
   }
 
