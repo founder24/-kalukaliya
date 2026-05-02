@@ -2903,22 +2903,9 @@ async def call_embed_with_dispatch(
                 from providers.cloudflare_ai import embed as _cf_embed
                 return await _cf_embed(text)
             elif provider == "bedrock":
-                # Amazon Titan Text Embeddings v1 via Bedrock CF gateway BYOK.
-                from providers.bedrock import _base_url as _bk_base_url, _headers as _bk_hdrs, _get_client as _bk_get_client
-                _bk_base = _bk_base_url()
-                if not _bk_base:
-                    raise RuntimeError("bedrock embed: CF gateway not available")
-                _titan_url = f"{_bk_base}/model/amazon.titan-embed-text-v1/invoke"
-                _titan_resp = await _bk_get_client().post(
-                    _titan_url,
-                    headers=_bk_hdrs(),
-                    json={"inputText": text},
-                )
-                _titan_resp.raise_for_status()
-                _titan_vec = _titan_resp.json().get("embedding", [])
-                if not _titan_vec:
-                    raise RuntimeError("bedrock titan embed: empty embedding returned")
-                return _titan_vec
+                # Amazon Titan Embeddings v2 via CF AI Gateway BYOK (Task #256).
+                from providers.bedrock import call_embed as _bk_embed
+                return await _bk_embed(text, task_type=task_type)
             elif provider == "cohere":
                 from providers.cohere import embed_query as _cohere_embed_q, ENABLED as _cohere_enabled
                 if not _cohere_enabled:
@@ -2928,9 +2915,9 @@ async def call_embed_with_dispatch(
                     raise RuntimeError("cohere embed: embed_query returned empty vector")
                 return _cohere_vec
             elif provider == "azure_openai":
-                # Azure OpenAI embeddings endpoint not wired (Task #257).
-                # Listed as mandated second-to-last; excluded gracefully via RuntimeError.
-                raise RuntimeError("azure_openai embed endpoint not wired (Task #257)")
+                # Azure OpenAI text-embedding-3-large via CF BYOK (Task #256).
+                from providers.azure_openai import call_embed as _az_embed
+                return await _az_embed(text)
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
@@ -2988,19 +2975,15 @@ async def call_translate_with_dispatch(
                 ]
                 return await _call_gemini(prompt, _GEMINI_KEY, "gemini-2.5-flash", 2048)
             elif provider == "bedrock":
-                from providers import bedrock as _bk_prov
-                _bk_translate_msgs = [
-                    {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
-                    {"role": "user", "content": text},
-                ]
-                return await _bk_prov.call_converse(_bk_translate_msgs, max_tokens=2048)
+                # Amazon Translate via bedrock-proxy Worker (SigV4) — Task #256.
+                # Falls back to RuntimeError if BEDROCK_PROXY_URL not configured.
+                from providers.bedrock import call_translate as _bk_translate
+                return await _bk_translate(text, target_lang=target_lang, source_lang=source_lang)
             elif provider == "azure_openai":
-                from providers import azure_openai as _az_prov
-                _az_translate_msgs = [
-                    {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
-                    {"role": "user", "content": text},
-                ]
-                return await _az_prov.call_chat(_az_translate_msgs, max_tokens=2048)
+                # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
+                # Falls back to RuntimeError if AZURE_TRANSLATOR_KEY not configured.
+                from providers.azure_openai import call_translate as _az_translate
+                return await _az_translate(text, target_lang=target_lang, source_lang=source_lang)
             elif provider == "workers_ai":
                 prompt = [
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},

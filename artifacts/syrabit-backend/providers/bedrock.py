@@ -1,11 +1,18 @@
-"""providers.bedrock — AWS Bedrock LLM via Cloudflare AI Gateway (BYOK).
+"""providers.bedrock — AWS Bedrock LLM + feature services via Cloudflare AI Gateway (BYOK).
 
-Routes chat completions to AWS Bedrock (Anthropic Claude) via the CF AI
-Gateway, which handles AWS SigV4 request signing when BYOK is configured
-in the Cloudflare dashboard with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+Routes:
+  Chat (LLM):
+    call_converse()         — Claude 3.5 Haiku via CF AI Gateway aws-bedrock BYOK slug
+    call_converse_vision()  — Claude 3.5 Sonnet v2 multimodal via same slug
+
+  Feature services (Task #256):
+    call_tts()      — Amazon Polly TTS via bedrock-proxy Worker (SigV4)
+    call_stt()      — Amazon Transcribe STT via bedrock-proxy Worker (SigV4)
+    call_embed()    — Amazon Titan Embeddings v2 via CF AI Gateway aws-bedrock BYOK
+    call_translate()— Amazon Translate via bedrock-proxy Worker (SigV4)
 
 CF AI Gateway slug: ``aws-bedrock``
-Upstream endpoint:  ``/model/{model_id}/converse``
+Bedrock-proxy Worker URL: ``BEDROCK_PROXY_URL`` env var (required for TTS/STT/Translate)
 
 BYOK setup (CF dashboard → AI Gateway → Providers → AWS Bedrock):
   - Store your AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_REGION
@@ -15,7 +22,9 @@ Message format: OpenAI chat messages → Bedrock Converse API → string reply
 """
 from __future__ import annotations
 
+import base64 as _b64
 import logging
+import os as _os
 from typing import Optional
 
 import httpx
@@ -63,6 +72,11 @@ def _headers() -> dict:
     if CF_AI_GATEWAY_TOKEN:
         h["cf-aig-authorization"] = f"Bearer {CF_AI_GATEWAY_TOKEN}"
     return h
+
+
+def _proxy_url() -> str:
+    """Return the bedrock-proxy Worker URL from env (BEDROCK_PROXY_URL)."""
+    return _os.environ.get("BEDROCK_PROXY_URL", "").strip().rstrip("/")
 
 
 def _to_bedrock_messages(messages: list) -> tuple[Optional[str], list]:
@@ -231,3 +245,170 @@ async def call_converse_vision(
         raise RuntimeError(f"bedrock vision: connection error via CF gateway — {exc}")
 
     return _extract_text(resp.json())
+
+
+# ── Task #256: Feature services ───────────────────────────────────────────────
+
+async def call_tts(
+    text: str,
+    *,
+    voice: Optional[str] = None,
+    output_format: str = "mp3",
+) -> bytes:
+    """TTS via Amazon Polly, routed through the bedrock-proxy Worker (SigV4).
+
+    The bedrock-proxy Worker signs requests with AWS SigV4 and forwards to the
+    Amazon Polly /v1/speech endpoint. Requires BEDROCK_PROXY_URL env var.
+
+    Voice selection priority:
+      1. ``voice`` argument
+      2. ``BEDROCK_POLLY_VOICE`` env var
+      3. "Raveena" (Indian English Neural default)
+
+    Raises RuntimeError if BEDROCK_PROXY_URL is not configured or the call fails.
+    """
+    proxy = _proxy_url()
+    if not proxy:
+        raise RuntimeError("bedrock tts: BEDROCK_PROXY_URL not configured")
+
+    voice_id = voice or _os.environ.get("BEDROCK_POLLY_VOICE", "Raveena")
+    client = _get_client()
+    try:
+        resp = await client.post(
+            f"{proxy}/polly/synthesize",
+            headers={"Content-Type": "application/json"},
+            json={"text": text, "voice_id": voice_id, "output_format": output_format},
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"bedrock tts: HTTP {exc.response.status_code} from proxy — {exc.response.text[:200]}"
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise RuntimeError(f"bedrock tts: connection error to proxy — {exc}")
+    return resp.content
+
+
+async def call_stt(
+    audio_bytes: bytes,
+    *,
+    mime_type: str = "audio/wav",
+    language: str = "en-US",
+) -> str:
+    """STT via Amazon Transcribe, routed through the bedrock-proxy Worker (SigV4).
+
+    The bedrock-proxy Worker accepts base64-encoded audio, uploads it to S3
+    (configured via BEDROCK_S3_BUCKET Worker binding), starts a Transcribe job,
+    polls for completion, and returns the transcript text.
+
+    Requires BEDROCK_PROXY_URL env var. Raises RuntimeError if not configured
+    or the call fails.
+    """
+    proxy = _proxy_url()
+    if not proxy:
+        raise RuntimeError("bedrock stt: BEDROCK_PROXY_URL not configured")
+
+    audio_b64 = _b64.b64encode(audio_bytes).decode("ascii")
+    client = _get_client()
+    try:
+        resp = await client.post(
+            f"{proxy}/transcribe",
+            headers={"Content-Type": "application/json"},
+            json={
+                "audio_b64": audio_b64,
+                "mime_type": mime_type,
+                "language_code": language,
+            },
+            timeout=httpx.Timeout(60.0),  # Transcribe jobs can take up to ~30s for short clips
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"bedrock stt: HTTP {exc.response.status_code} from proxy — {exc.response.text[:200]}"
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise RuntimeError(f"bedrock stt: connection error to proxy — {exc}")
+    return resp.json().get("transcript", "")
+
+
+async def call_embed(
+    text: str,
+    *,
+    task_type: str = "RETRIEVAL_DOCUMENT",
+) -> list:
+    """Embed text via Amazon Titan Embeddings v2 through CF AI Gateway BYOK.
+
+    Uses the ``amazon.titan-embed-text-v2:0`` model via the CF AI Gateway
+    aws-bedrock BYOK slug (same path as Converse). No proxy Worker needed —
+    Titan Embeddings is natively accessible via the CF gateway.
+
+    Raises RuntimeError if CF gateway is unavailable or the embedding is empty.
+    """
+    base = _base_url()
+    if not base:
+        raise RuntimeError("bedrock embed: CF AI Gateway not available for Titan embeddings")
+
+    titan_url = f"{base}/model/amazon.titan-embed-text-v2:0/invoke"
+    client = _get_client()
+    try:
+        resp = await client.post(
+            titan_url,
+            headers=_headers(),
+            json={"inputText": text},
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"bedrock embed: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise RuntimeError(f"bedrock embed: connection error via CF gateway — {exc}")
+
+    vec = resp.json().get("embedding", [])
+    if not vec:
+        raise RuntimeError("bedrock embed: empty embedding returned by Titan v2")
+    return vec
+
+
+async def call_translate(
+    text: str,
+    target_lang: str,
+    source_lang: str = "en",
+) -> str:
+    """Translate text via Amazon Translate, routed through the bedrock-proxy Worker (SigV4).
+
+    The bedrock-proxy Worker signs the request with AWS SigV4 and forwards to
+    the Amazon Translate TranslateText API.
+
+    ``target_lang`` and ``source_lang`` are ISO 639-1 language codes
+    (e.g. "as", "hi", "en"). BCP-47 codes are normalised to the base code.
+
+    Raises RuntimeError if BEDROCK_PROXY_URL is not configured or the call fails.
+    """
+    proxy = _proxy_url()
+    if not proxy:
+        raise RuntimeError("bedrock translate: BEDROCK_PROXY_URL not configured")
+
+    # Normalise BCP-47 to ISO 639-1 (e.g. "as-IN" → "as")
+    tgt = target_lang.split("-")[0] if "-" in target_lang else target_lang
+    src = source_lang.split("-")[0] if "-" in source_lang else source_lang
+
+    client = _get_client()
+    try:
+        resp = await client.post(
+            f"{proxy}/translate",
+            headers={"Content-Type": "application/json"},
+            json={
+                "text": text,
+                "source_language_code": src,
+                "target_language_code": tgt,
+            },
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"bedrock translate: HTTP {exc.response.status_code} from proxy — {exc.response.text[:200]}"
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise RuntimeError(f"bedrock translate: connection error to proxy — {exc}")
+    return resp.json().get("translated_text", "")

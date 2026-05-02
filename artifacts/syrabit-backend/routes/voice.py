@@ -143,11 +143,13 @@ async def _synthesize_with_fallback(
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
             elif provider == "vertex":
-                raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired (Task #256)")
+                raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired")
             elif provider == "bedrock":
-                raise RuntimeError("TTS not supported by 'bedrock' — no Bedrock TTS endpoint (Task #256)")
+                from providers.bedrock import call_tts as _bk_tts
+                return await _bk_tts(text, voice=voice_id)
             elif provider == "azure_openai":
-                raise RuntimeError("TTS not supported by 'azure_openai' — Azure Speech not wired (Task #256)")
+                from providers.azure_openai import call_tts as _az_tts
+                return await _az_tts(text, voice=voice_id)
             else:
                 raise RuntimeError(f"TTS: unknown provider {provider!r}")
         except Exception as exc:
@@ -182,11 +184,13 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)
             elif provider == "vertex":
-                raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired (Task #256)")
+                raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired")
             elif provider == "bedrock":
-                raise RuntimeError("STT not supported by 'bedrock' — no Bedrock STT endpoint (Task #256)")
+                from providers.bedrock import call_stt as _bk_stt
+                return await _bk_stt(audio_bytes, language=language)
             elif provider == "azure_openai":
-                raise RuntimeError("STT not supported by 'azure_openai' — Azure Speech not wired (Task #256)")
+                from providers.azure_openai import call_stt as _az_stt
+                return await _az_stt(audio_bytes, language=language)
             else:
                 raise RuntimeError(f"STT: unknown provider {provider!r}")
         except Exception as exc:

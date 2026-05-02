@@ -506,6 +506,196 @@ def test_rag_fallback_calls_workers_ai_raw_at_runtime():
     print("  PASS: call_llm_for_rag hard fallback calls _call_llm_raw(provider_list=_LLM_PROVIDERS_WORKERS_ONLY)")
 
 
+# ── Task #256: Bedrock + Azure OpenAI feature service wiring tests ────────────
+
+def test_bedrock_call_tts_raises_when_no_proxy():
+    """providers.bedrock.call_tts raises RuntimeError when BEDROCK_PROXY_URL is not set."""
+    from providers.bedrock import call_tts as _bk_tts
+    import os
+    orig = os.environ.pop("BEDROCK_PROXY_URL", None)
+    try:
+        try:
+            asyncio.run(_bk_tts("hello"))
+            assert False, "Expected RuntimeError when BEDROCK_PROXY_URL not set"
+        except RuntimeError as exc:
+            assert "BEDROCK_PROXY_URL" in str(exc), f"Unexpected error: {exc}"
+    finally:
+        if orig is not None:
+            os.environ["BEDROCK_PROXY_URL"] = orig
+    print("  PASS: providers.bedrock.call_tts raises RuntimeError when BEDROCK_PROXY_URL not set")
+
+
+def test_bedrock_call_stt_raises_when_no_proxy():
+    """providers.bedrock.call_stt raises RuntimeError when BEDROCK_PROXY_URL is not set."""
+    from providers.bedrock import call_stt as _bk_stt
+    import os
+    orig = os.environ.pop("BEDROCK_PROXY_URL", None)
+    try:
+        try:
+            asyncio.run(_bk_stt(b"audio"))
+            assert False, "Expected RuntimeError when BEDROCK_PROXY_URL not set"
+        except RuntimeError as exc:
+            assert "BEDROCK_PROXY_URL" in str(exc), f"Unexpected error: {exc}"
+    finally:
+        if orig is not None:
+            os.environ["BEDROCK_PROXY_URL"] = orig
+    print("  PASS: providers.bedrock.call_stt raises RuntimeError when BEDROCK_PROXY_URL not set")
+
+
+def test_bedrock_call_translate_raises_when_no_proxy():
+    """providers.bedrock.call_translate raises RuntimeError when BEDROCK_PROXY_URL is not set."""
+    from providers.bedrock import call_translate as _bk_translate
+    import os
+    orig = os.environ.pop("BEDROCK_PROXY_URL", None)
+    try:
+        try:
+            asyncio.run(_bk_translate("hello", target_lang="as"))
+            assert False, "Expected RuntimeError when BEDROCK_PROXY_URL not set"
+        except RuntimeError as exc:
+            assert "BEDROCK_PROXY_URL" in str(exc), f"Unexpected error: {exc}"
+    finally:
+        if orig is not None:
+            os.environ["BEDROCK_PROXY_URL"] = orig
+    print("  PASS: providers.bedrock.call_translate raises RuntimeError when BEDROCK_PROXY_URL not set")
+
+
+def test_azure_openai_call_tts_raises_when_no_speech_key():
+    """providers.azure_openai.call_tts raises RuntimeError when AZURE_SPEECH_KEY is not set."""
+    from providers.azure_openai import call_tts as _az_tts
+    import os
+    orig_key = os.environ.pop("AZURE_SPEECH_KEY", None)
+    orig_region = os.environ.pop("AZURE_SPEECH_REGION", None)
+    try:
+        try:
+            asyncio.run(_az_tts("hello"))
+            assert False, "Expected RuntimeError when AZURE_SPEECH_KEY not set"
+        except RuntimeError as exc:
+            assert "AZURE_SPEECH_KEY" in str(exc), f"Unexpected error: {exc}"
+    finally:
+        if orig_key is not None:
+            os.environ["AZURE_SPEECH_KEY"] = orig_key
+        if orig_region is not None:
+            os.environ["AZURE_SPEECH_REGION"] = orig_region
+    print("  PASS: providers.azure_openai.call_tts raises RuntimeError when AZURE_SPEECH_KEY not set")
+
+
+def test_azure_openai_call_translate_raises_when_no_translator_key():
+    """providers.azure_openai.call_translate raises RuntimeError when AZURE_TRANSLATOR_KEY not set."""
+    from providers.azure_openai import call_translate as _az_translate
+    import os
+    orig = os.environ.pop("AZURE_TRANSLATOR_KEY", None)
+    try:
+        try:
+            asyncio.run(_az_translate("hello", target_lang="as"))
+            assert False, "Expected RuntimeError when AZURE_TRANSLATOR_KEY not set"
+        except RuntimeError as exc:
+            assert "AZURE_TRANSLATOR_KEY" in str(exc), f"Unexpected error: {exc}"
+    finally:
+        if orig is not None:
+            os.environ["AZURE_TRANSLATOR_KEY"] = orig
+    print("  PASS: providers.azure_openai.call_translate raises RuntimeError when AZURE_TRANSLATOR_KEY not set")
+
+
+def test_embed_dispatch_routes_bedrock_to_call_embed():
+    """call_embed_with_dispatch routes 'bedrock' → providers.bedrock.call_embed (Task #256)."""
+    from llm import call_embed_with_dispatch
+    embed_stub = mock.AsyncMock(return_value=[0.9, 0.8, 0.7])
+    with mock.patch("llm.select_provider", return_value="bedrock"):
+        with mock.patch("providers.bedrock.call_embed", embed_stub):
+            result = asyncio.run(call_embed_with_dispatch("test text", lang="en"))
+    assert result == [0.9, 0.8, 0.7], f"Expected embedding list, got {result!r}"
+    embed_stub.assert_called_once()
+    print("  PASS: call_embed_with_dispatch routes select_provider('embed')='bedrock' → providers.bedrock.call_embed")
+
+
+def test_embed_dispatch_routes_azure_openai_to_call_embed():
+    """call_embed_with_dispatch routes 'azure_openai' → providers.azure_openai.call_embed (Task #256)."""
+    from llm import call_embed_with_dispatch
+    embed_stub = mock.AsyncMock(return_value=[0.5, 0.4, 0.3])
+    with mock.patch("llm.select_provider", return_value="azure_openai"):
+        with mock.patch("providers.azure_openai.call_embed", embed_stub):
+            result = asyncio.run(call_embed_with_dispatch("test text", lang="en"))
+    assert result == [0.5, 0.4, 0.3], f"Expected embedding list, got {result!r}"
+    embed_stub.assert_called_once()
+    print("  PASS: call_embed_with_dispatch routes select_provider('embed')='azure_openai' → providers.azure_openai.call_embed")
+
+
+def test_translate_dispatch_routes_bedrock_to_call_translate():
+    """call_translate_with_dispatch routes 'bedrock' → providers.bedrock.call_translate (Task #256)."""
+    from llm import call_translate_with_dispatch
+    translate_stub = mock.AsyncMock(return_value="অনুবাদিত পাঠ্য")
+    with mock.patch("llm.select_provider", return_value="bedrock"):
+        with mock.patch("providers.bedrock.call_translate", translate_stub):
+            result = asyncio.run(
+                call_translate_with_dispatch("hello world", "en-IN", "as-IN", lang="as")
+            )
+    assert result == "অনুবাদিত পাঠ্য", f"Unexpected: {result!r}"
+    translate_stub.assert_called_once()
+    print("  PASS: call_translate_with_dispatch routes select_provider('translate')='bedrock' → providers.bedrock.call_translate")
+
+
+def test_translate_dispatch_routes_azure_openai_to_call_translate():
+    """call_translate_with_dispatch routes 'azure_openai' → providers.azure_openai.call_translate (Task #256)."""
+    from llm import call_translate_with_dispatch
+    translate_stub = mock.AsyncMock(return_value="translated text")
+    with mock.patch("llm.select_provider", return_value="azure_openai"):
+        with mock.patch("providers.azure_openai.call_translate", translate_stub):
+            result = asyncio.run(
+                call_translate_with_dispatch("hello world", "en-IN", "as-IN", lang="as")
+            )
+    assert result == "translated text", f"Unexpected: {result!r}"
+    translate_stub.assert_called_once()
+    print("  PASS: call_translate_with_dispatch routes select_provider('translate')='azure_openai' → providers.azure_openai.call_translate")
+
+
+def test_voice_tts_bedrock_provider_calls_bedrock_call_tts():
+    """_synthesize_with_fallback: when provider='bedrock', calls providers.bedrock.call_tts (Task #256)."""
+    from routes.voice import _synthesize_with_fallback
+    tts_stub = mock.AsyncMock(return_value=b"bedrock-audio")
+    with mock.patch("llm.select_provider", return_value="bedrock"):
+        with mock.patch("providers.bedrock.call_tts", tts_stub):
+            result = asyncio.run(_synthesize_with_fallback("hello", None, None, "en"))
+    assert result == b"bedrock-audio", f"Expected bedrock audio, got {result!r}"
+    tts_stub.assert_called_once()
+    print("  PASS: _synthesize_with_fallback routes provider='bedrock' → providers.bedrock.call_tts")
+
+
+def test_voice_tts_azure_openai_provider_calls_azure_call_tts():
+    """_synthesize_with_fallback: when provider='azure_openai', calls providers.azure_openai.call_tts (Task #256)."""
+    from routes.voice import _synthesize_with_fallback
+    tts_stub = mock.AsyncMock(return_value=b"azure-audio")
+    with mock.patch("llm.select_provider", return_value="azure_openai"):
+        with mock.patch("providers.azure_openai.call_tts", tts_stub):
+            result = asyncio.run(_synthesize_with_fallback("hello", None, None, "en"))
+    assert result == b"azure-audio", f"Expected azure audio, got {result!r}"
+    tts_stub.assert_called_once()
+    print("  PASS: _synthesize_with_fallback routes provider='azure_openai' → providers.azure_openai.call_tts")
+
+
+def test_voice_stt_bedrock_provider_calls_bedrock_call_stt():
+    """_transcribe_with_fallback: when provider='bedrock', calls providers.bedrock.call_stt (Task #256)."""
+    from routes.voice import _transcribe_with_fallback
+    stt_stub = mock.AsyncMock(return_value="bedrock transcript")
+    with mock.patch("llm.select_provider", return_value="bedrock"):
+        with mock.patch("providers.bedrock.call_stt", stt_stub):
+            result = asyncio.run(_transcribe_with_fallback(b"audio", "en"))
+    assert result == "bedrock transcript", f"Expected bedrock transcript, got {result!r}"
+    stt_stub.assert_called_once()
+    print("  PASS: _transcribe_with_fallback routes provider='bedrock' → providers.bedrock.call_stt")
+
+
+def test_voice_stt_azure_openai_provider_calls_azure_call_stt():
+    """_transcribe_with_fallback: when provider='azure_openai', calls providers.azure_openai.call_stt (Task #256)."""
+    from routes.voice import _transcribe_with_fallback
+    stt_stub = mock.AsyncMock(return_value="azure transcript")
+    with mock.patch("llm.select_provider", return_value="azure_openai"):
+        with mock.patch("providers.azure_openai.call_stt", stt_stub):
+            result = asyncio.run(_transcribe_with_fallback(b"audio", "en"))
+    assert result == "azure transcript", f"Expected azure transcript, got {result!r}"
+    stt_stub.assert_called_once()
+    print("  PASS: _transcribe_with_fallback routes provider='azure_openai' → providers.azure_openai.call_stt")
+
+
 if __name__ == "__main__":
     tests = [
         test_all_15_feature_keys_present,
@@ -539,6 +729,20 @@ if __name__ == "__main__":
         test_chat_fallback_calls_workers_ai_raw_at_runtime,
         test_content_fallback_calls_workers_ai_raw_at_runtime,
         test_rag_fallback_calls_workers_ai_raw_at_runtime,
+        # Task #256: Bedrock + Azure feature service wiring
+        test_bedrock_call_tts_raises_when_no_proxy,
+        test_bedrock_call_stt_raises_when_no_proxy,
+        test_bedrock_call_translate_raises_when_no_proxy,
+        test_azure_openai_call_tts_raises_when_no_speech_key,
+        test_azure_openai_call_translate_raises_when_no_translator_key,
+        test_embed_dispatch_routes_bedrock_to_call_embed,
+        test_embed_dispatch_routes_azure_openai_to_call_embed,
+        test_translate_dispatch_routes_bedrock_to_call_translate,
+        test_translate_dispatch_routes_azure_openai_to_call_translate,
+        test_voice_tts_bedrock_provider_calls_bedrock_call_tts,
+        test_voice_tts_azure_openai_provider_calls_azure_call_tts,
+        test_voice_stt_bedrock_provider_calls_bedrock_call_stt,
+        test_voice_stt_azure_openai_provider_calls_azure_call_stt,
     ]
     failed = 0
     for t in tests:

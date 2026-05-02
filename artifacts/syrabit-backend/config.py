@@ -529,6 +529,35 @@ _AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID', '').strip()
 _AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '').strip()
 _AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1').strip()
 
+# ── Bedrock feature-service proxy (Task #256) ─────────────────────────────────
+# The bedrock-proxy Cloudflare Worker signs AWS SigV4 requests for services
+# not natively supported by the CF AI Gateway BYOK path (Polly, Transcribe,
+# Translate). Deploy workers/bedrock-proxy and set BEDROCK_PROXY_URL to its URL.
+# When unset, bedrock TTS/STT/Translate raise RuntimeError → excluded gracefully.
+BEDROCK_PROXY_URL = os.environ.get('BEDROCK_PROXY_URL', '').strip()
+# Default Polly voice for bedrock TTS. "Raveena" is the Neural Indian English
+# voice; swap to "Joanna", "Matthew", "Aditi", etc. via env var.
+BEDROCK_POLLY_VOICE = os.environ.get('BEDROCK_POLLY_VOICE', 'Raveena').strip() or 'Raveena'
+
+# ── Azure Speech & Translator (Task #256) ────────────────────────────────────
+# Azure Speech Services — used for Azure Neural TTS (call_tts in azure_openai.py)
+# and Azure Whisper STT (call_stt via CF BYOK).
+# Set in Railway/Replit Secrets; when unset, azure_openai TTS raises RuntimeError.
+AZURE_SPEECH_KEY = os.environ.get('AZURE_SPEECH_KEY', '').strip()
+AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', '').strip()
+# Default Azure Neural TTS voice — Indian English expressive neural voice.
+AZURE_TTS_VOICE = (
+    os.environ.get('AZURE_TTS_VOICE', 'en-IN-NeerjaExpressiveNeural').strip()
+    or 'en-IN-NeerjaExpressiveNeural'
+)
+# Azure Translator — used for azure_openai.call_translate().
+# Separate from the Azure OpenAI key; set AZURE_TRANSLATOR_KEY in Railway Secrets.
+AZURE_TRANSLATOR_KEY = os.environ.get('AZURE_TRANSLATOR_KEY', '').strip()
+AZURE_TRANSLATOR_ENDPOINT = (
+    os.environ.get('AZURE_TRANSLATOR_ENDPOINT', 'https://api.cognitive.microsofttranslator.com').strip()
+    or 'https://api.cognitive.microsofttranslator.com'
+)
+
 # ── Google Cloud Platform credentials (Task #247) ────────────────────────────
 # A single service account JSON (GOOGLE_APPLICATION_CREDENTIALS_JSON) is used
 # for all GCP services: STT v2 (Chirp_2), TTS Neural2, Translation v3,

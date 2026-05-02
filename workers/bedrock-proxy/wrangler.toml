@@ -1,0 +1,24 @@
+name = "bedrock-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# Secrets — set via `wrangler secret put <NAME>`:
+#
+#   AWS_ACCESS_KEY_ID       — IAM access key with Polly:SynthesizeSpeech,
+#                             transcribe:StartTranscriptionJob,
+#                             transcribe:GetTranscriptionJob,
+#                             translate:TranslateText
+#   AWS_SECRET_ACCESS_KEY   — IAM secret key
+#   AWS_REGION              — AWS region (default: us-east-1)
+#   BEDROCK_PROXY_AUTH_TOKEN— Optional shared secret; backend must send
+#                             Authorization: Bearer <token> header
+#   AWS_S3_BUCKET           — S3 bucket for Transcribe input/output (e.g. syrabit-transcribe-tmp)
+#
+# Deploy:
+#   pnpm --filter bedrock-proxy run deploy
+#
+# Then set BEDROCK_PROXY_URL=https://bedrock-proxy.<your-subdomain>.workers.dev
+# in Railway / Replit Secrets so the backend can route TTS/STT/Translate calls.
+
+[env.preview]
+name = "bedrock-proxy-preview"
