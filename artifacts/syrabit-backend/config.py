@@ -309,6 +309,9 @@ _CF_PROVIDER_SLUGS = {
     "baseten":     "baseten/v1",     # Fine-tuned EdTech LLMs — OpenAI-compatible endpoint
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
+    # Task #250 — Phase 2 providers routed via CF AI Gateway BYOK
+    "bedrock":      "aws-bedrock",       # AWS Bedrock — Converse API; CF handles SigV4
+    "azure_openai": "azure-openai",      # Azure OpenAI — chat/completions; CF handles key
 }
 
 _DIRECT_PROVIDER_URLS = {
@@ -325,6 +328,9 @@ _DIRECT_PROVIDER_URLS = {
     "cohere":      "https://api.cohere.com/v1",
     "cartesia":    "https://api.cartesia.ai/v1",
     "baseten":     "https://api.baseten.co/v1",   # Baseten universal OpenAI-compatible gateway
+    # Bedrock direct: region-scoped; Azure direct: tenant endpoint (requires env var)
+    "bedrock":     None,   # Set at runtime via BEDROCK_DIRECT_URL or derived from AWS_REGION
+    "azure_openai": None,  # Set at runtime via AZURE_OPENAI_ENDPOINT
 }
 
 _cf_gw_healthy = True

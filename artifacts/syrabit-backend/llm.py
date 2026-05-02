@@ -1481,11 +1481,17 @@ async def _dispatch_llm_for_feature(messages: list, provider: str, max_tokens: i
             raise RuntimeError("sarvam: no Sarvam LLM key available")
         return await _call_sarvam_llm(messages, sarvam_slot["key"], "sarvam-m", max_tokens)
 
-    if provider in ("bedrock", "azure_openai"):
-        # Phase 2 — client modules not yet wired (Task #256).
-        # call_with_provider_fallback will catch this RuntimeError, add the
-        # provider to the exclude set, and draw the next weighted candidate.
-        raise RuntimeError(f"{provider}: client not yet wired (Phase 2 — Task #256)")
+    if provider == "bedrock":
+        # AWS Bedrock Converse API via CF AI Gateway BYOK (aws-bedrock slug).
+        # CF handles SigV4 signing — no AWS SDK required in the backend.
+        from providers.bedrock import call_converse as _bedrock_converse
+        return await _bedrock_converse(messages, max_tokens=max_tokens)
+
+    if provider == "azure_openai":
+        # Azure OpenAI chat/completions via CF AI Gateway BYOK (azure-openai slug).
+        # CF injects the Azure API key stored in the dashboard.
+        from providers.azure_openai import call_chat as _az_chat
+        return await _az_chat(messages, max_tokens=max_tokens)
 
     # workers_ai or any unknown provider → Workers-AI-only dispatch.
     # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
