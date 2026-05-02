@@ -37,7 +37,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Depends, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from auth_deps import get_current_user
+from auth_deps import get_current_user, get_current_user_optional
 
 logger = logging.getLogger("routes.voice")
 
@@ -223,7 +223,7 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 )
 async def text_to_speech(
     body: TtsRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
     lang_key = body.language.lower().strip()
 

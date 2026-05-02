@@ -49,71 +49,6 @@ function chunkText(text) {
   return chunks.filter(Boolean);
 }
 
-let _sarvamStatus = null;
-let _statusPromise = null;
-let _statusRetryCount = 0;
-const MAX_STATUS_RETRIES = 2;
-
-function fetchSarvamStatus() {
-  return fetch(`${API_BASE}/sarvam/status`)
-    .then(r => {
-      if (!r.ok) throw new Error('status failed');
-      return r.json();
-    })
-    .then(data => {
-      _sarvamStatus = {
-        enabled: data.enabled,
-        languages: (data.supported_languages || []).filter(l => l.includes('-')),
-      };
-      _statusRetryCount = 0;
-      return _sarvamStatus;
-    })
-    .catch(() => {
-      if (_statusRetryCount < MAX_STATUS_RETRIES) {
-        _statusRetryCount++;
-        _statusPromise = null;
-        return null;
-      }
-      _sarvamStatus = { enabled: false, languages: [] };
-      return _sarvamStatus;
-    });
-}
-
-function useSarvamStatus() {
-  const [enabled, setEnabled] = useState(_sarvamStatus?.enabled ?? null);
-  const [languages, setLanguages] = useState(_sarvamStatus?.languages ?? []);
-
-  useEffect(() => {
-    if (_sarvamStatus) {
-      setEnabled(_sarvamStatus.enabled);
-      setLanguages(_sarvamStatus.languages);
-      return;
-    }
-    if (!_statusPromise) {
-      _statusPromise = fetchSarvamStatus();
-    }
-    _statusPromise.then(status => {
-      if (status) {
-        setEnabled(status.enabled);
-        setLanguages(status.languages);
-      } else {
-        const retryTimer = setTimeout(() => {
-          _statusPromise = fetchSarvamStatus();
-          _statusPromise.then(s => {
-            if (s) {
-              setEnabled(s.enabled);
-              setLanguages(s.languages);
-            }
-          });
-        }, 3000);
-        return () => clearTimeout(retryTimer);
-      }
-    });
-  }, []);
-
-  return { enabled, languages };
-}
-
 const LANG_LABELS = {
   'en-IN': 'English',
   'hi-IN': 'Hindi',
@@ -134,11 +69,7 @@ function getLangLabel(code) {
 }
 
 export function getTTSLang() {
-  const stored = localStorage.getItem(TTS_LANG_KEY) || 'en-IN';
-  if (_sarvamStatus?.languages?.length && !_sarvamStatus.languages.includes(stored)) {
-    return 'en-IN';
-  }
-  return stored;
+  return localStorage.getItem(TTS_LANG_KEY) || 'en-IN';
 }
 
 function setTTSLang(lang) {
@@ -202,28 +133,20 @@ export function useTTS() {
     const chunks = chunkText(text);
     const lang = getTTSLang();
 
-    const fetchChunkAudio = async (chunkText, signal) => {
-      const res = await fetch(`${API_BASE}/sarvam/tts`, {
+    const fetchChunkAudio = async (chunk, signal) => {
+      const res = await fetch(`${API_BASE}/voice/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          text: chunkText,
-          target_language_code: lang,
-          speaker: 'karun',
-        }),
+        body: JSON.stringify({ text: chunk, language: lang }),
         signal,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'TTS request failed');
       }
-      const data = await res.json();
-      if (!data.audio_base64) throw new Error('No audio returned');
-      const binary = atob(data.audio_base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-      const blob = new Blob([bytes], { type: `audio/${data.format || 'wav'}` });
+      const arrayBuffer = await res.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
       currentUrlsRef.current.push(url);
       return url;
