@@ -1,0 +1,70 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: dispatch-v2
+  namespace: default
+  annotations:
+    # GCP Premium Tier network routing — replaces Argo Smart Routing ($5/mo).
+    # Traffic from asia-south1 travels Google's backbone to every POP instead
+    # of the public internet, cutting p95 latency by ~30 ms on trans-oceanic hops.
+    run.googleapis.com/network-interfaces: '[{"network":"default","subnetwork":"default"}]'
+    run.googleapis.com/launch-stage: BETA
+    # Cloud CDN is attached to the existing HTTPS Load Balancer that fronts
+    # this service — cache-hit responses never reach this container, so
+    # effective RPS is lower than raw traffic, keeping costs in Activate budget.
+    run.googleapis.com/description: >
+      Tenant dispatch service (migrated from Cloudflare Workers for Platforms).
+      Replaces Workers for Platforms ($25/mo). Covered by GCP Activate credits.
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scale to 0 outside business hours to preserve credit headroom.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        # asia-south1 (Mumbai) — lowest latency for the primary user base.
+        run.googleapis.com/cloudsql-instances: ""
+        # Use GCP Confidential Computing (AMD SEV) for tenant isolation —
+        # covered by GCP Activate at no extra charge on N2D machines.
+        run.googleapis.com/sandbox: gvisor
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      serviceAccountName: dispatch-v2-sa@syrabit-prod.iam.gserviceaccount.com
+      containers:
+        - image: asia-south1-docker.pkg.dev/syrabit-prod/services/dispatch-v2:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DISPATCH_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: dispatch-shared-secret
+                  key: latest
+            - name: BACKEND_RAILWAY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-railway-url
+                  key: latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+  traffic:
+    - percent: 100
+      latestRevision: true

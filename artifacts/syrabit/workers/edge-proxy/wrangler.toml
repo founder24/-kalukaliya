@@ -1,0 +1,27 @@
+name = "syrabit-edge-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Thin shim only — all heavy dispatch moved to GCP Cloud Run.
+# Free tier (100 k req/day) is sufficient for this shim; Workers Paid cancelled.
+
+[vars]
+# Non-secret vars; secrets set via: wrangler secret put DISPATCH_CLOUD_RUN_URL
+NODE_ENV = "production"
+
+[env.production]
+name = "syrabit-edge-proxy"
+routes = [
+  { pattern = "dispatch.syrabit.ai/*", zone_name = "syrabit.ai" },
+]
+
+[env.staging]
+name = "syrabit-edge-proxy-staging"
+routes = [
+  { pattern = "dispatch-staging.syrabit.ai/*", zone_name = "syrabit.ai" },
+]
+
+# Secrets (set with `wrangler secret put`):
+#   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app
+#   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret

@@ -1,0 +1,21 @@
+name = "syrabit-email-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Stub only — outbound email sending moved to AWS Lambda (lambda-email-worker.tf).
+# This worker receives SNS → HTTPS delivery events and forwards to backend.
+# Free tier (100 k req/day) is sufficient; Workers Paid subscription cancelled.
+
+[env.production]
+name = "syrabit-email-worker"
+routes = [
+  { pattern = "api.syrabit.ai/webhooks/ses-sns/*", zone_name = "syrabit.ai" },
+]
+
+[env.staging]
+name = "syrabit-email-worker-staging"
+
+# Secrets (set with `wrangler secret put`):
+#   BACKEND_WEBHOOK_URL            — https://api.syrabit.ai/api/webhooks/ses
+#   SNS_SIGNING_CERT_URL_PREFIX    — https://sns.ap-south-1.amazonaws.com/

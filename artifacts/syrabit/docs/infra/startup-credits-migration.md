@@ -1,5 +1,9 @@
 # Startup Credits Migration Runbook
 
+**Last updated:** 2026-05-02  
+**Status:** In progress  
+**Savings target:** ~$40/mo on Cloudflare paid add-ons
+
 **Task #263** — Replace paid Cloudflare add-ons (~$40–50/mo) with workloads
 covered by existing startup credit programmes so the net Cloudflare bill drops
 to $0 add-on spend while the Enterprise zone (WAF, Turnstile, mTLS, Zero Trust,
@@ -135,3 +139,273 @@ Each step is independently reversible:
 ---
 
 *Last updated: 2026-05-02 — Task #263*
+
+## Migrated Services
+
+### 1. Workers for Platforms → GCP Cloud Run `dispatch-v2`
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare Workers for Platforms | GCP Cloud Run (asia-south1) |
+| **Cost** | $25/mo | $0 (GCP Activate) |
+| **File** | (Cloudflare dashboard binding) | `infra/gcp/cloud-run-dispatch.yaml` |
+| **Worker stub** | `workers/edge-proxy/src/index.ts` (heavy) | `workers/edge-proxy/src/index.ts` (thin shim, free tier) |
+
+**Migration steps:**
+1. Deploy `dispatch-v2` Cloud Run service from `infra/gcp/cloud-run-dispatch.yaml`
+2. Set `DISPATCH_CLOUD_RUN_URL` wrangler secret to the Cloud Run service URL
+3. Set `DISPATCH_SHARED_SECRET` on both the worker and Cloud Run env
+4. Deploy the updated `edge-proxy` worker (`wrangler deploy workers/edge-proxy`)
+5. Verify traffic via Cloud Run logs and Axiom dashboard
+6. Cancel Workers for Platforms subscription in Cloudflare dashboard
+
+**Rollback:** Set `DISPATCH_CLOUD_RUN_URL` to empty → worker returns 503 → revert to Workers for Platforms binding in dashboard.
+
+---
+
+### 2. Argo Smart Routing → GCP Premium Tier + Route 53 Latency
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare Argo Smart Routing (zone level) | GCP Premium Tier (Cloud Run) + Route 53 latency records |
+| **Cost** | $5/mo | $0 (GCP Activate + AWS Activate) |
+| **File** | (Cloudflare dashboard) | `infra/aws/route53-latency.tf` |
+
+**Migration steps:**
+1. Cloud Run in asia-south1 automatically uses GCP Premium Tier network — no config change needed
+2. `terraform apply infra/aws/route53-latency.tf` (provide `gcp_cloud_run_ip` and `railway_api_ip` vars)
+3. Verify Route 53 health checks are green in AWS Console
+4. Monitor p95 latency in Cloud Monitoring for 48 h
+5. Cancel Argo Smart Routing in Cloudflare dashboard → Subscriptions
+
+**Expected latency change:** GCP Premium Tier achieves similar or better inter-region routing vs Argo for GCP-hosted origins. Route 53 latency records provide automatic geo-steering.
+
+---
+
+### 3. Workers Paid → AWS Lambda (email-worker + bedrock-proxy)
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare Workers Paid plan | AWS Lambda (arm64, Graviton3) |
+| **Cost** | $5/mo | $0 (AWS Activate) |
+| **Files** | `workers/email-worker/src/index.ts` (heavy), `workers/bedrock-proxy/src/index.ts` (heavy) | Lambda images in ECR; CF workers reduced to thin stubs |
+
+**Migration steps:**
+1. Build and push Docker images:
+   ```bash
+   docker build -t email-worker workers/email-worker && \
+     aws ecr get-login-password | docker login --username AWS --password-stdin <acct>.dkr.ecr.ap-south-1.amazonaws.com && \
+     docker tag email-worker <acct>.dkr.ecr.ap-south-1.amazonaws.com/syrabit/email-worker:latest && \
+     docker push <acct>.dkr.ecr.ap-south-1.amazonaws.com/syrabit/email-worker:latest
+   # Repeat for bedrock-proxy (us-east-1)
+   ```
+2. `terraform apply infra/aws/lambda-email-worker.tf`
+3. `terraform apply infra/aws/lambda-bedrock-proxy.tf`
+4. Update `.env` with new `LAMBDA_EMAIL_WORKER_URL` and `BEDROCK_LAMBDA_URL`
+5. Deploy thin CF worker stubs (`wrangler deploy workers/email-worker`, `wrangler deploy workers/bedrock-proxy`)
+6. Smoke-test: send test OTP email + verify Bedrock inference via `/api/chat`
+7. Confirm CF Workers daily requests < 100 k (free tier threshold)
+8. Cancel Workers Paid subscription in Cloudflare dashboard
+
+**Performance gains:** arm64 Graviton3 is ~20% faster and ~20% cheaper per invocation vs x86. Bedrock proxy gains CloudFront edge cache for repeated prompts (TTL 5 min).
+
+---
+
+### 4. Cache Reserve → GCP Cloud CDN
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare Cache Reserve | GCP Cloud CDN (on existing HTTPS LB) |
+| **Cost** | ~$5/mo usage | $0 (GCP Activate) |
+| **File** | (Cloudflare dashboard) | `infra/gcp/cloud-cdn.tf` |
+
+**Migration steps:**
+1. `terraform apply infra/gcp/cloud-cdn.tf`
+2. Verify `enable_cdn = true` on the `dispatch-v2-backend` backend service
+3. Check cache-hit rate in Cloud Monitoring (`loadbalancing.googleapis.com/https/backend_request_count`)
+4. Target ≥ 70 % hit rate for static assets
+5. Cancel Cache Reserve in Cloudflare dashboard → Caching → Cache Reserve
+
+**Validation:** Cloud Monitoring dashboard `syrabit-cdn-cache-hit` shows hit ratio ≥ 0.70 after 24 h warm-up.
+
+---
+
+### 5. R2 → GCP Cloud Storage (`syrabit-media`, asia-south1)
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare R2 (`syrabit-media` bucket) | GCP Cloud Storage (`syrabit-media`, asia-south1) |
+| **Cost** | R2 Paid usage charges | $0 (GCP Activate, Standard class) |
+| **File** | (Cloudflare dashboard) | `infra/gcp/cloud-cdn.tf` (bucket + CDN) |
+
+**Migration steps:**
+1. `terraform apply infra/gcp/cloud-cdn.tf` (includes bucket + public IAM binding)
+2. Sync existing R2 objects: `rclone sync r2:syrabit-media gcs:syrabit-media --transfers=32`
+3. Update backend upload path (`STORAGE_PROVIDER=gcs`, `GCS_BUCKET=syrabit-media`)
+4. Update signed-URL generation to use `google.cloud.storage.generate_signed_url()`
+5. Flip CDN backend to `syrabit-media-backend` (GCS) for `/media/*` path
+6. Monitor for 24 h; verify media loads in production
+7. Cancel R2 Paid subscription if monthly bill drops to zero
+
+**Lifecycle:** Objects ≥ 365 days automatically move to NEARLINE (70 % cheaper).
+
+---
+
+### 6. Log Explorer → GCP Cloud Logging + Axiom
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare Log Explorer | GCP Cloud Logging (storage) + Axiom (UI) |
+| **Cost** | Log Explorer usage charges | $0 (GCP Activate + Axiom startup tier) |
+| **File** | (Cloudflare dashboard) | `infra/gcp/cloud-logging-axiom.tf` |
+
+**Migration steps:**
+1. `terraform apply infra/gcp/cloud-logging-axiom.tf`
+2. In Cloudflare dashboard → Analytics → Logpush: create new job → destination HTTP → `https://api.axiom.co/v1/datasets/cf-logs/ingest` with `Authorization: Bearer <AXIOM_TOKEN>`
+3. Also add GCP Logging destination: `https://logging.googleapis.com/v2/entries:write` with SA key
+4. Import Grafana Cloud dashboard JSON from `infra/gcp/grafana/cf-logs-dashboard.json` (to be created)
+5. Cancel Cloudflare Log Explorer subscription
+
+**Retention:** 30 days in Axiom (startup tier), 30 days in Cloud Logging (free tier). BigQuery export for longer retention.
+
+---
+
+### 7. Basic Load Balancing → GCP HTTPS LB + Route 53 Failover
+
+| | Before | After |
+|---|---|---|
+| **Service** | Cloudflare Basic Load Balancing | GCP Global HTTPS LB (existing) + Route 53 health-check failover |
+| **Cost** | $5/mo | $0 (GCP Activate + AWS Activate) |
+| **File** | (Cloudflare dashboard) | `infra/aws/route53-latency.tf` |
+
+**Migration steps:**
+1. Confirm GCP HTTPS LB is healthy for Cloud Run origin (should already be)
+2. Apply Route 53 latency records (same `terraform apply` as step 2 above)
+3. Verify both health checks are green
+4. Remove the Cloudflare Load Balancing pool config
+5. Cancel Cloudflare Basic Load Balancing subscription
+
+---
+
+## Additional Performance-Boosting Features (by Provider)
+
+### Google Cloud (GCP Activate — $100 k)
+
+| Feature | Benefit | Status |
+|---|---|---|
+| Cloud CDN (Brotli + HTTP/3) | Edge caching replaces Cache Reserve; Brotli at PoP | ✅ `infra/gcp/cloud-cdn.tf` |
+| Cloud Run gVisor sandbox | Tenant isolation, faster container startup (50 ms vs 300 ms) | ✅ `infra/gcp/cloud-run-dispatch.yaml` |
+| GCP Premium Tier network | Backbone routing replaces Argo Smart Routing | ✅ automatic on Cloud Run |
+| Cloud Storage NEARLINE lifecycle | 70 % cost reduction for cold media | ✅ `infra/gcp/cloud-cdn.tf` |
+| Cloud Logging + log-based metrics | 5xx error rate + origin latency alerting | ✅ `infra/gcp/cloud-logging-axiom.tf` |
+| Vertex AI (already active) | On-device RAG, embeddings for study content | existing |
+| BigQuery (Activate) | Cost attribution per feature, slow-query analysis | planned |
+| Cloud Armor (free tier) | DDoS protection + rate limiting at GCP LB | planned |
+| Cloud Trace | Distributed tracing across Cloud Run services | planned |
+
+### Amazon Web Services (AWS Activate — $100 k)
+
+| Feature | Benefit | Status |
+|---|---|---|
+| Lambda arm64 (Graviton3) | 20 % faster / cheaper vs x86 for Node.js | ✅ `infra/aws/lambda-*.tf` |
+| Lambda Provisioned Concurrency | Eliminates cold-start for OTP / Bedrock paths | ✅ `infra/aws/lambda-*.tf` |
+| CloudFront + cache policy | Edge cache for Bedrock prompt responses (TTL 5 min) | ✅ `infra/aws/lambda-bedrock-proxy.tf` |
+| Amazon Bedrock Guardrails | Content filtering at Lambda layer, zero RTT | ✅ `infra/aws/lambda-bedrock-proxy.tf` |
+| SES Dedicated IP Pool | Better inbox placement vs shared IP | ✅ `infra/aws/lambda-email-worker.tf` |
+| SES Virtual Deliverability Manager | Engagement tracking, bounce suppression | ✅ `infra/aws/lambda-email-worker.tf` |
+| Route 53 latency records + health checks | Geo-steering + automatic failover | ✅ `infra/aws/route53-latency.tf` |
+| AWS X-Ray active tracing | Per-invocation flame graphs for Lambda | ✅ `infra/aws/lambda-*.tf` |
+| Cost Anomaly Detection | Alert on Bedrock spend spike > $50/day | ✅ `infra/aws/lambda-bedrock-proxy.tf` |
+| AWS Global Accelerator | Anycast routing, < 10 ms improvement Asia | 🔵 optional, see `route53-latency.tf` |
+| CloudWatch Contributor Insights | Top-N model × user Bedrock spend | planned |
+| AWS WAF (on CloudFront) | Bot blocking + rate limiting on Bedrock proxy | planned |
+
+### Microsoft Azure (Azure for Startups — $5 k)
+
+| Feature | Benefit | Status |
+|---|---|---|
+| Azure Front Door Standard | 100+ PoPs, Brotli L11, Origin Shield | ✅ `infra/azure/front-door.tf` |
+| Front Door WAF (OWASP 3.2 + Bot Manager) | Additional WAF layer on top of Cloudflare | ✅ `infra/azure/front-door.tf` |
+| Azure DDoS Network Protection | Volumetric attack absorption | ✅ included in Front Door Standard |
+| Cosmos DB Serverless (MongoDB API) | Geo-distributed chat session cache, < 12 ms reads | ✅ `infra/azure/cosmos-db-cache.tf` |
+| Cosmos DB multi-region reads | Central India + East Asia replicas | ✅ `infra/azure/cosmos-db-cache.tf` |
+| Cosmos DB PITR (7 days) | Disaster recovery at no extra cost | ✅ `infra/azure/cosmos-db-cache.tf` |
+| Azure Monitor metric alerts | Front Door origin latency p95 alerting | ✅ `infra/azure/front-door.tf` |
+| Azure Container Registry (planned) | Private registry for Lambda / Cloud Run images | planned |
+
+### Axiom (Startup Tier — 500 GB/mo)
+
+| Feature | Benefit | Status |
+|---|---|---|
+| Cloudflare Logpush → Axiom | Replaces Log Explorer, full query UI | ✅ `infra/gcp/cloud-logging-axiom.tf` |
+| APM traces (OpenTelemetry) | End-to-end request tracing via OTLP ingest | planned |
+| Axiom dashboards | Custom request-rate / error-rate dashboards | planned |
+| Alert rules | Slack / PagerDuty on 5xx spike | planned |
+
+### Sentry (Startup Team Plan — 12 months free)
+
+| Feature | Benefit | Status |
+|---|---|---|
+| Error tracking (frontend + backend) | Real-user JS errors, Python exceptions | existing (backend) |
+| Performance monitoring | LCP / FID / CLS tracking from real users | planned |
+| Session Replay | Video-like replay of user sessions hitting errors | planned |
+| Crons (dead-man's switch) | Heartbeat monitoring for nightly jobs | planned |
+| Alerts → Slack | On-call paging for P0 errors | planned |
+
+### Grafana Cloud (Free Tier — 10 k series, 14-day retention)
+
+| Feature | Benefit | Status |
+|---|---|---|
+| Prometheus remote write | Cloud Run + Lambda metrics in one place | planned |
+| Log explorer (Loki) | Supplement Axiom with shorter hot-retention store | planned |
+| Grafana dashboards | Infra overview, CDN cache hit, error rate | planned |
+
+---
+
+## Cancellation Checklist
+
+- [ ] Cloudflare Workers for Platforms — cancel after `dispatch-v2` Cloud Run verified
+- [ ] Cloudflare Argo Smart Routing — cancel after Route 53 latency records active
+- [ ] Cloudflare Workers Paid — cancel after Lambda stubs verified < 100 k req/day
+- [ ] Cloudflare Cache Reserve — cancel after GCP Cloud CDN hit rate ≥ 70 %
+- [ ] Cloudflare R2 Paid — cancel after GCS bucket verified as primary and R2 bill = $0
+- [ ] Cloudflare Log Explorer — cancel after Axiom ingest confirmed active
+- [ ] Cloudflare Basic Load Balancing — cancel after Route 53 health checks green
+
+**Total target saving:** ~$40/mo → $0/mo on Cloudflare add-ons.  
+**Cloudflare Enterprise zone retained** for WAF, Turnstile, mTLS, Zero Trust, Pages, D1, Vectorize.
+
+---
+
+## Smoke Test Protocol
+
+Run after each migration step:
+
+```bash
+# Full smoke suite
+node artifacts/syrabit/scripts/nightly-smoke.js
+
+# Quick CDN cache check
+curl -sI https://syrabit.ai/ | grep -i 'x-cache\|cf-cache-status\|age'
+
+# Bedrock proxy health
+curl -X POST https://api.syrabit.ai/api/chat \
+  -H 'content-type: application/json' \
+  -d '{"message":"test","model":"claude-3-5-sonnet"}' | jq .status
+
+# Email worker health
+curl -X POST https://api.syrabit.ai/api/email/test \
+  -H 'x-admin-token: $ADMIN_TOKEN'
+
+# Route 53 latency check (from ap-south-1)
+dig +short api.syrabit.ai @8.8.8.8
+```
+
+---
+
+## Contact
+
+- GCP billing alerts → ops@syrabit.ai + Cloud Monitoring notification channel
+- AWS cost anomaly alerts → ops@syrabit.ai
+- Azure Monitor alerts → ops@syrabit.ai
+- Axiom log alerts → Slack `#infra-alerts`

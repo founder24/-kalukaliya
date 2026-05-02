@@ -500,6 +500,62 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       .finally(() => setCfAddonsLoading(false));
   }, [adminToken]);
 
+  // Task #263 — AWS Activate credit burn panel.
+  const [awsCredits, setAwsCredits] = useState(null);
+  const [awsCreditsLoading, setAwsCreditsLoading] = useState(false);
+
+  const loadAwsCredits = useCallback(() => {
+    setAwsCreditsLoading(true);
+    axios.get(`${API_BASE}/admin/billing/aws-activate`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setAwsCredits(r.data))
+      .catch(() => setAwsCredits({ _error: true }))
+      .finally(() => setAwsCreditsLoading(false));
+  }, [adminToken]);
+
+  // Task #263 — Azure for Startups credit burn panel.
+  const [azureCredits, setAzureCredits] = useState(null);
+  const [azureCreditsLoading, setAzureCreditsLoading] = useState(false);
+
+  const loadAzureCredits = useCallback(() => {
+    setAzureCreditsLoading(true);
+    axios.get(`${API_BASE}/admin/billing/azure-startups`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setAzureCredits(r.data))
+      .catch(() => setAzureCredits({ _error: true }))
+      .finally(() => setAzureCreditsLoading(false));
+  }, [adminToken]);
+
+  // Task #263 — Axiom startup-tier usage panel.
+  const [axiomCredits, setAxiomCredits] = useState(null);
+  const [axiomCreditsLoading, setAxiomCreditsLoading] = useState(false);
+
+  const loadAxiomCredits = useCallback(() => {
+    setAxiomCreditsLoading(true);
+    axios.get(`${API_BASE}/admin/billing/axiom`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setAxiomCredits(r.data))
+      .catch(() => setAxiomCredits({ _error: true }))
+      .finally(() => setAxiomCreditsLoading(false));
+  }, [adminToken]);
+
+  // Task #263 — Sentry startup-tier usage panel.
+  const [sentryCredits, setSentryCredits] = useState(null);
+  const [sentryCreditsLoading, setSentryCreditsLoading] = useState(false);
+
+  const loadSentryCredits = useCallback(() => {
+    setSentryCreditsLoading(true);
+    axios.get(`${API_BASE}/admin/billing/sentry`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setSentryCredits(r.data))
+      .catch(() => setSentryCredits({ _error: true }))
+      .finally(() => setSentryCreditsLoading(false));
+  }, [adminToken]);
+
   // Task #918 — paged-on-call audit log per pill, sourced from
   //   * /admin/health/edge-proxy-deploy/cron/alert-history
   //   * /admin/health/cf-waf-drift/cron/alert-history
@@ -621,8 +677,12 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     loadCfAudit();
     // Task #255 — GCP credit burn panel row.
     loadGcpCredits();
-    // Task #263 — CF paid add-on migration status panel.
+    // Task #263 — CF add-on migration panel + per-provider credit burn panels.
     loadCfAddons();
+    loadAwsCredits();
+    loadAzureCredits();
+    loadAxiomCredits();
+    loadSentryCredits();
     const id = setInterval(() => {
       loadTpJsonldReport();
       loadTpJsonldHistory();
@@ -640,6 +700,10 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadCfAudit();
       loadGcpCredits();
       loadCfAddons();
+      loadAwsCredits();
+      loadAzureCredits();
+      loadAxiomCredits();
+      loadSentryCredits();
     }, 60000);
     return () => clearInterval(id);
   }, [adminToken, loadTpJsonldReport, loadTpJsonldHistory,
@@ -649,7 +713,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadTpCronAlertState, loadUnifiedLogsCfPullCronAlertState,
       loadSlackWebhookMissingAlertStates,
       loadSlackWebhookMissingAlertHistories, loadCfAudit, loadGcpCredits,
-      loadCfAddons]);
+      loadCfAddons, loadAwsCredits, loadAzureCredits, loadAxiomCredits, loadSentryCredits]);
 
   // Task #609 — managed AI response cache stats + admin purge controls.
   const [aiCacheStats, setAiCacheStats] = useState(null);
@@ -3247,6 +3311,431 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             </div>
           );
         })()}
+        {/* Task #263 — Startup credit burn panels: AWS Activate, Azure, Axiom, Sentry */}
+        <SectionErrorBoundary name="Startup Credit Panels">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          {/* ── AWS Activate ─────────────────────────────────────────────── */}
+          {(() => {
+            const d = awsCredits && !awsCredits._error ? awsCredits : null;
+            const low = d?.credits_low ?? false;
+            const unconfigured = !awsCreditsLoading && (!d || !d.configured);
+            const tile = low ? 'bg-red-50 border-red-200' : unconfigured ? 'bg-gray-50 border-gray-200' : 'bg-orange-50 border-orange-200';
+            const hdr = low ? 'text-red-600' : unconfigured ? 'text-gray-500' : 'text-orange-600';
+            return (
+              <div className={`rounded-2xl p-4 border ${tile}`} data-testid="aws-credit-panel">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${low ? 'bg-red-100' : unconfigured ? 'bg-gray-100' : 'bg-orange-100'}`}>
+                    <DollarSign size={17} className={low ? 'text-red-500' : unconfigured ? 'text-gray-400' : 'text-orange-500'} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-semibold ${hdr}`} data-testid="aws-credit-heading">AWS Activate</p>
+                      {low && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">Credits Low</span>}
+                      {d?.services?.length > 0 && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-orange-50 text-orange-600 border-orange-200">
+                          Lambda · SES · Route 53 · CloudFront · Bedrock
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {unconfigured ? 'AWS cost explorer not configured' : d?.account_alias ?? 'AWS Activate (Portfolio)'}
+                    </p>
+                  </div>
+                  <button onClick={loadAwsCredits} disabled={awsCreditsLoading}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                    data-testid="button-refresh-aws-credits" title="Refresh AWS credit data">
+                    <RefreshCw size={13} className={awsCreditsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+
+                {awsCreditsLoading && !d && <div className="flex justify-center py-4"><RefreshCw size={16} className="animate-spin text-gray-300" /></div>}
+                {awsCredits?._error && <p className="text-xs text-red-500 mt-1">Failed to load AWS credit data — check backend logs.</p>}
+
+                {unconfigured && !awsCredits?._error && (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-xs text-gray-600 font-medium">Setup instructions:</p>
+                    <ol className="space-y-1">
+                      {[
+                        'Set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY with ce:GetCostAndUsage permission',
+                        'Set AWS_ACTIVATE_GRANT_USD to the Activate programme grant total',
+                        'Set AWS_ACTIVATE_EXPIRY to the credit expiry date (YYYY-MM-DD)',
+                      ].map((s, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-gray-500">
+                          <span className="w-4 h-4 rounded-full bg-orange-50 flex items-center justify-center text-[9px] font-bold text-orange-600 flex-shrink-0 mt-0.5">{i + 1}</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {d && d.configured && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1">
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Grant Total</p>
+                      <p className="text-sm font-bold font-mono text-gray-900" data-testid="aws-grant-usd">
+                        ${d.grant_usd != null ? Number(d.grant_usd).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Spend MTD</p>
+                      <p className={`text-sm font-bold font-mono ${low ? 'text-red-600' : 'text-gray-900'}`} data-testid="aws-spend-mtd">
+                        ${d.spend_mtd_usd != null ? Number(d.spend_mtd_usd).toFixed(2) : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Remaining</p>
+                      <p className={`text-sm font-bold font-mono ${low ? 'text-red-600' : 'text-orange-600'}`} data-testid="aws-remaining">
+                        ${d.estimated_remaining_usd != null ? Number(d.estimated_remaining_usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Runway</p>
+                      <p className={`text-sm font-bold font-mono ${low ? 'text-red-600' : 'text-gray-900'}`} data-testid="aws-runway">
+                        {d.months_runway != null ? (d.months_runway >= 999 ? '∞' : `${Number(d.months_runway).toFixed(1)} mo`) : '—'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {d && d.days_until_expiry != null && (
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Credits expire: <span className="font-mono font-semibold">{d.expiry_date ?? '—'}</span>
+                    {' '}(<span className={d.days_until_expiry < 60 ? 'text-red-500 font-semibold' : 'text-gray-600'}>{d.days_until_expiry}d remaining</span>)
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Azure for Startups ───────────────────────────────────────── */}
+          {(() => {
+            const d = azureCredits && !azureCredits._error ? azureCredits : null;
+            const low = d?.credits_low ?? false;
+            const unconfigured = !azureCreditsLoading && (!d || !d.configured);
+            const tile = low ? 'bg-red-50 border-red-200' : unconfigured ? 'bg-gray-50 border-gray-200' : 'bg-blue-50 border-blue-200';
+            const hdr = low ? 'text-red-600' : unconfigured ? 'text-gray-500' : 'text-blue-600';
+            return (
+              <div className={`rounded-2xl p-4 border ${tile}`} data-testid="azure-credit-panel">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${low ? 'bg-red-100' : unconfigured ? 'bg-gray-100' : 'bg-blue-100'}`}>
+                    <DollarSign size={17} className={low ? 'text-red-500' : unconfigured ? 'text-gray-400' : 'text-blue-500'} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-semibold ${hdr}`} data-testid="azure-credit-heading">Azure for Startups</p>
+                      {low && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">Credits Low</span>}
+                      {d?.configured && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-600 border-blue-200">
+                          Front Door · Cosmos DB · DDoS · Monitor
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {unconfigured ? 'Azure Cost Management not configured' : d?.subscription_name ?? 'Azure for Startups ($5 000)'}
+                    </p>
+                  </div>
+                  <button onClick={loadAzureCredits} disabled={azureCreditsLoading}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                    data-testid="button-refresh-azure-credits" title="Refresh Azure credit data">
+                    <RefreshCw size={13} className={azureCreditsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+
+                {azureCreditsLoading && !d && <div className="flex justify-center py-4"><RefreshCw size={16} className="animate-spin text-gray-300" /></div>}
+                {azureCredits?._error && <p className="text-xs text-red-500 mt-1">Failed to load Azure credit data — check backend logs.</p>}
+
+                {unconfigured && !azureCredits?._error && (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-xs text-gray-600 font-medium">Setup instructions:</p>
+                    <ol className="space-y-1">
+                      {[
+                        'Create an Azure service principal with Billing Reader role',
+                        'Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID',
+                        'Set AZURE_ACTIVATE_GRANT_USD and AZURE_ACTIVATE_EXPIRY (YYYY-MM-DD)',
+                      ].map((s, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-gray-500">
+                          <span className="w-4 h-4 rounded-full bg-blue-50 flex items-center justify-center text-[9px] font-bold text-blue-600 flex-shrink-0 mt-0.5">{i + 1}</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {d && d.configured && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1">
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Grant Total</p>
+                      <p className="text-sm font-bold font-mono text-gray-900" data-testid="azure-grant-usd">
+                        ${d.grant_usd != null ? Number(d.grant_usd).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Spend MTD</p>
+                      <p className={`text-sm font-bold font-mono ${low ? 'text-red-600' : 'text-gray-900'}`} data-testid="azure-spend-mtd">
+                        ${d.spend_mtd_usd != null ? Number(d.spend_mtd_usd).toFixed(2) : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Remaining</p>
+                      <p className={`text-sm font-bold font-mono ${low ? 'text-red-600' : 'text-blue-600'}`} data-testid="azure-remaining">
+                        ${d.estimated_remaining_usd != null ? Number(d.estimated_remaining_usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Runway</p>
+                      <p className={`text-sm font-bold font-mono ${low ? 'text-red-600' : 'text-gray-900'}`} data-testid="azure-runway">
+                        {d.months_runway != null ? (d.months_runway >= 999 ? '∞' : `${Number(d.months_runway).toFixed(1)} mo`) : '—'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {d && d.days_until_expiry != null && (
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Credits expire: <span className="font-mono font-semibold">{d.expiry_date ?? '—'}</span>
+                    {' '}(<span className={d.days_until_expiry < 60 ? 'text-red-500 font-semibold' : 'text-gray-600'}>{d.days_until_expiry}d remaining</span>)
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Axiom startup tier ───────────────────────────────────────── */}
+          {(() => {
+            const d = axiomCredits && !axiomCredits._error ? axiomCredits : null;
+            const overLimit = d?.over_limit ?? false;
+            const unconfigured = !axiomCreditsLoading && (!d || !d.configured);
+            const tile = overLimit ? 'bg-red-50 border-red-200' : unconfigured ? 'bg-gray-50 border-gray-200' : 'bg-violet-50 border-violet-200';
+            const hdr = overLimit ? 'text-red-600' : unconfigured ? 'text-gray-500' : 'text-violet-600';
+            const ingestPct = d?.ingest_gb != null && d?.ingest_limit_gb != null
+              ? Math.min(100, Math.round((d.ingest_gb / d.ingest_limit_gb) * 100))
+              : null;
+            return (
+              <div className={`rounded-2xl p-4 border ${tile}`} data-testid="axiom-credit-panel">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${overLimit ? 'bg-red-100' : unconfigured ? 'bg-gray-100' : 'bg-violet-100'}`}>
+                    <BarChart2 size={17} className={overLimit ? 'text-red-500' : unconfigured ? 'text-gray-400' : 'text-violet-500'} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-semibold ${hdr}`} data-testid="axiom-credit-heading">Axiom Log Explorer</p>
+                      {overLimit && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">Over Limit</span>}
+                      {d?.configured && !overLimit && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-600 border-violet-200">Startup Tier · 500 GB/mo</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {unconfigured ? 'Axiom API token not configured' : 'Replaces Cloudflare Log Explorer'}
+                    </p>
+                  </div>
+                  <button onClick={loadAxiomCredits} disabled={axiomCreditsLoading}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                    data-testid="button-refresh-axiom-credits" title="Refresh Axiom usage">
+                    <RefreshCw size={13} className={axiomCreditsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+
+                {axiomCreditsLoading && !d && <div className="flex justify-center py-4"><RefreshCw size={16} className="animate-spin text-gray-300" /></div>}
+                {axiomCredits?._error && <p className="text-xs text-red-500 mt-1">Failed to load Axiom usage data — check backend logs.</p>}
+
+                {unconfigured && !axiomCredits?._error && (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-xs text-gray-600 font-medium">Setup instructions:</p>
+                    <ol className="space-y-1">
+                      {[
+                        'Create an Axiom API token with Query + Ingest permissions',
+                        'Set AXIOM_API_TOKEN and AXIOM_ORG_ID on the backend',
+                        'Configure Cloudflare Logpush to POST to api.axiom.co/v1/datasets/cf-logs/ingest',
+                      ].map((s, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-gray-500">
+                          <span className="w-4 h-4 rounded-full bg-violet-50 flex items-center justify-center text-[9px] font-bold text-violet-600 flex-shrink-0 mt-0.5">{i + 1}</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {d && d.configured && (
+                  <div className="space-y-2 mt-1">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Ingest MTD</p>
+                        <p className={`text-sm font-bold font-mono ${overLimit ? 'text-red-600' : 'text-gray-900'}`} data-testid="axiom-ingest-gb">
+                          {d.ingest_gb != null ? `${Number(d.ingest_gb).toFixed(1)} GB` : '—'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Limit</p>
+                        <p className="text-sm font-bold font-mono text-gray-900">
+                          {d.ingest_limit_gb != null ? `${d.ingest_limit_gb} GB` : '500 GB'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Retention</p>
+                        <p className="text-sm font-bold font-mono text-violet-600">
+                          {d.retention_days != null ? `${d.retention_days}d` : '30d'}
+                        </p>
+                      </div>
+                    </div>
+                    {ingestPct != null && (
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <span className="text-[10px] text-gray-500">Monthly ingest usage</span>
+                          <span className={`text-[10px] font-semibold ${ingestPct > 80 ? 'text-red-500' : ingestPct > 60 ? 'text-amber-500' : 'text-violet-600'}`}>{ingestPct}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden bg-gray-100">
+                          <div
+                            style={{ width: `${ingestPct}%`, background: ingestPct > 80 ? '#ef4444' : ingestPct > 60 ? '#f59e0b' : '#7c3aed' }}
+                            className="h-full rounded-full transition-all duration-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Sentry startup tier ──────────────────────────────────────── */}
+          {(() => {
+            const d = sentryCredits && !sentryCredits._error ? sentryCredits : null;
+            const overLimit = d?.over_limit ?? false;
+            const unconfigured = !sentryCreditsLoading && (!d || !d.configured);
+            const tile = overLimit ? 'bg-red-50 border-red-200' : unconfigured ? 'bg-gray-50 border-gray-200' : 'bg-indigo-50 border-indigo-200';
+            const hdr = overLimit ? 'text-red-600' : unconfigured ? 'text-gray-500' : 'text-indigo-600';
+            const errorPct = d?.errors_used != null && d?.errors_limit != null
+              ? Math.min(100, Math.round((d.errors_used / d.errors_limit) * 100))
+              : null;
+            return (
+              <div className={`rounded-2xl p-4 border ${tile}`} data-testid="sentry-credit-panel">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${overLimit ? 'bg-red-100' : unconfigured ? 'bg-gray-100' : 'bg-indigo-100'}`}>
+                    <AlertTriangle size={17} className={overLimit ? 'text-red-500' : unconfigured ? 'text-gray-400' : 'text-indigo-500'} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-semibold ${hdr}`} data-testid="sentry-credit-heading">Sentry</p>
+                      {overLimit && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">Quota Exceeded</span>}
+                      {d?.configured && !overLimit && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-600 border-indigo-200">
+                          Startup · {d?.plan ?? 'Team'} plan
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {unconfigured ? 'Sentry auth token not configured' : 'Error tracking · Perf monitoring'}
+                    </p>
+                  </div>
+                  <button onClick={loadSentryCredits} disabled={sentryCreditsLoading}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                    data-testid="button-refresh-sentry-credits" title="Refresh Sentry usage">
+                    <RefreshCw size={13} className={sentryCreditsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+
+                {sentryCreditsLoading && !d && <div className="flex justify-center py-4"><RefreshCw size={16} className="animate-spin text-gray-300" /></div>}
+                {sentryCredits?._error && <p className="text-xs text-red-500 mt-1">Failed to load Sentry usage data — check backend logs.</p>}
+
+                {unconfigured && !sentryCredits?._error && (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-xs text-gray-600 font-medium">Setup instructions:</p>
+                    <ol className="space-y-1">
+                      {[
+                        'Generate a Sentry auth token with org:read and project:read scopes',
+                        'Set SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT on the backend',
+                        'Apply for Sentry for Startups at sentry.io/for/startups/',
+                      ].map((s, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-gray-500">
+                          <span className="w-4 h-4 rounded-full bg-indigo-50 flex items-center justify-center text-[9px] font-bold text-indigo-600 flex-shrink-0 mt-0.5">{i + 1}</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {d && d.configured && (
+                  <div className="space-y-2 mt-1">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Errors MTD</p>
+                        <p className={`text-sm font-bold font-mono ${overLimit ? 'text-red-600' : 'text-gray-900'}`} data-testid="sentry-errors-used">
+                          {d.errors_used != null ? Number(d.errors_used).toLocaleString() : '—'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Quota</p>
+                        <p className="text-sm font-bold font-mono text-gray-900">
+                          {d.errors_limit != null ? Number(d.errors_limit).toLocaleString() : '—'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl p-3 border border-white/70 bg-white/60">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Plan Expires</p>
+                        <p className={`text-sm font-bold font-mono ${d?.days_until_expiry != null && d.days_until_expiry < 60 ? 'text-red-500' : 'text-indigo-600'}`}>
+                          {d.expiry_date ?? '—'}
+                        </p>
+                      </div>
+                    </div>
+                    {errorPct != null && (
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <span className="text-[10px] text-gray-500">Monthly error quota</span>
+                          <span className={`text-[10px] font-semibold ${errorPct > 80 ? 'text-red-500' : errorPct > 60 ? 'text-amber-500' : 'text-indigo-600'}`}>{errorPct}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden bg-gray-100">
+                          <div
+                            style={{ width: `${errorPct}%`, background: errorPct > 80 ? '#ef4444' : errorPct > 60 ? '#f59e0b' : '#6366f1' }}
+                            className="h-full rounded-full transition-all duration-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {d?.perf_transactions_used != null && (
+                      <p className="text-[11px] text-gray-500">
+                        Perf transactions: <span className="font-mono text-gray-700">{Number(d.perf_transactions_used).toLocaleString()}</span>
+                        {d.perf_transactions_limit ? ` / ${Number(d.perf_transactions_limit).toLocaleString()}` : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+        </div>
+
+        {/* Startup credits summary row */}
+        <div className="rounded-2xl p-4 bg-gradient-to-r from-violet-50 via-blue-50 to-orange-50 border border-violet-100">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <DollarSign size={13} className="text-violet-500" />
+            Startup Credit Programmes — Coverage Summary
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+            {[
+              { label: 'GCP Activate', amount: '$100 000', expiry: 'Mar 2027', color: 'text-emerald-600', covers: 'Cloud Run · CDN · Storage · Logging' },
+              { label: 'AWS Activate', amount: '$100 000', expiry: 'Jan 2027', color: 'text-orange-600', covers: 'Lambda · SES · Route 53 · CloudFront · Bedrock' },
+              { label: 'Azure Startups', amount: '$5 000', expiry: 'Jan 2027', color: 'text-blue-600', covers: 'Front Door · Cosmos DB · DDoS · Monitor' },
+              { label: 'Axiom + Sentry', amount: 'Free tiers', expiry: 'Ongoing', color: 'text-violet-600', covers: 'Logs · Errors · Perf · Replays' },
+            ].map((p) => (
+              <div key={p.label} className="rounded-xl p-3 bg-white/70 border border-white">
+                <p className={`text-sm font-bold ${p.color}`}>{p.amount}</p>
+                <p className="text-[11px] font-semibold text-gray-700 mt-0.5">{p.label}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">expires {p.expiry}</p>
+                <p className="text-[10px] text-gray-500 mt-1 leading-tight">{p.covers}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3 text-center">
+            Cloudflare Enterprise zone retained for WAF · Turnstile · mTLS · Zero Trust · Pages
+            {' '}·{' '}
+            <a href="/docs/infra/startup-credits-migration.md" className="underline hover:text-violet-600 transition-colors" target="_blank" rel="noopener noreferrer">
+              View migration runbook →
+            </a>
+          </p>
+        </div>
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="Live Traffic Stats">
