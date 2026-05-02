@@ -1925,6 +1925,11 @@ api.include_router(voice_router)
 from routes.admin_credits import router as admin_credits_router
 api.include_router(admin_credits_router)
 
+# Task #264 — Live credit-burn panels: AWS Activate, Azure for Startups,
+# Axiom, and Sentry.  Routes: /admin/billing/{aws-activate,azure-startups,axiom,sentry}
+from routes.admin_billing import router as admin_billing_router
+api.include_router(admin_billing_router)
+
 from llm import call_llm_api_content
 from auth_deps import get_admin_user
 
