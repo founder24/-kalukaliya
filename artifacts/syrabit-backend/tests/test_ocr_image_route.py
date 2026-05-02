@@ -2,7 +2,7 @@
 
 Task #268 — covers:
   - Valid JPEG image → 200 with extracted text
-  - Unsupported Content-Type → 400
+  - Unsupported Content-Type → 415 (Unsupported Media Type, RFC 9110 §15.5.16)
   - File exceeding 8 MB → 413 (streaming read path)
   - Missing file field → 422 (FastAPI validation)
   - Rate-limit cap → 429
