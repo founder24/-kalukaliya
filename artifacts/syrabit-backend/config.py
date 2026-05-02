@@ -535,6 +535,12 @@ _AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1').strip()
 # Translate). Deploy workers/bedrock-proxy and set BEDROCK_PROXY_URL to its URL.
 # When unset, bedrock TTS/STT/Translate raise RuntimeError → excluded gracefully.
 BEDROCK_PROXY_URL = os.environ.get('BEDROCK_PROXY_URL', '').strip()
+# Shared secret for authenticating backend → bedrock-proxy Worker requests.
+# Must match the BEDROCK_PROXY_AUTH_TOKEN wrangler secret on the Worker.
+# When set, every Polly/Transcribe/Translate proxy call sends:
+#   Authorization: Bearer <BEDROCK_PROXY_AUTH_TOKEN>
+# When unset, no auth header is sent (acceptable for private/internal Workers).
+BEDROCK_PROXY_AUTH_TOKEN = os.environ.get('BEDROCK_PROXY_AUTH_TOKEN', '').strip()
 # Default Polly voice for bedrock TTS. "Raveena" is the Neural Indian English
 # voice; swap to "Joanna", "Matthew", "Aditi", etc. via env var.
 BEDROCK_POLLY_VOICE = os.environ.get('BEDROCK_POLLY_VOICE', 'Raveena').strip() or 'Raveena'

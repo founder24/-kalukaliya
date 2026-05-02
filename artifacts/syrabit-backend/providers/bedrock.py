@@ -34,6 +34,7 @@ from config import (
     CF_CACHE_TTL,
     CF_AI_GATEWAY_TOKEN,
     BYOK_PLACEHOLDER,
+    BEDROCK_PROXY_AUTH_TOKEN,
     cf_gateway_url,
     is_cf_gateway_up,
 )
@@ -77,6 +78,19 @@ def _headers() -> dict:
 def _proxy_url() -> str:
     """Return the bedrock-proxy Worker URL from env (BEDROCK_PROXY_URL)."""
     return _os.environ.get("BEDROCK_PROXY_URL", "").strip().rstrip("/")
+
+
+def _proxy_headers() -> dict:
+    """Build HTTP headers for bedrock-proxy Worker calls.
+
+    Adds ``Authorization: Bearer <token>`` when BEDROCK_PROXY_AUTH_TOKEN is set.
+    The Worker validates this token via its own ``BEDROCK_PROXY_AUTH_TOKEN``
+    wrangler secret binding, preventing unauthorised cost-incurring calls.
+    """
+    h: dict = {"Content-Type": "application/json"}
+    if BEDROCK_PROXY_AUTH_TOKEN:
+        h["Authorization"] = f"Bearer {BEDROCK_PROXY_AUTH_TOKEN}"
+    return h
 
 
 def _to_bedrock_messages(messages: list) -> tuple[Optional[str], list]:
@@ -276,7 +290,7 @@ async def call_tts(
     try:
         resp = await client.post(
             f"{proxy}/polly/synthesize",
-            headers={"Content-Type": "application/json"},
+            headers=_proxy_headers(),
             json={"text": text, "voice_id": voice_id, "output_format": output_format},
         )
         resp.raise_for_status()
@@ -313,7 +327,7 @@ async def call_stt(
     try:
         resp = await client.post(
             f"{proxy}/transcribe",
-            headers={"Content-Type": "application/json"},
+            headers=_proxy_headers(),
             json={
                 "audio_b64": audio_b64,
                 "mime_type": mime_type,
@@ -397,7 +411,7 @@ async def call_translate(
     try:
         resp = await client.post(
             f"{proxy}/translate",
-            headers={"Content-Type": "application/json"},
+            headers=_proxy_headers(),
             json={
                 "text": text,
                 "source_language_code": src,

@@ -696,6 +696,151 @@ def test_voice_stt_azure_openai_provider_calls_azure_call_stt():
     print("  PASS: _transcribe_with_fallback routes provider='azure_openai' → providers.azure_openai.call_stt")
 
 
+# ── Task #256: Happy-path HTTP-mocked unit tests for each new provider function ──
+
+def _make_mock_response(content=None, json_data=None):
+    """Build a mock httpx response for unit tests."""
+    resp = mock.MagicMock()
+    resp.content = content or b""
+    resp.raise_for_status = mock.MagicMock()
+    if json_data is not None:
+        resp.json = mock.MagicMock(return_value=json_data)
+    return resp
+
+
+def test_bedrock_call_tts_happy_path():
+    """providers.bedrock.call_tts returns audio bytes when proxy responds 200."""
+    from providers.bedrock import call_tts as _bk_tts
+    mock_resp = _make_mock_response(content=b"polly-mp3-bytes")
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch.dict(os.environ, {"BEDROCK_PROXY_URL": "https://fake-proxy.workers.dev"}):
+        with mock.patch("providers.bedrock._get_client", return_value=mock_client):
+            result = asyncio.run(_bk_tts("hello world"))
+    assert result == b"polly-mp3-bytes", f"Expected audio bytes, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "/polly/synthesize" in call_url, f"Expected /polly/synthesize in URL, got {call_url}"
+    print("  PASS: providers.bedrock.call_tts happy path — returns audio bytes, calls /polly/synthesize")
+
+
+def test_bedrock_call_stt_happy_path():
+    """providers.bedrock.call_stt returns transcript string when proxy responds 200."""
+    from providers.bedrock import call_stt as _bk_stt
+    mock_resp = _make_mock_response(json_data={"transcript": "hello assam"})
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch.dict(os.environ, {"BEDROCK_PROXY_URL": "https://fake-proxy.workers.dev"}):
+        with mock.patch("providers.bedrock._get_client", return_value=mock_client):
+            result = asyncio.run(_bk_stt(b"\x00\x01\x02audio", language="en-US"))
+    assert result == "hello assam", f"Expected transcript, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "/transcribe" in call_url, f"Expected /transcribe in URL, got {call_url}"
+    print("  PASS: providers.bedrock.call_stt happy path — returns transcript, calls /transcribe")
+
+
+def test_bedrock_call_embed_happy_path():
+    """providers.bedrock.call_embed returns float list via CF gateway when available."""
+    from providers.bedrock import call_embed as _bk_embed
+    fake_vec = [0.1, 0.2, 0.3]
+    mock_resp = _make_mock_response(json_data={"embedding": fake_vec})
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch("providers.bedrock._base_url", return_value="https://fake-gw.example.com"):
+        with mock.patch("providers.bedrock._get_client", return_value=mock_client):
+            result = asyncio.run(_bk_embed("test text"))
+    assert result == fake_vec, f"Expected embedding, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "titan-embed-text-v2" in call_url, f"Expected titan-embed-text-v2 in URL, got {call_url}"
+    print("  PASS: providers.bedrock.call_embed happy path — returns float list, calls Titan v2 endpoint")
+
+
+def test_bedrock_call_translate_happy_path():
+    """providers.bedrock.call_translate returns translated string when proxy responds 200."""
+    from providers.bedrock import call_translate as _bk_translate
+    mock_resp = _make_mock_response(json_data={"translated_text": "হ্যালো"})
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch.dict(os.environ, {"BEDROCK_PROXY_URL": "https://fake-proxy.workers.dev"}):
+        with mock.patch("providers.bedrock._get_client", return_value=mock_client):
+            result = asyncio.run(_bk_translate("hello", target_lang="as", source_lang="en"))
+    assert result == "হ্যালো", f"Expected translated text, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "/translate" in call_url, f"Expected /translate in URL, got {call_url}"
+    print("  PASS: providers.bedrock.call_translate happy path — returns translated text, calls /translate")
+
+
+def test_azure_openai_call_tts_happy_path():
+    """providers.azure_openai.call_tts returns audio bytes when Azure Speech API responds 200."""
+    from providers.azure_openai import call_tts as _az_tts
+    mock_resp = _make_mock_response(content=b"azure-speech-mp3")
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch.dict(os.environ, {
+        "AZURE_SPEECH_KEY": "fake-speech-key",
+        "AZURE_SPEECH_REGION": "eastus",
+    }):
+        with mock.patch("providers.azure_openai._get_client", return_value=mock_client):
+            result = asyncio.run(_az_tts("hello world"))
+    assert result == b"azure-speech-mp3", f"Expected audio bytes, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "tts.speech.microsoft.com" in call_url, f"Expected Azure Speech URL, got {call_url}"
+    print("  PASS: providers.azure_openai.call_tts happy path — returns audio bytes, calls Azure Speech API")
+
+
+def test_azure_openai_call_stt_happy_path():
+    """providers.azure_openai.call_stt returns transcript when Azure Whisper endpoint responds 200."""
+    from providers.azure_openai import call_stt as _az_stt
+    mock_resp = _make_mock_response(json_data={"text": "azure whisper transcript"})
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch("providers.azure_openai._base_url", return_value="https://fake-az-gw.example.com"):
+        with mock.patch("providers.azure_openai._get_client", return_value=mock_client):
+            result = asyncio.run(_az_stt(b"\x00\x01audio", language="en-US"))
+    assert result == "azure whisper transcript", f"Expected transcript, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "audio/transcriptions" in call_url, f"Expected audio/transcriptions in URL, got {call_url}"
+    print("  PASS: providers.azure_openai.call_stt happy path — returns transcript, calls Azure Whisper endpoint")
+
+
+def test_azure_openai_call_embed_happy_path():
+    """providers.azure_openai.call_embed returns float list when Azure embeddings endpoint responds 200."""
+    from providers.azure_openai import call_embed as _az_embed
+    fake_vec = [0.4, 0.5, 0.6]
+    mock_resp = _make_mock_response(json_data={"data": [{"embedding": fake_vec}]})
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch("providers.azure_openai._base_url", return_value="https://fake-az-gw.example.com"):
+        with mock.patch("providers.azure_openai._get_client", return_value=mock_client):
+            result = asyncio.run(_az_embed("test text"))
+    assert result == fake_vec, f"Expected embedding list, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "embeddings" in call_url, f"Expected embeddings in URL, got {call_url}"
+    print("  PASS: providers.azure_openai.call_embed happy path — returns float list, calls Azure embeddings endpoint")
+
+
+def test_azure_openai_call_translate_happy_path():
+    """providers.azure_openai.call_translate returns translated string when Azure Translator responds 200."""
+    from providers.azure_openai import call_translate as _az_translate
+    mock_resp = _make_mock_response(json_data=[{"translations": [{"text": "translated-text", "to": "as"}]}])
+    mock_client = mock.MagicMock()
+    mock_client.post = mock.AsyncMock(return_value=mock_resp)
+    with mock.patch.dict(os.environ, {"AZURE_TRANSLATOR_KEY": "fake-translator-key"}):
+        with mock.patch("providers.azure_openai._get_client", return_value=mock_client):
+            result = asyncio.run(_az_translate("hello", target_lang="as"))
+    assert result == "translated-text", f"Expected translated text, got {result!r}"
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
+    assert "translate" in call_url, f"Expected translate in URL, got {call_url}"
+    print("  PASS: providers.azure_openai.call_translate happy path — returns translated text, calls Azure Translator API")
+
+
 if __name__ == "__main__":
     tests = [
         test_all_15_feature_keys_present,
@@ -743,6 +888,15 @@ if __name__ == "__main__":
         test_voice_tts_azure_openai_provider_calls_azure_call_tts,
         test_voice_stt_bedrock_provider_calls_bedrock_call_stt,
         test_voice_stt_azure_openai_provider_calls_azure_call_stt,
+        # Task #256: Happy-path HTTP-mocked unit tests for new provider functions
+        test_bedrock_call_tts_happy_path,
+        test_bedrock_call_stt_happy_path,
+        test_bedrock_call_embed_happy_path,
+        test_bedrock_call_translate_happy_path,
+        test_azure_openai_call_tts_happy_path,
+        test_azure_openai_call_stt_happy_path,
+        test_azure_openai_call_embed_happy_path,
+        test_azure_openai_call_translate_happy_path,
     ]
     failed = 0
     for t in tests:

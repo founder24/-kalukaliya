@@ -579,6 +579,84 @@ pnpm --filter syrabit-edge run smoke
 
 ---
 
-**Last Updated**: 2026-04-28  
+**Last Updated**: 2026-05-02  
 **Maintainer**: DevOps Team  
 **Review Cycle**: Quarterly
+
+---
+
+## 12. Bedrock-Proxy Worker (Task #256)
+
+A new Cloudflare Worker (`workers/bedrock-proxy/`) signs AWS SigV4 requests for
+Amazon Polly (TTS), Amazon Transcribe (STT), and Amazon Translate — AWS services
+not covered by the CF AI Gateway aws-bedrock BYOK slug.
+
+### 12.1 Deployment Steps
+
+```bash
+cd workers/bedrock-proxy
+
+# Install dependencies
+npm install
+
+# Set required secrets
+wrangler secret put AWS_ACCESS_KEY_ID
+wrangler secret put AWS_SECRET_ACCESS_KEY
+wrangler secret put BEDROCK_PROXY_AUTH_TOKEN  # Must match backend env var
+wrangler secret put AWS_S3_BUCKET             # e.g. syrabit-transcribe-tmp
+
+# Optional — defaults to us-east-1
+wrangler secret put AWS_REGION
+
+# Deploy
+npm run deploy
+```
+
+### 12.2 Required IAM Permissions
+
+The IAM user/role must have:
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "polly:SynthesizeSpeech",
+    "transcribe:StartTranscriptionJob",
+    "transcribe:GetTranscriptionJob",
+    "translate:TranslateText",
+    "s3:PutObject",
+    "s3:GetObject"
+  ],
+  "Resource": "*"
+}
+```
+
+### 12.3 Backend Configuration
+
+After deploying the Worker, set these environment variables in Railway/Replit Secrets:
+
+```bash
+BEDROCK_PROXY_URL=https://bedrock-proxy.<your-subdomain>.workers.dev
+BEDROCK_PROXY_AUTH_TOKEN=<same-value-as-worker-secret>  # Shared auth secret
+BEDROCK_POLLY_VOICE=Raveena   # Optional, default is Raveena (Indian English Neural)
+```
+
+### 12.4 Routes
+
+| Route | AWS Service | Notes |
+|-------|------------|-------|
+| `POST /polly/synthesize` | Amazon Polly | Returns `audio/mpeg` bytes |
+| `POST /transcribe` | Amazon Transcribe | Requires `AWS_S3_BUCKET`; polls up to 25s |
+| `POST /translate` | Amazon Translate | Returns `{translated_text}` JSON |
+| `GET /health` | — | Worker liveness check; no auth required |
+
+### 12.5 Security
+
+- The Worker validates `Authorization: Bearer <BEDROCK_PROXY_AUTH_TOKEN>` on all POST routes.
+- The backend (`providers/bedrock.py`) sends this header via `_proxy_headers()` when `BEDROCK_PROXY_AUTH_TOKEN` is set in the Railway environment.
+- Set `BEDROCK_PROXY_AUTH_TOKEN` to a random 32+ character string in both the Worker secrets and Railway secrets.
+- Without the token, the proxy still works but accepts any caller — only use for private/VPC-internal Workers.
+
+### 12.6 Monitoring
+
+The Worker health endpoint is registered in `workers/edge-proxy/monitored-urls.json`
+(`intentionally_external`). The synthetic probe checks `GET /health` on every deploy.

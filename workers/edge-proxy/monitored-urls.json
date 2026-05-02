@@ -313,6 +313,13 @@
         "workers/edge-proxy/src/cf-block-probe.ts"
       ],
       "runtime_constant": "CF_BLOCK_PROBE_DEFAULT_URL"
+    },
+    {
+      "url": "https://bedrock-proxy.<your-subdomain>.workers.dev/health",
+      "rationale": "Task #256 — bedrock-proxy Worker liveness probe. Proxies AWS SigV4 requests for Polly TTS, Transcribe STT, and Translate on behalf of providers/bedrock.py. Replace <your-subdomain> with the actual Workers subdomain after deployment and set BEDROCK_PROXY_URL in Railway.",
+      "registered_in": [
+        "workers/bedrock-proxy/src/index.ts"
+      ]
     }
   ]
 }
