@@ -1023,16 +1023,18 @@ PROVIDER_PRIORITY: dict = {
     #   Vertex removed from this pool; Azure is now primary for English because gpt-4.1-mini
     #   has the highest production TPS on Azure and $2.5k credits are consumed first.
     "english_rag_chat":  ["azure_openai", "bedrock", "workers_ai"],
-    # Assamese chat:
-    #   Sarvam (sarvam-m, 500) → Workers AI IndicTrans2 (800) → Vertex / Gemini (2000) last resort.
-    #   Sarvam is purpose-built for Indian languages and leads; IndicTrans2 second; Gemini last.
-    "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
+    # Assamese chat (Task #267 + user update):
+    #   Sarvam → Vertex / Gemini → workers_ai_indic (terminal last resort).
+    #   POOL_WEIGHTS gives sarvam=3000, workers_ai_indic=2000, vertex=100 so sarvam leads
+    #   in probability draws; workers_ai_indic is terminal but draws frequently as second choice.
+    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
     # Long-form content generation (Task #267): mirrors english_rag_chat.
     "content":           ["azure_openai", "bedrock", "workers_ai"],
-    # Assamese content generation:
-    #   Workers AI IndicTrans2 (800, primary) → Sarvam (500) → Vertex / Gemini (2000, last resort).
-    #   IndicTrans2 leads for Assamese content; Sarvam second; Gemini fallback.
-    "assamese_content":  ["workers_ai_indic", "sarvam", "vertex"],
+    # Assamese content generation (Task #267 + user update):
+    #   Vertex → workers_ai_indic (terminal last resort).
+    #   POOL_WEIGHTS gives workers_ai_indic=3000, sarvam=2000, vertex=100 so IndicTrans2
+    #   leads in probability draws even though it is the terminal entry.
+    "assamese_content":  ["sarvam", "vertex", "workers_ai_indic"],
     # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Vertex (2k, RuntimeError→skip) →
     # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
     # vertex/bedrock TTS endpoints not wired — listed per authoritative matrix; excluded
@@ -1053,11 +1055,11 @@ PROVIDER_PRIORITY: dict = {
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex (2k) → Workers AI.
     # Dispatch wired in rag._fetch_chunks_semantic via select_provider("vector_search").
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
-    # Translation: Assamese path.
-    #   sarvam(500) → vertex(2k) → workers_ai_indic(POOL_WEIGHTS 3000, IndicTrans2 en→indic)
-    #   → bedrock(1k, call_converse) → azure_openai(1, call_chat) → workers_ai(0, last resort).
-    #   bedrock + azure_openai retained for contract compatibility (test + call_translate_with_dispatch wired).
-    "translate":         ["sarvam", "vertex", "workers_ai_indic", "bedrock", "azure_openai", "workers_ai"],
+    # Translation (Task #267 + user update):
+    #   sarvam → vertex → bedrock → azure_openai → workers_ai_indic (terminal) → workers_ai (absolute last).
+    #   POOL_WEIGHTS gives workers_ai_indic=3000 so it draws ~48% despite being near-terminal.
+    #   bedrock + azure_openai retained per test contract (call_translate_with_dispatch wired).
+    "translate":         ["sarvam", "vertex", "bedrock", "workers_ai_indic", "azure_openai", "workers_ai"],
     # Vision / OCR: Vertex (2k) → Bedrock (1k, Claude multimodal via call_converse_vision) →
     # Azure OpenAI (1, via call_chat with image_url) → Workers AI.
     "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
