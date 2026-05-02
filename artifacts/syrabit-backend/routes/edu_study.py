@@ -590,8 +590,15 @@ async def _generate_and_clean_quiz(
     try:
         raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
     except Exception as e:
-        logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e}")
-        raise HTTPException(status_code=502, detail="quiz_llm_failed")
+        logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e} — trying Gemini fallback")
+        try:
+            gemini_key = _GEMINI_KEY or _GEMINI_KEY_2
+            if not gemini_key:
+                raise RuntimeError("No Gemini key configured")
+            raw = await _call_gemini(messages, gemini_key, "gemini-2.0-flash", max_tokens)
+        except Exception as e2:
+            logger.warning(f"[edu_quiz] Gemini quiz fallback also failed: {e2}")
+            raise HTTPException(status_code=502, detail="quiz_llm_failed")
     payload = _coerce_quiz_payload(raw)
     questions = payload.get("questions") or []
     cleaned: list[dict] = []

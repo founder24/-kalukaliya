@@ -3,14 +3,29 @@
  * Uses the browser SpeechRecognition API where available; otherwise
  * records a short clip and posts to the Sarvam Saaras backend.
  */
-import { Mic, MicOff, Loader2 } from 'lucide-react';
+import { useEffect } from 'react';
+import { Mic, MicOff } from 'lucide-react';
+import { toast } from 'sonner';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
+
+const MIC_ERROR_MESSAGES = {
+  no_recorder:         'Voice recording is not supported in this browser.',
+  mic_denied:          'Microphone access was denied — please allow it in your browser settings.',
+  recording_too_large: 'Recording too long — please try a shorter message.',
+  'not-allowed':       'Microphone access was denied — please allow it in your browser settings.',
+};
 
 export function MicButton({ onTranscript, language = 'en-IN', className = '', disabled = false }) {
   const { listening, error, start } = useSpeechRecognition({
     language,
     onResult: (text) => { if (onTranscript) onTranscript(text); },
   });
+
+  useEffect(() => {
+    if (!error) return;
+    const msg = MIC_ERROR_MESSAGES[error] || `Microphone error: ${error}`;
+    toast.error(msg);
+  }, [error]);
 
   return (
     <button

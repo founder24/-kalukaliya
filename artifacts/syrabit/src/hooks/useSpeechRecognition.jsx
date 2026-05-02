@@ -70,6 +70,10 @@ export function useSpeechRecognition({ language = 'en-IN', onResult } = {}) {
         stream.getTracks().forEach(t => t.stop());
         setListening(false);
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        if (blob.size > 10 * 1024 * 1024) {
+          setError('recording_too_large');
+          return;
+        }
         try {
           const res = await studyApi.stt(blob, lang);
           if (res?.text && onResult) onResult(res.text);

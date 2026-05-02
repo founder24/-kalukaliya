@@ -1063,10 +1063,11 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "azure_openai": 2500,   # second
         "bedrock":      1000,   # third
     },
-    # english_rag_chat: Azure primary (3000) → Workers AI (0, last resort) → Gemini emergency (100).
+    # english_rag_chat: Azure primary (3000) → Vertex emergency (100) → Workers AI (0, absolute last resort).
+    # Draw order by weight: azure_openai(3000) → vertex(100) → workers_ai(0 via PROVIDER_CREDITS).
     "english_rag_chat": {
         "azure_openai": 3000,   # primary — GPT-4o Mini, highest TPS on Azure
-        "vertex":        100,   # emergency fallback only
+        "vertex":        100,   # emergency fallback — Gemini when Azure is down
     },
     # assamese_rag_chat: Sarvam primary (3000) → IndicTrans2 second (2000) → Vertex last resort (100).
     "assamese_rag_chat": {

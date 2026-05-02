@@ -3,7 +3,7 @@ import { API_BASE } from '@/utils/api';
 import { toast } from 'sonner';
 
 const TTS_LANG_KEY = 'syrabit_tts_lang';
-const CHUNK_LIMIT = 500;
+const CHUNK_LIMIT = 490;
 
 function stripMarkdown(text) {
   return text
@@ -223,7 +223,7 @@ export function useTTS() {
       const binary = atob(data.audio_base64);
       const bytes = new Uint8Array(binary.length);
       for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-      const blob = new Blob([bytes], { type: 'audio/wav' });
+      const blob = new Blob([bytes], { type: `audio/${data.format || 'wav'}` });
       const url = URL.createObjectURL(blob);
       currentUrlsRef.current.push(url);
       return url;

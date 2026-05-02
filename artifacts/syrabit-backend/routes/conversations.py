@@ -194,7 +194,10 @@ async def post_chat_feedback(payload: FeedbackPayload, request: Request, user: O
                     payload.reaction, (payload.comment or "")[:1000] if payload.comment else None,
                 )
         else:
-            raise HTTPException(status_code=503, detail="Database unavailable")
+            logger.warning(
+                "chat-feedback dropped (pg_pool unavailable): reaction=%r conversation_id=%r",
+                payload.reaction, payload.conversation_id,
+            )
         return {"ok": True}
     except HTTPException:
         raise

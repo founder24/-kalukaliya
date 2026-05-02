@@ -3108,6 +3108,49 @@ async def sarvam_translate(data: dict):
         logger.error(f"Sarvam translate exception: {type(e).__name__} [{src}->{tgt}]")
         raise HTTPException(status_code=502, detail="Sarvam AI unreachable")
 
+async def _sarvam_tts_direct_fallback(text: str, lang: str, sample_rate: int) -> dict | None:
+    """Try ElevenLabs → Deepgram in sequence when Sarvam TTS fails.
+
+    Returns a response dict compatible with the sarvam_tts response schema
+    (audio_base64, language, format, sample_rate, provider) or None if both
+    fallback providers are also unavailable.
+    """
+    import base64 as _b64
+    try:
+        from providers import elevenlabs as _el
+        if _el.ENABLED:
+            try:
+                mp3 = await _el.synthesize(text, language_code=lang.split("-")[0] if lang else "en")
+                return {
+                    "audio_base64": _b64.b64encode(mp3).decode("ascii"),
+                    "language": lang,
+                    "format": "mp3",
+                    "sample_rate": sample_rate,
+                    "provider": "elevenlabs",
+                }
+            except Exception as _el_err:
+                logger.warning(f"[sarvam-tts] ElevenLabs fallback failed: {_el_err}")
+    except Exception:
+        pass
+    try:
+        from providers import deepgram as _dg
+        if _dg.ENABLED:
+            try:
+                mp3 = await _dg.synthesize(text, language=lang.split("-")[0] if lang else "en")
+                return {
+                    "audio_base64": _b64.b64encode(mp3).decode("ascii"),
+                    "language": lang,
+                    "format": "mp3",
+                    "sample_rate": sample_rate,
+                    "provider": "deepgram",
+                }
+            except Exception as _dg_err:
+                logger.warning(f"[sarvam-tts] Deepgram fallback failed: {_dg_err}")
+    except Exception:
+        pass
+    return None
+
+
 @router.post("/sarvam/tts")
 async def sarvam_tts(data: dict):
     """Convert text to speech in Indian languages via Sarvam AI (Bulbul model)."""
@@ -3170,47 +3213,15 @@ async def sarvam_tts(data: dict):
         return out
     except httpx.HTTPStatusError as e:
         logger.error(f"Sarvam TTS error {e.response.status_code} [{lang}]")
-        # Task #636 — Workers AI fallback for retryable upstream failures.
-        _primary_ms = int((_t_tts.perf_counter() - _tts_t0) * 1000)
-        try:
-            from providers import workers_ai as _wai
-            if _wai.is_enabled("tts") and _wai.should_fallback(e):
-                ok, val, _ = await _wai.attempt_fallback(
-                    "tts", e, _primary_ms,
-                    lambda: _wai.call_tts(text, lang=lang.split("-")[0] if lang else "en"),
-                )
-                if ok and val and val.get("audio_base64"):
-                    out = {
-                        "audio_base64": val["audio_base64"],
-                        "language": lang,
-                        "format": val.get("format", "wav"),
-                        "sample_rate": payload["speech_sample_rate"],
-                        "provider": "workers-ai",
-                    }
-                    return out
-        except Exception as _wai_err:  # noqa: BLE001
-            logger.warning(f"[workers-ai] tts fallback skipped: {type(_wai_err).__name__}: {str(_wai_err)[:150]}")
+        out = await _sarvam_tts_direct_fallback(text, lang, payload["speech_sample_rate"])
+        if out:
+            return out
         raise HTTPException(status_code=e.response.status_code, detail="Sarvam TTS failed")
     except Exception as e:
         logger.error(f"Sarvam TTS exception: {type(e).__name__} [{lang}]")
-        _primary_ms = int((_t_tts.perf_counter() - _tts_t0) * 1000)
-        try:
-            from providers import workers_ai as _wai
-            if _wai.is_enabled("tts") and _wai.should_fallback(e):
-                ok, val, _ = await _wai.attempt_fallback(
-                    "tts", e, _primary_ms,
-                    lambda: _wai.call_tts(text, lang=lang.split("-")[0] if lang else "en"),
-                )
-                if ok and val and val.get("audio_base64"):
-                    return {
-                        "audio_base64": val["audio_base64"],
-                        "language": lang,
-                        "format": val.get("format", "wav"),
-                        "sample_rate": payload["speech_sample_rate"],
-                        "provider": "workers-ai",
-                    }
-        except Exception as _wai_err:  # noqa: BLE001
-            logger.warning(f"[workers-ai] tts fallback skipped: {type(_wai_err).__name__}: {str(_wai_err)[:150]}")
+        out = await _sarvam_tts_direct_fallback(text, lang, payload["speech_sample_rate"])
+        if out:
+            return out
         raise HTTPException(status_code=502, detail="Sarvam AI unreachable")
 
 @router.post("/sarvam/transliterate")
