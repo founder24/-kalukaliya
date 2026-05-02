@@ -3662,7 +3662,8 @@ async def admin_block_ip(
     return {"ok": True, "ip_hash": ip_hash}
 
 
-INDEXNOW_KEY = os.environ.get("INDEXNOW_KEY", "syrabit-indexnow-2026-key").strip()
+import hashlib as _hashlib
+INDEXNOW_KEY = os.environ.get("INDEXNOW_KEY", _hashlib.sha256(b"syrabit-indexnow-2026").hexdigest()[:32]).strip()
 INDEXNOW_HOST = "https://syrabit.ai"
 
 async def _indexnow_submit(urls: List[str]) -> dict:
