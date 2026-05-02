@@ -545,6 +545,16 @@ BEDROCK_PROXY_AUTH_TOKEN = os.environ.get('BEDROCK_PROXY_AUTH_TOKEN', '').strip(
 # voice; swap to "Joanna", "Matthew", "Aditi", etc. via env var.
 BEDROCK_POLLY_VOICE = os.environ.get('BEDROCK_POLLY_VOICE', 'Raveena').strip() or 'Raveena'
 
+# ── Azure OpenAI model / deployment name (Task #256) ─────────────────────────
+# Azure OpenAI deployment name for chat completions, embeddings, and Whisper STT.
+# Azure uses a "deployment name" instead of a model name; the default maps to
+# gpt-4o-mini (cost-efficient). Override via AZURE_OPENAI_MODEL in Railway Secrets.
+# Used by providers/azure_openai.py as _MODEL. Vision and embed calls also inherit
+# this unless they use a dedicated deployment (e.g. text-embedding-3-large).
+AZURE_OPENAI_MODEL = (
+    os.environ.get('AZURE_OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
+)
+
 # ── Azure Speech & Translator (Task #256) ────────────────────────────────────
 # Azure Speech Services — used for Azure Neural TTS (call_tts in azure_openai.py)
 # and Azure Whisper STT (call_stt via CF BYOK).
