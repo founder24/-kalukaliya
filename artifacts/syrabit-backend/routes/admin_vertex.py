@@ -324,9 +324,15 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
 
     actual_spend_this_month = counters["total_estimated_spend_usd"]
     estimated_remaining = round(GCP_CREDIT_GRANT_USD - actual_spend_this_month, 4)
+
+    from datetime import datetime, timezone as _tz
+    _now = datetime.now(tz=_tz.utc)
+    _days_in_month = 28 if _now.month == 2 else (30 if _now.month in {4, 6, 9, 11} else 31)
+    _day_fraction = max(_now.day / _days_in_month, 1 / _days_in_month)
+    monthly_burn_rate = actual_spend_this_month / _day_fraction if actual_spend_this_month > 0 else 0.0
     months_runway = (
-        round(estimated_remaining / actual_spend_this_month, 1)
-        if actual_spend_this_month > 0
+        round(estimated_remaining / monthly_burn_rate, 1)
+        if monthly_burn_rate > 0
         else 9999.0
     )
 

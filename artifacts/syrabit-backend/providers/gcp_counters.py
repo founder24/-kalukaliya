@@ -105,7 +105,8 @@ def _estimated_spend_usd(service: str) -> float:
 def snapshot() -> dict:
     """Return a snapshot of current counters with spend estimates.
 
-    Does NOT trigger a month reset — safe to call at any frequency.
+    Calls _check_reset() to ensure month boundary is honoured before
+    reading values — safe to call at any frequency.
     """
     _check_reset()
     now = datetime.now(tz=timezone.utc)
