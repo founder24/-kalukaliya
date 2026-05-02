@@ -24,10 +24,16 @@
  *                              that has "Search Console API" read access on the
  *                              syrabit.ai property.  When unset the GSC section
  *                              degrades to a warning (non-blocking).
+ *                              All other GSC errors (bad credential, API error,
+ *                              permission denied) are hard failures.
  *                              See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
  *   GSC_SITE_URL             — GSC property URL (default: https://syrabit.ai/)
- *   GSC_INDEXED_URL_FLOOR    — Minimum indexed URL count before alerting
- *                              (default: 50).  Raise when the sitemap grows.
+ *   GSC_INDEXED_URL_FLOOR    — Minimum total indexed URL count (default: 50)
+ *   GSC_DROP_THRESHOLD_PCT   — Day-over-day drop % that triggers a hard failure
+ *                              (default: 10).  Requires UPSTASH_REDIS_REST_URL
+ *                              and UPSTASH_REDIS_REST_TOKEN for persistence.
+ *   UPSTASH_REDIS_REST_URL   — Upstash Redis REST endpoint (already in secrets)
+ *   UPSTASH_REDIS_REST_TOKEN — Upstash Redis REST bearer token (already in secrets)
  *
  * Exit codes:
  *   0  — all assertions passed
@@ -752,14 +758,24 @@ async function main() {
 
   // ── Task #262: Google Search Console Coverage check ──────────────────
   // Uses the GSC Webmasters API (service account JWT auth) to read the
-  // Sitemaps report and assert that the total indexed URL count across all
-  // submitted sitemaps is > GSC_INDEXED_URL_FLOOR.  Degrades to a warning
-  // when GSC_SERVICE_ACCOUNT_JSON is not set so CI runs without a credential
-  // are non-blocking.  See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
+  // Sitemaps report and assert:
+  //   (a) total indexed URL count >= GSC_INDEXED_URL_FLOOR (absolute floor)
+  //   (b) day-over-day drop does not exceed GSC_DROP_THRESHOLD_PCT (default 10%)
+  // The previous count is persisted in Upstash Redis between CI runs.
+  //
+  // Failure semantics (per code-review #262):
+  //   • GSC_SERVICE_ACCOUNT_JSON missing → warn() only (non-blocking)
+  //   • All other errors (bad credential, JWT failure, API error, 403,
+  //     no sitemaps found) → failures.push() (hard failure)
+  // See CRAWLABILITY_RUNBOOK.md § 9 for setup steps.
   {
-    const GSC_SA_JSON         = process.env.GSC_SERVICE_ACCOUNT_JSON || '';
-    const GSC_SITE_URL        = process.env.GSC_SITE_URL        || 'https://syrabit.ai/';
-    const GSC_INDEXED_FLOOR   = parseInt(process.env.GSC_INDEXED_URL_FLOOR || '50', 10);
+    const GSC_SA_JSON       = process.env.GSC_SERVICE_ACCOUNT_JSON || '';
+    const GSC_SITE_URL      = process.env.GSC_SITE_URL      || 'https://syrabit.ai/';
+    const GSC_INDEXED_FLOOR = parseInt(process.env.GSC_INDEXED_URL_FLOOR    || '50', 10);
+    const GSC_DROP_PCT      = parseInt(process.env.GSC_DROP_THRESHOLD_PCT   || '10', 10);
+    const REDIS_URL         = process.env.UPSTASH_REDIS_REST_URL            || '';
+    const REDIS_TOKEN       = process.env.UPSTASH_REDIS_REST_TOKEN          || '';
+    const REDIS_KEY         = 'gsc_indexed_count';
 
     console.log('\nTask #262 — GSC Coverage report check:');
 
@@ -771,20 +787,49 @@ async function main() {
         '(see CRAWLABILITY_RUNBOOK.md § 9).',
       );
     } else {
+      // Helper: read previous indexed count from Upstash Redis.
+      // Returns null when Redis is not configured or the key doesn't exist yet.
+      async function rediGet() {
+        if (!REDIS_URL || !REDIS_TOKEN) return null;
+        try {
+          const r = await fetch(`${REDIS_URL}/get/${REDIS_KEY}`, {
+            headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+            signal: AbortSignal.timeout(5000),
+          });
+          const j = await r.json();
+          const v = parseInt(j.result, 10);
+          return isNaN(v) ? null : v;
+        } catch { return null; }
+      }
+
+      // Helper: persist current indexed count to Upstash Redis.
+      // Silently skips when Redis is not configured.
+      async function rediSet(value) {
+        if (!REDIS_URL || !REDIS_TOKEN) return;
+        try {
+          await fetch(`${REDIS_URL}/set/${REDIS_KEY}/${value}`, {
+            headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+            signal: AbortSignal.timeout(5000),
+          });
+        } catch { /* non-critical */ }
+      }
+
       try {
-        // ── Step 1: Parse service account creds ──────────────────────────
+        // ── Step 1: Parse and validate service account creds ─────────────
         let saCreds;
         try {
           saCreds = JSON.parse(GSC_SA_JSON);
         } catch (e) {
-          throw new Error(`GSC_SERVICE_ACCOUNT_JSON is not valid JSON: ${e.message}`);
+          failures.push(`GSC Coverage: GSC_SERVICE_ACCOUNT_JSON is not valid JSON — ${e.message}`);
+          throw null; // jump to catch, which re-throws only non-null
         }
         const { client_email, private_key } = saCreds;
         if (!client_email || !private_key) {
-          throw new Error('GSC_SERVICE_ACCOUNT_JSON is missing client_email or private_key');
+          failures.push('GSC Coverage: GSC_SERVICE_ACCOUNT_JSON is missing client_email or private_key');
+          throw null;
         }
 
-        // ── Step 2: Build a signed JWT for the OAuth2 token exchange ─────
+        // ── Step 2: Build RS256-signed JWT (no external deps) ─────────────
         const nodeCrypto = await import('node:crypto');
         const now        = Math.floor(Date.now() / 1000);
         const jwtHeader  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
@@ -795,8 +840,14 @@ async function main() {
           iat:   now,
           exp:   now + 3600,
         })).toString('base64url');
-        const sigInput = `${jwtHeader}.${jwtClaims}`;
-        const sig      = nodeCrypto.createSign('RSA-SHA256').update(sigInput).sign(private_key, 'base64url');
+        const sigInput  = `${jwtHeader}.${jwtClaims}`;
+        let sig;
+        try {
+          sig = nodeCrypto.createSign('RSA-SHA256').update(sigInput).sign(private_key, 'base64url');
+        } catch (e) {
+          failures.push(`GSC Coverage: JWT signing failed — private_key may be malformed: ${e.message}`);
+          throw null;
+        }
         const signedJwt = `${sigInput}.${sig}`;
 
         // ── Step 3: Exchange JWT for an access token ──────────────────────
@@ -811,10 +862,15 @@ async function main() {
         });
         const tokenJson = await tokenRes.json();
         if (!tokenJson.access_token) {
-          throw new Error(`GSC token exchange failed (HTTP ${tokenRes.status}): ${JSON.stringify(tokenJson)}`);
+          failures.push(
+            `GSC Coverage: OAuth2 token exchange failed (HTTP ${tokenRes.status}) — ` +
+            `${tokenJson.error || JSON.stringify(tokenJson)}. ` +
+            'Check that the service account key is not expired/revoked.',
+          );
+          throw null;
         }
 
-        // ── Step 4: Fetch the Sitemaps report for the property ────────────
+        // ── Step 4: Fetch the Sitemaps report ─────────────────────────────
         const siteEncoded = encodeURIComponent(GSC_SITE_URL);
         const sitemapsRes = await fetch(
           `https://www.googleapis.com/webmasters/v3/sites/${siteEncoded}/sitemaps`,
@@ -826,57 +882,105 @@ async function main() {
         const sitemapsJson = await sitemapsRes.json();
 
         if (sitemapsRes.status === 403) {
-          warn(
-            'GSC Coverage check',
-            `403 Forbidden — service account "${client_email}" needs read access ` +
-            `on property "${GSC_SITE_URL}". Grant "Restricted" access via ` +
-            'GSC → Settings → Users and permissions, then re-run.',
+          failures.push(
+            `GSC Coverage: 403 Forbidden — service account "${client_email}" ` +
+            `needs "Restricted" (read) access on property "${GSC_SITE_URL}". ` +
+            'Grant access via GSC → Settings → Users and permissions ' +
+            '(CRAWLABILITY_RUNBOOK.md § 9c).',
           );
+          console.log('  ✗  GSC Sitemaps API: 403 Forbidden');
+          throw null;
         } else if (!sitemapsRes.ok) {
-          throw new Error(`GSC Sitemaps API HTTP ${sitemapsRes.status}: ${JSON.stringify(sitemapsJson)}`);
-        } else {
-          const sitemaps = sitemapsJson.sitemap || [];
-          if (sitemaps.length === 0) {
-            warn(
-              'GSC Coverage check',
-              `No sitemaps found on property "${GSC_SITE_URL}" — ` +
-              'submit sitemap-index.xml via GSC dashboard (CRAWLABILITY_RUNBOOK.md § 2)',
-            );
-          } else {
-            // Sum indexed counts across all sitemaps (parent index rows often
-            // report 0; child sitemaps carry the real counts).
-            let totalIndexed   = 0;
-            let totalSubmitted = 0;
-            for (const sm of sitemaps) {
-              for (const c of (sm.contents || [])) {
-                totalIndexed   += parseInt(c.indexed   || '0', 10);
-                totalSubmitted += parseInt(c.submitted || '0', 10);
-              }
-            }
-            const mark = totalIndexed >= GSC_INDEXED_FLOOR ? '✓' : '✗';
-            console.log(`  ${mark}  Indexed URLs: ${totalIndexed} / submitted: ${totalSubmitted}  (floor: ${GSC_INDEXED_FLOOR})`);
-            if (totalIndexed < GSC_INDEXED_FLOOR) {
-              failures.push(
-                `GSC Coverage: indexed URL count ${totalIndexed} is below floor ${GSC_INDEXED_FLOOR} ` +
-                `— possible indexing regression; check GSC Coverage report for "${GSC_SITE_URL}"`,
-              );
-            }
-            // Per-sitemap detail for diagnosis
-            for (const sm of sitemaps) {
-              const smIdx = (sm.contents || []).reduce((s, c) => s + parseInt(c.indexed   || '0', 10), 0);
-              const smSub = (sm.contents || []).reduce((s, c) => s + parseInt(c.submitted || '0', 10), 0);
-              const smErr = parseInt(sm.errors || '0', 10);
-              const errNote = smErr > 0 ? `  errors=${smErr}` : '';
-              console.log(`       ${sm.path}: submitted=${smSub} indexed=${smIdx}${errNote}`);
-            }
+          failures.push(
+            `GSC Coverage: Sitemaps API HTTP ${sitemapsRes.status} — ` +
+            `${JSON.stringify(sitemapsJson)}`,
+          );
+          throw null;
+        }
+
+        const sitemaps = sitemapsJson.sitemap || [];
+        if (sitemaps.length === 0) {
+          failures.push(
+            `GSC Coverage: no sitemaps found on property "${GSC_SITE_URL}" — ` +
+            'submit sitemap-index.xml via GSC dashboard (CRAWLABILITY_RUNBOOK.md § 2)',
+          );
+          console.log('  ✗  GSC: no sitemaps registered');
+          throw null;
+        }
+
+        // ── Step 5: Sum indexed counts ────────────────────────────────────
+        // Parent sitemap-index rows typically report 0; child sitemaps carry
+        // the real per-type counts. Sum all contents[].indexed entries.
+        let totalIndexed   = 0;
+        let totalSubmitted = 0;
+        for (const sm of sitemaps) {
+          for (const c of (sm.contents || [])) {
+            totalIndexed   += parseInt(c.indexed   || '0', 10);
+            totalSubmitted += parseInt(c.submitted || '0', 10);
           }
         }
-      } catch (e) {
-        const msg = e.message || String(e);
-        if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) {
-          warn('GSC Coverage check', 'request timed out — GSC API may be unreachable from this runner; re-run manually');
+
+        // ── Step 6: Absolute floor check ──────────────────────────────────
+        const floorOk = totalIndexed >= GSC_INDEXED_FLOOR;
+        console.log(
+          `  ${floorOk ? '✓' : '✗'}  Indexed URLs: ${totalIndexed} / submitted: ${totalSubmitted}` +
+          `  (floor: ${GSC_INDEXED_FLOOR})`,
+        );
+        if (!floorOk) {
+          failures.push(
+            `GSC Coverage: indexed URL count ${totalIndexed} < floor ${GSC_INDEXED_FLOOR} ` +
+            `— possible indexing regression; check GSC Coverage report for "${GSC_SITE_URL}"`,
+          );
+        }
+
+        // ── Step 7: Day-over-day delta check (via Upstash Redis) ──────────
+        const prevCount = await rediGet();
+        if (prevCount === null) {
+          if (!REDIS_URL || !REDIS_TOKEN) {
+            console.log('  ℹ  Delta check skipped — UPSTASH_REDIS_REST_URL/TOKEN not set');
+          } else {
+            console.log(`  ℹ  Delta check: no baseline stored yet — seeding with ${totalIndexed}`);
+          }
         } else {
-          warn('GSC Coverage check', `unexpected error — ${msg}. Check credential format and network access.`);
+          const dropPct = prevCount > 0
+            ? Math.round(((prevCount - totalIndexed) / prevCount) * 100)
+            : 0;
+          const deltaOk = dropPct <= GSC_DROP_PCT;
+          console.log(
+            `  ${deltaOk ? '✓' : '✗'}  Delta: ${prevCount} → ${totalIndexed}` +
+            ` (${dropPct > 0 ? '-' : '+'}${Math.abs(dropPct)}%  threshold: ${GSC_DROP_PCT}%)`,
+          );
+          if (!deltaOk) {
+            failures.push(
+              `GSC Coverage: indexed URL count dropped ${dropPct}% overnight ` +
+              `(${prevCount} → ${totalIndexed}), exceeding ${GSC_DROP_PCT}% threshold ` +
+              `— check for new noindex tags, robots.txt changes, or soft-404 waves`,
+            );
+          }
+        }
+        // Always update the stored baseline after a successful API read.
+        await rediSet(totalIndexed);
+
+        // ── Per-sitemap detail ─────────────────────────────────────────────
+        for (const sm of sitemaps) {
+          const smIdx = (sm.contents || []).reduce((s, c) => s + parseInt(c.indexed   || '0', 10), 0);
+          const smSub = (sm.contents || []).reduce((s, c) => s + parseInt(c.submitted || '0', 10), 0);
+          const smErr = parseInt(sm.errors || '0', 10);
+          const errNote = smErr > 0 ? `  errors=${smErr}` : '';
+          console.log(`       ${sm.path}: submitted=${smSub} indexed=${smIdx}${errNote}`);
+        }
+
+      } catch (e) {
+        // null sentinel means we already pushed a failure message above; skip.
+        if (e !== null) {
+          const msg = e.message || String(e);
+          if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) {
+            failures.push('GSC Coverage: request timed out — GSC API unreachable from this runner');
+            console.log('  ✗  GSC: request timed out');
+          } else {
+            failures.push(`GSC Coverage: unexpected error — ${msg}`);
+            console.log(`  ✗  GSC: ${msg}`);
+          }
         }
       }
     }
