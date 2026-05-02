@@ -2869,6 +2869,31 @@ async def call_embed_with_dispatch(
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
                 return await _cf_embed(text)
+            elif provider == "bedrock":
+                # Amazon Titan Text Embeddings v1 via Bedrock CF gateway BYOK.
+                from providers.bedrock import _base_url as _bk_base_url, _headers as _bk_hdrs, _get_client as _bk_get_client
+                _bk_base = _bk_base_url()
+                if not _bk_base:
+                    raise RuntimeError("bedrock embed: CF gateway not available")
+                _titan_url = f"{_bk_base}/model/amazon.titan-embed-text-v1/invoke"
+                _titan_resp = await _bk_get_client().post(
+                    _titan_url,
+                    headers=_bk_hdrs(),
+                    json={"inputText": text},
+                )
+                _titan_resp.raise_for_status()
+                _titan_vec = _titan_resp.json().get("embedding", [])
+                if not _titan_vec:
+                    raise RuntimeError("bedrock titan embed: empty embedding returned")
+                return _titan_vec
+            elif provider == "cohere":
+                from providers.cohere import embed_query as _cohere_embed_q, ENABLED as _cohere_enabled
+                if not _cohere_enabled:
+                    raise RuntimeError("cohere embed: COHERE_API_KEY not configured")
+                _cohere_vec = await _cohere_embed_q(text)
+                if not _cohere_vec:
+                    raise RuntimeError("cohere embed: embed_query returned empty vector")
+                return _cohere_vec
             elif provider == "azure_openai":
                 # Azure OpenAI embeddings endpoint not wired (Task #257).
                 # Listed as mandated second-to-last; excluded gracefully via RuntimeError.
@@ -2927,6 +2952,13 @@ async def call_translate_with_dispatch(
                     {"role": "user", "content": text},
                 ]
                 return await _call_gemini(prompt, _GEMINI_KEY, "gemini-2.5-flash", 2048)
+            elif provider == "bedrock":
+                from providers import bedrock as _bk_prov
+                _bk_translate_msgs = [
+                    {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
+                    {"role": "user", "content": text},
+                ]
+                return await _bk_prov.call_converse(_bk_translate_msgs, max_tokens=2048)
             elif provider == "azure_openai":
                 from providers import azure_openai as _az_prov
                 _az_translate_msgs = [
@@ -2988,6 +3020,23 @@ async def call_search_rag_with_dispatch(
                     {"title": r.title, "url": r.url, "text": (r.text or "")[:500]}
                     for r in (results.results or [])
                 ]
+            elif provider == "tavily":
+                import os as _os_tv
+                _tavily_key = _os_tv.environ.get("TAVILY_API_KEY") or _os_tv.environ.get("TAVILY_KEY")
+                if not _tavily_key:
+                    raise RuntimeError("tavily: TAVILY_API_KEY not set")
+                import httpx as _httpx_tv
+                async with _httpx_tv.AsyncClient(timeout=10.0) as _tv_client:
+                    _tv_resp = await _tv_client.post(
+                        "https://api.tavily.com/search",
+                        json={"api_key": _tavily_key, "query": query, "max_results": 5},
+                    )
+                    _tv_resp.raise_for_status()
+                    _tv_data = _tv_resp.json()
+                return [
+                    {"title": r.get("title", ""), "url": r.get("url", ""), "text": (r.get("content", ""))[:500]}
+                    for r in _tv_data.get("results", [])
+                ]
             elif provider == "workers_ai":
                 raise RuntimeError("live web search not available via workers_ai (no search endpoint)")
             else:
@@ -3024,9 +3073,21 @@ async def call_rerank_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider("rerank", lang=lang, exclude=exclude)
         try:
-            if provider == "azure_openai":
-                # Azure OpenAI rerank not wired (Task #257); listed as mandated
-                # second-to-last — excluded gracefully via RuntimeError.
+            if provider == "pinecone_ai":
+                from providers import pinecone_ai as _pc_prov
+                doc_texts = [d if isinstance(d, str) else d.get("text", str(d)) for d in docs]
+                if not doc_texts:
+                    return docs
+                scores = await _pc_prov.rerank(query, doc_texts)
+                # Sort docs by score descending (highest relevance first).
+                ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+                return [d for _, d in ranked]
+            elif provider == "cohere":
+                # Cohere /rerank endpoint not accessible through the current CF gateway
+                # slug — wiring deferred to Task #257. Excluded gracefully.
+                raise RuntimeError("cohere rerank: endpoint not wired via CF gateway (Task #257)")
+            elif provider == "azure_openai":
+                # Azure OpenAI rerank not wired (Task #257); excluded gracefully.
                 raise RuntimeError("azure_openai rerank not wired (Task #257)")
             elif provider == "workers_ai":
                 raise RuntimeError("rerank via workers_ai: no rerank endpoint available")
@@ -3079,6 +3140,9 @@ async def call_vision_with_dispatch(
                     }
                 ]
                 return await _call_gemini(vision_messages, _GEMINI_KEY, "gemini-2.5-flash", 1024)
+            elif provider == "bedrock":
+                from providers.bedrock import call_converse_vision as _bk_vision
+                return await _bk_vision(b64_image, mime_type, prompt, max_tokens=1024)
             elif provider == "azure_openai":
                 from providers import azure_openai as _az_prov
                 _az_vision_msgs = [

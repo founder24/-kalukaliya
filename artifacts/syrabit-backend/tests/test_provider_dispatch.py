@@ -100,90 +100,102 @@ def test_workers_ai_fallback_pool_is_workers_only():
 def test_tts_stt_priority_structure():
     """tts/stt/voice priority lists must follow the authoritative provider matrix.
 
-    Per the task spec, azure_openai is mandated second-to-last (weight=1) in ALL
-    feature chains before workers_ai.  vertex/bedrock TTS/STT are NOT wired
-    (Task #256) and must NOT appear in the tts/stt/voice pools.
-    azure_openai TTS/STT raises RuntimeError and is excluded gracefully by the
-    fallback loop — it is listed for authoritative matrix compliance.
+    Per the authoritative matrix: all mandated providers are listed even when their
+    TTS/STT endpoints are not yet wired (Task #256). vertex/bedrock/azure_openai
+    raise RuntimeError and are excluded gracefully by the fallback loop, leaving
+    cartesia/elevenlabs/assemblyai/workers_ai as the actively synthesizing providers.
+
+    Required structure:
+      tts:   cartesia → elevenlabs → vertex → bedrock → azure_openai → workers_ai
+      stt:   assemblyai → vertex → bedrock → azure_openai → workers_ai
+      voice: assemblyai → cartesia → elevenlabs → vertex → bedrock → azure_openai → workers_ai
     """
-    _not_allowed = {"vertex", "bedrock"}
     for feature in ("tts", "stt", "voice"):
         pool = PROVIDER_PRIORITY.get(feature, [])
         pool_set = set(pool)
-        overlap = pool_set & _not_allowed
-        assert not overlap, (
-            f"PROVIDER_PRIORITY['{feature}'] contains providers with no TTS/STT endpoint: {overlap}."
-        )
         assert "workers_ai" in pool_set, f"{feature}: workers_ai must be in the pool as last-resort"
         assert pool[-1] == "workers_ai", f"{feature}: workers_ai must be last in priority list"
-        if "azure_openai" in pool_set:
-            assert pool[-2] == "azure_openai", (
-                f"{feature}: azure_openai must be second-to-last (mandated by authoritative matrix)"
-            )
-    print("  PASS: tts/stt/voice priority list structure valid — azure_openai second-to-last, vertex/bedrock excluded")
+        assert "azure_openai" in pool_set, f"{feature}: azure_openai must be in pool (authoritative matrix)"
+        assert pool[-2] == "azure_openai", (
+            f"{feature}: azure_openai must be second-to-last (mandated by authoritative matrix)"
+        )
+        # vertex and bedrock must be listed per authoritative matrix (they raise RuntimeError → excluded gracefully)
+        assert "vertex" in pool_set, f"{feature}: vertex must be listed per authoritative matrix"
+        assert "bedrock" in pool_set, f"{feature}: bedrock must be listed per authoritative matrix"
+    print("  PASS: tts/stt/voice priority list structure valid — all mandated providers listed, azure second-to-last")
 
 
 def test_embed_priority_structure():
-    """embed priority must have vertex first and workers_ai last with azure_openai second-to-last.
+    """embed priority must include vertex, bedrock (Titan), cohere, azure_openai, workers_ai.
 
-    Per the authoritative provider matrix, azure_openai is second-to-last in ALL chains.
-    cohere/pinecone/bedrock embed clients Phase 2 (Task #257) — must NOT be listed.
+    Per the authoritative provider matrix:
+      vertex(2k) → bedrock(1k, Titan embed) → cohere(1k) → azure_openai(1, RuntimeError) → workers_ai(0)
+    bedrock.embed wired via Amazon Titan Text Embeddings v1; cohere.embed_query wired.
+    pinecone_ai excluded from embed dispatch (vector search only, not feature embed pool).
     """
     embed_pool = PROVIDER_PRIORITY.get("embed", [])
     pool_set = set(embed_pool)
-    not_allowed = {"cohere", "pinecone_ai", "bedrock"}
-    overlap = pool_set & not_allowed
-    assert not overlap, (
-        f"PROVIDER_PRIORITY['embed'] contains Phase-2 providers: {overlap}. "
-        f"Remove them until their embed clients are wired (Task #257)."
-    )
+    # pinecone_ai should NOT be in the embed pool (it's a vector search store, not an embed provider)
+    assert "pinecone_ai" not in pool_set, "embed: pinecone_ai must not be in embed pool (use vector_search)"
     assert "vertex" in pool_set, "embed priority must include vertex"
+    assert "bedrock" in pool_set, "embed priority must include bedrock (Titan Text Embeddings)"
+    assert "cohere" in pool_set, "embed priority must include cohere (embed_query wired)"
     assert "workers_ai" in pool_set, "embed priority must include workers_ai as last-resort"
     assert embed_pool[-1] == "workers_ai", "embed: workers_ai must be last"
-    print(f"  PASS: PROVIDER_PRIORITY['embed'] = {embed_pool} (azure_openai second-to-last, bedrock/cohere/pinecone excluded)")
+    assert embed_pool[-2] == "azure_openai", "embed: azure_openai must be second-to-last"
+    print(f"  PASS: PROVIDER_PRIORITY['embed'] = {embed_pool} (vertex/bedrock/cohere wired, azure second-to-last)")
 
 
-def test_translate_priority_excludes_bedrock():
-    """bedrock must not be in translate priority — no translate endpoint wired.
+def test_translate_priority_includes_bedrock():
+    """bedrock must be in translate priority — translate wired via providers.bedrock.call_converse.
 
-    azure_openai IS listed as mandated second-to-last; translate routes via
-    providers.azure_openai.call_chat with translation system prompt.
+    Authoritative matrix:
+      sarvam(500) → vertex(2k) → bedrock(1k, call_converse) → azure_openai(1, call_chat) → workers_ai(0)
     """
     translate_pool = PROVIDER_PRIORITY.get("translate", [])
     pool_set = set(translate_pool)
-    assert "bedrock" not in pool_set, (
-        f"PROVIDER_PRIORITY['translate'] contains bedrock which has no translate endpoint."
+    assert "bedrock" in pool_set, (
+        "PROVIDER_PRIORITY['translate'] must include bedrock (translate wired via call_converse)"
     )
     assert "sarvam" in pool_set or "vertex" in pool_set, \
         "translate priority must contain at least sarvam or vertex"
     assert translate_pool[-1] == "workers_ai", "translate: workers_ai must be last"
-    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (bedrock excluded, azure second-to-last)")
+    assert translate_pool[-2] == "azure_openai", "translate: azure_openai must be second-to-last"
+    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (bedrock wired via call_converse)")
 
 
-def test_vision_priority_excludes_bedrock():
-    """bedrock must not be in vision priority — vision path not wired for bedrock.
+def test_vision_priority_includes_bedrock():
+    """bedrock must be in vision priority — vision wired via providers.bedrock.call_converse_vision.
 
-    azure_openai IS listed as mandated second-to-last; vision routes via
-    providers.azure_openai.call_chat with image_url content (GPT-4o compatible).
+    Authoritative matrix:
+      vertex(2k) → bedrock(1k, Claude multimodal) → azure_openai(1, call_chat) → workers_ai(0)
     """
     vision_pool = PROVIDER_PRIORITY.get("vision", [])
     pool_set = set(vision_pool)
-    assert "bedrock" not in pool_set, (
-        f"PROVIDER_PRIORITY['vision'] contains bedrock which has no vision dispatch wired."
+    assert "bedrock" in pool_set, (
+        "PROVIDER_PRIORITY['vision'] must include bedrock (wired via call_converse_vision)"
     )
     assert "vertex" in pool_set, "vision priority must include vertex (Gemini vision)"
     assert vision_pool[-1] == "workers_ai", "vision: workers_ai must be last"
-    print(f"  PASS: PROVIDER_PRIORITY['vision'] = {vision_pool} (bedrock excluded, azure second-to-last)")
+    assert vision_pool[-2] == "azure_openai", "vision: azure_openai must be second-to-last"
+    print(f"  PASS: PROVIDER_PRIORITY['vision'] = {vision_pool} (bedrock wired via call_converse_vision)")
 
 
-def test_no_phase2_stub_providers_in_live_search():
-    """tavily must not be in live_search priority — Tavily client not yet wired."""
+def test_live_search_includes_tavily():
+    """tavily must be in live_search priority — Tavily dispatch wired in call_search_rag_with_dispatch.
+
+    Authoritative matrix:
+      exa_ai(1000) → tavily(500) → workers_ai(0)
+    tavily branch wired via TAVILY_API_KEY env var + Tavily search API.
+    """
     live_pool = PROVIDER_PRIORITY.get("live_search", [])
-    assert "tavily" not in live_pool, (
-        "PROVIDER_PRIORITY['live_search'] contains 'tavily' but Tavily client is not wired (Phase 2)."
+    pool_set = set(live_pool)
+    assert "tavily" in pool_set, (
+        "PROVIDER_PRIORITY['live_search'] must include tavily (dispatch wired)"
     )
-    assert "exa_ai" in live_pool, "live_search must have exa_ai as primary"
-    print(f"  PASS: PROVIDER_PRIORITY['live_search'] = {live_pool} (tavily excluded until wired)")
+    assert "exa_ai" in pool_set, "live_search must have exa_ai as primary"
+    assert live_pool[-1] == "workers_ai", "live_search: workers_ai must be last"
+    print(f"  PASS: PROVIDER_PRIORITY['live_search'] = {live_pool} (exa_ai + tavily wired)")
 
 
 # ── CF AI Gateway slug URL well-formedness ────────────────────────────────────
@@ -505,9 +517,9 @@ if __name__ == "__main__":
         test_workers_ai_fallback_pool_is_workers_only,
         test_tts_stt_priority_structure,
         test_embed_priority_structure,
-        test_translate_priority_excludes_bedrock,
-        test_vision_priority_excludes_bedrock,
-        test_no_phase2_stub_providers_in_live_search,
+        test_translate_priority_includes_bedrock,
+        test_vision_priority_includes_bedrock,
+        test_live_search_includes_tavily,
         test_assemblyai_uses_cf_gateway_url,
         test_bedrock_uses_cf_gateway_slug,
         test_azure_openai_uses_cf_gateway_slug,

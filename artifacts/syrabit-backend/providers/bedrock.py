@@ -174,3 +174,60 @@ async def health_check() -> dict:
     if not base:
         return {"ok": False, "reason": "CF AI Gateway currently down"}
     return {"ok": True, "model": _MODEL_ID, "gateway": base}
+
+
+async def call_converse_vision(
+    b64_image: str,
+    mime_type: str = "image/jpeg",
+    prompt: str = "Describe this image.",
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 1024,
+) -> str:
+    """Analyse an image using Claude multimodal via Bedrock Converse API (CF gateway BYOK).
+
+    Uses Claude 3.5 Sonnet v2 by default (supports vision via the Converse API).
+    Raises RuntimeError if the CF gateway is unavailable or bedrock not configured.
+    """
+    base = _base_url()
+    if not base:
+        raise RuntimeError("bedrock vision: CF AI Gateway not available for vision")
+
+    # Claude claude-3-5-sonnet supports multimodal via Converse API.
+    vision_model_id = model or "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    url = f"{base}/model/{vision_model_id}/converse"
+
+    # Bedrock Converse image format: image block with format + base64 bytes.
+    img_format = mime_type.split("/")[-1].lower()
+    if img_format == "jpg":
+        img_format = "jpeg"
+
+    body: dict = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "image": {
+                            "format": img_format,
+                            "source": {"bytes": b64_image},
+                        }
+                    },
+                    {"text": prompt},
+                ],
+            }
+        ],
+        "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0.0},
+    }
+
+    client = _get_client()
+    try:
+        resp = await client.post(url, headers=_headers(), json=body)
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        raise RuntimeError(f"bedrock vision: HTTP {status} — {exc.response.text[:200]}")
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise RuntimeError(f"bedrock vision: connection error via CF gateway — {exc}")
+
+    return _extract_text(resp.json())

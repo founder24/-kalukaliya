@@ -905,38 +905,40 @@ PROVIDER_PRIORITY: dict = {
     "content":           ["vertex", "bedrock", "azure_openai", "workers_ai"],
     # Assamese content generation: Sarvam first.
     "assamese_content":  ["sarvam", "vertex", "azure_openai", "workers_ai"],
-    # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Azure OpenAI (1, 2nd-to-last) → Workers AI.
-    # vertex/bedrock TTS not wired (Phase 2: Task #256). azure_openai TTS wired at select_provider
-    # weight=1 so it is drawn last before workers_ai; raises RuntimeError and is excluded gracefully.
-    "tts":               ["cartesia", "elevenlabs", "azure_openai", "workers_ai"],
-    # Speech-to-text: AssemblyAI (1k) → Azure OpenAI (1, 2nd-to-last) → Workers AI.
-    # vertex/bedrock STT not wired (Phase 2: Task #256).
-    "stt":               ["assemblyai", "azure_openai", "workers_ai"],
-    # Combined voice pipeline: union of tts + stt active providers.
-    "voice":             ["assemblyai", "cartesia", "elevenlabs", "azure_openai", "workers_ai"],
-    # Embeddings: Vertex (2k) → Azure OpenAI (1, 2nd-to-last) → Workers AI.
-    # cohere/pinecone/bedrock embed clients Phase 2 (Task #257).
-    "embed":             ["vertex", "azure_openai", "workers_ai"],
-    # Reranking: Azure OpenAI (1, 2nd-to-last) → Workers AI.
-    # cohere/pinecone rerank Phase 2 (Task #257). Returns docs unranked when all exhaust.
-    "rerank":            ["azure_openai", "workers_ai"],
+    # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Vertex (2k, RuntimeError→skip) →
+    # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
+    # vertex/bedrock TTS endpoints not wired — listed per authoritative matrix; excluded
+    # gracefully when RuntimeError is raised in _synthesize_with_fallback.
+    "tts":               ["cartesia", "elevenlabs", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Speech-to-text: AssemblyAI (1k) → Vertex (2k, RuntimeError→skip) →
+    # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
+    "stt":               ["assemblyai", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Combined voice pipeline: full union of tts + stt providers per authoritative matrix.
+    "voice":             ["assemblyai", "cartesia", "elevenlabs", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Embeddings: Vertex (2k) → Bedrock Titan (1k) → Cohere (1k) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
+    # cohere.embed_query and bedrock titan embed wired; azure_openai embed endpoint not wired (Task #257).
+    "embed":             ["vertex", "bedrock", "cohere", "azure_openai", "workers_ai"],
+    # Reranking: Pinecone AI (500) → Cohere (1k, RuntimeError→skip, no /rerank in CF gateway) →
+    # Azure OpenAI (1, RuntimeError→skip) → Workers AI.
+    # pinecone_ai.rerank wired; cohere/azure rerank endpoint not wired (Task #257).
+    "rerank":            ["pinecone_ai", "cohere", "azure_openai", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex (2k) → Workers AI.
     # Dispatch wired in rag._fetch_chunks_semantic via select_provider("vector_search").
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
-    # Translation: Sarvam (500) → Vertex (2k) → Azure OpenAI (1, 2nd-to-last) → Workers AI.
-    # bedrock translate not wired (Phase 2).
-    "translate":         ["sarvam", "vertex", "azure_openai", "workers_ai"],
-    # Vision / OCR: Vertex (2k) → Azure OpenAI (1, 2nd-to-last) → Workers AI.
-    # bedrock vision not wired (Phase 2).
-    "vision":            ["vertex", "azure_openai", "workers_ai"],
+    # Translation: Sarvam (500) → Vertex (2k) → Bedrock (1k, via call_converse) →
+    # Azure OpenAI (1, via call_chat) → Workers AI.
+    "translate":         ["sarvam", "vertex", "bedrock", "azure_openai", "workers_ai"],
+    # Vision / OCR: Vertex (2k) → Bedrock (1k, Claude multimodal via call_converse_vision) →
+    # Azure OpenAI (1, via call_chat with image_url) → Workers AI.
+    "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
     # Safety checks: Bedrock (1k, Claude 3.5 Haiku via CF BYOK) → Workers AI.
     # Active by default when CF gateway is configured (ENABLE_LLM_SAFETY_CHECK).
     "safety":            ["bedrock", "workers_ai"],
     # RAG search with external web results: Exa neural search (1k) → Workers AI.
     "search_rag":        ["exa_ai", "workers_ai"],
-    # Live / real-time search: Exa (1k) → Workers AI.
-    # tavily excluded — Tavily client not yet wired (Phase 2).
-    "live_search":       ["exa_ai", "workers_ai"],
+    # Live / real-time search: Exa (1k) → Tavily (500) → Workers AI.
+    # exa_ai and tavily both wired in call_search_rag_with_dispatch.
+    "live_search":       ["exa_ai", "tavily", "workers_ai"],
 }
 
 PROVIDER_CREDITS: dict = {

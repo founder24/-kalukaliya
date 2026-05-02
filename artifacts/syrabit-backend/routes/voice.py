@@ -115,12 +115,12 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"]: cartesia(500) → elevenlabs(500) → azure_openai(1) → workers_ai(0)
+    PROVIDER_PRIORITY["tts"]: cartesia(500) → elevenlabs(500) → vertex(2k, skip) →
+      bedrock(1k, skip) → azure_openai(1, skip) → workers_ai(0)
 
-    azure_openai is listed as mandated second-to-last per the authoritative provider matrix.
-    Its TTS endpoint is not yet wired (Task #256); raises RuntimeError which the fallback
-    loop catches, excludes it from the pool, and redraws from remaining candidates.
-    vertex/bedrock are NOT in the tts priority list (no TTS endpoint planned, Phase 2).
+    vertex/bedrock/azure_openai TTS endpoints not wired (Task #256); each raises
+    RuntimeError which the fallback loop catches, excludes from pool, and redraws.
+    cartesia, elevenlabs, and workers_ai are the actively synthesizing providers.
     """
     from llm import select_provider
 
@@ -136,10 +136,18 @@ async def _synthesize_with_fallback(
                 return await _tts_elevenlabs(text, voice_id, language)
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
-            elif provider in ("vertex", "bedrock", "azure_openai"):
-                # TTS not available via LLM/generic providers in this scope —
-                # raise so the fallback loop removes them and tries the next.
-                raise RuntimeError(f"TTS not supported by {provider!r} (no TTS endpoint configured)")
+            elif provider == "vertex":
+                # Google Cloud TTS not wired in this codebase (Task #256).
+                # Listed per authoritative matrix; excluded gracefully.
+                raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired (Task #256)")
+            elif provider == "bedrock":
+                # AWS Bedrock has no TTS API (Task #256).
+                # Listed per authoritative matrix; excluded gracefully.
+                raise RuntimeError("TTS not supported by 'bedrock' — no Bedrock TTS endpoint (Task #256)")
+            elif provider == "azure_openai":
+                # Azure Speech TTS not wired (Task #256).
+                # Listed per authoritative matrix; excluded gracefully.
+                raise RuntimeError("TTS not supported by 'azure_openai' — Azure Speech not wired (Task #256)")
             else:
                 raise RuntimeError(f"TTS: unknown provider {provider!r}")
         except Exception as exc:
@@ -154,12 +162,12 @@ async def _synthesize_with_fallback(
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    PROVIDER_PRIORITY["stt"]: assemblyai(1000) → azure_openai(1) → workers_ai(0)
+    PROVIDER_PRIORITY["stt"]: assemblyai(1000) → vertex(2k, skip) → bedrock(1k, skip) →
+      azure_openai(1, skip) → workers_ai(0)
 
-    azure_openai is listed as mandated second-to-last per the authoritative provider matrix.
-    Its STT endpoint is not yet wired (Task #256); raises RuntimeError which the fallback
-    loop catches, excludes it from the pool, and redraws from remaining candidates.
-    vertex/bedrock are NOT in the stt priority list (no STT endpoint planned, Phase 2).
+    vertex/bedrock/azure_openai STT endpoints not wired (Task #256); each raises
+    RuntimeError which the fallback loop catches, excludes from pool, and redraws.
+    assemblyai and workers_ai are the actively transcribing providers.
     """
     from llm import select_provider
 
@@ -173,10 +181,15 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
                 return await _stt_assemblyai(audio_bytes, language)
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)
-            elif provider in ("vertex", "bedrock", "azure_openai"):
-                # STT not available via LLM/generic providers in this scope —
-                # raise so fallback loop removes them and tries the next candidate.
-                raise RuntimeError(f"STT not supported by {provider!r} (no STT endpoint configured)")
+            elif provider == "vertex":
+                # Google Cloud STT not wired (Task #256). Listed per authoritative matrix.
+                raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired (Task #256)")
+            elif provider == "bedrock":
+                # AWS Bedrock has no STT API (Task #256). Listed per authoritative matrix.
+                raise RuntimeError("STT not supported by 'bedrock' — no Bedrock STT endpoint (Task #256)")
+            elif provider == "azure_openai":
+                # Azure Speech STT not wired (Task #256). Listed per authoritative matrix.
+                raise RuntimeError("STT not supported by 'azure_openai' — Azure Speech not wired (Task #256)")
             else:
                 raise RuntimeError(f"STT: unknown provider {provider!r}")
         except Exception as exc:
