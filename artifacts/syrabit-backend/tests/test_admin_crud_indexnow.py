@@ -252,3 +252,48 @@ def test_update_page_status_bumps_updated_at_and_fires_indexnow():
     assert len(notified) == 1
     n = notified[0]
     assert n["board_slug"] == "ahsec" and n["topic_slug"] == "newtons-laws"
+
+
+def test_update_page_status_indexnow_failure_is_non_blocking():
+    """IndexNow push_indexnow raising must not surface to the caller of
+    update_page_status.  The function wraps the notification in both
+    notify_indexnow_for_page (which swallows its own errors) and
+    asyncio.create_task (fire-and-forget).  If either layer fails the
+    HTTP response must still be {"message": "Status updated to published"}.
+    This covers the 'silently ignores failures (non-critical)' requirement
+    from Task #261."""
+    import asyncio as _asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from tests._deps_stub import install_deps_stub
+    install_deps_stub()
+    import seo_engine
+
+    fake_db = MagicMock()
+    fake_db.seo_pages.update_one = AsyncMock(
+        return_value=MagicMock(matched_count=1)
+    )
+    fake_db.seo_pages.find_one = AsyncMock(return_value={
+        "board_slug": "cbse", "class_slug": "class-10",
+        "subject_slug": "maths", "topic_slug": "polynomials",
+        "page_type": "notes",
+    })
+    seo_engine._db = fake_db
+
+    async def _exploding_notify(p):
+        raise RuntimeError("IndexNow endpoint unreachable — non-blocking test")
+
+    with patch("routes.bot_discovery.notify_indexnow_for_page",
+               side_effect=_exploding_notify):
+        result = _asyncio.run(
+            seo_engine.update_page_status(
+                page_id="page-fail", status="published", _admin={"sub": "admin"}
+            )
+        )
+        async def _drain():
+            for _ in range(20):
+                await _asyncio.sleep(0)
+        _asyncio.run(_drain())
+
+    # Publication must succeed even though IndexNow threw
+    assert result == {"message": "Status updated to published"}
