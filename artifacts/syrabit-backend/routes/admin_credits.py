@@ -707,3 +707,277 @@ async def admin_credits_smoke_test(
             "Slack alerts fire only on 'fail' (non-200 or connection error)."
         ),
     }
+
+
+# ── Task #263: Startup credit burn panels ─────────────────────────────────────
+# Four read-only endpoints consumed by the AdminHealth billing panels.
+#
+# Each endpoint first checks whether the relevant env vars are configured.
+# When not configured it returns {"configured": false} so the frontend shows
+# setup instructions rather than an error.  When configured, live API calls are
+# attempted with a generous fallback to manually-maintained env-var overrides.
+#
+# Env-var reference:
+#   AWS_ACTIVATE_GRANT_USD         — original programme grant (e.g. "1000")
+#   AWS_ACTIVATE_REMAINING_USD     — current remaining credits (update manually)
+#   AWS_ACTIVATE_SPEND_MTD         — spend this/last month (for runway calc)
+#   AWS_ACTIVATE_EXPIRY            — credit expiry date YYYY-MM-DD
+#   AWS_ACCOUNT_ALIAS              — friendly account name (optional)
+#
+#   AZURE_ACTIVATE_GRANT_USD       — original programme grant (e.g. "5000")
+#   AZURE_ACTIVATE_REMAINING_USD   — current remaining credits
+#   AZURE_ACTIVATE_SPEND_MTD       — spend this/last month
+#   AZURE_ACTIVATE_EXPIRY          — credit expiry date YYYY-MM-DD
+#   AZURE_SUBSCRIPTION_NAME        — friendly subscription name (optional)
+#
+#   AXIOM_API_TOKEN + AXIOM_ORG_ID — live ingest stats fetched from Axiom API
+#   AXIOM_INGEST_GB_MTD            — fallback: ingest GB this month
+#   AXIOM_INGEST_LIMIT_GB          — fallback: plan limit (default 500)
+#   AXIOM_RETENTION_DAYS           — fallback: retention (default 30)
+#
+#   SENTRY_AUTH_TOKEN + SENTRY_ORG — live error counts fetched from Sentry API
+#   SENTRY_ERRORS_USED_MTD         — fallback: error events this month
+#   SENTRY_ERRORS_LIMIT            — fallback: plan quota (default 50000)
+#   SENTRY_PLAN                    — fallback: plan name (default "Team")
+
+import datetime as _dt
+import os as _os
+
+
+def _days_until_expiry(date_str: str | None) -> int | None:
+    if not date_str:
+        return None
+    try:
+        exp = _dt.date.fromisoformat(date_str)
+        return (exp - _dt.date.today()).days
+    except ValueError:
+        return None
+
+
+@router.get(
+    "/admin/billing/aws-activate",
+    summary="AWS Activate credit burn panel (Task #263)",
+    description=(
+        "Returns current AWS Activate credit balance and runway. "
+        "Reads AWS_ACTIVATE_GRANT_USD, AWS_ACTIVATE_REMAINING_USD, "
+        "AWS_ACTIVATE_SPEND_MTD, AWS_ACTIVATE_EXPIRY from environment. "
+        "Returns {configured: false} when the grant env var is absent."
+    ),
+)
+async def admin_billing_aws_activate(
+    _admin: dict = Depends(get_admin_user),
+) -> dict:
+    grant_str = _os.environ.get("AWS_ACTIVATE_GRANT_USD")
+    if not grant_str:
+        return {"configured": False}
+
+    grant_usd = float(grant_str)
+    remaining_str = _os.environ.get("AWS_ACTIVATE_REMAINING_USD")
+    remaining = float(remaining_str) if remaining_str else grant_usd
+    spend_mtd_str = _os.environ.get("AWS_ACTIVATE_SPEND_MTD")
+    spend_mtd: float | None = float(spend_mtd_str) if spend_mtd_str else None
+    expiry_date = _os.environ.get("AWS_ACTIVATE_EXPIRY")
+    days_until = _days_until_expiry(expiry_date)
+    credits_low = remaining < grant_usd * 0.20
+
+    months_runway: float | None = None
+    if spend_mtd and spend_mtd > 0:
+        months_runway = round(remaining / spend_mtd, 1)
+    elif remaining >= grant_usd * 0.99:
+        months_runway = 999.0
+
+    return {
+        "configured":             True,
+        "credits_low":            credits_low,
+        "account_alias":          _os.environ.get("AWS_ACCOUNT_ALIAS", "AWS Activate Portfolio"),
+        "grant_usd":              grant_usd,
+        "spend_mtd_usd":          spend_mtd,
+        "estimated_remaining_usd": remaining,
+        "months_runway":          months_runway,
+        "expiry_date":            expiry_date,
+        "days_until_expiry":      days_until,
+        "services":               ["Lambda", "SES", "Route 53", "CloudFront", "Bedrock"],
+        "note": (
+            "Update AWS_ACTIVATE_REMAINING_USD and AWS_ACTIVATE_SPEND_MTD "
+            "to reflect the current credit state. Set AWS_ACTIVATE_GRANT_USD "
+            "and AWS_ACTIVATE_EXPIRY once when the programme activates."
+        ),
+    }
+
+
+@router.get(
+    "/admin/billing/azure-startups",
+    summary="Azure for Startups credit burn panel (Task #263)",
+    description=(
+        "Returns current Azure for Startups credit balance and runway. "
+        "Reads AZURE_ACTIVATE_GRANT_USD, AZURE_ACTIVATE_REMAINING_USD, "
+        "AZURE_ACTIVATE_SPEND_MTD, AZURE_ACTIVATE_EXPIRY from environment. "
+        "Returns {configured: false} when the grant env var is absent."
+    ),
+)
+async def admin_billing_azure_startups(
+    _admin: dict = Depends(get_admin_user),
+) -> dict:
+    grant_str = _os.environ.get("AZURE_ACTIVATE_GRANT_USD")
+    if not grant_str:
+        return {"configured": False}
+
+    grant_usd = float(grant_str)
+    remaining_str = _os.environ.get("AZURE_ACTIVATE_REMAINING_USD")
+    remaining = float(remaining_str) if remaining_str else grant_usd
+    spend_mtd_str = _os.environ.get("AZURE_ACTIVATE_SPEND_MTD")
+    spend_mtd: float | None = float(spend_mtd_str) if spend_mtd_str else None
+    expiry_date = _os.environ.get("AZURE_ACTIVATE_EXPIRY")
+    days_until = _days_until_expiry(expiry_date)
+    credits_low = remaining < grant_usd * 0.20
+
+    months_runway: float | None = None
+    if spend_mtd and spend_mtd > 0:
+        months_runway = round(remaining / spend_mtd, 1)
+    elif remaining >= grant_usd * 0.99:
+        months_runway = 999.0
+
+    return {
+        "configured":             True,
+        "credits_low":            credits_low,
+        "subscription_name":      _os.environ.get("AZURE_SUBSCRIPTION_NAME", "Azure for Startups"),
+        "grant_usd":              grant_usd,
+        "spend_mtd_usd":          spend_mtd,
+        "estimated_remaining_usd": remaining,
+        "months_runway":          months_runway,
+        "expiry_date":            expiry_date,
+        "days_until_expiry":      days_until,
+        "services":               ["Front Door", "Cosmos DB", "DDoS Protection", "Monitor"],
+        "note": (
+            "Update AZURE_ACTIVATE_REMAINING_USD and AZURE_ACTIVATE_SPEND_MTD "
+            "to reflect the current credit state. Set AZURE_ACTIVATE_GRANT_USD "
+            "and AZURE_ACTIVATE_EXPIRY once when the programme activates."
+        ),
+    }
+
+
+@router.get(
+    "/admin/billing/axiom",
+    summary="Axiom Log Explorer startup-tier usage panel (Task #263)",
+    description=(
+        "Returns Axiom ingest usage for the current month. "
+        "When AXIOM_API_TOKEN + AXIOM_ORG_ID are set, live dataset stats are "
+        "fetched from api.axiom.co; otherwise falls back to env-var overrides "
+        "(AXIOM_INGEST_GB_MTD, AXIOM_INGEST_LIMIT_GB, AXIOM_RETENTION_DAYS). "
+        "Returns {configured: false} when neither token nor fallback vars are set."
+    ),
+)
+async def admin_billing_axiom(
+    _admin: dict = Depends(get_admin_user),
+) -> dict:
+    api_token = _os.environ.get("AXIOM_API_TOKEN")
+    org_id = _os.environ.get("AXIOM_ORG_ID")
+
+    if api_token and org_id:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.axiom.co/v1/datasets",
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "X-Axiom-Org-Id": org_id,
+                    },
+                )
+            if resp.status_code == 200:
+                datasets = resp.json()
+                total_bytes = sum(d.get("compressedBytes", 0) for d in datasets)
+                ingest_gb = round(total_bytes / 1_073_741_824, 2)
+                ingest_limit_gb = int(_os.environ.get("AXIOM_INGEST_LIMIT_GB", "500"))
+                retention_days = int(_os.environ.get("AXIOM_RETENTION_DAYS", "30"))
+                return {
+                    "configured":     True,
+                    "over_limit":     ingest_gb > ingest_limit_gb,
+                    "ingest_gb":      ingest_gb,
+                    "ingest_limit_gb": ingest_limit_gb,
+                    "retention_days": retention_days,
+                    "dataset_count":  len(datasets),
+                }
+            logger.warning("[admin-billing] axiom API returned %s", resp.status_code)
+        except Exception as exc:
+            logger.warning("[admin-billing] axiom API error: %s", exc)
+
+    ingest_str = _os.environ.get("AXIOM_INGEST_GB_MTD")
+    if not api_token and not ingest_str:
+        return {"configured": False}
+
+    ingest_gb = float(ingest_str) if ingest_str else 0.0
+    ingest_limit_gb = int(_os.environ.get("AXIOM_INGEST_LIMIT_GB", "500"))
+    retention_days = int(_os.environ.get("AXIOM_RETENTION_DAYS", "30"))
+    return {
+        "configured":     True,
+        "over_limit":     ingest_gb > ingest_limit_gb,
+        "ingest_gb":      ingest_gb,
+        "ingest_limit_gb": ingest_limit_gb,
+        "retention_days": retention_days,
+        "dataset_count":  None,
+        "note":           "Live Axiom API unreachable — showing env-var fallback values.",
+    }
+
+
+@router.get(
+    "/admin/billing/sentry",
+    summary="Sentry error-tracking startup-tier usage panel (Task #263)",
+    description=(
+        "Returns Sentry error event counts for the last 30 days. "
+        "When SENTRY_AUTH_TOKEN + SENTRY_ORG are set, live stats are fetched "
+        "from sentry.io/api/0/organizations/{org}/stats_v2/; otherwise falls "
+        "back to env-var overrides (SENTRY_ERRORS_USED_MTD, SENTRY_ERRORS_LIMIT, "
+        "SENTRY_PLAN). Returns {configured: false} when no token or fallback vars."
+    ),
+)
+async def admin_billing_sentry(
+    _admin: dict = Depends(get_admin_user),
+) -> dict:
+    auth_token = _os.environ.get("SENTRY_AUTH_TOKEN")
+    org_slug = _os.environ.get("SENTRY_ORG")
+
+    if auth_token and org_slug:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"https://sentry.io/api/0/organizations/{org_slug}/stats_v2/",
+                    params={
+                        "statsPeriod": "30d",
+                        "category":    "error",
+                        "outcome":     "accepted",
+                        "groupBy":     "category",
+                        "field":       "sum(quantity)",
+                    },
+                    headers={"Authorization": f"Bearer {auth_token}"},
+                )
+            if resp.status_code == 200:
+                data = resp.json()
+                totals = data.get("totals", {})
+                errors_used = int(totals.get("sum(quantity)", 0))
+                errors_limit = int(_os.environ.get("SENTRY_ERRORS_LIMIT", "50000"))
+                plan = _os.environ.get("SENTRY_PLAN", "Team")
+                return {
+                    "configured":   True,
+                    "over_limit":   errors_used > errors_limit,
+                    "plan":         plan,
+                    "errors_used":  errors_used,
+                    "errors_limit": errors_limit,
+                }
+            logger.warning("[admin-billing] sentry API returned %s", resp.status_code)
+        except Exception as exc:
+            logger.warning("[admin-billing] sentry API error: %s", exc)
+
+    errors_str = _os.environ.get("SENTRY_ERRORS_USED_MTD")
+    if not auth_token and not errors_str:
+        return {"configured": False}
+
+    errors_used = int(errors_str) if errors_str else 0
+    errors_limit = int(_os.environ.get("SENTRY_ERRORS_LIMIT", "50000"))
+    return {
+        "configured":   True,
+        "over_limit":   errors_used > errors_limit,
+        "plan":         _os.environ.get("SENTRY_PLAN", "Team"),
+        "errors_used":  errors_used,
+        "errors_limit": errors_limit,
+        "note":         "Live Sentry API unreachable — showing env-var fallback values.",
+    }
