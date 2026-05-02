@@ -98,31 +98,21 @@ def test_workers_ai_fallback_pool_is_workers_only():
 # ── PROVIDER_PRIORITY correctness — only wired providers ─────────────────────
 
 def test_tts_stt_priority_structure():
-    """tts/stt/voice priority lists must follow the authoritative provider matrix.
+    """tts/stt/voice priority lists must follow the current provider matrix.
 
-    Per the authoritative matrix: all mandated providers are listed even when their
-    TTS/STT endpoints are not yet wired (Task #256). vertex/bedrock/azure_openai
-    raise RuntimeError and are excluded gracefully by the fallback loop, leaving
-    cartesia/elevenlabs/assemblyai/workers_ai as the actively synthesizing providers.
-
-    Required structure:
-      tts:   cartesia → elevenlabs → vertex → bedrock → azure_openai → workers_ai
-      stt:   assemblyai → vertex → bedrock → azure_openai → workers_ai
-      voice: assemblyai → cartesia → elevenlabs → vertex → bedrock → azure_openai → workers_ai
+    Current structure (Cartesia removed):
+      tts:   elevenlabs → deepgram → vertex → workers_ai
+      stt:   deepgram → assemblyai → vertex → workers_ai
+      voice: deepgram → elevenlabs → vertex → workers_ai
     """
     for feature in ("tts", "stt", "voice"):
         pool = PROVIDER_PRIORITY.get(feature, [])
         pool_set = set(pool)
         assert "workers_ai" in pool_set, f"{feature}: workers_ai must be in the pool as last-resort"
         assert pool[-1] == "workers_ai", f"{feature}: workers_ai must be last in priority list"
-        assert "azure_openai" in pool_set, f"{feature}: azure_openai must be in pool (authoritative matrix)"
-        assert pool[-2] == "azure_openai", (
-            f"{feature}: azure_openai must be second-to-last (mandated by authoritative matrix)"
-        )
-        # vertex and bedrock must be listed per authoritative matrix (they raise RuntimeError → excluded gracefully)
-        assert "vertex" in pool_set, f"{feature}: vertex must be listed per authoritative matrix"
-        assert "bedrock" in pool_set, f"{feature}: bedrock must be listed per authoritative matrix"
-    print("  PASS: tts/stt/voice priority list structure valid — all mandated providers listed, azure second-to-last")
+        assert "vertex" in pool_set, f"{feature}: vertex must be listed (raises RuntimeError → excluded gracefully)"
+        assert "cartesia" not in pool_set, f"{feature}: cartesia has been removed and must not be in the pool"
+    print("  PASS: tts/stt/voice priority list structure valid — cartesia absent, workers_ai last")
 
 
 def test_embed_priority_structure():
@@ -291,15 +281,14 @@ def test_call_with_provider_fallback_invokes_attempt_fn():
     print(f"  PASS: call_with_provider_fallback invokes attempt_fn with provider={calls[0]!r}")
 
 
-def test_tts_cartesia_fails_falls_back_to_workers_ai():
-    """_synthesize_with_fallback: cartesia fails → falls back to next available (workers_ai).
+def test_tts_elevenlabs_fails_falls_back_to_workers_ai():
+    """_synthesize_with_fallback: elevenlabs fails → falls back to workers_ai.
 
-    vertex/bedrock/azure_openai are not in PROVIDER_PRIORITY['tts'], so the
-    fallback pool is: cartesia → elevenlabs → workers_ai.  We simulate cartesia
-    being selected first (fails) then workers_ai succeeding.
+    Pool: elevenlabs → deepgram → vertex(skip) → workers_ai.
+    We simulate elevenlabs selected first (fails) then workers_ai succeeding.
     """
     from routes.voice import _synthesize_with_fallback
-    side_effects = iter(["cartesia", "workers_ai"])
+    side_effects = iter(["elevenlabs", "workers_ai"])
 
     def _fake_select(feature, lang="en", exclude=frozenset()):
         return next(side_effects)
@@ -311,7 +300,7 @@ def test_tts_cartesia_fails_falls_back_to_workers_ai():
 
     assert result == b"audio-bytes", "Fallback to workers_ai should return audio bytes"
     workers_stub.assert_called_once()
-    print("  PASS: TTS cartesia fails, fallback recovers to workers_ai (vertex/bedrock not in pool)")
+    print("  PASS: TTS elevenlabs fails, fallback recovers to workers_ai")
 
 
 def test_stt_assemblyai_fails_falls_back_to_workers_ai():
@@ -1069,7 +1058,7 @@ if __name__ == "__main__":
         test_dispatch_routes_bedrock_at_runtime,
         test_dispatch_routes_azure_openai_at_runtime,
         test_call_with_provider_fallback_invokes_attempt_fn,
-        test_tts_cartesia_fails_falls_back_to_workers_ai,
+        test_tts_elevenlabs_fails_falls_back_to_workers_ai,
         test_stt_assemblyai_fails_falls_back_to_workers_ai,
         test_embed_dispatch_routes_to_vertex_at_runtime,
         test_translate_dispatch_routes_sarvam_or_vertex,

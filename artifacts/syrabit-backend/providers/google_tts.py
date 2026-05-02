@@ -1,9 +1,8 @@
 """Google Cloud Text-to-Speech — Neural2 voices for Indic languages.
 
-Primary TTS for Hindi, Bengali, and Assamese. Cartesia sonic-2 remains
-primary for English. Cartesia is also used as fallback for Indic when
-Google TTS is unavailable or fails (Workers AI Deepgram Aura-2 is a
-secondary fallback for English only — it has no native Indic support).
+Primary TTS for Hindi, Bengali, and Assamese. ElevenLabs is primary
+for English. Deepgram Aura-2 is the secondary English fallback.
+Workers AI is the last-resort fallback for all languages.
 
 Voices:
   hi-IN: hi-IN-Neural2-A (female), hi-IN-Neural2-C (male)

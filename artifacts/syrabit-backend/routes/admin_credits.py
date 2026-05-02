@@ -22,7 +22,6 @@ GET /admin/credits/smoke-test
   AI Gateway slug. Each probe exercises BYOK auth and upstream reachability:
 
     cohere      POST /embed with 1-word input            (BYOK: Authorization: "")
-    cartesia    GET  /v1/voices (voice list)              (BYOK: X-API-Key: "")
     assemblyai  GET  /v2/transcript (list)                (BYOK: Authorization: "")
     elevenlabs  GET  /v1/models (model list)              (BYOK: xi-api-key: "")
     sarvam      POST /v1/chat/completions  max_tokens=1   (BYOK: api-subscription-key: "")
@@ -59,7 +58,6 @@ _CREDIT_REFERENCE: dict[str, int] = {
     "bedrock":       1000,
     "azure_openai":  2500,   # $2.5k Azure for Startups — weight is fixed at 1 though
     "sarvam":         500,
-    "cartesia":       500,
     "elevenlabs":     500,
     "assemblyai":    1000,
     "cohere":        1000,
@@ -75,7 +73,6 @@ _PROGRAMME_NAMES: dict[str, str] = {
     "bedrock":       "AWS Activate",
     "azure_openai":  "Azure for Startups",
     "sarvam":        "Sarvam Startup Credits",
-    "cartesia":      "Cartesia Startup Credits",
     "elevenlabs":    "ElevenLabs Startup Credits",
     "assemblyai":    "AssemblyAI Startup Credits",
     "cohere":        "Cohere Startup Credits",
@@ -123,19 +120,6 @@ _PROVIDER_PROBE_SPECS: dict[str, dict] = {
             "Authorization": "",
         },
         "description": "1-word embed → validates BYOK cohere key",
-    },
-    # Cartesia TTS — GET /v1/voices.
-    # Lists available voices; lightweight, no TTS cost.
-    # Cartesia uses X-API-Key (not Authorization Bearer) — empty value triggers BYOK.
-    "cartesia": {
-        "method": "GET",
-        "path": "/v1/voices",
-        "body": None,
-        "extra_headers": {
-            "X-API-Key": "",          # BYOK: empty → CF substitutes CARTESIA_API_KEY
-            "Cartesia-Version": "2024-06-10",
-        },
-        "description": "voice list → validates BYOK cartesia key",
     },
     # AssemblyAI STT — GET /v2/transcript.
     # Lists recent transcript jobs (may be empty list); validates API key, no cost.
@@ -644,7 +628,7 @@ async def admin_credits_provider_weights(
         "select_provider() to confirm weighted selection works, then makes a "
         "provider-specific minimal real request through the chosen provider's "
         "CF AI Gateway slug to exercise BYOK auth and upstream reachability. "
-        "Probes: cohere POST /embed, cartesia GET /v1/voices, assemblyai GET "
+        "Probes: cohere POST /embed, assemblyai GET "
         "/v2/transcript, elevenlabs GET /v1/models, sarvam POST /v1/chat/completions, "
         "bedrock POST /model/nova-micro/converse, azure_openai POST /chat/completions. "
         "Providers without a CF slug (vertex, workers_ai, etc.) are marked 'skip'. "

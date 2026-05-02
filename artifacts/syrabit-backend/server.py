@@ -101,7 +101,6 @@ def _validate_env():
         "XAI_API_KEY":        "grok/v1",
         "OPENAI_API_KEY":     "openai/v1",
         "COHERE_API_KEY":     "cohere/v1",
-        "CARTESIA_API_KEY":   "cartesia/v1",
         "BASETEN_API_KEY":    "baseten/v1",
     }
 

@@ -90,12 +90,12 @@ def test_smoke_test_slack_webhook_env_in_slack_alerter_config():
 # ── _PROVIDER_PROBE_SPECS coverage ───────────────────────────────────────────
 
 _CF_SLUG_PROVIDERS = frozenset(
-    {"cohere", "cartesia", "assemblyai", "elevenlabs", "sarvam", "bedrock", "azure_openai"}
+    {"cohere", "assemblyai", "elevenlabs", "sarvam", "bedrock", "azure_openai"}
 )
 
 
 def test_probe_specs_registered_for_all_cf_slug_providers():
-    """All 7 CF-slug PROVIDER_PRIORITY providers must have a probe spec."""
+    """All 6 CF-slug PROVIDER_PRIORITY providers must have a probe spec."""
     specs = mod._PROVIDER_PROBE_SPECS
     missing = _CF_SLUG_PROVIDERS - set(specs.keys())
     assert not missing, f"Missing probe specs for: {missing}"
@@ -123,8 +123,8 @@ def test_probe_specs_post_providers_have_body():
 
 
 def test_probe_specs_get_providers():
-    """cartesia, assemblyai, elevenlabs must use GET (lightweight list endpoints)."""
-    for p in ("cartesia", "assemblyai", "elevenlabs"):
+    """assemblyai, elevenlabs must use GET (lightweight list endpoints)."""
+    for p in ("assemblyai", "elevenlabs"):
         assert mod._PROVIDER_PROBE_SPECS[p]["method"] == "GET", (
             f"{p} should use GET for its lightweight list endpoint"
         )
@@ -143,14 +143,6 @@ def test_probe_spec_cohere_uses_empty_authorization():
     spec = mod._PROVIDER_PROBE_SPECS["cohere"]
     assert spec["extra_headers"].get("Authorization") == "", (
         "cohere: Authorization must be '' (empty) to trigger CF BYOK"
-    )
-
-
-def test_probe_spec_cartesia_uses_empty_x_api_key():
-    """cartesia spec must send X-API-Key: '' so CF BYOK substitutes the Cartesia key."""
-    spec = mod._PROVIDER_PROBE_SPECS["cartesia"]
-    assert spec["extra_headers"].get("X-API-Key") == "", (
-        "cartesia: X-API-Key must be '' (empty) to trigger CF BYOK"
     )
 
 
@@ -248,9 +240,9 @@ def test_build_probe_headers_adds_byok_key():
 def test_build_probe_headers_merges_extra_headers():
     """Provider-specific extra_headers must be present in the merged result."""
     with patch("config.CF_AI_GATEWAY_TOKEN", ""):
-        h = mod._build_probe_headers("cartesia", {"X-API-Key": "", "Cartesia-Version": "2024-06-10"})
-    assert h.get("X-API-Key") == ""
-    assert h.get("Cartesia-Version") == "2024-06-10"
+        h = mod._build_probe_headers("elevenlabs", {"xi-api-key": "", "Content-Type": "application/json"})
+    assert h.get("xi-api-key") == ""
+    assert h.get("Content-Type") == "application/json"
     assert h["cf-aig-byok-key"] == "true"
 
 
@@ -282,17 +274,17 @@ def test_probe_provider_get_returns_200():
     """GET probe returning 200 → (200, positive_latency_ms)."""
     spec = {
         "method": "GET",
-        "path": "/v1/voices",
+        "path": "/v1/models",
         "body": None,
-        "extra_headers": {"X-API-Key": ""},
+        "extra_headers": {"xi-api-key": ""},
     }
     _Client = _make_httpx_client(get_status=200)
     with patch("httpx.AsyncClient", _Client), \
          patch("config.CF_AI_GATEWAY_TOKEN", ""):
         status, latency = asyncio.run(
             mod._probe_provider(
-                "cartesia",
-                "https://gateway.ai.cloudflare.com/v1/a/g/cartesia/v1",
+                "elevenlabs",
+                "https://gateway.ai.cloudflare.com/v1/a/g/elevenlabs/v1",
                 spec,
             )
         )
@@ -424,17 +416,17 @@ def test_probe_provider_includes_byok_headers_in_request():
     """Probe must include cf-aig-byok-key in the outgoing request headers."""
     spec = {
         "method": "GET",
-        "path": "/v1/voices",
+        "path": "/v1/models",
         "body": None,
-        "extra_headers": {"X-API-Key": ""},
+        "extra_headers": {"xi-api-key": ""},
     }
     _Client = _make_httpx_client(get_status=200)
     with patch("httpx.AsyncClient", _Client), \
          patch("config.CF_AI_GATEWAY_TOKEN", "tok"):
         asyncio.run(
             mod._probe_provider(
-                "cartesia",
-                "https://gateway.ai.cloudflare.com/v1/a/g/cartesia/v1",
+                "elevenlabs",
+                "https://gateway.ai.cloudflare.com/v1/a/g/elevenlabs/v1",
                 spec,
             )
         )
@@ -448,17 +440,17 @@ def test_probe_provider_includes_byok_headers_in_request():
 def test_run_feature_smoke_pass_when_slug_exists_and_200():
     """Feature with a CF slug + probe spec returns outcome='pass' on HTTP 200."""
     _Client = _make_httpx_client(get_status=200)
-    with patch("llm.select_provider", return_value="cartesia"), \
+    with patch("llm.select_provider", return_value="elevenlabs"), \
          patch("config.CF_GATEWAY_ENABLED", True), \
          patch("config.cf_gateway_url",
-               return_value="https://gateway.ai.cloudflare.com/v1/a/g/cartesia/v1"), \
+               return_value="https://gateway.ai.cloudflare.com/v1/a/g/elevenlabs/v1"), \
          patch("httpx.AsyncClient", _Client), \
          patch("config.CF_AI_GATEWAY_TOKEN", ""):
         result = asyncio.run(mod._run_feature_smoke("tts"))
     assert result["outcome"] == "pass"
     assert result["status"] == 200
     assert result["feature"] == "tts"
-    assert result["provider"] == "cartesia"
+    assert result["provider"] == "elevenlabs"
     assert result["error"] == ""
 
 
@@ -694,8 +686,8 @@ def test_post_smoke_slack_alert_posts_when_env_set():
             return _Resp(200)
 
     failures = [
-        {"feature": "tts", "provider": "cartesia", "status": 503,
-         "latency_ms": 200.0, "probe_description": "voice list"},
+        {"feature": "tts", "provider": "elevenlabs", "status": 503,
+         "latency_ms": 200.0, "probe_description": "model list"},
         {"feature": "stt", "provider": "assemblyai", "status": 0,
          "latency_ms": 8001.0, "probe_description": "transcript list"},
     ]

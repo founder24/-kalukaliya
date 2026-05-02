@@ -1308,7 +1308,7 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 
 # ── PROVIDER_PRIORITY weighted round-robin dispatch (Task #250) ───────────────
 # Maps provider names (as used in PROVIDER_PRIORITY) to their default LLM
-# model identifiers.  For non-LLM providers (cartesia, assemblyai, cohere,
+# model identifiers.  For non-LLM providers (assemblyai, cohere,
 # pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
@@ -1316,7 +1316,6 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "bedrock":          "amazon.nova-micro-v1:0",                    # AWS Bedrock Nova Micro — fastest/cheapest Nova
     "azure_openai":     "gpt-4.1-mini",                              # Azure OpenAI GPT-4.1-mini — highest TPS on Azure; primary for english_rag_chat
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
-    "cartesia":         "sonic-2",                                   # Cartesia TTS
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
     "assemblyai":       "best",                                      # AssemblyAI STT
     "deepgram":         "nova-3",                                    # Deepgram STT + Aura-2 TTS — primary STT
@@ -1337,7 +1336,6 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     "bedrock":          "bedrock",
     "azure_openai":     "openai",           # Azure OpenAI is OpenAI-compatible
     "sarvam":           "sarvam",
-    "cartesia":         "cartesia",
     "elevenlabs":       "elevenlabs",
     "assemblyai":       "assemblyai",
     "deepgram":         "deepgram",
