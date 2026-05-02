@@ -109,25 +109,25 @@ def test_valid_image_returns_extracted_text():
 # MIME validation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_pdf_mime_returns_400():
+def test_pdf_mime_returns_415():
     app, _ = _build_ocr_app()
     with TestClient(app) as client:
         resp = client.post(
             "/api/ai/ocr-image",
             files={"file": ("doc.pdf", b"%PDF-1.4 fake", "application/pdf")},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 415
     assert "Unsupported file type" in resp.json()["detail"]
 
 
-def test_text_mime_returns_400():
+def test_text_mime_returns_415():
     app, _ = _build_ocr_app()
     with TestClient(app) as client:
         resp = client.post(
             "/api/ai/ocr-image",
             files={"file": ("note.txt", b"hello world", "text/plain")},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 415
 
 
 # ─────────────────────────────────────────────────────────────────────────────

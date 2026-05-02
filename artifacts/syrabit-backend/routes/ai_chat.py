@@ -567,10 +567,12 @@ async def ocr_chat_image(
             raise HTTPException(status_code=403, detail="Turnstile verification failed")
 
     # 2. Mime check on the client-supplied Content-Type (cheap fast-path).
+    # 415 Unsupported Media Type is the semantically correct status for an
+    # unaccepted Content-Type header — RFC 9110 §15.5.16.
     ct = (file.content_type or "").lower()
     if ct not in _OCR_ALLOWED_MIME:
         raise HTTPException(
-            status_code=400,
+            status_code=415,
             detail=f"Unsupported file type: {ct or 'unknown'}. Please upload an image (JPEG, PNG, WebP, GIF or HEIC).",
         )
 
