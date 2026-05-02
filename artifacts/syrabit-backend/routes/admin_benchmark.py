@@ -16,8 +16,6 @@ from pydantic import BaseModel, Field
 
 from auth_deps import get_admin_user
 from config import (
-    _CEREBRAS_KEY,
-    _GROQ_KEY,
     _GEMINI_KEY,
 )
 from llm import _call_llm_raw, call_llm_api_chat
@@ -64,8 +62,6 @@ STAGE3_SYSTEM_PROMPT = (
     "Keep the same factual content — do not add new facts."
 )
 
-_CEREBRAS_PROVIDER_LIST = [{"provider": "cerebras", "key": _CEREBRAS_KEY, "default_model": "llama3.1-8b"}] if _CEREBRAS_KEY else []
-_GROQ_PROVIDER_LIST = [{"provider": "groq", "key": _GROQ_KEY, "default_model": "meta-llama/llama-4-scout-17b-16e-instruct"}] if _GROQ_KEY else []
 _GEMINI_PROVIDER_LIST = [{"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"}] if _GEMINI_KEY else []
 
 
@@ -201,17 +197,10 @@ async def _run_method_b(
     wall_t0 = time.perf_counter()
     error = None
 
-    if not _CEREBRAS_KEY or not _GROQ_KEY or not _GEMINI_KEY:
-        missing = []
-        if not _CEREBRAS_KEY:
-            missing.append("CEREBRAS_API_KEY")
-        if not _GROQ_KEY:
-            missing.append("GROQ_API_KEY")
-        if not _GEMINI_KEY:
-            missing.append("GEMINI_API_KEY")
+    if not _GEMINI_KEY:
         return {
             "method": f"B {'Optimized' if parallel_stage1_rag else 'Sequential'} (Multi-LLM)",
-            "error": f"Missing API keys: {', '.join(missing)}",
+            "error": "Missing API keys: GEMINI_API_KEY",
             "timings": {},
         }
 
@@ -223,7 +212,7 @@ async def _run_method_b(
     async def _stage1():
         try:
             result, elapsed = await _timed_llm_call(
-                stage1_messages, "llama3.1-8b", 256, _CEREBRAS_PROVIDER_LIST,
+                stage1_messages, "@cf/meta/llama-3.3-70b-instruct-fp8-fast", 256, _GEMINI_PROVIDER_LIST,
             )
             try:
                 cleaned = result.strip()
@@ -298,7 +287,7 @@ async def _run_method_b(
 
     try:
         draft, stage2_ms = await _timed_llm_call(
-            stage2_messages, "meta-llama/llama-4-scout-17b-16e-instruct", max_tokens, _GROQ_PROVIDER_LIST,
+            stage2_messages, "@cf/openai/gpt-oss-120b", max_tokens, _GEMINI_PROVIDER_LIST,
         )
     except Exception as e:
         draft = f"[Stage 2 error: {type(e).__name__}]"
@@ -308,8 +297,8 @@ async def _run_method_b(
 
     timings["stage2_synthesis_ms"] = stage2_ms
     stages["stage2_synthesis"] = {
-        "provider": "groq",
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "provider": "workers-ai",
+        "model": "@cf/openai/gpt-oss-120b",
         "time_ms": stage2_ms,
         "ttft_ms": stage2_ms,
         "ttft_note": "non-streaming: TTFT equals full response time",
@@ -383,15 +372,11 @@ async def admin_ai_benchmark(
     results = []
 
     providers_status = {
-        "cerebras": {"available": bool(_CEREBRAS_KEY), "model": "llama3.1-8b"},
-        "groq": {"available": bool(_GROQ_KEY), "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
         "gemini": {"available": bool(_GEMINI_KEY), "model": "gemini-2.5-flash"},
         "smart_key_pool": {"available": True, "model": "pool_selected"},
     }
 
-    multi_llm_possible = all(
-        providers_status[p]["available"] for p in ("cerebras", "groq", "gemini")
-    )
+    multi_llm_possible = bool(_GEMINI_KEY)
 
     for q in queries:
         query_result = {"query": q.query, "subject_name": q.subject_name, "methods": {}}

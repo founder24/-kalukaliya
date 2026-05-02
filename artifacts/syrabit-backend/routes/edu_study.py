@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field
 
 from auth_deps import get_current_user, get_current_user_optional, check_rate_limit, get_user_credits
 from llm import call_llm_api, _call_gemini, _GEMINI_KEY, _GEMINI_KEY_2
+from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
 import deps
 from deps import sarvam_client
@@ -587,9 +588,9 @@ async def _generate_and_clean_quiz(
         {"role": "user",   "content": "\n".join([p for p in user_msg_parts if p])},
     ]
     try:
-        raw = await call_llm_api(messages, max_tokens=max_tokens)
+        raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
     except Exception as e:
-        logger.warning(f"[edu_quiz] LLM call failed: {e}")
+        logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e}")
         raise HTTPException(status_code=502, detail="quiz_llm_failed")
     payload = _coerce_quiz_payload(raw)
     questions = payload.get("questions") or []
@@ -690,19 +691,24 @@ async def pregenerate_chapter_quiz(
 ) -> bool:
     """Public hook called from ``admin_create_chapter`` (and any future
     bulk-import / migration script) to materialise the permanent quiz
-    cache entry for a chapter at the moment it is created. Best-effort:
-    returns True on success, False on any failure (logged). Never
-    raises — the chapter creation flow must not be blocked by a flaky
-    LLM, and the lazy fallback in ``quiz_generate`` will recover the
-    miss the first time a student opens the quiz anyway.
+    cache entries for a chapter at the moment it is created. Best-effort:
+    returns True if ALL three language copies succeed, False if any fail
+    (logged individually). Never raises — the chapter creation flow must
+    not be blocked by a flaky LLM, and the lazy fallback in
+    ``quiz_generate`` will recover the miss the first time a student
+    opens the quiz anyway.
+
+    Generates THREE independent copies (English, Assamese, Hindi) via
+    Azure GPT-4.1-mini and stores each under its own lang key in MongoDB.
+    This matches the "store multiple copies per chapter" spec and ensures
+    every language tab loads instantly from cache without any LLM round-trip.
 
     Resolves the chapter_ref slug-path the SAME way the frontend
     constructs it (board/class/subject/chapter, no stream segment) via
     ``_resolve_quiz_cache_chapter_ref`` so the cache key the admin
     pre-gen writes is the SAME key ``quiz_generate`` will look up on
     a student click. Skips quietly if the chapter has no body content
-    (no source text → not enough material to write a meaningful MCQ
-    set)."""
+    (no source text → not enough material to write a meaningful MCQ set)."""
     try:
         title = (chapter_doc.get("title") or "").strip()
         content = (chapter_doc.get("content") or "").strip()
@@ -732,32 +738,43 @@ async def pregenerate_chapter_quiz(
                 subject_name = (subj.get("name") or subj.get("title") or "")[:200]
         except Exception:
             pass
-        cleaned = await _generate_and_clean_quiz(
-            context=content,
-            topic=title,
-            chapter_ref=chapter_ref,
-            subject_name=subject_name,
-            count=count,
-            response_lang=response_lang,
-            # Pool generation needs a much larger output budget than
-            # the legacy 7-question request — see _QUIZ_POOL_MAX_TOKENS.
-            max_tokens=(_QUIZ_POOL_MAX_TOKENS if count >= 12 else 2000),
-        )
-        await _save_quiz_cache(
-            chapter_ref, response_lang, cleaned, chapter_id=chapter_id
-        )
-        logger.info(
-            f"[edu_quiz] pregenerated and cached pool of {len(cleaned)} questions "
-            f"for chapter_id={chapter_id} chapter_ref={chapter_ref!r} "
-            f"lang={response_lang} (target pool size={count})"
-        )
-        return True
-    except HTTPException as e:
-        logger.warning(
-            f"[edu_quiz] pregenerate failed for "
-            f"{chapter_doc.get('id')!r}: {e.detail}"
-        )
-        return False
+        # Generate three language copies (en, as, hi) via Azure GPT-4.1-mini.
+        # Each copy is stored independently; all three must succeed for True return.
+        _PREGENERATE_LANGS = ["en", "as", "hi"]
+        all_ok = True
+        for lang in _PREGENERATE_LANGS:
+            try:
+                cleaned = await _generate_and_clean_quiz(
+                    context=content,
+                    topic=title,
+                    chapter_ref=chapter_ref,
+                    subject_name=subject_name,
+                    count=count,
+                    response_lang=lang,
+                    # Pool generation needs a much larger output budget than
+                    # the legacy 7-question request — see _QUIZ_POOL_MAX_TOKENS.
+                    max_tokens=(_QUIZ_POOL_MAX_TOKENS if count >= 12 else 2000),
+                )
+                await _save_quiz_cache(
+                    chapter_ref, lang, cleaned, chapter_id=chapter_id
+                )
+                logger.info(
+                    f"[edu_quiz] pregenerated and cached pool of {len(cleaned)} questions "
+                    f"for chapter_id={chapter_id} chapter_ref={chapter_ref!r} "
+                    f"lang={lang} (target pool size={count})"
+                )
+            except HTTPException as e:
+                logger.warning(
+                    f"[edu_quiz] pregenerate lang={lang} failed for "
+                    f"{chapter_id!r}: {e.detail}"
+                )
+                all_ok = False
+            except Exception as e:
+                logger.warning(
+                    f"[edu_quiz] pregenerate lang={lang} crashed for {chapter_id!r}: {e}"
+                )
+                all_ok = False
+        return all_ok
     except Exception as e:
         logger.warning(
             f"[edu_quiz] pregenerate crashed for {chapter_doc.get('id')!r}: {e}"

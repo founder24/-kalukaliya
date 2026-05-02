@@ -28,13 +28,14 @@ __all__ = [
     "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_URL",
     "_ASSEMBLYAI_KEY", "ASSEMBLYAI_STT_MODEL",
     "_AWS_ACCESS_KEY", "_AWS_REGION", "_AWS_SECRET_KEY",
-    "_CEREBRAS_KEY", "_CF_PROVIDER_SLUGS", "_CORS_ALLOW_CREDENTIALS",
+    "_CF_PROVIDER_SLUGS", "_CORS_ALLOW_CREDENTIALS",
+    "_DEEPGRAM_KEY",
     "_ELEVENLABS_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID",
     "_GEMINI_KEY", "_GEMINI_KEY_2",
-    "_GROQ_KEY",
-    "_OPENAI_KEY", "_OPENROUTER_KEY",
+    "_OPENAI_KEY",
     "_PG_DSN",
     "_SARVAM_LLM_KEY", "_SARVAM_LLM_KEY_2", "_SARVAM_LLM_KEY_3",
+    "_VOYAGE_AI_KEY",
     "_XAI_KEY",
     "cf_gateway_url", "get_provider_base_url",
     "is_cf_gateway_up", "mark_cf_gateway_down",
@@ -299,40 +300,38 @@ CF_CACHE_TTL = int(os.environ.get('CF_AI_GATEWAY_CACHE_TTL', '86400'))
 
 _CF_PROVIDER_SLUGS = {
     "openai":      "openai",
-    "groq":        "groq/openai/v1",
     "xai":         "grok/v1",
     "gemini":      "google-ai-studio/v1beta/openai",
     # Sarvam: slug has NO /v1 because callers already send
     # /v1/chat/completions, /translate, /text-to-speech, etc.
     # CF custom provider forwards {base}/custom-sarvam/<path> → https://api.sarvam.ai/<path>
     "sarvam":      "custom-sarvam",
-    "cerebras":    "cerebras/v1",
-    "openrouter":  "openrouter/v1",
     # New providers routed through CF AI Gateway
     "cohere":      "cohere/v1",      # Embeddings/RAG — embed-multilingual-v3.0 (1024-dim)
     "cartesia":    "cartesia/v1",    # Voice TTS — Sonic-2 model
     "baseten":     "baseten/v1",     # Fine-tuned EdTech LLMs — OpenAI-compatible endpoint
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
-    # Task #250 — Phase 2 providers routed via CF AI Gateway BYOK
+    "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
+    "voyage_ai":   "voyage-ai/v1",   # Embeddings — voyage-3-large (1024-dim)
+    # Phase 2 providers routed via CF AI Gateway BYOK
     "bedrock":      "aws-bedrock",       # AWS Bedrock — Converse API; CF handles SigV4
     "azure_openai": "azure-openai",      # Azure OpenAI — chat/completions; CF handles key
 }
 
 _DIRECT_PROVIDER_URLS = {
     "openai":      None,
-    "groq":        None,
     "xai":         "https://api.x.ai/v1",
     "gemini":      "https://generativelanguage.googleapis.com/v1beta/openai/",
     # Sarvam direct URL has NO /v1 — callers already supply /v1/chat/completions
     # and non-LLM endpoints like /translate, /text-to-speech live at root.
     "sarvam":      "https://api.sarvam.ai",
-    "cerebras":    "https://api.cerebras.ai/v1",
-    "openrouter":  "https://openrouter.ai/api/v1",
     # Fallback direct URLs (used when CF gateway is down)
     "cohere":      "https://api.cohere.com/v1",
     "cartesia":    "https://api.cartesia.ai/v1",
     "baseten":     "https://api.baseten.co/v1",   # Baseten universal OpenAI-compatible gateway
+    "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
+    "voyage_ai":   "https://api.voyageai.com/v1",  # Voyage AI embeddings direct fallback
     # Bedrock direct: region-scoped; Azure direct: tenant endpoint (requires env var)
     "bedrock":     None,   # Set at runtime via BEDROCK_DIRECT_URL or derived from AWS_REGION
     "azure_openai": None,  # Set at runtime via AZURE_OPENAI_ENDPOINT
@@ -429,9 +428,6 @@ else:
     _cfg_log.info("Cloudflare AI Gateway DISABLED — using direct provider URLs")
 
 # ── LLM Configuration ─────────────────────────────────────────────────────────
-_GROQ_KEY = os.environ.get('GROQ_API_KEY', '').strip()
-# GROQ_API_KEY_2 removed — key was deleted from Railway as part of env-var cleanup.
-# CF AI Gateway BYOK (single key, edge-managed retries) replaces secondary key rotation.
 # Gemini re-enabled (2026-04-20) — AI Studio Tier 1 confirmed (2000 RPM/key),
 # CF AI Gateway BYOK verified working for google-ai-studio provider.
 _GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
@@ -443,14 +439,12 @@ _OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '').strip()
 _SARVAM_LLM_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 _SARVAM_LLM_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
 _SARVAM_LLM_KEY_3 = os.environ.get('SARVAM_API_KEY_3', '').strip()
-_CEREBRAS_KEY = os.environ.get('CEREBRAS_API_KEY', '').strip()
-_OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '').strip()
 
-# ── New AI provider keys (Cohere, Cartesia, Baseten) ─────────────────────────
-# All three route through CF AI Gateway (BYOK) so local keys are optional
-# once the keys are registered in the CF dashboard. When gateway is enabled
-# and the local env var is missing, BYOK_PLACEHOLDER is substituted so the
-# provider module activates and CF injects the real key on every request.
+# ── New AI provider keys (Cohere, Cartesia, Baseten, Deepgram, Voyage AI) ─────
+# All route through CF AI Gateway (BYOK) so local keys are optional once the
+# keys are registered in the CF dashboard. When gateway is enabled and the
+# local env var is missing, BYOK_PLACEHOLDER is substituted so the provider
+# module activates and CF injects the real key on every request.
 #
 # Baseten model selection: BASETEN_MODEL_ID is the deployment ID shown in
 # the Baseten dashboard (e.g. "xyz123abc"). Required to use Baseten even in
@@ -460,6 +454,8 @@ _CARTESIA_KEY     = os.environ.get('CARTESIA_API_KEY',     '').strip()
 _BASETEN_KEY      = os.environ.get('BASETEN_API_KEY',      '').strip()
 _ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
+_DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
+_VOYAGE_AI_KEY    = os.environ.get('VOYAGE_AI_API_KEY',    '').strip()
 BASETEN_MODEL_ID  = os.environ.get('BASETEN_MODEL_ID', '').strip()
 
 # AssemblyAI STT config
@@ -501,23 +497,22 @@ CHAT_DEFAULT_MODEL = os.environ.get(
 # is substituted with the BYOK_PLACEHOLDER so the SmartKeyPool / provider list
 # still builds (downstream callers send placeholder + cf-aig-byok-key header
 # and the gateway substitutes the real key). This is what lets operators
-# safely remove GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, etc. from
-# production secrets once BYOK is verified in the CF dashboard.
+# safely remove local API keys from production secrets once BYOK is verified
+# in the CF dashboard.
 if CF_GATEWAY_ENABLED:
-    _GROQ_KEY     = _GROQ_KEY     or BYOK_PLACEHOLDER
-    _GEMINI_KEY   = _GEMINI_KEY   or BYOK_PLACEHOLDER
-    _CEREBRAS_KEY = _CEREBRAS_KEY or BYOK_PLACEHOLDER
-    _OPENROUTER_KEY = _OPENROUTER_KEY or BYOK_PLACEHOLDER
+    _GEMINI_KEY     = _GEMINI_KEY     or BYOK_PLACEHOLDER
     _SARVAM_LLM_KEY = _SARVAM_LLM_KEY or BYOK_PLACEHOLDER
-    _XAI_KEY      = _XAI_KEY      or BYOK_PLACEHOLDER
-    _OPENAI_KEY   = _OPENAI_KEY   or BYOK_PLACEHOLDER  # CF slug: openai/v1
-    # New providers: BYOK allows the CF gateway to inject keys stored in
-    # the CF dashboard, so the local env var is optional in production.
+    _XAI_KEY        = _XAI_KEY        or BYOK_PLACEHOLDER
+    _OPENAI_KEY     = _OPENAI_KEY     or BYOK_PLACEHOLDER  # CF slug: openai/v1
+    # Provider keys — BYOK allows CF gateway to inject keys stored in the
+    # CF dashboard, so the local env var is optional in production.
     _COHERE_KEY      = _COHERE_KEY      or BYOK_PLACEHOLDER
     _CARTESIA_KEY    = _CARTESIA_KEY    or BYOK_PLACEHOLDER
     _BASETEN_KEY     = _BASETEN_KEY     or BYOK_PLACEHOLDER
     _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
+    _DEEPGRAM_KEY    = _DEEPGRAM_KEY    or BYOK_PLACEHOLDER
+    _VOYAGE_AI_KEY   = _VOYAGE_AI_KEY   or BYOK_PLACEHOLDER
     # Secondary/tertiary keys (_GEMINI_KEY_2, _SARVAM_LLM_KEY_2/3)
     # stay empty if not set — CF Gateway manages rate limiting at the edge via
     # the single BYOK key per provider. Delete these from Railway to clean up.
@@ -661,30 +656,18 @@ if _EXPLICIT_PROVIDER == 'workers-ai' and _CF_API_TOKEN_FOR_LLM and _CF_ACCOUNT_
     LLM_PROVIDER = 'workers-ai'
     LLM_API_KEY = _CF_API_TOKEN_FOR_LLM
     LLM_MODEL = os.environ.get('LLM_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast')
-elif _EXPLICIT_PROVIDER == 'groq' and _GROQ_KEY:
-    LLM_PROVIDER = 'groq'
-    LLM_API_KEY = _GROQ_KEY
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct')
 elif _EXPLICIT_PROVIDER == 'sarvam' and _SARVAM_LLM_KEY:
     LLM_PROVIDER = 'sarvam'
     LLM_API_KEY = _SARVAM_LLM_KEY
     LLM_MODEL = os.environ.get('LLM_MODEL', 'sarvam-m')
-elif _EXPLICIT_PROVIDER == 'cerebras' and _CEREBRAS_KEY:
-    LLM_PROVIDER = 'cerebras'
-    LLM_API_KEY = _CEREBRAS_KEY
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'llama3.1-8b')
 elif _EXPLICIT_PROVIDER == 'openai' and _OPENAI_KEY and _OPENAI_KEY != 'x':
     LLM_PROVIDER = 'openai'
     LLM_API_KEY = _OPENAI_KEY
     LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4o-mini')
-elif _GROQ_KEY:
-    LLM_PROVIDER = 'groq'
-    LLM_API_KEY = _GROQ_KEY
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct')
-elif _CEREBRAS_KEY:
-    LLM_PROVIDER = 'cerebras'
-    LLM_API_KEY = _CEREBRAS_KEY
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'llama3.1-8b')
+elif _CF_API_TOKEN_FOR_LLM and _CF_ACCOUNT_ID_FOR_LLM:
+    LLM_PROVIDER = 'workers-ai'
+    LLM_API_KEY = _CF_API_TOKEN_FOR_LLM
+    LLM_MODEL = os.environ.get('LLM_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast')
 elif _SARVAM_LLM_KEY:
     LLM_PROVIDER = 'sarvam'
     LLM_API_KEY = _SARVAM_LLM_KEY
@@ -694,9 +677,9 @@ elif _OPENAI_KEY and _OPENAI_KEY != 'x':
     LLM_API_KEY = _OPENAI_KEY
     LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4o-mini')
 else:
-    LLM_PROVIDER = 'groq'
+    LLM_PROVIDER = 'workers-ai'
     LLM_API_KEY = ''
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct')
+    LLM_MODEL = os.environ.get('LLM_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast')
 OPENAI_API_KEY = LLM_API_KEY
 
 # ── Sarvam AI Configuration ──────────────────────────────────────────────────
@@ -1018,74 +1001,60 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG (Task #267):
-    #   Azure OpenAI (gpt-4.1-mini, 2.5k) → Bedrock (nova-micro, 1k) → Workers AI (0, last resort).
-    #   Vertex removed from this pool; Azure is now primary for English because gpt-4.1-mini
-    #   has the highest production TPS on Azure and $2.5k credits are consumed first.
-    "english_rag_chat":  ["azure_openai", "bedrock", "workers_ai"],
-    # Assamese chat (Task #267 + user update):
-    #   Sarvam → Vertex / Gemini → workers_ai_indic (terminal last resort).
-    #   POOL_WEIGHTS gives sarvam=3000, workers_ai_indic=2000, vertex=100 so sarvam leads
-    #   in probability draws; workers_ai_indic is terminal but draws frequently as second choice.
-    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
+    # English chat + RAG:
+    #   Azure GPT-4o Mini (primary, 2.5k) → Workers AI (last resort) → Gemini (emergency).
+    #   Rotational to avoid exhausting the primary; all via CF AI Gateway.
+    "english_rag_chat":  ["azure_openai", "workers_ai", "vertex"],
+    # Assamese chat:
+    #   Sarvam (primary, native Indic) → Workers AI IndicTrans2 (neural MT) → Gemini (emergency).
+    #   POOL_WEIGHTS gives sarvam=3000, workers_ai_indic=2000, vertex=100.
+    "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
     # Long-form content / notes generation:
-    #   Vertex / Gemini (primary) → Azure OpenAI → Bedrock → Workers AI (last resort).
-    #   Gemini 2.5 Flash leads because of its 1M-token context window — ideal for notes.
-    #   POOL_WEIGHTS["content"] gives vertex=5000 so it draws ~56% vs azure ~28% vs bedrock ~14%.
+    #   Gemini (primary, 1M-token context) → Azure → AWS Bedrock → Workers AI (last resort).
+    #   POOL_WEIGHTS["content"] gives vertex=5000 so Gemini draws ~56%.
     "content":           ["vertex", "azure_openai", "bedrock", "workers_ai"],
-    # Assamese content generation (Task #267 + user update):
-    #   Vertex → workers_ai_indic (terminal last resort).
-    #   POOL_WEIGHTS gives workers_ai_indic=3000, sarvam=2000, vertex=100 so IndicTrans2
-    #   leads in probability draws even though it is the terminal entry.
+    # Assamese content generation:
+    #   Sarvam → Vertex → workers_ai_indic (last resort).
     "assamese_content":  ["sarvam", "vertex", "workers_ai_indic"],
-    # Text-to-speech: Cartesia (500) → ElevenLabs (500) → Vertex (2k, RuntimeError→skip) →
-    # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
-    # vertex/bedrock TTS endpoints not wired — listed per authoritative matrix; excluded
-    # gracefully when RuntimeError is raised in _synthesize_with_fallback.
-    "tts":               ["cartesia", "elevenlabs", "vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Speech-to-text: AssemblyAI (1k) → Vertex (2k, RuntimeError→skip) →
-    # Bedrock (1k, RuntimeError→skip) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
-    "stt":               ["assemblyai", "vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Combined voice pipeline: full union of tts + stt providers per authoritative matrix.
-    "voice":             ["assemblyai", "cartesia", "elevenlabs", "vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Embeddings: Vertex (2k) → Bedrock Titan (1k) → Cohere (1k) → Azure OpenAI (1, RuntimeError→skip) → Workers AI.
-    # cohere.embed_query and bedrock titan embed wired; azure_openai embed endpoint not wired (Task #257).
-    "embed":             ["vertex", "bedrock", "cohere", "azure_openai", "workers_ai"],
-    # Reranking: Pinecone AI (500) → Cohere (1k, RuntimeError→skip, no /rerank in CF gateway) →
-    # Azure OpenAI (1, RuntimeError→skip) → Workers AI.
-    # pinecone_ai.rerank wired; cohere/azure rerank endpoint not wired (Task #257).
-    "rerank":            ["pinecone_ai", "cohere", "azure_openai", "workers_ai"],
-    # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex (2k) → Workers AI.
-    # Dispatch wired in rag._fetch_chunks_semantic via select_provider("vector_search").
+    # Text-to-speech: ElevenLabs (primary) → Cartesia → Deepgram → Vertex → Workers AI.
+    # All via CF AI Gateway; rotational so no single provider is exhausted.
+    "tts":               ["elevenlabs", "cartesia", "deepgram", "vertex", "workers_ai"],
+    # Speech-to-text: Deepgram (primary) → AssemblyAI → Vertex → Workers AI.
+    "stt":               ["deepgram", "assemblyai", "vertex", "workers_ai"],
+    # Combined voice pipeline: Deepgram → ElevenLabs → Cartesia → Vertex → Workers AI.
+    "voice":             ["deepgram", "elevenlabs", "cartesia", "vertex", "workers_ai"],
+    # Embeddings: Cohere (primary) → Voyage AI → Workers AI (last resort).
+    "embed":             ["cohere", "voyage_ai", "workers_ai"],
+    # Reranking: Pinecone AI (primary) → Workers AI (last resort).
+    "rerank":            ["pinecone_ai", "workers_ai"],
+    # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
-    # Translation (Task #267 + user update):
-    #   sarvam → vertex → bedrock → azure_openai → workers_ai_indic (terminal) → workers_ai (absolute last).
-    #   POOL_WEIGHTS gives workers_ai_indic=3000 so it draws ~48% despite being near-terminal.
-    #   bedrock + azure_openai retained per test contract (call_translate_with_dispatch wired).
-    "translate":         ["sarvam", "vertex", "bedrock", "workers_ai_indic", "azure_openai", "workers_ai"],
-    # Vision / OCR: Vertex (2k) → Bedrock (1k, Claude multimodal via call_converse_vision) →
-    # Azure OpenAI (1, via call_chat with image_url) → Workers AI.
+    # Translation (English→Assamese):
+    #   Workers AI IndicTrans2 (primary, dedicated neural MT) → Gemini (fallback).
+    #   POOL_WEIGHTS gives workers_ai_indic=3000, vertex=100.
+    "translate":         ["workers_ai_indic", "vertex"],
+    # Vision / OCR: Vertex → Bedrock (Claude multimodal) → Azure OpenAI → Workers AI.
     "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Safety checks: Bedrock (1k, Claude 3.5 Haiku via CF BYOK) → Workers AI.
-    # Active by default when CF gateway is configured (ENABLE_LLM_SAFETY_CHECK).
+    # Safety checks: Bedrock (Claude 3.5 Haiku via CF BYOK) → Workers AI.
     "safety":            ["bedrock", "workers_ai"],
-    # RAG search with external web results: Exa neural search (1k) → Workers AI.
+    # RAG search with external web results: Exa neural search → Workers AI.
     "search_rag":        ["exa_ai", "workers_ai"],
-    # Live / real-time search: Exa (1k) → Tavily (500) → Workers AI.
-    # exa_ai and tavily both wired in call_search_rag_with_dispatch.
+    # Live / real-time search: Exa → Tavily → Workers AI.
     "live_search":       ["exa_ai", "tavily", "workers_ai"],
 }
 
 PROVIDER_CREDITS: dict = {
     "vertex":           2000,   # Google Cloud for Startups — $2k
     "bedrock":          1000,   # AWS Activate — $1k
-    "azure_openai":     2500,   # Azure for Startups — $2.5k; primary for english_rag_chat + content (Task #267)
+    "azure_openai":     2500,   # Azure for Startups — $2.5k; primary for english_rag_chat
     "sarvam":            500,   # Sarvam startup credits — $500
     "cartesia":          500,   # Cartesia startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
-    "cohere":           1000,   # Cohere startup credits — $1k
-    "pinecone_ai":       500,   # Pinecone startup credits — $500
+    "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback
+    "cohere":           1000,   # Cohere startup credits — $1k; primary embed
+    "voyage_ai":         500,   # Voyage AI startup credits — $500; secondary embed
+    "pinecone_ai":       500,   # Pinecone startup credits — $500; primary rerank
     "exa_ai":           1000,   # Exa startup credits — $1k
     "tavily":            500,   # Tavily startup credits — $500
     "mongodb_atlas":       0,   # MongoDB Atlas free tier — weight 0 (fallback only)
@@ -1095,10 +1064,6 @@ PROVIDER_CREDITS: dict = {
 
 # Per-pool weight overrides — take precedence over PROVIDER_CREDITS in select_provider.
 # Use this when a provider should have a different priority in one pool vs. the global default.
-# Assamese pools need fine-grained ordering that can't be expressed with a single global weight:
-#   assamese_content:  IndicTrans2 (3000) → Sarvam (2000) → Vertex (100, true last resort)
-#   assamese_rag_chat: Sarvam (3000) → IndicTrans2 (2000) → Vertex (100, true last resort)
-#   translate:         IndicTrans2 (3000) → Sarvam (2000) → Vertex (100, true last resort)
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
     # content (notes/important_questions/pyq generation):
     #   Vertex/Gemini primary (5000) — 1M-token context ideal for long notes.
@@ -1108,26 +1073,27 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "azure_openai": 2500,   # second
         "bedrock":      1000,   # third
     },
-    # assamese_content: IndicTrans2 primary (3000) → Sarvam second (2000) → Vertex last resort (100).
-    "assamese_content": {
-        "workers_ai_indic": 3000,   # primary — purpose-built Indic neural MT
-        "sarvam":           2000,   # second
-        "vertex":            100,   # last resort only
+    # english_rag_chat: Azure primary (3000) → Workers AI (0, last resort) → Gemini emergency (100).
+    "english_rag_chat": {
+        "azure_openai": 3000,   # primary — GPT-4o Mini, highest TPS on Azure
+        "vertex":        100,   # emergency fallback only
     },
     # assamese_rag_chat: Sarvam primary (3000) → IndicTrans2 second (2000) → Vertex last resort (100).
     "assamese_rag_chat": {
         "sarvam":           3000,   # primary — best for Assamese conversational
-        "workers_ai_indic": 2000,   # second
+        "workers_ai_indic": 2000,   # second — purpose-built Indic neural MT
         "vertex":            100,   # last resort only
     },
-    # translate: IndicTrans2 primary (3000) → Sarvam second (2000) → Vertex (100) →
-    #            bedrock/azure_openai at their global credits → workers_ai(0) absolute last.
+    # assamese_content: Sarvam primary (2000) → Vertex second (100) → IndicTrans2 last resort.
+    "assamese_content": {
+        "sarvam":           2000,   # primary
+        "vertex":            100,   # second
+        "workers_ai_indic": 3000,   # last resort — purpose-built Indic neural MT
+    },
+    # translate: IndicTrans2 primary (3000) → Vertex fallback (100).
     "translate": {
-        "workers_ai_indic": 3000,   # primary — dedicated Indic MT model
-        "sarvam":           2000,   # second
-        "vertex":            100,   # third (low weight)
-        # bedrock (1000) and azure_openai (2500) use global PROVIDER_CREDITS (no override needed)
-        # workers_ai (0) uses global — stays at zero / absolute last resort
+        "workers_ai_indic": 3000,   # primary — dedicated Indic MT model, fastest
+        "vertex":            100,   # fallback — Gemini handles any edge cases
     },
 }
 

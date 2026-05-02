@@ -3,15 +3,16 @@ routes.voice — Voice API endpoints (TTS, STT, two-leg voice dispatch).
 
 POST /api/voice/tts
   Converts text to speech.
-  - Indic languages (hi, bn, as): Google Cloud TTS Neural2 (Task #247).
-    Falls back to Cartesia → ElevenLabs → Workers AI Deepgram on failure.
+  - Indic languages (hi, bn, as): Google Cloud TTS Neural2.
+    Falls back to PROVIDER_PRIORITY weighted round-robin on failure.
   - English/other: PROVIDER_PRIORITY weighted round-robin with
-    fallback-without-replacement. Weighted pool: Cartesia → ElevenLabs → Workers AI.
+    fallback-without-replacement.
+    Weighted pool: ElevenLabs(primary) → Cartesia → Vertex → Workers AI Deepgram.
   Returns audio/mpeg bytes (mp3).
 
 POST /api/voice/stt
   Speech-to-text via PROVIDER_PRIORITY weighted round-robin with fallback-without-
-  replacement. Weighted pool: AssemblyAI → Workers AI Whisper.
+  replacement. Weighted pool: Deepgram(primary) → AssemblyAI → Vertex → Workers AI.
   Accepts multipart/form-data with an 'audio' file field.
 
 POST /api/voice/voice
@@ -25,7 +26,7 @@ GET  /api/voice/voices
   Lists available Cartesia voices (for admin UI to pick a voice ID).
 
 GET  /api/voice/health
-  Reports readiness of all voice providers (Cartesia, ElevenLabs, AssemblyAI,
+  Reports readiness of all voice providers (Deepgram, ElevenLabs, Cartesia, AssemblyAI,
   Workers AI, Google TTS/STT).
 """
 from __future__ import annotations
@@ -89,13 +90,29 @@ async def _tts_elevenlabs(text: str, voice_id: Optional[str], language: str) -> 
     )
 
 
+async def _tts_deepgram(text: str, voice_id: Optional[str], language: str) -> bytes:
+    """TTS via Deepgram Aura-2. Raises RuntimeError on failure."""
+    from providers import deepgram as _dg
+    if not _dg.ENABLED:
+        raise RuntimeError("Deepgram TTS not available (DEEPGRAM_API_KEY not set)")
+    return await _dg.synthesize(text, voice=voice_id or None, language=language)
+
+
 async def _tts_workers_ai(text: str, language: str) -> bytes:
-    """Fallback TTS via Workers AI Deepgram Aura. Raises RuntimeError on failure."""
+    """Last-resort TTS via Workers AI Deepgram Aura. Raises RuntimeError on failure."""
     from providers.cloudflare_ai import speak as _cf_speak
     return await _cf_speak(text, lang=language[:2] if language else "en")
 
 
 # ── Individual provider STT callers ───────────────────────────────────────────
+
+async def _stt_deepgram(audio_bytes: bytes, language: str) -> str:
+    """Primary STT via Deepgram Nova-3. Raises RuntimeError on failure."""
+    from providers import deepgram as _dg
+    if not _dg.ENABLED:
+        raise RuntimeError("Deepgram STT not available (DEEPGRAM_API_KEY not set)")
+    return await _dg.transcribe(audio_bytes, language_code=language or None)
+
 
 async def _stt_assemblyai(audio_bytes: bytes, language: str) -> str:
     """STT via AssemblyAI 'best' model. Raises RuntimeError on failure."""
@@ -106,7 +123,7 @@ async def _stt_assemblyai(audio_bytes: bytes, language: str) -> str:
 
 
 async def _stt_workers_ai(audio_bytes: bytes) -> str:
-    """Fallback STT via Workers AI Whisper-large-v3-turbo. Raises RuntimeError on failure."""
+    """Last-resort STT via Workers AI Whisper-large-v3-turbo. Raises RuntimeError on failure."""
     from providers.cloudflare_ai import transcribe as _cf_transcribe
     return await _cf_transcribe(audio_bytes)
 
@@ -121,12 +138,12 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"]: cartesia(500) → elevenlabs(500) → vertex(2k, skip) →
-      bedrock(1k, skip) → azure_openai(1, skip) → workers_ai(0)
+    PROVIDER_PRIORITY["tts"]: elevenlabs(primary) → cartesia → vertex(skip) →
+      workers_ai → deepgram
 
-    vertex/bedrock/azure_openai TTS endpoints not wired (Task #256); each raises
-    RuntimeError which the fallback loop catches, excludes from pool, and redraws.
-    cartesia, elevenlabs, and workers_ai are the actively synthesizing providers.
+    vertex TTS endpoint not wired; raises RuntimeError which the fallback loop
+    catches, excludes from pool, and redraws.
+    elevenlabs, cartesia, deepgram, and workers_ai are the actively synthesizing providers.
     """
     from llm import select_provider
 
@@ -136,10 +153,12 @@ async def _synthesize_with_fallback(
     for _ in range(max_attempts):
         provider = select_provider("tts", lang=language, exclude=exclude)
         try:
-            if provider == "cartesia":
-                return await _tts_cartesia(text, voice_id, model_id, language)
-            elif provider == "elevenlabs":
+            if provider == "elevenlabs":
                 return await _tts_elevenlabs(text, voice_id, language)
+            elif provider == "cartesia":
+                return await _tts_cartesia(text, voice_id, model_id, language)
+            elif provider == "deepgram":
+                return await _tts_deepgram(text, voice_id, language)
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
             elif provider == "vertex":
@@ -164,12 +183,12 @@ async def _synthesize_with_fallback(
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    PROVIDER_PRIORITY["stt"]: assemblyai(1000) → vertex(2k, skip) → bedrock(1k, skip) →
-      azure_openai(1, skip) → workers_ai(0)
+    PROVIDER_PRIORITY["stt"]: deepgram(primary) → assemblyai → vertex(skip) →
+      workers_ai
 
-    vertex/bedrock/azure_openai STT endpoints not wired (Task #256); each raises
-    RuntimeError which the fallback loop catches, excludes from pool, and redraws.
-    assemblyai and workers_ai are the actively transcribing providers.
+    vertex STT endpoint not wired; raises RuntimeError which the fallback loop
+    catches, excludes from pool, and redraws.
+    deepgram, assemblyai, and workers_ai are the actively transcribing providers.
     """
     from llm import select_provider
 
@@ -179,7 +198,9 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     for _ in range(max_attempts):
         provider = select_provider("stt", lang=language, exclude=exclude)
         try:
-            if provider == "assemblyai":
+            if provider == "deepgram":
+                return await _stt_deepgram(audio_bytes, language)
+            elif provider == "assemblyai":
                 return await _stt_assemblyai(audio_bytes, language)
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)

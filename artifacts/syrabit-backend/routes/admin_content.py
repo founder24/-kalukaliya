@@ -87,7 +87,6 @@ from fastapi import (
 from models import (
     SubjectCreate, ChapterCreate, ChunkCreate,
 )
-from config import _GROQ_KEY
 from deps import (
     db,
     is_mongo_available,

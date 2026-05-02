@@ -49,8 +49,8 @@ from fastapi import HTTPException
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from config import (
     LLM_PROVIDER, LLM_MODEL, OPENAI_API_KEY, SARVAM_THINK_BUFFER,
-    _GROQ_KEY, _GEMINI_KEY, _GEMINI_KEY_2, _OPENAI_KEY,
-    _SARVAM_LLM_KEY, _SARVAM_LLM_KEY_2, _SARVAM_LLM_KEY_3, _CEREBRAS_KEY, _OPENROUTER_KEY, _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION,
+    _GEMINI_KEY, _GEMINI_KEY_2, _OPENAI_KEY,
+    _SARVAM_LLM_KEY, _SARVAM_LLM_KEY_2, _SARVAM_LLM_KEY_3, _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION,
     is_cf_gateway_up, mark_cf_gateway_down, get_provider_base_url,
     byok_headers, BYOK_PLACEHOLDER,
     VERTEX_GEMINI_MODEL,
@@ -119,21 +119,21 @@ _LLM_PROVIDER_METRICS_MAX = 20_000
 # silently auto-expires mid-burst.  The counter resets on the next
 # successful call (mark_ok → _reset_provider_429).
 #
-# Providers included: workers-ai, groq, gemini.  Others silently no-op.
+# Providers included: workers-ai, gemini, azure_openai, deepgram.  Others silently no-op.
 _PROVIDER_429_BURST_WINDOW_S = 180   # shared lookback / Redis TTL for all providers
 _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps]
     "workers-ai":   [],
-    "groq":         [],
     "gemini":       [],
-    "azure_openai": [],   # Task #267: azure is now primary for english_rag_chat + content
-    "bedrock":      [],   # Task #267: bedrock is now second-tier for english pools
+    "azure_openai": [],
+    "bedrock":      [],
+    "deepgram":     [],
 }
 _PROVIDER_429_REDIS_KEYS: dict = {
-    "workers-ai":   "wai_429_burst",    # keeps existing Redis key for backwards compat
-    "groq":         "groq_429_burst",
+    "workers-ai":   "wai_429_burst",
     "gemini":       "gemini_429_burst",
-    "azure_openai": "azure_429_burst",  # Task #267: burst tracking for Azure primary
-    "bedrock":      "bedrock_429_burst",# Task #267: burst tracking for Bedrock second-tier
+    "azure_openai": "azure_429_burst",
+    "bedrock":      "bedrock_429_burst",
+    "deepgram":     "deepgram_429_burst",
 }
 
 # Backwards-compat module-level aliases for code that references these directly
@@ -422,22 +422,14 @@ _CF_AI_ENABLED = bool(_CF_AI_ACCOUNT_ID and _CF_API_TOKEN)
 _LLM_PROVIDERS = []
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
-if _GROQ_KEY:
-    _LLM_PROVIDERS.append({"provider": "groq", "key": _GROQ_KEY, "default_model": "meta-llama/llama-4-scout-17b-16e-instruct"})
 if _GEMINI_KEY:
     _LLM_PROVIDERS.append({"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"})
-if _CEREBRAS_KEY:
-    _LLM_PROVIDERS.append({"provider": "cerebras", "key": _CEREBRAS_KEY, "default_model": "llama3.1-8b"})
 
 _LLM_PROVIDERS_CHAT: list[dict] = []
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS_CHAT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
-if _GROQ_KEY:
-    _LLM_PROVIDERS_CHAT.append({"provider": "groq", "key": _GROQ_KEY, "default_model": "meta-llama/llama-4-scout-17b-16e-instruct"})
 if _GEMINI_KEY:
     _LLM_PROVIDERS_CHAT.append({"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"})
-if _CEREBRAS_KEY:
-    _LLM_PROVIDERS_CHAT.append({"provider": "cerebras", "key": _CEREBRAS_KEY, "default_model": "llama3.1-8b"})
 
 # Workers-AI-only slice of _LLM_PROVIDERS_CHAT — used as the ``workers_ai``
 # fallback inside _dispatch_llm_for_feature so that PROVIDER_PRIORITY routing
@@ -452,34 +444,16 @@ _MODEL_PROVIDER_MAP = {
     "sarvam-30b-16k": "sarvam",
     "sarvam-105b": "sarvam",
     "sarvam-105b-32k": "sarvam",
-    "llama3.1-8b": "cerebras",
-    "qwen-3-235b-a22b-instruct-2507": "cerebras",
     "gemini-2.5-flash": "gemini",
     "gemini-2.0-flash": "gemini",
-    "deepseek/deepseek-chat-v3-0324": "openrouter",
-    "deepseek/deepseek-r1": "openrouter",
-    "qwen/qwen3-235b-a22b": "openrouter",
-    "google/gemini-2.5-flash-preview": "openrouter",
-    "google/gemini-2.0-flash-lite-001": "openrouter",
-    "google/gemma-3-27b-it": "openrouter",
-    "meta-llama/llama-4-maverick": "openrouter",
-    "meta-llama/llama-4-scout": "openrouter",
-    "meta-llama/llama-4-scout-17b-16e-instruct": "groq",
-    # Legacy entries — kept for cost-lookup back-compat on historical
-    # records, but no live provider call site references these any
-    # more (Cerebras dropped llama-3.3-70b from our account; the SLM
-    # tier-0 slot is now llama3.1-8b which is mapped above).
-    "llama-3.3-70b-versatile": "cerebras",
-    "llama-3.3-70b": "cerebras",
+    "gpt-4o-mini": "azure_openai",
+    "gpt-4.1-mini": "azure_openai",
 }
 
 _MODEL_ALIAS_MAP = {
-    "openai/gpt-oss-20b": "deepseek/deepseek-chat-v3-0324",
-    "openai/gpt-oss-120b": "qwen-3-235b-a22b-instruct-2507",
-    # Cerebras dropped llama-3.3-70b — redirect to Workers AI FP8 equivalent.
-    # Handles both the Groq-style "-versatile" suffix and the bare form so
-    # any caller or env var using these names automatically gets the correct
-    # Workers AI model without a 404 round-trip.
+    # Workers AI model aliases — redirect old names to current Workers AI equivalents
+    "openai/gpt-oss-20b":  "@cf/openai/gpt-oss-20b",
+    "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
     "llama-3.3-70b-versatile": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
 }
@@ -514,15 +488,10 @@ _SLM_SLOT_CANDIDATES = [
     ("workers-ai",  "@cf/meta/llama-3.2-3b-instruct",                 128, 3),
     # Tier 4: Workers AI llama-3.1-8b — fast 8B fallback.
     ("workers-ai",  "@cf/meta/llama-3.1-8b-instruct-fp8",              64, 4),
-    # Tier 5: Gemini 2.0 Flash — position-2 GCP fallback (Task #247).
-    # Activates only when Workers AI load > 0.80 (effective_priority boost).
+    # Tier 5: Gemini 2.0 Flash — GCP fallback when Workers AI load > 0.80.
     # Consumes GCP credits; intentionally NOT a primary slot.
     # RPM cap: 600 (AI Studio Tier 1) → shared with _GEMINI_KEY.
     ("gemini",      "gemini-2.0-flash",                                  4, 5),
-    # Tier 6: Groq llama-4-scout — external fallback when Workers AI is saturated.
-    ("groq",        "meta-llama/llama-4-scout-17b-16e-instruct",         4, 6),
-    # Tier 7: Cerebras llama3.1-8b — secondary external fallback.
-    ("cerebras",    "llama3.1-8b",                                        4, 7),
 ]
 
 # Content SmartKeyPool — serves `_CONTENT_INTENTS` (notes, important_questions,
@@ -585,14 +554,12 @@ def _parse_rpm_limit(env_var: str, default: int) -> int:
 #   the old ~50 RPM free-tier limit no longer applies.  See _EMBED_429_THRESHOLD
 #   in vertex_services.py — threshold raised to 10 hits accordingly.
 _POOL_RPM_LIMITS = {
-    "workers-ai": _parse_rpm_limit("WORKERS_AI_RPM_LIMIT", 10000),
-    "groq":        _parse_rpm_limit("GROQ_RPM_LIMIT",          30),
-    "cerebras":    _parse_rpm_limit("CEREBRAS_RPM_LIMIT",      30),
-    "sarvam":      _parse_rpm_limit("SARVAM_RPM_LIMIT",        30),
-    "gemini":      _parse_rpm_limit("GEMINI_RPM_LIMIT",       600),
-    "openrouter":  60,
-    "openai":      60,
-    "bedrock":     30,
+    "workers-ai":   _parse_rpm_limit("WORKERS_AI_RPM_LIMIT", 10000),
+    "sarvam":       _parse_rpm_limit("SARVAM_RPM_LIMIT",        30),
+    "gemini":       _parse_rpm_limit("GEMINI_RPM_LIMIT",       600),
+    "azure_openai": _parse_rpm_limit("AZURE_OPENAI_RPM_LIMIT", 500),
+    "openai":       60,
+    "bedrock":      30,
 }
 logger.info("SLM RPM limits (overridable via env): %s", _POOL_RPM_LIMITS)
 
@@ -1309,7 +1276,7 @@ _TASK_ROUTE: dict[str, tuple] = {
     "notes":         ("workers-ai", "@cf/openai/gpt-oss-120b"),
     "mcq":           ("workers-ai", "@cf/openai/gpt-oss-120b"),
     # ── Deep reasoning ───────────────────────────────────────────────────────
-    "reasoning":     ("cerebras",   "qwen-3-235b-a22b-instruct-2507"),
+    "reasoning":     ("workers-ai", "@cf/openai/gpt-oss-120b"),
 }
 
 
@@ -1346,19 +1313,21 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "vertex":           "gemini-2.5-flash",                          # Vertex AI Gemini 2.5 Flash — highest TPS
-    "bedrock":          "amazon.nova-micro-v1:0",                    # AWS Bedrock Nova Micro — fastest/cheapest Nova (Task #267)
-    "azure_openai":     "gpt-4.1-mini",                              # Azure OpenAI GPT-4.1-mini — highest TPS on Azure (Task #267)
-    "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic)
+    "bedrock":          "amazon.nova-micro-v1:0",                    # AWS Bedrock Nova Micro — fastest/cheapest Nova
+    "azure_openai":     "gpt-4.1-mini",                              # Azure OpenAI GPT-4.1-mini — highest TPS on Azure; primary for english_rag_chat
+    "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "cartesia":         "sonic-2",                                   # Cartesia TTS
-    "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS
+    "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
     "assemblyai":       "best",                                      # AssemblyAI STT
-    "cohere":           "embed-multilingual-v3.0",                   # Cohere Embed
-    "pinecone_ai":      "llama-text-embed-v2",                       # Pinecone embed/rerank
+    "deepgram":         "nova-3",                                    # Deepgram STT + Aura-2 TTS — primary STT
+    "cohere":           "embed-multilingual-v3.0",                   # Cohere Embed — primary embed
+    "voyage_ai":        "voyage-3-large",                            # Voyage AI embeddings — secondary embed
+    "pinecone_ai":      "llama-text-embed-v2",                       # Pinecone embed/rerank — primary rerank
     "exa_ai":           "exa",                                       # Exa neural search
     "tavily":           "tavily-search",                             # Tavily search
     "mongodb_atlas":    "vector-search",                             # Atlas $vectorSearch (fallback)
     "workers_ai":       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",  # CF Workers AI general LLM (last resort)
-    "workers_ai_indic": "@cf/ai4bharat/indictrans2-en-indic-1b",     # CF Workers AI IndicTrans2 English→Assamese (Task #267)
+    "workers_ai_indic": "@cf/ai4bharat/indictrans2-en-indic-1b",     # CF Workers AI IndicTrans2 English→Assamese; primary translate
 }
 
 # Maps provider names to the canonical provider string used by _call_single_provider.
@@ -1371,13 +1340,15 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     "cartesia":         "cartesia",
     "elevenlabs":       "elevenlabs",
     "assemblyai":       "assemblyai",
+    "deepgram":         "deepgram",
     "cohere":           "cohere",
+    "voyage_ai":        "voyage_ai",
     "pinecone_ai":      "pinecone_ai",
     "exa_ai":           "exa_ai",
     "tavily":           "tavily",
     "mongodb_atlas":    "mongodb_atlas",
     "workers_ai":       "workers-ai",
-    "workers_ai_indic": "workers-ai-indic",  # CF IndicTrans2 — Assamese last resort (Task #267)
+    "workers_ai_indic": "workers-ai-indic",  # CF IndicTrans2 — primary for translate + assamese pools
 }
 
 # CF AI Gateway saturation threshold — providers above this RPM ratio are
@@ -1502,13 +1473,15 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
 
 
 _INDICTRANS_VALID_FEATURES: frozenset = frozenset({
-    "assamese_content", "translate",
+    "assamese_content", "translate", "assamese_rag_chat",
 })
 """Features where workers_ai_indic (IndicTrans2) is a valid translation provider.
 
-Chat/safety features are NOT in this set.  When workers_ai_indic is drawn for a
-pool outside this set it raises RuntimeError immediately so call_with_provider_fallback
-excludes it and moves to the next provider (Workers AI llama-3.3-70b).
+assamese_rag_chat is included because Sarvam is primary there and IndicTrans2
+serves as the secondary (translate-based response rendering).
+Chat/safety/english features are NOT in this set.  When workers_ai_indic is drawn
+for a pool outside this set it raises RuntimeError immediately so
+call_with_provider_fallback excludes it and moves to the next provider.
 """
 
 
@@ -1695,19 +1668,15 @@ async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048
     Uses all providers including Emergent (admin content generation)."""
     return await _llm_batcher.call(messages, model, max_tokens)
 
-# Admin content batcher chain — Cerebras qwen-235B (high-quality, fast)
-# preferred, Gemini 2.5 Flash as fallback. Sarvam was previously inserted
-# between them but has been removed: this batcher serves admin notes,
-# important_questions and PYQ for ALL languages, and Sarvam quota is now
-# reserved for Assamese-only paths (see `_SARVAM_PROVIDERS` rationale at
-# top of this module).
+# Admin content batcher chain — Gemini 2.5 Flash primary (1M-token context,
+# best for long-form notes/MCQ). Workers AI 120B secondary. Workers AI 70B
+# tertiary. Qwen removed (no longer in provider pool).
 _LLM_PROVIDERS_CONTENT: list[dict] = []
-if _CF_AI_ENABLED:
-    _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
-    _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/qwen/qwen2.5-72b-instruct"})
-    _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
 if _GEMINI_KEY:
     _LLM_PROVIDERS_CONTENT.append({"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"})
+if _CF_AI_ENABLED:
+    _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
+    _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
 
 logger.info(
     f"Admin content providers (quality-first order): "
@@ -2860,7 +2829,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         _wai_model = "@cf/qwen/qwen2.5-72b-instruct"
         _phase2_t0 = time.monotonic()
         logger.info(
-            f"[INDIC] Phase 2 (Qwen FALLBACK): streaming from "
+            f"[INDIC] Phase 2 (Workers AI fallback): streaming from "
             f"workers-ai/{_wai_model} for {response_lang}"
         )
 

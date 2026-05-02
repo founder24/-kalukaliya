@@ -119,16 +119,7 @@ Format this into a clear, student-friendly response. Preserve all factual conten
 
 def _pick_stage1_providers() -> list:
     from llm import _LLM_PROVIDERS
-    from config import _CEREBRAS_KEY, _GROQ_KEY
     providers = []
-    if _CEREBRAS_KEY:
-        # Stage-1 topic resolver runs on Cerebras llama3.1-8b — the
-        # only fast small-model slot accessible to our account after
-        # Cerebras dropped llama-3.3-70b on 2026-04-26. 8B is more than
-        # enough for the topic-resolution prompt and keeps TTFT low.
-        providers.append({"provider": "cerebras", "key": _CEREBRAS_KEY, "default_model": "llama3.1-8b"})
-    if _GROQ_KEY:
-        providers.append({"provider": "groq", "key": _GROQ_KEY, "default_model": "meta-llama/llama-4-scout-17b-16e-instruct"})
     for p in _LLM_PROVIDERS:
         pid = (p["provider"], id(p["key"]))
         if pid not in {(pp["provider"], id(pp["key"])) for pp in providers}:
@@ -138,12 +129,7 @@ def _pick_stage1_providers() -> list:
 
 def _pick_stage2_providers() -> list:
     from llm import _LLM_PROVIDERS
-    from config import _GROQ_KEY, _OPENROUTER_KEY
     providers = []
-    if _GROQ_KEY:
-        providers.append({"provider": "groq", "key": _GROQ_KEY, "default_model": "meta-llama/llama-4-scout-17b-16e-instruct"})
-    if _OPENROUTER_KEY:
-        providers.append({"provider": "openrouter", "key": _OPENROUTER_KEY, "default_model": "deepseek/deepseek-chat-v3-0324"})
     for p in _LLM_PROVIDERS:
         pid = (p["provider"], id(p["key"]))
         if pid not in {(pp["provider"], id(pp["key"])) for pp in providers}:

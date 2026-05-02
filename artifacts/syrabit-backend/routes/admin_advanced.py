@@ -1623,54 +1623,9 @@ async def admin_llm_speed_test(admin: dict = Depends(get_admin_user)):
                     result["total_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
                     result["tokens"] = token_count
                     result["ok"] = token_count > 0
-            elif p_name == "groq":
-                import httpx as _httpx
-                from config import _GROQ_KEY
-                headers = {"Authorization": f"Bearer {_GROQ_KEY}", "Content-Type": "application/json"}
-                payload = {"model": p_model, "messages": _PROBE_MESSAGES, "max_tokens": _PROBE_MAX_TOKENS, "stream": True}
-                async with _httpx.AsyncClient(timeout=15.0) as _c:
-                    async with _c.stream("POST", "https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload) as _r:
-                        _r.raise_for_status()
-                        token_count = 0
-                        async for line in _r.aiter_lines():
-                            if not line.startswith("data: ") or line.strip() == "data: [DONE]":
-                                continue
-                            import json as _j
-                            try:
-                                delta = _j.loads(line[6:])["choices"][0]["delta"].get("content", "")
-                                if delta:
-                                    if result["ttfb_ms"] is None:
-                                        result["ttfb_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
-                                    token_count += 1
-                            except Exception:
-                                pass
-                result["total_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
-                result["tokens"] = token_count
-                result["ok"] = token_count > 0
-            elif p_name == "cerebras":
-                import httpx as _httpx
-                from config import _CEREBRAS_KEY
-                headers = {"Authorization": f"Bearer {_CEREBRAS_KEY}", "Content-Type": "application/json"}
-                payload = {"model": p_model, "messages": _PROBE_MESSAGES, "max_tokens": _PROBE_MAX_TOKENS, "stream": True}
-                async with _httpx.AsyncClient(timeout=15.0) as _c:
-                    async with _c.stream("POST", "https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload) as _r:
-                        _r.raise_for_status()
-                        token_count = 0
-                        async for line in _r.aiter_lines():
-                            if not line.startswith("data: ") or line.strip() == "data: [DONE]":
-                                continue
-                            import json as _j
-                            try:
-                                delta = _j.loads(line[6:])["choices"][0]["delta"].get("content", "")
-                                if delta:
-                                    if result["ttfb_ms"] is None:
-                                        result["ttfb_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
-                                    token_count += 1
-                            except Exception:
-                                pass
-                result["total_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
-                result["tokens"] = token_count
-                result["ok"] = token_count > 0
+            elif p_name in ("groq", "cerebras"):
+                result["error"] = f"{p_name} provider removed from pool"
+                result["ok"] = False
         except Exception as exc:
             result["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
             result["total_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
