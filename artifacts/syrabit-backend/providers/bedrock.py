@@ -35,6 +35,7 @@ from config import (
     CF_AI_GATEWAY_TOKEN,
     BYOK_PLACEHOLDER,
     BEDROCK_PROXY_AUTH_TOKEN,
+    _AWS_REGION,
     cf_gateway_url,
     is_cf_gateway_up,
 )
@@ -63,10 +64,13 @@ def _base_url() -> str:
 
 
 def _headers() -> dict:
-    """Build CF AI Gateway BYOK headers for Bedrock."""
+    """Build CF AI Gateway Provider Keys headers for Bedrock.
+
+    CF AI Gateway Provider Keys auto-injects AWS credentials — no cf-aig-byok-key needed.
+    URL must include bedrock-runtime/{region}/model/{id} for CF to forward correctly.
+    """
     h: dict = {
         "Content-Type": "application/json",
-        "cf-aig-byok-key": "true",
     }
     if CF_CACHE_TTL:
         h["cf-aig-cache-ttl"] = str(CF_CACHE_TTL)
@@ -164,7 +168,7 @@ async def call_converse(
         raise RuntimeError("bedrock: CF AI Gateway is down or aws-bedrock slug not configured")
 
     model_id = model or _MODEL_ID
-    url = f"{base}/model/{model_id}/converse"
+    url = f"{base}/bedrock-runtime/{_AWS_REGION}/model/{model_id}/converse"
     system_prompt, bedrock_msgs = _to_bedrock_messages(messages)
     if not bedrock_msgs:
         raise ValueError("bedrock: no user/assistant messages to send")
@@ -223,7 +227,7 @@ async def call_converse_vision(
 
     # Claude claude-3-5-sonnet supports multimodal via Converse API.
     vision_model_id = model or "anthropic.claude-3-5-sonnet-20241022-v2:0"
-    url = f"{base}/model/{vision_model_id}/converse"
+    url = f"{base}/bedrock-runtime/{_AWS_REGION}/model/{vision_model_id}/converse"
 
     # Bedrock Converse image format: image block with format + base64 bytes.
     img_format = mime_type.split("/")[-1].lower()
@@ -362,7 +366,7 @@ async def call_embed(
     if not base:
         raise RuntimeError("bedrock embed: CF AI Gateway not available for Titan embeddings")
 
-    titan_url = f"{base}/model/amazon.titan-embed-text-v2:0/invoke"
+    titan_url = f"{base}/bedrock-runtime/{_AWS_REGION}/model/amazon.titan-embed-text-v2:0/invoke"
     client = _get_client()
     try:
         resp = await client.post(
