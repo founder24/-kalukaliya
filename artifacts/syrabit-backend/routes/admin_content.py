@@ -895,55 +895,73 @@ def _extract_dominant_colors(img_bytes: bytes, n: int = 5) -> list:
     return [f'#{r:02x}{g:02x}{b:02x}' for (r, g, b), _ in top]
 
 
+_VISION_ANALYSIS_PROMPT = (
+    "Analyze this book/textbook cover image. I need TWO things:\n"
+    "1) Color analysis of the image\n"
+    "2) Bounding boxes of ALL text regions (title, subtitle, author, edition, publisher, etc.)\n\n"
+    "Return ONLY valid JSON (no extra text):\n"
+    "{\"dominant_colors\":[\"#hex1\",\"#hex2\",\"#hex3\"],"
+    "\"secondary_colors\":[\"#hex4\",\"#hex5\"],"
+    "\"style\":\"minimalist|bold|academic|colorful|dark|light\","
+    "\"mood\":\"serious|vibrant|calm|educational|professional\","
+    "\"bg_is_dark\":true,"
+    "\"accent_color\":\"#hex\","
+    "\"text_regions\":["
+    "{\"x_pct\":10,\"y_pct\":5,\"w_pct\":80,\"h_pct\":12,\"label\":\"title\"},"
+    "{\"x_pct\":20,\"y_pct\":85,\"w_pct\":60,\"h_pct\":8,\"label\":\"author\"}"
+    "]}\n\n"
+    "text_regions: each box as percentage of image dimensions (0-100). "
+    "x_pct=left edge %, y_pct=top edge %, w_pct=width %, h_pct=height %. "
+    "Include EVERY text element you can see. Be generous with box sizes — "
+    "make each box slightly larger than the text to ensure full coverage."
+)
+
+
 async def _analyze_with_groq_vision(b64_img: str, mime: str = "image/jpeg") -> dict:
-    """Call Groq vision model to get color/style analysis AND text bounding boxes."""
-    if not _GROQ_KEY:
-        return {}
+    """Analyse a book-cover image via PROVIDER_PRIORITY['vision'] weighted dispatch.
+
+    Primary path: call_vision_with_dispatch (vertex/Gemini → bedrock → workers_ai).
+    Fallback: Groq llama-4-scout direct call (legacy path, used when dispatch exhausts all providers).
+    """
+    raw = None
     try:
-        import httpx as _httpx
-        async with _httpx.AsyncClient(timeout=30) as _c:
-            resp = await _c.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {_GROQ_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_img}"}},
-                            {"type": "text", "text": (
-                                "Analyze this book/textbook cover image. I need TWO things:\n"
-                                "1) Color analysis of the image\n"
-                                "2) Bounding boxes of ALL text regions (title, subtitle, author, edition, publisher, etc.)\n\n"
-                                "Return ONLY valid JSON (no extra text):\n"
-                                "{\"dominant_colors\":[\"#hex1\",\"#hex2\",\"#hex3\"],"
-                                "\"secondary_colors\":[\"#hex4\",\"#hex5\"],"
-                                "\"style\":\"minimalist|bold|academic|colorful|dark|light\","
-                                "\"mood\":\"serious|vibrant|calm|educational|professional\","
-                                "\"bg_is_dark\":true,"
-                                "\"accent_color\":\"#hex\","
-                                "\"text_regions\":["
-                                "{\"x_pct\":10,\"y_pct\":5,\"w_pct\":80,\"h_pct\":12,\"label\":\"title\"},"
-                                "{\"x_pct\":20,\"y_pct\":85,\"w_pct\":60,\"h_pct\":8,\"label\":\"author\"}"
-                                "]}\n\n"
-                                "text_regions: each box as percentage of image dimensions (0-100). "
-                                "x_pct=left edge %, y_pct=top edge %, w_pct=width %, h_pct=height %. "
-                                "Include EVERY text element you can see. Be generous with box sizes — "
-                                "make each box slightly larger than the text to ensure full coverage."
-                            )}
-                        ]
-                    }],
-                    "max_tokens": 600,
-                    "temperature": 0.05,
-                },
-            )
-        if resp.status_code == 200:
-            raw = resp.json()["choices"][0]["message"]["content"]
+        from llm import call_vision_with_dispatch
+        raw = await call_vision_with_dispatch(b64_img, _VISION_ANALYSIS_PROMPT, lang="en", mime_type=mime)
+    except Exception as _ve:
+        logger.debug("Vision dispatch failed: %s — trying Groq fallback", _ve)
+
+    if raw is None and _GROQ_KEY:
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=30) as _c:
+                resp = await _c.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {_GROQ_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_img}"}},
+                                {"type": "text", "text": _VISION_ANALYSIS_PROMPT},
+                            ],
+                        }],
+                        "max_tokens": 600,
+                        "temperature": 0.05,
+                    },
+                )
+            if resp.status_code == 200:
+                raw = resp.json()["choices"][0]["message"]["content"]
+        except Exception as _ge:
+            logger.warning(f"Groq vision fallback failed: {_ge}")
+
+    if raw:
+        try:
             m = re.search(r'\{.*\}', raw, re.DOTALL)
             if m:
                 return json.loads(m.group())
-    except Exception as _ve:
-        logger.warning(f"Vision analysis failed: {_ve}")
+        except Exception:
+            pass
     return {}
 
 

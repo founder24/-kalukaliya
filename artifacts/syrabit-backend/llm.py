@@ -2932,7 +2932,7 @@ async def call_translate_with_dispatch(
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
                     {"role": "user", "content": text},
                 ]
-                return await _call_llm_raw(_LLM_PROVIDERS_WORKERS_ONLY, prompt, None, 2048)
+                return await _call_llm_raw(prompt, None, 2048, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
             else:
                 raise RuntimeError(f"translate: unknown provider {provider!r}")
         except Exception as exc:

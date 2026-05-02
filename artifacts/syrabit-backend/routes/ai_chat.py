@@ -126,7 +126,7 @@ def _safe_metadata(raw) -> dict:
             return {}
     return {}
 from qa_engine import log_chat_message as _log_chat_message
-from guardrails.prompt_safety import evaluate_prompt_safety, validate_llm_output
+from guardrails.prompt_safety import evaluate_prompt_safety, validate_llm_output, llm_classify_safety
 import chat_speedup_metrics as _speedup
 
 logger = logging.getLogger(__name__)
@@ -1326,6 +1326,12 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             raise HTTPException(status_code=403, detail="Turnstile verification failed")
 
     safe_prompt, fallback_msg, guardrail_tag = evaluate_prompt_safety(msg.message)
+    if safe_prompt is not None:
+        _llm_safety_tag = await llm_classify_safety(safe_prompt)
+        if _llm_safety_tag:
+            guardrail_tag = _llm_safety_tag
+            safe_prompt = None
+            fallback_msg = "I can only help with educational questions. Let's keep our conversation on-topic."
     _stream_intent, _stream_db_category = classify_intent(msg.message)
 
     # Task #610 — annotate the auto-created request span so chat traces are

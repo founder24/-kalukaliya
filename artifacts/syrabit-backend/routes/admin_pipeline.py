@@ -18,7 +18,7 @@ from cache import _invalidate_content_cache
 from auth_deps import (
     get_admin_user,
 )
-from llm import call_llm_api_content, call_llm_api_content_with_retry
+from llm import call_llm_api_content, call_llm_api_content_with_retry, call_translate_with_dispatch, call_embed_with_dispatch
 from rag import (
     auto_chunk_content,
     backfill_chunk_embeddings,
@@ -759,9 +759,12 @@ Goal: cover the **maximum number of high-yield exam concepts** in the **minimum 
 
 
 async def _translate_text_sarvam(text: str, source_lang: str = "en-IN", target_lang: str = "as-IN") -> str:
-    _client = sarvam_translate_client or sarvam_client
-    if not _client:
-        raise HTTPException(status_code=503, detail="Sarvam AI not configured")
+    """Translate text via PROVIDER_PRIORITY["translate"] weighted dispatch.
+
+    Routes through call_translate_with_dispatch (sarvam → vertex → workers_ai)
+    with chunking to stay under Sarvam's 1 800-char per-request limit.
+    Falls back to legacy sarvam_translate_client if dispatch exhausts all providers.
+    """
     if not text or not text.strip():
         return ""
     MAX_CHUNK = 1800
@@ -783,24 +786,34 @@ async def _translate_text_sarvam(text: str, source_lang: str = "en-IN", target_l
         chunks.append(current)
 
     translated_parts = []
+    _target_lang_bcp = target_lang.split("-")[0] if "-" in target_lang else "as"
     for chunk in chunks:
-        payload = {
-            "input": chunk[:1950],
-            "source_language_code": source_lang,
-            "target_language_code": target_lang,
-            "speaker_gender": "Female",
-            "mode": "formal",
-            "model": "sarvam-translate:v1",
-            "enable_preprocessing": False,
-        }
         try:
-            resp = await _client.post("/translate", json=payload)
-            resp.raise_for_status()
-            result = resp.json()
-            translated_parts.append(result.get("translated_text", ""))
+            translated = await call_translate_with_dispatch(
+                chunk[:1950], source_lang, target_lang, lang=_target_lang_bcp
+            )
+            translated_parts.append(translated)
         except Exception as e:
-            logger.warning(f"Sarvam translate chunk failed: {e}")
-            raise
+            logger.warning(f"Translate dispatch failed for chunk ({source_lang}→{target_lang}): {e}")
+            _client = sarvam_translate_client or sarvam_client
+            if not _client:
+                raise HTTPException(status_code=503, detail="Translation failed — no provider available")
+            try:
+                payload = {
+                    "input": chunk[:1950],
+                    "source_language_code": source_lang,
+                    "target_language_code": target_lang,
+                    "speaker_gender": "Female",
+                    "mode": "formal",
+                    "model": "sarvam-translate:v1",
+                    "enable_preprocessing": False,
+                }
+                resp = await _client.post("/translate", json=payload)
+                resp.raise_for_status()
+                translated_parts.append(resp.json().get("translated_text", ""))
+            except Exception as e2:
+                logger.warning(f"Sarvam translate fallback chunk failed: {e2}")
+                raise
     return "\n".join(translated_parts)
 
 
@@ -1940,6 +1953,9 @@ async def admin_embed_chunks_bulk(
     notes/QA to make content semantically searchable.
     """
     from providers.chunk_embedder import embed_chunks_bulk
+    from llm import select_provider
+    _embed_provider = select_provider("embed", lang="en")
+    logger.info("[embed_dispatch] selected provider=%r for bulk chunk embed run", _embed_provider)
     result = await embed_chunks_bulk(
         db,
         batch_size=batch_size,
@@ -1947,6 +1963,7 @@ async def admin_embed_chunks_bulk(
         subject_id=subject_id,
         limit=limit,
     )
+    result["provider_selected"] = _embed_provider
     return result
 
 

@@ -273,6 +273,17 @@ async def web_search_with_fallback(
 
     scoped_query = _build_search_query(query, board_name, class_name, subject_name, chapter_name)
 
+    _search_rag_task = None
+    try:
+        from llm import call_search_rag_with_dispatch, select_provider
+        _search_provider = select_provider("search_rag", lang="en")
+        if _search_provider == "exa_ai":
+            _search_rag_task = asyncio.ensure_future(
+                call_search_rag_with_dispatch(scoped_query, feature="search_rag", lang="en")
+            )
+    except Exception:
+        _search_rag_task = None
+
     web_raw = await _ddg_search(scoped_query, max_results=num_results)
 
     if isinstance(web_raw, list):
@@ -301,6 +312,22 @@ async def web_search_with_fallback(
         all_results.extend(other_results)
     else:
         logger.warning(f"[WEB_SEARCH] Web layer failed: {web_raw}")
+
+    if _search_rag_task is not None:
+        try:
+            _exa_results = await asyncio.wait_for(_search_rag_task, timeout=2.0)
+            for r in _exa_results:
+                url = r.get("url", "")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    all_results.append({
+                        "title": r.get("title", ""),
+                        "snippet": r.get("text", r.get("snippet", ""))[:400],
+                        "url": url,
+                        "_layer": "exa",
+                    })
+        except Exception as _ex_err:
+            logger.debug("[WEB_SEARCH] exa search_rag concurrent task non-fatal: %s", _ex_err)
 
     if not all_results:
         logger.warning(f"[WEB_SEARCH] No results for: {query[:60]}")
