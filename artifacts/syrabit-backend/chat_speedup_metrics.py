@@ -27,6 +27,7 @@ __all__ = [
     "record_speculative_web",
     "record_ttfb",
     "record_total_latency",
+    "record_lang_ttfb",
     "record_warm_run",
     "record_provider_call",
     "record_provider_fallback",
@@ -89,6 +90,11 @@ _warm_runs_pending: Deque[Dict[str, Any]] = deque(maxlen=_MAX_WARM_RUNS)
 _PROVIDER_NAME_MAX = 32
 _provider_daily: Dict[str, Dict[str, Dict[str, float]]] = {}
 _provider_fallbacks: Dict[str, Dict[str, int]] = {}
+
+# Per-language TTFB tracking (S6 — enables Assamese vs English TTFB comparison):
+#   _lang_daily[date][lang_code] = {ttfb_ms_sum, ttfb_count, total_ms_sum, total_count, calls}
+# In-memory only; not persisted to Redis (rebuilds quickly from live traffic).
+_lang_daily: Dict[str, Dict[str, Dict[str, float]]] = {}
 
 
 def _today_key() -> str:
@@ -244,6 +250,27 @@ def record_provider_call(provider: str, *, ttfb_ms: float = 0.0, total_ms: float
         record_total_latency(total_ms)
 
 
+def record_lang_ttfb(lang: str, ttfb_ms: float = 0.0, total_ms: float = 0.0) -> None:
+    """Record TTFB/total latency keyed by response language (e.g. 'en', 'as').
+    Enables per-language P95 monitoring so Assamese regressions surface
+    independently from English in the /api/admin/chat/speedups dashboard."""
+    lang_key = (lang or "en")[:8].lower()
+    with _lock:
+        day = _lang_daily.setdefault(_today_key(), {})
+        b = day.setdefault(lang_key, {
+            "ttfb_ms_sum": 0.0, "ttfb_count": 0,
+            "total_ms_sum": 0.0, "total_count": 0,
+            "calls": 0,
+        })
+        b["calls"] = b.get("calls", 0) + 1
+        if ttfb_ms > 0:
+            b["ttfb_ms_sum"] = b.get("ttfb_ms_sum", 0.0) + float(ttfb_ms)
+            b["ttfb_count"] = b.get("ttfb_count", 0) + 1
+        if total_ms > 0:
+            b["total_ms_sum"] = b.get("total_ms_sum", 0.0) + float(total_ms)
+            b["total_count"] = b.get("total_count", 0) + 1
+
+
 def record_provider_fallback(from_provider: str, to_provider: str) -> None:
     """Record a fallback transition (e.g. vertex_gemini → openai/gpt-oss-20b
     when Vertex fails before first token). The from→to pair is the bucket
@@ -382,6 +409,34 @@ def snapshot(days: int = 7) -> Dict[str, Any]:
         for k, v in sorted(fallbacks_total.items(), key=lambda x: -x[1])
     ]
 
+    # ── Per-language TTFB breakdown (S6) ───────────────────────────────────────
+    by_lang_agg: Dict[str, Dict[str, Any]] = {}
+    with _lock:
+        for d, langs in _lang_daily.items():
+            if d < cutoff:
+                continue
+            for lk, b in langs.items():
+                tgt = by_lang_agg.setdefault(lk, {
+                    "calls": 0,
+                    "ttfb_ms_sum": 0.0, "ttfb_count": 0,
+                    "total_ms_sum": 0.0, "total_count": 0,
+                })
+                tgt["calls"] += int(b.get("calls", 0) or 0)
+                tgt["ttfb_ms_sum"] += float(b.get("ttfb_ms_sum", 0.0) or 0.0)
+                tgt["ttfb_count"] += int(b.get("ttfb_count", 0) or 0)
+                tgt["total_ms_sum"] += float(b.get("total_ms_sum", 0.0) or 0.0)
+                tgt["total_count"] += int(b.get("total_count", 0) or 0)
+    lang_list = [
+        {
+            "lang": lk,
+            "calls": int(agg["calls"]),
+            "avg_ttfb_ms": _avg(agg["ttfb_ms_sum"], agg["ttfb_count"]),
+            "avg_total_ms": _avg(agg["total_ms_sum"], agg["total_count"]),
+            "ttfb_samples": int(agg["ttfb_count"]),
+        }
+        for lk, agg in sorted(by_lang_agg.items())
+    ]
+
     return {
         "period_days": days,
         "totals": {
@@ -404,6 +459,7 @@ def snapshot(days: int = 7) -> Dict[str, Any]:
         "warm_runs": list(reversed(warm_runs_snapshot))[:20],
         "by_provider": providers_list,
         "provider_fallbacks": fallbacks_list,
+        "by_lang": lang_list,
         "has_data": chats > 0,
     }
 

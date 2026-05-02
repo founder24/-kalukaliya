@@ -160,6 +160,30 @@ def get_instant_response(query: str) -> str | None:
     normalized = query.strip().lower().rstrip("!. ")
     return _INSTANT_CASUAL_RESPONSES.get(normalized)
 
+
+# Pre-translated Assamese instant responses — returned directly without any
+# LLM or translation call, saving 3-7 s on common greetings/acknowledgements.
+_INSTANT_ASSAMESE_RESPONSES: dict[str, str] = {
+    "নমস্কাৰ": "নমস্কাৰ! 🙏 মই ছয়ৰা, আপোনাৰ অধ্যয়ন সহায়কাৰী। আজি আপোনাক কেনেকৈ সহায় কৰিব পাৰো?",
+    "হেল্লো": "হেল্লো! 👋 মই ছয়ৰা। পাঠ্যক্ৰমৰ যিকোনো বিষয়ে সুধিব পাৰে!",
+    "হেল্ল'": "হেল্লো! 👋 মই ছয়ৰা। পাঠ্যক্ৰমৰ যিকোনো বিষয়ে সুধিব পাৰে!",
+    "ধন্যবাদ": "আপোনাক স্বাগতম! 😊 আৰু কিবা জানিব বিচাৰে নেকি?",
+    "আপোনাক ধন্যবাদ": "আপোনাক স্বাগতম! 😊 যিকোনো সময়তে সহায়ৰ বাবে আহিব পাৰে।",
+    "বিদায়": "বিদায়! 👋 পঢ়া-শুনাত শুভকামনা। যিকোনো সময়তে আহিব পাৰে!",
+    "ঠিক আছে": "ঠিক আছে! 📚 যদি কোনো প্ৰশ্ন থাকে, সুধিব।",
+    "হয়": "বহুত ভাল! 📚 আৰু কিবা জানিব বিচাৰে নেকি?",
+    "ভাল": "বহুত ভাল! আন কিবা সহায় লাগিব নেকি? 📚",
+    "সহায় কৰা": "অৱশ্যেই! আপোনাৰ বিষয় বা অধ্যায়ৰ বিষয়ে সুধিব পাৰে।",
+    "নমস্কাৰ!": "নমস্কাৰ! 🙏 মই ছয়ৰা, আপোনাৰ অধ্যয়ন সহায়কাৰী। আজি আপোনাক কেনেকৈ সহায় কৰিব পাৰো?",
+}
+
+
+def get_instant_assamese_response(query: str) -> str | None:
+    """Return a pre-translated Assamese response for common greetings/phrases.
+    Skips the entire LLM + translation pipeline — TTFB ~0 ms."""
+    normalized = query.strip().rstrip("!। ")
+    return _INSTANT_ASSAMESE_RESPONSES.get(normalized)
+
 _STAGE1_SKIP_INTENTS = {"casual", "general", "syllabus", "chapter_meta"}
 
 def should_use_pipeline(intent: str, query: str) -> bool:

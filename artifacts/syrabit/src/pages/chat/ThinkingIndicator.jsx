@@ -2,17 +2,17 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 
 /**
  * Single-line thinking indicator that cycles through three search phases:
- *   Phase 0 → "Searching Assam Board Syllabus"   (shown for ≥ 2 s)
- *   Phase 1 → "Searching <Subject Name>"          (shown for ≥ 2 s)
+ *   Phase 0 → "Searching Assam Board Syllabus"   (shown for ≥ 0.8 s)
+ *   Phase 1 → "Searching <Subject Name>"          (shown for ≥ 0.8 s)
  *   Phase 2 → "Searching <Chapter Name>"          (cycles until response)
  *
  * Each phase replaces the previous with a quick fade-out / fade-in.
  * Discovery events from the backend can advance phases early, but the
- * 2-second minimum per phase is always respected.
+ * 0.8-second minimum per phase is always respected.
  */
 
-const MIN_PHASE_MS    = 2000; // each phase visible for at least 2 s
-const PHASE_SCHEDULE  = [2000, 4000]; // default timers: advance at 2 s, then at 4 s
+const MIN_PHASE_MS    = 800;  // each phase visible for at least 0.8 s
+const PHASE_SCHEDULE  = [800, 1800]; // default timers: advance at 0.8 s, then at 1.8 s
 
 const DOT_KEYFRAMES = `
 @keyframes syra-think-pulse {

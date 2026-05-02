@@ -176,21 +176,31 @@ async def rerank_items(
     *,
     top_k: int = 3,
     model: Optional[str] = None,
+    min_score: Optional[float] = None,
 ) -> List[T]:
     """Rerank a list of arbitrary items. Compatible with the old voyage interface.
 
     Args:
-        query:   Search query.
-        items:   List of items to rank.
-        text_fn: Function that extracts the text to score from each item.
-        top_k:   Return this many top items (sorted by relevance).
-        model:   Override reranking model.
+        query:     Search query.
+        items:     List of items to rank.
+        text_fn:   Function that extracts the text to score from each item.
+        top_k:     Return this many top items (sorted by relevance).
+        model:     Override reranking model.
+        min_score: If set, drop items whose reranker score is below this
+                   threshold. At least one item is always returned so the
+                   caller never gets an empty list when all candidates are weak.
+                   bge-reranker-v2-m3 scores are typically in the -10..+10
+                   range; -1.0 drops only actively irrelevant chunks.
     """
     if not items:
         return items
     docs = [text_fn(item) for item in items]
     scores = await rerank(query, docs, top_n=top_k, model=model)
     ranked = sorted(zip(scores, items), key=lambda x: x[0], reverse=True)
+    if min_score is not None:
+        filtered = [(s, item) for s, item in ranked if s >= min_score]
+        if filtered:
+            return [item for _, item in filtered[:top_k]]
     return [item for _, item in ranked[:top_k]]
 
 

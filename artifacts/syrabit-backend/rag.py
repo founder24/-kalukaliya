@@ -589,6 +589,45 @@ async def _try_vector_provider(
     raise RuntimeError(f"vector_search: unhandled provider branch {provider!r}")
 
 
+_HYDE_TIMEOUT = 2.5  # s; skip HyDE silently if LLM is slow
+
+
+async def _generate_hyde_passage(query: str) -> Optional[str]:
+    """HyDE (Hypothetical Document Embedding) — R1 improvement.
+
+    Generates an ~80-word factual passage that answers *query*, then embeds
+    that passage instead of the raw question.  Because the hypothetical
+    answer uses the same vocabulary as real textbook chapters it lives closer
+    to actual chapter content in embedding space, improving recall especially
+    for abstract / concept-level questions.
+
+    Falls back to None (caller uses raw query) on timeout or any error.
+    """
+    try:
+        from llm import call_llm_api_chat as _chat_llm
+        _prompt = (
+            "Write an 80-word factual academic passage that directly answers the following "
+            "question. Use precise terminology as found in AHSEC Class 11-12 textbooks. "
+            "Do not repeat the question — just write the passage.\n\n"
+            f"Question: {query}\n\nPassage:"
+        )
+        result = await asyncio.wait_for(
+            _chat_llm([{"role": "user", "content": _prompt}], max_tokens=130),
+            timeout=_HYDE_TIMEOUT,
+        )
+        passage = (result or "").strip()
+        if len(passage) > 40:
+            logger.debug("[HyDE] %d-char passage for '%s'", len(passage), query[:40])
+            return passage
+        return None
+    except asyncio.TimeoutError:
+        logger.debug("[HyDE] timed out (%.1fs) for '%s'", _HYDE_TIMEOUT, query[:40])
+        return None
+    except Exception as _e:
+        logger.debug("[HyDE] failed: %s", _e)
+        return None
+
+
 async def _fetch_chunks_semantic(
     query: str,
     limit: int = 10,
@@ -788,7 +827,7 @@ async def _fetch_internal_chapters(
                     return f"{c['title']}\n\n{en_part}" + (f"\n\n{as_part}" if as_part else "")
 
                 candidates = await asyncio.wait_for(
-                    _pc_rerank(query, candidates, _rerank_text, top_k=limit),
+                    _pc_rerank(query, candidates, _rerank_text, top_k=limit, min_score=-1.0),
                     timeout=8.0,
                 )
                 logger.info(
@@ -834,6 +873,7 @@ async def resolve_rag_context(
     pre_syl_match=None,
     topic_metadata: Optional[dict] = None,
     prefetched_chapters: Optional[list] = None,
+    max_content_chars: int = 4000,
 ) -> dict:
     if document_text and document_text.strip():
         relevant = _extract_relevant_sections(document_text, query)
@@ -845,7 +885,7 @@ async def resolve_rag_context(
             "intent": intent or "general",
         }
     if intent not in ("casual", "general") and (subject_id or subject_name):
-        internal_chapters = prefetched_chapters if prefetched_chapters is not None else await _fetch_internal_chapters(query, subject_id=subject_id, subject_name=subject_name)
+        internal_chapters = prefetched_chapters if prefetched_chapters is not None else await _fetch_internal_chapters(query, subject_id=subject_id, subject_name=subject_name, max_content_chars=max_content_chars)
         if internal_chapters:
             return {
                 "chunks": internal_chapters, "chapters": internal_chapters, "subjects": [],

@@ -70,7 +70,7 @@ from tracing import (
     emit_phase_span,
 )
 from followup_context import detect_followup, build_followup_context, merge_followup_into_query
-from pipeline import should_use_pipeline, stage1_resolve_topic, apply_stage1_to_intent, build_enhanced_query, get_instant_response
+from pipeline import should_use_pipeline, stage1_resolve_topic, apply_stage1_to_intent, build_enhanced_query, get_instant_response, get_instant_assamese_response
 import wai_chapter_index as _wai_idx
 
 # Chat Enhancement Layer
@@ -154,7 +154,9 @@ def _record_llm_cost(model, prompt_tokens, completion_tokens, provider="gemini",
 # Polish only kicks in for substantive output. Below this length the polish
 # round-trip cost (~0.8-1.5s) outweighs the marginal quality lift, and N
 # small fragments would compound into multi-second post-stream latency.
-_POLISH_MIN_LEN = 80
+# Raised from 80→250: one-sentence answers from IndicTrans2 are already
+# fluent; the extra 0.8-1.5s round-trip is only justified for longer text.
+_POLISH_MIN_LEN = 250
 
 # Hard ceiling on the Sarvam polish call so a slow/dead Sarvam never holds
 # up the translation pipeline. On timeout we return the un-polished Qwen
@@ -265,7 +267,7 @@ async def _assamese_translate_gemini_main_sarvam_polish(
                     "model": "sarvam-translate:v1",
                     "enable_preprocessing": False,
                 }),
-                timeout=3.5,
+                timeout=2.0,
             )
             if _sv_resp.status_code == 200:
                 _sv_result = (_sv_resp.json().get("translated_text") or "").strip()
@@ -870,10 +872,12 @@ async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depend
         rag_ctx["_stage1_subject"] = _s1_subject_str
 
     _use_prefetched = _prefetched_chapters if (_prefetched_chapters and _rag_query == _original_message) else None
+    _rag_content_budget = 8000 if _detected_intent in ("notes", "important_questions", "pyq") else 4000
     rag_ctx = await resolve_rag_context(
         _rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
         document_text=document_text, intent=_detected_intent,
         prefetched_chapters=_use_prefetched,
+        max_content_chars=_rag_content_budget,
     )
     if _s1_subject_str:
         rag_ctx["_stage1_subject"] = _s1_subject_str
@@ -1428,6 +1432,31 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
     _sarvam_target = _SARVAM_LANG_MAP.get(_resp_lang)
     _want_translate = bool(_sarvam_target and _resp_lang != "en")
 
+    # S2: Assamese greeting fast-path — returns pre-translated text directly,
+    # skipping the entire LLM + translation pipeline (~3-7 s saved per greeting).
+    if _want_translate and _stream_intent == "casual":
+        _instant_as = get_instant_assamese_response(msg.message)
+        if _instant_as:
+            logger.info(f"[STREAM] INSTANT Assamese fast-path: '{msg.message[:30]}' → {len(_instant_as)} chars (0 LLM calls)")
+            _speedup.record_instant_fastpath()
+            _instant_as_ms = (_time_mod.time() - _stream_t0) * 1000
+            _speedup.record_ttfb(_instant_as_ms)
+            _speedup.record_total_latency(_instant_as_ms)
+            try:
+                _speedup.record_lang_ttfb(_resp_lang, _instant_as_ms, _instant_as_ms)
+            except Exception:
+                pass
+            _instant_as_text = _instant_as
+            async def _instant_as_stream():
+                yield f"data: {json.dumps({'conversation_id': msg.conversation_id or '', 'rag_source': 'none', 'rag_quality': 'none', 'rag_chunks': 0})}\n\n"
+                yield f"data: {json.dumps({'content': _instant_as_text})}\n\n"
+                yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or ''})}\n\n"
+                yield "data: [DONE]\n\n"
+            if not is_anon and credits_info:
+                asyncio.create_task(_refund_credit(user_id, credits_info["used"] + 1))
+            return StreamingResponse(_instant_as_stream(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     _instant_s = get_instant_response(msg.message) if _stream_intent == "casual" else None
     if _instant_s:
         if _want_translate and _instant_s:
@@ -1447,6 +1476,10 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
         _instant_ms = (_time_mod.time() - _stream_t0) * 1000
         _speedup.record_ttfb(_instant_ms)
         _speedup.record_total_latency(_instant_ms)
+        try:
+            _speedup.record_lang_ttfb(_resp_lang, _instant_ms, _instant_ms)
+        except Exception:
+            pass
         try:
             record_first_token(_instant_ms, source="instant")
             record_chat_attrs(**{
@@ -1921,10 +1954,12 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
     raw_conv = _prefetched_conv
 
     _s_use_prefetched = _s_prefetched_chapters if (_s_prefetched_chapters and _s_rag_query == _s_original_message) else None
+    _s_rag_content_budget = 8000 if _stream_intent in ("notes", "important_questions", "pyq") else 4000
     rag_ctx = await resolve_rag_context(
         _s_rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
         document_text=document_text, intent=_stream_intent,
         prefetched_chapters=_s_use_prefetched,
+        max_content_chars=_s_rag_content_budget,
     )
     if _s1_subject_str:
         rag_ctx["_stage1_subject"] = _s1_subject_str
@@ -2437,6 +2472,11 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                 )
                 _indic_buffer_mode = bool(_want_translate) and _asm_behaviour() != "off"
                 _indic_pending_chunks: list = []
+                # S1: rolling chunk translate — 250-char English windows flushed as
+                # Assamese immediately, cutting TTFB from 5-18 s → ~3-5 s.
+                _rolling_en_buf = ""        # accumulated English content
+                _rolling_as_chunks: list = []  # Assamese chunks already yielded
+                _ROLL_CHUNK_CHARS = 250     # translate every ~250 English chars
 
                 # When buffering Assamese, the user otherwise sees a blank
                 # bubble for the entire LLM generation + sanitize window
@@ -2464,6 +2504,7 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                             logger.info(f"[STREAM][TIMING] TTFT (first LLM token): {_ttfb_llm_ms / 1000:.3f}s")
                             try:
                                 _speedup.record_ttfb(_ttfb_llm_ms)
+                                _speedup.record_lang_ttfb(_resp_lang, _ttfb_llm_ms)
                             except Exception:
                                 pass
                             try:
@@ -2724,6 +2765,7 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                 _final_total_ms = (_time_mod.time() - _stream_t0) * 1000
                 _record_chat_latency(_final_total_ms)
                 _speedup.record_total_latency(_final_total_ms)
+                _speedup.record_lang_ttfb(_resp_lang, 0.0, _final_total_ms)
                 # Preserve the path label set earlier by the cache-hit
                 # branch (`cache`) — only attribute as `main` for true
                 # non-cached LLM responses, otherwise the request-span
