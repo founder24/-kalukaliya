@@ -309,6 +309,97 @@ describe("ai-gateway-cache-alert", () => {
     expect(state.consecutive_query_failures).toBe(0);
   });
 
+  it("respects the watchdog-blind cooldown and does not re-page on the next failure", async () => {
+    const env = baseEnv();
+    // Pre-seed state as if we just paged the watchdog-blind alert
+    // 1 hour ago — well inside the 6h QUERY_FAIL_COOLDOWN_MS, so the
+    // 7th consecutive failure must NOT re-fire the page.
+    const oneHourAgo = new Date(NOW.getTime() - 60 * 60 * 1000);
+    await env.RATE_LIMIT.put(
+      _AI_GATEWAY_CACHE_ALERT_STATE_KEY,
+      JSON.stringify({
+        last_evaluated_at: oneHourAgo.toISOString(),
+        consecutive_query_failures: 6,
+        query_fail_last_fired_at: oneHourAgo.toISOString(),
+      }),
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errors: [{ message: "scope missing" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const res = await runAiGatewayCacheAlert(env, NOW);
+    expect(res.reason).toBe("query_failed");
+    expect(res.consecutive_query_failures).toBe(7);
+    // Cooldown active → no second webhook attempt.
+    expect(res.query_fail_alert_fired).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // KV cooldown anchor unchanged.
+    const state = await _readAiGatewayCacheAlertStateForTests(
+      env.RATE_LIMIT as unknown as KVNamespace,
+    );
+    expect(state.query_fail_last_fired_at).toBe(oneHourAgo.toISOString());
+  });
+
+  it("re-fires the watchdog-blind alert once the cooldown has elapsed", async () => {
+    const env = baseEnv();
+    // Pre-seed a stale watchdog-blind firing > 6h ago — the next
+    // failure should be allowed to re-page.
+    const longAgo = new Date(
+      NOW.getTime() - (_AI_GATEWAY_CACHE_ALERT_DEFAULTS.QUERY_FAIL_COOLDOWN_MS + 1000),
+    );
+    await env.RATE_LIMIT.put(
+      _AI_GATEWAY_CACHE_ALERT_STATE_KEY,
+      JSON.stringify({
+        last_evaluated_at: longAgo.toISOString(),
+        consecutive_query_failures: 6,
+        query_fail_last_fired_at: longAgo.toISOString(),
+      }),
+    );
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ errors: [{ message: "scope missing" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 200 }));
+    const res = await runAiGatewayCacheAlert(env, NOW);
+    expect(res.consecutive_query_failures).toBe(7);
+    expect(res.query_fail_alert_fired).toBe(true);
+    // Cooldown anchor advanced to NOW.
+    const state = await _readAiGatewayCacheAlertStateForTests(
+      env.RATE_LIMIT as unknown as KVNamespace,
+    );
+    expect(state.query_fail_last_fired_at).toBe(NOW.toISOString());
+  });
+
+  it("respects AI_GATEWAY_CACHE_ALERT_QUERY_FAIL_THRESHOLD override", async () => {
+    const env = baseEnv({ AI_GATEWAY_CACHE_ALERT_QUERY_FAIL_THRESHOLD: "1" });
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ errors: [{ message: "scope missing" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 200 }));
+    const res = await runAiGatewayCacheAlert(env, NOW);
+    expect(res.consecutive_query_failures).toBe(1);
+    // Threshold lowered to 1 → first failure trips the page.
+    expect(res.query_fail_alert_fired).toBe(true);
+
+    // Webhook payload echoes the overridden threshold.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, webhookInit] = fetchMock.mock.calls[1];
+    const payload = JSON.parse((webhookInit as RequestInit).body as string);
+    expect(payload.alert_type).toBe("ai_gateway_cache_watchdog_blind");
+    expect(payload.threshold).toBe(1);
+    expect(payload.consecutive_failures).toBe(1);
+  });
+
   it("respects custom floor and embed tag overrides", async () => {
     const env = baseEnv({
       AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT: "70",
