@@ -889,6 +889,43 @@ async def get_chapter_by_slug_with_stream(board_slug: str, class_slug: str, stre
     except HTTPException:
         return await _chapter_fallback_search(subject_slug, chapter_slug, response)
 
+
+# ── Task #295 — Assamese-slug resolver ─────────────────────────────────────
+# Serves chapter pages mounted at the dedicated /as/<board>/<class>/<subj>/<slug_as>
+# SPA route. Resolves the chapter by its stored Assamese slug (chapters.slug_as)
+# first, then falls back to the English slug so URLs created BEFORE the
+# backfill script ran (or chapters that simply have no slug_as yet) still
+# resolve under /as/ instead of 404-ing. Returns the same payload shape as
+# /content/chapter-by-slug/* so the frontend can swap endpoints transparently.
+@router.get("/content/chapter-by-slug-as/{board_slug}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}")
+async def get_chapter_by_slug_as_with_stream(board_slug: str, class_slug: str, stream_slug: str, subject_slug: str, chapter_slug: str, response: Response = None):
+    return await get_chapter_by_slug_as(board_slug, class_slug, subject_slug, chapter_slug, response)
+
+
+@router.get("/content/chapter-by-slug-as/{board_slug}/{class_slug}/{subject_slug}/{chapter_slug}")
+async def get_chapter_by_slug_as(board_slug: str, class_slug: str, subject_slug: str, chapter_slug: str, response: Response = None):
+    if not await is_mongo_available():
+        raise HTTPException(503, "Content database unavailable")
+    hier = await _resolve_slug_hierarchy(board_slug, class_slug, subject_slug)
+    if not hier:
+        raise HTTPException(404, "Board, class, or subject not found")
+    subj = hier["subj"]
+    from urllib.parse import unquote
+    decoded_slug = unquote(chapter_slug)
+    # Try Assamese slug first (the canonical lookup for this route),
+    # then fall back to the English slug so /as/ URLs work even when
+    # the backfill hasn't translated this chapter yet.
+    chapter = await db.chapters.find_one(
+        {"slug_as": decoded_slug, "subject_id": subj["id"]}, {"_id": 0, "id": 1}
+    )
+    if not chapter:
+        return await get_chapter_by_slug(board_slug, class_slug, subject_slug, chapter_slug, response)
+    # Reuse the canonical English-slug resolver for the heavy chunk-merge
+    # + cache logic by looking up the actual English slug we just matched.
+    full = await db.chapters.find_one({"id": chapter["id"]}, {"_id": 0, "slug": 1})
+    eng_slug = (full or {}).get("slug") or chapter_slug
+    return await get_chapter_by_slug(board_slug, class_slug, subject_slug, eng_slug, response)
+
 @router.get("/content/chapter/{board_slug}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}")
 async def get_chapter_legacy_with_stream(board_slug: str, class_slug: str, stream_slug: str, subject_slug: str, chapter_slug: str, response: Response = None):
     try:

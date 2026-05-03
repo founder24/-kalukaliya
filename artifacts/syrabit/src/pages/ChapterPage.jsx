@@ -476,7 +476,27 @@ export default function ChapterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.chapter_id]);
   const { sharing, share, serpPreview, confirmShare, dismissPreview } = useShare();
-  const { contentLang, switchLang } = useContentLang();
+  const { contentLang: ctxContentLang, switchLang } = useContentLang();
+  // Task #295 — when the URL is mounted under the dedicated /as/* path,
+  // the chapter is being served as the Assamese-canonical variant (the
+  // hreflang="as-IN" target). Force the content language to Assamese
+  // for the page regardless of the user's persisted toggle so the SPA
+  // never flashes English content for a URL Google indexed as as-IN.
+  const isAssamesePath = typeof window !== 'undefined'
+    && (window.location.pathname || '').startsWith('/as/');
+  const contentLang = isAssamesePath ? 'as' : ctxContentLang;
+
+  // Task #295 — keep the global LanguageContext in sync with the URL
+  // when the chapter is mounted under /as/. Without this, child
+  // components that read `useContentLang()` directly (instead of the
+  // `contentLang` prop drilled from this file) would still see the
+  // user's persisted preference and could render English UI strings
+  // on a URL Google indexed as as-IN.
+  useEffect(() => {
+    if (isAssamesePath && ctxContentLang !== 'as') {
+      try { switchLang('as'); } catch { /* tolerate ctx-less SSR */ }
+    }
+  }, [isAssamesePath, ctxContentLang, switchLang]);
 
   useEffect(() => {
     if (!board || !classSlug || !subjectSlug || !chapterSlug) return;
@@ -490,16 +510,20 @@ export default function ChapterPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    // Task #295 — on /as/* URLs, fetch via the slug_as-aware resolver
+    // so the chapter resolves whether the URL contains the translated
+    // Assamese slug or the English slug fallback.
+    const resolverPath = isAssamesePath ? 'chapter-by-slug-as' : 'chapter-by-slug';
     const apiPath = hasStreamInUrl
-      ? `/content/chapter-by-slug/${board}/${classSlug}/${streamSlug}/${subjectSlug}/${chapterSlug}`
-      : `/content/chapter-by-slug/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`;
+      ? `/content/${resolverPath}/${board}/${classSlug}/${streamSlug}/${subjectSlug}/${chapterSlug}`
+      : `/content/${resolverPath}/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`;
     apiClient()
       .get(apiPath)
       .then(r => { if (!cancelled) setData(r.data); })
       .catch(e => { if (!cancelled) setError(e.response?.status === 404 ? 'Chapter not found' : 'Failed to load chapter'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [board, classSlug, streamSlug, subjectSlug, chapterSlug, hasStreamInUrl]);
+  }, [board, classSlug, streamSlug, subjectSlug, chapterSlug, hasStreamInUrl, isAssamesePath]);
 
   useEffect(() => {
     if (!data) return;

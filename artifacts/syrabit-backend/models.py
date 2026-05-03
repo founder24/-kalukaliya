@@ -98,6 +98,10 @@ class ChapterCreate(BaseModel):
     subject_id: str
     title: str
     slug: Optional[str] = ""
+    # Task #295 — Assamese URL slug used by the dedicated /as/<…>/<slug_as>
+    # path. Populated by scripts/backfill_assamese_slugs.py from the
+    # translated chapter title. Empty until backfilled.
+    slug_as: Optional[str] = ""
     description: Optional[str] = ""
     content: Optional[str] = ""
     content_as: Optional[str] = ""

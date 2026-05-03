@@ -331,6 +331,17 @@ export function AppRoutes() {
           cloaking — same React tree, same DOM). */}
       <Route path="/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
       <Route path="/:board/:classSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
+
+      {/* Task #295 — Assamese-language chapter routes. The /as/* prefix
+          is the path-based hreflang="as-IN" target (replaces ?lang=as).
+          ChapterPage detects the prefix, forces contentLang='as' for
+          the duration of the page, and fetches via the dedicated
+          /content/chapter-by-slug-as resolver which matches against
+          chapters.slug_as (with English-slug fallback). */}
+      <Route path="/as/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug" element={<ChapterPage />} />
+      <Route path="/as/:board/:classSlug/:subjectSlug/:chapterSlug" element={<ChapterPage />} />
+      <Route path="/as/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
+      <Route path="/as/:board/:classSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
       <Route path="/:board/:classSlug/:subjectSlug/:chapterSlug/:pageType" element={<LegacyTopicRedirect />} />
       <Route path="/:board/:classSlug/:subjectSlug" element={<SubjectLandingPage />} />
 

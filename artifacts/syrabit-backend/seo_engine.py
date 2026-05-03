@@ -4618,6 +4618,44 @@ async def get_sitemap_entries():
 
 BASE_URL = "https://syrabit.ai"
 
+
+# ── Task #295 — Assamese path-prefix helper ─────────────────────────────
+# Converts an English chapter URL into its Assamese sibling URL using a
+# dedicated /as/<…> path prefix instead of the previous ?lang=as query
+# parameter. Google treats path-based language variants as much stronger
+# hreflang signals than query-string variants, so the chapter sitemap
+# now emits a clean path-based URL (the chapter SPA route has matching
+# /as/* variants in App.jsx, so the URL actually resolves).
+#
+# Scope note: only the *chapter* sitemap uses this helper. The HTML
+# renderers in this file (about, subject landing, topic page-type) keep
+# their ?lang=as hreflang form because the SPA does not yet expose
+# /as/* routes for those non-chapter pages — emitting a path that 404s
+# would be worse for SEO than the query-string form.
+#
+# When `slug_as` is supplied (chapter sitemap loop has access to the
+# stored Assamese slug), the LAST path segment is replaced with the
+# Assamese slug — yielding a fully-translated URL like
+#   https://syrabit.ai/as/ahsec/class-12/physics/বৈদ্যুতিক-আধান
+# Otherwise the English path is preserved under /as/ so URLs stay
+# resolvable even before the backfill script has populated slug_as.
+def _as_alt_url(en_url: str, *, slug_as: str = "") -> str:
+    try:
+        from urllib.parse import urlparse, urlunparse, quote
+        p = urlparse(en_url)
+        new_path = "/as" + (p.path if p.path.startswith("/") else "/" + p.path)
+        if slug_as:
+            parts = new_path.rstrip("/").split("/")
+            if parts:
+                parts[-1] = quote(slug_as, safe="-")
+                new_path = "/".join(parts)
+        return urlunparse(p._replace(path=new_path))
+    except Exception:
+        # Defensive fallback: never break SEO HTML rendering on a URL
+        # parsing edge case — degrade to the old query-param form.
+        sep = "&" if "?" in en_url else "?"
+        return f"{en_url}{sep}lang=as"
+
 STATIC_PAGES = [
     ("/home", "weekly", "1.0"),
     ("/about", "monthly", "0.9"),
@@ -4648,8 +4686,13 @@ def _build_urlset(entries: list[dict]) -> str:
     for e in entries:
         loc = e["loc"]
         if e.get("has_assamese"):
-            sep = "&amp;" if "?" in loc else "?"
-            as_loc = f"{loc}{sep}lang=as"
+            # Task #295 — emit the dedicated /as/<path> alternate. When a
+            # translated Assamese chapter slug is available, also rewrite
+            # the last segment so the alternate URL is fully native (e.g.
+            # /as/ahsec/class-12/physics/বৈদ্যুতিক-আধান). Without slug_as
+            # the path is still /as/<en-slug> which the backend resolver
+            # accepts as a fallback. Both forms beat ?lang=as for SEO.
+            as_loc = _as_alt_url(loc, slug_as=e.get("slug_as", ""))
             # Task #291 — sitemap guard: emit en-IN, as-IN, and x-default
             # alternates so Google Search Console treats Assamese variants
             # as first-class siblings of the English page.
@@ -4863,7 +4906,7 @@ async def get_sitemap_chapters():
     lib_streams = {s["id"]: s for s in await _db.streams.find({}, {"_id": 0}).to_list(500)}
     lib_classes = {c["id"]: c for c in await _db.classes.find({}, {"_id": 0}).to_list(500)}
     lib_boards = {b["id"]: b for b in await _db.boards.find({}, {"_id": 0}).to_list(500)}
-    chapters = await _db.chapters.find({}, {"_id": 0, "id": 1, "subject_id": 1, "slug": 1, "title": 1, "updated_at": 1, "created_at": 1, "content_as": 1}).to_list(5000)
+    chapters = await _db.chapters.find({}, {"_id": 0, "id": 1, "subject_id": 1, "slug": 1, "slug_as": 1, "title": 1, "updated_at": 1, "created_at": 1, "content_as": 1}).to_list(5000)
     sub_map = {s["id"]: s for s in lib_subjects}
     entries = []
     for ch in chapters:
@@ -4889,6 +4932,11 @@ async def get_sitemap_chapters():
             "loc": f"{BASE_URL}/{b_slug}/{c_slug}/{sub['slug']}/{ch_slug}",
             "lastmod": lastmod, "pri": pri, "freq": freq,
             "has_assamese": bool((ch.get("content_as") or "").strip()),
+            # Task #295 — pass the stored Assamese slug through so
+            # _build_urlset can emit the path-based hreflang alternate
+            # with the actual translated URL segment instead of a
+            # ?lang=as query string. Empty when not yet backfilled.
+            "slug_as": (ch.get("slug_as") or "").strip(),
         })
     # Task #291 — emit a sitemap-time WARNING when published English chapters
     # are missing their Assamese (content_as) sibling. The hreflang="as-IN"

@@ -85,9 +85,29 @@ def _canonical_url(ch: dict, *, lang_qs: str = "as") -> str:
     canonical/sitemap output (lines ~4020/4261/4295 of seo_engine.py).
     Re-implemented locally instead of imported because seo_engine has
     heavy startup cost (Vertex/Anthropic clients) we don't want in batch
-    embedders, but the URL shape is kept in lock-step with seo_engine."""
+    embedders, but the URL shape is kept in lock-step with seo_engine.
+
+    Task #295 — for the Assamese variant (``lang_qs='as'``) we now emit
+    a path-based ``/as/<board>/<class>/<subject>/<slug_as_or_slug>``
+    URL instead of the legacy ``?lang=as`` query string, matching the
+    new SPA route + sitemap emission. When ``chapters.slug_as`` is
+    populated the chapter segment is the translated Assamese slug; if
+    not yet backfilled, the English slug is reused under ``/as/`` so
+    the URL still resolves via the backend fallback resolver.
+    """
+    from urllib.parse import quote
+    en_slug = ch.get("slug") or ""
+    if lang_qs == "as":
+        chapter_seg = (ch.get("slug_as") or "").strip() or en_slug
+        parts = [ch.get("board_slug"), ch.get("class_slug"),
+                 ch.get("subject_slug"), chapter_seg]
+        parts = [p for p in parts if p]
+        if not parts:
+            return ""
+        encoded = "/".join(quote(str(p), safe="-") for p in parts)
+        return f"{BASE_URL}/as/{encoded}"
     parts = [ch.get("board_slug"), ch.get("class_slug"),
-             ch.get("subject_slug"), ch.get("slug")]
+             ch.get("subject_slug"), en_slug]
     parts = [p for p in parts if p]
     if not parts:
         return ""
@@ -234,6 +254,12 @@ async def main() -> int:
     # ── Chapter-level fields (chapters + chapter-attached notes/mcqs/pyqs/iq) ─
     chapter_proj = {
         "_id": 0, "id": 1, "title": 1, "subject_id": 1, "slug": 1,
+        # Task #295 — pull slug_as so _canonical_url emits the
+        # path-based /as/<board>/<class>/<subject>/<slug_as> URL when
+        # the backfill script has translated the chapter's slug. Without
+        # this projection the field would always be missing in `ch` and
+        # canonical URLs would silently fall back to the English slug.
+        "slug_as": 1,
         "subject_slug": 1, "class_slug": 1, "board_slug": 1,
         "content_as": 1, "notes_as": 1, "mcqs_as": 1, "pyqs_as": 1,
         "important_qs_as": 1, "important_questions_as": 1,
