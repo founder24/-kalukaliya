@@ -311,10 +311,31 @@ async def _exec_retry_failed_jobs(admin: dict, params: ActionParams) -> str:
     return f"Re-queued {n} failed jobs{scope}."
 
 
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Strict-ish boolean coercion for action params. Plain ``bool()``
+    treats the string ``"false"`` as truthy, which would silently flip
+    maintenance mode on when an LLM serialises ``False`` as ``"false"``.
+    Accept the common JSON / English variants and fall back to default
+    for unknown inputs."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "yes", "y", "on", "1", "enable", "enabled"):
+            return True
+        if v in ("false", "no", "n", "off", "0", "disable", "disabled"):
+            return False
+    return default
+
+
 async def _exec_toggle_maintenance(admin: dict, params: ActionParams) -> str:
     from deps import db  # type: ignore
 
-    enable = bool(params.get("enable", True))
+    enable = _coerce_bool(params.get("enable"), default=True)
     await db.settings.update_one(
         {"_id": "global"},
         {"$set": {"maintenance_mode": enable}},
