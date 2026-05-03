@@ -193,8 +193,34 @@ async def call_converse(
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
+        body_txt = exc.response.text or ""
+        # Distinguish account-wide DAILY token quota exhaustion (which needs a
+        # Service Quota raise or midnight-UTC reset) from short-term burst /
+        # per-minute throttling (which usually self-resolves in seconds).
+        # Both surface as 429/ThrottlingException, so we gate the actionable
+        # daily-quota hint on the explicit "per day" wording AWS uses for the
+        # daily limit. Any other 429 gets a generic short-term throttle msg.
+        body_lc = body_txt.lower()
+        is_daily_quota = ("tokens per day" in body_lc) or ("token per day" in body_lc)
+        if is_daily_quota:
+            raise RuntimeError(
+                "bedrock: account-wide DAILY TOKEN QUOTA exhausted — "
+                "every Bedrock model in this account is throttled until "
+                "midnight UTC. FIX: AWS Console → Service Quotas → Bedrock → "
+                "search 'On-demand model inference tokens per day' for the "
+                "model(s) you use (e.g. Amazon Nova Lite) and request an "
+                "increase. Default quota is intentionally low for new "
+                f"accounts. CF gateway response: {body_txt[:160]}"
+            )
+        if status == 429 or "ThrottlingException" in body_txt:
+            raise RuntimeError(
+                f"bedrock: short-term throttle (HTTP {status}) — request rate "
+                "exceeded; usually self-resolves in seconds. If persistent, "
+                "check AWS Service Quotas for per-minute (TPM/RPM) limits. "
+                f"Response: {body_txt[:200]}"
+            )
         raise RuntimeError(
-            f"bedrock: HTTP {status} from CF gateway — {exc.response.text[:200]}"
+            f"bedrock: HTTP {status} from CF gateway — {body_txt[:200]}"
         )
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise RuntimeError(f"bedrock: connection error via CF gateway — {exc}")

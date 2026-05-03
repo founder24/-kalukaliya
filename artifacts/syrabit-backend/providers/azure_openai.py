@@ -171,6 +171,52 @@ async def close() -> None:
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
+def _endpoint_misconfig_hint(
+    endpoint: str, status: int, body: str, deployment: str = ""
+) -> Optional[str]:
+    """Return an actionable diagnostic for two distinct Azure failure modes:
+
+    1. CATALOG endpoint: host is *.api.cognitive.microsoft.com (the regional
+       Cognitive Services model-catalog URL). It exposes /openai/models but
+       has NO deployments, so every chat call 404s. Operator must switch to a
+       per-resource OpenAI endpoint (https://<resource>.openai.azure.com/).
+    2. DEPLOYMENT NOT FOUND on an otherwise-valid per-resource endpoint: the
+       deployment name doesn't exist on this resource (typo, deleted, or never
+       created). Operator must create/rename the deployment in the portal.
+
+    Returned only on definitive matches; ambiguous failures yield None so the
+    generic HTTP-status error is surfaced instead.
+    """
+    host = (endpoint or "").lower()
+    body_txt = body or ""
+
+    # Case 1: catalog endpoint — applies regardless of status because every
+    # chat call against this URL is doomed.
+    if "api.cognitive.microsoft.com" in host:
+        return (
+            "azure_openai: endpoint is the regional Cognitive Services CATALOG "
+            "URL (api.cognitive.microsoft.com), not a per-resource Azure OpenAI "
+            "endpoint. Catalog URLs host /openai/models but have NO deployments "
+            "— every chat call will 404. FIX in Azure Portal → Azure OpenAI "
+            "resource → Keys and Endpoint: use the per-resource URL like "
+            "https://<your-resource>.openai.azure.com/ and create at least one "
+            "deployment (e.g. gpt-4o-mini) under Resource Management → Model "
+            f"deployments. Current AZURE_OPENAI_ENDPOINT={endpoint!r}"
+        )
+
+    # Case 2: DeploymentNotFound on a valid-looking per-resource endpoint.
+    if status == 404 and "DeploymentNotFound" in body_txt:
+        return (
+            f"azure_openai: deployment {deployment!r} does not exist on "
+            f"endpoint {endpoint!r}. FIX in Azure Portal → your Azure OpenAI "
+            "resource → Resource Management → Model deployments → create a "
+            "deployment with this exact name, OR update AZURE_OPENAI_DEPLOYMENT "
+            "to match an existing deployment name on this resource."
+        )
+
+    return None
+
+
 async def call_chat(
     messages: list,
     *,
@@ -201,13 +247,21 @@ async def call_chat(
                 )
                 logger.warning("%s — advancing to next candidate", last_err)
                 continue
+            if resp.status_code == 404:
+                hint = _endpoint_misconfig_hint(base, 404, resp.text, deployment)
+                if hint:
+                    raise RuntimeError(hint)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"].get("content", "") or ""
             return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
         except httpx.HTTPStatusError as exc:
             # Non-retryable status (e.g. 400 BadRequest, 404 DeploymentNotFound)
-            # — the next key will fail identically. Fail fast.
+            # — the next key will fail identically. Fail fast with the most
+            # actionable error message we can produce.
+            hint = _endpoint_misconfig_hint(base, exc.response.status_code, exc.response.text, deployment)
+            if hint:
+                raise RuntimeError(hint)
             raise RuntimeError(
                 f"azure_openai[{label}]: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
             )
