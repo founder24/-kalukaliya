@@ -1,0 +1,39 @@
+cloud alpha services api-keys get-key-string $KEY_NAME --project=$PROJECT
+ERROR: (gcloud.services.enable) [axomxplain@gmail.com] does not have permission to access projects instance [blissful-acumen-495019-t6] (or it may not exist): Permission denied to enable service [factchecktools.googleapis.com]
+Permission denied to enable service [kgsearch.googleapis.com]
+Permission denied to enable service [language.googleapis.com]
+Permission denied to enable service [pagespeedonline.googleapis.com]
+Permission denied to enable service [webrisk.googleapis.com]
+Help Token: AShNTyFCooHvb69h7FVQL8YBHOTfL3_xtpVxhHArd_hg2w6LjsLY1YypGvsDUXqxmp6n05e1455imqfIvn72ogbZtpew1zEYQEH0jyuho9hyxhec. This command is authenticated as axomxplain@gmail.com which is the active account specified by the [core/account] property
+- '@type': type.googleapis.com/google.rpc.PreconditionFailure
+  violations:
+  - subject: '110002'
+    type: googleapis.com
+- '@type': type.googleapis.com/google.rpc.ErrorInfo
+  domain: serviceusage.googleapis.com
+  reason: AUTH_PERMISSION_DENIED
+ERROR: (gcloud.alpha.services.api-keys.create) PERMISSION_DENIED: Permission 'apikeys.keys.create' denied on resource 'projects/blissful-acumen-495019-t6/locations/global'
+Help Token: AShNTyHUFrwHnFXePKGC5S6WD2uaiwJhZKnCClEX6oX3jVazKMPW4MkIX0slZMkJ0UMrXCgWbdJy01_6ppBXa5gWR1TyKYdVPrsPDstUyvohA4On. This command is authenticated as axomxplain@gmail.com which is the active account specified by the [core/account] property
+- '@type': type.googleapis.com/google.rpc.PreconditionFailure
+  violations:
+  - subject: '110002'
+    type: googleapis.com
+- '@type': type.googleapis.com/google.rpc.ErrorInfo
+  domain: apikeys.googleapis.com
+  reason: AUTH_PERMISSION_DENIED
+ERROR: (gcloud.alpha.services.api-keys.list) PERMISSION_DENIED: Permission 'apikeys.keys.list' denied on resource 'projects/blissful-acumen-495019-t6/locations/global'
+Help Token: AShNTyGNPjJH27OeZ2hZlkSEkk-U5E7MoYHb0kv2At1BSEG6WOs58QB_DJ7GCMC6BgUHqMLBzuNJ9sHefhr9_s8XLdzK46OjwAvns2HwzlYW0IlH. This command is authenticated as axomxplain@gmail.com which is the active account specified by the [core/account] property
+- '@type': type.googleapis.com/google.rpc.PreconditionFailure
+  violations:
+  - subject: '110002'
+    type: googleapis.com
+- '@type': type.googleapis.com/google.rpc.ErrorInfo
+  domain: apikeys.googleapis.com
+  reason: AUTH_PERMISSION_DENIED
+ERROR: (gcloud.alpha.services.api-keys.get-key-string) argument (KEY : --location=LOCATION): Must be specified.
+Usage: gcloud alpha services api-keys get-key-string (KEY : --location=LOCATION) [optional flags]
+  optional flags may be  --help | --location
+
+For detailed information on this command and its flags, run:
+  gcloud alpha services api-keys get-key-string --help
+axomxplain@cloudshell:~ (blissful-acumen-495019-t6)$ 
