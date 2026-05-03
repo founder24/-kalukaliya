@@ -24,11 +24,9 @@ routing, retries and BYOK):
     workers_ai_oss120     — providers.cloudflare_ai.chat_stream(model_key="chat_long")
     vertex_chat           — vertex_chat.stream_chat (Vertex/Gemini path, currently
                             configured to llama-3.3-70b-instruct via Workers AI)
-    gemini_flash          — Gemini 2.5 Flash via Google's OpenAI-compat endpoint
   assamese_chat:
     sarvam                — sarvam-m via the sarvam_llm_client streaming pipeline
     vertex_chat           — vertex_chat.stream_chat (same Vertex/Gemini path)
-    gemini_flash          — Gemini 2.5 Flash
 
 Providers that fail to initialise (missing keys, unreachable gateway,
 etc.) are recorded as ``skipped`` with a short reason string instead of
@@ -303,63 +301,6 @@ async def _run_cf_chat_oss120(messages: list, max_tokens: int, **_):
     return await _stream_and_time(_cf_oss_stream("@cf/openai/gpt-oss-120b", messages, max_tokens))
 
 
-async def _run_gemini_flash(messages: list, max_tokens: int, **_):
-    """Stream from real Gemini 2.5 Flash via Google's OpenAI-compatible endpoint.
-
-    Distinct from the ``vertex_chat`` provider (which currently routes to
-    Workers AI llama-3.3-70b).  Uses ``GEMINI_API_KEY`` directly, with an
-    optional CF AI Gateway BYOK route via ``CF_AI_GATEWAY_GEMINI_BASE``.
-    Mirrors the Gemini call path used by ``llm.py``'s ``_call_gemini``.
-    """
-    import httpx
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("gemini_flash disabled (GEMINI_API_KEY missing)")
-    base = (
-        os.environ.get("CF_AI_GATEWAY_GEMINI_BASE", "").strip()
-        or "https://generativelanguage.googleapis.com/v1beta/openai"
-    )
-    url = base.rstrip("/") + "/chat/completions"
-    payload = {
-        "model": "gemini-2.5-flash",
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "stream": True,
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-    }
-
-    async def _gen():
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                if resp.status_code >= 400:
-                    body = await resp.aread()
-                    raise RuntimeError(
-                        f"gemini_flash HTTP {resp.status_code} — "
-                        f"{body.decode(errors='replace')[:200]}"
-                    )
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(raw)
-                        delta = (chunk.get("choices") or [{}])[0].get("delta", {})
-                        token = delta.get("content") or ""
-                        if token:
-                            yield token
-                    except json.JSONDecodeError:
-                        continue
-
-    return await _stream_and_time(_gen)
-
-
 async def _run_vertex_chat(messages: list, max_tokens: int, **_):
     """Stream from the production Vertex/Gemini chat path (``vertex_chat.py``).
 
@@ -427,14 +368,13 @@ ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], st
     "workers_ai_oss20":  (_run_cf_chat_oss20,  "@cf/openai/gpt-oss-20b"),
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
     "vertex_chat":            (_run_vertex_chat,            "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
-    "gemini_flash":           (_run_gemini_flash,           "gemini-2.5-flash"),
     "sarvam":                 (_run_sarvam,                 "sarvam-m"),
 }
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
-    "english_chat":  ["azure_openai", "workers_ai_oss20", "vertex_chat", "gemini_flash"],
-    "assamese_chat": ["sarvam", "vertex_chat", "gemini_flash"],
-    "long_form":     ["azure_openai", "workers_ai_oss120", "vertex_chat", "gemini_flash"],
+    "english_chat":  ["azure_openai", "workers_ai_oss20", "vertex_chat"],
+    "assamese_chat": ["sarvam", "vertex_chat"],
+    "long_form":     ["azure_openai", "workers_ai_oss120", "vertex_chat"],
 }
 
 
