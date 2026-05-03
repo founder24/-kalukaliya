@@ -42,7 +42,6 @@ def _build_chat_app():
     chat_mod.classify_intent = lambda _q: ("notes", "notes")
     chat_mod.get_instant_response = lambda _q: None  # avoid instant fast-path
     chat_mod.evaluate_prompt_safety = lambda _q: (True, None, "")
-    chat_mod.CF_TURNSTILE_ENABLED = False
 
     app = FastAPI()
     app.include_router(chat_mod.router, prefix="/api")

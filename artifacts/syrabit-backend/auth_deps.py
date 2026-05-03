@@ -231,7 +231,7 @@ async def get_current_user_optional(
             return user
         # DB lookup returned nothing (new user race, test token, etc.) but the
         # JWT signature is valid — treat as a minimal authenticated user so the
-        # caller is not silently downgraded to anonymous and blocked by Turnstile.
+        # caller is not silently downgraded to anonymous.
         role = payload.get("role", "student")
         return {
             "id": user_id,

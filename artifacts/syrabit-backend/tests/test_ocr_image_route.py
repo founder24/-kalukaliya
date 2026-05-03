@@ -67,8 +67,6 @@ def _build_ocr_app(dep_override=None):
     from routes import ai_chat as chat_mod
     from auth_deps import rate_limit_ocr_optional
 
-    chat_mod.CF_TURNSTILE_ENABLED = False
-
     app = FastAPI()
     app.include_router(chat_mod.router, prefix="/api")
 

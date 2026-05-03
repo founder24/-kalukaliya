@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 __all__ = [
     "ADMIN_JWT_SECRET",
     "CF_CACHE_TTL", "CF_GATEWAY_ENABLED",
-    "CF_TURNSTILE_ENABLED", "CF_TURNSTILE_SECRET_KEY",
     "CHAT_ENHANCE_ENABLED",
     "COOKIE_DOMAIN", "COOKIE_SAMESITE",
     "CORS_ORIGINS", "CORS_ORIGIN_REGEX",
@@ -246,10 +245,6 @@ CF_ACCESS_TEAM_DOMAIN = os.environ.get('CF_ACCESS_TEAM_DOMAIN', '').strip().rstr
 CF_ACCESS_AUD_ADMIN = os.environ.get('CF_ACCESS_AUD_ADMIN', '').strip()
 CF_ACCESS_AUD_INTERNAL = os.environ.get('CF_ACCESS_AUD_INTERNAL', '').strip()
 CF_ACCESS_ENFORCE = os.environ.get('CF_ACCESS_ENFORCE', '').strip().lower() in ('1', 'true', 'yes', 'on')
-
-# ── Cloudflare Turnstile ────────────────────────────────────────────────────
-CF_TURNSTILE_SECRET_KEY = os.environ.get('CF_TURNSTILE_SECRET_KEY', '').strip()
-CF_TURNSTILE_ENABLED = bool(CF_TURNSTILE_SECRET_KEY)
 
 # ── Cloudflare R2 Object Storage ─────────────────────────────────────────────
 # R2 uses S3-compatible API with account-scoped endpoint.

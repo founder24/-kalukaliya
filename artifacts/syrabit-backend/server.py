@@ -170,7 +170,6 @@ def _validate_env():
         "CF_AI_GATEWAY_TOKEN",        # CF Gateway BYOK master token
         "CLOUDFLARE_API_TOKEN",   # CF API (WAF drift, cache purge, analytics)
         "CF_ZONE_ID",             # CF zone for cache purge
-        "CF_TURNSTILE_SECRET_KEY", # CF Turnstile (bot protection)
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "RESEND_API_KEY",         # Transactional email
@@ -2520,7 +2519,7 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "x-anon-id", "x-turnstile-token", "traceparent", "tracestate", "baggage"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "x-anon-id", "traceparent", "tracestate", "baggage"],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After", "X-Request-Id", "traceparent"],
     max_age=600,
 )

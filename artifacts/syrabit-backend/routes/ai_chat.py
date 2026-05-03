@@ -523,9 +523,8 @@ async def ocr_chat_image(
     not consume the daily chat-message budget — Task #819. The follow-up
     chat send still costs 1 credit on its own; OCR is free.
 
-    Other safeguards mirror the chat endpoint: Cloudflare Turnstile for
-    anonymous callers, bounded streaming reads to cap memory pressure,
-    and magic-byte sniffing to refuse non-image payloads before any
+    Bounded streaming reads cap memory pressure and magic-byte sniffing
+    refuses non-image payloads before any
     Vertex call is made (a Vertex Vision call is far more expensive than
     a chat call). No documents/PDFs — the chat composer is image-only by
     product decision.
