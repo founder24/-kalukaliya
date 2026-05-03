@@ -1871,6 +1871,7 @@ from routes.admin_topic_discovery import router as admin_topic_discovery_router
 from routes.admin_seo_remediation import router as admin_seo_remediation_router
 from routes.admin_seo_internal_linker import router as admin_seo_internal_linker_router
 from routes.admin_entity_seo import router as admin_entity_seo_router
+from routes.admin_seo_external import router as admin_seo_external_router
 
 api.include_router(auth_router)
 api.include_router(content_router)
@@ -1925,6 +1926,7 @@ api.include_router(admin_topic_discovery_router)
 api.include_router(admin_seo_remediation_router)
 api.include_router(admin_seo_internal_linker_router)
 api.include_router(admin_entity_seo_router)
+api.include_router(admin_seo_external_router)
 
 from routes.voice import router as voice_router
 api.include_router(voice_router)

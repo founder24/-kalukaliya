@@ -167,3 +167,25 @@ PYEOF
 - Commits are created automatically by Replit's checkpoint system; `--no-commit` push mode is always used.
 - `gc.auto=0` + `maintenance.auto=false` env vars prevent git from spawning background maintenance (which creates `objects/maintenance.lock`).
 - **GITHUB_TOKEN** must be a valid classic or fine-grained PAT with `repo` write scope. Verify with: `curl -sH "Authorization: token $GITHUB_TOKEN" https://api.github.com/user | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('login','INVALID:',d.get('message')))"`
+## GCP service wiring (May 2026, ongoing)
+
+### Vertex AI 84%-error red herring (resolved)
+- `vertex_services.health_check()` and `vertex_chat.py` are **Workers AI shims** routing through `gateway.ai.cloudflare.com/.../workers-ai`. They report `via_cf_gateway=True` but never touch `aiplatform.googleapis.com`.
+- Real Gemini chat path uses the **`google-ai-studio`** slug (config.py:299, server.py:106) → `generativelanguage.googleapis.com`, NOT Vertex AI.
+- Only `providers/vertex_embed.py` and `retrievers/vertex.py` actually call `*-aiplatform.googleapis.com` — both gated on local SA JSON which is **not in env** (Vertex SA lives in CF AI Gateway BYOK per user). They silently no-op.
+- Therefore the 25 calls / 84% errors on "Agent Platform API" are CI/manual probes (e.g. `scripts/test_vertex_via_aig.py`), **not production chat traffic**. Production chat is healthy.
+
+### Newly wired endpoints (zero-risk; API-key-only, no SA needed)
+- `kg_search_client.py` — Reusable Knowledge Graph Search wrapper (`GOOGLE_KG_API_KEY`).
+- `pagespeed_service.py` — PageSpeed Insights v5 wrapper with Core Web Vitals + thresholding (`GOOGLE_PAGESPEED_API_KEY`, falls back to `GOOGLE_KG_API_KEY`).
+- `routes/admin_seo_external.py` — admin-gated:
+  - `GET  /api/admin/seo/kg-search?query=&limit=&languages=&types=`
+  - `GET  /api/admin/seo/pagespeed?url=&strategy=&categories=`
+  - `POST /api/admin/seo/pagespeed/batch` body `{urls,strategy,categories}` (max 20 URLs, concurrency=3)
+- Existing `entity_seo_health.py:584` Knowledge-Graph caller is unchanged (kept for backward compat); future refactor can switch it to `kg_search_client`.
+
+### Remaining enabled APIs not yet wired
+Books, Fact Check Tools, Natural Language, Discovery Engine, Cloud Scheduler, Cloud Tasks, Web Risk, Web Security Scanner. Service Usage / Cloud Asset / Cloud Billing require a separate local SA (CF AI Gateway BYOK only proxies AI providers, not arbitrary Google APIs).
+
+### Router-prefix gotcha
+`api = APIRouter(prefix="/api")` in `server.py:1785`. Routes registered on `api` must use `/admin/...`, NOT `/api/admin/...`, otherwise they end up at `/api/api/admin/...`. (Pre-existing bug in `admin_seo_keywords.py` — `/api/api/admin/seo/enrich` — left untouched.)
