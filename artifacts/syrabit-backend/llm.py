@@ -3226,6 +3226,58 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
 #   vector_search→ rag.py vector recall
 
 
+# Indic Unicode script ranges used by the embed-feature language router.
+# Bengali/Assamese (U+0980–U+09FF), Devanagari for Hindi/Marathi
+# (U+0900–U+097F), and a few common South-Indian blocks so the same
+# detector covers the wider Sarvam-supported language set we already accept
+# in chat. Detection is intentionally cheap (single regex pass) because it
+# runs on the hot path of every embed call.
+import re as _re_embed_lang
+_INDIC_SCRIPT_RE = _re_embed_lang.compile(
+    r"[\u0900-\u097F"   # Devanagari (Hindi, Marathi, Sanskrit)
+    r"\u0980-\u09FF"    # Bengali / Assamese
+    r"\u0A00-\u0A7F"    # Gurmukhi (Punjabi)
+    r"\u0A80-\u0AFF"    # Gujarati
+    r"\u0B00-\u0B7F"    # Oriya
+    r"\u0B80-\u0BFF"    # Tamil
+    r"\u0C00-\u0C7F"    # Telugu
+    r"\u0C80-\u0CFF"    # Kannada
+    r"\u0D00-\u0D7F]"   # Malayalam
+)
+_INDIC_LANG_CODES = frozenset({
+    "as", "bn", "hi", "mr", "sa", "pa", "gu", "or", "ta", "te", "kn", "ml",
+})
+
+
+def _embed_feature_for(text: str, lang: str) -> str:
+    """Return the POOL_WEIGHTS key for an embed call given the *text* and
+    caller-supplied *lang* hint.
+
+    Routing rule (Voyage/Cohere hybrid):
+      • Any Indic-script character present in *text*  → ``embed_indic``
+        (Cohere primary — embed-multilingual-v3.0 has the strongest
+        Bengali/Assamese retrieval in the public Indic benchmark).
+      • Otherwise *lang* is in the Indic set            → ``embed_indic``
+        (catches romanised-Assamese / code-mixed queries the script test
+        misses; the caller already classified the user-language).
+      • Otherwise (English / Latin-script / unknown)    → ``embed_en``
+        (Voyage primary — voyage-3.5 nDCG@10 = 0.816 vs Cohere 0.781).
+
+    This is a per-query router, NOT a weighted blend: a query goes to the
+    language-best provider in full, and the *aggregate* split across all
+    queries reflects the user-language mix (~60/40 English/Indic in our
+    case → ~60% Voyage / 40% Cohere overall, without diluting either
+    class with a weighted average). Each sub-pool still falls back to the
+    other provider on failure (1024-dim → drop-in compatible) so a
+    provider outage degrades cleanly inside the existing dispatch loop.
+    """
+    if text and _INDIC_SCRIPT_RE.search(text):
+        return "embed_indic"
+    if (lang or "").lower().strip() in _INDIC_LANG_CODES:
+        return "embed_indic"
+    return "embed_en"
+
+
 async def call_embed_with_dispatch(
     text: str,
     task_type: str = "RETRIEVAL_DOCUMENT",
@@ -3233,20 +3285,31 @@ async def call_embed_with_dispatch(
 ) -> list:
     """Embed *text* via the weighted provider selected for the 'embed' feature key.
 
-    Priority (PROVIDER_PRIORITY['embed']):
-      cohere(1000) → voyage_ai(500) → bedrock(50, Titan v2, conservative) → workers_ai(0)
+    Routing (hybrid, language-aware):
+      English / Latin-script    → POOL_WEIGHTS['embed_en']
+                                   voyage_ai(10000) → cohere(100) → workers_ai(0)
+      Indic-script / Indic lang → POOL_WEIGHTS['embed_indic']
+                                   cohere(10000) → voyage_ai(100) → workers_ai(0)
 
-    bedrock: Amazon Titan Text Embeddings v2 via CF gateway BYOK (/model/.../invoke).
-    cohere: providers.cohere.embed_query (1024-dim, embed-multilingual-v3.0).
-    azure_openai: embeddings endpoint not wired (Task #257) — excluded gracefully.
+    voyage_ai: providers.voyage_ai.embed_query (1024-dim, voyage-3.5).
+    cohere:    providers.cohere.embed_query    (1024-dim, embed-multilingual-v3.0).
+    workers_ai: cloudflare_ai.embed (1024-dim, @cf/baai/bge-m3).
+    azure_openai/bedrock: branches kept for back-compat in case POOL_WEIGHTS
+    is overridden at runtime; not selected by the default hybrid pools.
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP
+    feature = _embed_feature_for(text, lang)
     exclude: frozenset = frozenset()
-    max_attempts = len(_PP.get("embed", [])) + 1
+    # Total attempts allowed = the union of providers across the chosen
+    # sub-pool plus the generic embed pool's last-resort entry, +1 so we
+    # always probe the workers_ai weight-0 fallback after the weighted
+    # providers are excluded.
+    pool = _PP.get(feature) or _PP.get("embed", [])
+    max_attempts = len(pool) + 1
 
     for _ in range(max_attempts):
-        provider = select_provider("embed", lang=lang, exclude=exclude)
+        provider = select_provider(feature, lang=lang, exclude=exclude)
         try:
             if provider == "vertex":
                 import vertex_services
@@ -3276,6 +3339,14 @@ async def call_embed_with_dispatch(
                 if not _cohere_vec:
                     raise RuntimeError("cohere embed: embed_query returned empty vector")
                 return _cohere_vec
+            elif provider == "voyage_ai":
+                from providers.voyage_ai import embed_query as _voyage_embed_q, ENABLED as _voyage_enabled
+                if not _voyage_enabled:
+                    raise RuntimeError("voyage_ai embed: VOYAGE_API_KEY not configured")
+                _voyage_vec = await _voyage_embed_q(text)
+                if not _voyage_vec:
+                    raise RuntimeError("voyage_ai embed: embed_query returned empty vector")
+                return _voyage_vec
             elif provider == "azure_openai":
                 # Azure OpenAI text-embedding-3-large via CF BYOK (Task #256).
                 from providers.azure_openai import call_embed as _az_embed

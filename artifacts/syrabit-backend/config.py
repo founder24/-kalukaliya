@@ -447,7 +447,10 @@ _BASETEN_KEY      = os.environ.get('BASETEN_API_KEY',      '').strip()
 _ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
 _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
-_VOYAGE_AI_KEY    = os.environ.get('VOYAGE_AI_API_KEY',    '').strip()
+_VOYAGE_AI_KEY    = (
+    os.environ.get('VOYAGE_API_KEY',    '').strip()
+    or os.environ.get('VOYAGE_AI_API_KEY', '').strip()
+)
 # Search providers (Task #275): Exa neural search + Tavily live web search.
 # Used by PROVIDER_PRIORITY['search_rag'] and ['live_search'] pools.
 # Read directly by llm.py:3219 (Exa) and llm.py:3237 (Tavily) at request time;
@@ -467,6 +470,18 @@ ELEVENLABS_MODEL_ID = os.environ.get('ELEVENLABS_MODEL_ID', 'eleven_multilingual
 # Cohere embed config
 COHERE_EMBED_MODEL   = os.environ.get('COHERE_EMBED_MODEL',   'embed-multilingual-v3.0').strip() or 'embed-multilingual-v3.0'
 COHERE_EMBED_PRIMARY = os.environ.get('COHERE_EMBED_PRIMARY', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+
+# Voyage AI embed config — voyage-3.5 has the strongest English retrieval
+# nDCG@10 in the public benchmark (0.816 vs Cohere multilingual-v3.0 0.781),
+# so we make it the primary for English / mixed-script queries via the
+# `embed_en` sub-pool. Output dim pinned to 1024 to keep parity with the
+# existing Cohere-shaped Pinecone index — both providers can write into the
+# same namespace without re-indexing.
+VOYAGE_EMBED_MODEL = os.environ.get('VOYAGE_EMBED_MODEL', 'voyage-3.5').strip() or 'voyage-3.5'
+try:
+    VOYAGE_EMBED_DIMS = int(os.environ.get('VOYAGE_EMBED_DIMS', '1024').strip() or '1024')
+except ValueError:
+    VOYAGE_EMBED_DIMS = 1024
 
 # ── Vertex AI Gemini Flash chat (Task #607) ─────────────────────────────────
 # When VERTEX_PROJECT_ID is set, the chat path can route through Vertex AI's
@@ -1060,6 +1075,16 @@ PROVIDER_PRIORITY: dict = {
     "voice":             ["deepgram", "elevenlabs", "vertex", "workers_ai"],
     # Embeddings: Cohere (primary) → Voyage AI → Workers AI.
     "embed":             ["cohere", "voyage_ai", "workers_ai"],
+    # Language-routed embed sub-pools (hybrid). call_embed_with_dispatch
+    # picks "embed_en" when the query is English / mostly Latin script and
+    # "embed_indic" when Bengali/Assamese/Devanagari script is detected (or
+    # when the caller passes lang in the Indic set). Each sub-pool keeps the
+    # other provider as a 1024-dim fallback so a Voyage outage on an English
+    # query degrades cleanly to Cohere (and vice versa) without any vector-
+    # space mismatch in the Pinecone index. workers_ai (bge-m3, 1024-dim) is
+    # the last-resort weight-0 fallback in both pools.
+    "embed_en":          ["voyage_ai", "cohere", "workers_ai"],
+    "embed_indic":       ["cohere", "voyage_ai", "workers_ai"],
     # Reranking: Pinecone AI (primary) → Workers AI (last resort).
     "rerank":            ["pinecone_ai", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
@@ -1146,9 +1171,27 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     # (Cohere/ElevenLabs/Deepgram) keep deterministic priority over generic
     # fallbacks. Bedrock removed across the board (account-wide quota dead).
     "embed": {
-        "cohere":     1000,   # primary — embed-multilingual-v3.0
-        "voyage_ai":   500,   # secondary — voyage-3-large
+        "cohere":     1000,   # primary — embed-multilingual-v3.0 (generic / fallback path)
+        "voyage_ai":   500,   # secondary — voyage-3.5
         "workers_ai":    0,   # last-resort — @cf/baai/bge-m3
+    },
+    # Hybrid language-routed embed (Task — Voyage/Cohere split).
+    # Per-query script detection in call_embed_with_dispatch picks the right
+    # sub-pool, so the *aggregate* traffic split reflects user-language mix
+    # (≈60% English → Voyage, ≈40% Assamese/code-mixed → Cohere) without
+    # diluting either query class with a weighted average. The 100x lock
+    # ratio engages select_provider's STRICT-primary short-circuit so the
+    # picked primary wins every healthy draw and the secondary only kicks in
+    # when the primary is excluded (already-failed-this-request).
+    "embed_en": {
+        "voyage_ai":  10000,  # primary — voyage-3.5, English nDCG@10 = 0.816
+        "cohere":       100,  # fallback — embed-multilingual-v3.0 (1024-dim parity)
+        "workers_ai":     0,  # last-resort — @cf/baai/bge-m3
+    },
+    "embed_indic": {
+        "cohere":     10000,  # primary — embed-multilingual-v3.0, strong Indic retrieval
+        "voyage_ai":    100,  # fallback — voyage-3.5 (1024-dim parity)
+        "workers_ai":     0,  # last-resort — @cf/baai/bge-m3
     },
     "tts": {
         "elevenlabs": 500,   # primary — eleven_multilingual_v2
