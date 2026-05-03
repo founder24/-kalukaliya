@@ -21,7 +21,6 @@ from config import (
     MONGO_URL,
     _DEEPGRAM_KEY,
     _COHERE_KEY,
-    _BASETEN_KEY,
     _ASSEMBLYAI_KEY,
     _ELEVENLABS_KEY,
     _VOYAGE_AI_KEY,
@@ -74,8 +73,6 @@ def _key_status_for(name: str) -> dict[str, Any]:
         return {"configured": _present(_COHERE_KEY), "source": "COHERE_API_KEY"}
     if name == "voyage_ai":
         return {"configured": _present(_VOYAGE_AI_KEY), "source": "VOYAGE_AI_API_KEY"}
-    if name == "baseten":
-        return {"configured": _present(_BASETEN_KEY), "source": "BASETEN_API_KEY"}
     if name == "pinecone_ai":
         return {"configured": bool(os.environ.get("PINECONE_API_KEY")), "source": "PINECONE_API_KEY"}
     if name == "mongodb_atlas":

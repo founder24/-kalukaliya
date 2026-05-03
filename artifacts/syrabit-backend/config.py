@@ -303,7 +303,6 @@ _CF_PROVIDER_SLUGS = {
     "sarvam":      "custom-sarvam",
     # New providers routed through CF AI Gateway
     "cohere":      "cohere/v1",      # Embeddings/RAG — embed-multilingual-v3.0 (1024-dim)
-    "baseten":     "baseten/v1",     # Fine-tuned EdTech LLMs — OpenAI-compatible endpoint
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
     "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
@@ -326,7 +325,6 @@ _DIRECT_PROVIDER_URLS = {
     "sarvam":      "https://api.sarvam.ai",
     # Fallback direct URLs (used when CF gateway is down)
     "cohere":      "https://api.cohere.com/v1",
-    "baseten":     "https://api.baseten.co/v1",   # Baseten universal OpenAI-compatible gateway
     "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
     "voyage_ai":   "https://api.voyageai.com/v1",  # Voyage AI embeddings direct fallback
     # Bedrock direct: region-scoped; Azure direct: tenant endpoint (requires env var)
@@ -443,17 +441,12 @@ _SARVAM_LLM_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 _SARVAM_LLM_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
 _SARVAM_LLM_KEY_3 = os.environ.get('SARVAM_API_KEY_3', '').strip()
 
-# ── New AI provider keys (Cohere, Baseten, Deepgram, Voyage AI) ─────────────
+# ── New AI provider keys (Cohere, Deepgram, Voyage AI) ──────────────────────
 # All route through CF AI Gateway (BYOK) so local keys are optional once the
 # keys are registered in the CF dashboard. When gateway is enabled and the
 # local env var is missing, BYOK_PLACEHOLDER is substituted so the provider
 # module activates and CF injects the real key on every request.
-#
-# Baseten model selection: BASETEN_MODEL_ID is the deployment ID shown in
-# the Baseten dashboard (e.g. "xyz123abc"). Required to use Baseten even in
-# BYOK mode — it is sent as the "model" field in the chat/completions body.
 _COHERE_KEY       = os.environ.get('COHERE_API_KEY',       '').strip()
-_BASETEN_KEY      = os.environ.get('BASETEN_API_KEY',      '').strip()
 _ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
 _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
@@ -468,7 +461,6 @@ _VOYAGE_AI_KEY    = (
 # works under CF AI Gateway.
 _EXA_KEY          = os.environ.get('EXA_API_KEY',          '').strip()
 _TAVILY_KEY       = os.environ.get('TAVILY_API_KEY',       '').strip()
-BASETEN_MODEL_ID  = os.environ.get('BASETEN_MODEL_ID', '').strip()
 
 # AssemblyAI STT config
 ASSEMBLYAI_STT_MODEL = os.environ.get('ASSEMBLYAI_STT_MODEL', 'best').strip() or 'best'
@@ -529,7 +521,6 @@ if CF_GATEWAY_ENABLED:
     # Provider keys — BYOK allows CF gateway to inject keys stored in the
     # CF dashboard, so the local env var is optional in production.
     _COHERE_KEY      = _COHERE_KEY      or BYOK_PLACEHOLDER
-    _BASETEN_KEY     = _BASETEN_KEY     or BYOK_PLACEHOLDER
     _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
     _DEEPGRAM_KEY    = _DEEPGRAM_KEY    or BYOK_PLACEHOLDER

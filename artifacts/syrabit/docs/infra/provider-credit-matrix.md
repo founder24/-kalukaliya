@@ -33,28 +33,13 @@ reference today.
 
 | Tier | Providers in scope (matches `PROVIDER_PRIORITY`) |
 |------|---------------------------------------------------|
-| LLM / chat / content / vision / safety | `vertex`, `azure_openai`, `bedrock`, `sarvam`, `baseten` (¹) |
+| LLM / chat / content / vision / safety | `vertex`, `azure_openai`, `bedrock`, `sarvam` |
 | Voice (TTS / STT)                      | `elevenlabs`, `deepgram`, `assemblyai` |
 | Embed / rerank                          | `cohere`, `voyage_ai`, `pinecone_ai` |
 | Vector / DB                             | `pinecone_ai`, `mongodb_atlas` |
 | Search                                  | `exa_ai`, `tavily` |
 | Last-resort fallback (zero credit)      | `workers_ai`, `workers_ai_indic` |
 | Infra-tier (credit-bearing, not in `PROVIDER_PRIORITY`) | `cloudflare`, `aws`, `gcp`, `azure`, `upstash`, `mongodb_atlas` |
-
-> (¹) **`baseten` reconciliation — explicit resolution.** `baseten` is named
-> in the Task #303 brief but is **not** present in the current
-> `artifacts/syrabit-backend/config.py:PROVIDER_PRIORITY` /
-> `PROVIDER_CREDITS` / `POOL_WEIGHTS`. Resolution chosen for this doc: keep
-> the row in §1 and the column in §2 so the brief's provider list is
-> honoured, but **every numeric weight cell for `baseten` in §2 is set to
-> `0`** (not blank, not `—`) to make it explicit that the dispatcher MUST
-> NOT route to `baseten` until it has been wired into `config.py`. A
-> `baseten=0` cell is functionally equivalent to "absent" for
-> `get_weighted_chain`, so this satisfies both the "matrix cells must be
-> numeric 0–100" requirement and the "providers must match `config.py`"
-> requirement (zero-weighted = unreachable). If the Baseten credit
-> programme is dropped, delete the row + column with no other change
-> needed.
 
 **Explicitly excluded — do not list, score, or re-introduce:**
 - `cartesia` (removed from TTS chain; Deepgram fills the slot)
@@ -79,7 +64,6 @@ otherwise they are vendor-published or `unverified`.
 | `azure_openai` | Azure for Startups | 2,500 | unverified | unverified | `AZURE_SUBSCRIPTION_ID` env | `english_rag_chat`, `content`, `vision`, `tts`, `stt`, `embed`, `rerank`, `translate` | unverified (last bench HTTP 401 on key) | unverified | `bench_results/latest.json` (skipped — 401); Azure Cost Management |
 | `bedrock` | AWS Activate | 1,000 | unverified | unverified | account `926046660612` (env `AWS_ACCESS_KEY_ID`) | `vision`, `safety` (Bedrock Guardrails), legacy embed/translate via `bedrock-proxy` Worker | unverified (last bench HTTP 429 — TPD limit) | unverified | `bench_results/latest.json` (skipped — 429); AWS Cost Explorer |
 | `sarvam` | Sarvam Startup Credits | 500 | unverified | unverified | Sarvam tenant ID | `assamese_rag_chat`, `assamese_content`, `translate` | 306 / 325 (warm), 997 cold | 72.8 tok/s p50 | `bench_results/latest.json` (suite=`assamese_chat`, provider=`sarvam`); Sarvam dashboard |
-| `baseten` | Baseten Startup Credits | unverified | unverified | unverified | Baseten org ID | optional Indic LLM hosting (not currently in `PROVIDER_PRIORITY`; reserved slot) | unverified | unverified | `unverified` |
 | `elevenlabs` | ElevenLabs Startup Credits | 500 | unverified | unverified | ElevenLabs workspace | `tts`, `voice` | unverified | unverified | `unverified` |
 | `deepgram` | Deepgram Startup Credits | 500 | unverified | unverified | Deepgram project ID | `stt` (primary, nova-3), `tts` (aura-2 fallback), `voice` | ~250 ms p50 (vendor docs) | unverified | Deepgram public benchmark (`unverified` — re-measure required) |
 | `assemblyai` | AssemblyAI Startup Credits | 1,000 | unverified | unverified | AssemblyAI org | `stt`, `voice` | unverified (vendor publishes ~600 ms streaming p50) | unverified | `unverified` |
@@ -179,36 +163,32 @@ Suite SLOs used for the latency penalty (sourced from
 ### 2.2 Consolidated matrix (all in-scope providers × all feature keys)
 
 Single numeric matrix as required by the task. **Every cell is an integer in
-`[0, 100]`** — `0` means the provider does not serve that feature key (or,
-for `baseten`, is reserved-not-yet-wired per §"In-scope providers"); `1` is
-the last-resort pin for `workers_ai*`; `2..100` are credit-weighted draw
+`[0, 100]`** — `0` means the provider does not serve that feature key; `1`
+is the last-resort pin for `workers_ai*`; `2..100` are credit-weighted draw
 values per §2.1. The per-pool tables in §2.3 below are slices of this same
 matrix kept for narrative readability.
 
-| Feature key       | vertex | azure_openai | bedrock | sarvam | baseten | elevenlabs | deepgram | assemblyai | cohere | voyage_ai | pinecone_ai | mongodb_atlas | exa_ai | tavily | workers_ai | workers_ai_indic |
-|-------------------|------:|-------------:|--------:|------:|--------:|----------:|--------:|----------:|------:|---------:|-----------:|-------------:|------:|------:|----------:|----------------:|
-| `english_rag_chat`|    72 |           85 |       0 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `assamese_rag_chat`|   55 |            0 |       0 |    78 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         0 |               1 |
-| `content`         |    78 |           70 |       0 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `assamese_content`|    35 |            0 |       0 |    80 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         0 |               1 |
-| `vision`          |    78 |           60 |      45 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `safety`          |     0 |            0 |      82 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `tts`             |    45 |            0 |       0 |     0 |       0 |        70 |      60 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `stt`             |    45 |            0 |       0 |     0 |       0 |         0 |      82 |        70 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `voice`           |    40 |            0 |       0 |     0 |       0 |        65 |      80 |        70 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `embed`           |     0 |            0 |       0 |     0 |       0 |         0 |       0 |         0 |    85 |       55 |          0 |            0 |     0 |     0 |         1 |               0 |
-| `rerank`          |     0 |            0 |       0 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |         82 |            0 |     0 |     0 |         1 |               0 |
-| `vector_search`   |    35 |            0 |       0 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |         88 |            5 |     0 |     0 |         1 |               0 |
-| `search_rag`      |     0 |            0 |       0 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |    85 |     0 |         1 |               0 |
-| `live_search`     |     0 |            0 |       0 |     0 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |    80 |    55 |         1 |               0 |
-| `translate`       |    65 |           45 |      35 |    82 |       0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         0 |               1 |
+| Feature key       | vertex | azure_openai | bedrock | sarvam | elevenlabs | deepgram | assemblyai | cohere | voyage_ai | pinecone_ai | mongodb_atlas | exa_ai | tavily | workers_ai | workers_ai_indic |
+|-------------------|------:|-------------:|--------:|------:|----------:|--------:|----------:|------:|---------:|-----------:|-------------:|------:|------:|----------:|----------------:|
+| `english_rag_chat`|    72 |           85 |       0 |     0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `assamese_rag_chat`|   55 |            0 |       0 |    78 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         0 |               1 |
+| `content`         |    78 |           70 |       0 |     0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `assamese_content`|    35 |            0 |       0 |    80 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         0 |               1 |
+| `vision`          |    78 |           60 |      45 |     0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `safety`          |     0 |            0 |      82 |     0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `tts`             |    45 |            0 |       0 |     0 |        70 |      60 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `stt`             |    45 |            0 |       0 |     0 |         0 |      82 |        70 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `voice`           |    40 |            0 |       0 |     0 |        65 |      80 |        70 |     0 |        0 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `embed`           |     0 |            0 |       0 |     0 |         0 |       0 |         0 |    85 |       55 |          0 |            0 |     0 |     0 |         1 |               0 |
+| `rerank`          |     0 |            0 |       0 |     0 |         0 |       0 |         0 |     0 |        0 |         82 |            0 |     0 |     0 |         1 |               0 |
+| `vector_search`   |    35 |            0 |       0 |     0 |         0 |       0 |         0 |     0 |        0 |         88 |            5 |     0 |     0 |         1 |               0 |
+| `search_rag`      |     0 |            0 |       0 |     0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |    85 |     0 |         1 |               0 |
+| `live_search`     |     0 |            0 |       0 |     0 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |    80 |    55 |         1 |               0 |
+| `translate`       |    65 |           45 |      35 |    82 |         0 |       0 |         0 |     0 |        0 |          0 |            0 |     0 |     0 |         0 |               1 |
 
 Invariants enforced by this table:
 - **Last-resort pin honoured.** `workers_ai` and `workers_ai_indic` never
   exceed `1` on any row.
-- **`baseten` reserved.** Every `baseten` cell is `0` per the §"In-scope
-  providers" reconciliation note — the dispatcher will skip it until the
-  provider is added to `config.py:PROVIDER_PRIORITY`.
 - **No provider scores on a feature it cannot serve.** Compare against §1.
 
 ### 2.3 Per-pool slices (for review readability)
@@ -219,14 +199,14 @@ slice tables means "provider not part of the pool" (i.e. `0` in §2.2).
 
 #### LLM / vision / safety pools
 
-| Feature key       | vertex | azure_openai | bedrock | sarvam | baseten | workers_ai | workers_ai_indic |
-|-------------------|------:|-------------:|--------:|-------:|--------:|-----------:|-----------------:|
-| `english_rag_chat`|    72 |           85 |       — |      — |       0 |          1 |                — |
-| `assamese_rag_chat`|   55 |            — |       — |     78 |       0 |          — |                1 |
-| `content`         |    78 |           70 |       — |      — |       0 |          1 |                — |
-| `assamese_content`|    35 |            — |       — |     80 |       0 |          — |                1 |
-| `vision`          |    78 |           60 |      45 |      — |       0 |          1 |                — |
-| `safety`          |     — |            — |      82 |      — |       0 |          1 |                — |
+| Feature key       | vertex | azure_openai | bedrock | sarvam | workers_ai | workers_ai_indic |
+|-------------------|------:|-------------:|--------:|-------:|-----------:|-----------------:|
+| `english_rag_chat`|    72 |           85 |       — |      — |          1 |                — |
+| `assamese_rag_chat`|   55 |            — |       — |     78 |          — |                1 |
+| `content`         |    78 |           70 |       — |      — |          1 |                — |
+| `assamese_content`|    35 |            — |       — |     80 |          — |                1 |
+| `vision`          |    78 |           60 |      45 |      — |          1 |                — |
+| `safety`          |     — |            — |      82 |      — |          1 |                — |
 
 Notes:
 - `english_rag_chat`: Azure outscores Vertex on runway (2.5k vs 2.0k) at

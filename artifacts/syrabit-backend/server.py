@@ -93,7 +93,7 @@ def _validate_env():
     # sends a placeholder; the gateway appends the real key at the edge.
     # Safe to delete from Railway as soon as you've added the key to CF BYOK.
     # Locked provider chain (Task #297): Vertex (google-ai-studio slug),
-    # Azure OpenAI, Sarvam, Cohere, Baseten, ElevenLabs, Deepgram, AssemblyAI,
+    # Azure OpenAI, Sarvam, Cohere, ElevenLabs, Deepgram, AssemblyAI,
     # Voyage, Pinecone, Workers AI / Workers AI · IndicTrans2. xAI/OpenAI kept
     # as optional rare-feature endpoints. Providers removed from the active
     # routing chain are documented in scripts/check_dead_providers.py.
@@ -107,7 +107,6 @@ def _validate_env():
         "XAI_API_KEY":        "grok/v1",
         "OPENAI_API_KEY":     "openai/v1",
         "COHERE_API_KEY":     "cohere/v1",
-        "BASETEN_API_KEY":    "baseten/v1",
     }
 
     # ── Category 2: Secondary/tertiary AI keys — always redundant with BYOK ──
