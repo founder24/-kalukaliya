@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  LayoutDashboard, GitBranch, BookOpen, Users,
-  MessageSquare, TrendingUp, CreditCard, Bell, Key,
-  Shield, ShieldAlert, Settings, Activity, HeartPulse, LogOut,
+  LayoutDashboard, BookOpen, Users,
+  MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
-  Crown, Cpu, Layers, Zap, BarChart2, ThumbsUp,
-  ExternalLink, ShieldCheck,
+  Crown, Cpu, Activity, ShieldAlert,
+  ExternalLink,
 } from 'lucide-react';
 import axios from 'axios';
 import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlertCount, API_BASE } from '@/utils/api';
@@ -14,112 +13,134 @@ import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
-const AdminDashboard     = lazy(() => import('@/components/admin/AdminDashboard'));
-const AdminRoadmap       = lazy(() => import('@/components/admin/AdminRoadmap'));
-const AdminContentHub    = lazy(() => import('@/components/admin/AdminContentHub'));
-const AdminUsers         = lazy(() => import('@/components/admin/AdminUsers'));
-const AdminConversations = lazy(() => import('@/components/admin/AdminConversations'));
-const AdminAnalytics     = lazy(() => import('@/components/admin/AdminAnalytics'));
-const AdminPlans         = lazy(() => import('@/components/admin/AdminPlans'));
-const AdminNotifications = lazy(() => import('@/components/admin/AdminNotifications'));
-const AdminApiConfig     = lazy(() => import('@/components/admin/AdminApiConfig'));
-const AdminGoogleAuth    = lazy(() => import('@/components/admin/AdminGoogleAuth'));
-const AdminSettings      = lazy(() => import('@/components/admin/AdminSettings'));
-const AdminRateLimits    = lazy(() => import('@/components/admin/AdminRateLimits'));
-const AdminActivityLog   = lazy(() => import('@/components/admin/AdminActivityLog'));
-const AdminHealth        = lazy(() => import('@/components/admin/AdminHealth'));
-const AdminSeoManager    = lazy(() => import('@/components/admin/AdminSeoManager'));
-const AdminMonetization  = lazy(() => import('@/components/admin/AdminMonetization'));
-const AdminAds           = lazy(() => import('@/components/admin/AdminAds'));
-const AdminVertexPanel   = lazy(() => import('@/components/admin/AdminVertexPanel'));
-const AdminAutomation    = lazy(() => import('@/components/admin/AdminAutomation'));
-const AdminIntelligence  = lazy(() => import('@/components/admin/AdminIntelligence'));
-const AdminFeedback      = lazy(() => import('@/components/admin/AdminFeedback'));
-const AdminBotSecurity   = lazy(() => import('@/components/admin/AdminBotSecurity'));
-const AdminEduBrowser    = lazy(() => import('@/components/admin/AdminEduBrowser'));
-// Task #944 — Unified Log Explorer: filter / search / live-tail / export
-// across edge worker + Cloudflare GraphQL + backend + cron sources.
-const AdminLogsExplorer  = lazy(() => import('@/components/admin/AdminLogsExplorer'));
-const SyraAssistant      = lazy(() => import('@/components/admin/SyraAssistant'));
+const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
+const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
+const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
+const AdminUsers           = lazy(() => import('@/components/admin/AdminUsers'));
+const AdminConversations   = lazy(() => import('@/components/admin/AdminConversations'));
+const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
+const AdminNotifications   = lazy(() => import('@/components/admin/AdminNotifications'));
+const AdminSettings        = lazy(() => import('@/components/admin/AdminSettings'));
+const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
+const AdminSeoManager      = lazy(() => import('@/components/admin/AdminSeoManager'));
+// Task #296 — consolidated wrappers fold the previous fragmented panels
+// into tabbed parents (AI & Automation, Revenue, Access & Security, Logs).
+const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'));
+const AdminRevenueHub      = lazy(() => import('@/components/admin/AdminRevenueHub'));
+const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));
+// Logs Explorer now hosts Admin Actions inline as a `source=admin-actions`
+// pseudo-filter (Task #296) — no separate hub wrapper needed.
+const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
+const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
 import { SyraProvider } from '@/components/admin/syra/SyraContext';
 
+// Task #296 — flattened sidebar: 12 sections in 4 groups (was 24 in 6).
 const SECTIONS = [
-  { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',        group: 'main'     },
-  { id: 'roadmap',       icon: GitBranch,       label: 'Roadmap',           group: 'main'     },
-  { id: 'contenthub',    icon: Layers,          label: 'Content Editor',    group: 'content'  },
-  { id: 'seomanager',    icon: Globe,           label: 'SEO Manager',       group: 'content'  },
-  { id: 'vertex',        icon: Cpu,             label: 'AI Studio',         group: 'content'  },
-  { id: 'automation',    icon: Zap,             label: 'Automation',        group: 'content'  },
-  { id: 'users',         icon: Users,           label: 'Users',             group: 'audience' },
-  { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience' },
-  { id: 'feedback',      icon: ThumbsUp,        label: 'Chat Feedback',     group: 'audience' },
-  { id: 'analytics',     icon: TrendingUp,      label: 'Analytics',         group: 'insights' },
-  { id: 'monetization',  icon: Crown,           label: 'Monetization',      group: 'insights' },
-  { id: 'ads',           icon: BarChart2,       label: 'Ad Revenue',        group: 'insights' },
-  { id: 'plans',         icon: CreditCard,      label: 'Plans & Credits',   group: 'insights' },
-  { id: 'intelligence',  icon: BarChart2,       label: 'Intelligence',      group: 'insights' },
-  { id: 'notifications', icon: Bell,            label: 'Notifications',     group: 'comms'    },
-  { id: 'apiconfig',     icon: Key,             label: 'API Config',        group: 'system'   },
-  { id: 'googleauth',    icon: Shield,          label: 'Google Auth',       group: 'system'   },
-  { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'   },
-  { id: 'edubrowser',    icon: ShieldCheck,     label: 'Edu Browser',       group: 'system'   },
-  { id: 'ratelimits',    icon: Shield,          label: 'Rate Limits',       group: 'system'   },
-  { id: 'activitylog',   icon: Activity,        label: 'Activity Log',      group: 'system'   },
-  { id: 'botsecurity',   icon: ShieldAlert,     label: 'Bot Security',      group: 'system'   },
-  { id: 'logsexplorer',  icon: Activity,        label: 'Logs Explorer',     group: 'system'   },
-  { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'   },
+  { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',         group: 'main'       },
+  { id: 'contenthub',    icon: BookOpen,        label: 'Content Editor',    group: 'main'       },
+  { id: 'seomanager',    icon: Globe,           label: 'SEO Manager',       group: 'main'       },
+  { id: 'users',         icon: Users,           label: 'Users',             group: 'audience'   },
+  { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience'   },
+  { id: 'notifications', icon: Bell,            label: 'Notifications',     group: 'audience'   },
+  { id: 'ai',            icon: Cpu,             label: 'AI & Automation',   group: 'operations' },
+  { id: 'revenue',       icon: Crown,           label: 'Revenue',           group: 'operations' },
+  { id: 'analytics',     icon: TrendingUp,      label: 'Analytics',         group: 'operations' },
+  { id: 'security',      icon: ShieldAlert,     label: 'Access & Security', group: 'system'     },
+  { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
+  { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
+  { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
 ];
 
 const GROUP_LABELS = {
-  main:     '',
-  content:  'CONTENT',
-  audience: 'AUDIENCE',
-  insights: 'INSIGHTS',
-  comms:    'COMMS',
-  system:   'SYSTEM',
+  main:       '',
+  audience:   'AUDIENCE',
+  operations: 'OPERATIONS',
+  system:     'SYSTEM',
 };
 
-const GROUPS = ['main', 'content', 'audience', 'insights', 'comms', 'system'];
+const GROUPS = ['main', 'audience', 'operations', 'system'];
 
 const SECTION_COMPONENTS = {
   dashboard:     AdminDashboard,
-  roadmap:       AdminRoadmap,
   contenthub:    AdminContentHub,
   seomanager:    AdminSeoManager,
-  automation:    AdminAutomation,
   users:         AdminUsers,
   conversations: AdminConversations,
-  feedback:      AdminFeedback,
-  analytics:     AdminAnalytics,
-  monetization:  AdminMonetization,
-  ads:           AdminAds,
-  plans:         AdminPlans,
   notifications: AdminNotifications,
-  apiconfig:     AdminApiConfig,
-  googleauth:    AdminGoogleAuth,
-  settings:      AdminSettings,
-  ratelimits:    AdminRateLimits,
-  activitylog:   AdminActivityLog,
-  botsecurity:   AdminBotSecurity,
-  edubrowser:    AdminEduBrowser,
-  logsexplorer:  AdminLogsExplorer,
+  ai:            AdminAiHub,
+  revenue:       AdminRevenueHub,
+  analytics:     AdminAnalytics,
+  security:      AdminAccessSecurity,
+  logs:          AdminLogsExplorer,
   health:        AdminHealth,
-  vertex:        AdminVertexPanel,
-  intelligence:  AdminIntelligence,
+  settings:      AdminSettings,
+  // Roadmap is no longer in the sidebar but stays mounted as a reachable
+  // route via the `roadmap` deep-link redirect / dashboard quick link.
+  roadmap:       AdminRoadmap,
 };
+
+// Task #296 — backwards-compat redirect map for legacy section ids.
+// Every old `setActiveSection('apiconfig')` style call (deep links from
+// emails, bookmarks, AdminQuickLinks, SyraAssistant intents, etc.) is
+// rewritten into the new merged section + an initial tab/sub-tab so
+// users land on exactly the right pane.
+//
+// Shape:  { section: 'ai', tab: 'providers', subTab: 'apiconfig' }
+//
+// Forwarders preserve any extra navContext keys (panel, channel, etc.)
+// the caller passed alongside (used by botsecurity alert deep links).
+export const SECTION_REDIRECTS = {
+  // AI & Automation
+  apiconfig:    { section: 'ai',       tab: 'providers', subTab: 'apiconfig'    },
+  vertex:       { section: 'ai',       tab: 'providers', subTab: 'vertex'       },
+  intelligence: { section: 'ai',       tab: 'providers', subTab: 'intelligence' },
+  automation:   { section: 'ai',       tab: 'jobs' },
+  // Revenue
+  monetization: { section: 'revenue',  tab: 'monetization' },
+  plans:        { section: 'revenue',  tab: 'plans' },
+  ads:          { section: 'revenue',  tab: 'ads' },
+  // Access & Security
+  googleauth:   { section: 'security', tab: 'auth' },
+  ratelimits:   { section: 'security', tab: 'ratelimits' },
+  botsecurity:  { section: 'security', tab: 'botsecurity' },
+  edubrowser:   { section: 'security', tab: 'edubrowser' },
+  // Logs — Admin Actions is now an in-explorer source filter, not a tab.
+  logsexplorer: { section: 'logs' },
+  activitylog:  { section: 'logs', initialSources: ['admin-actions'] },
+  // Conversations Feedback tab
+  feedback:     { section: 'conversations', tab: 'feedback' },
+  // Roadmap was retired from the sidebar but stays mounted; explicit
+  // entry here documents the passthrough for old deep-links.
+  roadmap:      { section: 'roadmap' },
+};
+
+export function resolveSectionRedirect(section, ctx = null) {
+  // Special case retained from earlier behaviour: 'blog' opens the
+  // ContentHub on its blog tab.
+  if (section === 'blog') {
+    return { section: 'contenthub', navContext: { ...(ctx || {}), initialTab: 'blog' } };
+  }
+  const redirect = SECTION_REDIRECTS[section];
+  if (!redirect) {
+    return { section, navContext: ctx };
+  }
+  const merged = { ...(ctx || {}) };
+  if (redirect.tab && merged.tab === undefined) merged.tab = redirect.tab;
+  if (redirect.subTab && merged.subTab === undefined) merged.subTab = redirect.subTab;
+  if (redirect.initialSources && merged.initialSources === undefined) {
+    merged.initialSources = redirect.initialSources;
+  }
+  return { section: redirect.section, navContext: merged };
+}
 
 export default function AdminPage() {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('dashboard');
   const [navContext, setNavContext]        = useState(null);
   const handleNavigate = useCallback((section, ctx = null) => {
-    if (section === 'blog') {
-      setNavContext({ initialTab: 'blog' });
-      setActiveSection('contenthub');
-    } else {
-      setNavContext(ctx);
-      setActiveSection(section);
-    }
+    const resolved = resolveSectionRedirect(section, ctx);
+    setNavContext(resolved.navContext);
+    setActiveSection(resolved.section);
   }, []);
   const [collapsed, setCollapsed]         = useState(false);
   const [verifying, setVerifying]         = useState(true);
@@ -143,15 +164,8 @@ export default function AdminPage() {
     return () => clearInterval(alertPollRef.current);
   }, [adminToken, verifying]);
 
-  // Cookie-only admin auth: the httponly `syrabit_admin_session`
-  // cookie set by `/admin/login` is the sole source of truth.
-  // `adminVerify()` sends `withCredentials: true` so the cookie rides
-  // along, and the backend slides its expiry forward on every call.
-  // `adminToken` is kept purely as a "session ready" sentinel so that
-  // downstream effects + children gate on a verified session; it does
-  // NOT hold a real JWT (the cookie does, in httponly form). Helpers
-  // call `adminHeaders(token)` which already filters non-JWT values to
-  // `{}`, so passing the sentinel falls through to cookie auth.
+  // Cookie-only admin auth (see prior comments) — adminToken is the
+  // sentinel; the httponly cookie does the actual auth.
   useEffect(() => {
     adminVerify()
       .then((res) => {
@@ -165,19 +179,6 @@ export default function AdminPage() {
       });
   }, [navigate]);
 
-  // Periodic keep-alive: reach `/admin/verify` so the backend re-issues
-  // the cookie before its 24h max_age lapses. No localStorage hop —
-  // the cookie carries itself via `withCredentials: true`.
-  //
-  // Audit #10: the previous 20-minute cadence was hitting the API 72×
-  // per day per open admin tab for a cookie that lives 24 hours. None
-  // of the other admin endpoints (dashboard polls, alerts, etc.) re-
-  // issue the session cookie — only `/admin/verify` slides the expiry —
-  // so we still need *some* interval, but the standard "refresh at
-  // half-life" pattern is 12 hours: refreshes well before the 24h
-  // expiry, recovers from short network blips on the next tick, and
-  // cuts API churn ~36× while keeping active sessions sliding
-  // indefinitely.
   useEffect(() => {
     if (verifying) return;
     const id = setInterval(() => {
@@ -222,9 +223,6 @@ export default function AdminPage() {
   }, [verifying, adminToken]);
 
   const handleLogout = async () => {
-    // Backend `/admin/logout` clears the httponly `syrabit_admin_session`
-    // cookie — that's the entire session teardown. No localStorage to
-    // wipe (cookie-only auth).
     await adminLogout().catch(() => {});
     setAdminToken(null);
     toast.success('Logged out');
@@ -241,7 +239,8 @@ export default function AdminPage() {
   }
 
   const ActiveComponent = SECTION_COMPONENTS[activeSection] || AdminDashboard;
-  const activeLabel = SECTIONS.find((s) => s.id === activeSection)?.label || 'Admin';
+  const activeLabel = SECTIONS.find((s) => s.id === activeSection)?.label
+    || (activeSection === 'roadmap' ? 'Roadmap' : 'Admin');
 
   const statusConfig = {
     ok:          { label: 'All Systems Operational', dot: 'bg-emerald-500', text: 'text-emerald-700', border: 'border-emerald-200', bg: 'bg-emerald-50' },
@@ -249,6 +248,14 @@ export default function AdminPage() {
     maintenance: { label: 'Maintenance Mode',        dot: 'bg-red-500',     text: 'text-red-700',     border: 'border-red-200',     bg: 'bg-red-50'     },
   };
   const sc = statusConfig[sysStatus];
+
+  // Sections that consume navContext are now the merged hubs (which all
+  // accept a `tab`/`subTab` initial-state) plus the few legacy panels
+  // that already used it directly (users, contenthub, dashboard).
+  const SECTIONS_WITH_CONTEXT = new Set([
+    'users', 'contenthub', 'dashboard', 'conversations',
+    'ai', 'revenue', 'security', 'logs',
+  ]);
 
   return (
     <SyraProvider activeSection={activeSection} adminToken={adminToken} adminEmail={adminEmail}>
@@ -301,7 +308,7 @@ export default function AdminPage() {
                   return (
                     <button
                       key={id}
-                      onClick={() => setActiveSection(id)}
+                      onClick={() => handleNavigate(id)}
                       className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 text-left group ${
                         isActive
                           ? 'bg-violet-50 text-violet-700 font-semibold'
@@ -320,7 +327,7 @@ export default function AdminPage() {
                       {!collapsed && (
                         <span className="text-[13px] truncate">{sectionLabel}</span>
                       )}
-                      {id === 'botsecurity' && unackAlertCount > 0 && (
+                      {id === 'security' && unackAlertCount > 0 && (
                         <span className="ml-auto flex-shrink-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
                           {unackAlertCount > 99 ? '99+' : unackAlertCount}
                         </span>
@@ -401,7 +408,7 @@ export default function AdminPage() {
                 adminToken={adminToken}
                 adminName={adminName}
                 onNavigate={handleNavigate}
-                navContext={activeSection === 'users' || activeSection === 'contenthub' || activeSection === 'botsecurity' || activeSection === 'dashboard' ? navContext : null}
+                navContext={SECTIONS_WITH_CONTEXT.has(activeSection) ? navContext : null}
               />
             </Suspense>
           </SectionErrorBoundary>

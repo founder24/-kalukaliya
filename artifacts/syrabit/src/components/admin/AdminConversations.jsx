@@ -4,6 +4,7 @@ import {
   ChevronRight, Crown, X, Clock, ArrowLeft, Sparkles, TrendingUp, RefreshCw, Flag,
 } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
+import AdminFeedback from './AdminFeedback';
 import { useSyraSelection, useSyraFilters, useSyraVisibleError } from '@/components/admin/syra/SyraContext';
 import { adminGetConversations, extractFaqs, conversationsSentiment, syncConversations, API_BASE } from '@/utils/api';
 import axios from 'axios';
@@ -69,12 +70,21 @@ function SentimentBar({ data }) {
   );
 }
 
-export default function AdminConversations({ adminToken, onNavigate }) {
+const VALID_CONV_TABS = new Set(['conversations', 'faqs', 'feedback']);
+
+export default function AdminConversations({ adminToken, onNavigate, navContext }) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState('conversations');
+  // Task #296 — honour navContext.tab so deep-links from the legacy
+  // `feedback` section id (and any future deep-links) land on the
+  // requested tab instead of the default "conversations" pane.
+  const initialTab = VALID_CONV_TABS.has(navContext?.tab) ? navContext.tab : 'conversations';
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    if (VALID_CONV_TABS.has(navContext?.tab)) setTab(navContext.tab);
+  }, [navContext?.tab]);
   const [faqs, setFaqs] = useState(null);
   const [faqLoading, setFaqLoading] = useState(false);
   const [sentiment, setSentiment] = useState(null);
@@ -204,8 +214,10 @@ export default function AdminConversations({ adminToken, onNavigate }) {
           {[
             { id: 'conversations', label: `Conversations (${conversations.length})` },
             { id: 'faqs', label: 'FAQ Extractor' },
+            { id: 'feedback', label: 'Chat Feedback' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
+              data-testid={`admin-conversations-tab-${t.id}`}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 tab === t.id
                   ? 'bg-violet-600 text-white shadow-sm'
@@ -225,6 +237,12 @@ export default function AdminConversations({ adminToken, onNavigate }) {
             {faqLoading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} Extract FAQs
           </button>
         </div>
+
+        {tab === 'feedback' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminFeedback adminToken={adminToken} />
+          </div>
+        )}
 
         {tab === 'faqs' && (
           <div className="p-6 space-y-4 flex-1 overflow-y-auto">

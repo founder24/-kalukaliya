@@ -5056,7 +5056,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
         <AdminDraftServedSubjects adminToken={adminToken} />
       </SectionErrorBoundary>
 
-      <AdminQuickLinks links={['content','seomanager','analytics','users','conversations','vertex','monetization']} onNavigate={onNavigate} />
+      <AdminQuickLinks links={['content','seomanager','analytics','users','conversations','ai','revenue','roadmap']} onNavigate={onNavigate} />
     </div>
   );
 }

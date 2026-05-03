@@ -26,13 +26,24 @@ import {
   adminLogsExportUrl, adminLogsDownloadExport,
 } from '@/utils/api';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
+// Task #296 — Admin Actions are folded into the Logs Explorer as an
+// extra `source=admin-actions` filter. When that pseudo-source is
+// active the explorer swaps its table for the AdminActivityLog view
+// (which still talks to the dedicated /admin/activity-log endpoint).
+import AdminActivityLog from './AdminActivityLog';
+
+// `admin-actions` is a UI-only pseudo-source — it does NOT get sent to
+// the unified-logs API. It signals "switch this pane to render the
+// admin audit-trail UI instead of the unified-logs table".
+export const ADMIN_ACTIONS_SOURCE = 'admin-actions';
 
 const SOURCE_OPTIONS = [
-  { id: 'edge',       label: 'Edge worker' },
-  { id: 'cloudflare', label: 'Cloudflare GraphQL' },
-  { id: 'backend',    label: 'Backend (FastAPI)' },
-  { id: 'pages',      label: 'CF Pages' },
-  { id: 'cron',       label: 'Cron / jobs' },
+  { id: 'edge',                 label: 'Edge worker' },
+  { id: 'cloudflare',           label: 'Cloudflare GraphQL' },
+  { id: 'backend',              label: 'Backend (FastAPI)' },
+  { id: 'pages',                label: 'CF Pages' },
+  { id: 'cron',                 label: 'Cron / jobs' },
+  { id: ADMIN_ACTIONS_SOURCE,   label: 'Admin actions' },
 ];
 const LEVEL_OPTIONS = ['debug', 'info', 'warn', 'error'];
 const TIME_PRESETS = [
@@ -90,9 +101,15 @@ function statusClass(status) {
   return 'text-emerald-700';
 }
 
-export default function AdminLogsExplorer({ adminToken }) {
+export default function AdminLogsExplorer({ adminToken, onNavigate, navContext }) {
+  // Task #296 — seed initial sources from navContext so the legacy
+  // `activitylog` deep-link (redirected to logs with
+  // initialSources=['admin-actions']) lands on the Admin Actions view.
+  const initialSources = Array.isArray(navContext?.initialSources)
+    ? navContext.initialSources.filter((s) => typeof s === 'string')
+    : [];
   const [filters, setFilters] = useState({
-    sources: [],
+    sources: initialSources,
     levels:  [],
     route_prefix: '',
     correlation_id: '',
@@ -100,6 +117,17 @@ export default function AdminLogsExplorer({ adminToken }) {
     status_min: '',
     status_max: '',
   });
+  // Re-seed sources if navContext changes after mount (e.g. user clicks
+  // the Admin Actions deep-link from the dashboard while already on Logs).
+  useEffect(() => {
+    if (Array.isArray(navContext?.initialSources)) {
+      setFilters((f) => ({ ...f, sources: navContext.initialSources.filter((s) => typeof s === 'string') }));
+    }
+  }, [navContext?.initialSources]);
+
+  // Active "admin-actions" pseudo-source short-circuits the unified-logs
+  // pane and renders the activity-log audit trail instead.
+  const showAdminActions = filters.sources.includes(ADMIN_ACTIONS_SOURCE);
   const [preset, setPreset] = useState('1h');
   const [logs, setLogs]       = useState([]);
   const [total, setTotal]     = useState(0);
@@ -156,10 +184,23 @@ export default function AdminLogsExplorer({ adminToken }) {
     const p = TIME_PRESETS.find((x) => x.id === preset) || TIME_PRESETS[1];
     return timeWindowFromPreset(p);
   }, [preset]);
-  const fullFilters = useMemo(() => ({ ...filters, ...window_ }),
-    [filters, window_]);
+  // Strip the admin-actions pseudo-source before issuing API calls — the
+  // unified-logs backend has no concept of it; it's UI-only routing.
+  const fullFilters = useMemo(() => ({
+    ...filters,
+    sources: (filters.sources || []).filter((s) => s !== ADMIN_ACTIONS_SOURCE),
+    ...window_,
+  }), [filters, window_]);
 
   const load = useCallback(async ({ append = false, before = null } = {}) => {
+    // Skip the unified-logs query entirely when the pane has been
+    // swapped to the Admin Actions view. AdminActivityLog runs its own
+    // fetch against /admin/activity-log.
+    if (showAdminActions) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -250,7 +291,9 @@ export default function AdminLogsExplorer({ adminToken }) {
     if (confirmText !== 'CLEAR' || clearing) return;
     setClearing(true);
     try {
-      const r = await adminLogsClear(adminToken, filters.sources || []);
+      // Pseudo-source is UI-only; never send it to the unified-logs API.
+      const cleanSources = (filters.sources || []).filter((s) => s !== ADMIN_ACTIONS_SOURCE);
+      const r = await adminLogsClear(adminToken, cleanSources);
       toast.success(`Cleared ${r.data?.deleted ?? 0} entries — purge is logged in Activity Log`);
       setConfirmClearOpen(false);
       setConfirmText('');
@@ -574,7 +617,15 @@ export default function AdminLogsExplorer({ adminToken }) {
           </div>
         </div>
 
+        {/* ── Admin Actions view (Task #296) ───────────────────────── */}
+        {showAdminActions && (
+          <div data-testid="admin-logs-actions-pane" className="border rounded bg-white p-4">
+            <AdminActivityLog adminToken={adminToken} onNavigate={onNavigate} />
+          </div>
+        )}
+
         {/* ── Result count + error ────────────────────────────────── */}
+        {!showAdminActions && (
         <div className="flex items-center justify-between text-sm text-slate-600">
           <span>
             Showing {logs.length}
@@ -582,8 +633,10 @@ export default function AdminLogsExplorer({ adminToken }) {
           </span>
           {error && <span className="text-red-600">{error}</span>}
         </div>
+        )}
 
         {/* ── Table ──────────────────────────────────────────────── */}
+        {!showAdminActions && (
         <div className="border rounded overflow-x-auto bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600 text-xs uppercase">
@@ -719,8 +772,9 @@ export default function AdminLogsExplorer({ adminToken }) {
             </tbody>
           </table>
         </div>
+        )}
 
-        {nextBefore && (
+        {!showAdminActions && nextBefore && (
           <div className="flex justify-center">
             <button
               type="button"
