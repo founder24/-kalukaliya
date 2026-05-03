@@ -111,7 +111,7 @@ function classifyAlert(type) {
   return 'general';
 }
 
-export default function SyraAssistant({ activeSection, onNavigate, adminToken }) {
+export default function SyraAssistant({ activeSection, onNavigate, adminToken, adminEmail }) {
   const {
     selectedEntity, filters, visibleError,
     prefs, setPrefs, toggleMute, alertCategories, prefsRef,
@@ -637,25 +637,30 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   // Code review #298: this MUST trigger the first time the operator
   // opens the orb each day, not on session load. Loading the admin
   // panel in a background tab while AFK shouldn't blow the briefing
-  // budget — we wait until they actually engage with Syra.
+  // budget — we wait until they actually engage with Syra. Markers
+  // are namespaced per admin email so a shared workstation doesn't
+  // suppress operator B's briefing because A heard it earlier.
+  const adminSlug = String(adminEmail || 'anon').toLowerCase().trim() || 'anon';
+  const greetingKey = `syra:lastGreetingDate:${adminSlug}`;
+  const briefingKey = `syra:lastBriefingDate:${adminSlug}`;
   useEffect(() => {
     if (!adminToken || typeof window === 'undefined') return;
     if (!open) return;
     const today = todayKey();
     let saidGreeting = false;
     if (prefs.greeting) {
-      const last = window.localStorage.getItem('syra:lastGreetingDate');
+      const last = window.localStorage.getItem(greetingKey);
       if (last !== today) {
-        window.localStorage.setItem('syra:lastGreetingDate', today);
+        window.localStorage.setItem(greetingKey, today);
         const persona = prefs.persona || 'Syra';
         speak(`${persona} online. Ready when you are.`);
         saidGreeting = true;
       }
     }
     if (prefs.briefing) {
-      const last = window.localStorage.getItem('syra:lastBriefingDate');
+      const last = window.localStorage.getItem(briefingKey);
       if (last !== today) {
-        window.localStorage.setItem('syra:lastBriefingDate', today);
+        window.localStorage.setItem(briefingKey, today);
         const delay = saidGreeting ? 2200 : 200;
         setTimeout(() => {
           adminSyraBriefing(adminToken)
@@ -675,7 +680,30 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     // localStorage keys, so toggling `open` on/off in the same day is
     // a no-op after the first announcement.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, open]);
+  }, [adminToken, open, greetingKey, briefingKey]);
+
+  // ── Conversational memory controls ──────────────────────────────────────
+  // Idle-timeout clear: if the operator hasn't spoken to Syra in 30
+  // minutes, drop the rolling buffer so a stale "him" doesn't refer
+  // to a user from this morning. Reset on every new turn.
+  const lastTurnAtRef = useRef(Date.now());
+  useEffect(() => { lastTurnAtRef.current = Date.now(); }, [reply, transcript]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (Date.now() - lastTurnAtRef.current > 30 * 60_000) {
+        memoryRef.current = [];
+      }
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const clearMemory = useCallback(() => {
+    memoryRef.current = [];
+    setPendingAction(null);
+    setReply('');
+    setTranscript('');
+    setError('');
+    speak('Memory cleared.');
+  }, [speak]);
 
   // ── Proactive alert poller ──────────────────────────────────────────────
   // Code review #298: per-category mute is only meaningful if the
@@ -756,6 +784,7 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
           setPrefs={setPrefs}
           alertCategories={alertCategories}
           toggleMute={toggleMute}
+          onClearMemory={clearMemory}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -872,7 +901,7 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   );
 }
 
-function SyraSettingsPanel({ prefs, setPrefs, alertCategories, toggleMute, onClose }) {
+function SyraSettingsPanel({ prefs, setPrefs, alertCategories, toggleMute, onClearMemory, onClose }) {
   return (
     <div
       className="max-w-sm w-[320px] rounded-2xl shadow-2xl border border-gray-200 bg-white p-4 space-y-3"
@@ -934,6 +963,15 @@ function SyraSettingsPanel({ prefs, setPrefs, alertCategories, toggleMute, onClo
           className="mt-1 w-full px-2 py-1 rounded-lg border border-gray-200 text-sm"
         />
       </label>
+
+      <button
+        type="button"
+        onClick={onClearMemory}
+        data-testid="syra-clear-memory"
+        className="w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+      >
+        Clear conversation memory now
+      </button>
 
       <div className="text-xs text-gray-700">
         <p className="font-medium mb-1">Mute alert categories</p>

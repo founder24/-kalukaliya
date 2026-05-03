@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2, Search, Ban, CheckCircle, Crown, ChevronDown, AlertTriangle, RefreshCw, TrendingDown, Activity, CreditCard, Plus, Minus, X, GraduationCap, Trophy } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
 import { Input } from '@/components/ui/input';
@@ -178,15 +178,19 @@ export default function AdminUsers({ adminToken, navContext, onNavigate }) {
   // Task #298 — publish current filter set + selected user (the one
   // whose credits modal is open) onto SyraContext so the orb can
   // resolve "ban this user" / "show me only the suspended ones".
-  useSyraFilters(useCallback(() => ({
+  // Memoised so the provider's setFilters effect only fires on real
+  // changes — passing a fresh object every render would loop.
+  const syraFilters = useMemo(() => ({
     search: search || undefined,
     tab: tab !== 'all' ? tab : undefined,
-  }), [search, tab])());
-  useSyraSelection(creditsUser ? {
+  }), [search, tab]);
+  useSyraFilters(syraFilters);
+  const syraSelection = useMemo(() => (creditsUser ? {
     type: 'user',
     id: creditsUser.id,
     label: creditsUser.name || creditsUser.email,
-  } : null);
+  } : null), [creditsUser?.id, creditsUser?.name, creditsUser?.email]);
+  useSyraSelection(syraSelection);
 
   useEffect(() => {
     const timer = setTimeout(() => {

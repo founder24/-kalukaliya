@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Bell, Send, Clock, Trash2, Users, Loader2, Info, CheckCircle2, AlertTriangle, XCircle, Zap, Plus, BarChart3, Smartphone, RefreshCw, ChevronDown, ChevronUp, Eye } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
 import { toast } from 'sonner';
@@ -67,12 +67,15 @@ export default function AdminNotifications({ adminToken, onNavigate }) {
   const [statsDays, setStatsDays] = useState(7);
 
   // Task #298 — publish active filters + visible error so Syra can
-  // contextualise replies on the Notifications screen.
-  useSyraFilters({
+  // contextualise replies on the Notifications screen. Memoised to
+  // avoid creating a fresh object every render (which would re-trigger
+  // SyraContext.setFilters and risk a re-render loop).
+  const syraFilters = useMemo(() => ({
     tab: mainTab !== 'broadcast' ? mainTab : undefined,
     audience: audience !== 'all' ? audience : undefined,
     type: type !== 'info' ? type : undefined,
-  });
+  }), [mainTab, audience, type]);
+  useSyraFilters(syraFilters);
   useSyraVisibleError(error || null);
 
   useEffect(() => {

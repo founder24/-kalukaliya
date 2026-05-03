@@ -413,6 +413,7 @@ export default function AdminPage() {
           activeSection={activeSection}
           onNavigate={handleNavigate}
           adminToken={adminToken}
+          adminEmail={adminEmail}
         />
       </Suspense>
     </div>
