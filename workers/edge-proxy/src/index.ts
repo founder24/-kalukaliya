@@ -21,6 +21,10 @@ import { runCfBlockProbe } from "./cf-block-probe";
 import { runBotCacheAlert } from "./bot-cache-alert";
 import { runAiGatewayCacheAlert } from "./ai-gateway-cache-alert";
 import {
+  runR2StorageClassAlert,
+  shouldRunMonthlyR2Check,
+} from "./r2-storage-class-alert";
+import {
   recordBotCacheEvent,
   getBotCacheStats,
   type BotCacheStats,
@@ -165,6 +169,26 @@ interface Env {
    * hasn't been provisioned yet (returns 503 on the upload route).
    */
   ASSETS?: R2Bucket;
+  /**
+   * Task #314 — R2 binding for the `syrabit-media` bucket. Used by the
+   * monthly R2 cold-storage / Logpush-cap watchdog to walk the
+   * `logpush/` prefix and sum object sizes (no per-prefix dimension is
+   * exposed via the GraphQL Analytics API). Optional so the worker
+   * still boots in local dev / before the bucket is provisioned —
+   * the watchdog skips the Logpush-cap signal when the binding is
+   * absent.
+   */
+  R2_MEDIA?: R2Bucket;
+  /**
+   * Task #314 — env vars for the monthly R2 cold-storage watchdog.
+   * See workers/edge-proxy/src/r2-storage-class-alert.ts for the full
+   * configuration matrix and runbook pointers.
+   */
+  R2_STORAGE_ALERT_DISABLED?: string;
+  R2_LIFECYCLE_RULES_APPLIED_AT?: string;
+  R2_STORAGE_ALERT_LOGPUSH_CAP_GB?: string;
+  R2_STORAGE_ALERT_BUCKETS?: string;
+  R2_STORAGE_ANALYTICS_TOKEN?: string;
   /**
    * Task: D1 Cache Warming on Startup — preload hot content into D1/KV cache
    * when the worker starts to eliminate cold-start latency (~10-50ms → ~0ms).
@@ -3360,11 +3384,25 @@ export default {
       // with no signal benefit. The handler still runs on every
       // minute for the synthetic / cf-block / bot-cache probes; only
       // this single watchdog is gated.
-      const minuteOfHour = new Date(event.scheduledTime).getUTCMinutes();
+      const scheduledAt = new Date(event.scheduledTime);
+      const minuteOfHour = scheduledAt.getUTCMinutes();
       if (minuteOfHour % 15 === 0) {
         ctx.waitUntil(runAiGatewayCacheAlert(wrapped).catch((e) => {
           const msg = e instanceof Error ? e.message : "unknown";
           console.error(`[ai-gateway-cache-alert] unhandled error: ${msg.slice(0, 300)}`);
+        }));
+      }
+      // Task #314 — monthly R2 cold-storage / Logpush-cap watchdog.
+      // Gated to a single evaluation per calendar month at 00:00 UTC
+      // on day 1 (the cost-review checklist runs on the first business
+      // day, so the alert lands in inbox before the human reviewer
+      // sits down). The 28-day cooldown inside the module makes a
+      // duplicate run a no-op anyway, but gating here saves the
+      // per-minute GraphQL + R2-list cost.
+      if (shouldRunMonthlyR2Check(scheduledAt)) {
+        ctx.waitUntil(runR2StorageClassAlert(wrapped).catch((e) => {
+          const msg = e instanceof Error ? e.message : "unknown";
+          console.error(`[r2-storage-class-alert] unhandled error: ${msg.slice(0, 300)}`);
         }));
       }
       return;

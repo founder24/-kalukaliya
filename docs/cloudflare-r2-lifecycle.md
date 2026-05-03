@@ -146,3 +146,18 @@ Logpush-driven R2 storage stays under the 5GB cap. If 100% is still
 Step 5 contains the diagnose-and-re-apply procedure (run
 `./infra/r2-lifecycle/apply.sh --verify`, re-apply if needed, ticket
 Cloudflare if the rules are present but not acting).
+
+> **Automated backstop (Task #314):**
+> `workers/edge-proxy/src/r2-storage-class-alert.ts` runs once per
+> calendar month from the `syrabit-edge` worker cron, queries the same
+> storage-class split via the Cloudflare GraphQL Analytics API, and
+> pages on-call if the IA share is 0% after these rules have been live
+> ≥30 days, or if the `syrabit-media/logpush/` prefix exceeds 5 GB.
+> The on-call message links back to this doc and to
+> `./infra/r2-lifecycle/apply.sh --verify` as the diagnose step.
+> After running `apply.sh` for the first time (or after a re-apply
+> following a bucket rebuild), set the
+> `R2_LIFECYCLE_RULES_APPLIED_AT` worker var to today's date so the
+> 30-day grace window starts from the correct anchor — without that
+> var, the IA-share alert is suppressed (the Logpush-cap alert still
+> fires).

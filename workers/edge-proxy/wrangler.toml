@@ -193,6 +193,18 @@ bucket_name = "syrabit-assets"
 # if you try to use ASSETS locally without it. Add a test bucket when needed:
 #   wrangler r2 bucket create syrabit-assets-dev
 
+# Task #314 — R2 binding for the syrabit-media bucket. The monthly
+# R2 cold-storage watchdog (workers/edge-proxy/src/r2-storage-class-alert.ts)
+# uses this to walk the `logpush/` prefix and sum object sizes — the
+# Cloudflare GraphQL Analytics API does not expose a per-prefix
+# storage dimension, so the prefix-cap signal needs a direct binding.
+# The binding is otherwise unused by the request path; if a future
+# route serves media directly from the worker, point it at this same
+# binding rather than introducing a second one.
+[[r2_buckets]]
+binding     = "R2_MEDIA"
+bucket_name = "syrabit-media"
+
 # Vectorize binding — currently OFF by design.
 #
 # Embedding generation, upserts, and queries all happen in the Railway
@@ -378,6 +390,55 @@ new_classes = ["RateLimiter"]
 #                   the observability gap where a token rotation or
 #                   schema rename silently disables the primary alert),
 #                   AI_GATEWAY_CACHE_ALERT_DISABLED=true to pause.
+#
+#                   ALSO runs Task #314 monthly R2 cold-storage /
+#                   Logpush-cap watchdog, but ONLY on day 1 of each
+#                   calendar month at 00:00 UTC (one evaluation per
+#                   month — see shouldRunMonthlyR2Check() in
+#                   src/r2-storage-class-alert.ts). The cost-review
+#                   checklist runs on the first business day, so the
+#                   alert lands in inbox before the human reviewer
+#                   sits down. Each iteration costs one GraphQL query
+#                   against `r2StorageAdaptiveGroups` plus a
+#                   paginated R2 list against the
+#                   `syrabit-media/logpush/` prefix.
+#                   Pages on:
+#                     - 24h IA share across syrabit-assets +
+#                       syrabit-media is 0% AND the lifecycle rules
+#                       have been live ≥30 days (rules-stuck signal —
+#                       backstop for Step 5 of
+#                       docs/cloudflare-monthly-cost-review.md), and
+#                     - sum of `syrabit-media/logpush/*` object sizes
+#                       exceeds R2_STORAGE_ALERT_LOGPUSH_CAP_GB
+#                       (default 5 GB — matches the cap row in
+#                       docs/cloudflare-cost-map.md).
+#                   Re-uses SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL but
+#                   tags payloads with alert_type=
+#                   r2_ia_share_zero / r2_logpush_storage_high.
+#                   Required:
+#                     R2_STORAGE_ANALYTICS_TOKEN — Cloudflare API
+#                       token with `Account Analytics: Read` scope on
+#                       the account. Distinct from CF_ANALYTICS_TOKEN
+#                       and AI_GATEWAY_ANALYTICS_TOKEN so each scope
+#                       can be rotated independently. Set via
+#                       `wrangler secret put R2_STORAGE_ANALYTICS_TOKEN
+#                       --name syrabit-edge`. Absent ⇒ watchdog skips
+#                       with a console warning.
+#                     R2_LIFECYCLE_RULES_APPLIED_AT — ISO date of when
+#                       the lifecycle rules were last applied (set as
+#                       a plaintext var in this file or via
+#                       `wrangler secret put` after running
+#                       ./infra/r2-lifecycle/apply.sh). The IA-share
+#                       alert is suppressed until ≥30 days have
+#                       elapsed; without this var the alert never
+#                       fires (the Logpush-cap signal still does).
+#                     R2_MEDIA — R2 binding declared above for
+#                       syrabit-media. Required for the Logpush-cap
+#                       signal; the IA-share signal does not need it.
+#                   Optional knobs: R2_STORAGE_ALERT_LOGPUSH_CAP_GB
+#                   (default 5), R2_STORAGE_ALERT_BUCKETS (default
+#                   "syrabit-assets,syrabit-media"),
+#                   R2_STORAGE_ALERT_DISABLED=true to pause.
 #
 #   "0 */6 * * *" → 6-hourly D1 content sync from the Railway backend.
 crons = ["* * * * *", "0 */6 * * *"]

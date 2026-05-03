@@ -41,6 +41,25 @@ AI inference as possible.
      If yes, file a follow-up task to investigate before next month.
 
 5. **Verify the R2 cold-storage lifecycle rules are working.**
+
+   > **Primary signal is now automated** (Task #314). The monthly R2
+   > watchdog at `workers/edge-proxy/src/r2-storage-class-alert.ts`
+   > runs once per calendar month at 00:00 UTC on day 1, queries the
+   > Cloudflare GraphQL Analytics API for the IA share across
+   > `syrabit-assets` + `syrabit-media`, and walks the
+   > `syrabit-media/logpush/` prefix for its size. If either the
+   > IA-share-zero (after the rules have been live ≥30 days) or the
+   > Logpush-over-cap signal trips, on-call gets paged via the same
+   > webhook (`SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL`) used by the
+   > synthetic / cf-block / bot-cache / AI-gateway probes, with
+   > `alert_type = r2_ia_share_zero` or `r2_logpush_storage_high`.
+   > The manual check below is the **backstop** — the alert should
+   > fire days before the human reviewer notices, but if it didn't
+   > fire and the invoice still shows 100% Standard, the alert
+   > pipeline itself is broken and should be diagnosed (token scope,
+   > webhook URL, `R2_LIFECYCLE_RULES_APPLIED_AT` var still unset
+   > after re-applying, etc.).
+
    Cloudflare Dashboard → Billing → most recent invoice → R2 line item
    detail (or Dashboard → R2 → Usage → filter by storage class).
    Record three numbers in the running log's R2 columns:
