@@ -242,6 +242,73 @@ describe("ai-gateway-cache-alert", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not fire 'watchdog blind' alert until the consecutive failure threshold is crossed", async () => {
+    const env = baseEnv();
+    const failResp = () =>
+      new Response(JSON.stringify({ errors: [{ message: "scope missing" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    // 5 consecutive failures (default threshold = 6) — no alert yet.
+    for (let i = 0; i < 5; i++) {
+      fetchMock.mockResolvedValueOnce(failResp());
+      const res = await runAiGatewayCacheAlert(env, NOW);
+      expect(res.skipped).toBe(true);
+      expect(res.reason).toBe("query_failed");
+      expect(res.consecutive_query_failures).toBe(i + 1);
+      expect(res.query_fail_alert_fired).toBe(false);
+    }
+    // Only GraphQL fetches so far, no webhook.
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    // 6th consecutive failure — webhook fires.
+    fetchMock.mockResolvedValueOnce(failResp());
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 200 }));
+    const res = await runAiGatewayCacheAlert(env, NOW);
+    expect(res.consecutive_query_failures).toBe(6);
+    expect(res.query_fail_alert_fired).toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    const [webhookUrl, webhookInit] = fetchMock.mock.calls[6];
+    expect(webhookUrl).toBe("https://hooks.example.com/watchdog");
+    const payload = JSON.parse((webhookInit as RequestInit).body as string);
+    expect(payload.alert_type).toBe("ai_gateway_cache_watchdog_blind");
+    expect(payload.severity).toBe("warning");
+    expect(payload.consecutive_failures).toBe(6);
+    expect(payload.threshold).toBe(_AI_GATEWAY_CACHE_ALERT_DEFAULTS.QUERY_FAIL_THRESHOLD);
+    expect(payload.minutes_blind).toBe(90);
+    expect(payload.dashboard_url).toBe(_AI_GATEWAY_CACHE_ALERT_DEFAULTS.DASHBOARD_URL);
+    expect(payload.runbook).toBe("docs/ops/ai-gateway-activation.md");
+  });
+
+  it("resets the consecutive-failure counter on a successful query", async () => {
+    const env = baseEnv();
+    const failResp = () =>
+      new Response(JSON.stringify({ errors: [{ message: "tx" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    // 3 failures then a success — counter resets to 0.
+    for (let i = 0; i < 3; i++) {
+      fetchMock.mockResolvedValueOnce(failResp());
+      const r = await runAiGatewayCacheAlert(env, NOW);
+      expect(r.consecutive_query_failures).toBe(i + 1);
+    }
+    fetchMock.mockResolvedValueOnce(
+      gqlResponse([
+        { count: 800, dimensions: { cached: "true" } },
+        { count: 200, dimensions: { cached: "false" } },
+      ]),
+    );
+    const okRes = await runAiGatewayCacheAlert(env, NOW);
+    expect(okRes.ok).toBe(true);
+    expect(okRes.consecutive_query_failures).toBe(0);
+
+    const state = await _readAiGatewayCacheAlertStateForTests(env.RATE_LIMIT as unknown as KVNamespace);
+    expect(state.consecutive_query_failures).toBe(0);
+  });
+
   it("respects custom floor and embed tag overrides", async () => {
     const env = baseEnv({
       AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT: "70",

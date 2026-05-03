@@ -95,6 +95,21 @@ const DEFAULT_MIN_SAMPLE = 50;
 const DEFAULT_EMBED_TAG = "workers-ai-fallback:embed";
 const COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const WINDOW_SECONDS = 24 * 60 * 60;
+/** N consecutive `query_failed` evaluations that trip the secondary
+ *  "watchdog itself is blind" alert. At one evaluation every 15 min,
+ *  6 in a row ≈ 90 minutes of monitoring blindness — long enough to
+ *  rule out a transient CF GraphQL hiccup, short enough that a token
+ *  scope drift or schema change is surfaced inside the working day. */
+const DEFAULT_QUERY_FAIL_THRESHOLD = 6;
+/** Same 6h cooldown as the primary signal so a persistently broken
+ *  token doesn't spam the channel for a full day. */
+const QUERY_FAIL_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+/** Direct dashboard URL — included in the payload so on-call can
+ *  one-click into the AI Gateway logs view filtered to our gateway. */
+const DASHBOARD_URL =
+  "https://dash.cloudflare.com/" +
+  ACCOUNT_ID +
+  "/ai/ai-gateway/syrabit-ai-gw/logs";
 
 export interface AiGatewayCacheAlertEnv {
   RATE_LIMIT?: KVNamespace;
@@ -102,6 +117,10 @@ export interface AiGatewayCacheAlertEnv {
   AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT?: string;
   AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE?: string;
   AI_GATEWAY_CACHE_ALERT_EMBED_TAG?: string;
+  /** Override the consecutive-failure threshold for the secondary
+   *  "watchdog blind" alert. Default 6 ≈ 90 min of monitoring
+   *  blindness before paging. */
+  AI_GATEWAY_CACHE_ALERT_QUERY_FAIL_THRESHOLD?: string;
   /** From Task #307; without it, embed calls don't go through the
    *  gateway at all and there's nothing to evaluate. */
   WORKERS_AI_GATEWAY_ID?: string;
@@ -123,6 +142,12 @@ export interface AiGatewayCacheAlertState {
   last_hit_rate: number | null;
   /** Most recent total embed sample size (cached + uncached). */
   last_sample: number | null;
+  /** Number of consecutive `query_failed` evaluations. Reset to 0 on
+   *  any successful query. Drives the secondary "watchdog blind"
+   *  alert. */
+  consecutive_query_failures: number;
+  /** ISO timestamp the "watchdog blind" alert last fired. */
+  query_fail_last_fired_at: string | null;
 }
 
 export interface AiGatewayCacheAlertResult {
@@ -135,6 +160,13 @@ export interface AiGatewayCacheAlertResult {
   uncached_requests: number;
   floor_pct: number;
   floor_alert_fired: boolean;
+  /** Running count of consecutive query failures *after* this
+   *  evaluation. Useful for tests and dashboard surfacing. */
+  consecutive_query_failures: number;
+  /** True if THIS evaluation tripped the "watchdog blind" alert
+   *  (i.e. consecutive_query_failures crossed the threshold and
+   *  cooldown was clear). */
+  query_fail_alert_fired: boolean;
 }
 
 const EMPTY_STATE: AiGatewayCacheAlertState = {
@@ -142,6 +174,8 @@ const EMPTY_STATE: AiGatewayCacheAlertState = {
   floor_last_fired_at: null,
   last_hit_rate: null,
   last_sample: null,
+  consecutive_query_failures: 0,
+  query_fail_last_fired_at: null,
 };
 
 async function readState(kv: KVNamespace): Promise<AiGatewayCacheAlertState> {
@@ -352,7 +386,10 @@ export async function runAiGatewayCacheAlert(
   now: Date = new Date(),
 ): Promise<AiGatewayCacheAlertResult> {
   const floorPct = readNumberVar(env.AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT, DEFAULT_FLOOR_PCT, 0);
-  const skipResult = (reason: string): AiGatewayCacheAlertResult => ({
+  const skipResult = (
+    reason: string,
+    extras: Partial<AiGatewayCacheAlertResult> = {},
+  ): AiGatewayCacheAlertResult => ({
     ok: false,
     skipped: true,
     reason,
@@ -362,6 +399,9 @@ export async function runAiGatewayCacheAlert(
     uncached_requests: 0,
     floor_pct: floorPct,
     floor_alert_fired: false,
+    consecutive_query_failures: 0,
+    query_fail_alert_fired: false,
+    ...extras,
   });
 
   if ((env.AI_GATEWAY_CACHE_ALERT_DISABLED || "").toLowerCase() === "true") {
@@ -388,6 +428,13 @@ export async function runAiGatewayCacheAlert(
   const minSample = Math.floor(
     readNumberVar(env.AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE, DEFAULT_MIN_SAMPLE, 0),
   );
+  const queryFailThreshold = Math.floor(
+    readNumberVar(
+      env.AI_GATEWAY_CACHE_ALERT_QUERY_FAIL_THRESHOLD,
+      DEFAULT_QUERY_FAIL_THRESHOLD,
+      1,
+    ),
+  );
   const embedTag = env.AI_GATEWAY_CACHE_ALERT_EMBED_TAG || DEFAULT_EMBED_TAG;
 
   const stats = await queryEmbedHitRate(
@@ -401,9 +448,63 @@ export async function runAiGatewayCacheAlert(
   state.last_evaluated_at = now.toISOString();
 
   if (!stats) {
+    // Increment the consecutive-failure counter and, if we've crossed
+    // the threshold (default 6 ≈ 90 min of blindness), page on-call
+    // about the watchdog itself. This closes the observability gap
+    // the reviewer flagged: a silently-failing watchdog (e.g. token
+    // scope dropped, GraphQL schema renamed) is itself a critical
+    // signal because the primary floor alert can't fire while the
+    // query is broken.
+    state.consecutive_query_failures = (state.consecutive_query_failures || 0) + 1;
+    let queryFailAlertFired = false;
+    if (state.consecutive_query_failures >= queryFailThreshold) {
+      const lastFiredMs = state.query_fail_last_fired_at
+        ? Date.parse(state.query_fail_last_fired_at)
+        : 0;
+      if (!lastFiredMs || now.getTime() - lastFiredMs >= QUERY_FAIL_COOLDOWN_MS) {
+        const minutesBlind = state.consecutive_query_failures * 15;
+        const payload = {
+          text:
+            `:warning: *Syrabit AI Gateway cache-hit watchdog is blind* — ` +
+            `${state.consecutive_query_failures} consecutive Cloudflare ` +
+            `GraphQL queries for \`aiGatewayRequestsAdaptiveGroups\` have ` +
+            `failed (~${minutesBlind} min of monitoring blindness). The ` +
+            `primary embed cache-hit-rate floor alert cannot fire while ` +
+            `this is broken, so a real cache regression would go ` +
+            `unnoticed. Likely causes: (a) AI_GATEWAY_ANALYTICS_TOKEN ` +
+            `was rotated and the new value is missing the ` +
+            `\`AI Gateway: Read\` scope, (b) the token expired, or (c) ` +
+            `Cloudflare renamed the analytics dataset / dimensions. ` +
+            `Investigate: tail Worker logs for \`[ai-gateway-cache-alert]\` ` +
+            `lines to see the underlying HTTP / GraphQL error, then ` +
+            `\`wrangler secret put AI_GATEWAY_ANALYTICS_TOKEN --name ` +
+            `syrabit-edge\`. Dashboard: ${DASHBOARD_URL}. ` +
+            `Runbook: docs/ops/ai-gateway-activation.md.`,
+          severity: "warning",
+          alert_type: "ai_gateway_cache_watchdog_blind",
+          gateway_id: env.WORKERS_AI_GATEWAY_ID,
+          consecutive_failures: state.consecutive_query_failures,
+          threshold: queryFailThreshold,
+          minutes_blind: minutesBlind,
+          dashboard_url: DASHBOARD_URL,
+          runbook: "docs/ops/ai-gateway-activation.md",
+        };
+        queryFailAlertFired = await fireWebhook(env, payload);
+        if (queryFailAlertFired) {
+          state.query_fail_last_fired_at = now.toISOString();
+        }
+      }
+    }
     await writeState(env.RATE_LIMIT, state);
-    return skipResult("query_failed");
+    return skipResult("query_failed", {
+      consecutive_query_failures: state.consecutive_query_failures,
+      query_fail_alert_fired: queryFailAlertFired,
+    });
   }
+
+  // Successful query — reset the consecutive-failure counter so a
+  // future spell of failures has to cross the threshold from scratch.
+  state.consecutive_query_failures = 0;
 
   const total = stats.cached + stats.uncached;
   const hitRate = total > 0 ? stats.cached / total : 0;
@@ -432,7 +533,7 @@ export async function runAiGatewayCacheAlert(
           `cache keys no longer match, (b) someone hand-edited the ` +
           `dashboard cache TTL on the embed route override, or (c) the ` +
           `embed model was changed without re-warming the cache. ` +
-          `Investigate: dash → AI → AI Gateway → \`syrabit-ai-gw\` → Logs ` +
+          `Investigate: ${DASHBOARD_URL} ` +
           `(filter metadata.tag = \`${embedTag}\`). ` +
           `Rollback runbook: docs/ops/ai-gateway-activation.md.`,
         severity: "critical",
@@ -445,6 +546,7 @@ export async function runAiGatewayCacheAlert(
         sample: total,
         cached_requests: stats.cached,
         uncached_requests: stats.uncached,
+        dashboard_url: DASHBOARD_URL,
         runbook: "docs/ops/ai-gateway-activation.md",
       };
       floorAlertFired = await fireWebhook(env, payload);
@@ -469,6 +571,8 @@ export async function runAiGatewayCacheAlert(
     uncached_requests: stats.uncached,
     floor_pct: floorPct,
     floor_alert_fired: floorAlertFired,
+    consecutive_query_failures: 0,
+    query_fail_alert_fired: false,
   };
 }
 
@@ -490,4 +594,7 @@ export const _AI_GATEWAY_CACHE_ALERT_DEFAULTS = {
   EMBED_TAG: DEFAULT_EMBED_TAG,
   COOLDOWN_MS,
   WINDOW_SECONDS,
+  QUERY_FAIL_THRESHOLD: DEFAULT_QUERY_FAIL_THRESHOLD,
+  QUERY_FAIL_COOLDOWN_MS,
+  DASHBOARD_URL,
 } as const;

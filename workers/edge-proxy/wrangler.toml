@@ -371,6 +371,12 @@ new_classes = ["RateLimiter"]
 #                   (default 50), AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE
 #                   (default 50), AI_GATEWAY_CACHE_ALERT_EMBED_TAG
 #                   (default "workers-ai-fallback:embed"),
+#                   AI_GATEWAY_CACHE_ALERT_QUERY_FAIL_THRESHOLD
+#                   (default 6 — N consecutive GraphQL failures before
+#                   the secondary alert_type=
+#                   ai_gateway_cache_watchdog_blind page fires; closes
+#                   the observability gap where a token rotation or
+#                   schema rename silently disables the primary alert),
 #                   AI_GATEWAY_CACHE_ALERT_DISABLED=true to pause.
 #
 #   "0 */6 * * *" → 6-hourly D1 content sync from the Railway backend.

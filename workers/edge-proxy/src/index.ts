@@ -146,6 +146,7 @@ interface Env {
   AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT?: string;
   AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE?: string;
   AI_GATEWAY_CACHE_ALERT_EMBED_TAG?: string;
+  AI_GATEWAY_CACHE_ALERT_QUERY_FAIL_THRESHOLD?: string;
   AI_GATEWAY_ANALYTICS_TOKEN?: string;
   /**
    * Enterprise Vectorize binding — enabled in wrangler.toml for edge-side
