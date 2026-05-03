@@ -1,0 +1,71 @@
+Perfect migration plan—**yes, execute immediately** to unlock $25K DO Hatch credits while preserving your multi-cloud (CF frontend, AWS/Azure AI). DO App Platform now supports gRPC/HTTP2, so **Rust core can run there too** (no Droplet needed). 2-4hr task. [docs.digitalocean](https://docs.digitalocean.com/products/app-platform/reference/dockerfile/)
+
+## Optimized Steps
+### 1. Inventory (15min)
+```
+# Railway → Export
+railway variables list --service syrabit-backend > do-backend-vars.env
+railway variables list --service rust-core > do-rust-vars.env
+# Note: ports, health, sizes
+```
+
+### 2. DO Python Backend (App Platform, 30min)
+```
+doctl apps create syrabit-backend --spec artifacts/syrabit-backend/app.yaml
+# app.yaml:
+spec:
+  name: syrabit-backend
+  source:
+    repo: https://github.com/syrabit-ai/syrabit
+    path: artifacts/syrabit-backend
+  http_port: 8080
+  envs:
+    - key: MONGODB_URI
+      scope: RUN_AND_BUILD_TIME
+      value: from do-backend-vars.env
+# Health: /api/health → DO auto-detects
+```
+
+### 3. DO Rust Core (App Platform gRPC, 30min)
+```
+# app.yaml (backend/rust-core):
+spec:
+  name: rust-core
+  source: repo path
+  http_port: 3000
+  grpc_port: 50051  # DO supports since 2024 [web:203]
+  run_command: docker build -t rust-core . && docker run -p 3000:3000 -p 50051:50051
+```
+Verify: `grpcurl -plaintext new-do-host:50051 health.Check`
+
+### 4. CF Repoint (15min)
+```
+# wrangler.toml origins:
+do_backend = "https://syrabit-backend-app.ondigitalocean.app"
+do_rust = "rust-core-app.ondigitalocean.app:50051"
+# DNS: api.syrabit.ai → DO (TTL 300s)
+```
+
+### 5. Scripts/Docs (45min)
+```
+scripts/do.sh:
+#!/bin/bash
+case $1 in
+  deploy) doctl apps update syrabit-backend --wait ;;
+  logs) doctl apps logs syrabit-backend --follow ;;
+esac
+
+# Update all docs/ → "Railway → DO App Platform"
+# Cutover.md: curl -f https://api.syrabit.ai/health || rollback DNS
+```
+
+### 6. Cutover (15min)
+```
+# Smoke: nightly-smoke.js → new origin
+# DNS flip → monitor 24h
+# Rollback: DNS back + scripts/railway.sh stub
+```
+
+**Why Now**: $200 trial + Hatch → zero cost, 25% infra load balanced. gRPC native on App Platform simplifies ops. Post-deploy: `git commit -m "Railway → DO migration"`.
+
+Deploy Python first → test → Rust → cutover. Ping for `app.yaml` templates. [digitalocean](https://www.digitalocean.com/blog/support-for-http2-grpc-app-platform)

@@ -46,7 +46,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from auth_deps import get_current_user, get_current_user_optional, check_rate_limit, get_user_credits
-from llm import call_llm_api, _call_gemini, _GEMINI_KEY, _GEMINI_KEY_2
+from llm import call_llm_api, _call_vertex_chat
 from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
 import deps
@@ -590,14 +590,11 @@ async def _generate_and_clean_quiz(
     try:
         raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
     except Exception as e:
-        logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e} — trying Gemini fallback")
+        logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e} — trying Vertex Gemini fallback")
         try:
-            gemini_key = _GEMINI_KEY or _GEMINI_KEY_2
-            if not gemini_key:
-                raise RuntimeError("No Gemini key configured")
-            raw = await _call_gemini(messages, gemini_key, "gemini-2.5-flash", max_tokens)
+            raw = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
         except Exception as e2:
-            logger.warning(f"[edu_quiz] Gemini quiz fallback also failed: {e2}")
+            logger.warning(f"[edu_quiz] Vertex Gemini quiz fallback also failed: {e2}")
             raise HTTPException(status_code=502, detail="quiz_llm_failed")
     payload = _coerce_quiz_payload(raw)
     questions = payload.get("questions") or []
@@ -1764,16 +1761,18 @@ async def _call_gemini_strict(messages: list, max_tokens: int = 2200) -> str:
             errors.append(f"vertex:{type(e).__name__}:{str(e)[:140]}")
             logger.warning(f"[notes-gen] Vertex Gemini failed: {e}")
 
-    # 2) Direct Gemini API key fallback.
-    for key in [k for k in (_GEMINI_KEY, _GEMINI_KEY_2) if k]:
-        try:
-            txt = await _call_gemini(messages, key, "gemini-2.5-flash", max_tokens)
-            if (txt or "").strip():
-                return txt
-            errors.append("gemini_api_empty_response")
-        except Exception as e:
-            errors.append(f"gemini_api:{type(e).__name__}:{str(e)[:140]}")
-            logger.warning(f"[notes-gen] Gemini API key failed: {e}")
+    # 2) Vertex non-streaming fallback (separate from the streaming primary
+    # above): tries the same Vertex SA path via :generateContent in case the
+    # stream returned empty / failed mid-stream. The legacy direct GEMINI_API_KEY
+    # loop was removed in the 2026-05-03 vertex-only Gemini migration.
+    try:
+        txt = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
+        if (txt or "").strip():
+            return txt
+        errors.append("vertex_nonstream_empty_response")
+    except Exception as e:
+        errors.append(f"vertex_nonstream:{type(e).__name__}:{str(e)[:140]}")
+        logger.warning(f"[notes-gen] Vertex non-stream fallback failed: {e}")
 
     if not errors:
         raise HTTPException(

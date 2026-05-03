@@ -180,64 +180,14 @@ def _patched_oai_response():
     return resp
 
 
-def test_call_gemini_forwards_api_key_to_cf_cache_headers_real_key(llm_module):
-    """Real api_key going through `_call_gemini` MUST NOT clear Authorization
-    in the extra_headers (regression for the architect-flagged bypass)."""
-    llm_mod, _ = llm_module
-    captured = {}
-
-    async def _fake_create(**kwargs):
-        captured["extra_headers"] = kwargs.get("extra_headers")
-        return _patched_oai_response()
-
-    fake_client = MagicMock()
-    fake_client.chat.completions.create = AsyncMock(side_effect=_fake_create)
-
-    with patch.object(llm_mod, "_get_oai_client", return_value=fake_client):
-        asyncio.run(
-            llm_mod._call_gemini(
-                messages=[{"role": "user", "content": "hi"}],
-                api_key="real-provider-key",
-                model="gemini-2.5-flash",
-                max_tokens=8,
-            )
-        )
-
-    headers = captured["extra_headers"] or {}
-    assert "Authorization" not in headers, (
-        f"_call_gemini with REAL api_key MUST NOT inject Authorization; "
-        f"got: {headers!r}"
-    )
-    assert headers.get("cf-aig-byok-key") == "true", headers
-
-
-def test_call_gemini_forwards_api_key_to_cf_cache_headers_byok(llm_module):
-    """BYOK placeholder going through `_call_gemini` MUST clear Authorization."""
-    llm_mod, cfg = llm_module
-    captured = {}
-
-    async def _fake_create(**kwargs):
-        captured["extra_headers"] = kwargs.get("extra_headers")
-        return _patched_oai_response()
-
-    fake_client = MagicMock()
-    fake_client.chat.completions.create = AsyncMock(side_effect=_fake_create)
-
-    with patch.object(llm_mod, "_get_oai_client", return_value=fake_client):
-        asyncio.run(
-            llm_mod._call_gemini(
-                messages=[{"role": "user", "content": "hi"}],
-                api_key=cfg.BYOK_PLACEHOLDER,
-                model="gemini-2.5-flash",
-                max_tokens=8,
-            )
-        )
-
-    headers = captured["extra_headers"] or {}
-    assert headers.get("Authorization") == "", (
-        f"_call_gemini with BYOK_PLACEHOLDER MUST emit Authorization='' "
-        f"so CF substitutes the dashboard-stored key; got: {headers!r}"
-    )
+# NOTE: The two `test_call_gemini_*` regression tests were removed in the
+# 2026-05-03 vertex-only Gemini migration. `_call_gemini` (direct
+# generativelanguage.googleapis.com client) no longer exists; all Gemini
+# calls now route through `_call_vertex_chat` / `vertex_chat.stream_chat`
+# which use SA-minted OAuth bearers and bypass the CF AI Gateway BYOK path
+# entirely, so the cache-header forwarding contract is no longer applicable
+# to Gemini. The generic `_call_openai_compat` BYOK-forwarding test below
+# still exercises the same helper for the providers that still use BYOK.
 
 
 def test_call_openai_compat_forwards_api_key_byok(llm_module):

@@ -55,7 +55,7 @@ from fastapi import HTTPException
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from config import (
     LLM_PROVIDER, LLM_MODEL, OPENAI_API_KEY, SARVAM_THINK_BUFFER,
-    _GEMINI_KEY, _GEMINI_KEY_2, _OPENAI_KEY,
+    _OPENAI_KEY,
     _SARVAM_LLM_KEY, _SARVAM_LLM_KEY_2, _SARVAM_LLM_KEY_3, _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION,
     is_cf_gateway_up, mark_cf_gateway_down, get_provider_base_url,
     byok_headers, BYOK_PLACEHOLDER,
@@ -526,14 +526,13 @@ _CF_AI_ENABLED = bool(_CF_AI_ACCOUNT_ID and _CF_API_TOKEN)
 _LLM_PROVIDERS = []
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
-if _GEMINI_KEY:
-    _LLM_PROVIDERS.append({"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"})
+# NOTE: legacy "gemini" provider entry removed (Task: vertex-only Gemini auth,
+# 2026-05-03). Vertex AI / Gemini is reached via PROVIDER_PRIORITY → vertex
+# branch in _dispatch_llm_for_feature, which calls `_call_vertex_chat` (SA).
 
 _LLM_PROVIDERS_CHAT: list[dict] = []
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS_CHAT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
-if _GEMINI_KEY:
-    _LLM_PROVIDERS_CHAT.append({"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"})
 
 # Workers-AI-only slice of _LLM_PROVIDERS_CHAT — used as the ``workers_ai``
 # fallback inside _dispatch_llm_for_feature so that PROVIDER_PRIORITY routing
@@ -1039,50 +1038,25 @@ def _handle_cf_gateway_auth_error(exc: Exception) -> None:
     mark_cf_gateway_down()
     logger.warning(f"Cloudflare AI Gateway 401 auth error — falling back to direct URLs for 5 min: {type(exc).__name__}: {str(exc)[:200]}")
 
-async def _call_gemini(messages: list, api_key: str, model: str, max_tokens: int) -> str:
-    """Non-streaming call to Google Gemini via its OpenAI-compatible endpoint."""
-    direct_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    base = get_provider_base_url("gemini") or direct_base
-    client = _get_oai_client(api_key, base)
-    try:
-        resp = await client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            # Pass api_key so the BYOK-aware helper can decide whether to
-            # clear the upstream Authorization (placeholder → clear so CF
-            # substitutes; real key → keep so SDK bearer reaches upstream).
-            extra_headers=_cf_cache_headers(api_key=api_key) or None,
-        )
-    except _oai.APIConnectionError as e:
-        if base != direct_base and _is_cf_connection_error(e):
-            _handle_cf_connection_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            resp = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            )
-        else:
-            raise
-    except _oai.AuthenticationError as e:
-        if base != direct_base:
-            _handle_cf_gateway_auth_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            resp = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            )
-        else:
-            raise
-    content = resp.choices[0].message.content or ""
-    return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
-
 # ── Vertex AI native chat (GCP service-account auth) ─────────────────────────
 # Replaces the legacy Gemini Direct API path for chat dispatch. Auth via
 # GOOGLE_APPLICATION_CREDENTIALS_JSON → OAuth bearer for cloud-platform scope.
 _VERTEX_CHAT_CACHE: dict = {}
 
 async def _call_vertex_chat(messages: list, model: str, max_tokens: int) -> str:
-    """Call Vertex AI :generateContent with SA-minted OAuth bearer."""
+    """Call Vertex AI :generateContent with SA-minted OAuth bearer.
+
+    Supports both text and multimodal (image_url data URLs) message content.
+    OpenAI-style content lists with ``{type: "image_url", image_url: {url: …}}``
+    parts are converted to Vertex ``inlineData`` parts so vision-style prompts
+    routed through the dispatcher (e.g. ``call_vision_with_dispatch``) reach
+    Gemini multimodal without a separate REST client.
+    """
     from google.oauth2 import service_account
     from google.auth.transport.requests import Request as _GAuthReq
     import httpx as _httpx
+    import base64 as _b64
+    import re as _re_local
 
     if "creds" not in _VERTEX_CHAT_CACHE:
         sa_raw = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
@@ -1110,22 +1084,55 @@ async def _call_vertex_chat(messages: list, model: str, max_tokens: int) -> str:
     url = (f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
            f"/locations/{location}/publishers/google/models/{model}:generateContent")
 
+    def _parts_for(content) -> list:
+        """OpenAI-style content (str | list[part]) → Vertex parts list."""
+        if isinstance(content, str):
+            return [{"text": content}] if content else []
+        out: list = []
+        if not isinstance(content, list):
+            return out
+        for p in content:
+            if not isinstance(p, dict):
+                continue
+            ptype = p.get("type")
+            if ptype == "text":
+                t = p.get("text", "")
+                if t:
+                    out.append({"text": t})
+            elif ptype == "image_url":
+                url_obj = p.get("image_url") or {}
+                src = url_obj.get("url") if isinstance(url_obj, dict) else url_obj
+                if not isinstance(src, str):
+                    continue
+                m = _re_local.match(r"^data:([^;]+);base64,(.+)$", src)
+                if m:
+                    out.append({"inlineData": {"mimeType": m.group(1), "data": m.group(2)}})
+                else:  # remote URL — Vertex prefers fileData with gs:// or https:// (Cloud Storage)
+                    out.append({"fileData": {"mimeType": "image/jpeg", "fileUri": src}})
+            elif ptype == "input_audio":  # passthrough for completeness
+                audio = p.get("input_audio") or {}
+                data = audio.get("data") if isinstance(audio, dict) else None
+                fmt  = audio.get("format", "wav") if isinstance(audio, dict) else "wav"
+                if data:
+                    out.append({"inlineData": {"mimeType": f"audio/{fmt}", "data": data}})
+        return out
+
     # Convert OpenAI-style messages → Vertex contents + systemInstruction
     sys_parts: list = []
     contents: list  = []
     for m in messages:
         role = (m.get("role") or "user").lower()
-        text = m.get("content") or ""
-        if isinstance(text, list):  # multimodal lists → join text parts only
-            text = "".join(p.get("text", "") for p in text if isinstance(p, dict) and p.get("type") == "text")
-        if not text:
+        parts = _parts_for(m.get("content"))
+        if not parts:
             continue
         if role == "system":
-            sys_parts.append({"text": text})
+            # systemInstruction takes only text parts; flatten any inline parts
+            # to text where possible (multimodal in system role is unusual).
+            sys_parts.extend([p for p in parts if "text" in p])
         elif role == "assistant":
-            contents.append({"role": "model", "parts": [{"text": text}]})
+            contents.append({"role": "model", "parts": parts})
         else:
-            contents.append({"role": "user", "parts": [{"text": text}]})
+            contents.append({"role": "user", "parts": parts})
     if not contents:
         contents = [{"role": "user", "parts": [{"text": ""}]}]
 
@@ -1159,7 +1166,7 @@ async def _call_openai_compat(messages: list, api_key: str, model: str, max_toke
     try:
         resp = await client.chat.completions.create(
             model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            # See _call_gemini for the rationale — pass api_key so BYOK
+            # Pass api_key so BYOK
             # placeholders correctly trigger the clear-Authorization branch.
             extra_headers=_cf_cache_headers(api_key=api_key) or None,
         )
@@ -1234,7 +1241,10 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
     if provider == "sarvam":
         return await _call_sarvam_llm(messages, api_key, model, max_tokens)
     if provider == "gemini":
-        return await _call_gemini(messages, api_key, model, max_tokens)
+        # Legacy "gemini" provider name → Vertex AI service-account auth
+        # (Task: vertex-only Gemini auth, 2026-05-03). The api_key arg is
+        # ignored; auth uses GOOGLE_APPLICATION_CREDENTIALS_JSON.
+        return await _call_vertex_chat(messages, model or "gemini-2.5-flash", max_tokens)
     if provider == "cerebras":
         return await _call_cerebras(messages, api_key, model, max_tokens)
     if provider == "groq":
@@ -1939,8 +1949,9 @@ async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048
 # best for long-form notes/MCQ). Workers AI 120B secondary. Workers AI 70B
 # tertiary. Qwen removed (no longer in provider pool).
 _LLM_PROVIDERS_CONTENT: list[dict] = []
-if _GEMINI_KEY:
-    _LLM_PROVIDERS_CONTENT.append({"provider": "gemini", "key": _GEMINI_KEY, "default_model": "gemini-2.5-flash"})
+# NOTE: legacy "gemini" provider entry removed (Task: vertex-only Gemini auth,
+# 2026-05-03). Content generation reaches Gemini via PROVIDER_PRIORITY['content']
+# → vertex branch (Vertex SA) above the workers_ai entries below.
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
     _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
@@ -2172,37 +2183,10 @@ async def _stream_sarvam(messages: list, api_key: str, model: str, max_tokens: i
         else:
             raise
 
-async def _stream_gemini(messages: list, api_key: str, model: str, max_tokens: int):
-    """Token-by-token streaming from Google Gemini via its OpenAI-compatible endpoint."""
-    direct_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    base = get_provider_base_url("gemini") or direct_base
-    client = _get_oai_client(api_key, base)
-    try:
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-        )
-    except _oai.APIConnectionError as e:
-        if base != direct_base and _is_cf_connection_error(e):
-            _handle_cf_connection_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            stream = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-            )
-        else:
-            raise
-    except _oai.AuthenticationError as e:
-        if base != direct_base:
-            _handle_cf_gateway_auth_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            stream = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-            )
-        else:
-            raise
-    async for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta and delta.content:
-            yield delta.content
+# NOTE: `_stream_gemini` (direct generativelanguage.googleapis.com OpenAI-compat
+# stream) was removed in the 2026-05-03 vertex-only Gemini migration. All
+# Gemini streaming now flows through `_stream_vertex_gemini` →
+# `vertex_chat.stream_chat` (SA auth via GOOGLE_APPLICATION_CREDENTIALS_JSON).
 
 async def _stream_vertex_gemini(messages: list, model: str, max_tokens: int):
     """Token-by-token streaming from Vertex AI Gemini Flash (Task #607).
@@ -2416,7 +2400,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
 
     if _use_vertex_fastpath:
         if not _vertex_chat.is_configured():
-            logger.warning("gemini-flash requested but neither GEMINI_API_KEY nor VERTEX_PROJECT_ID is set — falling back to legacy SLM pool")
+            logger.warning("gemini-flash requested but Vertex SA credentials (GOOGLE_APPLICATION_CREDENTIALS_JSON + VERTEX_PROJECT_ID) are not set — falling back to legacy SLM pool")
             use_model_raw = _vertex_fallback_target
         elif not _vertex_chat.is_available():
             # Circuit breaker is open — Vertex is known-broken right now.
@@ -2655,8 +2639,10 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             async for token in _stream_sarvam(messages, p_key, p_model, _mt, response_lang=response_lang):
                 yield token
         elif p_name == "gemini":
-            logger.info(f"LLM stream: provider=gemini, model={p_model}")
-            async for token in _stream_gemini(messages, p_key, p_model, _mt):
+            # Legacy "gemini" provider name → Vertex streaming (Task: vertex-only
+            # Gemini auth, 2026-05-03). p_key ignored; SA auth via SA JSON.
+            logger.info(f"LLM stream: provider=gemini→vertex, model={p_model}")
+            async for token in _stream_vertex_gemini(messages, p_model, _mt):
                 yield token
         elif p_name == "cerebras":
             logger.info(f"LLM stream: provider=cerebras, model={p_model}")
@@ -3406,7 +3392,7 @@ async def call_translate_with_dispatch(
                     {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
                     {"role": "user", "content": text},
                 ]
-                return await _call_gemini(prompt, _GEMINI_KEY, "gemini-2.5-flash", 2048)
+                return await _call_vertex_chat(prompt, "gemini-2.5-flash", 2048)
             elif provider == "bedrock":
                 # Amazon Translate via bedrock-proxy Worker (SigV4) — Task #256.
                 # Task #304: feed outcome into the shared 429-burst lifecycle.
@@ -3580,7 +3566,8 @@ async def call_vision_with_dispatch(
     Priority (PROVIDER_PRIORITY['vision']):
       vertex(2000, Gemini) → bedrock(1000, Nova Lite multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
 
-    vertex: Gemini 2.5 Flash vision via _call_gemini with image_url content.
+    vertex: Gemini 2.5 Flash vision via _call_vertex_chat with image_url content
+            (Vertex SA auth; multimodal parts converted to inlineData).
     bedrock: Amazon Nova Lite multimodal via providers.bedrock.call_converse_vision (Task #304).
              Claude 3.5 Sonnet kept as in-pool higher-quality fallback if Nova Lite fails.
     azure_openai: GPT-4o vision via providers.azure_openai.call_chat with image_url content.
@@ -3597,8 +3584,6 @@ async def call_vision_with_dispatch(
         provider = select_provider("vision", lang=lang, exclude=exclude)
         try:
             if provider == "vertex":
-                if not _GEMINI_KEY:
-                    raise RuntimeError("vertex vision: GEMINI_API_KEY not set")
                 vision_messages = [
                     {
                         "role": "user",
@@ -3611,7 +3596,7 @@ async def call_vision_with_dispatch(
                         ],
                     }
                 ]
-                return await _call_gemini(vision_messages, _GEMINI_KEY, "gemini-2.5-flash", 1024)
+                return await _call_vertex_chat(vision_messages, "gemini-2.5-flash", 1024)
             elif provider == "bedrock":
                 # Task #304: Nova Lite primary (multimodal Converse), Claude 3.5 Sonnet
                 # as in-pool higher-quality fallback if Nova Lite fails. Both attempts

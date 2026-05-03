@@ -42,7 +42,7 @@ def _key_status_for(name: str) -> dict[str, Any]:
     card without exposing the actual secret value.
     """
     import os
-    from config import _GEMINI_KEY_RAW, BYOK_PLACEHOLDER
+    from config import BYOK_PLACEHOLDER
 
     def _present(val: str | None) -> bool:
         return bool(val) and val != BYOK_PLACEHOLDER
@@ -50,7 +50,13 @@ def _key_status_for(name: str) -> dict[str, Any]:
     if name == "vertex":
         return {"configured": bool(os.environ.get("VERTEX_PROJECT_ID")), "source": "VERTEX_PROJECT_ID"}
     if name in ("gemini", "google_ai_studio"):
-        return {"configured": _present(_GEMINI_KEY_RAW), "source": "GEMINI_API_KEY"}
+        # Gemini reaches the backend via Vertex AI service-account auth only
+        # (2026-05-03 vertex-only migration). The legacy GEMINI_API_KEY env
+        # var is no longer consulted — surface SA JSON presence instead.
+        return {
+            "configured": bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()),
+            "source": "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+        }
     if name == "azure_openai":
         return {"configured": bool(os.environ.get("AZURE_OPENAI_ENDPOINT")), "source": "AZURE_OPENAI_ENDPOINT"}
     if name == "workers_ai" or name == "workers_ai_indic":

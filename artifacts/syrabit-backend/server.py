@@ -97,13 +97,12 @@ def _validate_env():
     # Voyage, Pinecone, Workers AI / Workers AI · IndicTrans2. xAI/OpenAI kept
     # as optional rare-feature endpoints. Providers removed from the active
     # routing chain are documented in scripts/check_dead_providers.py.
-    # GEMINI_API_KEY stays here so the BYOK secret-audit surfaces its
-    # lifecycle on every boot. It is bound *once* in config.py as
-    # `_GEMINI_KEY` and consumed via the CF AI Gateway slug
-    # `google-ai-studio/v1beta/openai`. Direct `os.environ.get('GEMINI_API_KEY')`
-    # reads outside config.py are blocked by the dead-provider guard.
+    # GEMINI_API_KEY removed from this map (2026-05-03 vertex-only migration):
+    # all Gemini calls now route through Vertex AI with service-account auth
+    # (GOOGLE_APPLICATION_CREDENTIALS_JSON). The env var is no longer read by
+    # the backend — operators should delete it from Railway. The dead-provider
+    # guard continues to block any new `os.environ.get('GEMINI_API_KEY')`.
     _BYOK_PRIMARY = {
-        "GEMINI_API_KEY":     "google-ai-studio/v1beta/openai",
         "SARVAM_API_KEY":     "custom-sarvam",
         "XAI_API_KEY":        "grok/v1",
         "OPENAI_API_KEY":     "openai/v1",

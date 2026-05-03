@@ -625,30 +625,30 @@ def test_embed_dispatch_routes_to_vertex_at_runtime():
 def test_translate_dispatch_routes_sarvam_or_vertex():
     """call_translate_with_dispatch routes 'translate' via select_provider and calls the provider."""
     from llm import call_translate_with_dispatch
-    gemini_stub = mock.AsyncMock(return_value="translated")
+    vertex_stub = mock.AsyncMock(return_value="translated")
     with mock.patch("llm.select_provider", return_value="vertex"):
-        with mock.patch("llm._call_gemini", gemini_stub):
+        with mock.patch("llm._call_vertex_chat", vertex_stub):
             result = asyncio.run(
                 call_translate_with_dispatch("hello", "en-IN", "as-IN", lang="as")
             )
     assert result == "translated", f"Unexpected: {result!r}"
-    gemini_stub.assert_called_once()
-    print("  PASS: call_translate_with_dispatch routes select_provider('translate')='vertex' → _call_gemini")
+    vertex_stub.assert_called_once()
+    print("  PASS: call_translate_with_dispatch routes select_provider('translate')='vertex' → _call_vertex_chat")
 
 
 def test_vision_dispatch_routes_vertex_at_runtime():
-    """call_vision_with_dispatch routes 'vision' via select_provider → _call_gemini for vertex."""
+    """call_vision_with_dispatch routes 'vision' via select_provider → _call_vertex_chat for vertex
+    (multimodal image_url parts → Vertex inlineData; SA auth, no GEMINI_API_KEY)."""
     from llm import call_vision_with_dispatch
-    gemini_stub = mock.AsyncMock(return_value="image analysis")
+    vertex_stub = mock.AsyncMock(return_value="image analysis")
     with mock.patch("llm.select_provider", return_value="vertex"):
-        with mock.patch("llm._call_gemini", gemini_stub):
-            with mock.patch("llm._GEMINI_KEY", "fake-key"):
-                result = asyncio.run(
-                    call_vision_with_dispatch("base64data", "Describe this image", lang="en")
-                )
+        with mock.patch("llm._call_vertex_chat", vertex_stub):
+            result = asyncio.run(
+                call_vision_with_dispatch("base64data", "Describe this image", lang="en")
+            )
     assert result == "image analysis", f"Unexpected: {result!r}"
-    gemini_stub.assert_called_once()
-    print("  PASS: call_vision_with_dispatch routes select_provider('vision')='vertex' → _call_gemini")
+    vertex_stub.assert_called_once()
+    print("  PASS: call_vision_with_dispatch routes select_provider('vision')='vertex' → _call_vertex_chat")
 
 
 def test_safety_feature_key_priority_has_bedrock_first():

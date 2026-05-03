@@ -316,7 +316,11 @@ _CF_PROVIDER_SLUGS = {
 _DIRECT_PROVIDER_URLS = {
     "openai":      None,
     "xai":         "https://api.x.ai/v1",
-    "gemini":      "https://generativelanguage.googleapis.com/v1beta/openai/",
+    # NOTE: "gemini" entry removed (Task: vertex-only Gemini auth, 2026-05-03).
+    # All Gemini calls now route through Vertex AI service-account auth via
+    # `_call_vertex_chat` / `vertex_chat.stream_chat`. The direct
+    # generativelanguage.googleapis.com endpoint is no longer reachable from
+    # the backend; do NOT re-add unless you are deliberately rolling back.
     # Sarvam direct URL has NO /v1 — callers already supply /v1/chat/completions
     # and non-LLM endpoints like /translate, /text-to-speech live at root.
     "sarvam":      "https://api.sarvam.ai",
@@ -421,12 +425,18 @@ else:
     _cfg_log.info("Cloudflare AI Gateway DISABLED — using direct provider URLs")
 
 # ── LLM Configuration ─────────────────────────────────────────────────────────
-# Gemini re-enabled (2026-04-20) — AI Studio Tier 1 confirmed (2000 RPM/key),
-# CF AI Gateway BYOK verified working for google-ai-studio provider.
-_GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
-_GEMINI_KEY_2 = os.environ.get('GEMINI_API_KEY_2', '').strip()
-_GEMINI_KEY_RAW = _GEMINI_KEY
-_GEMINI_KEY_2_RAW = _GEMINI_KEY_2
+# Gemini auth migrated to Vertex AI service-account (2026-05-03).
+# GEMINI_API_KEY / GEMINI_API_KEY_2 are NO LONGER read from the environment —
+# all Gemini calls route through `vertex_chat.stream_chat` and
+# `_call_vertex_chat` (llm.py), which authenticate via
+# GOOGLE_APPLICATION_CREDENTIALS_JSON → OAuth bearer for cloud-platform scope.
+# These symbols stay bound to "" so any in-flight `from config import _GEMINI_KEY`
+# imports degrade gracefully (the `if _GEMINI_KEY:` guards become False and the
+# legacy gemini code paths short-circuit). Safe to delete from Railway.
+_GEMINI_KEY = ""
+_GEMINI_KEY_2 = ""
+_GEMINI_KEY_RAW = ""
+_GEMINI_KEY_2_RAW = ""
 _XAI_KEY = os.environ.get('XAI_API_KEY', '').strip()
 _OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '').strip()
 _SARVAM_LLM_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
@@ -510,7 +520,9 @@ CHAT_DEFAULT_MODEL = os.environ.get(
 # safely remove local API keys from production secrets once BYOK is verified
 # in the CF dashboard.
 if CF_GATEWAY_ENABLED:
-    _GEMINI_KEY     = _GEMINI_KEY     or BYOK_PLACEHOLDER
+    # NOTE: _GEMINI_KEY intentionally NOT substituted with BYOK_PLACEHOLDER
+    # (Task: vertex-only Gemini auth, 2026-05-03). The Gemini provider has
+    # been removed from every dispatch chain — Vertex SA is the only path.
     _SARVAM_LLM_KEY = _SARVAM_LLM_KEY or BYOK_PLACEHOLDER
     _XAI_KEY        = _XAI_KEY        or BYOK_PLACEHOLDER
     _OPENAI_KEY     = _OPENAI_KEY     or BYOK_PLACEHOLDER  # CF slug: openai/v1

@@ -177,7 +177,7 @@ def test_probe_logs_error_with_reason_when_no_credential(monkeypatch):
             return {
                 "ok": False,
                 "auth_mode": "none",
-                "reason": "No credential available (set VERTEX_SERVICE_ACCOUNT, GEMINI_API_KEY, or CF AI Gateway BYOK).",
+                "reason": "No credential available (set VERTEX_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS_JSON).",
             }
 
     import sys

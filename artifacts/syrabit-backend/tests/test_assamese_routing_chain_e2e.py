@@ -781,13 +781,15 @@ class TestAssameseTranslatePipelineIndicTrans2Path:
 
         gemini_calls: list = []
 
-        async def _fake_gemini(messages, api_key, model, max_tokens):
+        # Vertex-only Gemini auth (2026-05-03): stub `_call_vertex_chat` (signature
+        # `messages, model, max_tokens` — no api_key arg) instead of the deleted
+        # `_call_gemini`.
+        async def _fake_gemini(messages, model, max_tokens):
             gemini_calls.append(messages)
             return gemini_assamese
 
         import llm as _llm
-        monkeypatch.setattr(_llm, "_call_gemini", _fake_gemini, raising=False)
-        monkeypatch.setattr(_llm, "_GEMINI_KEY", "fake-gemini-key", raising=False)
+        monkeypatch.setattr(_llm, "_call_vertex_chat", _fake_gemini, raising=False)
 
         import deps
         monkeypatch.setattr(deps, "sarvam_translate_client", None, raising=False)
@@ -1041,8 +1043,9 @@ class TestLiveIndicTrans2:
 
         gemini_calls: list = []
 
-        async def _fake_gemini(messages, api_key, model, max_tokens):
-            # Tier B Gemini call confirmed; return proper Assamese script
+        async def _fake_gemini(messages, model, max_tokens):
+            # Tier B Gemini call confirmed (Vertex SA path post 2026-05-03);
+            # signature is `(messages, model, max_tokens)` — no api_key arg.
             gemini_calls.append(model)
             return _ASSAMESE_STUB
 
@@ -1050,15 +1053,14 @@ class TestLiveIndicTrans2:
         original_sarvam_c   = getattr(deps, "sarvam_client", None)
         original_sarvam_llm = getattr(deps, "sarvam_llm_client", None)
         original_redis      = chat_mod.redis_client
-        original_gemini_fn  = getattr(_llm, "_call_gemini", None)
-        original_gemini_key = getattr(_llm, "_GEMINI_KEY", None)
+        original_vertex_fn  = getattr(_llm, "_call_vertex_chat", None)
         try:
             deps.sarvam_translate_client = None
             deps.sarvam_client           = None
             deps.sarvam_llm_client       = None
             chat_mod.redis_client        = None
-            _llm._call_gemini            = _fake_gemini
-            _llm._GEMINI_KEY             = "stub-key"
+            # Vertex-only Gemini auth (2026-05-03): patch `_call_vertex_chat`.
+            _llm._call_vertex_chat       = _fake_gemini
 
             result = asyncio.run(
                 chat_mod._assamese_translate_gemini_main_sarvam_polish(
@@ -1071,10 +1073,8 @@ class TestLiveIndicTrans2:
             deps.sarvam_client           = original_sarvam_c
             deps.sarvam_llm_client       = original_sarvam_llm
             chat_mod.redis_client        = original_redis
-            if original_gemini_fn is not None:
-                _llm._call_gemini = original_gemini_fn
-            if original_gemini_key is not None:
-                _llm._GEMINI_KEY = original_gemini_key
+            if original_vertex_fn is not None:
+                _llm._call_vertex_chat = original_vertex_fn
 
         # IndicTrans2 was invoked live (providers/workers_indic.py log confirms:
         # "en-indic returned no Assamese script — CF endpoint returning Devanagari").
@@ -1175,7 +1175,8 @@ class TestLiveIndicTrans2:
         indic_trans_calls: list[str] = []
         gemini_calls: list = []
 
-        async def _fake_gemini(messages, api_key, model, max_tokens):
+        async def _fake_gemini(messages, model, max_tokens):
+            # Vertex SA path post 2026-05-03 — no api_key arg.
             gemini_calls.append(model)
             return _ASSAMESE_STUB
 
@@ -1183,15 +1184,14 @@ class TestLiveIndicTrans2:
         original_sarvam_c   = getattr(deps, "sarvam_client", None)
         original_sarvam_llm = getattr(deps, "sarvam_llm_client", None)
         original_redis      = chat_mod.redis_client
-        original_gemini_fn  = getattr(_llm, "_call_gemini", None)
-        original_gemini_key = getattr(_llm, "_GEMINI_KEY", None)
+        original_vertex_fn  = getattr(_llm, "_call_vertex_chat", None)
         try:
             deps.sarvam_translate_client = None
             deps.sarvam_client           = None
             deps.sarvam_llm_client       = None
             chat_mod.redis_client        = None
-            _llm._call_gemini            = _fake_gemini
-            _llm._GEMINI_KEY             = "stub-key"
+            # Vertex-only Gemini auth (2026-05-03): patch `_call_vertex_chat`.
+            _llm._call_vertex_chat       = _fake_gemini
 
             result = asyncio.run(
                 chat_mod._assamese_translate_gemini_main_sarvam_polish(
@@ -1204,10 +1204,8 @@ class TestLiveIndicTrans2:
             deps.sarvam_client           = original_sarvam_c
             deps.sarvam_llm_client       = original_sarvam_llm
             chat_mod.redis_client        = original_redis
-            if original_gemini_fn is not None:
-                _llm._call_gemini = original_gemini_fn
-            if original_gemini_key is not None:
-                _llm._GEMINI_KEY = original_gemini_key
+            if original_vertex_fn is not None:
+                _llm._call_vertex_chat = original_vertex_fn
 
         assert len(gemini_calls) == 1, (
             "Gemini (Tier B) must be triggered as fallback when IndicTrans2 raises "

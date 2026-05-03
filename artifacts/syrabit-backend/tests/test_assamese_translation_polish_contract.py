@@ -243,12 +243,14 @@ def test_indic_response_phase1_sarvam_wins_phase2_gemini_not_called(monkeypatch)
         yield "নমস্কাৰ"
         yield " পৃথিৱী"
 
-    async def _fake_gemini(messages, api_key, model, max_tokens):
+    async def _fake_gemini(messages, model, max_tokens):
+        # Vertex SA path post 2026-05-03 — `_stream_vertex_gemini` signature
+        # is `(messages, model, max_tokens)` (no api_key).
         gemini_calls["n"] += 1
         yield "GEMINI WAS CALLED"
 
     monkeypatch.setattr(llm, "_stream_sarvam", _fake_sarvam, raising=False)
-    monkeypatch.setattr(llm, "_stream_gemini", _fake_gemini, raising=False)
+    monkeypatch.setattr(llm, "_stream_vertex_gemini", _fake_gemini, raising=False)
     monkeypatch.setattr(llm._vertex_chat, "is_configured", lambda: False, raising=False)
 
     async def _drive():
@@ -299,13 +301,15 @@ def test_indic_response_phase1_all_sarvam_fail_then_phase2_gemini(monkeypatch):
         raise RuntimeError("Sarvam down (simulated)")
         yield  # pragma: no cover
 
-    async def _fake_gemini(messages, api_key, model, max_tokens):
+    async def _fake_gemini(messages, model, max_tokens):
+        # Vertex SA path post 2026-05-03 — `_stream_vertex_gemini` signature
+        # is `(messages, model, max_tokens)` (no api_key).
         gemini_calls["n"] += 1
         yield "নমস্কাৰ ফ্ৰম জেমিনি"
         yield " (গেমিনি ফলব্যাক)"
 
     monkeypatch.setattr(llm, "_stream_sarvam", _fake_sarvam, raising=False)
-    monkeypatch.setattr(llm, "_stream_gemini", _fake_gemini, raising=False)
+    monkeypatch.setattr(llm, "_stream_vertex_gemini", _fake_gemini, raising=False)
     monkeypatch.setattr(llm._vertex_chat, "is_configured", lambda: False, raising=False)
 
     async def _drive():
@@ -351,15 +355,17 @@ def test_indic_response_no_gemini_key_returns_error_after_sarvam_fails(monkeypat
         raise RuntimeError("Sarvam down")
         yield  # pragma: no cover
 
-    async def _fake_gemini(messages, api_key, model, max_tokens):
+    async def _fake_gemini(messages, model, max_tokens):
+        # Vertex SA path post 2026-05-03 — `_stream_vertex_gemini` signature
+        # is `(messages, model, max_tokens)` (no api_key).
         gemini_calls["n"] += 1
         raise AssertionError(
-            "Gemini must not be called when no Gemini key is configured"
+            "Gemini must not be called when no Gemini provider is configured"
         )
         yield  # pragma: no cover
 
     monkeypatch.setattr(llm, "_stream_sarvam", _fake_sarvam, raising=False)
-    monkeypatch.setattr(llm, "_stream_gemini", _fake_gemini, raising=False)
+    monkeypatch.setattr(llm, "_stream_vertex_gemini", _fake_gemini, raising=False)
     monkeypatch.setattr(llm._vertex_chat, "is_configured", lambda: False, raising=False)
 
     async def _drive():

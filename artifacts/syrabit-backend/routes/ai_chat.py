@@ -1,5 +1,5 @@
 """Syrabit.ai — AI chat & search routes"""
-import re, json, asyncio, time as _time_mod, uuid, logging, hashlib
+import os, re, json, asyncio, time as _time_mod, uuid, logging, hashlib
 
 from typing import Optional
 from datetime import datetime, timezone
@@ -302,16 +302,19 @@ async def _assamese_translate_gemini_main_sarvam_polish(
     # returns the un-polished IndicTrans2 string so the user still gets
     # a translation.
     try:
-        from llm import _call_gemini as _gemini_call, _GEMINI_KEY as _gkey
-        if not _gkey:
+        from llm import _call_vertex_chat
+        # `_call_vertex_chat` uses Vertex SA (GOOGLE_APPLICATION_CREDENTIALS_JSON);
+        # do NOT gate on `vertex_chat.is_configured()` (that symbol gates the
+        # streaming wrapper on Cloudflare creds, not on the SA needed here).
+        if not (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "") or "").strip():
             return _tr_cache_store(translate_out)
         polished = await asyncio.wait_for(
-            _gemini_call(
+            _call_vertex_chat(
                 [
                     {"role": "system", "content": _POLISH_SYSTEM_PROMPT},
                     {"role": "user", "content": translate_out[:4000]},
                 ],
-                _gkey, "gemini-2.5-flash",
+                "gemini-2.5-flash",
                 min(1200, len(translate_out) * 3 + 200),
             ),
             timeout=_SARVAM_POLISH_TIMEOUT_SEC,

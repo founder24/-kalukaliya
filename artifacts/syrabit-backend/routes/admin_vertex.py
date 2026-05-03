@@ -68,13 +68,9 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
     # CF gateway BYOK vs direct key, key + endpoint combos) and fall back to
     # raw env-var presence for providers that don't ship a module.
     def _gemini_or_vertex_configured() -> bool:
-        """True if either a Gemini key (config-bound) or a Vertex SA JSON exists."""
-        try:
-            from config import _GEMINI_KEY as _gem
-            if _gem:
-                return True
-        except Exception:
-            pass
+        """True if a Vertex SA JSON exists. Vertex SA is the only Gemini auth
+        path since the 2026-05-03 vertex-only migration — direct GEMINI_API_KEY
+        is no longer consulted."""
         return bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip())
 
     def _flag(modpath: str, attr: str = "ENABLED") -> bool:
@@ -521,15 +517,9 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     _check(google_vision, "vision_ocr")
     _check(vertex_embed, "vertex_embed")
 
-    try:
-        from config import _GEMINI_KEY as _gem_key
-        has_gemini = bool(_gem_key)
-    except Exception:
-        has_gemini = False
-    if has_gemini:
-        configured_services.append("gemini_fallback")
-    else:
-        unconfigured_services.append("gemini_fallback")
+    # Gemini is reachable only through Vertex SA now (2026-05-03 vertex-only
+    # migration); SA presence is reported via the `vertex_embed`/`vertex_chat`
+    # cards above. The standalone `gemini_fallback` row was removed.
 
     sa_configured = bool(
         GOOGLE_APPLICATION_CREDENTIALS_JSON
