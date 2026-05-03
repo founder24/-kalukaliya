@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 BASE_URL = "http://localhost:8080"
+_STREAM_ENDPOINT = "/api/ai/chat/stream"   # was /api/ai/internal-chat (renamed)
 
 TEST_QUERIES = [
     {"q": "What is photosynthesis?",               "subject": "Biology"},

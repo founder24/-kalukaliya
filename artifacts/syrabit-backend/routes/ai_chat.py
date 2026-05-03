@@ -1806,13 +1806,16 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
     # handles the full _fetch_internal_chapters call if Redis misses.
 
     async def _check_warm_redis() -> list:
-        """Redis-only check — completes in <5ms. Used in Phase 0 (150ms budget)."""
+        """Redis-only check used in Phase 0 (150ms budget).
+        Uses run_in_executor so the sync Upstash REST call doesn't block
+        the event loop — critical when the Phase-0 asyncio.wait fires."""
         import hashlib as _hl, json as _json
         _sid = msg.subject_id or ""
         _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
         if redis_client:
             try:
-                _wdata = redis_client.get(_wkey)
+                _loop = asyncio.get_event_loop()
+                _wdata = await _loop.run_in_executor(None, redis_client.get, _wkey)
                 if _wdata:
                     _parsed = _json.loads(_wdata)
                     if _parsed:
@@ -1829,7 +1832,8 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
         _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
         if redis_client:
             try:
-                _wdata = redis_client.get(_wkey)
+                _loop = asyncio.get_event_loop()
+                _wdata = await _loop.run_in_executor(None, redis_client.get, _wkey)
                 if _wdata:
                     _parsed = _json.loads(_wdata)
                     if _parsed:
