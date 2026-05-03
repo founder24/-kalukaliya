@@ -54,6 +54,7 @@ from config import (
     is_cf_gateway_up, mark_cf_gateway_down, get_provider_base_url,
     byok_headers, BYOK_PLACEHOLDER,
     VERTEX_GEMINI_MODEL,
+    AZURE_OPENAI_DEPLOYMENT,
     ENABLE_PARALLEL_LLM_RACE, PARALLEL_RACE_TIMEOUT, MIN_PROVIDERS_TO_RACE, MAX_CONCURRENT_RACE_PROVIDERS,
 )
 import vertex_chat as _vertex_chat
@@ -1382,7 +1383,7 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "vertex":           "gemini-2.5-flash",                          # Vertex AI Gemini 2.5 Flash — highest TPS
     "bedrock":          "amazon.nova-micro-v1:0",                    # AWS Bedrock Nova Micro — fastest/cheapest Nova
-    "azure_openai":     "gpt-4.1-mini",                              # Azure OpenAI GPT-4.1-mini — highest TPS on Azure; primary for english_rag_chat
+    "azure_openai":     AZURE_OPENAI_DEPLOYMENT,                     # Azure OpenAI deployment from config (Task #290 — env-driven, no hard-coded model drift)
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
     "assemblyai":       "best",                                      # AssemblyAI STT

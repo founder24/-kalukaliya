@@ -47,6 +47,7 @@ import httpx
 from fastapi import APIRouter, Depends
 
 from auth_deps import get_admin_user
+from config import AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["admin-credits"])
@@ -188,7 +189,7 @@ _PROVIDER_PROBE_SPECS: dict[str, dict] = {
         "method": "POST",
         # CF BYOK probe path — uses the Azure deployment name from config so it
         # matches whichever deployment operators created in the portal (Task #290).
-        "path": f"/openai/deployments/{__import__('config').AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version={__import__('config').AZURE_OPENAI_API_VERSION}",
+        "path": f"/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version={AZURE_OPENAI_API_VERSION}",
         "body": {
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 1,
