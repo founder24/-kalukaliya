@@ -189,3 +189,31 @@ Books, Fact Check Tools, Natural Language, Discovery Engine, Cloud Scheduler, Cl
 
 ### Router-prefix gotcha
 `api = APIRouter(prefix="/api")` in `server.py:1785`. Routes registered on `api` must use `/admin/...`, NOT `/api/admin/...`, otherwise they end up at `/api/api/admin/...`. (Pre-existing bug in `admin_seo_keywords.py` — `/api/api/admin/seo/enrich` — left untouched.)
+
+## GCP wiring Phase 2 (May 2026) — content quality + security + discovery
+
+User asked for all four phases (content quality / reliability / security / discovery). Half delivered now (API-key only); half deferred (need a Google SA JSON which isn't in env).
+
+### Built (API-key only)
+- `fact_check_client.py` — Fact Check Tools claims:search (`GOOGLE_FACT_CHECK_API_KEY` → `GOOGLE_KG_API_KEY`).
+- `nlp_client.py` — Cloud Natural Language v1: `analyze_sentiment`, `analyze_entities`, `classify_text` (`GOOGLE_NLP_API_KEY` → `GOOGLE_KG_API_KEY`).
+- `web_risk_client.py` — Web Risk uris:search (single + batch with sem-bounded concurrency=8) (`GOOGLE_WEB_RISK_API_KEY` → `GOOGLE_KG_API_KEY`).
+- `books_client.py` — Books v1 volumes search + get (`GOOGLE_BOOKS_API_KEY` → `GOOGLE_KG_API_KEY`; works without key at lower rate).
+
+Admin endpoints (all `Depends(get_admin_user)`, all `/admin/...` paths under `api=APIRouter(prefix="/api")`):
+- `GET  /api/admin/content/fact-check`
+- `POST /api/admin/content/nlp/analyze` (features: sentiment/entities/classify, runs concurrently)
+- `GET  /api/admin/security/web-risk`
+- `POST /api/admin/security/web-risk/batch` (max 50 URIs)
+- `GET  /api/admin/discovery/books/search`
+- `GET  /api/admin/discovery/books/volume/{volume_id}`
+
+### Deferred — need GOOGLE_APPLICATION_CREDENTIALS_JSON
+- Cloud Scheduler / Cloud Tasks (reliability)
+- Web Security Scanner (security — long-running automated scans)
+- Discovery Engine / Vertex AI Search (discovery)
+
+CF AI Gateway BYOK only proxies AI providers, not arbitrary Google APIs, so these four require a separate local SA. To unblock: provide `GOOGLE_APPLICATION_CREDENTIALS_JSON` env var with a SA that has the relevant roles (`roles/cloudscheduler.admin`, `roles/cloudtasks.admin`, `roles/websecurityscanner.editor`, `roles/discoveryengine.viewer`).
+
+### Convention reminder
+All new admin route files use `@router.get("/admin/...")` (no `/api/` prefix) since `api = APIRouter(prefix="/api")` adds it automatically.
