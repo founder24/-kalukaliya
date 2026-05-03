@@ -29,8 +29,19 @@ Routes:
   the next monthly evaluation. The operator email is logged here for
   the audit trail (the worker doesn't have an identity to log).
 
-Both routes reuse ``D1_SYNC_SECRET`` for the worker handshake (same
-shared secret as ``/admin/kv-health``). No new secret to provision.
+* ``GET /r2-watchdog-status`` — Task #321 — public-facing,
+  unauthenticated companion that returns ONLY the secondary
+  "watchdog blind" fields (``consecutive_query_failures``,
+  ``query_fail_threshold``, ``query_fail_last_fired_at``,
+  ``last_evaluated_at``) so the public on-call status page
+  (`/status`) can render the same red/amber indicator without
+  admin credentials. The cost / IA-share / Logpush GB numbers
+  remain admin-only — only the watchdog liveness signal is
+  exposed publicly.
+
+All admin routes reuse ``D1_SYNC_SECRET`` for the worker handshake
+(same shared secret as ``/admin/kv-health``). No new secret to
+provision.
 """
 from __future__ import annotations
 
@@ -172,3 +183,103 @@ async def admin_r2_storage_health_reset_watchdog(
     except Exception:
         body = {"detail": resp.text[:300]}
     raise HTTPException(status_code=resp.status_code, detail=body)
+
+
+# Task #321 — default "watchdog blind" threshold mirrored from
+# workers/edge-proxy/src/r2-storage-class-alert.ts
+# (DEFAULT_QUERY_FAIL_THRESHOLD). Used as a fallback so the public
+# indicator still renders correctly against an older worker that
+# omits ``query_fail_threshold`` from the snapshot payload.
+_DEFAULT_QUERY_FAIL_THRESHOLD = 2
+
+# Runbook the on-call indicator deep-links to. Kept in sync with the
+# admin tile (artifacts/syrabit/src/components/admin/R2ColdStoragePanel
+# .jsx ``RUNBOOK_URL``) so both surfaces point at the same Step 5.
+_RUNBOOK_URL = (
+    "https://github.com/syrabit/syrabit/blob/main/"
+    "docs/cloudflare-monthly-cost-review.md#step-5"
+)
+
+
+@router.get("/r2-watchdog-status")
+async def public_r2_watchdog_status():
+    """Task #321 — public, unauthenticated read of the R2 cold-storage
+    watchdog liveness signal so the on-call status page can mirror the
+    admin "watchdog blind" indicator without admin credentials.
+
+    Returns only the fields needed for the indicator:
+
+    * ``configured`` — whether the worker is wired up at all.
+    * ``query_fail_threshold`` — N consecutive monthly failures that
+      trip the watchdog-blind page (so the UI knows when to flip red).
+    * ``runbook_url`` — same Step 5 link the admin tile uses.
+    * ``state`` — ``{consecutive_query_failures, query_fail_last_fired
+      _at, last_evaluated_at}`` only. Cost / IA-share / Logpush GB
+      numbers stay admin-only — they are not part of the watchdog
+      liveness signal and have no business being on the public page.
+
+    Errors degrade to ``configured: false`` rather than 5xx so a
+    proxy outage does not turn the public status page red on its own.
+    """
+    secret = _edge_secret()
+    base = _edge_url()
+    if not secret or not base:
+        return {
+            "configured": False,
+            "reason": "CF_EDGE_PROXY_URL or D1_SYNC_SECRET is not set",
+            "query_fail_threshold": _DEFAULT_QUERY_FAIL_THRESHOLD,
+            "runbook_url": _RUNBOOK_URL,
+            "state": None,
+        }
+    url = f"{base}/api/edge/r2-storage-health"
+    try:
+        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_S) as client:
+            resp = await client.get(url, headers={"X-Edge-Admin-Secret": secret})
+        if resp.status_code != 200:
+            return {
+                "configured": True,
+                "reason": f"edge returned {resp.status_code}",
+                "query_fail_threshold": _DEFAULT_QUERY_FAIL_THRESHOLD,
+                "runbook_url": _RUNBOOK_URL,
+                "state": None,
+            }
+        full = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[r2-watchdog-status] edge fetch failed: {exc}")
+        return {
+            "configured": True,
+            "reason": f"edge unreachable: {type(exc).__name__}",
+            "query_fail_threshold": _DEFAULT_QUERY_FAIL_THRESHOLD,
+            "runbook_url": _RUNBOOK_URL,
+            "state": None,
+        }
+
+    # Strip the snapshot down to the watchdog liveness fields. We
+    # intentionally drop ia_share / total_gb / logpush_gb / bucket
+    # names so the public payload cannot be used to infer storage
+    # cost details.
+    full_state = full.get("state") or {}
+    public_state = {
+        "consecutive_query_failures": full_state.get(
+            "consecutive_query_failures", 0,
+        ),
+        "query_fail_last_fired_at": full_state.get(
+            "query_fail_last_fired_at"
+        ),
+        "last_evaluated_at": full_state.get("last_evaluated_at"),
+    }
+    threshold = full.get(
+        "query_fail_threshold", _DEFAULT_QUERY_FAIL_THRESHOLD,
+    )
+    try:
+        threshold = int(threshold)
+        if threshold < 1:
+            threshold = _DEFAULT_QUERY_FAIL_THRESHOLD
+    except (TypeError, ValueError):
+        threshold = _DEFAULT_QUERY_FAIL_THRESHOLD
+    return {
+        "configured": bool(full.get("configured", True)),
+        "query_fail_threshold": threshold,
+        "runbook_url": _RUNBOOK_URL,
+        "state": public_state,
+    }

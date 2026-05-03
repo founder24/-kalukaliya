@@ -3,7 +3,16 @@ import { PublicLayout } from '@/components/layout/PublicLayout';
 import PageMeta from '@/components/seo/PageMeta';
 import { API_BASE, WORKER_API } from '@/utils/api';
 import axios from 'axios';
-import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, Activity } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, Activity, EyeOff } from 'lucide-react';
+
+/** Task #321 — fallback "watchdog blind" threshold mirrored from
+ *  workers/edge-proxy/src/r2-storage-class-alert.ts
+ *  (DEFAULT_QUERY_FAIL_THRESHOLD). The backend usually returns
+ *  ``query_fail_threshold`` so this is only used if the field is
+ *  missing (older worker / proxy outage). */
+const R2_WATCHDOG_DEFAULT_THRESHOLD = 2;
+const R2_WATCHDOG_RUNBOOK_URL =
+  'https://github.com/syrabit/syrabit/blob/main/docs/cloudflare-monthly-cost-review.md#step-5';
 
 const SERVICE_CHECKS = [
   { key: 'api', label: 'Backend API', description: 'Core backend services' },
@@ -37,6 +46,12 @@ export default function StatusPage() {
   const [loading, setLoading] = useState(true);
   const [lastChecked, setLastChecked] = useState(null);
   const [latency, setLatency] = useState(null);
+  // Task #321 — mirror the admin dashboard's "watchdog blind"
+  // indicator (R2ColdStoragePanel) on the public status page so
+  // on-call sees a single failed monthly evaluation without needing
+  // admin credentials. `null` while loading; the public payload from
+  // /api/r2-watchdog-status otherwise.
+  const [r2Watchdog, setR2Watchdog] = useState(null);
 
   const checkStatus = useCallback(async () => {
     setLoading(true);
@@ -73,6 +88,15 @@ export default function StatusPage() {
         llm: 'down',
         cdn: 'operational',
       });
+    }
+    // Task #321 — fetched in parallel-ish (after /health to keep the
+    // happy-path render order). Failures degrade silently — the
+    // indicator simply hides instead of turning the whole page red.
+    try {
+      const wd = await axios.get(`${API_BASE}/r2-watchdog-status`);
+      setR2Watchdog(wd.data || null);
+    } catch {
+      setR2Watchdog(null);
     }
     setLastChecked(new Date());
     setLoading(false);
@@ -123,11 +147,14 @@ export default function StatusPage() {
                   {!services ? 'Checking…' : allOperational ? 'All Systems Operational' : anyDown ? 'Service Disruption Detected' : 'Partial Degradation'}
                 </span>
               </div>
-              {latency !== null && (
-                <span className="text-muted-foreground/50 text-xs">
-                  {latency}ms response
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                <R2WatchdogIndicator data={r2Watchdog} />
+                {latency !== null && (
+                  <span className="text-muted-foreground/50 text-xs">
+                    {latency}ms response
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="divide-y divide-border/15">
@@ -163,5 +190,64 @@ export default function StatusPage() {
         </div>
       </div>
     </PublicLayout>
+  );
+}
+
+/**
+ * Task #321 — public-facing mirror of the admin dashboard's
+ * "watchdog blind" indicator (see
+ * artifacts/syrabit/src/components/admin/R2ColdStoragePanel.jsx
+ * ``WatchdogBlindIndicator``). On-call responders typically work
+ * from this status page rather than the admin dashboard, so we
+ * surface ``consecutive_query_failures`` here too: a single failed
+ * monthly evaluation flips the badge amber, the second failure (the
+ * one that actually pages) flips it red.
+ *
+ * Hidden when the watchdog is unconfigured / the counter is 0 so
+ * the status header stays uncluttered in the steady state. Tooltip
+ * + link both deep-link into the same Step 5 runbook the admin tile
+ * uses, so on-call has one source of truth either way.
+ */
+function R2WatchdogIndicator({ data }) {
+  if (!data || data.configured === false) return null;
+  const state = data.state || {};
+  const count = Number(state.consecutive_query_failures || 0);
+  if (!Number.isFinite(count) || count < 1) return null;
+  const threshold = Number(
+    data.query_fail_threshold ?? R2_WATCHDOG_DEFAULT_THRESHOLD,
+  );
+  const tripped = count >= threshold;
+  const cls = tripped
+    ? 'bg-red-500/15 text-red-500 ring-red-500/30'
+    : 'bg-amber-500/15 text-amber-500 ring-amber-500/30';
+  const lastFired = state.query_fail_last_fired_at;
+  const remaining = Math.max(0, threshold - count);
+  const runbookUrl = data.runbook_url || R2_WATCHDOG_RUNBOOK_URL;
+  const tooltip =
+    `R2 cold-storage watchdog: ${count} of ${threshold} consecutive ` +
+    `monthly evaluations failed (~${count} month${count === 1 ? '' : 's'} blind). ` +
+    (tripped
+      ? 'Watchdog-blind page has fired — the primary IA-share + Logpush-cap alerts cannot fire while this is broken. '
+      : `${remaining} more failed monthly evaluation${remaining === 1 ? '' : 's'} will trip the page. `) +
+    (lastFired
+      ? `Last fired: ${new Date(lastFired).toLocaleString()}. `
+      : 'Never fired. ') +
+    `Runbook: ${runbookUrl}`;
+  return (
+    <a
+      href={runbookUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={tooltip}
+      aria-label={tooltip}
+      data-testid="status-page-r2-watchdog-indicator"
+      data-watchdog-state={tripped ? 'tripped' : 'warn'}
+      data-watchdog-count={count}
+      data-watchdog-threshold={threshold}
+      className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded ring-1 ${cls} no-underline hover:brightness-110`}
+    >
+      <EyeOff size={10} />
+      <span>R2 watchdog {count}/{threshold}</span>
+    </a>
   );
 }
