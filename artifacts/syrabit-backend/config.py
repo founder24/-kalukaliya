@@ -974,7 +974,7 @@ PLAN_PRICES = {
     "pro":     {"price": 999, "label": "Pro",      "description": "4,000 credits/day · full document access"},
 }
 
-# ── Provider Priority & Credits (Task #250) ──────────────────────────────────
+# ── Provider Priority & Credits (Task #250, rebalanced Task #281) ───────────
 # PROVIDER_PRIORITY: ordered fallback sequence per feature. The rotation pool
 # draws by *weight* (not by list position); list order only matters after all
 # weighted providers are exhausted (last-resort fallback sequence).
@@ -983,10 +983,19 @@ PLAN_PRICES = {
 # draw weights for weighted round-robin. weight=0 means "never in rotation
 # pool — last-resort fallback only".
 #
+# Task #281 — chat & content pools: AWS Bedrock has been removed from the
+# four chat/content pools (english_rag_chat, assamese_rag_chat, content,
+# assamese_content). For those pools, POOL_WEIGHTS overrides the
+# credit-derived defaults to enforce **equal-weight rotational** draws so no
+# single primary provider gets exhausted before its peers. Bedrock is still
+# available for the `vision` and `safety` pools (Claude multimodal /
+# Claude 3.5 Haiku) and remains a $1k entry in PROVIDER_CREDITS so the
+# vision/safety weighted draw still resolves correctly.
+#
 # Credit reference table (minimum confirmed startup-programme amounts):
 #   vertex        Google Cloud for Startups          $2,000
-#   bedrock       AWS Activate                       $1,000
-#   azure_openai  Azure for Startups                 $2,500  → fixed weight 1 (second-to-last)
+#   bedrock       AWS Activate                       $1,000  (vision + safety only — chat/content pools excluded per Task #281)
+#   azure_openai  Azure for Startups                 $2,500
 #   sarvam        Sarvam startup credits             $500
 #   elevenlabs    ElevenLabs startup credits         $500
 #   assemblyai    AssemblyAI startup credits         $1,000
@@ -997,21 +1006,26 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG (Task #267):
-    #   Azure GPT-4.1-mini (primary, 2.5k) → Bedrock Nova Micro (second, 1k) → Workers AI (last resort).
-    #   POOL_WEIGHTS gives azure_openai=3000, bedrock=1000; workers_ai falls back at weight 0.
-    "english_rag_chat":  ["azure_openai", "bedrock", "workers_ai"],
-    # Assamese chat (Task #267):
-    #   Sarvam (primary, native Indic) → Gemini 2.5 Flash (second) → Workers AI IndicTrans2 (last resort).
-    #   POOL_WEIGHTS gives sarvam=3000, vertex=100; workers_ai_indic falls back at weight 0.
+    # English chat + RAG (Task #281): equal-weight rotation across Azure,
+    # Gemini, and Workers AI. Bedrock removed from this pool — see header
+    # comment above. POOL_WEIGHTS["english_rag_chat"] gives every provider
+    # weight=1000 so the draw is true round-robin (~33% each).
+    "english_rag_chat":  ["azure_openai", "vertex", "workers_ai"],
+    # Assamese chat (Task #281): equal-weight rotation across Sarvam (native
+    # Indic), Gemini, and Workers AI IndicTrans2. POOL_WEIGHTS gives every
+    # provider weight=1000 so the draw is true round-robin (~33% each).
     "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
-    # Long-form content / notes generation:
-    #   Gemini (primary, 1M-token context) → Azure → AWS Bedrock → Workers AI (last resort).
-    #   POOL_WEIGHTS["content"] gives vertex=5000 so Gemini draws ~56%.
-    "content":           ["vertex", "azure_openai", "bedrock", "workers_ai"],
-    # Assamese content generation:
-    #   Sarvam → Vertex → workers_ai_indic (last resort).
-    "assamese_content":  ["sarvam", "vertex", "workers_ai_indic"],
+    # Long-form content / notes generation (Task #281): equal-weight rotation
+    # across Gemini (1M-token context), Azure, and Workers AI. Bedrock
+    # removed — see header comment above. POOL_WEIGHTS["content"] gives every
+    # provider weight=1000 so the draw is true round-robin (~33% each).
+    "content":           ["vertex", "azure_openai", "workers_ai"],
+    # Assamese content generation (Task #281): IndicTrans2 dominant primary
+    # (purpose-built Indic neural MT), Gemini reserved at low weight strictly
+    # for note-formatting / structuring fallback. Sarvam removed from this
+    # pool — Sarvam stays on the conversational `assamese_rag_chat` path
+    # where its native conversational tone matters most.
+    "assamese_content":  ["workers_ai_indic", "vertex"],
     # Text-to-speech: ElevenLabs (primary) → Deepgram → Vertex → Workers AI.
     # All via CF AI Gateway; rotational so no single provider is exhausted.
     "tts":               ["elevenlabs", "deepgram", "vertex", "workers_ai"],
@@ -1060,31 +1074,35 @@ PROVIDER_CREDITS: dict = {
 # Per-pool weight overrides — take precedence over PROVIDER_CREDITS in select_provider.
 # Use this when a provider should have a different priority in one pool vs. the global default.
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
-    # content (notes/important_questions/pyq generation):
-    #   Vertex/Gemini primary (5000) — 1M-token context ideal for long notes.
-    #   Azure OpenAI second (2500), Bedrock third (1000), Workers AI last resort (0).
+    # content / english_rag_chat / assamese_rag_chat (Task #281):
+    #   Equal-weight rotational draw across the 3 providers in each pool —
+    #   AWS removed, Gemini restored to english_rag_chat — so no single
+    #   primary gets exhausted before its peers. weight=1000 each →
+    #   ~33% draw probability per provider.
     "content": {
-        "vertex":       5000,   # primary — Gemini 2.5 Flash, best for long-form notes
-        "azure_openai": 2500,   # second
-        "bedrock":      1000,   # third
+        "vertex":       1000,   # Gemini 2.5 Flash — 1M-token context, best for long-form notes
+        "azure_openai": 1000,   # GPT-4.1-mini — fastest TPS on Azure
+        "workers_ai":   1000,   # Llama 3.3 70B fp8 — Cloudflare credit pool
     },
-    # english_rag_chat (Task #267): Azure primary (3000) → Bedrock second (1000) → Workers AI (0, absolute last resort).
-    # Draw order by weight: azure_openai(3000) → bedrock(1000) → workers_ai(0 via PROVIDER_CREDITS).
+    # english_rag_chat (Task #281): Azure / Gemini / Workers AI equal-weight rotation.
+    # Draw order is randomised by weight, so all three see ~33% of traffic.
     "english_rag_chat": {
-        "azure_openai": 3000,   # primary — GPT-4.1-mini, highest TPS on Azure
-        "bedrock":      1000,   # second — Nova Micro fallback when Azure is rate-limited
+        "azure_openai": 1000,   # GPT-4.1-mini
+        "vertex":       1000,   # Gemini 2.5 Flash — restored to this pool in Task #281
+        "workers_ai":   1000,   # Llama 3.3 70B fp8 fallback
     },
-    # assamese_rag_chat (Task #267): Sarvam primary (3000) → Vertex second (100) → IndicTrans2 last resort (0).
-    # workers_ai_indic has no POOL_WEIGHTS override → falls back to PROVIDER_CREDITS=0 (last resort).
+    # assamese_rag_chat (Task #281): Sarvam / Gemini / IndicTrans2 equal-weight rotation.
     "assamese_rag_chat": {
-        "sarvam":  3000,   # primary — best for Assamese conversational
-        "vertex":   100,   # second — Gemini 2.5 Flash emergency fallback
+        "sarvam":           1000,   # native Indic conversational
+        "vertex":           1000,   # Gemini 2.5 Flash
+        "workers_ai_indic": 1000,   # CF IndicTrans2 — purpose-built Indic neural MT
     },
-    # assamese_content: Sarvam primary (2000) → Vertex second (100) → IndicTrans2 last resort.
+    # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
+    # at low weight strictly for formatting / structuring notes. Sarvam removed
+    # per spec — Sarvam stays on the conversational `assamese_rag_chat` path.
     "assamese_content": {
-        "sarvam":           2000,   # primary
-        "vertex":            100,   # second
-        "workers_ai_indic": 3000,   # last resort — purpose-built Indic neural MT
+        "workers_ai_indic": 5000,   # primary — purpose-built Indic neural MT
+        "vertex":            100,   # small slice for note formatting / structure
     },
     # translate: IndicTrans2 primary (3000) → Vertex fallback (100).
     "translate": {

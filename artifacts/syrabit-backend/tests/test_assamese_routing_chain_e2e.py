@@ -454,10 +454,14 @@ class TestCallWithProviderFallbackAssamese:
         )
 
 
-# ── E. English chain: 429 on azure_openai/bedrock triggers next provider ─────
+# ── E. English chain: 429 on azure_openai/vertex triggers next provider ─────
+# Task #281 rebalanced english_rag_chat to ["azure_openai", "vertex",
+# "workers_ai"] (equal-weight rotation, Bedrock removed). The fallback
+# semantics being tested here are unchanged — only the providers that
+# participate in the rotation differ.
 
 class TestEnglishChain429Fallback:
-    """429 HTTP errors on azure_openai and bedrock must trigger provider removal
+    """429 HTTP errors on azure_openai and vertex must trigger provider removal
     from the english_rag_chat pool so the next provider is tried."""
 
     def _make_429_error(self):
@@ -469,16 +473,16 @@ class TestEnglishChain429Fallback:
 
     def test_azure_openai_429_excluded_from_subsequent_draws(self):
         """HTTP 429 from azure_openai must exclude it and the request must
-        succeed via bedrock or workers_ai without azure_openai being retried.
+        succeed via vertex or workers_ai without azure_openai being retried.
 
         select_provider is forced to draw azure_openai first to avoid flakiness
-        from the weighted-random (3000:1000) draw.
+        from the equal-weight (1000:1000:1000) random draw.
         """
         import llm
 
         call_order: list[str] = []
         err_429 = self._make_429_error()
-        original, _ = _force_select_provider(llm, ["azure_openai", "bedrock"])
+        original, _ = _force_select_provider(llm, ["azure_openai", "vertex"])
         try:
             async def _attempt(provider: str) -> str:
                 call_order.append(provider)
@@ -498,8 +502,8 @@ class TestEnglishChain429Fallback:
         )
         assert result.startswith("response-from-"), "Must return a successful result"
 
-    def test_azure_openai_and_bedrock_429_falls_through_to_workers_ai(self):
-        """HTTP 429 on both azure_openai and bedrock must ultimately reach workers_ai."""
+    def test_azure_openai_and_vertex_429_falls_through_to_workers_ai(self):
+        """HTTP 429 on both azure_openai and vertex must ultimately reach workers_ai."""
         import llm
 
         call_order: list[str] = []
@@ -509,12 +513,12 @@ class TestEnglishChain429Fallback:
         err_429 = httpx.HTTPStatusError("429", request=MagicMock(), response=mock_resp)
 
         original, _ = _force_select_provider(
-            llm, ["azure_openai", "bedrock", "workers_ai"]
+            llm, ["azure_openai", "vertex", "workers_ai"]
         )
         try:
             async def _attempt(provider: str) -> str:
                 call_order.append(provider)
-                if provider in ("azure_openai", "bedrock"):
+                if provider in ("azure_openai", "vertex"):
                     raise err_429
                 return f"response-from-{provider}"
 
@@ -524,8 +528,8 @@ class TestEnglishChain429Fallback:
         finally:
             llm.select_provider = original
 
-        assert call_order == ["azure_openai", "bedrock", "workers_ai"], (
-            f"Expected azure_openai→bedrock→workers_ai; got {call_order}"
+        assert call_order == ["azure_openai", "vertex", "workers_ai"], (
+            f"Expected azure_openai→vertex→workers_ai; got {call_order}"
         )
         assert result == "response-from-workers_ai"
 
@@ -539,7 +543,7 @@ class TestEnglishChain429Fallback:
         mock_resp.status_code = 429
         err_429 = httpx.HTTPStatusError("429", request=MagicMock(), response=mock_resp)
 
-        original, _ = _force_select_provider(llm, ["azure_openai", "bedrock"])
+        original, _ = _force_select_provider(llm, ["azure_openai", "vertex"])
         try:
             async def _attempt(provider: str) -> str:
                 call_order.append(provider)
