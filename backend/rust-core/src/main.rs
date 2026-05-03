@@ -51,6 +51,12 @@ pub struct AppConfig {
     pub database_url: String,
     pub jwt_secret: String,
     pub environment: String,
+    /// Optional Twilio credentials for sending SMS OTPs. If any of these
+    /// are unset the staff handlers fall back to logging the OTP to the
+    /// tracing layer (development mode).
+    pub twilio_account_sid: Option<String>,
+    pub twilio_auth_token: Option<String>,
+    pub twilio_from_number: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -70,6 +76,9 @@ impl Default for AppConfig {
                 .unwrap_or_else(|_| "dev-secret-key".to_string()),
             environment: std::env::var("ENVIRONMENT")
                 .unwrap_or_else(|_| "development".to_string()),
+            twilio_account_sid: std::env::var("TWILIO_ACCOUNT_SID").ok(),
+            twilio_auth_token: std::env::var("TWILIO_AUTH_TOKEN").ok(),
+            twilio_from_number: std::env::var("TWILIO_FROM_NUMBER").ok(),
         }
     }
 }
