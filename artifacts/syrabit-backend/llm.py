@@ -1073,6 +1073,85 @@ async def _call_gemini(messages: list, api_key: str, model: str, max_tokens: int
     content = resp.choices[0].message.content or ""
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
+# ── Vertex AI native chat (GCP service-account auth) ─────────────────────────
+# Replaces the legacy Gemini Direct API path for chat dispatch. Auth via
+# GOOGLE_APPLICATION_CREDENTIALS_JSON → OAuth bearer for cloud-platform scope.
+_VERTEX_CHAT_CACHE: dict = {}
+
+async def _call_vertex_chat(messages: list, model: str, max_tokens: int) -> str:
+    """Call Vertex AI :generateContent with SA-minted OAuth bearer."""
+    from google.oauth2 import service_account
+    from google.auth.transport.requests import Request as _GAuthReq
+    import httpx as _httpx
+
+    if "creds" not in _VERTEX_CHAT_CACHE:
+        sa_raw = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
+        if not sa_raw:
+            raise RuntimeError("vertex: GOOGLE_APPLICATION_CREDENTIALS_JSON not set")
+        sa_info = json.loads(sa_raw)
+        creds = service_account.Credentials.from_service_account_info(
+            sa_info, scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        _VERTEX_CHAT_CACHE["creds"]   = creds
+        _VERTEX_CHAT_CACHE["project"] = (
+            os.environ.get("GCP_PROJECT_ID")
+            or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or os.environ.get("VERTEX_PROJECT_ID")
+            or sa_info.get("project_id")
+        )
+    creds   = _VERTEX_CHAT_CACHE["creds"]
+    project = _VERTEX_CHAT_CACHE["project"]
+    if not project:
+        raise RuntimeError("vertex: project_id missing from SA JSON / env")
+    if not creds.valid:
+        await asyncio.to_thread(creds.refresh, _GAuthReq())
+
+    location = os.environ.get("VERTEX_LOCATION", "us-central1").strip() or "us-central1"
+    url = (f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
+           f"/locations/{location}/publishers/google/models/{model}:generateContent")
+
+    # Convert OpenAI-style messages → Vertex contents + systemInstruction
+    sys_parts: list = []
+    contents: list  = []
+    for m in messages:
+        role = (m.get("role") or "user").lower()
+        text = m.get("content") or ""
+        if isinstance(text, list):  # multimodal lists → join text parts only
+            text = "".join(p.get("text", "") for p in text if isinstance(p, dict) and p.get("type") == "text")
+        if not text:
+            continue
+        if role == "system":
+            sys_parts.append({"text": text})
+        elif role == "assistant":
+            contents.append({"role": "model", "parts": [{"text": text}]})
+        else:
+            contents.append({"role": "user", "parts": [{"text": text}]})
+    if not contents:
+        contents = [{"role": "user", "parts": [{"text": ""}]}]
+
+    payload: dict = {
+        "contents": contents,
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.1},
+    }
+    if sys_parts:
+        payload["systemInstruction"] = {"parts": sys_parts}
+
+    async with _httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {creds.token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    r.raise_for_status()
+    data  = r.json()
+    parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+    text  = "".join(p.get("text", "") for p in parts).strip()
+    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+
 async def _call_openai_compat(messages: list, api_key: str, model: str, max_tokens: int, provider: str, fallback_base: str) -> str:
     """Non-streaming call via an OpenAI-compatible provider (OpenAI, xAI, Fireworks)."""
     base = get_provider_base_url(provider) or fallback_base
@@ -1658,11 +1737,11 @@ async def _dispatch_llm_for_feature(
     import time as _dp_t
 
     if provider == "vertex":
-        if not _GEMINI_KEY:
-            raise RuntimeError("vertex: GEMINI_API_KEY not available")
+        if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip():
+            raise RuntimeError("vertex: GOOGLE_APPLICATION_CREDENTIALS_JSON not available")
         _t0 = _dp_t.perf_counter()
         try:
-            result = await _call_gemini(messages, _GEMINI_KEY, "gemini-2.5-flash", max_tokens)
+            result = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
             _record_llm_call("vertex", "gemini-2.5-flash", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
             return result
         except Exception as _exc:
