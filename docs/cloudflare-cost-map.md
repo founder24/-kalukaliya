@@ -84,6 +84,7 @@ AI later, and lets us justify a top-up to the startup rep with a clean
 | Cloudflare Access | `cf_access.py` admin route protection (Task #637). | 🟦 STARTUP-100% (Access seats up to startup cap) | Keep. Audit seat count quarterly to stay under cap. |
 | Cloudflare Tunnel | Not in use. | n/a | If we adopt it for the Cloud Run / Railway origins, it remains 🟦 under the Access subscription. |
 | WAF custom rulesets | A handful of country-of-origin and path rules. | 🟪 ENT-INCLUDED after the upgrade | Keep current rules; document any new rule in the same PR that adds it. |
+| Argo Smart Routing | Routes via CF private backbone. | 🟪 ENT-INCLUDED on the Enterprise zone plan | **Do NOT subscribe to "Smart Shield Argo Zone Level Plan - Basic" separately** ($5/mo) — it duplicates what the Enterprise zone already bundles. The standalone subscription was cancelled 2026-05-03; rely on the Enterprise inclusion. |
 | Rate Limiting (advanced) | Not used today (DO-based limiter does the job). | 🟦 STARTUP-100% (locked-but-free per startup rep) | **Action:** request unlock from the startup team email; once unlocked, evaluate whether the DO limiter can be retired in favour of the dashboard rules (would remove a paid DO line item). |
 | SSL for SaaS | Not used today. | 🟦 STARTUP-100% (locked-but-free per startup rep) | **Action:** request unlock from the startup team email so it is available the day we offer custom student domains. |
 | Advanced Certificate Manager | Not used today. | 🟦 STARTUP-100% (locked-but-free per startup rep) | **Action:** request unlock; useful when we need wildcard certs for `*.assets.syrabit.ai` style fan-out. |
@@ -133,6 +134,31 @@ when `WORKERS_AI_GATEWAY_ID` is set, with one of these tags in
 Backend-initiated Workers AI calls (none today) should send the same gateway
 ID + a tag of the form `workers-ai-backend:<route>` so the invoice slice is
 contiguous.
+
+---
+
+## Cancelled subscriptions (2026-05-03)
+
+The following Cloudflare subscriptions were cancelled in the dashboard
+to preserve the $5,000 startup credit pool for Workers AI and to remove
+duplicate or unused billable features. None of these are required by
+the codebase; if any future feature needs one, re-evaluate before
+re-subscribing.
+
+| Subscription | Prior cost | Why cancelled |
+|---|---|---|
+| Workers for Platforms | $25/mo | SaaS-multitenant Worker dispatch — Syrabit does not run customer-supplied code in Workers. Pure waste. |
+| Smart Shield Argo Zone Level Plan - Basic | $5/mo | **Duplicate of the Argo Smart Routing already bundled in the Enterprise zone plan.** Two charges for the same product. |
+| Basic Load Balancing | $5/mo | Only one origin (Railway) — LB needs ≥2 pools to do anything. Re-subscribe only when a second origin is provisioned. The deleted setup script `workers/edge-proxy/scripts/setup-load-balancer.mjs` and the historical runbook block in `artifacts/syrabit/CLOUDFLARE_PAGES.md` (now collapsed under a "CANCELLED" header) cover what to re-create at that point. |
+| Cache Reserve | $0 base + usage | Tier-2 cache lives in R2 → double R2 spend. Hot path is already covered by per-POP `caches.default` and KV `BOT_HTML_CACHE`. |
+| Cloudflare Log Explorer - Base Fee | $0 base + usage | Indexed log storage burns the $5k pool on every query. Backend logs (Replit) and GraphQL Analytics API (free) cover the same need. |
+| Zaraz | $0 (free-tier) | Edge tag manager not in use. Free tier silently overages past 100k events/mo. The setup script `workers/edge-proxy/scripts/setup-zaraz.mjs` was deleted in the same change. |
+| Images Stream Basic | $0 (free-tier) | Cloudflare Images was never activated on this zone (`probeImageResizer()` in `imageCdn.js` confirms inactive). Stream is for video hosting (not used). |
+
+The remaining paid subscriptions are: **Workers Paid** ($5/mo, kept —
+required for the edge worker, Logpush, Smart Placement) and
+**R2 Paid** ($0 base + usage, kept — required for the R2 buckets
+listed in the Storage section above).
 
 ---
 

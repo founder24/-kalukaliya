@@ -40,7 +40,7 @@ They cannot be provisioned via `wrangler.toml` or Worker code.
 
 **Enable**:  
 Dashboard → syrabit.ai → Speed → Optimization → **Argo** → Toggle ON  
-*(Billed per GB transferred over Argo — typically < $5/month at current traffic volumes)*
+*Bundled with the Enterprise zone plan (free Cloudflare-for-Startups upgrade) — do **not** subscribe to "Smart Shield Argo Zone Level Plan - Basic" separately, that is a duplicate $5/mo charge for the same product (cancelled 2026-05-03; see `docs/cloudflare-cost-map.md`).*
 
 **Also enable for the Workers subdomain** if `api.syrabit.ai` is a separate zone.
 
@@ -93,36 +93,7 @@ Dashboard → syrabit.ai → Speed → Optimization → **Mirage** → ON
 
 ---
 
-### 6. Load Balancing
-
-> **Current state**: single origin — Railway (`workspacemockup-sandbox-production-df37.up.railway.app`). A second origin (AWS App Runner or a redundant Railway deployment) is needed before a load balancer adds value.
-
-**When a second origin is ready**:  
-Dashboard → syrabit.ai → Traffic → **Load Balancing** → Create Load Balancer  
-- Hostname: `api.syrabit.ai`  
-- Pool 1 (primary): Railway endpoint — health check `GET /api/health` every 60s  
-- Pool 2 (failover): App Runner / second Railway — same health check  
-- Session affinity: None (stateless API — Railway handles auth via JWT, no sticky sessions needed)  
-- Steering policy: **Failover** (not Round Robin — the backend has DB state; split traffic needs care)
-
-> **Important**: Do NOT enable load balancing until the failover origin shares the same MongoDB connection and JWT secrets — otherwise auth will fail on failover requests.
-
----
-
-### 7. Zaraz (Web Tag Management)
-
-> **Current state**: PostHog and Emergent.sh are loaded via deferred JavaScript after LCP (`index.html` `deferPosthog` / `deferThirdParty` scripts). No render-blocking third-party scripts exist in the bundle. Google Fonts are loaded non-blocking (media="print" trick).
-
-> **Zaraz benefit**: moves PostHog event capture to the edge, eliminating the `us.i.posthog.com` browser network request entirely (replaces it with a same-origin request to `syrabit.ai/cdn-cgi/zaraz/...`).
-
-**When to set up**:  
-Dashboard → syrabit.ai → Zaraz → Get Started  
-Add tool: **PostHog** → enter Project API key (`VITE_POSTHOG_KEY`)  
-Remove from `index.html`: the `initPosthog` script block (the `deferPosthog` IIFE)
-
----
-
-### 8. Cache Rules (Replacing Legacy Page Rules)
+### 6. Cache Rules (Replacing Legacy Page Rules)
 
 > **Current state**: the Worker handles all cache logic in code via `monitored-urls.json` → `getCacheTtl()` / `isCacheable()`. There are **no legacy Page Rules** for caching — the Worker IS the cache layer.
 
@@ -203,7 +174,7 @@ Modify TTLs in `monitored-urls.json` → redeploy the Worker. No dashboard chang
 | Vectorize — syllabus-index | (768-dim cosine, BGE — legacy fallback) |
 | Pages project | `syrabit-zip-convert` |
 
-> **Zone ID**: retrieve from the dashboard sidebar for `syrabit.ai` — needed for Cache Tag purge API calls and Load Balancer provisioning.
+> **Zone ID**: retrieve from the dashboard sidebar for `syrabit.ai` — needed for Cache Tag purge API calls.
 
 ---
 

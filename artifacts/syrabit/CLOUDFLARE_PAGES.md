@@ -759,7 +759,12 @@ The Pages frontend picks up the change on the next build (the `s.src` URL is bak
 
 ---
 
-## Load Balancer setup
+## Load Balancer setup — CANCELLED 2026-05-03
+
+**Status:** The Basic Load Balancing subscription was cancelled. With a single Railway origin a load balancer adds no value (LB requires ≥2 pools). The setup script `workers/edge-proxy/scripts/setup-load-balancer.mjs` was removed in the same change. Re-evaluate when a second origin (Cloud Run failover, second Railway, etc.) is provisioned. See `docs/cloudflare-cost-map.md` → "Cancelled subscriptions".
+
+<details>
+<summary>Historical: what the script used to do (kept as reference)</summary>
 
 **Status:** Runbook script ready. Requires a Cloudflare API token with Load Balancer Edit permissions.
 
@@ -790,11 +795,18 @@ The existing DNS record for `api.syrabit.ai` is a proxied AAAA `100::` placehold
 | Pool | `syrabit-railway-primary` | Origin: `workspacemockup-sandbox-production-df37.up.railway.app`, weight 1 |
 | Load Balancer | `api.syrabit.ai` | Proxied, TTL 30s, steering: off (single pool), fallback: Railway pool |
 
-Script: `workers/edge-proxy/scripts/setup-load-balancer.mjs`
+Script: `workers/edge-proxy/scripts/setup-load-balancer.mjs` *(deleted 2026-05-03)*
+
+</details>
 
 ---
 
-## Zaraz — GA4 via Cloudflare consent layer
+## Zaraz — GA4 via Cloudflare consent layer — CANCELLED 2026-05-03
+
+**Status:** Zaraz subscription cancelled. PostHog and GA4 continue to load via the existing deferred-JS path in `index.html` (`deferPosthog` / `deferThirdParty` IIFEs after LCP). The setup script `workers/edge-proxy/scripts/setup-zaraz.mjs` was removed in the same change. Re-evaluate only if we need GDPR/DPDP consent management at the edge. See `docs/cloudflare-cost-map.md` → "Cancelled subscriptions".
+
+<details>
+<summary>Historical: what the script used to do (kept as reference)</summary>
 
 **Status:** Runbook script ready. Requires Zaraz to be enabled in the dashboard first.
 
@@ -829,4 +841,6 @@ The Google Tag Gateway (above) makes GA4 first-party at the network level but do
 | Categories | `analytics` (gates GA4), `advertising` (empty — reserved) |
 | Modal buttons | Accept all / Reject all / Confirm choices |
 
-Script: `workers/edge-proxy/scripts/setup-zaraz.mjs`
+Script: `workers/edge-proxy/scripts/setup-zaraz.mjs` *(deleted 2026-05-03)*
+
+</details>
