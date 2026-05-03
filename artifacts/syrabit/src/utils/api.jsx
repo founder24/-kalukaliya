@@ -455,6 +455,40 @@ export const adminSyraChat = (transcript, activeSection, token) =>
     { headers: adminHeaders(token), withCredentials: true, timeout: 30000 },
   );
 
+// Task #voice-agent — Deepgram-backed STT for the Syra orb. Posts a
+// short recorded blob (webm/ogg/mp3/wav) and returns
+// { transcript, language }. Strictly admin-gated.
+export const adminSyraSTT = (audioBlob, language, token) => {
+  const fd = new FormData();
+  const ext = (audioBlob.type || '').includes('ogg') ? 'ogg' : 'webm';
+  fd.append('audio', audioBlob, `syra.${ext}`);
+  fd.append('language', language || 'en');
+  return axios.post(`${API_BASE}/admin/syra/stt`, fd, {
+    headers: { ...adminHeaders(token) },
+    withCredentials: true,
+    timeout: 30000,
+  });
+};
+
+// Task #voice-agent — Deepgram Aura-2 TTS for the Syra orb. Returns the
+// raw MP3 bytes as a Blob URL the caller can hand to <audio>. The
+// `responseType: 'blob'` opt-in is required because axios defaults to
+// JSON-parsing the response.
+export const adminSyraTTS = async (text, language, token, voice) => {
+  const res = await axios.post(
+    `${API_BASE}/admin/syra/tts`,
+    { text, language: language || 'en', voice: voice || null },
+    {
+      headers: { ...adminHeaders(token), 'Content-Type': 'application/json' },
+      withCredentials: true,
+      responseType: 'blob',
+      timeout: 30000,
+    },
+  );
+  const blob = new Blob([res.data], { type: 'audio/mpeg' });
+  return URL.createObjectURL(blob);
+};
+
 const getSeoPage = (board, classSlug, subjectSlug, topicSlug, pageType) => {
   let url = `${WORKER_API}/seo/page/${board}/${classSlug}/${subjectSlug}/${topicSlug}`;
   if (pageType && pageType !== 'notes') url += `/${pageType}`;

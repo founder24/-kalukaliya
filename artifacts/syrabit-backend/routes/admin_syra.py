@@ -16,11 +16,12 @@ import logging
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from auth_deps import get_admin_user
 from llm import call_llm_api_chat
+from providers import deepgram as _deepgram
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -208,3 +209,99 @@ async def syra_chat(req: SyraChatRequest, admin: dict = Depends(get_admin_user))
         "response": response[:600],
         "data": parsed.get("data") if isinstance(parsed.get("data"), dict) else None,
     }
+
+
+# ── Deepgram-backed voice surface for the admin Syra orb ─────────────────────
+# Task #voice-agent: SyraAssistant used to rely on the browser's Web Speech
+# API for STT and `window.speechSynthesis` for TTS — Firefox/some mobile
+# browsers don't ship those, and the quality / Indic support is poor. These
+# two endpoints route the orb through Deepgram (Nova-3 STT + Aura-2 TTS) so
+# every browser gets the same studio-quality voice loop, gated to admins
+# only via `get_admin_user` so we never burn Deepgram credits on anonymous
+# traffic.
+
+_MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB — Syra prompts are short.
+_MAX_TTS_CHARS = 1500
+
+
+@router.post(
+    "/admin/syra/stt",
+    summary="Syra STT (Deepgram Nova-3, admin-gated)",
+    description=(
+        "Transcribe a short admin voice command with Deepgram Nova-3. "
+        "Accepts multipart/form-data with an `audio` field (webm/ogg/mp3/wav). "
+        "Returns `{transcript, language}`. Strictly admin-gated."
+    ),
+)
+async def syra_stt(
+    audio: UploadFile = File(..., description="Recorded voice command (webm/ogg/mp3/wav)"),
+    language: str = Form("en", description="BCP-47 language code (en, hi, as, bn)"),
+    admin: dict = Depends(get_admin_user),
+):
+    if not _deepgram.ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Deepgram STT is not configured (DEEPGRAM_API_KEY missing).",
+        )
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file.")
+    if len(audio_bytes) > _MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio file too large (max 10 MB).")
+    try:
+        transcript = await _deepgram.transcribe(audio_bytes, language_code=language)
+    except RuntimeError as exc:
+        logger.error("[syra-stt] deepgram failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {
+        "transcript": (transcript or "").strip(),
+        "language": language,
+        "bytes_received": len(audio_bytes),
+    }
+
+
+class _SyraTtsRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=_MAX_TTS_CHARS)
+    language: str = Field("en", min_length=2, max_length=8)
+    voice: str | None = Field(default=None, max_length=64)
+
+
+@router.post(
+    "/admin/syra/tts",
+    response_class=Response,
+    summary="Syra TTS (Deepgram Aura-2, admin-gated)",
+    description=(
+        "Synthesize a short Syra reply with Deepgram Aura-2 and return mp3 "
+        "audio bytes. Strictly admin-gated."
+    ),
+)
+async def syra_tts(req: _SyraTtsRequest, admin: dict = Depends(get_admin_user)):
+    if not _deepgram.ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Deepgram TTS is not configured (DEEPGRAM_API_KEY missing).",
+        )
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text.")
+    try:
+        audio_bytes = await _deepgram.synthesize(
+            text, voice=req.voice, language=req.language,
+        )
+    except RuntimeError as exc:
+        logger.error("[syra-tts] deepgram failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not audio_bytes:
+        raise HTTPException(status_code=502, detail="Deepgram returned empty audio.")
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": 'inline; filename="syra.mp3"',
+            "Cache-Control": "no-store",
+            "X-TTS-Provider": "deepgram_aura2",
+            "X-TTS-Lang": req.language,
+            "X-TTS-Chars": str(len(text)),
+            "X-TTS-Bytes": str(len(audio_bytes)),
+        },
+    )
