@@ -14,8 +14,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from fastapi import Body
 from auth_deps import get_admin_user
 import books_client
+import discovery_engine_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,3 +47,34 @@ async def admin_books_volume(
 ):
     """Fetch a single Google Books volume by ID."""
     return await books_client.get_volume(volume_id)
+
+
+@router.post("/admin/discovery/engine/search")
+async def admin_discovery_engine_search(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    """Run a Vertex AI Search (Discovery Engine) query.
+
+    Body: {"query": str, "page_size"?: int, "data_store"?: str,
+           "location"?: str, "collection"?: str, "serving_config"?: str}
+    Falls back to env vars (GCP_DISCOVERY_*) when fields omitted.
+    """
+    query = (payload.get("query") or "").strip()
+    if not query:
+        return {"status": "error", "error": "query required"}
+    raw_page_size = payload.get("page_size")
+    try:
+        page_size = int(raw_page_size) if raw_page_size is not None else 10
+    except (TypeError, ValueError):
+        return {"status": "error",
+                "error": f"page_size must be an integer, got {raw_page_size!r}"}
+    page_size = max(1, min(50, page_size))
+    return await discovery_engine_client.search(
+        query,
+        page_size=page_size,
+        data_store=payload.get("data_store"),
+        location=payload.get("location"),
+        collection=payload.get("collection"),
+        serving_config=payload.get("serving_config"),
+    )

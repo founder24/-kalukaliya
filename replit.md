@@ -217,3 +217,53 @@ CF AI Gateway BYOK only proxies AI providers, not arbitrary Google APIs, so thes
 
 ### Convention reminder
 All new admin route files use `@router.get("/admin/...")` (no `/api/` prefix) since `api = APIRouter(prefix="/api")` adds it automatically.
+
+## GCP wiring Phase 3 (May 2026) — SA-gated infra services
+
+User asked to plan and wire all remaining services in one shot. Built all 4 SA-required services as cleanly-disabled clients that activate the moment `GOOGLE_APPLICATION_CREDENTIALS_JSON` is set — no more env work needed (except for Discovery Engine, see below).
+
+### New shared module
+- `gcp_auth.py` — single SA loader for the whole backend. Loads from `GOOGLE_APPLICATION_CREDENTIALS_JSON` (raw JSON) or `GOOGLE_APPLICATION_CREDENTIALS` (path). Mints OAuth tokens via `google-auth` (already in requirements.txt), caches them ~50min. `is_configured()`, `project_id()`, `auth_header()`, `disabled_payload()` are the public API. Returns None cleanly when SA absent.
+
+### New clients (all SA-gated; return `status="disabled"` cleanly until SA set)
+- `cloud_scheduler_client.py` — list/get/run/pause/resume jobs (region: `GCP_SCHEDULER_LOCATION`, default `us-central1`).
+- `cloud_tasks_client.py` — list queues + tasks, enqueue HTTP-target tasks with optional OIDC auth (region: `GCP_TASKS_LOCATION`, default `us-central1`).
+- `web_security_scanner_client.py` — list scan configs, start scan runs, list runs + findings.
+- `discovery_engine_client.py` — Vertex AI Search query (needs additional env: `GCP_DISCOVERY_DATA_STORE` mandatory, `GCP_DISCOVERY_LOCATION`/`COLLECTION`/`SERVING_CONFIG` optional with sane defaults).
+
+### Admin endpoints (12 new, all admin-gated)
+Cloud Scheduler:
+- `GET  /api/admin/gcp/scheduler/jobs`
+- `POST /api/admin/gcp/scheduler/jobs/run|pause|resume`
+
+Cloud Tasks:
+- `GET  /api/admin/gcp/tasks/queues`
+- `GET  /api/admin/gcp/tasks/queue?name=`
+- `POST /api/admin/gcp/tasks/enqueue`
+
+Web Security Scanner:
+- `GET  /api/admin/gcp/wss/configs`
+- `POST /api/admin/gcp/wss/configs/start`
+- `GET  /api/admin/gcp/wss/runs?config=`
+- `GET  /api/admin/gcp/wss/findings?run=`
+
+Discovery Engine (added to admin_discovery.py):
+- `POST /api/admin/discovery/engine/search`
+
+### Unified status endpoint
+- `GET /api/admin/gcp/services-status` — returns all 10 wired GCP services in one payload with `auth_mode`, `configured`, key/SA state, and (for not-configured services) the env vars to set. Designed to power a single dashboard tile.
+
+### To activate the SA-gated services
+1. Create a SA in your GCP project with these roles:
+   - `roles/cloudscheduler.admin`
+   - `roles/cloudtasks.admin`
+   - `roles/websecurityscanner.editor`
+   - `roles/discoveryengine.viewer`
+2. Download the JSON key.
+3. Set `GOOGLE_APPLICATION_CREDENTIALS_JSON` secret to the raw JSON content.
+4. (Discovery Engine only) Set `GCP_DISCOVERY_DATA_STORE` to your data-store ID.
+
+All endpoints will start working immediately — no code change, no restart needed beyond the next worker boot that reads the new env.
+
+### Total GCP services wired across all 3 phases: 10
+KG Search, PageSpeed, Fact Check, Natural Language, Web Risk, Books, Cloud Scheduler, Cloud Tasks, Web Security Scanner, Discovery Engine.

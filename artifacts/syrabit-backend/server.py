@@ -1875,6 +1875,8 @@ from routes.admin_seo_external import router as admin_seo_external_router
 from routes.admin_content_quality import router as admin_content_quality_router
 from routes.admin_security_external import router as admin_security_external_router
 from routes.admin_discovery import router as admin_discovery_router
+from routes.admin_gcp_infra import router as admin_gcp_infra_router
+from routes.admin_gcp_status import router as admin_gcp_status_router
 
 api.include_router(auth_router)
 api.include_router(content_router)
@@ -1933,6 +1935,8 @@ api.include_router(admin_seo_external_router)
 api.include_router(admin_content_quality_router)
 api.include_router(admin_security_external_router)
 api.include_router(admin_discovery_router)
+api.include_router(admin_gcp_infra_router)
+api.include_router(admin_gcp_status_router)
 
 from routes.voice import router as voice_router
 api.include_router(voice_router)

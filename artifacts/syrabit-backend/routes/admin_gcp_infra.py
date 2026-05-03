@@ -1,0 +1,157 @@
+"""Admin endpoints for SA-gated GCP infra APIs (Phase 3).
+
+  Cloud Scheduler:
+    GET  /api/admin/gcp/scheduler/jobs
+    POST /api/admin/gcp/scheduler/jobs/run        body: {name}
+    POST /api/admin/gcp/scheduler/jobs/pause      body: {name}
+    POST /api/admin/gcp/scheduler/jobs/resume     body: {name}
+
+  Cloud Tasks:
+    GET  /api/admin/gcp/tasks/queues
+    GET  /api/admin/gcp/tasks/queue?name=...
+    POST /api/admin/gcp/tasks/enqueue             body: {queue,url,payload?,method?,headers?,schedule_time?,oidc_sa?}
+
+  Web Security Scanner:
+    GET  /api/admin/gcp/wss/configs
+    POST /api/admin/gcp/wss/configs/start         body: {name}
+    GET  /api/admin/gcp/wss/runs?config=...
+    GET  /api/admin/gcp/wss/findings?run=...
+
+All endpoints return status="disabled" cleanly when GOOGLE_APPLICATION_CREDENTIALS_JSON
+is missing, so the dashboard renders gracefully without crashing.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, Query
+
+from auth_deps import get_admin_user
+import cloud_scheduler_client
+import cloud_tasks_client
+import web_security_scanner_client
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+# ── Cloud Scheduler ────────────────────────────────────────────────────────
+@router.get("/admin/gcp/scheduler/jobs")
+async def admin_scheduler_jobs(
+    location: Optional[str] = Query(None),
+    page_size: int = Query(100, ge=1, le=500),
+    admin: dict = Depends(get_admin_user),
+):
+    return await cloud_scheduler_client.list_jobs(
+        location=location, page_size=page_size,
+    )
+
+
+@router.post("/admin/gcp/scheduler/jobs/run")
+async def admin_scheduler_run(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return {"status": "error", "error": "name required"}
+    return await cloud_scheduler_client.run_job(name)
+
+
+@router.post("/admin/gcp/scheduler/jobs/pause")
+async def admin_scheduler_pause(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return {"status": "error", "error": "name required"}
+    return await cloud_scheduler_client.pause_job(name)
+
+
+@router.post("/admin/gcp/scheduler/jobs/resume")
+async def admin_scheduler_resume(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return {"status": "error", "error": "name required"}
+    return await cloud_scheduler_client.resume_job(name)
+
+
+# ── Cloud Tasks ────────────────────────────────────────────────────────────
+@router.get("/admin/gcp/tasks/queues")
+async def admin_tasks_queues(
+    location: Optional[str] = Query(None),
+    admin: dict = Depends(get_admin_user),
+):
+    return await cloud_tasks_client.list_queues(location=location)
+
+
+@router.get("/admin/gcp/tasks/queue")
+async def admin_tasks_queue(
+    name: str = Query(..., description="Full queue resource name."),
+    page_size: int = Query(50, ge=1, le=500),
+    admin: dict = Depends(get_admin_user),
+):
+    return await cloud_tasks_client.list_tasks(name, page_size=page_size)
+
+
+@router.post("/admin/gcp/tasks/enqueue")
+async def admin_tasks_enqueue(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    queue = (payload.get("queue") or "").strip()
+    url = (payload.get("url") or "").strip()
+    if not queue or not url:
+        return {"status": "error", "error": "queue + url required"}
+    return await cloud_tasks_client.enqueue_http_task(
+        queue,
+        url=url,
+        payload=payload.get("payload"),
+        method=payload.get("method") or "POST",
+        headers=payload.get("headers") or None,
+        schedule_time=payload.get("schedule_time") or None,
+        oidc_service_account_email=payload.get("oidc_sa") or None,
+    )
+
+
+# ── Web Security Scanner ───────────────────────────────────────────────────
+@router.get("/admin/gcp/wss/configs")
+async def admin_wss_configs(
+    page_size: int = Query(100, ge=1, le=500),
+    admin: dict = Depends(get_admin_user),
+):
+    return await web_security_scanner_client.list_scan_configs(page_size=page_size)
+
+
+@router.post("/admin/gcp/wss/configs/start")
+async def admin_wss_start(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return {"status": "error", "error": "name required"}
+    return await web_security_scanner_client.start_scan_run(name)
+
+
+@router.get("/admin/gcp/wss/runs")
+async def admin_wss_runs(
+    config: str = Query(..., description="Full scan-config resource name."),
+    page_size: int = Query(25, ge=1, le=200),
+    admin: dict = Depends(get_admin_user),
+):
+    return await web_security_scanner_client.list_scan_runs(config, page_size=page_size)
+
+
+@router.get("/admin/gcp/wss/findings")
+async def admin_wss_findings(
+    run: str = Query(..., description="Full scan-run resource name."),
+    page_size: int = Query(100, ge=1, le=500),
+    admin: dict = Depends(get_admin_user),
+):
+    return await web_security_scanner_client.list_findings(run, page_size=page_size)
