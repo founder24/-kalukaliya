@@ -1,29 +1,33 @@
-"""providers.azure_openai — Azure OpenAI LLM + feature services via Cloudflare AI Gateway (BYOK).
+"""providers.azure_openai — Azure OpenAI LLM + feature services with multi-endpoint failover.
+
+Endpoint candidate chain (tried in order on each call):
+  1. CF AI Gateway BYOK   — when ``CF_GATEWAY_ENABLED`` and the ``azure-openai``
+                            slug is registered. CF injects the dashboard-stored
+                            key (``cf-aig-byok-key: true`` + empty ``api-key``).
+  2. Direct AZURE_OPENAI_ENDPOINT + ``AZURE_OPENAI_KEY_1``  (primary)
+  3. Direct AZURE_OPENAI_ENDPOINT + ``AZURE_OPENAI_KEY_2``  (failover)
+
+A retryable failure on candidate N (connect error, HTTP 401/403/408/425/429/5xx,
+empty stream) advances to candidate N+1. The last candidate's exception is
+re-raised so callers see a meaningful error.
 
 Routes:
   Chat (LLM):
-    call_chat()     — GPT-4o-mini via CF AI Gateway azure-openai BYOK slug
+    call_chat()       — non-streaming chat completion
+    stream_chat()     — async iterator of content tokens
+  Feature services:
+    call_tts()        — Azure Neural TTS (Speech REST API; AZURE_SPEECH_*)
+    call_stt()        — Azure Whisper (Azure OpenAI /audio/transcriptions)
+    call_embed()      — text-embedding-3-large (Azure OpenAI /embeddings)
+    call_translate()  — Azure Translator (AZURE_TRANSLATOR_KEY)
 
-  Feature services (Task #256):
-    call_tts()      — Azure Neural TTS via Azure Speech Services REST API
-    call_stt()      — Azure Whisper via Azure OpenAI endpoint (CF BYOK)
-    call_embed()    — text-embedding-3-large via Azure OpenAI endpoint (CF BYOK)
-    call_translate()— Azure Translator REST API (AZURE_TRANSLATOR_KEY)
-
-CF AI Gateway slug: ``azure-openai``
-
-BYOK setup (CF dashboard → AI Gateway → Providers → Azure OpenAI):
-  - Store your Azure OpenAI API key + endpoint
-  - Enable BYOK — CF forwards the key and routes to your Azure deployment
-
-Additional env vars for feature services (Task #256):
-  AZURE_SPEECH_KEY      — Azure Cognitive Services Speech key
-  AZURE_SPEECH_REGION   — Azure region (e.g. "eastus")
-  AZURE_TTS_VOICE       — Azure Neural TTS voice name (default: en-IN-NeerjaExpressiveNeural)
-  AZURE_TRANSLATOR_KEY  — Azure Translator API key
-  AZURE_TRANSLATOR_ENDPOINT — Azure Translator endpoint (default: https://api.cognitive.microsofttranslator.com)
-
-Model: gpt-4o-mini (cost-efficient; swap via AZURE_OPENAI_MODEL env var)
+Env vars:
+  AZURE_OPENAI_ENDPOINT   — e.g. ``https://my-resource.openai.azure.com``
+  AZURE_OPENAI_KEY_1      — primary subscription key (preferred)
+  AZURE_OPENAI_KEY_2      — secondary subscription key (failover)
+  AZURE_OPENAI_API_KEY    — legacy single-key fallback (used as KEY_1 when set)
+  AZURE_OPENAI_MODEL      — deployment name (default: gpt-4o-mini)
+  AZURE_OPENAI_API_VERSION— REST api-version (default: 2024-12-01-preview)
 """
 from __future__ import annotations
 
@@ -31,44 +35,66 @@ import json
 import logging
 import os as _os
 import re
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Iterable, Optional
 
 import httpx
 
 from config import (
-    CF_GATEWAY_ENABLED,
-    CF_CACHE_TTL,
-    CF_AI_GATEWAY_TOKEN,
     BYOK_PLACEHOLDER,
+    CF_AI_GATEWAY_TOKEN,
+    CF_CACHE_TTL,
+    CF_GATEWAY_ENABLED,
     cf_gateway_url,
     is_cf_gateway_up,
 )
 
 logger = logging.getLogger("providers.azure_openai")
 
-_MODEL = _os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"  # deployment name in Azure AI Foundry
-_API_VERSION = "2024-12-01-preview"
+_MODEL = _os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+_API_VERSION = _os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview").strip() or "2024-12-01-preview"
 _TIMEOUT_S = 30.0
 
-ENABLED: bool = CF_GATEWAY_ENABLED and bool(cf_gateway_url("azure_openai"))
+# ── Direct-endpoint config (Task #290) ───────────────────────────────────────
+_DIRECT_ENDPOINT = _os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip().rstrip("/")
+_KEY_1 = (
+    _os.environ.get("AZURE_OPENAI_KEY_1", "").strip()
+    or _os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
+)
+_KEY_2 = _os.environ.get("AZURE_OPENAI_KEY_2", "").strip()
+
+# Status codes that justify advancing to the next candidate (transient/auth).
+_RETRYABLE_STATUS = frozenset({401, 403, 408, 425, 429, 500, 502, 503, 504})
+
+# Direct-endpoint mode is viable when we have an endpoint AND at least one key.
+_DIRECT_ENABLED = bool(_DIRECT_ENDPOINT and (_KEY_1 or _KEY_2))
+# Gateway mode is viable when CF gateway is configured with the azure-openai slug.
+_GATEWAY_AVAILABLE = CF_GATEWAY_ENABLED and bool(cf_gateway_url("azure_openai"))
+
+ENABLED: bool = _GATEWAY_AVAILABLE or _DIRECT_ENABLED
 
 if ENABLED:
-    logger.info("Azure OpenAI LLM ready — model=%s gateway=CF-BYOK", _MODEL)
+    _modes = []
+    if _GATEWAY_AVAILABLE:
+        _modes.append("CF-BYOK")
+    if _KEY_1:
+        _modes.append("direct(KEY_1)")
+    if _KEY_2:
+        _modes.append("direct(KEY_2)")
+    logger.info(
+        "Azure OpenAI ready — model=%s candidates=[%s]",
+        _MODEL, ", ".join(_modes),
+    )
 else:
-    logger.info("Azure OpenAI LLM disabled (CF_GATEWAY_ENABLED not set or azure-openai slug missing)")
+    logger.info(
+        "Azure OpenAI disabled — neither CF AI Gateway azure-openai slug nor "
+        "AZURE_OPENAI_ENDPOINT+AZURE_OPENAI_KEY_1/2 are configured."
+    )
 
 
-def _base_url() -> str:
-    """Return the Azure OpenAI base URL — CF AI Gateway when enabled."""
-    if is_cf_gateway_up():
-        gw = cf_gateway_url("azure_openai")
-        if gw:
-            return gw
-    return ""
+# ── Candidate chain ───────────────────────────────────────────────────────────
 
-
-def _headers() -> dict:
-    """Build CF AI Gateway BYOK headers for Azure OpenAI."""
+def _gateway_headers() -> dict:
+    """CF AI Gateway BYOK headers for Azure OpenAI."""
     h: dict = {
         "Content-Type": "application/json",
         "api-key": BYOK_PLACEHOLDER,
@@ -81,6 +107,42 @@ def _headers() -> dict:
         h["cf-aig-authorization"] = f"Bearer {CF_AI_GATEWAY_TOKEN}"
     return h
 
+
+def _direct_headers(key: str) -> dict:
+    """Direct Azure endpoint headers — uses ``api-key`` subscription header."""
+    return {"Content-Type": "application/json", "api-key": key}
+
+
+def _candidates() -> list[tuple[str, str, dict]]:
+    """Return the ordered list of (label, base_url, headers) to try.
+
+    Order:
+      1. CF AI Gateway (when up) — single attempt; gateway has its own retries.
+      2. Direct endpoint with KEY_1 (primary).
+      3. Direct endpoint with KEY_2 (failover).
+
+    An empty list means the provider is fully unavailable and callers should
+    raise. Re-evaluated per-call so transient gateway recovery is picked up.
+    """
+    out: list[tuple[str, str, dict]] = []
+    if _GATEWAY_AVAILABLE and is_cf_gateway_up():
+        gw = cf_gateway_url("azure_openai")
+        if gw:
+            out.append(("cf_byok", gw, _gateway_headers()))
+    if _DIRECT_ENDPOINT:
+        if _KEY_1:
+            out.append(("direct_key_1", _DIRECT_ENDPOINT, _direct_headers(_KEY_1)))
+        if _KEY_2:
+            out.append(("direct_key_2", _DIRECT_ENDPOINT, _direct_headers(_KEY_2)))
+    return out
+
+
+def _multipart_headers(headers: dict) -> dict:
+    """Strip Content-Type so httpx sets the multipart boundary itself."""
+    return {k: v for k, v in headers.items() if k.lower() != "content-type"}
+
+
+# ── HTTP client singleton ─────────────────────────────────────────────────────
 
 _client: Optional[httpx.AsyncClient] = None
 
@@ -103,45 +165,53 @@ async def close() -> None:
         _client = None
 
 
+# ── Chat ──────────────────────────────────────────────────────────────────────
+
 async def call_chat(
     messages: list,
     *,
     model: Optional[str] = None,
     max_tokens: int = 2048,
 ) -> str:
-    """Call Azure OpenAI chat/completions via CF AI Gateway BYOK.
+    """Non-streaming chat completion with multi-candidate failover.
 
-    Raises RuntimeError if the gateway is unavailable or not configured.
+    Iterates the candidate chain, advancing on retryable HTTP status or
+    connect errors. Re-raises the last candidate's error as RuntimeError.
     """
-    base = _base_url()
-    if not base:
-        raise RuntimeError("azure_openai: CF AI Gateway is down or azure-openai slug not configured")
+    chain = _candidates()
+    if not chain:
+        raise RuntimeError("azure_openai: no candidates available (gateway down and no direct keys)")
 
-    # Azure OpenAI requires the deployment name in the URL path.
-    # CF AI Gateway forwards: {gateway}/openai/deployments/{deployment}/chat/completions
     deployment = model or _MODEL
-    url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
-    body = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-    }
-
+    body = {"messages": messages, "max_tokens": max_tokens, "temperature": 0.1}
+    last_err: Optional[Exception] = None
     client = _get_client()
-    try:
-        resp = await client.post(url, headers=_headers(), json=body)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        raise RuntimeError(
-            f"azure_openai: HTTP {status} from CF gateway — {exc.response.text[:200]}"
-        )
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        raise RuntimeError(f"azure_openai: connection error via CF gateway — {exc}")
 
-    data = resp.json()
-    content = data["choices"][0]["message"].get("content", "") or ""
-    return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+    for label, base, headers in chain:
+        url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
+        try:
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code in _RETRYABLE_STATUS:
+                last_err = RuntimeError(
+                    f"azure_openai[{label}]: HTTP {resp.status_code} — {resp.text[:200]}"
+                )
+                logger.warning("%s — advancing to next candidate", last_err)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"].get("content", "") or ""
+            return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        except httpx.HTTPStatusError as exc:
+            # Non-retryable status (e.g. 400 BadRequest, 404 DeploymentNotFound)
+            # — the next key will fail identically. Fail fast.
+            raise RuntimeError(
+                f"azure_openai[{label}]: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            last_err = RuntimeError(f"azure_openai[{label}]: connection error — {exc}")
+        logger.warning("%s — advancing to next candidate", last_err)
+
+    raise last_err if last_err else RuntimeError("azure_openai: all candidates exhausted")
 
 
 async def stream_chat(
@@ -151,69 +221,100 @@ async def stream_chat(
     max_tokens: int = 2048,
     timeout_s: float = 20.0,
 ) -> AsyncIterator[str]:
-    """Stream tokens from Azure OpenAI chat/completions via CF AI Gateway BYOK.
+    """Stream content tokens with pre-first-token candidate failover.
 
-    Async generator — yields content token strings one at a time.
-    Uses the persistent httpx singleton client (HTTP/2, connection pooling).
-    Raises RuntimeError on gateway error or connection failure.
+    If a candidate fails BEFORE emitting any content token (HTTP error,
+    connect error, or empty stream), we advance to the next candidate.
+    A mid-stream failure (after first token) is propagated — we never
+    silently double-stream tokens to the client.
     """
-    base = _base_url()
-    if not base:
-        raise RuntimeError("azure_openai: CF AI Gateway is down or azure-openai slug not configured")
+    chain = _candidates()
+    if not chain:
+        raise RuntimeError("azure_openai: no candidates available (gateway down and no direct keys)")
 
     deployment = model or _MODEL
-    url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
     body = {
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.1,
         "stream": True,
     }
-
     client = _get_client()
-    try:
-        async with client.stream(
-            "POST", url, headers=_headers(), json=body,
-            timeout=httpx.Timeout(timeout_s),
-        ) as resp:
-            if resp.status_code >= 400:
-                body_bytes = await resp.aread()
-                raise RuntimeError(
-                    f"azure_openai: HTTP {resp.status_code} — {body_bytes.decode()[:200]}"
-                )
-            async for line in resp.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                raw = line[5:].strip()
-                if raw == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(raw)
-                    choices = chunk.get("choices", [])
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta", {})
-                    token = delta.get("content") or ""
-                    if token:
-                        yield token
-                except Exception:
-                    continue
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"azure_openai: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
-        )
-    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
-        raise RuntimeError(f"azure_openai: connection error — {exc}")
+    last_err: Optional[Exception] = None
 
+    for label, base, headers in chain:
+        url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
+        first_token_seen = False
+        try:
+            async with client.stream(
+                "POST", url, headers=headers, json=body,
+                timeout=httpx.Timeout(timeout_s),
+            ) as resp:
+                if resp.status_code in _RETRYABLE_STATUS:
+                    body_bytes = await resp.aread()
+                    last_err = RuntimeError(
+                        f"azure_openai[{label}]: HTTP {resp.status_code} — {body_bytes.decode(errors='replace')[:200]}"
+                    )
+                    logger.warning("%s — advancing to next candidate", last_err)
+                    continue
+                if resp.status_code >= 400:
+                    body_bytes = await resp.aread()
+                    raise RuntimeError(
+                        f"azure_openai[{label}]: HTTP {resp.status_code} — {body_bytes.decode(errors='replace')[:200]}"
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                        choices = chunk.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        token = delta.get("content") or ""
+                        if token:
+                            first_token_seen = True
+                            yield token
+                    except json.JSONDecodeError:
+                        continue
+            if first_token_seen:
+                return
+            # Empty stream → try next candidate.
+            last_err = RuntimeError(f"azure_openai[{label}]: empty stream")
+            logger.warning("%s — advancing to next candidate", last_err)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            if first_token_seen:
+                # Mid-stream failure — must propagate so caller can flag the user.
+                raise RuntimeError(f"azure_openai[{label}]: mid-stream {type(exc).__name__}: {exc}")
+            last_err = RuntimeError(f"azure_openai[{label}]: connection error — {exc}")
+            logger.warning("%s — advancing to next candidate", last_err)
+
+    raise last_err if last_err else RuntimeError("azure_openai: all candidates exhausted")
+
+
+# ── Health ────────────────────────────────────────────────────────────────────
 
 async def health_check() -> dict:
-    """Return Azure OpenAI provider readiness status."""
+    """Return Azure OpenAI provider readiness with mode breakdown."""
     if not ENABLED:
-        return {"ok": False, "reason": "CF_GATEWAY_ENABLED not set or azure-openai slug missing"}
-    base = _base_url()
-    if not base:
-        return {"ok": False, "reason": "CF AI Gateway currently down"}
-    return {"ok": True, "model": _MODEL, "gateway": base}
+        return {
+            "ok": False,
+            "reason": "no candidates — set CF AI Gateway azure-openai slug "
+                      "or AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_KEY_1/2",
+        }
+    chain = _candidates()
+    return {
+        "ok": bool(chain),
+        "model": _MODEL,
+        "candidates": [c[0] for c in chain],
+        "gateway_available": _GATEWAY_AVAILABLE,
+        "direct_available": _DIRECT_ENABLED,
+        "key_1_set": bool(_KEY_1),
+        "key_2_set": bool(_KEY_2),
+    }
 
 
 # ── Task #256: Feature services ───────────────────────────────────────────────
@@ -232,7 +333,6 @@ async def call_tts(
       3. "en-IN-NeerjaExpressiveNeural" (Indian English neural default)
 
     Returns MP3 audio bytes (audio-16khz-128kbitrate-mono-mp3).
-    Raises RuntimeError if not configured or the call fails.
     """
     key = _os.environ.get("AZURE_SPEECH_KEY", "").strip()
     region = _os.environ.get("AZURE_SPEECH_REGION", "").strip()
@@ -244,7 +344,6 @@ async def call_tts(
     voice_name = voice or _os.environ.get(
         "AZURE_TTS_VOICE", "en-IN-NeerjaExpressiveNeural"
     )
-    # Detect xml:lang from voice name prefix (e.g. "en-IN-..." → "en-IN")
     parts = voice_name.split("-")
     xml_lang = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else "en-US"
 
@@ -280,34 +379,41 @@ async def call_stt(
     language: str = "en-US",
     model: Optional[str] = None,
 ) -> str:
-    """STT via Azure Whisper endpoint through CF AI Gateway BYOK.
+    """STT via Azure Whisper endpoint with multi-candidate failover."""
+    chain = _candidates()
+    if not chain:
+        raise RuntimeError("azure_openai stt: no candidates available")
 
-    Uses the Azure OpenAI /audio/transcriptions endpoint (Whisper model).
-    Requires the CF AI Gateway azure-openai slug to be configured.
-
-    Raises RuntimeError if CF gateway is unavailable or the call fails.
-    """
-    base = _base_url()
-    if not base:
-        raise RuntimeError("azure_openai stt: CF AI Gateway not available")
-
-    url = f"{base}/audio/transcriptions?api-version={_API_VERSION}"
-    # Multipart: strip Content-Type to let httpx set the boundary
-    hdrs = {k: v for k, v in _headers().items() if k.lower() != "content-type"}
+    deployment = model or "whisper"
     files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
-    data = {"model": model or "whisper", "language": language.split("-")[0] if "-" in language else language}
-
+    data = {
+        "model": deployment,
+        "language": language.split("-")[0] if "-" in language else language,
+    }
     client = _get_client()
-    try:
-        resp = await client.post(url, headers=hdrs, files=files, data=data)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"azure_openai stt: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
-        )
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        raise RuntimeError(f"azure_openai stt: connection error — {exc}")
-    return resp.json().get("text", "")
+    last_err: Optional[Exception] = None
+
+    for label, base, headers in chain:
+        url = f"{base}/openai/deployments/{deployment}/audio/transcriptions?api-version={_API_VERSION}"
+        try:
+            resp = await client.post(url, headers=_multipart_headers(headers), files=files, data=data)
+            if resp.status_code in _RETRYABLE_STATUS:
+                last_err = RuntimeError(
+                    f"azure_openai stt[{label}]: HTTP {resp.status_code} — {resp.text[:200]}"
+                )
+                logger.warning("%s — advancing to next candidate", last_err)
+                continue
+            resp.raise_for_status()
+            return resp.json().get("text", "")
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"azure_openai stt[{label}]: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            last_err = RuntimeError(f"azure_openai stt[{label}]: connection error — {exc}")
+        logger.warning("%s — advancing to next candidate", last_err)
+
+    raise last_err if last_err else RuntimeError("azure_openai stt: all candidates exhausted")
 
 
 async def call_embed(
@@ -315,39 +421,43 @@ async def call_embed(
     *,
     model: Optional[str] = None,
 ) -> list:
-    """Embed text via Azure OpenAI text-embedding-3-large through CF AI Gateway BYOK.
+    """Embed text via Azure OpenAI text-embedding-3-large with failover."""
+    chain = _candidates()
+    if not chain:
+        raise RuntimeError("azure_openai embed: no candidates available")
 
-    Uses the Azure OpenAI /embeddings endpoint.
-    Requires the CF AI Gateway azure-openai slug to be configured.
-
-    Returns a list of floats.
-    Raises RuntimeError if CF gateway is unavailable or the embedding is empty.
-    """
-    base = _base_url()
-    if not base:
-        raise RuntimeError("azure_openai embed: CF AI Gateway not available")
-
-    url = f"{base}/embeddings?api-version={_API_VERSION}"
-    body = {
-        "model": model or "text-embedding-3-large",
-        "input": text,
-    }
+    deployment = model or "text-embedding-3-large"
+    body = {"input": text}
     client = _get_client()
-    try:
-        resp = await client.post(url, headers=_headers(), json=body)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"azure_openai embed: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
-        )
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        raise RuntimeError(f"azure_openai embed: connection error — {exc}")
+    last_err: Optional[Exception] = None
 
-    data = resp.json()
-    vec = (data.get("data") or [{}])[0].get("embedding", [])
-    if not vec:
-        raise RuntimeError("azure_openai embed: empty embedding returned")
-    return vec
+    for label, base, headers in chain:
+        url = f"{base}/openai/deployments/{deployment}/embeddings?api-version={_API_VERSION}"
+        try:
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code in _RETRYABLE_STATUS:
+                last_err = RuntimeError(
+                    f"azure_openai embed[{label}]: HTTP {resp.status_code} — {resp.text[:200]}"
+                )
+                logger.warning("%s — advancing to next candidate", last_err)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            vec = (data.get("data") or [{}])[0].get("embedding", [])
+            if not vec:
+                last_err = RuntimeError(f"azure_openai embed[{label}]: empty embedding returned")
+                logger.warning("%s — advancing to next candidate", last_err)
+                continue
+            return vec
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"azure_openai embed[{label}]: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            last_err = RuntimeError(f"azure_openai embed[{label}]: connection error — {exc}")
+        logger.warning("%s — advancing to next candidate", last_err)
+
+    raise last_err if last_err else RuntimeError("azure_openai embed: all candidates exhausted")
 
 
 async def call_translate(
@@ -359,11 +469,6 @@ async def call_translate(
 
     Requires AZURE_TRANSLATOR_KEY env var.
     AZURE_TRANSLATOR_ENDPOINT defaults to https://api.cognitive.microsofttranslator.com.
-
-    ``target_lang`` / ``source_lang`` are BCP-47 codes (e.g. "as", "hi-IN", "en").
-    The function passes them as-is to the Translator API.
-
-    Raises RuntimeError if AZURE_TRANSLATOR_KEY is not configured or the call fails.
     """
     key = _os.environ.get("AZURE_TRANSLATOR_KEY", "").strip()
     if not key:
