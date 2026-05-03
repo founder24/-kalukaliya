@@ -126,6 +126,63 @@ def test_execute_destructive_succeeds_when_confirmed(client):
     fake.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_user_status_executor_uses_supa_and_invalidates_session(mock_admin):
+    """Integration parity check: the Syra ``user.set_status`` executor
+    MUST go through ``supa_update_user`` (Supabase, the system of
+    record) AND call ``_redis_invalidate_session`` so a banned user is
+    kicked at the next request — same behaviour as the canonical
+    ``/admin/users/{id}/status`` admin endpoint. A direct Mongo write
+    or a missing session invalidation is a security regression."""
+    import syra_actions
+
+    with patch("db_ops.supa_get_user_by_id", new=AsyncMock(return_value={"id": "u1", "email": "u@x.com"})) as g, \
+         patch("db_ops.supa_update_user", new=AsyncMock(return_value=None)) as up, \
+         patch("cache._redis_invalidate_session") as inv:
+        msg = await syra_actions._exec_user_status(mock_admin, {"user_id": "u1", "status": "banned"})
+    g.assert_awaited_once_with("u1")
+    up.assert_awaited_once_with("u1", {"status": "banned"})
+    inv.assert_called_once_with("u1")
+    assert "banned" in msg
+
+
+@pytest.mark.asyncio
+async def test_user_credits_executor_targets_credits_used_today(mock_admin):
+    """``user.adjust_credits`` must mutate ``credits_used_today`` via
+    Supabase (matching ``admin_update_user_credits``), not a Mongo
+    ``credits`` field that doesn't exist in the canonical schema."""
+    import syra_actions
+
+    user = {"id": "u2", "email": "u2@x.com", "credits_used_today": 5, "credits_reset_date": "1999-01-01"}
+    with patch("db_ops.supa_get_user_by_id", new=AsyncMock(return_value=user)), \
+         patch("db_ops.supa_update_user", new=AsyncMock(return_value=None)) as up:
+        msg = await syra_actions._exec_user_credits(mock_admin, {"user_id": "u2", "delta": 3})
+    # Stale reset_date ⇒ used_today resets to 0; +3 grant ⇒ used = max(0, 0-3) = 0.
+    up.assert_awaited_once()
+    args, _ = up.call_args
+    assert args[0] == "u2"
+    assert args[1]["credits_used_today"] == 0
+    assert "credits_reset_date" in args[1]
+    assert "u2@x.com" in msg
+
+
+@pytest.mark.asyncio
+async def test_reset_quiz_quota_executor_uses_redis_rate_limit(mock_admin):
+    """``user.reset_quiz_quota`` must clear the same Redis bucket the
+    quiz endpoint reads (``_quiz_quota_meta`` + ``reset_rate_limit``).
+    A Mongo delete on ``quiz_quota`` is a no-op against the actual
+    enforcement path."""
+    import syra_actions
+
+    with patch("db_ops.supa_get_user_by_id", new=AsyncMock(return_value={"id": "u3", "email": "u3@x.com"})), \
+         patch("routes.admin_auth_users._quiz_quota_meta", return_value=("rl:quiz:user:u3", 50, 86400)) as meta, \
+         patch("auth_deps.reset_rate_limit", return_value=7) as rl:
+        msg = await syra_actions._exec_reset_quiz_quota(mock_admin, {"user_id": "u3"})
+    meta.assert_called_once()
+    rl.assert_called_once_with("rl:quiz:user:u3", 86400)
+    assert "u3@x.com" in msg and "7" in msg
+
+
 def test_extended_registry_actions_present():
     """The action registry must cover the full mutating-admin surface
     Syra is supposed to mirror — credits, alert lifecycle, and job

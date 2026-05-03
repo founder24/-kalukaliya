@@ -89,7 +89,13 @@ async def _audit(admin: dict, action: SyraAction, params: ActionParams, result: 
 
 # ── Built-in executors ──────────────────────────────────────────────────────
 async def _exec_user_status(admin: dict, params: ActionParams) -> str:
-    from deps import supa  # type: ignore
+    """Set a user's status. Mirrors the canonical admin endpoint —
+    persists through ``supa_update_user`` (Supabase, the system of
+    record for users) AND invalidates the active session in Redis so
+    a banned/suspended user is kicked at the next request rather than
+    living until their access token expires."""
+    from db_ops import supa_get_user_by_id, supa_update_user
+    from cache import _redis_invalidate_session
 
     user_id = str(params.get("user_id") or "").strip()
     status = str(params.get("status") or "").strip().lower()
@@ -97,12 +103,22 @@ async def _exec_user_status(admin: dict, params: ActionParams) -> str:
         raise ValueError("user_id is required")
     if status not in ("active", "suspended", "banned"):
         raise ValueError("status must be active|suspended|banned")
-    supa.table("users").update({"status": status}).eq("id", user_id).execute()
-    return f"User {user_id[:8]}… set to {status}."
+    user = await supa_get_user_by_id(user_id)
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+    await supa_update_user(user_id, {"status": status})
+    # Critical: matches admin_set_user_status — without this a banned
+    # user keeps their cookie session until JWT expiry.
+    _redis_invalidate_session(user_id)
+    return f"User {user.get('email', user_id[:8] + '…')} set to {status}."
 
 
 async def _exec_user_plan(admin: dict, params: ActionParams) -> str:
-    from deps import supa  # type: ignore
+    """Set a user's plan. Same parity story as ``_exec_user_status`` —
+    plan changes go through Supabase and we invalidate the session so
+    plan-gated quotas re-resolve on the next request."""
+    from db_ops import supa_get_user_by_id, supa_update_user
+    from cache import _redis_invalidate_session
 
     user_id = str(params.get("user_id") or "").strip()
     plan = str(params.get("plan") or "").strip().lower()
@@ -110,20 +126,33 @@ async def _exec_user_plan(admin: dict, params: ActionParams) -> str:
         raise ValueError("user_id is required")
     if plan not in ("free", "starter", "pro"):
         raise ValueError("plan must be free|starter|pro")
-    supa.table("users").update({"plan": plan}).eq("id", user_id).execute()
-    return f"User {user_id[:8]}… moved to {plan} plan."
+    user = await supa_get_user_by_id(user_id)
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+    await supa_update_user(user_id, {"plan": plan})
+    _redis_invalidate_session(user_id)
+    return f"User {user.get('email', user_id[:8] + '…')} moved to {plan} plan."
 
 
 async def _exec_reset_quiz_quota(admin: dict, params: ActionParams) -> str:
-    from deps import db  # type: ignore
+    """Reset the per-user quiz quota counter. Must use the same
+    Redis rate-limit bucket the ``/edu/quiz/generate`` endpoint
+    enforces — see ``admin_reset_user_quiz_quota`` in
+    ``routes/admin_auth_users.py``. A direct Mongo delete would be a
+    no-op against the actual control plane."""
+    from db_ops import supa_get_user_by_id
+    from auth_deps import reset_rate_limit
+    from routes.admin_auth_users import _quiz_quota_meta
 
     user_id = str(params.get("user_id") or "").strip()
     if not user_id:
         raise ValueError("user_id is required")
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    res = await db.quiz_quota.delete_many({"user_id": user_id, "date": today})
-    cleared = getattr(res, "deleted_count", 0) or 0
-    return f"Cleared {cleared} quiz-quota entries for today."
+    user = await supa_get_user_by_id(user_id)
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+    rl_key, _cap, window = _quiz_quota_meta(user)
+    cleared = reset_rate_limit(rl_key, window)
+    return f"Quiz quota reset for {user.get('email', user_id[:8] + '…')} (cleared {cleared})."
 
 
 async def _exec_acknowledge_alert(admin: dict, params: ActionParams) -> str:
@@ -199,10 +228,15 @@ async def _exec_purge_cache(admin: dict, params: ActionParams) -> str:
 
 
 async def _exec_user_credits(admin: dict, params: ActionParams) -> str:
-    """Adjust a user's credit balance. Mirrors AdminUsers credits modal
-    + ``adminUpdateUserCredits``. Positive ``delta`` grants, negative
-    revokes; absolute floors at 0."""
-    from deps import db  # type: ignore
+    """Adjust a user's daily credit consumption. Mirrors the canonical
+    ``admin_update_user_credits`` PATCH route exactly — same
+    Supabase-backed ``credits_used_today`` field, same UTC-day reset
+    window, same add/deduct/reset verbs. A positive ``delta`` GRANTS
+    the user more headroom (decreases credits_used_today); a negative
+    delta CONSUMES credits (increases credits_used_today). Floors at
+    0 to match the admin endpoint."""
+    from datetime import datetime as _dt, timezone as _tz
+    from db_ops import supa_get_user_by_id, supa_update_user
 
     uid = str(params.get("user_id") or "").strip()
     delta = int(params.get("delta") or 0)
@@ -210,15 +244,25 @@ async def _exec_user_credits(admin: dict, params: ActionParams) -> str:
         raise ValueError("user_id is required")
     if delta == 0:
         raise ValueError("delta must be non-zero")
-    user = await db.users.find_one({"id": uid})
+    user = await supa_get_user_by_id(uid)
     if not user:
         raise ValueError(f"User {uid} not found")
-    new_balance = max(0, int(user.get("credits") or 0) + delta)
-    res = await db.users.update_one({"id": uid}, {"$set": {"credits": new_balance}})
-    if not getattr(res, "matched_count", 0):
-        raise ValueError(f"User {uid} not found")
+    today_str = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    reset_date = user.get("credits_reset_date") or ""
+    if hasattr(reset_date, "isoformat"):
+        reset_date = str(reset_date)[:10]
+    used_today = user.get("credits_used_today", 0) if reset_date == today_str else 0
+    # delta > 0 ⇒ "give them more credits" ⇒ subtract from used.
+    new_used = max(0, used_today - delta)
+    await supa_update_user(uid, {
+        "credits_used_today": new_used,
+        "credits_reset_date": today_str,
+    })
     sign = "+" if delta > 0 else ""
-    return f"Credits {sign}{delta} → {new_balance} for {user.get('email', uid)}."
+    return (
+        f"Credits {sign}{delta} for {user.get('email', uid)} "
+        f"(used today: {used_today} → {new_used})."
+    )
 
 
 async def _exec_resolve_alert(admin: dict, params: ActionParams) -> str:
