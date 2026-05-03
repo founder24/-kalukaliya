@@ -198,6 +198,75 @@ async def _exec_purge_cache(admin: dict, params: ActionParams) -> str:
     return "Cache purge requested."
 
 
+async def _exec_user_credits(admin: dict, params: ActionParams) -> str:
+    """Adjust a user's credit balance. Mirrors AdminUsers credits modal
+    + ``adminUpdateUserCredits``. Positive ``delta`` grants, negative
+    revokes; absolute floors at 0."""
+    from deps import db  # type: ignore
+
+    uid = str(params.get("user_id") or "").strip()
+    delta = int(params.get("delta") or 0)
+    if not uid:
+        raise ValueError("user_id is required")
+    if delta == 0:
+        raise ValueError("delta must be non-zero")
+    user = await db.users.find_one({"id": uid})
+    if not user:
+        raise ValueError(f"User {uid} not found")
+    new_balance = max(0, int(user.get("credits") or 0) + delta)
+    res = await db.users.update_one({"id": uid}, {"$set": {"credits": new_balance}})
+    if not getattr(res, "matched_count", 0):
+        raise ValueError(f"User {uid} not found")
+    sign = "+" if delta > 0 else ""
+    return f"Credits {sign}{delta} → {new_balance} for {user.get('email', uid)}."
+
+
+async def _exec_resolve_alert(admin: dict, params: ActionParams) -> str:
+    """Mark an alert resolved (distinct from acknowledged — operator has
+    handled the underlying issue, not just seen it)."""
+    from deps import db  # type: ignore
+    from bson import ObjectId  # type: ignore
+
+    aid = str(params.get("alert_id") or "").strip()
+    if not aid:
+        raise ValueError("alert_id is required")
+    try:
+        oid = ObjectId(aid)
+    except Exception as exc:
+        raise ValueError(f"Invalid alert id: {aid}") from exc
+    res = await db.alerts.update_one(
+        {"_id": oid},
+        {"$set": {
+            "acknowledged": True,
+            "resolved": True,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": admin.get("email", "admin"),
+        }},
+    )
+    if not getattr(res, "matched_count", 0):
+        raise ValueError(f"Alert {aid} not found")
+    return f"Alert {aid[:8]}… resolved."
+
+
+async def _exec_retry_failed_jobs(admin: dict, params: ActionParams) -> str:
+    """Re-queue jobs that ended in ``failed`` state. Best-effort; the
+    actual retry runner is owned by the worker process — we only flip
+    the status so the next sweep picks them up."""
+    from deps import db  # type: ignore
+
+    job_type = str(params.get("job_type") or "").strip() or None
+    query: dict[str, Any] = {"status": "failed"}
+    if job_type:
+        query["type"] = job_type
+    res = await db.jobs.update_many(
+        query,
+        {"$set": {"status": "pending", "retry_requested_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    n = getattr(res, "modified_count", 0) or 0
+    scope = f" of type {job_type}" if job_type else ""
+    return f"Re-queued {n} failed jobs{scope}."
+
+
 async def _exec_toggle_maintenance(admin: dict, params: ActionParams) -> str:
     from deps import db  # type: ignore
 
@@ -262,6 +331,30 @@ register(SyraAction(
     destructive=True,
     params=[],
     executor=_exec_purge_cache,
+))
+register(SyraAction(
+    id="user.adjust_credits",
+    label="Adjust user credits",
+    destructive=True,
+    params=["user_id", "delta"],
+    executor=_exec_user_credits,
+    summary="Grant or revoke credits on a user account.",
+))
+register(SyraAction(
+    id="alert.resolve",
+    label="Resolve alert",
+    destructive=False,
+    params=["alert_id"],
+    executor=_exec_resolve_alert,
+    summary="Mark an alert as resolved (handled), not just acknowledged.",
+))
+register(SyraAction(
+    id="jobs.retry_failed",
+    label="Retry failed jobs",
+    destructive=True,
+    params=["job_type"],
+    executor=_exec_retry_failed_jobs,
+    summary="Re-queue jobs in failed status (optionally filtered by type).",
 ))
 register(SyraAction(
     id="settings.toggle_maintenance",

@@ -895,6 +895,17 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken, a
             </>
           )}
           {listening ? <MicOff size={20} className="relative" /> : speaking ? <Volume2 size={20} className="relative" /> : <Mic size={20} className="relative" />}
+          {/* Persistent wake-word indicator on the orb itself, so the
+              operator can see at a glance — even with the panel
+              closed — that "Hey Syra" is being listened for. */}
+          {prefs.wakeWord && wakeListening && (
+            <span
+              data-testid="syra-wake-indicator"
+              title="Wake word active — say 'Hey Syra'"
+              aria-label="Wake word listening"
+              className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-white shadow"
+            />
+          )}
         </button>
       </div>
     </div>

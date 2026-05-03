@@ -126,6 +126,28 @@ def test_execute_destructive_succeeds_when_confirmed(client):
     fake.assert_awaited_once()
 
 
+def test_extended_registry_actions_present():
+    """The action registry must cover the full mutating-admin surface
+    Syra is supposed to mirror — credits, alert lifecycle, and job
+    retry are explicitly part of the JARVIS upgrade."""
+    import syra_actions
+
+    ids = {a["id"] for a in syra_actions.list_actions()}
+    for required in (
+        "user.set_status", "user.set_plan", "user.adjust_credits",
+        "alert.acknowledge", "alert.acknowledge_all", "alert.resolve",
+        "jobs.retry_failed",
+        "conversation.flag",
+        "cache.purge_all", "settings.toggle_maintenance",
+    ):
+        assert required in ids, f"missing action: {required}"
+    # Destructive flag is correctly set on the dangerous ones.
+    by_id = {a["id"]: a for a in syra_actions.list_actions()}
+    assert by_id["user.adjust_credits"]["destructive"] is True
+    assert by_id["jobs.retry_failed"]["destructive"] is True
+    assert by_id["alert.resolve"]["destructive"] is False
+
+
 def test_prefs_round_trip_per_admin(client):
     """Code review #298: prefs must persist per-admin server-side, not
     just in localStorage. Round-trip through PUT then GET, ensuring
