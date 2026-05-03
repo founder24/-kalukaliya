@@ -2,13 +2,14 @@ import { Loader2, RefreshCw, Eye, TrendingUp, DollarSign, Target } from 'lucide-
 import { Card, Stat } from './shared';
 import CurrencyProvenanceCaption, { breakdownTooltip } from './CurrencyProvenanceCaption';
 
-export default function ConversionsTab({ pageConvData, pageConvLoading, loadPageConversions }) {
+export default function ConversionsTab({ pageConvData, pageConvLoading, loadPageConversions, rangeDays = 30 }) {
+  const rangeSuffix = rangeDays === 1 ? 'today' : `last ${rangeDays} days`;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-gray-700 font-semibold text-sm">Page-Level Conversion Tracker</h3>
-          <p className="text-gray-700 text-xs mt-0.5">Which pages drive the most trial → paid conversions</p>
+          <p className="text-gray-700 text-xs mt-0.5">Which pages drive the most trial → paid conversions · {rangeSuffix}</p>
         </div>
         <button onClick={loadPageConversions} disabled={pageConvLoading}
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs text-gray-600 hover:text-gray-900 transition-all"

@@ -29,7 +29,8 @@ function RevenueChartTooltip({ active, payload, label, breakdown }) {
   );
 }
 
-export default function RevenueTab({ widgetErrors, load, mrr, predicted, growth, arpu, ltv, paidUsers, dailyRev, cohortData, predict, revenue }) {
+export default function RevenueTab({ widgetErrors, load, mrr, predicted, growth, arpu, ltv, paidUsers, dailyRev, cohortData, predict, revenue, rangeDays = 30 }) {
+  const rangeLabel = rangeDays === 1 ? 'Today' : `Last ${rangeDays} Days`;
   const breakdown = revenue?.currency_breakdown;
   return (
     <div className="space-y-4">
@@ -60,7 +61,7 @@ export default function RevenueTab({ widgetErrors, load, mrr, predicted, growth,
         <Stat icon={Zap}        label="LTV (12-mo)"   value={fmtInr(ltv)}        color="#06b6d4" sub="Avg lifetime value" />
       </div>
 
-      <Card title="Daily Revenue — Last 30 Days"
+      <Card title={`Daily Revenue — ${rangeLabel}`}
         empty={!dailyRev.length} emptyMsg="No payment data yet">
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={dailyRev} margin={{ top: 5, right: 10, bottom: 0, left: -10 }}>
@@ -100,7 +101,7 @@ export default function RevenueTab({ widgetErrors, load, mrr, predicted, growth,
               { label: 'Payments (last month)',  value: predict?.payments_last_month  || 0, color: '#64748b' },
               { label: 'Signups (this month)',   value: predict?.signups_this_month   || 0, color: '#7c3aed' },
               { label: 'Signups (last month)',   value: predict?.signups_last_month   || 0, color: '#64748b' },
-              { label: 'Total payments (30d)',   value: revenue?.total_payments       || 0, color: '#f59e0b' },
+              { label: `Total payments (${rangeDays === 1 ? 'today' : `${rangeDays}d`})`, value: revenue?.total_payments || 0, color: '#f59e0b' },
             ].map((item, i) => (
               <div key={i} className="flex items-center justify-between p-2 rounded-lg" style={{
                 background: i % 2 === 0 ? '#f9fafb' : 'transparent',

@@ -46,7 +46,11 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
       adminGetAnalytics(adminToken, overviewDays),
       axios.get(`${API_BASE}/admin/analytics/funnel`, h),
       axios.get(`${API_BASE}/admin/analytics/content-heatmap`, h),
-      adminGetRevenue(adminToken, 30),
+      // Daily-revenue chart and cohort split follow the page's range
+      // selector. (Top-line MRR/Predicted MRR come from the predictor
+      // endpoint and are intentionally range-agnostic — MRR is a
+      // 30-day SaaS metric by definition.)
+      adminGetRevenue(adminToken, overviewDays),
       adminGetPredictor(adminToken),
       adminGetGA4Status(adminToken),
     ]);
@@ -88,11 +92,13 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
   const loadPageConversions = useCallback(async () => {
     setPageConvLoading(true);
     try {
-      const r = await pageConversions(adminToken, 30);
+      // Follow the page's range selector so the conversions list moves
+      // with overviewDays instead of being permanently pinned to 30.
+      const r = await pageConversions(adminToken, overviewDays);
       setPageConvData(r.data);
     } catch { toast.error('Failed to load page conversions'); }
     finally { setPageConvLoading(false); }
-  }, [adminToken]);
+  }, [adminToken, overviewDays]);
 
   const loadDailyAnalytics = useCallback(async (days = dailyDays) => {
     setDailyLoading(true);
@@ -236,7 +242,8 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
         {tab === 'revenue' && (
           <RevenueTab widgetErrors={widgetErrors} load={load} mrr={mrr} predicted={predicted}
             growth={growth} arpu={arpu} ltv={ltv} paidUsers={paidUsers}
-            dailyRev={dailyRev} cohortData={cohortData} predict={predict} revenue={revenue} />
+            dailyRev={dailyRev} cohortData={cohortData} predict={predict} revenue={revenue}
+            rangeDays={overviewDays} />
         )}
 
         {tab === 'predict' && (
@@ -246,7 +253,7 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
 
         {tab === 'pages' && (
           <ConversionsTab pageConvData={pageConvData} pageConvLoading={pageConvLoading}
-            loadPageConversions={loadPageConversions} />
+            loadPageConversions={loadPageConversions} rangeDays={overviewDays} />
         )}
 
         <AdminQuickLinks links={['seomanager','users','conversations','monetization','dashboard']} onNavigate={onNavigate} />
