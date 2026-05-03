@@ -444,6 +444,17 @@ export const adminUpdateRoadmapItem = (token, id, data) =>
 export const adminGetActivityLog = (token) =>
   axios.get(`${API_BASE}/admin/activity-log`, { headers: adminHeaders(token), withCredentials: true });
 
+// Task #276 — Syra voice assistant. Posts the spoken transcript and the
+// currently-active admin section to the backend, which routes through
+// the english_rag_chat provider pool and returns a structured action
+// (navigate / scroll / fetch / answer) for the orb to execute locally.
+export const adminSyraChat = (transcript, activeSection, token) =>
+  axios.post(
+    `${API_BASE}/admin/syra/chat`,
+    { transcript, context: { active_section: activeSection || 'dashboard' } },
+    { headers: adminHeaders(token), withCredentials: true, timeout: 30000 },
+  );
+
 const getSeoPage = (board, classSlug, subjectSlug, topicSlug, pageType) => {
   let url = `${WORKER_API}/seo/page/${board}/${classSlug}/${subjectSlug}/${topicSlug}`;
   if (pageType && pageType !== 'notes') url += `/${pageType}`;

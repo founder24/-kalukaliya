@@ -280,7 +280,7 @@ export default function AdminUsers({ adminToken, navContext, onNavigate }) {
         )}
 
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <h2 className="text-gray-900 font-semibold text-lg">Users ({users.length}{hasMore ? '+' : ''})</h2>
+          <h2 className="text-gray-900 font-semibold text-lg" data-syra="users-header">Users ({users.length}{hasMore ? '+' : ''})</h2>
           <div className="flex items-center gap-3">
             <button onClick={loadChurnRisk} disabled={riskLoading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all bg-red-50 border border-red-200 text-red-600 hover:bg-red-100">
@@ -296,7 +296,7 @@ export default function AdminUsers({ adminToken, navContext, onNavigate }) {
         </div>
 
         {riskData && (
-          <div className="rounded-2xl p-4 bg-red-50 border border-red-200">
+          <div className="rounded-2xl p-4 bg-red-50 border border-red-200" data-syra="churn-risk">
             <div className="flex items-center gap-2 mb-3">
               <TrendingDown size={15} color="#ef4444" />
               <span className="font-bold text-gray-900 text-sm">Churn Risk Summary</span>

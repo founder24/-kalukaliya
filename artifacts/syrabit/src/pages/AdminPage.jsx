@@ -40,6 +40,7 @@ const AdminEduBrowser    = lazy(() => import('@/components/admin/AdminEduBrowser
 // Task #944 — Unified Log Explorer: filter / search / live-tail / export
 // across edge worker + Cloudflare GraphQL + backend + cron sources.
 const AdminLogsExplorer  = lazy(() => import('@/components/admin/AdminLogsExplorer'));
+const SyraAssistant      = lazy(() => import('@/components/admin/SyraAssistant'));
 
 const SECTIONS = [
   { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',        group: 'main'     },
@@ -404,6 +405,14 @@ export default function AdminPage() {
           </SectionErrorBoundary>
         </main>
       </div>
+
+      <Suspense fallback={null}>
+        <SyraAssistant
+          activeSection={activeSection}
+          onNavigate={handleNavigate}
+          adminToken={adminToken}
+        />
+      </Suspense>
     </div>
   );
 }

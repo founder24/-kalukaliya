@@ -257,7 +257,7 @@ export default function AdminConversations({ adminToken, onNavigate }) {
           <div className="p-4 border-b border-gray-200 space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-gray-900 font-semibold">Conversations ({conversations.length})</h2>
+                <h2 className="text-gray-900 font-semibold" data-syra="conversations-header">Conversations ({conversations.length})</h2>
                 <p className="text-xs text-gray-400">{withMessages.length} with messages · {totalMessages} total msgs · {anonymousConvs.length} anonymous</p>
               </div>
               <div className="flex gap-1 flex-shrink-0">

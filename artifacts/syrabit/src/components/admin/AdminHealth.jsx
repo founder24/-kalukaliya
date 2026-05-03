@@ -4283,7 +4283,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
               const isNotConfigured = dep.status === 'not_configured';
               const isError = dep.status === 'error';
               return (
-                <div key={key} className={`rounded-xl p-4 flex items-center gap-3 bg-white border border-gray-200 shadow-sm`} data-testid={`dep-${key}`}>
+                <div key={key} className={`rounded-xl p-4 flex items-center gap-3 bg-white border border-gray-200 shadow-sm`} data-testid={`dep-${key}`} data-syra={`${key}-latency`}>
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
                     isOk ? 'bg-emerald-50' : isNotConfigured ? 'bg-gray-100' : isError ? 'bg-red-50' : 'bg-amber-50'
                   }`}>

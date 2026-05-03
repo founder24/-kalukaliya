@@ -59,11 +59,13 @@ function GlassCard({ children, className = '', glow, ...props }) {
 }
 
 function StatCard({ label, value, icon: Icon, color, subLabel, subValue, pulse, onClick }) {
+  const syraId = (label || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   return (
     <div
       className={`relative rounded-2xl p-5 overflow-hidden transition-all duration-300 group bg-white border border-gray-200 shadow-sm ${onClick ? 'cursor-pointer hover:shadow-md' : ''}`}
       onClick={onClick}
       data-testid="dashboard-stat-card"
+      data-syra={syraId || undefined}
     >
       {pulse && (
         <span className="absolute top-3 right-3 flex h-2 w-2">
@@ -144,7 +146,7 @@ function DepStatusCard({ name, status, latency }) {
   const color = STATUS_COLORS[status] || STATUS_COLORS.unknown;
   const label = DEP_LABELS[name] || name;
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl transition-all duration-200 hover:bg-gray-50 bg-gray-50 border border-gray-100">
+    <div className="flex items-center gap-3 p-3 rounded-xl transition-all duration-200 hover:bg-gray-50 bg-gray-50 border border-gray-100" data-syra={`${name}-status`}>
       <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${color}15` }}>
         <Icon size={14} style={{ color }} />
       </div>
