@@ -1,0 +1,85 @@
+Name                Endpoint
+------------------  ----------------------------------------------
+syrabit-translator  https://api.cognitive.microsofttranslator.com/
+syrabit-openai      https://eastus.api.cognitive.microsoft.com/
+syrabit-speech      https://eastus.api.cognitive.microsoft.com/
+bash: RESOURCE_NAME: No such file or directory
+dipak [ ~ ]$ az cognitiveservices account deployment create \
+  --name syrabit-openai \
+  --resource-group syrabit-rg \
+  --deployment-name gpt-5-nano \
+  --model-name gpt-5-nano \
+  --model-version 2025-08-07 \
+  --model-format OpenAI \
+  --sku-name GlobalStandard \
+  --sku-capacity 50
+{
+  "etag": "\"97455f71-459a-4fd8-aef8-001dc55e9786\"",
+  "id": "/subscriptions/a1fb8870-612b-4388-a8df-bb1f85bc5dae/resourceGroups/syrabit-rg/providers/Microsoft.CognitiveServices/accounts/syrabit-openai/deployments/gpt-5-nano",
+  "name": "gpt-5-nano",
+  "properties": {
+    "callRateLimit": null,
+    "capabilities": {
+      "agentsV2": "true",
+      "area": "US",
+      "assistants": "true",
+      "chatCompletion": "true",
+      "responses": "true"
+    },
+    "capacitySettings": null,
+    "currentCapacity": 50,
+    "dynamicThrottlingEnabled": null,
+    "model": {
+      "callRateLimit": null,
+      "format": "OpenAI",
+      "name": "gpt-5-nano",
+      "publisher": null,
+      "source": null,
+      "sourceAccount": null,
+      "version": "2025-08-07"
+    },
+    "parentDeploymentName": null,
+    "provisioningState": "Succeeded",
+    "raiPolicyName": "Microsoft.DefaultV2",
+    "rateLimits": [
+      {
+        "count": 50.0,
+        "dynamicThrottlingEnabled": null,
+        "key": "request",
+        "matchPatterns": null,
+        "minCount": null,
+        "renewalPeriod": 60.0
+      },
+      {
+        "count": 50000.0,
+        "dynamicThrottlingEnabled": null,
+        "key": "token",
+        "matchPatterns": null,
+        "minCount": null,
+        "renewalPeriod": 60.0
+      }
+    ],
+    "scaleSettings": null,
+    "spilloverDeploymentName": null,
+    "versionUpgradeOption": "OnceNewDefaultVersionAvailable"
+  },
+  "resourceGroup": "syrabit-rg",
+  "sku": {
+    "capacity": 50,
+    "family": null,
+    "name": "GlobalStandard",
+    "size": null,
+    "tier": null
+  },
+  "systemData": {
+    "createdAt": "2026-05-03T17:47:03.300517+00:00",
+    "createdBy": "founder@syrabit.ai",
+    "createdByType": "User",
+    "lastModifiedAt": "2026-05-03T17:47:03.300517+00:00",
+    "lastModifiedBy": "founder@syrabit.ai",
+    "lastModifiedByType": "User"
+  },
+  "tags": null,
+  "type": "Microsoft.CognitiveServices/accounts/deployments"
+}
+dipak [ ~ ]$ 
