@@ -19,16 +19,17 @@ Provider matrix (uses the SAME client modules production traffic uses,
 so the benchmark exercises the real code path including CF AI Gateway
 routing, retries and BYOK):
   english_chat / long_form:
-    azure_openai      — providers.azure_openai.stream_chat (gpt-4.1-mini default)
-    bedrock_nova      — providers.bedrock.call_converse   (amazon.nova-micro-v1:0)
-    workers_ai_oss20  — providers.cloudflare_ai.chat_stream(model_key="chat_gpt_oss")
-    workers_ai_oss120 — providers.cloudflare_ai.chat_stream(model_key="chat_long")
-    gemini_flash      — Gemini 2.5 Flash via Google's OpenAI-compat streaming endpoint
-                        (or CF AI Gateway BYOK when CF_AI_GATEWAY_GEMINI_BASE is set)
+    azure_openai          — providers.azure_openai.stream_chat (gpt-4.1-mini default)
+    bedrock_nova          — providers.bedrock.call_converse   (amazon.nova-micro-v1:0)
+    workers_ai_oss20      — providers.cloudflare_ai.chat_stream(model_key="chat_gpt_oss")
+    workers_ai_oss120     — providers.cloudflare_ai.chat_stream(model_key="chat_long")
+    vertex_chat           — vertex_chat.stream_chat (Vertex/Gemini path, currently
+                            configured to llama-3.3-70b-instruct via Workers AI)
   assamese_chat:
-    sarvam            — sarvam-m via the sarvam_llm_client streaming pipeline
-    workers_ai_indic  — providers.cloudflare_ai.chat_stream(model_key="chat_indic") (gemma-sea-lion)
-    gemini_flash      — Gemini 2.5 Flash (same adapter as above)
+    sarvam                  — sarvam-m via the sarvam_llm_client streaming pipeline
+    workers_ai_indictrans2  — providers.workers_indic.call_indic_trans
+                              (@cf/ai4bharat/indictrans2-en-indic-1b)
+    vertex_chat             — vertex_chat.stream_chat (same Vertex/Gemini path)
 
 Providers that fail to initialise (missing keys, unreachable gateway,
 etc.) are recorded as ``skipped`` with a short reason string instead of
@@ -263,70 +264,51 @@ async def _run_cf_chat_oss120(messages: list, max_tokens: int, **_):
     )
 
 
-async def _run_cf_chat_indic(messages: list, max_tokens: int, **_):
-    from providers import cloudflare_ai
-    return await _stream_and_time(
-        lambda: cloudflare_ai.chat_stream(messages, model_key="chat_indic", max_tokens=max_tokens),
-    )
+async def _run_vertex_chat(messages: list, max_tokens: int, **_):
+    """Stream from the production Vertex/Gemini chat path (``vertex_chat.py``).
 
-
-async def _run_gemini_flash(messages: list, max_tokens: int, **_):
-    """Stream from Gemini 2.5 Flash via Google's OpenAI-compatible endpoint.
-
-    Uses GEMINI_API_KEY directly (no Workers AI alias). When the
-    `CF_AI_GATEWAY_GEMINI_BASE` env is set we go through the Cloudflare
-    AI Gateway BYOK path; otherwise we hit
-    generativelanguage.googleapis.com/v1beta/openai/ directly. This matches
-    what production traffic uses for the `gemini-2.5-flash` SLM slot
-    (see llm.py _call_gemini and routes/admin_benchmark.py).
+    The module currently delegates streaming to Workers AI
+    (``@cf/meta/llama-3.3-70b-instruct-fp8-fast``) with the same public
+    interface used by ``llm.py`` and ``routes/edu_study.py``.  Benchmarking
+    via this module — instead of hitting Google's endpoint directly —
+    measures the exact code path production traffic takes for the
+    ``vertex_chat`` SLM slot.
     """
-    import httpx
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("gemini_flash disabled (GEMINI_API_KEY missing)")
-    base = (
-        os.environ.get("CF_AI_GATEWAY_GEMINI_BASE", "").strip()
-        or "https://generativelanguage.googleapis.com/v1beta/openai"
+    import vertex_chat as _vc
+    if not _vc.is_configured():
+        raise RuntimeError(
+            "vertex_chat disabled (CF_AI_GATEWAY_ACCOUNT_ID / CLOUDFLARE_API_TOKEN missing)"
+        )
+    return await _stream_and_time(
+        lambda: _vc.stream_chat(messages, max_tokens=max_tokens, temperature=0.1),
     )
-    url = base.rstrip("/") + "/chat/completions"
-    payload = {
-        "model": "gemini-2.5-flash",
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "stream": True,
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-    }
 
-    async def _gen():
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                if resp.status_code >= 400:
-                    body = await resp.aread()
-                    raise RuntimeError(
-                        f"gemini_flash HTTP {resp.status_code} — "
-                        f"{body.decode(errors='replace')[:200]}"
-                    )
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(raw)
-                        delta = (chunk.get("choices") or [{}])[0].get("delta", {})
-                        token = delta.get("content") or ""
-                        if token:
-                            yield token
-                    except json.JSONDecodeError:
-                        continue
 
-    return await _stream_and_time(_gen)
+async def _run_workers_ai_indictrans2(messages: list, max_tokens: int, **_):
+    """Bench the IndicTrans2 last-resort Assamese path (``providers.workers_indic``).
+
+    IndicTrans2 is a translation model rather than a chat LLM, so we
+    extract the user prompt from the OpenAI-style messages list and
+    translate it English→Assamese.  ``call_indic_trans`` is non-streaming,
+    so the measured TTFT == total latency (a single request/response).
+    """
+    from providers import workers_indic
+    if not workers_indic.ENABLED:
+        raise RuntimeError(
+            "workers_ai_indictrans2 disabled (CF_AI_GATEWAY_ACCOUNT_ID / CLOUDFLARE_API_TOKEN missing)"
+        )
+    user_text = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    ) or "Explain photosynthesis in 3 sentences."
+    # Detect Bengali-block (Assamese) characters → use indic-en, else en-indic.
+    is_assamese = any("\u0980" <= ch <= "\u09FF" for ch in user_text)
+    direction = "indic-en" if is_assamese else "en-indic"
+    t0 = time.perf_counter()
+    translated = await workers_indic.call_indic_trans(user_text, direction=direction)
+    total_ms = (time.perf_counter() - t0) * 1000.0
+    # Non-streaming endpoint → first byte == final response.
+    return total_ms, total_ms, translated or ""
 
 
 async def _run_sarvam(messages: list, max_tokens: int, response_lang: str = "as", **_):
@@ -376,15 +358,15 @@ ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], st
     "bedrock_nova":      (_run_bedrock_nova,   "amazon.nova-micro-v1:0"),
     "workers_ai_oss20":  (_run_cf_chat_oss20,  "@cf/openai/gpt-oss-20b"),
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
-    "workers_ai_indic":  (_run_cf_chat_indic,  "@cf/aisingapore/gemma-sea-lion-v4-27b-it"),
-    "gemini_flash":      (_run_gemini_flash,   "gemini-2.5-flash"),
-    "sarvam":            (_run_sarvam,         "sarvam-m"),
+    "workers_ai_indictrans2": (_run_workers_ai_indictrans2, "@cf/ai4bharat/indictrans2-en-indic-1b"),
+    "vertex_chat":            (_run_vertex_chat,            "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+    "sarvam":                 (_run_sarvam,                 "sarvam-m"),
 }
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
-    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "gemini_flash"],
-    "assamese_chat": ["sarvam", "workers_ai_indic", "gemini_flash"],
-    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "gemini_flash"],
+    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "vertex_chat"],
+    "assamese_chat": ["sarvam", "workers_ai_indictrans2", "vertex_chat"],
+    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "vertex_chat"],
 }
 
 
@@ -494,6 +476,35 @@ def _markdown_report(report: dict) -> str:
         f"**Warm-ups:** {report['warmups']} · "
         f"**Host:** `{report.get('host', 'unknown')}`"
     )
+    lines.append("")
+
+    # ── Top-level winner-by-metric summary across all suites ──
+    metric_labels: list[tuple[str, str, bool]] = [
+        ("ttft_cold_p50_ms",  "TTFT cold p50",  True),   # lower is better
+        ("ttft_warm_p50_ms",  "TTFT warm p50",  True),
+        ("ttft_warm_p95_ms",  "TTFT warm p95",  True),
+        ("total_p50_ms",      "Total p50",      True),
+        ("tokens_per_sec_p50","tok/s p50",      False),  # higher is better
+    ]
+    lines.append("## Winner by metric (across all suites)")
+    lines.append("")
+    lines.append("| Suite | " + " | ".join(lbl for _, lbl, _ in metric_labels) + " |")
+    lines.append("|---" * (len(metric_labels) + 1) + "|")
+    for suite_id, suite in report["suites"].items():
+        row = [f"`{suite_id}`"]
+        for key, _, lower_better in metric_labels:
+            cands = [
+                (pid, r[key]) for pid, r in suite["providers"].items()
+                if not r.get("skipped") and r.get("samples", 0) > 0
+                and r.get(key) is not None
+            ]
+            if not cands:
+                row.append("—")
+                continue
+            pid, val = (min if lower_better else max)(cands, key=lambda kv: kv[1])
+            unit = "ms" if key.endswith("_ms") else ""
+            row.append(f"`{pid}` ({val:.0f}{unit})" if unit else f"`{pid}` ({val:.1f})")
+        lines.append("| " + " | ".join(row) + " |")
     lines.append("")
 
     for suite_id, suite in report["suites"].items():
