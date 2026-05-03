@@ -41,6 +41,7 @@ const AdminEduBrowser    = lazy(() => import('@/components/admin/AdminEduBrowser
 // across edge worker + Cloudflare GraphQL + backend + cron sources.
 const AdminLogsExplorer  = lazy(() => import('@/components/admin/AdminLogsExplorer'));
 const SyraAssistant      = lazy(() => import('@/components/admin/SyraAssistant'));
+import { SyraProvider } from '@/components/admin/syra/SyraContext';
 
 const SECTIONS = [
   { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',        group: 'main'     },
@@ -250,6 +251,7 @@ export default function AdminPage() {
   const sc = statusConfig[sysStatus];
 
   return (
+    <SyraProvider activeSection={activeSection}>
     <div className="min-h-screen flex bg-[#f8f9fc]" data-testid="admin-dashboard">
       <aside
         className="flex flex-col h-screen sticky top-0 transition-all duration-300 flex-shrink-0 z-20 bg-white"
@@ -414,5 +416,6 @@ export default function AdminPage() {
         />
       </Suspense>
     </div>
+    </SyraProvider>
   );
 }

@@ -1,19 +1,22 @@
-"""Task #276 — Syra: voice assistant for the admin panel.
+"""Task #276 + #298 — Syra: voice coworker for the admin panel.
 
-Exposes ``POST /api/admin/syra/chat`` — accepts the admin's spoken
-transcript plus the currently-active section, calls the
-``english_rag_chat`` provider pool through ``call_llm_api_chat`` (Azure
-GPT-4o mini → Workers AI → Gemini), and returns a structured action the
-frontend can execute (navigate / scroll / fetch / answer).
+Endpoints
+---------
+``POST /api/admin/syra/chat``           — conversational turn (memory + screen context aware)
+``POST /api/admin/syra/execute-action`` — run a registered write action (Task #298)
+``GET  /api/admin/syra/actions``        — list registered actions (UI introspection)
+``GET  /api/admin/syra/briefing``       — daily briefing paragraph (Task #298)
+``POST /api/admin/syra/stt``            — Deepgram Nova-3 transcription
+``POST /api/admin/syra/tts``            — Deepgram Aura-2 synthesis
 
-Strictly admin-gated via ``get_admin_user`` — the orb never appears for
-students and the endpoint is unreachable without a valid admin session.
+All routes are admin-gated via ``get_admin_user``.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
@@ -22,6 +25,11 @@ from pydantic import BaseModel, Field
 from auth_deps import get_admin_user
 from llm import call_llm_api_chat
 from providers import deepgram as _deepgram
+from syra_actions import (
+    SyraActionError,
+    execute as execute_action,
+    list_actions as list_registered_actions,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,108 +43,104 @@ _SECTION_IDS = [
     "botsecurity", "logsexplorer", "health",
 ]
 
-_SYSTEM_PROMPT = """You are Syra, the voice assistant embedded in the
-Syrabit.ai admin control panel. You speak ONLY to the admin operator,
-never to students. Be concise, friendly, and professional — your reply
-will be read aloud by the browser's text-to-speech engine.
 
-# Admin sections you can navigate to (use the exact id):
-- dashboard      — KPIs, traffic, alerts overview
-- contenthub     — content editor (boards, classes, subjects, chapters, blog)
-- seomanager     — SEO topics, pages, sitemaps, internal links
-- vertex         — Vertex AI Studio (model probes, Gemini health)
-- automation     — scheduled jobs and pipelines
-- users          — user list, plans, churn risk, credits, quotas
-- conversations  — student chat history, FAQ extractor, sentiment
-- feedback       — chat feedback (thumbs up/down) review
-- analytics      — Cloudflare + GA4 analytics, funnels, daily stats
-- monetization   — premium revenue, Stripe payouts
-- ads            — AdSense / ad-network revenue
-- plans          — pricing plans, credit configuration
-- intelligence   — predictive intelligence, growth signals
-- notifications  — push channels, email/Slack templates
-- apiconfig      — third-party API keys / provider config
-- googleauth     — Google OAuth + GA4 service-account status
-- settings       — site-wide settings, maintenance mode
-- edubrowser     — educational browser allowlist + educator submissions
-- ratelimits     — rate-limit buckets and overrides
-- activitylog    — admin audit log
-- botsecurity    — bot-traffic alerts, suppressed alerts, WAF
-- logsexplorer   — unified log search (edge worker + backend + cron)
-- health         — infrastructure health, latency, cron pills
+def _build_system_prompt(actions_json: str) -> str:
+    return f"""You are Syra, the JARVIS-style voice coworker embedded in
+the Syrabit.ai admin control panel. You speak ONLY to admin operators.
+Keep replies short (≤ 2 sentences, ≤ 200 chars unless quoting a
+specific number) — Deepgram Aura-2 will read them aloud. Be calm,
+direct, and proactive: if the operator's wording is ambiguous but
+they've selected an entity on screen (see "selected_entity" in
+context), assume that entity. Use the conversation history to resolve
+pronouns ("ban him", "do it for that user").
+
+# Admin sections (use the exact id when navigating)
+- dashboard, contenthub, seomanager, vertex, automation, users,
+  conversations, feedback, analytics, monetization, ads, plans,
+  intelligence, notifications, apiconfig, googleauth, settings,
+  edubrowser, ratelimits, activitylog, botsecurity, logsexplorer,
+  health.
 
 # Architecture knowledge (answer questions about these):
-- Provider pools (PROVIDER_PRIORITY): english_rag_chat
-  (Azure GPT-4.1-mini → Vertex/Gemini → Workers AI Llama 3.3-70B),
-  assamese_rag_chat (Sarvam-m → Vertex/Gemini → Workers AI IndicTrans2),
-  content (Vertex/Gemini → Azure → Workers AI), assamese_content
-  (Workers AI IndicTrans2 → Vertex), tts (ElevenLabs → Deepgram →
-  Vertex → Workers AI), stt (Deepgram → AssemblyAI → Vertex → Workers
-  AI), embed (Cohere → Voyage → Workers AI), rerank, live_search.
-  Every call is weighted round-robin and routed through Cloudflare AI
-  Gateway with BYOK keys.
-- Quiz generation: Azure GPT-4.1-mini generates the master quiz, then
-  Sarvam translates into Assamese + Hindi; all three language copies
-  are stored in MongoDB (quizzes collection).
-- Cloudflare AI Gateway: unified observability + caching for every LLM
-  call; BYOK headers attach the per-provider key so usage is billed
-  against startup credits, not the gateway account.
-- Dual-database split: MongoDB Atlas holds content, conversations,
-  notifications, alerts, locks, bot reports; PostgreSQL (Supabase) holds
-  user profiles, plans, credits, billing audit trail.
-- Deployment: backend on Railway (FastAPI + uvicorn), frontend on
-  Cloudflare Pages, edge proxy as a Cloudflare Worker in front of
-  api.syrabit.ai for KV-cached SEO pages and bot routing.
+- Provider pools: english_rag_chat (Azure GPT-4.1-mini → Vertex/Gemini
+  → Workers AI Llama 3.3-70B), assamese_rag_chat (Sarvam-m → Vertex
+  → Workers AI IndicTrans2), content (Vertex → Azure → Workers AI),
+  tts (ElevenLabs → Deepgram → Workers AI), stt (Deepgram → AssemblyAI
+  → Workers AI). All routed through Cloudflare AI Gateway with BYOK.
+- Quizzes: Azure generates English master, Sarvam translates to
+  Assamese + Hindi, all stored in MongoDB.
+- Dual database: MongoDB Atlas (content, conversations, alerts,
+  notifications, locks); PostgreSQL via Supabase (users, plans,
+  credits, billing).
+- Hosting: backend on Railway, frontend on Cloudflare Pages, edge
+  Worker fronts api.syrabit.ai for KV-cached SEO + bot routing.
 
-# Response format — ALWAYS reply with a single JSON object, no prose
-outside the JSON, no markdown fences:
-{
-  "action": "navigate" | "scroll" | "fetch" | "answer",
-  "target": "<section id, css selector, or data-syra landmark>" or null,
+# Registered write actions (only these may be invoked):
+{actions_json}
+
+# Response format — ALWAYS reply with one JSON object, no prose
+outside it, no markdown fences:
+{{
+  "action": "navigate" | "scroll" | "fetch" | "answer" | "run_action",
+  "target": "<section id, css selector, landmark, or null>",
   "response": "<short spoken reply, <= 200 chars>",
+  "action_id": "<one of the registered ids when action=run_action>",
+  "params": {{ ... }},
+  "confirm": "<short confirmation phrase, only for destructive actions>",
   "data": null
-}
+}}
 
-# Action selection rules:
-- "navigate" — admin asked to switch sections ("go to health",
-  "open users"). target = exact section id from the list above.
-- "scroll" — admin asked to find/scroll to a card or heading on the
-  current section ("scroll to MongoDB latency", "show me the active
-  users card"). target = a short landmark name; the frontend resolves
-  it via [data-syra="<target>"], heading text, or a fuzzy class match.
-- "fetch" — admin asked for a live data point ("how many active users
-  today", "what's the current error rate"). target = a hint identifying
-  which data card the frontend should refresh (e.g. "active-users",
-  "error-rate"). Keep response short — the frontend will append the
-  actual numbers.
-- "answer" — architecture / how-does-X-work questions, or anything the
-  other actions can't satisfy. target = null. Put the full answer in
-  "response" (still keep it under ~3 sentences for TTS).
+# Action selection
+- "navigate" — switch sections.
+- "scroll"   — focus a card on the current section (target = data-syra
+  landmark or heading text).
+- "fetch"    — request a fresh data point (target hint, frontend fills
+  numbers).
+- "run_action" — invoke a registered write action by id; include the
+  required params object. If the action is destructive, also write a
+  short ``confirm`` phrase (e.g. "Ban user Priya?") that the frontend
+  will read aloud and ask the operator to confirm.
+- "answer"   — fallback / architecture / how-does-X questions.
+
+If the operator asks for something not in the registry, do NOT invent
+an action_id — explain politely and suggest the closest registered
+verb.
 """
 
 
-class _ChatContext(BaseModel):
+class _ChatTurn(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., max_length=2000)
+
+
+class _SelectedEntity(BaseModel):
+    type: str | None = None
+    id: str | None = None
+    label: str | None = None
+
+
+class _ScreenContext(BaseModel):
     active_section: str = "dashboard"
+    selected_entity: _SelectedEntity | None = None
+    filters: dict[str, Any] | None = None
+    visible_error: str | None = None
 
 
 class SyraChatRequest(BaseModel):
     transcript: str = Field(..., min_length=1, max_length=2000)
-    context: _ChatContext = Field(default_factory=_ChatContext)
+    history: list[_ChatTurn] = Field(default_factory=list, max_length=16)
+    context: _ScreenContext = Field(default_factory=_ScreenContext)
 
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _parse_syra_json(raw: str) -> dict[str, Any] | None:
-    """Best-effort JSON extraction — handles plain JSON, fenced blocks,
-    or a JSON object embedded in surrounding prose."""
     if not raw:
         return None
     text = raw.strip()
-    # Strip markdown fences if present.
     if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
-        text = text.strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
     try:
         return json.loads(text)
     except Exception:
@@ -150,54 +154,32 @@ def _parse_syra_json(raw: str) -> dict[str, Any] | None:
         return None
 
 
-@router.post("/admin/syra/chat")
-async def syra_chat(req: SyraChatRequest, admin: dict = Depends(get_admin_user)):
-    active = req.context.active_section if req.context else "dashboard"
-    if active not in _SECTION_IDS:
-        active = "dashboard"
-
-    user_msg = (
-        f"Active admin section: {active}.\n"
-        f"Admin command (spoken): {req.transcript.strip()}\n\n"
-        "Reply with the JSON object as specified."
-    )
-    messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": user_msg},
-    ]
-
-    raw = ""
-    try:
-        raw = await call_llm_api_chat(messages, max_tokens=512, lang="en")
-    except Exception as exc:
-        logger.warning(f"[syra] LLM call failed: {exc}")
-        return {
-            "action": "answer",
-            "target": None,
-            "response": "Sorry, I couldn't reach the AI service right now. Please try again in a moment.",
-            "data": None,
-        }
-
-    parsed = _parse_syra_json(str(raw))
-    if not isinstance(parsed, dict):
-        return {
-            "action": "answer",
-            "target": None,
-            "response": str(raw)[:400] if raw else "I didn't catch that. Could you repeat?",
-            "data": None,
-        }
-
+def _normalise_action_response(parsed: dict[str, Any], registered_ids: set[str]) -> dict[str, Any]:
     action = str(parsed.get("action") or "answer").lower().strip()
-    if action not in ("navigate", "scroll", "fetch", "answer"):
+    if action not in ("navigate", "scroll", "fetch", "answer", "run_action"):
         action = "answer"
 
     target = parsed.get("target")
     if target is not None:
         target = str(target).strip() or None
+
     if action == "navigate" and target not in _SECTION_IDS:
-        # Hallucinated section — degrade gracefully to a spoken answer.
-        action = "answer"
-        target = None
+        action, target = "answer", None
+
+    action_id = parsed.get("action_id")
+    if action_id is not None:
+        action_id = str(action_id).strip() or None
+
+    if action == "run_action":
+        if not action_id or action_id not in registered_ids:
+            # Hallucinated action — degrade to a plain answer rather than
+            # leaking the invalid id to the frontend.
+            action, action_id = "answer", None
+
+    params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    confirm = parsed.get("confirm")
+    if confirm is not None:
+        confirm = str(confirm).strip() or None
 
     response = str(parsed.get("response") or "").strip()
     if not response:
@@ -206,43 +188,192 @@ async def syra_chat(req: SyraChatRequest, admin: dict = Depends(get_admin_user))
     return {
         "action": action,
         "target": target,
+        "action_id": action_id,
+        "params": params,
+        "confirm": confirm,
         "response": response[:600],
         "data": parsed.get("data") if isinstance(parsed.get("data"), dict) else None,
     }
 
 
-# ── Deepgram-backed voice surface for the admin Syra orb ─────────────────────
-# Task #voice-agent: SyraAssistant used to rely on the browser's Web Speech
-# API for STT and `window.speechSynthesis` for TTS — Firefox/some mobile
-# browsers don't ship those, and the quality / Indic support is poor. These
-# two endpoints route the orb through Deepgram (Nova-3 STT + Aura-2 TTS) so
-# every browser gets the same studio-quality voice loop, gated to admins
-# only via `get_admin_user` so we never burn Deepgram credits on anonymous
-# traffic.
+@router.get("/admin/syra/actions")
+async def syra_actions(admin: dict = Depends(get_admin_user)):
+    return {"actions": list_registered_actions()}
 
-_MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB — Syra prompts are short.
+
+@router.post("/admin/syra/chat")
+async def syra_chat(req: SyraChatRequest, admin: dict = Depends(get_admin_user)):
+    ctx = req.context or _ScreenContext()
+    active = ctx.active_section if ctx.active_section in _SECTION_IDS else "dashboard"
+
+    actions = list_registered_actions()
+    registered_ids = {a["id"] for a in actions}
+    actions_json = json.dumps(actions, indent=2)
+
+    selected = ctx.selected_entity.model_dump() if ctx.selected_entity else None
+    screen_blob = {
+        "active_section": active,
+        "selected_entity": selected,
+        "filters": ctx.filters or {},
+        "visible_error": ctx.visible_error,
+    }
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": _build_system_prompt(actions_json)},
+    ]
+    # Conversation memory — last few turns trimmed by Pydantic max_length.
+    for turn in (req.history or [])[-8:]:
+        messages.append({"role": turn.role, "content": turn.content[:1200]})
+
+    user_msg = (
+        f"Screen context: {json.dumps(screen_blob, ensure_ascii=False)}\n"
+        f"Operator said: {req.transcript.strip()}\n\n"
+        "Reply with the JSON object as specified."
+    )
+    messages.append({"role": "user", "content": user_msg})
+
+    try:
+        raw = await call_llm_api_chat(messages, max_tokens=512, lang="en")
+    except Exception as exc:
+        logger.warning("[syra] LLM call failed: %s", exc)
+        return {
+            "action": "answer",
+            "target": None,
+            "action_id": None,
+            "params": {},
+            "confirm": None,
+            "response": "Sorry, the AI service is unreachable right now.",
+            "data": None,
+        }
+
+    parsed = _parse_syra_json(str(raw))
+    if not isinstance(parsed, dict):
+        return {
+            "action": "answer",
+            "target": None,
+            "action_id": None,
+            "params": {},
+            "confirm": None,
+            "response": str(raw)[:400] if raw else "I didn't catch that. Could you repeat?",
+            "data": None,
+        }
+    return _normalise_action_response(parsed, registered_ids)
+
+
+# ── Action execution ────────────────────────────────────────────────────────
+class _ExecuteRequest(BaseModel):
+    action_id: str = Field(..., min_length=1, max_length=64)
+    params: dict[str, Any] = Field(default_factory=dict)
+    confirmed: bool = False
+
+
+@router.post("/admin/syra/execute-action")
+async def syra_execute_action(req: _ExecuteRequest, admin: dict = Depends(get_admin_user)):
+    try:
+        result = await execute_action(
+            req.action_id, req.params, admin, confirmed=req.confirmed,
+        )
+    except SyraActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # pragma: no cover — last-ditch
+        logger.exception("[syra] action %s failed: %s", req.action_id, exc)
+        raise HTTPException(status_code=500, detail=f"Action failed: {exc}")
+    return result
+
+
+# ── Daily briefing ──────────────────────────────────────────────────────────
+async def _gather_briefing_facts(admin: dict) -> dict[str, Any]:
+    facts: dict[str, Any] = {
+        "open_alerts": 0,
+        "active_users_today": None,
+        "new_signups_today": None,
+        "negative_feedback_24h": None,
+        "failed_jobs_24h": None,
+    }
+    try:
+        from deps import db  # type: ignore
+
+        facts["open_alerts"] = await db.alerts.count_documents({"acknowledged": False})
+    except Exception as exc:
+        logger.debug("briefing alerts count failed: %s", exc)
+    try:
+        from deps import db  # type: ignore
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        facts["negative_feedback_24h"] = await db.chat_feedback.count_documents({
+            "feedback": "down",
+            "created_at": {"$gte": since},
+        })
+    except Exception as exc:
+        logger.debug("briefing feedback count failed: %s", exc)
+    try:
+        from deps import db  # type: ignore
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        facts["failed_jobs_24h"] = await db.cron_runs.count_documents({
+            "status": "failed",
+            "finished_at": {"$gte": since},
+        })
+    except Exception as exc:
+        logger.debug("briefing job count failed: %s", exc)
+    try:
+        from deps import supa  # type: ignore
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        res = supa.table("users").select("id", count="exact").gte("created_at", today).execute()
+        facts["new_signups_today"] = getattr(res, "count", None)
+    except Exception as exc:
+        logger.debug("briefing signups failed: %s", exc)
+    return facts
+
+
+@router.get("/admin/syra/briefing")
+async def syra_briefing(admin: dict = Depends(get_admin_user)):
+    facts = await _gather_briefing_facts(admin)
+
+    name = (admin.get("name") or "").split(" ")[0] or "boss"
+    parts: list[str] = [f"Good morning {name}."]
+
+    open_alerts = facts.get("open_alerts") or 0
+    if open_alerts:
+        parts.append(f"{open_alerts} alert{'s' if open_alerts != 1 else ''} still open.")
+    else:
+        parts.append("No open alerts.")
+
+    if facts.get("failed_jobs_24h"):
+        parts.append(f"{facts['failed_jobs_24h']} cron job{'s' if facts['failed_jobs_24h'] != 1 else ''} failed in the last 24 hours.")
+    if facts.get("negative_feedback_24h"):
+        parts.append(f"{facts['negative_feedback_24h']} thumbs-down on chat in the last 24 hours.")
+    if facts.get("new_signups_today"):
+        parts.append(f"{facts['new_signups_today']} new signup{'s' if facts['new_signups_today'] != 1 else ''} so far today.")
+
+    if len(parts) == 2:  # only greeting + alerts line
+        parts.append("Otherwise the panel is quiet.")
+
+    text = " ".join(parts)
+    return {
+        "text": text,
+        "facts": facts,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── Deepgram-backed voice surface ───────────────────────────────────────────
+_MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 _MAX_TTS_CHARS = 1500
 
 
 @router.post(
     "/admin/syra/stt",
     summary="Syra STT (Deepgram Nova-3, admin-gated)",
-    description=(
-        "Transcribe a short admin voice command with Deepgram Nova-3. "
-        "Accepts multipart/form-data with an `audio` field (webm/ogg/mp3/wav). "
-        "Returns `{transcript, language}`. Strictly admin-gated."
-    ),
 )
 async def syra_stt(
-    audio: UploadFile = File(..., description="Recorded voice command (webm/ogg/mp3/wav)"),
-    language: str = Form("en", description="BCP-47 language code (en, hi, as, bn)"),
+    audio: UploadFile = File(..., description="Recorded voice command"),
+    language: str = Form("en"),
     admin: dict = Depends(get_admin_user),
 ):
     if not _deepgram.ENABLED:
-        raise HTTPException(
-            status_code=503,
-            detail="Deepgram STT is not configured (DEEPGRAM_API_KEY missing).",
-        )
+        raise HTTPException(status_code=503, detail="Deepgram STT is not configured.")
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file.")
@@ -270,24 +401,15 @@ class _SyraTtsRequest(BaseModel):
     "/admin/syra/tts",
     response_class=Response,
     summary="Syra TTS (Deepgram Aura-2, admin-gated)",
-    description=(
-        "Synthesize a short Syra reply with Deepgram Aura-2 and return mp3 "
-        "audio bytes. Strictly admin-gated."
-    ),
 )
 async def syra_tts(req: _SyraTtsRequest, admin: dict = Depends(get_admin_user)):
     if not _deepgram.ENABLED:
-        raise HTTPException(
-            status_code=503,
-            detail="Deepgram TTS is not configured (DEEPGRAM_API_KEY missing).",
-        )
+        raise HTTPException(status_code=503, detail="Deepgram TTS is not configured.")
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Empty text.")
     try:
-        audio_bytes = await _deepgram.synthesize(
-            text, voice=req.voice, language=req.language,
-        )
+        audio_bytes = await _deepgram.synthesize(text, voice=req.voice, language=req.language)
     except RuntimeError as exc:
         logger.error("[syra-tts] deepgram failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc))

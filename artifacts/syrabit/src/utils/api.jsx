@@ -448,12 +448,57 @@ export const adminGetActivityLog = (token) =>
 // currently-active admin section to the backend, which routes through
 // the english_rag_chat provider pool and returns a structured action
 // (navigate / scroll / fetch / answer) for the orb to execute locally.
-export const adminSyraChat = (transcript, activeSection, token) =>
-  axios.post(
+// Task #298 — chat now ships rolling history + screen context (selected
+// entity, active filters, visible error string) so Syra can resolve
+// pronouns and operate on what the operator can actually see.
+export const adminSyraChat = (transcript, options, token) => {
+  const opts = options || {};
+  const activeSection = typeof opts === 'string' ? opts : opts.activeSection;
+  const history = (opts.history || []).slice(-8).map((t) => ({
+    role: t.role,
+    content: String(t.content || '').slice(0, 1200),
+  }));
+  const selected = opts.selectedEntity || null;
+  return axios.post(
     `${API_BASE}/admin/syra/chat`,
-    { transcript, context: { active_section: activeSection || 'dashboard' } },
+    {
+      transcript,
+      history,
+      context: {
+        active_section: activeSection || 'dashboard',
+        selected_entity: selected,
+        filters: opts.filters || null,
+        visible_error: opts.visibleError || null,
+      },
+    },
     { headers: adminHeaders(token), withCredentials: true, timeout: 30000 },
   );
+};
+
+// Task #298 — list registered Syra write actions (used by the orb's
+// settings panel + as an introspection seam for tests).
+export const adminSyraActions = (token) =>
+  axios.get(`${API_BASE}/admin/syra/actions`, {
+    headers: adminHeaders(token), withCredentials: true,
+  });
+
+// Task #298 — execute a registered Syra write action. The backend
+// rejects unknown ids and requires `confirmed=true` for destructive
+// actions, so the frontend gates destructive paths on the confirm card.
+export const adminSyraExecuteAction = (token, actionId, params, confirmed) =>
+  axios.post(
+    `${API_BASE}/admin/syra/execute-action`,
+    { action_id: actionId, params: params || {}, confirmed: !!confirmed },
+    { headers: adminHeaders(token), withCredentials: true, timeout: 30000 },
+  );
+
+// Task #298 — daily briefing: open alerts + cron failures + negative
+// feedback + new signups, packaged as a short paragraph the orb reads
+// out on the first open of each UTC day.
+export const adminSyraBriefing = (token) =>
+  axios.get(`${API_BASE}/admin/syra/briefing`, {
+    headers: adminHeaders(token), withCredentials: true, timeout: 15000,
+  });
 
 // Task #voice-agent — Deepgram-backed STT for the Syra orb. Posts a
 // short recorded blob (webm/ogg/mp3/wav) and returns

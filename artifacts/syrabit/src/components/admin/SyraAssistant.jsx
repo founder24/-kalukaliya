@@ -1,14 +1,45 @@
+/**
+ * Task #276 + #298 — Syra: JARVIS-style admin orb.
+ *
+ * On top of the click-to-talk Deepgram loop introduced in #276, this
+ * component now adds:
+ *   • Wake word ("Hey Syra") via the browser's SpeechRecognition API
+ *     (opt-in, off by default — users who don't want an always-on mic
+ *     never see it engage). Pauses while the tab is hidden.
+ *   • A rolling 8-turn conversation memory shipped with each request
+ *     so the LLM can resolve pronouns and follow-up questions.
+ *   • A write-action confirm card (Yes / Cancel buttons + a 6-second
+ *     voice listen window for "yes/ok/confirm" or "no/cancel/stop")
+ *     for any backend-marked destructive action.
+ *   • Proactive alerts: polls /admin/alerts/unacknowledged-count every
+ *     60 s; on a new high-severity alert (and not muted in settings)
+ *     announces it via TTS — debounced per category.
+ *   • A settings panel reachable from a gear icon next to the orb:
+ *     wake word, briefing, voice rate, mute categories, persona name.
+ *   • First-open-of-day persona greeting and overnight briefing,
+ *     keyed off localStorage `syra:lastGreetingDate` /
+ *     `syra:lastBriefingDate`.
+ *
+ * Everything is admin-gated by virtue of mounting only inside
+ * <AdminPage>; the backend endpoints additionally enforce admin auth.
+ */
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, X, Sparkles, Loader2, Volume2 } from 'lucide-react';
+import {
+  Mic, MicOff, X, Sparkles, Loader2, Volume2, Settings, Bell, BellOff, Check,
+} from 'lucide-react';
 import {
   adminSyraChat,
   adminSyraSTT,
   adminSyraTTS,
+  adminSyraExecuteAction,
+  adminSyraBriefing,
   adminGetDashboard,
   adminGetUsers,
   adminGetAnalytics,
   adminGetConversations,
+  adminGetUnacknowledgedAlertCount,
 } from '@/utils/api';
+import { useSyraContext } from '@/components/admin/syra/SyraContext';
 
 const FETCH_HANDLERS = {
   'active-users': async (t) => {
@@ -52,11 +83,8 @@ function findScrollTarget(target) {
 function pickRecorderMime() {
   if (typeof window === 'undefined' || !window.MediaRecorder) return '';
   const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-    'audio/mp4',
+    'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus',
+    'audio/ogg', 'audio/mp4',
   ];
   for (const m of candidates) {
     try { if (window.MediaRecorder.isTypeSupported(m)) return m; } catch (_e) { /* ignore */ }
@@ -64,7 +92,30 @@ function pickRecorderMime() {
   return '';
 }
 
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const MEMORY_LIMIT = 8;
+
+// Map a free-form alert/notification type onto one of the mute
+// categories exposed in the settings panel. Anything we don't
+// recognise lands in "general".
+function classifyAlert(type) {
+  const t = String(type || '').toLowerCase();
+  if (/(provider|outage|latency|gateway|llm|deepgram)/.test(t)) return 'provider_outage';
+  if (/(queue|cron|job|backlog|lag)/.test(t)) return 'queue_lag';
+  if (/(feedback|thumbs|rating)/.test(t)) return 'feedback_spike';
+  if (/(bot|security|waf|ip|spoof)/.test(t)) return 'security';
+  return 'general';
+}
+
 export default function SyraAssistant({ activeSection, onNavigate, adminToken }) {
+  const {
+    selectedEntity, filters, visibleError,
+    prefs, setPrefs, toggleMute, alertCategories, prefsRef,
+  } = useSyraContext();
+
   const [open, setOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,6 +124,9 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   const [reply, setReply] = useState('');
   const [error, setError] = useState('');
   const [supported, setSupported] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null); // {action_id, params, confirm, label, destructive}
+  const [wakeListening, setWakeListening] = useState(false);
 
   const mediaRecRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -80,21 +134,29 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   const handleSubmitRef = useRef(null);
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
-  // Track the auto-stop timer so a stale timeout from a previous session
-  // can never stop a fresh recorder. Bumped sessionIdRef + cancelledRef
-  // let `onstop` short-circuit when the user has cancelled/closed.
   const autoStopTimerRef = useRef(null);
   const sessionIdRef = useRef(0);
   const cancelledRef = useRef(false);
-  // Synchronous lock that blocks re-entry between user click and the
-  // resolution of `getUserMedia` (the permission prompt window) — without
-  // it, rapid double-clicks can each pass the `listening`/`mediaRecRef`
-  // checks because state hasn't flipped yet.
   const startingRef = useRef(false);
+  const memoryRef = useRef([]); // rolling [{role, content}]
+  const wakeRecRef = useRef(null);
+  const confirmListenRef = useRef(null); // SpeechRecognition for the confirm window
+  const lastSeenAlertCountRef = useRef(null);
+  const lastAlertSpokenAtRef = useRef({});
+  // Refs mirroring busy/listening so the wake-word callback (which is
+  // captured once per prefs.wakeWord toggle) always reads the latest
+  // state instead of a stale closure. Without this, the wake handler
+  // could fire startListening() while the orb is mid-STT/chat,
+  // overlapping mic + recognition streams.
+  const busyRef = useRef(false);
+  const listeningRef = useRef(false);
+  const speakingRef = useRef(false);
+  const startListeningRef = useRef(null);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => { listeningRef.current = listening; }, [listening]);
+  useEffect(() => { speakingRef.current = speaking; }, [speaking]);
 
-  // ── Capability probe ──────────────────────────────────────────────────────
-  // Deepgram does the actual transcription; we only need MediaRecorder +
-  // getUserMedia in the browser to capture a few seconds of audio.
+  // ── Capability probe ────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const ok = !!(window.MediaRecorder && navigator?.mediaDevices?.getUserMedia);
@@ -130,9 +192,6 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     setSpeaking(false);
   }, []);
 
-  // Speak via Deepgram Aura-2 over the admin/syra/tts endpoint. Falls back
-  // to window.speechSynthesis only when the network leg fails so the orb
-  // is never silent on a transient backend hiccup.
   const speak = useCallback(async (text) => {
     if (!text) return;
     stopPlayback();
@@ -140,37 +199,104 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
       const url = await adminSyraTTS(String(text).slice(0, 1500), 'en', adminToken);
       audioUrlRef.current = url;
       const audio = new Audio(url);
+      const rate = Math.max(0.7, Math.min(1.3, prefsRef.current?.voiceRate || 1));
+      try { audio.playbackRate = rate; } catch (_e) { /* ignore */ }
       audioRef.current = audio;
       setSpeaking(true);
       audio.onended = () => stopPlayback();
       audio.onerror = () => stopPlayback();
       await audio.play();
     } catch (_err) {
-      // Network/Deepgram fallback — use the browser's built-in voice so
-      // the operator still hears something rather than silent failure.
       stopPlayback();
       try {
         if (typeof window !== 'undefined' && window.speechSynthesis) {
           window.speechSynthesis.cancel();
           const u = new SpeechSynthesisUtterance(String(text).slice(0, 500));
-          u.rate = 1.05;
+          u.rate = Math.max(0.7, Math.min(1.3, prefsRef.current?.voiceRate || 1.05));
           window.speechSynthesis.speak(u);
         }
       } catch (_e) { /* ignore */ }
     }
-  }, [adminToken, stopPlayback]);
+  }, [adminToken, stopPlayback, prefsRef]);
 
+  // ── Action execution ────────────────────────────────────────────────────
+  const runAction = useCallback(async (actionId, params, confirmed) => {
+    try {
+      const res = await adminSyraExecuteAction(adminToken, actionId, params || {}, !!confirmed);
+      const summary = res?.data?.summary || 'Done.';
+      setReply(summary);
+      memoryRef.current.push({ role: 'assistant', content: summary });
+      memoryRef.current = memoryRef.current.slice(-MEMORY_LIMIT * 2);
+      speak(summary);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || 'That action failed.';
+      setError(msg);
+      speak(msg);
+    } finally {
+      setPendingAction(null);
+    }
+  }, [adminToken, speak]);
+
+  // Brief 6-second voice listen for "yes/ok/no/cancel" while the
+  // confirm card is showing. Uses the browser's SpeechRecognition for
+  // zero-latency local matching — never sends audio to the backend.
+  const startConfirmListen = useCallback((onYes, onNo) => {
+    if (typeof window === 'undefined') return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      const rec = new SR();
+      rec.lang = 'en-US';
+      rec.interimResults = true;
+      rec.continuous = false;
+      rec.onresult = (ev) => {
+        let text = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          text += ev.results[i][0].transcript;
+        }
+        const t = text.toLowerCase();
+        if (/\b(yes|yeah|yep|ok|okay|confirm|do it|go ahead|sure)\b/.test(t)) {
+          try { rec.stop(); } catch (_e) { /* ignore */ }
+          onYes && onYes();
+        } else if (/\b(no|nope|cancel|stop|abort|never mind|nevermind)\b/.test(t)) {
+          try { rec.stop(); } catch (_e) { /* ignore */ }
+          onNo && onNo();
+        }
+      };
+      rec.onend = () => { confirmListenRef.current = null; };
+      rec.onerror = () => { confirmListenRef.current = null; };
+      confirmListenRef.current = rec;
+      rec.start();
+      // Hard timeout — auto-cancel after 6 seconds of no clear answer.
+      setTimeout(() => {
+        try { rec.stop(); } catch (_e) { /* ignore */ }
+      }, 6000);
+    } catch (_e) { /* speech recognition not available */ }
+  }, []);
+
+  // ── Chat submission ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(async (text) => {
     if (!text) return;
     setBusy(true);
     setError('');
     setReply('');
+    memoryRef.current.push({ role: 'user', content: text });
+    memoryRef.current = memoryRef.current.slice(-MEMORY_LIMIT * 2);
     try {
-      const res = await adminSyraChat(text, activeSection, adminToken);
+      const res = await adminSyraChat(text, {
+        activeSection,
+        history: memoryRef.current.slice(0, -1), // exclude the just-pushed turn — backend gets it as the "transcript"
+        selectedEntity,
+        filters,
+        visibleError,
+      }, adminToken);
       const data = res.data || {};
       const action = data.action || 'answer';
       const target = data.target;
       let spoken = data.response || '';
+
+      memoryRef.current.push({ role: 'assistant', content: spoken });
+      memoryRef.current = memoryRef.current.slice(-MEMORY_LIMIT * 2);
 
       if (action === 'navigate' && target && typeof onNavigate === 'function') {
         onNavigate(target);
@@ -191,10 +317,32 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
           try {
             const summary = await handler(adminToken);
             if (summary) spoken = `${spoken} ${summary}`.trim();
-          } catch (_e) {
-            spoken += " (Couldn't fetch that data.)";
-          }
+          } catch (_e) { spoken += " (Couldn't fetch that data.)"; }
         }
+      } else if (action === 'run_action' && data.action_id) {
+        const destructive = !!data.confirm;
+        if (destructive) {
+          setPendingAction({
+            action_id: data.action_id,
+            params: data.params || {},
+            confirm: data.confirm,
+            label: data.confirm,
+            destructive: true,
+          });
+          setReply(data.confirm || spoken);
+          speak(data.confirm || spoken);
+          // Open a brief voice-confirm window so the operator never has to touch the keyboard.
+          startConfirmListen(
+            () => runAction(data.action_id, data.params || {}, true),
+            () => { setPendingAction(null); setReply('Cancelled.'); speak('Cancelled.'); },
+          );
+          setBusy(false);
+          return;
+        }
+        // Non-destructive: just run it.
+        await runAction(data.action_id, data.params || {}, false);
+        setBusy(false);
+        return;
       }
       setReply(spoken);
       speak(spoken);
@@ -205,23 +353,16 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     } finally {
       setBusy(false);
     }
-  }, [activeSection, adminToken, onNavigate, speak]);
+  }, [activeSection, adminToken, onNavigate, speak, selectedEntity, filters, visibleError, runAction, startConfirmListen]);
 
   useEffect(() => { handleSubmitRef.current = handleSubmit; }, [handleSubmit]);
 
-  // ── Recorder lifecycle ────────────────────────────────────────────────────
-  // We capture into MediaRecorder then upload the resulting blob to
-  // /api/admin/syra/stt where Deepgram Nova-3 transcribes it. Keeping the
-  // audio short (<= 30s, capped by stopListening or silence) keeps the
-  // latency budget under ~1.5s round-trip on a warm gateway.
+  // ── Recorder lifecycle (click-to-talk, unchanged from #276) ──────────────
   const startListening = useCallback(async () => {
     if (!supported) {
       setError('Voice input requires microphone access. Please use a recent Chrome/Edge/Firefox/Safari.');
       return;
     }
-    // Guard against overlapping sessions — block if mid-flight (sync lock
-    // for the pre-permission window) or already capturing; the orb should
-    // be a strict toggle, not a re-entrant call.
     if (startingRef.current || busy || listening || mediaRecRef.current) return;
     startingRef.current = true;
     setError('');
@@ -237,15 +378,10 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          channelCount: 1, echoCancellation: true,
+          noiseSuppression: true, autoGainControl: true,
         },
       });
-      // The user may have closed/cancelled the orb while the permission
-      // prompt was open — discard the stream and bail before we touch any
-      // recorder state.
       if (cancelledRef.current || sessionId !== sessionIdRef.current) {
         try { stream.getTracks().forEach((t) => t.stop()); } catch (_e) { /* ignore */ }
         return;
@@ -271,14 +407,7 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
         chunksRef.current = [];
         stopMediaTracks();
 
-        // Skip when the session was cancelled (close/abort) or a newer
-        // recording started in the meantime — never spend STT/TTS credits
-        // on audio the operator already abandoned.
-        if (cancelledRef.current || sessionId !== sessionIdRef.current) {
-          return;
-        }
-
-        // Empty/very short capture = nothing to transcribe.
+        if (cancelledRef.current || sessionId !== sessionIdRef.current) return;
         if (blob.size < 1200) {
           setError("Didn't catch any audio. Hold the button and speak clearly.");
           return;
@@ -298,10 +427,7 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
             return;
           }
           setTranscript(text);
-          // Hand off to the chat pipeline (which sets/clears `busy` itself).
-          if (handleSubmitRef.current) {
-            await handleSubmitRef.current(text);
-          }
+          if (handleSubmitRef.current) await handleSubmitRef.current(text);
         } catch (e) {
           const msg = e?.response?.data?.detail || 'Speech recognition failed.';
           setError(msg);
@@ -309,42 +435,28 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
         }
       };
 
-      // Auto-stop after 20s as a hard guard against runaway captures. The
-      // timer captures `sessionId` so a stale firing from an older session
-      // can never stop a fresh recorder.
       rec.start();
       setListening(true);
       autoStopTimerRef.current = setTimeout(() => {
         autoStopTimerRef.current = null;
-        if (
-          sessionId === sessionIdRef.current &&
-          mediaRecRef.current &&
-          mediaRecRef.current.state === 'recording'
-        ) {
+        if (sessionId === sessionIdRef.current && mediaRecRef.current?.state === 'recording') {
           try { mediaRecRef.current.stop(); } catch (_e) { /* ignore */ }
         }
       }, 20000);
     } catch (e) {
       const name = e?.name || '';
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
-        setError('Microphone permission denied.');
-      } else if (name === 'NotFoundError') {
-        setError('No microphone detected.');
-      } else {
-        setError(e?.message || 'Could not start recording.');
-      }
+      if (name === 'NotAllowedError' || name === 'SecurityError') setError('Microphone permission denied.');
+      else if (name === 'NotFoundError') setError('No microphone detected.');
+      else setError(e?.message || 'Could not start recording.');
       stopMediaTracks();
       setListening(false);
     } finally {
-      // Always release the sync start lock — including the bail-on-cancel
-      // path above, which returns from inside the try block.
       startingRef.current = false;
     }
   }, [adminToken, supported, busy, listening, stopMediaTracks, stopPlayback, clearAutoStopTimer]);
 
-  // `cancel=true` is set by the close button so `onstop` discards the
-  // capture instead of paying for STT/TTS the operator already aborted.
-  // Plain stopListening (e.g. orb tap) keeps cancel=false and submits.
+  useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
+
   const stopListening = useCallback((opts = {}) => {
     if (opts.cancel) cancelledRef.current = true;
     clearAutoStopTimer();
@@ -360,35 +472,225 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     if (speaking) { stopPlayback(); return; }
     if (listening) { stopListening(); return; }
     if (busy) return;
-    if (!open) { setOpen(true); }
+    if (!open) setOpen(true);
     startListening();
   };
 
-  // ── Cleanup on unmount ───────────────────────────────────────────────────
+  // ── Wake word ("Hey Syra") ──────────────────────────────────────────────
+  // Uses the browser's continuous SpeechRecognition. Audio never leaves
+  // the device until the wake phrase fires the click-to-talk path.
+  // Strictly opt-in via the settings panel and pauses on hidden tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR || !prefs.wakeWord) {
+      if (wakeRecRef.current) {
+        try { wakeRecRef.current.stop(); } catch (_e) { /* ignore */ }
+        wakeRecRef.current = null;
+      }
+      setWakeListening(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const rec = new SR();
+    rec.lang = 'en-US';
+    rec.continuous = true;
+    rec.interimResults = true;
+    let restartTimer = null;
+    rec.onresult = (ev) => {
+      let text = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        text += ev.results[i][0].transcript;
+      }
+      if (/\bhey\s*sy(?:ra|rah|rha|er[ae])\b/i.test(text) || /\bhi\s*syra\b/i.test(text)) {
+        try { rec.stop(); } catch (_e) { /* ignore */ }
+        // Read CURRENT state via refs — this callback was captured
+        // when prefs.wakeWord flipped on, so closing over `listening`
+        // / `busy` directly would be stale.
+        if (!listeningRef.current && !busyRef.current && !speakingRef.current) {
+          const start = startListeningRef.current;
+          if (typeof start === 'function') start();
+        }
+      }
+    };
+    rec.onend = () => {
+      if (cancelled || !prefsRef.current?.wakeWord) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      // Some browsers terminate continuous recognition every ~1 minute;
+      // schedule a quick restart so the wake word stays alive.
+      restartTimer = setTimeout(() => {
+        try { rec.start(); } catch (_e) { /* already started */ }
+      }, 400);
+    };
+    rec.onerror = () => { /* mic in use / no-permission — fall through to onend */ };
+    wakeRecRef.current = rec;
+    try { rec.start(); setWakeListening(true); } catch (_e) { /* ignore */ }
+
+    const onVisibility = () => {
+      if (typeof document === 'undefined') return;
+      if (document.hidden) {
+        try { rec.stop(); } catch (_e) { /* ignore */ }
+      } else if (prefsRef.current?.wakeWord) {
+        try { rec.start(); } catch (_e) { /* ignore */ }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      if (restartTimer) clearTimeout(restartTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      try { rec.stop(); } catch (_e) { /* ignore */ }
+      wakeRecRef.current = null;
+      setWakeListening(false);
+    };
+    // We intentionally re-init only on prefs.wakeWord toggle. Live
+    // changes to listening/busy don't need a restart of the wake loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.wakeWord]);
+
+  // ── First-open-of-day greeting + briefing ───────────────────────────────
+  useEffect(() => {
+    if (!adminToken || typeof window === 'undefined') return;
+    const today = todayKey();
+    let saidGreeting = false;
+    if (prefs.greeting) {
+      const last = window.localStorage.getItem('syra:lastGreetingDate');
+      if (last !== today) {
+        window.localStorage.setItem('syra:lastGreetingDate', today);
+        const persona = prefs.persona || 'Syra';
+        speak(`${persona} online. Ready when you are.`);
+        saidGreeting = true;
+      }
+    }
+    if (prefs.briefing) {
+      const last = window.localStorage.getItem('syra:lastBriefingDate');
+      if (last !== today) {
+        window.localStorage.setItem('syra:lastBriefingDate', today);
+        // Defer the briefing so it doesn't collide with the greeting.
+        const delay = saidGreeting ? 2200 : 200;
+        setTimeout(() => {
+          adminSyraBriefing(adminToken)
+            .then((r) => {
+              const text = r.data?.text;
+              if (text) {
+                setOpen(true);
+                setReply(text);
+                speak(text);
+              }
+            })
+            .catch(() => {});
+        }, delay);
+      }
+    }
+    // We only want this to fire once per session per token — listing
+    // adminToken in deps keeps it bound to the verified session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  // ── Proactive alert poller ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!adminToken || !prefs.proactiveAlerts) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await adminGetUnacknowledgedAlertCount(adminToken);
+        if (cancelled) return;
+        const count = r.data?.count || 0;
+        const prev = lastSeenAlertCountRef.current;
+        lastSeenAlertCountRef.current = count;
+        if (prev != null && count > prev) {
+          const cat = 'general'; // unack count is type-agnostic; per-type would need /alerts list
+          const muted = (prefsRef.current?.mutedCategories || []).includes(cat);
+          if (!muted) {
+            const lastSpoken = lastAlertSpokenAtRef.current[cat] || 0;
+            if (Date.now() - lastSpoken > 5 * 60_000) {
+              lastAlertSpokenAtRef.current[cat] = Date.now();
+              const text = `${count - prev} new alert${count - prev === 1 ? '' : 's'} fired. ${count} open in total.`;
+              setOpen(true);
+              setReply(text);
+              speak(text);
+            }
+          }
+        }
+      } catch (_e) { /* ignore — alerts endpoint may be down */ }
+    };
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [adminToken, prefs.proactiveAlerts, speak, prefsRef]);
+
+  // ── Cleanup on unmount ──────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
-      try {
-        if (mediaRecRef.current && mediaRecRef.current.state === 'recording') {
-          mediaRecRef.current.stop();
-        }
-      } catch (_e) { /* ignore */ }
+      try { if (mediaRecRef.current?.state === 'recording') mediaRecRef.current.stop(); } catch (_e) { /* ignore */ }
+      try { wakeRecRef.current?.stop(); } catch (_e) { /* ignore */ }
+      try { confirmListenRef.current?.stop(); } catch (_e) { /* ignore */ }
       stopMediaTracks();
       stopPlayback();
     };
   }, [stopMediaTracks, stopPlayback]);
 
+  // ── Render ──────────────────────────────────────────────────────────────
+  const cardOpen = open && (transcript || reply || error || busy || listening || pendingAction);
+
   return (
     <div className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-3" data-testid="syra-assistant">
-      {open && (transcript || reply || error || busy || listening) && (
-        <div className="max-w-sm w-[320px] rounded-2xl shadow-2xl border border-violet-200 bg-white/95 backdrop-blur p-4 animate-in fade-in slide-in-from-bottom-2">
+      {showSettings && (
+        <SyraSettingsPanel
+          prefs={prefs}
+          setPrefs={setPrefs}
+          alertCategories={alertCategories}
+          toggleMute={toggleMute}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {pendingAction && (
+        <div
+          className="max-w-sm w-[320px] rounded-2xl shadow-2xl border-2 border-amber-300 bg-amber-50 p-4"
+          role="alertdialog"
+          data-testid="syra-confirm-card"
+        >
+          <div className="flex items-start gap-2 mb-3">
+            <Bell size={16} className="text-amber-600 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">Confirm action</p>
+              <p className="text-sm text-amber-900 mt-1">{pendingAction.confirm || pendingAction.label}</p>
+              <p className="text-[11px] text-amber-700 mt-1">Say "yes" or "cancel" — or use the buttons.</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setPendingAction(null); setReply('Cancelled.'); speak('Cancelled.'); }}
+              className="flex-1 py-1.5 rounded-xl text-xs font-medium border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="syra-confirm-yes"
+              onClick={() => runAction(pendingAction.action_id, pendingAction.params || {}, true)}
+              className="flex-1 py-1.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 inline-flex items-center justify-center gap-1"
+            >
+              <Check size={12} /> Confirm
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cardOpen && (
+        <div className="max-w-sm w-[320px] rounded-2xl shadow-2xl border border-violet-200 bg-white/95 backdrop-blur p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5 text-violet-600">
               <Sparkles size={13} />
-              <span className="text-[11px] font-bold tracking-wide uppercase">Syra · Deepgram</span>
+              <span className="text-[11px] font-bold tracking-wide uppercase">
+                {prefs.persona || 'Syra'} · Deepgram
+                {wakeListening && <span className="ml-1 text-emerald-500">●</span>}
+              </span>
             </div>
             <button
-              onClick={() => { setOpen(false); stopListening({ cancel: true }); stopPlayback(); setTranscript(''); setReply(''); setError(''); }}
+              onClick={() => { setOpen(false); stopListening({ cancel: true }); stopPlayback(); setTranscript(''); setReply(''); setError(''); setPendingAction(null); }}
               className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
               aria-label="Close Syra"
             >
@@ -404,50 +706,144 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
               <span>Listening… tap orb to stop</span>
             </div>
           )}
-          {transcript && (
-            <p className="text-xs text-gray-500 italic mb-2 line-clamp-3">"{transcript}"</p>
-          )}
+          {transcript && (<p className="text-xs text-gray-500 italic mb-2 line-clamp-3">"{transcript}"</p>)}
           {busy && (
             <div className="flex items-center gap-2 text-xs text-violet-600">
-              <Loader2 size={12} className="animate-spin" />
-              <span>Thinking…</span>
+              <Loader2 size={12} className="animate-spin" /><span>Thinking…</span>
             </div>
           )}
           {speaking && !busy && (
             <div className="flex items-center gap-2 text-xs text-violet-600 mb-1">
-              <Volume2 size={12} className="animate-pulse" />
-              <span>Speaking…</span>
+              <Volume2 size={12} className="animate-pulse" /><span>Speaking…</span>
             </div>
           )}
-          {reply && !busy && (
-            <p className="text-sm text-gray-800 leading-snug">{reply}</p>
-          )}
-          {error && !busy && (
-            <p className="text-xs text-red-600">{error}</p>
-          )}
+          {reply && !busy && (<p className="text-sm text-gray-800 leading-snug">{reply}</p>)}
+          {error && !busy && (<p className="text-xs text-red-600">{error}</p>)}
         </div>
       )}
-      <button
-        onClick={handleOrbClick}
-        title={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Talk to Syra'}
-        aria-label={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Talk to Syra'}
-        data-testid="syra-orb"
-        className={`relative w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-200 ${
-          listening
-            ? 'bg-gradient-to-br from-rose-500 to-violet-600'
-            : speaking
-              ? 'bg-gradient-to-br from-emerald-500 to-violet-600'
-              : 'bg-gradient-to-br from-violet-500 to-indigo-600 hover:scale-105'
-        }`}
-      >
-        {(listening || speaking) && (
-          <>
-            <span className="absolute inset-0 rounded-full bg-violet-400 opacity-60 animate-ping" />
-            <span className="absolute inset-1 rounded-full bg-violet-500 opacity-40 animate-pulse" />
-          </>
-        )}
-        {listening ? <MicOff size={20} className="relative" /> : speaking ? <Volume2 size={20} className="relative" /> : <Mic size={20} className="relative" />}
-      </button>
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowSettings((v) => !v)}
+          title="Syra settings"
+          aria-label="Syra settings"
+          data-testid="syra-settings-toggle"
+          className="w-9 h-9 rounded-full bg-white border border-violet-200 text-violet-600 shadow flex items-center justify-center hover:bg-violet-50"
+        >
+          <Settings size={15} />
+        </button>
+        <button
+          onClick={handleOrbClick}
+          title={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Talk to Syra'}
+          aria-label={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Talk to Syra'}
+          data-testid="syra-orb"
+          className={`relative w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-200 ${
+            listening
+              ? 'bg-gradient-to-br from-rose-500 to-violet-600'
+              : speaking
+                ? 'bg-gradient-to-br from-emerald-500 to-violet-600'
+                : 'bg-gradient-to-br from-violet-500 to-indigo-600 hover:scale-105'
+          }`}
+        >
+          {(listening || speaking) && (
+            <>
+              <span className="absolute inset-0 rounded-full bg-violet-400 opacity-60 animate-ping" />
+              <span className="absolute inset-1 rounded-full bg-violet-500 opacity-40 animate-pulse" />
+            </>
+          )}
+          {listening ? <MicOff size={20} className="relative" /> : speaking ? <Volume2 size={20} className="relative" /> : <Mic size={20} className="relative" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SyraSettingsPanel({ prefs, setPrefs, alertCategories, toggleMute, onClose }) {
+  return (
+    <div
+      className="max-w-sm w-[320px] rounded-2xl shadow-2xl border border-gray-200 bg-white p-4 space-y-3"
+      data-testid="syra-settings-panel"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-gray-700">
+          <Settings size={14} />
+          <span className="text-xs font-bold tracking-wide uppercase">Syra settings</span>
+        </div>
+        <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100" aria-label="Close settings">
+          <X size={14} />
+        </button>
+      </div>
+
+      <label className="flex items-center justify-between text-xs text-gray-700">
+        <span>Wake word ("Hey Syra")</span>
+        <input
+          type="checkbox" checked={!!prefs.wakeWord}
+          onChange={(e) => setPrefs({ wakeWord: e.target.checked })}
+          data-testid="syra-pref-wakeword"
+        />
+      </label>
+
+      <label className="flex items-center justify-between text-xs text-gray-700">
+        <span>First-open daily greeting</span>
+        <input type="checkbox" checked={!!prefs.greeting} onChange={(e) => setPrefs({ greeting: e.target.checked })} />
+      </label>
+
+      <label className="flex items-center justify-between text-xs text-gray-700">
+        <span>Overnight briefing on first open</span>
+        <input type="checkbox" checked={!!prefs.briefing} onChange={(e) => setPrefs({ briefing: e.target.checked })} />
+      </label>
+
+      <label className="flex items-center justify-between text-xs text-gray-700">
+        <span>Proactive alert announcements</span>
+        <input type="checkbox" checked={!!prefs.proactiveAlerts} onChange={(e) => setPrefs({ proactiveAlerts: e.target.checked })} />
+      </label>
+
+      <label className="block text-xs text-gray-700 space-y-1">
+        <div className="flex items-center justify-between">
+          <span>Voice rate</span>
+          <span className="text-[10px] text-gray-500">{(prefs.voiceRate || 1).toFixed(2)}x</span>
+        </div>
+        <input
+          type="range" min="0.7" max="1.3" step="0.05"
+          value={prefs.voiceRate || 1}
+          onChange={(e) => setPrefs({ voiceRate: parseFloat(e.target.value) })}
+          className="w-full"
+        />
+      </label>
+
+      <label className="block text-xs text-gray-700">
+        <span>Persona name</span>
+        <input
+          type="text" maxLength={24}
+          value={prefs.persona || 'Syra'}
+          onChange={(e) => setPrefs({ persona: e.target.value })}
+          className="mt-1 w-full px-2 py-1 rounded-lg border border-gray-200 text-sm"
+        />
+      </label>
+
+      <div className="text-xs text-gray-700">
+        <p className="font-medium mb-1">Mute alert categories</p>
+        <div className="space-y-1">
+          {alertCategories.map((c) => {
+            const muted = (prefs.mutedCategories || []).includes(c.id);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => toggleMute(c.id)}
+                className={`w-full flex items-center justify-between px-2 py-1 rounded-lg border text-[11px] ${
+                  muted
+                    ? 'border-gray-200 bg-gray-50 text-gray-400'
+                    : 'border-violet-200 bg-violet-50 text-violet-700'
+                }`}
+              >
+                <span>{c.label}</span>
+                {muted ? <BellOff size={11} /> : <Bell size={11} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

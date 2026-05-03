@@ -4,6 +4,7 @@ import {
   ChevronRight, Crown, X, Clock, ArrowLeft, Sparkles, TrendingUp, RefreshCw, Flag,
 } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
+import { useSyraSelection } from '@/components/admin/syra/SyraContext';
 import { adminGetConversations, extractFaqs, conversationsSentiment, syncConversations, API_BASE } from '@/utils/api';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -158,6 +159,18 @@ export default function AdminConversations({ adminToken, onNavigate }) {
   }, [conversations, withMessages, anonymousConvs, registeredConvs, search, filterMode]);
 
   const selectedConv = useMemo(() => conversations.find(c => c.id === selected), [conversations, selected]);
+  // Task #298 — publish the selected conversation onto SyraContext so
+  // the orb can resolve "flag this", "ban the user in this thread"
+  // without forcing the operator to repeat the id.
+  useSyraSelection(useMemo(() => (
+    selectedConv
+      ? {
+          type: 'conversation',
+          id: selectedConv.id,
+          label: selectedConv.title || (selectedConv.user_name || 'Conversation'),
+        }
+      : null
+  ), [selectedConv?.id, selectedConv?.title, selectedConv?.user_name]));
 
   useEffect(() => {
     if (chatEndRef.current) {
