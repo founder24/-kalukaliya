@@ -44,8 +44,6 @@ function makeDefaultProps(overrides = {}) {
     sendMsg: vi.fn(),
     handleStop: vi.fn(),
     isAnon: false,
-    getTurnstileToken: vi.fn(),
-    turnstileEnabled: false,
     activeChapter: null,
     onDismissChapter: vi.fn(),
     ...overrides,

@@ -35,7 +35,6 @@ from db_ops import (
     supa_update_user,
     supa_update_user_password,
 )
-from turnstile_verify import require_turnstile
 import email_templates
 
 logger = logging.getLogger(__name__)
@@ -313,7 +312,6 @@ async def _send_password_reset_email(email: str, token: str):
 
 @router.post("/auth/reset-request")
 async def reset_request(data: PasswordResetReq, request: Request):
-    await require_turnstile(request)
     user = await supa_get_user_for_reset(data.email.lower())
     if user:
         token = str(uuid.uuid4())
@@ -324,12 +322,6 @@ async def reset_request(data: PasswordResetReq, request: Request):
 
 @router.post("/auth/reset-confirm")
 async def reset_confirm(data: PasswordResetConfirm, request: Request):
-    # Task #699 — gate the reset-confirm endpoint behind the same
-    # Turnstile check that protects /auth/reset-request, so an
-    # attacker can't hammer it at high QPS to probe for live tokens
-    # or harvest timing/error signal. No-op when the secret isn't
-    # configured (dev/local), preserving today's behaviour.
-    await require_turnstile(request)
     record = await supa_get_password_reset(data.token)
     if not record:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")

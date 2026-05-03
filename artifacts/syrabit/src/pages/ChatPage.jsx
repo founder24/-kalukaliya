@@ -16,7 +16,6 @@ import { toast } from 'sonner';
 import { MessageBubble } from './chat/MessageBubble';
 import { InputBar } from './chat/InputBar';
 import { ModelSelector, MODELS } from './chat/ModelSelector';
-import { useTurnstile } from '@/hooks/useTurnstile';
 import { Analytics } from '@/utils/analytics';
 import { startTrace, makeTraceparent } from '@/utils/firebasePerf';
 // React 19 hoists <title>/<meta>/<link> to <head> from anywhere in the
@@ -72,15 +71,6 @@ export default function ChatPage() {
       if (stored && stored !== 'en') setResponseLang(stored);
     } catch {}
   }, []);
-  // Skip Turnstile entirely for authenticated users — backend never verifies a
-  // captcha for them, so loading the CF script + invisible widget is pure
-  // overhead. (Task #282 T001)
-  // Wait until the auth check has resolved before deciding whether to load
-  // the Cloudflare script. Otherwise a logged-in user briefly sees `user=null`
-  // during initial /me hydration and we'd inject the script anyway, defeating
-  // the optimization. (Task #282 T001)
-  const skipTurnstile = !authChecked || !!user;
-  const { getToken: getTurnstileToken, ready: turnstileReady, enabled: turnstileEnabled } = useTurnstile({ skip: skipTurnstile });
   const handleCopy = useCallback((msgId) => setCopiedMsgId(msgId), []);
 
 
@@ -309,7 +299,7 @@ export default function ChatPage() {
   }, []);
 
   const sendMsg = async (text) => {
-    if (!text.trim() || isLoading || isOutOfCredits || (!user && turnstileEnabled && !turnstileReady)) return;
+    if (!text.trim() || isLoading || isOutOfCredits) return;
     // Cancel any pending auto-retry from a previous error.
     if (autoRetryTimerRef.current) {
       clearTimeout(autoRetryTimerRef.current);
@@ -370,8 +360,6 @@ export default function ChatPage() {
       }
       if (!user) {
         fetchHeaders['x-anon-id'] = getAnonId();
-        const _tsToken = await getTurnstileToken();
-        if (_tsToken) fetchHeaders['x-turnstile-token'] = _tsToken;
       }
       const response = await fetch(`${API_BASE}/ai/chat/stream`, {
         method: 'POST', headers: fetchHeaders,
@@ -733,8 +721,6 @@ export default function ChatPage() {
           effectiveLimit={effectiveLimit} remaining={remaining} creditPercent={creditPercent}
           textareaRef={textareaRef} adjustTextarea={adjustTextarea} sendMsg={sendMsg} handleStop={handleStop}
           isAnon={!user}
-          getTurnstileToken={getTurnstileToken}
-          turnstileEnabled={turnstileEnabled}
           activeChapter={activeChapter}
           onDismissChapter={onDismissChapter}
         />
