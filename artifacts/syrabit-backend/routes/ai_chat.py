@@ -2277,7 +2277,7 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             pass
 
     async def event_stream():
-        nonlocal full_response, rag_chapter_name, rag_chapter_slug
+        nonlocal full_response, rag_chapter_name, rag_chapter_slug, _wai_match
         _credit_saved = False  # set True when answer is committed; controls refund in finally
         try:
             # ── Discovery SSE events ───────────────────────────────────────────

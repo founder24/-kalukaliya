@@ -143,7 +143,7 @@ async def llm_classify_safety(prompt: str) -> Optional[str]:
     """
     if not _ENABLE_LLM_SAFETY:
         return None
-    if not prompt or not prompt.strip():
+    if not isinstance(prompt, str) or not prompt or not prompt.strip():
         return None
     try:
         from llm import call_with_provider_fallback, _dispatch_llm_for_feature
