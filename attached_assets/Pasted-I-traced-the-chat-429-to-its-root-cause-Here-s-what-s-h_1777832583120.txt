@@ -1,0 +1,32 @@
+I traced the chat 429 to its root cause. Here's what's happening.
+
+Root cause
+Cohere's API is rate-limiting your embeddings, and it cascades into the chat composer's "too many requests" toast.
+
+Evidence from production logs
+Cohere embed is throwing 429 Too Many Requests every 10–30 seconds continuously through the CF AI Gateway (gateway.ai.cloudflare.com/.../syrabit/cohere/v1/embed):
+
+11:44:25  Cohere embed failed (non-fatal): 429 Too Many Requests
+11:44:39  Cohere embed failed (non-fatal): 429 Too Many Requests
+11:45:01  Cohere embed failed (non-fatal): 429 Too Many Requests
+... (continues uninterrupted for 12+ minutes in the sample window)
+
+That's coming from Cohere itself — CF AI Gateway is just relaying upstream rate limits. Cohere's trial tier is 10 RPM; the production tier is 100 RPM. You're saturating it.
+
+Why it surfaces on the chat page
+The embed-provider chain in artifacts/syrabit-backend/llm.py (call_embed_with_dispatch, ~line 3260) tries providers in priority order. Two compounding problems on top of Cohere:
+
+Workers AI gateway auth is failing — startup probe logs show auth_mode='workers_ai' via_cf_gateway=True with embeddings=True generation=False. So Workers AI generation falls back to direct API and isn't relieving Cohere through the gateway cache.
+The AI Gateway you just provisioned in Task #307 isn't active in prod yet — WORKERS_AI_GATEWAY_ID is still unset as a wrangler secret, so cache hits aren't deflecting the repeat Cohere calls. Every chat turn that needs an embedding hits Cohere live.
+How the user sees the message
+The exact toast text "Too many requests — please wait a moment and try again." is the frontend fallback in ChatPage.jsx:386 — fired when the 429 response has no parseable detail:
+
+toast.error(detail || 'Too many requests — please wait a moment and try again.', ...)
+
+So the 429 reaching the browser has an empty/non-JSON body. Most likely path: Cloudflare's zone-level rate-limit rule (or Bot Fight Mode) tripping on the CGNAT IP from rapid chat-page sub-requests (the SPA fans out 6–8 /api/* calls per page load × multiple turns). Backend 429s all carry a JSON detail and would show that text, not the fallback.
+
+Three concrete fixes (in priority order)
+Activate the AI Gateway you provisioned — run docs/ops/ai-gateway-activation.md and set WORKERS_AI_GATEWAY_ID as a wrangler secret. The 1-hour response cache will deflect 60–80% of repeat Cohere calls and stop the 429 storm immediately. (Same fix Task #307 was sized for.)
+Bump Cohere's RPM ceiling — log into Cohere dashboard → Production tier → request a higher rate limit, or rotate to a paid plan. Until #1 is on, even the steady-state chat traffic exceeds the trial cap.
+Reorder embed priority so Cohere isn't first when Workers AI gateway is healthy — and fix the auth_mode='workers_ai' gateway auth in the startup probe (CF_AI_GATEWAY_TOKEN / CLOUDFLARE_ACCOUNT_ID env vars per the probe message).
+Quickest win is #1 — it's already coded, just needs the operator-side dashboard provisioning + secret set (~5 minutes).
