@@ -228,9 +228,19 @@ async def _stream_and_time(
 
 
 async def _run_azure_openai(messages: list, max_tokens: int, **_):
+    """Bench Azure OpenAI through the production candidate chain.
+
+    The provider's ``ENABLED`` flag is true when *either* the CF AI Gateway
+    azure-openai slug is registered *or* AZURE_OPENAI_ENDPOINT + at least one
+    of AZURE_OPENAI_KEY_1/2 are configured (Task #290 direct-mode failover).
+    A fully unconfigured environment is reported as a clean skip.
+    """
     from providers import azure_openai
     if not azure_openai.ENABLED:
-        raise RuntimeError("azure_openai disabled (CF gateway slug missing)")
+        raise RuntimeError(
+            "azure_openai disabled (no CF gateway slug AND no "
+            "AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_KEY_1/2)"
+        )
     return await _stream_and_time(
         lambda: azure_openai.stream_chat(messages, max_tokens=max_tokens),
     )
@@ -364,7 +374,7 @@ async def _run_sarvam(messages: list, max_tokens: int, response_lang: str = "as"
 
 # Adapter registry: ``provider_id -> (callable, model_label)``.
 ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], str]] = {
-    "azure_openai":      (_run_azure_openai,   os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini")),
+    "azure_openai":      (_run_azure_openai,   os.environ.get("AZURE_OPENAI_DEPLOYMENT", os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini"))),
     "workers_ai_oss20":  (_run_cf_chat_oss20,  "@cf/openai/gpt-oss-20b"),
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
     "vertex_chat":            (_run_vertex_chat,            "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),

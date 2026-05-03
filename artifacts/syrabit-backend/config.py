@@ -551,15 +551,33 @@ BEDROCK_PROXY_AUTH_TOKEN = os.environ.get('BEDROCK_PROXY_AUTH_TOKEN', '').strip(
 # voice; swap to "Joanna", "Matthew", "Aditi", etc. via env var.
 BEDROCK_POLLY_VOICE = os.environ.get('BEDROCK_POLLY_VOICE', 'Raveena').strip() or 'Raveena'
 
-# ── Azure OpenAI model / deployment name (Task #256) ─────────────────────────
-# Azure OpenAI deployment name for chat completions, embeddings, and Whisper STT.
-# Azure uses a "deployment name" instead of a model name; the default maps to
-# gpt-4o-mini (cost-efficient). Override via AZURE_OPENAI_MODEL in Railway Secrets.
-# Used by providers/azure_openai.py as _MODEL. Vision and embed calls also inherit
-# this unless they use a dedicated deployment (e.g. text-embedding-3-large).
-AZURE_OPENAI_MODEL = (
-    os.environ.get('AZURE_OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
+# ── Azure OpenAI deployment / direct-endpoint config (Task #256, #290) ───────
+# Azure uses a "deployment name" (created in the Azure portal) — not a model
+# name — for chat / embeddings / Whisper REST URLs. Task #290 standardised on
+# AZURE_OPENAI_DEPLOYMENT; AZURE_OPENAI_MODEL remains a backwards-compatible
+# alias so existing Railway/Replit secrets keep working without rotation.
+#
+# Direct-endpoint mode (Task #290) — set AZURE_OPENAI_ENDPOINT and at least
+# one of AZURE_OPENAI_KEY_1 / AZURE_OPENAI_KEY_2. The provider chains them
+# (KEY_1 → KEY_2) on retryable failures so a key rotation/throttle can be
+# absorbed without dropping traffic. CF AI Gateway BYOK still wins when up.
+AZURE_OPENAI_DEPLOYMENT = (
+    os.environ.get('AZURE_OPENAI_DEPLOYMENT', '').strip()
+    or os.environ.get('AZURE_OPENAI_MODEL', '').strip()
+    or 'gpt-4o-mini'
 )
+# Legacy alias kept for callers that imported AZURE_OPENAI_MODEL directly.
+AZURE_OPENAI_MODEL = AZURE_OPENAI_DEPLOYMENT
+AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT', '').strip().rstrip('/')
+AZURE_OPENAI_API_VERSION = (
+    os.environ.get('AZURE_OPENAI_API_VERSION', '2024-12-01-preview').strip()
+    or '2024-12-01-preview'
+)
+AZURE_OPENAI_KEY_1 = (
+    os.environ.get('AZURE_OPENAI_KEY_1', '').strip()
+    or os.environ.get('AZURE_OPENAI_API_KEY', '').strip()
+)
+AZURE_OPENAI_KEY_2 = os.environ.get('AZURE_OPENAI_KEY_2', '').strip()
 
 # ── Azure Speech & Translator (Task #256) ────────────────────────────────────
 # Azure Speech Services — used for Azure Neural TTS (call_tts in azure_openai.py)

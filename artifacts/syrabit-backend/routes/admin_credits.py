@@ -186,9 +186,10 @@ _PROVIDER_PROBE_SPECS: dict[str, dict] = {
     # BYOK: api-key=placeholder + empty Authorization → CF substitutes Azure key.
     "azure_openai": {
         "method": "POST",
-        "path": f"/chat/completions?api-version=2024-02-01",
+        # CF BYOK probe path — uses the Azure deployment name from config so it
+        # matches whichever deployment operators created in the portal (Task #290).
+        "path": f"/openai/deployments/{__import__('config').AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version={__import__('config').AZURE_OPENAI_API_VERSION}",
         "body": {
-            "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 1,
         },

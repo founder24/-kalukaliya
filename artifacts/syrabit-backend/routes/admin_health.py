@@ -959,6 +959,26 @@ async def admin_diagnostics(admin: dict = Depends(get_admin_user)) -> dict[str, 
         }
     except Exception as e:
         result["llm_providers"]["sarvam"] = {"status": "error", "error": str(e)}
+
+    # Azure OpenAI (Task #290) — report candidate chain so operators can see at
+    # a glance whether CF BYOK + KEY_1 + KEY_2 are all configured. The provider
+    # health_check is a pure-config check (no live HTTP) so it's safe to call
+    # from /admin/system-health on every request.
+    try:
+        from providers import azure_openai as _az
+        az_health = await _az.health_check()
+        result["llm_providers"]["azure_openai"] = {
+            "status": "healthy" if az_health.get("ok") else "unhealthy",
+            "deployment": az_health.get("model"),
+            "candidates": az_health.get("candidates", []),
+            "gateway_available": az_health.get("gateway_available"),
+            "direct_available": az_health.get("direct_available"),
+            "key_1_set": az_health.get("key_1_set"),
+            "key_2_set": az_health.get("key_2_set"),
+            "details": az_health.get("reason") if not az_health.get("ok") else None,
+        }
+    except Exception as e:
+        result["llm_providers"]["azure_openai"] = {"status": "error", "error": str(e)}
     
     # Database Pool Health
     # MongoDB

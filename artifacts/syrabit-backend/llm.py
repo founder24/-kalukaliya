@@ -1608,17 +1608,19 @@ async def _dispatch_llm_for_feature(
             raise
 
     if provider == "azure_openai":
-        # Azure OpenAI chat/completions via CF AI Gateway BYOK (azure-openai slug).
-        # CF injects the Azure API key stored in the dashboard.
-        # Model: gpt-4.1-mini — highest TPS on Azure as of 2025 (Task #267).
+        # Azure OpenAI chat/completions — providers/azure_openai handles the
+        # candidate chain (CF AI Gateway BYOK → direct KEY_1 → direct KEY_2).
+        # Deployment name comes from AZURE_OPENAI_DEPLOYMENT (Task #290; default
+        # set via config.py, falls back to legacy AZURE_OPENAI_MODEL alias).
         from providers.azure_openai import call_chat as _az_chat
+        from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL
         _t0 = _dp_t.perf_counter()
         try:
-            result = await _az_chat(messages, model="gpt-4.1-mini", max_tokens=max_tokens)
-            _record_llm_call("azure_openai", "gpt-4.1-mini", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            result = await _az_chat(messages, model=_AZ_DEPL, max_tokens=max_tokens)
+            _record_llm_call("azure_openai", _AZ_DEPL, int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
             return result
         except Exception as _exc:
-            _record_llm_call("azure_openai", "gpt-4.1-mini", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            _record_llm_call("azure_openai", _AZ_DEPL, int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
             raise
 
     if provider == "workers_ai_indic":

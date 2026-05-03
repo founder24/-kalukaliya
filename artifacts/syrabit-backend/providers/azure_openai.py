@@ -35,11 +35,16 @@ import json
 import logging
 import os as _os
 import re
-from typing import AsyncIterator, Iterable, Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
 from config import (
+    AZURE_OPENAI_API_VERSION,
+    AZURE_OPENAI_DEPLOYMENT,
+    AZURE_OPENAI_ENDPOINT,
+    AZURE_OPENAI_KEY_1,
+    AZURE_OPENAI_KEY_2,
     BYOK_PLACEHOLDER,
     CF_AI_GATEWAY_TOKEN,
     CF_CACHE_TTL,
@@ -50,17 +55,16 @@ from config import (
 
 logger = logging.getLogger("providers.azure_openai")
 
-_MODEL = _os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-_API_VERSION = _os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview").strip() or "2024-12-01-preview"
+# Single source of truth lives in config.py (Task #290 — AZURE_OPENAI_DEPLOYMENT
+# replaces AZURE_OPENAI_MODEL; legacy name still resolves via the config alias).
+_MODEL = AZURE_OPENAI_DEPLOYMENT
+_API_VERSION = AZURE_OPENAI_API_VERSION
 _TIMEOUT_S = 30.0
 
 # ── Direct-endpoint config (Task #290) ───────────────────────────────────────
-_DIRECT_ENDPOINT = _os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip().rstrip("/")
-_KEY_1 = (
-    _os.environ.get("AZURE_OPENAI_KEY_1", "").strip()
-    or _os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
-)
-_KEY_2 = _os.environ.get("AZURE_OPENAI_KEY_2", "").strip()
+_DIRECT_ENDPOINT = AZURE_OPENAI_ENDPOINT
+_KEY_1 = AZURE_OPENAI_KEY_1
+_KEY_2 = AZURE_OPENAI_KEY_2
 
 # Status codes that justify advancing to the next candidate (transient/auth).
 _RETRYABLE_STATUS = frozenset({401, 403, 408, 425, 429, 500, 502, 503, 504})
