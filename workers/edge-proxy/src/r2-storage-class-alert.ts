@@ -118,6 +118,27 @@ const LIST_PAGE_LIMIT = 1000;
  *  × any non-trivial size is far above 5GB). */
 const LIST_PAGE_HARD_CAP = 100;
 const BYTES_PER_GB = 1024 * 1024 * 1024;
+/** N consecutive `query_failed` evaluations that trip the secondary
+ *  "watchdog itself is blind" alert. The R2 watchdog only runs once per
+ *  calendar month, so N=2 ≈ 60 days of monitoring blindness — long
+ *  enough that a one-off CF GraphQL hiccup doesn't page (the next
+ *  month's evaluation will reset the counter on success), short enough
+ *  that a real token / schema regression is surfaced inside two billing
+ *  cycles instead of running for a full year of silent skips. The
+ *  primary R2 IA-share + Logpush-cap alerts cannot fire while the
+ *  GraphQL query is broken, so this is the only line of defence
+ *  against a silently-broken `R2_STORAGE_ANALYTICS_TOKEN` (e.g. rotated
+ *  without re-granting `Account Analytics: Read`) or a Cloudflare-side
+ *  rename of `r2StorageAdaptiveGroups`. Mirrors the
+ *  `consecutive_query_failures` pattern from
+ *  `ai-gateway-cache-alert.ts` (Task #311 secondary alert). */
+const DEFAULT_QUERY_FAIL_THRESHOLD = 2;
+/** 90-day cooldown on the watchdog-blind alert. Long enough that a
+ *  persistently broken token across 3+ monthly evaluations doesn't
+ *  re-page every month while the original ticket is still open, short
+ *  enough that on-call is reminded once per quarter if the regression
+ *  is left unfixed. */
+const QUERY_FAIL_COOLDOWN_MS = 90 * 24 * 60 * 60 * 1000;
 /** Direct dashboard URL — included in the payload so on-call can
  *  one-click into the R2 usage view. */
 const DASHBOARD_URL =
@@ -133,6 +154,10 @@ export interface R2StorageClassAlertEnv {
   R2_STORAGE_ALERT_LOGPUSH_CAP_GB?: string;
   R2_STORAGE_ALERT_BUCKETS?: string;
   R2_STORAGE_ANALYTICS_TOKEN?: string;
+  /** Override the consecutive-failure threshold for the secondary
+   *  "watchdog blind" alert. Default 2 ≈ 60 days of monitoring
+   *  blindness before paging (the watchdog runs monthly). */
+  R2_STORAGE_ALERT_QUERY_FAIL_THRESHOLD?: string;
   /** Reused from the synthetic probe so on-call sees one consistent
    *  delivery channel for "the edge layer is degraded". */
   SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL?: string;
@@ -151,6 +176,12 @@ export interface R2StorageClassAlertState {
   last_total_gb: number | null;
   /** Most recent computed Logpush prefix size in GB. */
   last_logpush_gb: number | null;
+  /** Number of consecutive `query_failed` evaluations. Reset to 0 on
+   *  any successful GraphQL query. Drives the secondary "watchdog
+   *  blind" alert (Task #316). */
+  consecutive_query_failures: number;
+  /** ISO timestamp the "watchdog blind" alert last fired. */
+  query_fail_last_fired_at: string | null;
 }
 
 export interface R2StorageClassAlertResult {
@@ -169,6 +200,14 @@ export interface R2StorageClassAlertResult {
    *  is unset / unparseable. The IA-share signal is suppressed
    *  until this is ≥ 30. */
   rules_age_days: number | null;
+  /** Running count of consecutive query failures *after* this
+   *  evaluation. 0 on any successful GraphQL query. Useful for tests
+   *  and dashboard surfacing (Task #316). */
+  consecutive_query_failures: number;
+  /** True if THIS evaluation tripped the "watchdog blind" alert
+   *  (i.e. consecutive_query_failures crossed the threshold and
+   *  cooldown was clear). */
+  query_fail_alert_fired: boolean;
 }
 
 const EMPTY_STATE: R2StorageClassAlertState = {
@@ -178,6 +217,8 @@ const EMPTY_STATE: R2StorageClassAlertState = {
   last_ia_share: null,
   last_total_gb: null,
   last_logpush_gb: null,
+  consecutive_query_failures: 0,
+  query_fail_last_fired_at: null,
 };
 
 async function readState(kv: KVNamespace): Promise<R2StorageClassAlertState> {
@@ -459,7 +500,10 @@ export async function runR2StorageClassAlert(
     DEFAULT_LOGPUSH_CAP_GB,
     0,
   );
-  const skipResult = (reason: string): R2StorageClassAlertResult => ({
+  const skipResult = (
+    reason: string,
+    extras: Partial<R2StorageClassAlertResult> = {},
+  ): R2StorageClassAlertResult => ({
     ok: false,
     skipped: true,
     reason,
@@ -472,6 +516,9 @@ export async function runR2StorageClassAlert(
     ia_alert_fired: false,
     logpush_alert_fired: false,
     rules_age_days: rulesAgeDays(env.R2_LIFECYCLE_RULES_APPLIED_AT, now),
+    consecutive_query_failures: 0,
+    query_fail_alert_fired: false,
+    ...extras,
   });
 
   if ((env.R2_STORAGE_ALERT_DISABLED || "").toLowerCase() === "true") {
@@ -492,6 +539,13 @@ export async function runR2StorageClassAlert(
 
   const buckets = readBucketsVar(env.R2_STORAGE_ALERT_BUCKETS);
   const ageDays = rulesAgeDays(env.R2_LIFECYCLE_RULES_APPLIED_AT, now);
+  const queryFailThreshold = Math.floor(
+    readNumberVar(
+      env.R2_STORAGE_ALERT_QUERY_FAIL_THRESHOLD,
+      DEFAULT_QUERY_FAIL_THRESHOLD,
+      1,
+    ),
+  );
 
   const storage = await queryR2Storage(
     env.R2_STORAGE_ANALYTICS_TOKEN,
@@ -504,6 +558,60 @@ export async function runR2StorageClassAlert(
 
   let iaAlertFired = false;
   let logpushAlertFired = false;
+  let queryFailAlertFired = false;
+
+  // Maintain the consecutive-failure counter that drives the secondary
+  // "watchdog itself is blind" alert (Task #316). Resetting on success
+  // and incrementing on failure mirrors the Task #311
+  // ai-gateway-cache-alert pattern. Note we update the counter here —
+  // BEFORE evaluating the IA / Logpush signals — so the success path's
+  // return value reflects the post-evaluation state (= 0 after a
+  // successful query) without an extra branch later.
+  if (storage) {
+    state.consecutive_query_failures = 0;
+  } else {
+    state.consecutive_query_failures =
+      (state.consecutive_query_failures || 0) + 1;
+    if (state.consecutive_query_failures >= queryFailThreshold) {
+      const lastFiredMs = state.query_fail_last_fired_at
+        ? Date.parse(state.query_fail_last_fired_at)
+        : 0;
+      if (!lastFiredMs || now.getTime() - lastFiredMs >= QUERY_FAIL_COOLDOWN_MS) {
+        const monthsBlind = state.consecutive_query_failures;
+        const payload = {
+          text:
+            `:warning: *Syrabit R2 cold-storage watchdog is blind* — ` +
+            `${state.consecutive_query_failures} consecutive monthly ` +
+            `Cloudflare GraphQL queries for \`r2StorageAdaptiveGroups\` ` +
+            `have failed (~${monthsBlind} month${monthsBlind === 1 ? "" : "s"} ` +
+            `of monitoring blindness). The primary IA-share + Logpush-cap ` +
+            `alerts cannot fire while this is broken, so a real cold-storage ` +
+            `regression would burn credits unnoticed across multiple billing ` +
+            `cycles. Likely causes: (a) R2_STORAGE_ANALYTICS_TOKEN was ` +
+            `rotated and the new value is missing the ` +
+            `\`Account Analytics: Read\` scope, (b) the token expired, or ` +
+            `(c) Cloudflare renamed the analytics dataset / dimensions. ` +
+            `Investigate: tail Worker logs for \`[r2-storage-class-alert]\` ` +
+            `lines to see the underlying HTTP / GraphQL error, then ` +
+            `\`wrangler secret put R2_STORAGE_ANALYTICS_TOKEN --name ` +
+            `syrabit-edge\`. Dashboard: ${DASHBOARD_URL}. ` +
+            `Runbook: docs/cloudflare-monthly-cost-review.md#step-5.`,
+          severity: "warning",
+          alert_type: "r2_storage_watchdog_blind",
+          consecutive_failures: state.consecutive_query_failures,
+          threshold: queryFailThreshold,
+          months_blind: monthsBlind,
+          buckets,
+          dashboard_url: DASHBOARD_URL,
+          runbook: "docs/cloudflare-monthly-cost-review.md#step-5",
+        };
+        queryFailAlertFired = await fireWebhook(env, payload);
+        if (queryFailAlertFired) {
+          state.query_fail_last_fired_at = now.toISOString();
+        }
+      }
+    }
+  }
 
   let totalBytes = 0;
   let standardBytes = 0;
@@ -625,7 +733,9 @@ export async function runR2StorageClassAlert(
   if (!storage) {
     console.log(
       `[r2-storage-class-alert] query_failed (logpush_gb=${logpushBytes !== null ? bytesToGb(logpushBytes).toFixed(3) : "n/a"} ` +
-      `logpush_alert_fired=${logpushAlertFired})`,
+      `logpush_alert_fired=${logpushAlertFired} ` +
+      `consecutive_query_failures=${state.consecutive_query_failures} ` +
+      `query_fail_alert_fired=${queryFailAlertFired})`,
     );
     return {
       ok: false,
@@ -640,6 +750,8 @@ export async function runR2StorageClassAlert(
       ia_alert_fired: false,
       logpush_alert_fired: logpushAlertFired,
       rules_age_days: ageDays,
+      consecutive_query_failures: state.consecutive_query_failures,
+      query_fail_alert_fired: queryFailAlertFired,
     };
   }
 
@@ -665,6 +777,8 @@ export async function runR2StorageClassAlert(
     ia_alert_fired: iaAlertFired,
     logpush_alert_fired: logpushAlertFired,
     rules_age_days: ageDays,
+    consecutive_query_failures: 0,
+    query_fail_alert_fired: false,
   };
 }
 
@@ -703,4 +817,6 @@ export const _R2_STORAGE_CLASS_ALERT_DEFAULTS = {
   COOLDOWN_MS,
   DASHBOARD_URL,
   BYTES_PER_GB,
+  QUERY_FAIL_THRESHOLD: DEFAULT_QUERY_FAIL_THRESHOLD,
+  QUERY_FAIL_COOLDOWN_MS,
 } as const;
