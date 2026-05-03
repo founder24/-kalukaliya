@@ -2401,12 +2401,16 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           <SectionErrorBoundary name="Workers AI Fallback">
             <div className="space-y-4">
 
-              {/* Task #297 — locked provider chain surfacing */}
+              {/* Task #297 — locked provider chain surfacing.
+                  Reads /admin/routing-config (pools is an ARRAY of
+                  {feature, providers, strict_primary_lock}) and renders
+                  one card per Task #297 surfaced provider with every pool
+                  membership + role/share + credential presence. */}
               <div className="rounded-2xl p-4 border border-emerald-200 bg-emerald-50/40 shadow-sm" data-testid="locked-provider-chain">
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="text-xs font-semibold text-emerald-800">Locked Provider Chain (Task #297)</p>
-                    <p className="text-[10px] text-emerald-700/70">Speech, Indic translation and primary datastore — sourced from <code className="font-mono">GET /admin/routing-config</code>.</p>
+                    <p className="text-[10px] text-emerald-700/70">Deepgram (speech), workers_ai_indic (IndicTrans2) and MongoDB Atlas (vector_search fallback) — sourced from <code className="font-mono">GET /admin/routing-config</code>.</p>
                   </div>
                   <button
                     onClick={() => {
@@ -2422,26 +2426,64 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
                   {[
-                    { key: 'deepgram',         label: 'Deepgram',         pool: 'stt',    note: 'Speech-to-text primary' },
-                    { key: 'workers_ai_indic', label: 'workers_ai_indic', pool: 'indic',  note: 'IndicTrans2 (Workers AI)' },
-                    { key: 'mongodb_atlas',    label: 'MongoDB Atlas',    pool: 'datastore', note: 'Primary persistence layer' },
+                    { key: 'deepgram',         label: 'Deepgram',         note: 'Speech-to-text + voice (primary)' },
+                    { key: 'workers_ai_indic', label: 'workers_ai_indic', note: 'IndicTrans2 — Indic translation primary' },
+                    { key: 'mongodb_atlas',    label: 'MongoDB Atlas',    note: 'vector_search fallback (weight-0)' },
                   ].map((p) => {
-                    const pool = routingConfig?.pools?.[p.pool];
-                    const slot = pool?.providers?.find?.((x) => x.name === p.key);
-                    const present = !!slot;
-                    const role = slot?.role || (present ? 'configured' : '—');
-                    const sharePct = slot?.share_pct;
+                    const poolsArr = Array.isArray(routingConfig?.pools) ? routingConfig.pools : [];
+                    // Every pool this provider participates in (real
+                    // feature names from PROVIDER_PRIORITY, not guesses).
+                    const memberships = poolsArr
+                      .map((pool) => {
+                        const slot = pool.providers?.find?.((x) => x.name === p.key);
+                        return slot ? { feature: pool.feature, ...slot } : null;
+                      })
+                      .filter(Boolean);
+                    const present = memberships.length > 0;
+                    const keyStatus = routingConfig?.key_status?.[p.key];
+                    const credConfigured = keyStatus?.configured;
+                    const dotColor = routingConfig === null
+                      ? 'bg-gray-300'
+                      : routingConfig?._error
+                        ? 'bg-red-500'
+                        : present && credConfigured
+                          ? 'bg-emerald-500'
+                          : present
+                            ? 'bg-amber-400'
+                            : 'bg-gray-300';
                     return (
                       <div key={p.key} className="rounded-lg p-3 bg-white border border-emerald-100" data-testid={`provider-card-${p.key}`}>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className={`inline-block w-2 h-2 rounded-full ${routingConfig === null ? 'bg-gray-300' : present ? 'bg-emerald-500' : routingConfig?._error ? 'bg-red-500' : 'bg-amber-400'}`} />
+                          <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
                           <span className="text-xs font-semibold text-gray-700">{p.label}</span>
+                          {keyStatus && (
+                            <span
+                              className={`ml-auto text-[9px] font-semibold px-1.5 py-0.5 rounded ${credConfigured ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}
+                              title={`source: ${keyStatus.source}`}
+                              data-testid={`provider-cred-${p.key}`}
+                            >
+                              {credConfigured ? 'Configured' : 'Missing'}
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[10px] text-gray-500 mb-1">{p.note}</div>
-                        <div className="text-[11px] font-mono text-gray-600">
-                          pool: <span className="text-emerald-700">{p.pool}</span> · role: <span className="text-emerald-700">{role}</span>
-                          {typeof sharePct === 'number' && <> · {sharePct}%</>}
-                        </div>
+                        <div className="text-[10px] text-gray-500 mb-1.5">{p.note}</div>
+                        {present ? (
+                          <div className="space-y-0.5">
+                            {memberships.map((m) => (
+                              <div key={m.feature} className="text-[11px] font-mono text-gray-600 flex justify-between gap-2">
+                                <span>
+                                  <span className="text-emerald-700">{m.feature}</span>
+                                  <span className="text-gray-400"> · {m.role}</span>
+                                </span>
+                                <span className="text-gray-500 tabular-nums">{m.share_pct}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-gray-400 italic">
+                            {routingConfig === null ? 'Click ↻ Load to fetch' : 'Not present in any pool'}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
