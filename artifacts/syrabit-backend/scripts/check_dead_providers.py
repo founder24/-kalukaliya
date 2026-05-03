@@ -108,6 +108,10 @@ ALLOWLIST_FILES = {
     # OpenAPI dump utility docstring lists eagerly-imported optional
     # integrations the script has to stub out for CI.
     "artifacts/syrabit-backend/scripts/dump_openapi.py",
+    # EN/AS LLM benchmark script — references cerebras/groq/gemini env-var
+    # names solely to hydrate them from the gunicorn process environ for
+    # comparison probing. They are NOT part of any production routing pool.
+    "artifacts/syrabit-backend/scripts/bench_en_as.py",
     # Workers-AI chat integration test docstring documents the prod
     # failure mode it simulates.
     "artifacts/syrabit-backend/tests/test_workers_ai_chat_integration.py",

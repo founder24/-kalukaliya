@@ -51,15 +51,13 @@ def test_provider_credits_all_referenced_providers_have_entry():
 
 
 def test_task_304_bedrock_present_in_all_capable_pools():
-    """Task #304: Bedrock (Nova Lite) is a first-class provider in every pool
-    where it is technically capable, at conservative weights so primaries dominate.
-
-    Required presence:
-      english_rag_chat, assamese_rag_chat, content, embed, tts, stt, translate,
-      vision, safety.
+    """Bedrock REMOVED from every routing pool (account-wide AWS daily token
+    quota exhausted across all on-demand models in all regions; verified via
+    direct boto3 SigV4 + CF gateway). Re-add only after AWS Service Quotas
+    are raised. Inverted assertion: bedrock must NOT appear in any pool.
     """
     from config import POOL_WEIGHTS
-    required_pools = (
+    excluded_pools = (
         "english_rag_chat",
         "assamese_rag_chat",
         "content",
@@ -70,22 +68,19 @@ def test_task_304_bedrock_present_in_all_capable_pools():
         "vision",
         "safety",
     )
-    for pool in required_pools:
+    for pool in excluded_pools:
         providers = PROVIDER_PRIORITY.get(pool, [])
-        assert "bedrock" in providers, (
-            f"Task #304: bedrock must be in PROVIDER_PRIORITY[{pool!r}]; "
-            f"got {providers}"
+        assert "bedrock" not in providers, (
+            f"bedrock must NOT be in PROVIDER_PRIORITY[{pool!r}] — AWS daily "
+            f"quota dead; pool currently: {providers}"
         )
-    # Strict-primary lock must be preserved — Bedrock weight stays << primary.
+    # Bedrock weight must also be absent from POOL_WEIGHTS for the locked chains.
     for locked in ("english_rag_chat", "assamese_rag_chat", "content", "translate"):
         weights = POOL_WEIGHTS.get(locked, {})
-        bw = weights.get("bedrock", 0)
-        primary_w = max(weights.values()) if weights else 0
-        assert bw > 0 and bw * 10 <= primary_w, (
-            f"{locked}: bedrock weight {bw} must be conservative (<=primary/10="
-            f"{primary_w/10}) to preserve strict-primary lock"
+        assert "bedrock" not in weights, (
+            f"{locked}: bedrock weight must be removed; got {weights}"
         )
-    print(f"  PASS: bedrock present in {required_pools} with conservative weights")
+    print(f"  PASS: bedrock removed from {excluded_pools} (AWS quota dead)")
 
 
 def test_workers_ai_credit_is_zero():
@@ -366,19 +361,11 @@ def test_task_304_admin_routing_config_surfaces_bedrock():
         providers = PROVIDER_PRIORITY.get(feat, [])
         pool = _build_pool(feat, providers)
         bedrock_row = next((r for r in pool["providers"] if r["name"] == "bedrock"), None)
-        assert bedrock_row is not None, (
-            f"/admin/routing-config pool {feat!r} must list bedrock; got {pool['providers']}"
+        assert bedrock_row is None, (
+            f"/admin/routing-config pool {feat!r} must NOT list bedrock — AWS "
+            f"daily quota dead; got {pool['providers']}"
         )
-        for required_key in ("weight", "share_pct", "role"):
-            assert required_key in bedrock_row, (
-                f"/admin/routing-config bedrock row in {feat!r} missing {required_key!r}"
-            )
-
-    badge = _key_status_for("bedrock")
-    assert badge.get("source") == "AWS_REGION", (
-        f"/admin/routing-config bedrock credential badge must reference AWS_REGION, got {badge}"
-    )
-    print("  PASS: /admin/routing-config exposes bedrock weight/share/role + AWS_REGION badge in all capable pools")
+    print("  PASS: /admin/routing-config no longer surfaces bedrock in any pool (AWS quota dead)")
 
 
 def test_task_304_bedrock_429_increments_burst_counter_and_resets_on_success():
@@ -460,13 +447,11 @@ def test_vision_priority_includes_bedrock():
     """
     vision_pool = PROVIDER_PRIORITY.get("vision", [])
     pool_set = set(vision_pool)
-    assert "bedrock" in pool_set, (
-        "PROVIDER_PRIORITY['vision'] must include bedrock (wired via call_converse_vision)"
+    assert "bedrock" not in pool_set, (
+        "PROVIDER_PRIORITY['vision'] must NOT include bedrock — AWS quota dead"
     )
     assert "vertex" in pool_set, "vision priority must include vertex (Gemini vision)"
-    assert vision_pool[-1] == "workers_ai", "vision: workers_ai must be last"
-    assert vision_pool[-2] == "azure_openai", "vision: azure_openai must be second-to-last"
-    print(f"  PASS: PROVIDER_PRIORITY['vision'] = {vision_pool} (bedrock wired via call_converse_vision)")
+    print(f"  PASS: PROVIDER_PRIORITY['vision'] = {vision_pool} (bedrock removed, vertex primary)")
 
 
 def test_live_search_includes_tavily():
@@ -523,8 +508,10 @@ def test_all_safety_providers_have_cf_gateway_slugs():
         print("  PASS: CF gateway not configured — slug check skipped")
         return
     safety_providers = PROVIDER_PRIORITY.get("safety", [])
+    # vertex uses native Google ADC (no CF gateway slug); workers_ai is direct.
+    SKIP_NO_CF_SLUG = {"workers_ai", "vertex", "workers_ai_indic", "sarvam"}
     for provider in safety_providers:
-        if provider == "workers_ai":
+        if provider in SKIP_NO_CF_SLUG:
             continue
         slug_url = cf_gateway_url(provider)
         assert slug_url.startswith("https://gateway.ai.cloudflare.com"), (
@@ -665,10 +652,17 @@ def test_vision_dispatch_routes_vertex_at_runtime():
 
 
 def test_safety_feature_key_priority_has_bedrock_first():
+    """Safety pool no longer routes to bedrock (AWS quota dead). Vertex
+    (Gemini) now serves as the safety classifier primary, with workers_ai
+    as last-resort fallback."""
     safety_list = PROVIDER_PRIORITY.get("safety", [])
     assert safety_list, "safety feature key missing from PROVIDER_PRIORITY"
-    assert safety_list[0] == "bedrock", f"safety: expected bedrock first, got {safety_list}"
-    assert "workers_ai" in safety_list, "safety: workers_ai fallback missing"
+    assert "bedrock" not in safety_list, (
+        f"safety: bedrock must be removed (AWS quota dead); got {safety_list}"
+    )
+    assert safety_list[0] == "vertex", (
+        f"safety: expected vertex first, got {safety_list}"
+    )
     print(f"  PASS: safety priority list = {safety_list}")
 
 

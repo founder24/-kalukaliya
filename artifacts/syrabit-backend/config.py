@@ -1003,20 +1003,20 @@ PLAN_PRICES = {
 # draw weights for weighted round-robin. weight=0 means "never in rotation
 # pool — last-resort fallback only".
 #
-# Task #304 — Bedrock is a first-class permanent provider built around
-# Amazon Nova Lite (`amazon.nova-lite-v1:0`) — true multimodal (text + image
-# + video in, text out), 300K context, ~150 TPS, ~$0.06/$0.24 per 1M tokens.
-# Nova Lite serves both chat and vision pools through the Converse API,
-# collapsing the previous Nova Micro (chat) + Claude 3.5 Sonnet (vision) split.
-# Claude 3.5 Sonnet is kept as a higher-quality in-pool fallback for vision
-# only. Bedrock is included in chat/content/embed/tts/stt/translate at
-# **conservative weights** (POOL_WEIGHTS bedrock=50) so the existing primaries
-# (Azure, Vertex, Cohere, ElevenLabs, Deepgram, IndicTrans2) still dominate
-# traffic and the strict-primary lock (10000:100 ratio) is preserved.
+# Bedrock REMOVED from every routing pool — AWS account-wide daily token
+# quota is exhausted across every on-demand model in every region (verified
+# via direct boto3 SigV4 + CF gateway probing, all 53 on-demand text models
+# in 6 regions returned the same dailyTokensExceeded error). The active
+# chat/content allowlist per current ops policy is:
+#     Cloudflare Workers AI + GCP Vertex + Azure OpenAI + Sarvam.
+# Bedrock entries remain in PROVIDER_CREDITS / SLM RPM dict / 429-burst
+# tracker as harmless dead code so re-enabling is a one-line PROVIDER_PRIORITY
+# edit once AWS Service Quotas are raised. See providers/bedrock.py for the
+# actionable daily-quota error message operators see when Bedrock is dispatched.
 #
 # Credit reference table (minimum confirmed startup-programme amounts):
 #   vertex        Google Cloud for Startups          $2,000
-#   bedrock       AWS Activate                       $1,000  (Task #304: Nova Lite all-in-one chat+vision; in every LLM/feature pool at conservative weight)
+#   bedrock       AWS Activate                       $1,000  (REMOVED from all routing pools — AWS daily token quota exhausted; informational only)
 #   azure_openai  Azure for Startups                 $2,500
 #   sarvam        Sarvam startup credits             $500
 #   elevenlabs    ElevenLabs startup credits         $500
@@ -1028,26 +1028,23 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG (Task #304): strict-primary lock — Azure GPT-4.1-mini
-    # (10000) → Vertex/Gemini 2.5 Flash (100) → Bedrock/Nova Lite (50, conservative)
-    # → Workers AI (0, last-resort). Bedrock is in-pool at weight 50 so the 100x
-    # primary→fallback ratio is preserved (Azure still draws every healthy
-    # request); see POOL_WEIGHTS["english_rag_chat"] below.
-    "english_rag_chat":  ["azure_openai", "vertex", "bedrock", "workers_ai"],
-    # Assamese chat (Task #291 — strict locked chain): Sarvam (native Indic
-    # conversational reasoning) primary, Vertex (Gemini 2.5 Flash) sole
-    # fallback. workers_ai_indic is intentionally NOT in this pool because
-    # IndicTrans2 is a translation model, not an Assamese reasoning/chat
-    # model — silently downgrading reasoning to a translator would produce
-    # nonsense answers. If both Sarvam and Vertex fail the request errors
-    # out cleanly rather than serving a wrong-model response.
-    "assamese_rag_chat": ["sarvam", "vertex", "bedrock"],
-    # Long-form content / notes generation (Task #304): strict-primary lock —
-    # Vertex/Gemini 2.5 Flash (10000, 1M-token context) → Azure GPT-4.1-mini
-    # (100) → Bedrock/Nova Lite (50, conservative) → Workers AI (0, last-resort).
-    # Bedrock is in-pool at weight 50 so Vertex still draws every healthy
-    # request; see POOL_WEIGHTS["content"] below.
-    "content":           ["vertex", "azure_openai", "bedrock", "workers_ai"],
+    # English chat + RAG: Azure GPT-4.1-mini (primary) → Vertex/Gemini 2.5
+    # Flash → Sarvam (Indic-aware fallback) → Workers AI (last-resort).
+    # Bedrock removed (account-wide daily token quota exhausted across every
+    # on-demand model in every region — see providers/bedrock.py for the
+    # actionable error). Re-add only after AWS Service Quotas are raised.
+    "english_rag_chat":  ["azure_openai", "vertex", "sarvam", "workers_ai"],
+    # Assamese chat: Sarvam (native Indic conversational reasoning) primary
+    # → Vertex (Gemini 2.5 Flash) → workers_ai_indic (IndicTrans2 last-resort,
+    # weight 0). IndicTrans2 is a translation model not a chat model, so it's
+    # intentionally weight-zero — only fires when both Sarvam AND Vertex are
+    # excluded, as a degraded-but-online fallback rather than serving an
+    # error. Bedrock removed (see english_rag_chat note).
+    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
+    # Long-form content / notes generation: Vertex/Gemini 2.5 Flash (primary,
+    # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI (last-resort).
+    # Bedrock removed (see english_rag_chat note).
+    "content":           ["vertex", "azure_openai", "sarvam", "workers_ai"],
     # Assamese content generation (Task #281): IndicTrans2 dominant primary
     # (purpose-built Indic neural MT), Gemini reserved at low weight strictly
     # for note-formatting / structuring fallback. Sarvam removed from this
@@ -1056,13 +1053,13 @@ PROVIDER_PRIORITY: dict = {
     "assamese_content":  ["workers_ai_indic", "vertex"],
     # Text-to-speech: ElevenLabs (primary) → Deepgram → Vertex → Workers AI.
     # All via CF AI Gateway; rotational so no single provider is exhausted.
-    "tts":               ["elevenlabs", "deepgram", "vertex", "bedrock", "workers_ai"],
-    # Speech-to-text: Deepgram (primary) → AssemblyAI → Vertex → Bedrock (Transcribe) → Workers AI.
-    "stt":               ["deepgram", "assemblyai", "vertex", "bedrock", "workers_ai"],
+    "tts":               ["elevenlabs", "deepgram", "vertex", "workers_ai"],
+    # Speech-to-text: Deepgram (primary) → AssemblyAI → Vertex → Workers AI.
+    "stt":               ["deepgram", "assemblyai", "vertex", "workers_ai"],
     # Combined voice pipeline: Deepgram → ElevenLabs → Vertex → Workers AI.
     "voice":             ["deepgram", "elevenlabs", "vertex", "workers_ai"],
-    # Embeddings: Cohere (primary) → Voyage AI → Bedrock (Titan v2, conservative) → Workers AI.
-    "embed":             ["cohere", "voyage_ai", "bedrock", "workers_ai"],
+    # Embeddings: Cohere (primary) → Voyage AI → Workers AI.
+    "embed":             ["cohere", "voyage_ai", "workers_ai"],
     # Reranking: Pinecone AI (primary) → Workers AI (last resort).
     "rerank":            ["pinecone_ai", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
@@ -1070,12 +1067,13 @@ PROVIDER_PRIORITY: dict = {
     # Translation (English→Assamese):
     #   Workers AI IndicTrans2 (primary, dedicated neural MT) → Gemini (fallback).
     #   POOL_WEIGHTS gives workers_ai_indic=3000, vertex=100.
-    "translate":         ["workers_ai_indic", "vertex", "bedrock"],
-    # Vision / OCR (Task #304): Vertex → Bedrock (Nova Lite primary, Claude
-    # Sonnet kept as in-pool fallback) → Azure OpenAI → Workers AI.
-    "vision":            ["vertex", "bedrock", "azure_openai", "workers_ai"],
-    # Safety checks: Bedrock Nova Lite via CF BYOK (Task #304) → Workers AI.
-    "safety":            ["bedrock", "workers_ai"],
+    "translate":         ["workers_ai_indic", "vertex"],
+    # Vision / OCR: Vertex (Gemini 2.5 Flash multimodal) → Azure OpenAI →
+    # Workers AI. Bedrock removed.
+    "vision":            ["vertex", "azure_openai", "workers_ai"],
+    # Safety checks: Vertex (Gemini safety classifier) → Workers AI.
+    # Bedrock removed.
+    "safety":            ["vertex", "workers_ai"],
     # RAG search with external web results: Exa neural search → Workers AI.
     "search_rag":        ["exa_ai", "workers_ai"],
     # Live / real-time search: Exa → Tavily → Workers AI.
@@ -1117,19 +1115,18 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "content": {
         "vertex":       10000,  # primary — Gemini 2.5 Flash, 1M-token context
         "azure_openai":   100,  # fallback — GPT-4.1-mini
-        "bedrock":         50,  # conservative — Nova Lite (Task #304)
+        "sarvam":          50,  # tertiary — Sarvam-M (Indic-aware fallback)
         "workers_ai":       0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
     "english_rag_chat": {
         "azure_openai": 10000,  # primary — GPT-4.1-mini (Azure)
         "vertex":         100,  # fallback — Gemini 2.5 Flash
-        "bedrock":         50,  # conservative — Nova Lite (Task #304)
+        "sarvam":          50,  # tertiary — Sarvam-M
         "workers_ai":       0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
     "assamese_rag_chat": {
         "sarvam": 10000,  # primary — native Assamese conversational reasoning
         "vertex":   100,  # fallback — Gemini 2.5 Flash (no further downgrade)
-        "bedrock":   50,  # conservative — Nova Lite (Task #304); 300K context handles long Indic prompts
     },
     # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
     # at low weight strictly for formatting / structuring notes. Sarvam removed
@@ -1144,30 +1141,25 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "translate": {
         "workers_ai_indic": 10000,  # primary — dedicated Indic MT model, fastest (Task #291 strict lock)
         "vertex":            100,   # fallback — Gemini handles any edge cases
-        "bedrock":            50,   # conservative — Amazon Translate via bedrock-proxy (Task #304)
     },
-    # Task #304 — embed/tts/stt explicit overrides so Bedrock joins as a
-    # conservative tertiary (weight=50) without inheriting its high
-    # PROVIDER_CREDITS=$1000 default and stealing significant traffic from
-    # the established primaries (Cohere/ElevenLabs/Deepgram).
+    # embed/tts/stt explicit overrides so the established primaries
+    # (Cohere/ElevenLabs/Deepgram) keep deterministic priority over generic
+    # fallbacks. Bedrock removed across the board (account-wide quota dead).
     "embed": {
         "cohere":     1000,   # primary — embed-multilingual-v3.0
         "voyage_ai":   500,   # secondary — voyage-3-large
-        "bedrock":      50,   # conservative — Amazon Titan Embed v2
         "workers_ai":    0,   # last-resort — @cf/baai/bge-m3
     },
     "tts": {
         "elevenlabs": 500,   # primary — eleven_multilingual_v2
         "deepgram":   500,   # secondary — Aura-2
         "vertex":    2000,   # tertiary — Vertex TTS
-        "bedrock":     50,   # conservative — Amazon Polly via bedrock-proxy
         "workers_ai":   0,   # last-resort
     },
     "stt": {
         "deepgram":   500,   # primary — Deepgram Nova-3
         "assemblyai":1000,   # secondary — AssemblyAI best
         "vertex":    2000,   # tertiary — Vertex STT
-        "bedrock":     50,   # conservative — Amazon Transcribe via bedrock-proxy
         "workers_ai":   0,   # last-resort
     },
     # vector_search: Pinecone curated index primary (3000) → Atlas/Vertex fallback (500).

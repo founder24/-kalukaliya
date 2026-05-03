@@ -1705,14 +1705,15 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
 
     Returns:
       routing_chains  — ordered provider+model list for each key feature pool.
-                        Task #304 reinstates Bedrock (Nova Lite all-in-one) at a
-                        conservative weight=50 across chat/content/embed/tts/stt/
-                        translate so primaries (Azure/Vertex/Cohere/ElevenLabs/
-                        Deepgram/IndicTrans2) still dominate; Bedrock also leads
-                        the safety pool and is the in-pool vision fallback.
+                        Bedrock has been REMOVED from every routing pool —
+                        AWS account-wide daily token quota is exhausted across
+                        every on-demand model in every region. Active chat /
+                        content allowlist: Azure OpenAI, Vertex (Gemini),
+                        Sarvam, Workers AI. Re-add Bedrock only after AWS
+                        Service Quotas are raised.
       burst_429       — 180-second sliding-window 429 counters for every tracked
-                        provider (Bedrock 429/5xx bursts deprioritize it just like
-                        Groq/Gemini).
+                        provider (the bedrock counter is retained for historical
+                        continuity but no longer increments in production).
       burst_429_60s   — same counters restricted to the last 60 seconds
                         (in-process timestamp list — accurate short window).
     """
@@ -1755,11 +1756,11 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
         "burst_429":      burst_180,
         "burst_429_60s":  burst_60,
         "note": (
-            "routing_chains reflects Task #304 rebalance: "
-            "english_rag_chat = azure_openai/gpt-4.1-mini (10000) → vertex/gemini-2.5-flash (100) → bedrock/amazon.nova-lite-v1:0 (50) → workers_ai (0); "
-            "assamese_rag_chat = sarvam/sarvam-m (10000) → vertex/gemini-2.5-flash (100) → bedrock/amazon.nova-lite-v1:0 (50). "
-            "Bedrock (Nova Lite) is a first-class permanent provider in chat/content/embed/tts/stt/translate at conservative weight, "
-            "primary in safety, and in-pool vision fallback (Claude 3.5 Sonnet retried within the bedrock branch when Nova Lite fails). "
+            "routing_chains: Bedrock REMOVED from all pools (AWS account-wide daily token quota exhausted). "
+            "english_rag_chat = azure_openai/gpt-4.1-mini (10000) → vertex/gemini-2.5-flash (100) → sarvam (50) → workers_ai (0); "
+            "assamese_rag_chat = sarvam/sarvam-m (10000) → vertex/gemini-2.5-flash (100) → workers_ai_indic (0, last-resort). "
+            "Active chat/content allowlist: Azure OpenAI, Vertex (Gemini), Sarvam, Workers AI. "
+            "Safety pool primary is now Vertex (Gemini). Re-add Bedrock only after AWS Service Quotas are raised. "
             "burst_429 uses Redis when available (180s TTL); burst_429_60s is always in-process."
         ),
     }
