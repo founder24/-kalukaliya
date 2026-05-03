@@ -374,6 +374,20 @@ export default function ChatPage() {
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;
         }
+        if (response.status === 429) {
+          const detail = String(errData.detail || '');
+          const isAnonWall = !user && /daily request ceiling|sign in|anon/i.test(detail);
+          if (isAnonWall) {
+            toast.error('Free daily limit reached. Sign in to keep chatting — resets at midnight UTC.', {
+              action: { label: 'Sign in', onClick: () => navigate('/login') },
+              duration: 8000,
+            });
+          } else {
+            toast.error(detail || 'Too many requests — please wait a moment and try again.', { duration: 6000 });
+          }
+          setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+          return;
+        }
         throw new Error(errData.detail || 'Stream failed');
       }
       const reader = response.body.getReader();

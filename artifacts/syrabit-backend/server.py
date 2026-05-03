@@ -432,12 +432,41 @@ async def _vertex_startup_probe() -> None:
     embed_ok = bool(result.get("embeddings"))
     gen_ok = bool(result.get("generation"))
     via_gateway = result.get("via_cf_gateway", False)
-    
-    # Check if this is a gateway failure with working direct fallback
+
+    # When the gateway probe fails (commonly because CF_AI_GATEWAY_TOKEN lacks
+    # the workers-ai scope and the gateway returns 401), confirm whether the
+    # *direct* api.cloudflare.com path still works. The main LLM dispatcher
+    # uses CLOUDFLARE_API_TOKEN against api.cloudflare.com regardless of the
+    # gateway, so chat traffic stays operational even when the gateway-only
+    # probe path 401s. We surface this as a WARNING + degraded-but-passing
+    # health record instead of an ERROR + spurious uptime alerts.
+    gateway_failed_but_direct_works = False
+    if via_gateway and (not embed_ok or not gen_ok):
+        try:
+            import httpx as _httpx
+            _acct = (os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID") or "").strip()
+            _tok  = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+            if _acct and _tok:
+                _direct_url = (
+                    f"https://api.cloudflare.com/client/v4/accounts/{_acct}"
+                    f"/ai/run/@cf/meta/llama-3.2-3b-instruct"
+                )
+                async with _httpx.AsyncClient(timeout=8) as _c:
+                    _dr = await _c.post(
+                        _direct_url,
+                        headers={"Authorization": f"Bearer {_tok}",
+                                 "Content-Type": "application/json"},
+                        json={"messages": [{"role": "user", "content": "OK"}]},
+                    )
+                gateway_failed_but_direct_works = (
+                    _dr.status_code == 200
+                    and isinstance(_dr.json().get("result"), dict)
+                )
+        except Exception as _exc:
+            logger.debug("[STARTUP-PROBE] direct fallback probe raised: %r", _exc)
+    # Legacy BYOK signal — keep honoring it for backwards compatibility.
     gateway_failed_but_direct_works = (
-        via_gateway 
-        and not embed_ok 
-        and result.get("byok")  # BYOK mode means direct fallback key exists
+        gateway_failed_but_direct_works or (via_gateway and not embed_ok and result.get("byok"))
     )
     
     if not embed_ok or not gen_ok:

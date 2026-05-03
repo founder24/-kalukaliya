@@ -1,0 +1,36 @@
+ Real issues found (3)
+1. Anonymous chat hits a hard daily wall (HTTP 429)
+What's happening:
+
+HTTP 429: "Daily request ceiling reached for this network 
+(>1500 requests/day). Sign in or try again tomorrow — resets at midnight UTC."
+
+Verdict: Not a bug, but it's a leaky UX. The chat UI shows a fake "Searching Assam Board Syllabus..." placeholder forever instead of telling the user "you've hit the free limit, please sign in." Real users will think the app is broken.
+
+Fix recommendation: When /api/ai/chat/stream returns 429 with detail containing "Daily request ceiling", show the user a clear toast/inline message with a "Sign in" CTA. Should be a 30-line frontend change in pages/ChatPage.jsx or pages/chat/InputBar.jsx.
+
+2. Workers AI startup probe is failing with HTTP 401
+What's happening:
+
+[STARTUP-PROBE] Workers AI self-check FAILED: 
+embeddings=True generation=False auth_mode='workers_ai' via_cf_gateway=True
+
+I tested directly: hitting https://gateway.ai.cloudflare.com/v1/{acct}/syrabit/workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast returns HTTP 401 "Authentication error" from Cloudflare.
+
+Verdict: The CF_AI_GATEWAY_TOKEN secret is missing the Workers AI Read permission, OR the workers-ai BYOK slug isn't enabled in your Cloudflare AI Gateway settings. However, actual chat dispatch works (I see successful llm_call provider=workers-ai lines in logs immediately after the failed probes), so this is a monitoring/health-reporting bug, not a chat-blocker. The reason it works for real traffic is the dispatcher uses an internal account_id + token header path that bypasses the failing probe path.
+
+Side effect: /api/health shows vertex: unhealthy and overall degraded. Will trigger spurious uptime alerts.
+
+Fix: Either (a) regenerate the CF_AI_GATEWAY_TOKEN with workers-ai scope, or (b) fix the probe to use the same dispatcher path that actually works.
+
+3. Cohere embeddings 429 (CF Gateway daily quota exhausted)
+WARNING: Cohere embed failed (non-fatal): Client error '429 Too Many Requests' 
+for url 'https://gateway.ai.cloudflare.com/.../cohere/v1/embed'
+
+Verdict: Cohere BYOK quota on Cloudflare AI Gateway is exhausted. Code fails over gracefully (logged as "non-fatal"). Resets daily.
+
+Fix: None needed today; if you want headroom, raise the per-day cap in Cloudflare AI Gateway dashboard.
+
+🟢 Cosmetic warnings (ignore)
+[imageCdn] Cloudflare Image Resizing not active — turn on the add-on in Cloudflare if you want optimized images, otherwise harmless
+Font preload warning on some pages — micro-perf only
