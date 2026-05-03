@@ -250,18 +250,126 @@ async def _run_bedrock_nova(messages: list, max_tokens: int, **_):
     return total_ms, total_ms, text or ""
 
 
+def _cf_oss_stream(model: str, messages: list, max_tokens: int):
+    """Stream from Workers AI gpt-oss via the OpenAI-compatible v1 endpoint.
+
+    Workers AI exposes ``/ai/v1/chat/completions`` (OpenAI-compat) for the
+    ``@cf/openai/gpt-oss-*`` family.  These are reasoning models that emit
+    text on TWO channels: ``delta.content`` (final answer) and
+    ``delta.reasoning_content`` (chain-of-thought).  When ``content`` is
+    empty/null we fall back to ``reasoning_content`` so the bench measures
+    actual model output instead of recording an empty-completion failure.
+    """
+    import httpx
+    acct = os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
+    tok  = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    if not (acct and tok):
+        raise RuntimeError(
+            f"workers_ai_oss disabled (CF_AI_GATEWAY_ACCOUNT_ID / CLOUDFLARE_API_TOKEN missing)"
+        )
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/v1/chat/completions"
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    headers = {
+        "Authorization": f"Bearer {tok}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+
+    async def _gen():
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    raise RuntimeError(
+                        f"workers_ai_oss HTTP {resp.status_code} — "
+                        f"{body.decode(errors='replace')[:200]}"
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                        delta = (chunk.get("choices") or [{}])[0].get("delta", {})
+                        token = delta.get("content") or delta.get("reasoning_content") or ""
+                        if token:
+                            yield token
+                    except json.JSONDecodeError:
+                        continue
+
+    return _gen
+
+
 async def _run_cf_chat_oss20(messages: list, max_tokens: int, **_):
-    from providers import cloudflare_ai
-    return await _stream_and_time(
-        lambda: cloudflare_ai.chat_stream(messages, model_key="chat_gpt_oss", max_tokens=max_tokens),
-    )
+    return await _stream_and_time(_cf_oss_stream("@cf/openai/gpt-oss-20b", messages, max_tokens))
 
 
 async def _run_cf_chat_oss120(messages: list, max_tokens: int, **_):
-    from providers import cloudflare_ai
-    return await _stream_and_time(
-        lambda: cloudflare_ai.chat_stream(messages, model_key="chat_long", max_tokens=max_tokens),
+    return await _stream_and_time(_cf_oss_stream("@cf/openai/gpt-oss-120b", messages, max_tokens))
+
+
+async def _run_gemini_flash(messages: list, max_tokens: int, **_):
+    """Stream from real Gemini 2.5 Flash via Google's OpenAI-compatible endpoint.
+
+    Distinct from the ``vertex_chat`` provider (which currently routes to
+    Workers AI llama-3.3-70b).  Uses ``GEMINI_API_KEY`` directly, with an
+    optional CF AI Gateway BYOK route via ``CF_AI_GATEWAY_GEMINI_BASE``.
+    Mirrors the Gemini call path used by ``llm.py``'s ``_call_gemini``.
+    """
+    import httpx
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("gemini_flash disabled (GEMINI_API_KEY missing)")
+    base = (
+        os.environ.get("CF_AI_GATEWAY_GEMINI_BASE", "").strip()
+        or "https://generativelanguage.googleapis.com/v1beta/openai"
     )
+    url = base.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": "gemini-2.5-flash",
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.1,
+        "stream": True,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+
+    async def _gen():
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    raise RuntimeError(
+                        f"gemini_flash HTTP {resp.status_code} — "
+                        f"{body.decode(errors='replace')[:200]}"
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                        delta = (chunk.get("choices") or [{}])[0].get("delta", {})
+                        token = delta.get("content") or ""
+                        if token:
+                            yield token
+                    except json.JSONDecodeError:
+                        continue
+
+    return await _stream_and_time(_gen)
 
 
 async def _run_vertex_chat(messages: list, max_tokens: int, **_):
@@ -297,15 +405,18 @@ async def _run_workers_ai_indictrans2(messages: list, max_tokens: int, **_):
         raise RuntimeError(
             "workers_ai_indictrans2 disabled (CF_AI_GATEWAY_ACCOUNT_ID / CLOUDFLARE_API_TOKEN missing)"
         )
+    # IndicTrans2 is a translation model; only the en-indic 1B variant is
+    # currently routable on Workers AI for this account (indic-en returns
+    # a 7000 'No route' error). Always send an English source so the
+    # bench measures the en-indic latency the production fallback uses.
     user_text = next(
         (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
         "",
-    ) or "Explain photosynthesis in 3 sentences."
-    # Detect Bengali-block (Assamese) characters → use indic-en, else en-indic.
+    )
     is_assamese = any("\u0980" <= ch <= "\u09FF" for ch in user_text)
-    direction = "indic-en" if is_assamese else "en-indic"
+    src_text = "Explain photosynthesis in 3 sentences." if is_assamese or not user_text else user_text
     t0 = time.perf_counter()
-    translated = await workers_indic.call_indic_trans(user_text, direction=direction)
+    translated = await workers_indic.call_indic_trans(src_text, direction="en-indic")
     total_ms = (time.perf_counter() - t0) * 1000.0
     # Non-streaming endpoint → first byte == final response.
     return total_ms, total_ms, translated or ""
@@ -360,13 +471,14 @@ ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], st
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
     "workers_ai_indictrans2": (_run_workers_ai_indictrans2, "@cf/ai4bharat/indictrans2-en-indic-1b"),
     "vertex_chat":            (_run_vertex_chat,            "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+    "gemini_flash":           (_run_gemini_flash,           "gemini-2.5-flash"),
     "sarvam":                 (_run_sarvam,                 "sarvam-m"),
 }
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
-    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "vertex_chat"],
-    "assamese_chat": ["sarvam", "workers_ai_indictrans2", "vertex_chat"],
-    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "vertex_chat"],
+    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "vertex_chat", "gemini_flash"],
+    "assamese_chat": ["sarvam", "workers_ai_indictrans2", "vertex_chat", "gemini_flash"],
+    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "vertex_chat", "gemini_flash"],
 }
 
 
