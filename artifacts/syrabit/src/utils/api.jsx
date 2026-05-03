@@ -168,7 +168,7 @@ export const saveOnboarding = (data) =>
 export const adminLogin = (email, password) =>
   axios.post(`${API_BASE}/admin/login`, { email, password }, { withCredentials: true });
 
-const adminHeaders = (token) => {
+export const adminHeaders = (token) => {
   const isRealJwt = token && typeof token === 'string' && token.split('.').length === 3;
   return isRealJwt ? { Authorization: `Bearer ${token}` } : {};
 };

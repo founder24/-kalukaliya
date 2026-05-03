@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BookOpen, Users,
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
-  Crown, Cpu, Activity, ShieldAlert,
+  Crown, Cpu, Activity, ShieldAlert, Cloud,
   ExternalLink,
 } from 'lucide-react';
 import axios from 'axios';
@@ -31,6 +31,7 @@ const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSe
 // Logs Explorer now hosts Admin Actions inline as a `source=admin-actions`
 // pseudo-filter (Task #296) — no separate hub wrapper needed.
 const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
+const AdminGcpPanel        = lazy(() => import('@/components/admin/AdminGcpPanel'));
 const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
 import { SyraProvider } from '@/components/admin/syra/SyraContext';
 
@@ -48,6 +49,7 @@ const SECTIONS = [
   { id: 'security',      icon: ShieldAlert,     label: 'Access & Security', group: 'system'     },
   { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
   { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
+  { id: 'gcp',           icon: Cloud,           label: 'GCP Integrations',  group: 'system'     },
   { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
 ];
 
@@ -73,6 +75,7 @@ const SECTION_COMPONENTS = {
   security:      AdminAccessSecurity,
   logs:          AdminLogsExplorer,
   health:        AdminHealth,
+  gcp:           AdminGcpPanel,
   settings:      AdminSettings,
   // Roadmap is no longer in the sidebar but stays mounted as a reachable
   // route via the `roadmap` deep-link redirect / dashboard quick link.

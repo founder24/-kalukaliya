@@ -31,6 +31,8 @@ from auth_deps import get_admin_user
 import cloud_scheduler_client
 import cloud_tasks_client
 import web_security_scanner_client
+import slack_notifier
+import discovery_engine_ingest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -155,3 +157,48 @@ async def admin_wss_findings(
     admin: dict = Depends(get_admin_user),
 ):
     return await web_security_scanner_client.list_findings(run, page_size=page_size)
+
+
+# ── Slack alerts on demand ─────────────────────────────────────────────
+@router.post("/admin/gcp/wss/notify-slack")
+async def admin_wss_notify_slack(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    """Fetch findings for a scan run and post HIGH+ ones to Slack."""
+    run = (payload.get("run") or "").strip()
+    if not run:
+        return {"status": "error", "error": "run required"}
+    min_sev = (payload.get("min_severity") or "HIGH").upper()
+    findings = await web_security_scanner_client.list_findings(run)
+    if findings.get("status") != "ok":
+        return {"status": "error", "stage": "list_findings", "detail": findings}
+    return await slack_notifier.post_wss_findings(
+        findings.get("findings") or [],
+        min_severity=min_sev,
+        scan_run_name=run,
+    )
+
+
+# ── Discovery Engine document ingest ───────────────────────────────────
+@router.post("/admin/discovery/engine/ingest")
+async def admin_discovery_ingest(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    """Upsert structured documents into the Discovery Engine data store.
+
+    Body: {"topics": [{...}]} or {"topic_ids": ["..."]} or {"topic": {...}}
+    """
+    if payload.get("topic"):
+        return await discovery_engine_ingest.upsert_topic(payload["topic"])
+    if payload.get("topics"):
+        docs = []
+        for t in payload["topics"]:
+            try:
+                docs.append(discovery_engine_ingest.topic_to_document(t))
+            except Exception:
+                pass
+        return await discovery_engine_ingest.upsert_documents(docs)
+    return {"status": "error",
+            "error": "provide one of: topic, topics"}

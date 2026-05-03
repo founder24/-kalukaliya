@@ -1266,9 +1266,11 @@ async def lifespan(app):
     # pending signal. Cross-replica safe: producers can fire from
     # any worker, the consumer drains them one at a time without
     # double-processing.
-    if _is_leader:
+    if _is_leader and not _gcp_scheduler_takeover():
         from seo_remediation_service import _seo_remediation_loop
         asyncio.create_task(_seo_remediation_loop(db))
+    elif _is_leader:
+        logger.info("seo-remediation in-process loop SKIPPED (GCP_SCHEDULER_TAKEOVER=1)")
     # Task #939: agentic internal-linker nightly maintenance loop.
     # Task #950: dedup is now via Mongo lease inside the loop
     # (``internal_linker_lease``), not the per-machine ``_is_leader``
@@ -1277,8 +1279,11 @@ async def lifespan(app):
     # still hits its fire-and-forget per-page entry point on every
     # replica (no lease) — only the nightly maintenance pass is
     # guarded.
-    from seo_internal_linker import _internal_linker_loop
-    asyncio.create_task(_internal_linker_loop(db))
+    if not _gcp_scheduler_takeover():
+        from seo_internal_linker import _internal_linker_loop
+        asyncio.create_task(_internal_linker_loop(db))
+    else:
+        logger.info("internal-linker in-process loop SKIPPED (GCP_SCHEDULER_TAKEOVER=1)")
     # Task #587 — nightly live grounded-recall benchmark + alerting.
     # Runs once per UTC day (configurable via GROUNDED_RECALL_NIGHTLY_*),
     # writes bench/results/latest.json so the admin tile reflects the
@@ -1287,11 +1292,14 @@ async def lifespan(app):
     # versus the committed baseline. Cross-replica dedup via
     # db.job_locks atomic CAS so multi-worker deployments do not run
     # the bench (or page admins) N×.
-    try:
-        from bench.grounded_recall import _grounded_recall_nightly_loop
-        asyncio.create_task(_grounded_recall_nightly_loop())
-    except Exception as _gr_err:
-        logger.warning(f"grounded-recall nightly loop not started: {_gr_err}")
+    if _gcp_scheduler_takeover():
+        logger.info("grounded-recall in-process loop SKIPPED (GCP_SCHEDULER_TAKEOVER=1)")
+    else:
+        try:
+            from bench.grounded_recall import _grounded_recall_nightly_loop
+            asyncio.create_task(_grounded_recall_nightly_loop())
+        except Exception as _gr_err:
+            logger.warning(f"grounded-recall nightly loop not started: {_gr_err}")
     # Tasks #599 / #618 — per-language live-retriever nightly subsets.
     # Each Indian-language subset has only ~5–8 tagged cases vs >100
     # globally, so a total coverage drop on e.g. as.wikipedia or
@@ -1877,6 +1885,25 @@ from routes.admin_security_external import router as admin_security_external_rou
 from routes.admin_discovery import router as admin_discovery_router
 from routes.admin_gcp_infra import router as admin_gcp_infra_router
 from routes.admin_gcp_status import router as admin_gcp_status_router
+from routes.internal_jobs import router as internal_jobs_router
+
+
+def _gcp_scheduler_takeover() -> bool:
+    """When True, the in-process nightly loops migrated to Cloud Scheduler
+    (grounded-recall, internal-linker, seo-remediation) are NOT started at
+    boot — Cloud Scheduler is expected to drive them via OIDC-gated
+    /api/internal/jobs/* endpoints. Read at startup; flipping requires a
+    workflow restart so the disabling is unambiguous."""
+    return (os.environ.get("GCP_SCHEDULER_TAKEOVER") or "").strip() in {"1", "true", "yes"}
+
+
+# Production hint: warn if internal jobs are mounted but no audience pin.
+if not (os.environ.get("GCP_OIDC_REQUIRED_AUDIENCE") or "").strip():
+    if (os.environ.get("REPLIT_DEPLOYMENT") or "").strip() == "1":
+        logging.getLogger(__name__).warning(
+            "GCP_OIDC_REQUIRED_AUDIENCE is unset in production — "
+            "consider pinning per-route audience to harden /api/internal/jobs/*."
+        )
 
 api.include_router(auth_router)
 api.include_router(content_router)
@@ -1937,6 +1964,7 @@ api.include_router(admin_security_external_router)
 api.include_router(admin_discovery_router)
 api.include_router(admin_gcp_infra_router)
 api.include_router(admin_gcp_status_router)
+api.include_router(internal_jobs_router)
 
 from routes.voice import router as voice_router
 api.include_router(voice_router)

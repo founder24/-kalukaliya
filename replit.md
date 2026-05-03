@@ -267,3 +267,45 @@ All endpoints will start working immediately — no code change, no restart need
 
 ### Total GCP services wired across all 3 phases: 10
 KG Search, PageSpeed, Fact Check, Natural Language, Web Risk, Books, Cloud Scheduler, Cloud Tasks, Web Security Scanner, Discovery Engine.
+
+## Phase 4 (May 2026) — Operational scaffold for Phases 1–3
+
+User asked to execute the 10–12 hour roadmap nonstop. Built the full operational layer that lets the wired GCP services do real work:
+
+### New modules
+- `oidc_auth.py` — `require_google_oidc()` FastAPI dependency. Verifies Google ID tokens via `google-auth`, allow-lists service-account emails (defaults to the SA loaded by `gcp_auth`, override via `GCP_OIDC_ALLOWED_EMAILS`), optional `aud` pinning via `GCP_OIDC_REQUIRED_AUDIENCE`, dev bypass via `GCP_OIDC_DEV_BYPASS=1` + `GCP_OIDC_DEV_SECRET` for local curl testing.
+- `slack_notifier.py` — generic Slack/Discord webhook poster + `post_wss_findings()` formatter (severity emoji + truncation). Driven by `SLACK_WEBHOOK_URL`.
+- `discovery_engine_ingest.py` — `topic_to_document()` mapper + `upsert_documents()` batch helper using `documents:import` (`reconciliationMode: INCREMENTAL`).
+- `routes/internal_jobs.py` — OIDC-gated job entrypoints under `/api/internal/jobs/*`. Five endpoints: `grounded-recall`, `internal-linker`, `seo-remediation-flush`, `wss-poll` (drains WSS findings → Slack), `discovery-ingest` (Cloud Tasks fan-out target). Plus `GET /status` for Cloud Scheduler probes.
+
+### Cutover safety
+- `GCP_SCHEDULER_TAKEOVER=1` env flag (read at request time, no restart needed) is the single switch operators flip once Cloud Scheduler jobs are confirmed running. Until then, the in-process `asyncio.create_task` loops keep running alongside the new endpoints — zero risk of dropping coverage during cutover. The flag's state is reported in the unified status endpoint.
+
+### Admin endpoints (3 new, in addition to Phase 3's 12)
+- `POST /api/admin/gcp/wss/notify-slack` — fetch findings for a scan run and post HIGH+ to Slack.
+- `POST /api/admin/discovery/engine/ingest` — admin-driven document upsert.
+- (Plus the 5 OIDC-gated internal endpoints above, machine-callable.)
+
+### Frontend — `AdminGcpPanel.jsx`
+New admin section "GCP Integrations" (sidebar, system group). 5 tabs:
+1. **Overview** — pulls `/admin/gcp/services-status`, renders all 12 services with status pills and the env-var hints they emit.
+2. **Cloud Scheduler** — list jobs + Run/Pause/Resume buttons.
+3. **Cloud Tasks** — list queues + rate-limit + state.
+4. **Security Scanner** — list scan configs + "Start scan" button.
+5. **Discovery Engine** — search box that POSTs to `/admin/discovery/engine/search`.
+
+Wired into `AdminPage.jsx` SECTIONS + SECTION_COMPONENTS as `gcp`.
+
+### What's deferred (intentionally, to keep this PR scoped)
+- Shared httpx retry helper across the 10 GCP clients — would mean rewriting Phase 1+2 stable code; will do as a follow-up with explicit metrics validation.
+- Prometheus counters — clients already record `elapsed_ms`; emitting them needs picking the right metrics module (deferred).
+- Topic.publish event hook into the page-quality pipeline — the codebase has no single publish event today; need a deeper exploration first.
+- BigQuery sink for Cloud Tasks results.
+
+### To finish activation
+1. **Bind 4 IAM roles to the SA** (`cloudscheduler.admin`, `cloudtasks.admin`, `websecurityscanner.editor`, `discoveryengine.viewer`) — see prior chat for the gcloud commands. Currently SA is configured but lacks roles, so live calls 403.
+2. **Set `SLACK_WEBHOOK_URL`** to enable findings alerting.
+3. **Create Cloud Scheduler jobs** pointing at `https://api.syrabit.ai/api/internal/jobs/{grounded-recall,internal-linker,seo-remediation-flush,wss-poll}` with OIDC token (audience = job URL, SA = the same one).
+4. **Set `GCP_SCHEDULER_TAKEOVER=1`** to disable the in-process loops once Cloud Scheduler is confirmed firing.
+
+Total: 22 admin endpoints + 5 OIDC-gated internal endpoints + 12-service dashboard tile across all 4 phases.

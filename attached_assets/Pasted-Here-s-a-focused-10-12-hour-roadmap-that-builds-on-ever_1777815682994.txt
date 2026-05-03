@@ -1,0 +1,44 @@
+Here's a focused 10–12 hour roadmap that builds on everything we just shipped. Sequenced so each block delivers value even if the next gets cut.
+
+Hour 0–1 · Land Phase 3 in production
+Confirm SA IAM bind — re-run the live probe; expect Cloud Scheduler/Tasks/WSS/Discovery to flip from 403 → 200.
+Replit Production secrets parity — copy GOOGLE_APPLICATION_CREDENTIALS_JSON + GCP_DISCOVERY_DATA_STORE from dev → prod scope (currently shared, just verify).
+Trigger first WSS scan run against https://syrabit.ai so we have findings by morning.
+Update replit.md Phase 3 section with "ACTIVATED" stamp + the resolved project ID.
+Hour 1–3 · Admin dashboard "GCP Integrations" tile
+Single React card on /admin that hits GET /api/admin/gcp/services-status and renders 10 service rows (green/yellow/red dot + the env-var hints we already return).
+Drill-down panels:
+Cloud Scheduler → list jobs + a "Run now" button per job
+Cloud Tasks → queues + their depths
+WSS → most recent run + finding counts by severity
+Discovery Engine → search box that POSTs to /api/admin/discovery/engine/search
+This is pure frontend work — backend is done.
+Hour 3–6 · Migrate the in-process loops onto Cloud Scheduler + Tasks
+This is the actual ROI of Phase 3 — get the API workers out of the cron business.
+
+grounded-recall nightly → Cloud Scheduler job hitting POST /internal/jobs/grounded-recall with OIDC auth.
+internal-linker rebuild → same pattern, weekly.
+remediation worker → fan-out via Cloud Tasks queue (one task per URL) so we get retries + back-pressure for free.
+Add routes/internal_jobs.py with OIDC-verified entrypoints (verify the Authorization: Bearer <id_token> against the SA's email).
+Delete the asyncio.create_task(forever_loop(...)) callers from server.py startup.
+Hour 6–8 · Page-quality pipeline using the Phase 2 clients
+Wire the new clients into actual content workflows instead of just exposing them on /admin.
+
+On every topic.publish event, fan out (via Cloud Tasks) → NLP analyze → Fact Check → Web Risk on outbound links → store the JSON on the topic document.
+Add a quality_score rollup field; surface in the admin topic list as a sortable column.
+PageSpeed: enqueue a Cloud Task per published URL, throttle to 1 QPS to stay under the API key budget.
+Hour 8–10 · Production hardening pass
+Retry/backoff on all 10 GCP clients — single shared httpx retry helper (was deferred from architect review).
+Per-call latency + error counters in Prometheus (we already track elapsed_ms in every payload — just need to emit it).
+Web Security Scanner findings → Slack/Discord webhook when severity ≥ HIGH.
+Discovery Engine indexing health — Scheduler job that calls the data store's getMetadata weekly and alerts if doc count drops.
+Hour 10–12 · Pick one
+Choose based on what's hottest:
+
+A · BigQuery sink for the Cloud Tasks task results so you have a queryable history of every PageSpeed/NLP/FactCheck call.
+B · Vertex AI Search ingest pipeline — schedule a Cloud Tasks fan-out that pushes every published topic into the syrabit-web data store as structured docs (richer than the current website crawl).
+C · Threat-modeling sweep — run the threat_modeling skill against the new admin endpoints + write threat_model.md.
+Suggested first step right now
+The fastest unlock is the IAM bind from my last message (~2 min of your time + 90s propagation), then I can immediately verify all 10 services flip green and start on Hour 1–3 (admin tile) so you have something visible to look at by tonight.
+
+Which of A/B/C do you want as the Hour 10–12 capstone? I'll pre-stage the work for it while you're running the IAM bind. If you don't pick, I'll default to B since it gives Discovery Engine the structured docs it needs to actually be useful.

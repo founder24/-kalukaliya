@@ -27,6 +27,7 @@ import cloud_scheduler_client
 import cloud_tasks_client
 import web_security_scanner_client
 import discovery_engine_client
+import slack_notifier
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -121,6 +122,22 @@ async def admin_gcp_services_status(admin: dict = Depends(get_admin_user)):
                 "GCP_DISCOVERY_SERVING_CONFIG (default default_search)",
             ],
         },
+    }
+
+    # Side channel: Slack notifier (not GCP, but driven by these services).
+    services["slack_notifier"] = {
+        "auth_mode": "webhook",
+        "endpoint": "/api/admin/gcp/wss/notify-slack",
+        "configured": slack_notifier.is_configured(),
+        "key": _api_key_state(["SLACK_WEBHOOK_URL"]),
+    }
+
+    # Cutover flag for the in-process → Cloud Scheduler migration.
+    services["scheduler_takeover_flag"] = {
+        "auth_mode": "env_flag",
+        "configured": (os.environ.get("GCP_SCHEDULER_TAKEOVER") or "").strip()
+            in {"1", "true", "yes"},
+        "env": "GCP_SCHEDULER_TAKEOVER (set to 1 once Cloud Scheduler jobs are running)",
     }
 
     # Aggregate counts so the dashboard can render a single status pill.
