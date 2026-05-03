@@ -1,6 +1,4 @@
 const FRIENDLY = {
-  turnstile_failed:
-    "Couldn't verify you're human. Refresh the page and try again — if this keeps happening, disable any ad-blocker or VPN that might be blocking Cloudflare.",
   invalid_credentials: 'Email or password is incorrect.',
   user_not_found: 'No account found with that email.',
   email_exists: 'An account with this email already exists. Try signing in instead.',

@@ -224,7 +224,7 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  const login = async (email, password, _turnstileToken = '') => {
+  const login = async (email, password) => {
     if (!supabase) throw new Error('Authentication is not configured.');
     const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password });
     if (sbError) {
@@ -240,7 +240,7 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  const signup = async (name, email, password, consent_dpdp = false, _turnstileToken = '') => {
+  const signup = async (name, email, password, consent_dpdp = false) => {
     if (!supabase) throw new Error('Authentication is not configured.');
     const { data: sbData, error: sbError } = await supabase.auth.signUp({
       email,
