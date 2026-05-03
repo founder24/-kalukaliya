@@ -79,22 +79,34 @@ routes = [
 # ---------------------------------------------------------------------------
 BACKEND_URL = "https://workspacemockup-sandbox-production-df37.up.railway.app"
 
-# Task #306 — WORKERS_AI_GATEWAY_ID: route every env.AI.run(...) through
-# the named AI Gateway so (a) Workers AI invoice line items are tagged
-# with metadata.tag = "workers-ai-fallback:<cap>" / "workers-ai-edge-
-# vector-search" (the monthly cost review groups on this), and (b)
+# Task #306 / #307 — WORKERS_AI_GATEWAY_ID: route every env.AI.run(...)
+# through the named AI Gateway so (a) Workers AI invoice line items are
+# tagged with metadata.tag = "workers-ai-fallback:<cap>" / "workers-ai-
+# edge-vector-search" (the monthly cost review groups on this), and (b)
 # repeat embed / classification / chat prompts are served from the
 # gateway's response cache without re-billing the $5k Cloudflare-for-
 # Startups credit pool. See docs/cloudflare-cost-map.md.
 #
-# IMPORTANT: setting this var requires that a gateway with the same id
-# already exists at https://dash.cloudflare.com → AI → AI Gateway.
-# Provision the gateway first (one-time, ~30 seconds) and configure
-# response caching with TTL ≥ 1h on embed routes, then uncomment the
-# line below and `wrangler deploy`. If the gateway is missing, every
-# env.AI.run() call returns a 4xx — leaving this commented is the safe
-# default until the gateway is created.
-# WORKERS_AI_GATEWAY_ID = "syrabit-ai-gw"
+# DO NOT uncomment the line below. Set WORKERS_AI_GATEWAY_ID as a
+# Wrangler **secret** instead:
+#
+#   echo "syrabit-ai-gw" | wrangler secret put WORKERS_AI_GATEWAY_ID --name syrabit-edge
+#
+# Reason: a plaintext var with the same name overwrites the secret on
+# every deploy, so anyone who deploys from a checkout without the value
+# would silently clear the gateway routing. The secret-only path keeps
+# the value pinned in Cloudflare regardless of who deploys.
+#
+# Activation runbook (provision the gateway, set the secret, verify
+# tagging end-to-end): docs/ops/ai-gateway-activation.md
+# Provisioning script (idempotent — safe to re-run any time the cache
+# policy changes): workers/edge-proxy/scripts/provision-ai-gateway.mjs
+#
+# WORKERS_AI_GATEWAY_ID is NOT declared here on purpose. The worker
+# treats an unset value as "send calls direct, no tagging" so there is
+# no failure mode if the secret has not been set yet — it is purely an
+# opt-in for cost attribution + caching. See aiGatewayOpts() in
+# workers/edge-proxy/src/index.ts.
 
 # D1_WARM_ON_STARTUP — Enable cache warming on worker startup to eliminate
 # cold-start latency (~10-50ms → ~0ms). When true, runs D1 sync immediately
