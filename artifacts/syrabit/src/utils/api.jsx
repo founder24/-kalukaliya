@@ -803,6 +803,9 @@ export const requestRefund = (paymentId, reason = '') =>
 export const vertexHealth = (token) =>
   axios.get(`${API_BASE}/admin/vertex/health`, { headers: adminHeaders(token), withCredentials: true });
 
+export const vertexProviderRouting = (token) =>
+  axios.get(`${API_BASE}/admin/vertex/provider-routing`, { headers: adminHeaders(token), withCredentials: true });
+
 export const vertexTranslate = (token, text, target_lang = 'as', source_lang = 'en') =>
   axios.post(`${API_BASE}/admin/vertex/translate`, { text, target_lang, source_lang }, { headers: adminHeaders(token), withCredentials: true });
 

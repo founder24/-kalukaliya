@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import {
   Search, Languages, BarChart2, Lightbulb, TrendingUp, FileSearch,
-  Eye, Brain, CreditCard, ListChecks,
+  Eye, Brain, CreditCard, ListChecks, Network,
 } from 'lucide-react';
 import StatusHeader from './vertex-panel/StatusHeader';
+import ProviderRoutingCard from './vertex-panel/ProviderRoutingCard';
 import SemanticSearchCard from './vertex-panel/SemanticSearchCard';
 import TranslationCard from './vertex-panel/TranslationCard';
 import QualityScoreCard from './vertex-panel/QualityScoreCard';
@@ -18,6 +19,7 @@ import AdminQuickLinks from './AdminQuickLinks';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 const SERVICE_CARDS = [
+  { id: 'routing',    label: 'Provider Routing',    icon: Network,     color: '#8b5cf6',  component: ProviderRoutingCard },
   { id: 'semantic',   label: 'Semantic Search',    icon: Search,      color: '#3b82f6',  component: SemanticSearchCard },
   { id: 'translate',  label: 'Translation',         icon: Languages,   color: '#10b981',  component: TranslationCard },
   { id: 'quality',    label: 'Quality Scorer',      icon: BarChart2,   color: '#f59e0b',  component: QualityScoreCard },
@@ -32,7 +34,7 @@ const SERVICE_CARDS = [
 
 export default function AdminVertexPanel({ token, adminToken, onNavigate }) {
   const tk = adminToken || token;
-  const [active, setActive] = useState('semantic');
+  const [active, setActive] = useState('routing');
 
   const ActiveCard = SERVICE_CARDS.find(s => s.id === active)?.component;
 
@@ -41,7 +43,7 @@ export default function AdminVertexPanel({ token, adminToken, onNavigate }) {
       <div style={{ padding: '0 2px' }}>
         <StatusHeader token={tk} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 24 }}>
           {SERVICE_CARDS.map(s => {
             const Icon = s.icon;
             const isActive = active === s.id;

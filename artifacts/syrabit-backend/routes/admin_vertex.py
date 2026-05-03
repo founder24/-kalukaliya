@@ -41,6 +41,179 @@ async def vertex_health(admin: dict = Depends(get_admin_user)):
     return await vertex_services.health_check()
 
 
+@router.get("/admin/vertex/provider-routing")
+async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
+    """Surface the live AI-Studio routing matrix.
+
+    Reads PROVIDER_PRIORITY + POOL_WEIGHTS + PROVIDER_CREDITS from
+    config.py and the canonical model strings from llm._PROVIDER_DEFAULT_MODELS,
+    then annotates every (feature, provider) pair with:
+
+      * effective draw weight (POOL_WEIGHTS overrides PROVIDER_CREDITS)
+      * role — primary / fallback / last_resort (derived from weight ratios:
+        if max-weight provider dominates next-highest by >= 10x it's strict
+        primary; weight-0 entries are last_resort; everything else fallback)
+      * model — canonical model string used for that provider
+      * enabled — whether the relevant env credential(s) are present
+
+    The frontend uses this to render the "Provider Routing" tile in
+    AI Studio so admins see the truth from config, not stale documentation.
+    """
+    import os
+    from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, POOL_WEIGHTS
+    from llm import _PROVIDER_DEFAULT_MODELS
+
+    # Ground-truth enablement per provider — prefer the provider module's own
+    # ENABLED flag (which already encodes the real candidate-chain logic, e.g.
+    # CF gateway BYOK vs direct key, key + endpoint combos) and fall back to
+    # raw env-var presence for providers that don't ship a module.
+    def _flag(modpath: str, attr: str = "ENABLED") -> bool:
+        try:
+            mod = __import__(modpath, fromlist=[attr])
+            return bool(getattr(mod, attr, False))
+        except Exception:
+            return False
+
+    PROVIDER_META = {
+        "vertex":           {"label": "Vertex AI / Gemini",          "env": ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GOOGLE_APPLICATION_CREDENTIALS_JSON"],
+                             "enabled": bool(os.environ.get("GEMINI_API_KEY", "").strip()
+                                             or os.environ.get("GEMINI_API_KEY_2", "").strip()
+                                             or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip())},
+        "azure_openai":     {"label": "Azure OpenAI",                "env": ["AZURE_OPENAI_KEY_1", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY_2", "AZURE_OPENAI_ENDPOINT"],
+                             "enabled": _flag("providers.azure_openai")},
+        "bedrock":          {"label": "AWS Bedrock",                 "env": ["CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_ID", "BEDROCK_PROXY_AUTH_TOKEN"],
+                             "enabled": _flag("providers.bedrock")},
+        "sarvam":           {"label": "Sarvam (Indic LLM)",          "env": ["SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"],
+                             "enabled": any(os.environ.get(k, "").strip() for k in ("SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"))},
+        "elevenlabs":       {"label": "ElevenLabs",                  "env": ["ELEVENLABS_API_KEY"],
+                             "enabled": _flag("providers.elevenlabs")},
+        "assemblyai":       {"label": "AssemblyAI",                  "env": ["ASSEMBLYAI_API_KEY"],
+                             "enabled": _flag("providers.assemblyai")},
+        "deepgram":         {"label": "Deepgram",                    "env": ["DEEPGRAM_API_KEY"],
+                             "enabled": _flag("providers.deepgram")},
+        "cohere":           {"label": "Cohere Embeddings",           "env": ["COHERE_API_KEY"],
+                             "enabled": _flag("providers.cohere")},
+        "voyage_ai":        {"label": "Voyage AI",                   "env": ["VOYAGE_AI_API_KEY", "VOYAGE_API_KEY"],
+                             "enabled": bool(os.environ.get("VOYAGE_AI_API_KEY", "").strip()
+                                             or os.environ.get("VOYAGE_API_KEY", "").strip())},
+        "pinecone_ai":      {"label": "Pinecone (Inference + Rerank)", "env": ["PINECONE_API_KEY"],
+                             "enabled": _flag("providers.pinecone_ai")},
+        "exa_ai":           {"label": "Exa Neural Search",           "env": ["EXA_API_KEY"],
+                             "enabled": bool(os.environ.get("EXA_API_KEY", "").strip())},
+        "tavily":           {"label": "Tavily Search",               "env": ["TAVILY_API_KEY"],
+                             "enabled": bool(os.environ.get("TAVILY_API_KEY", "").strip())},
+        "mongodb_atlas":    {"label": "MongoDB Atlas $vectorSearch", "env": ["MONGO_URL", "MONGODB_URI"],
+                             "enabled": bool(os.environ.get("MONGO_URL", "").strip()
+                                             or os.environ.get("MONGODB_URI", "").strip())},
+        "workers_ai":       {"label": "Cloudflare Workers AI",       "env": ["CF_AI_GATEWAY_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CF_AI_GATEWAY_TOKEN"],
+                             "enabled": _flag("providers.cloudflare_ai", attr="_ENABLED")},
+        "workers_ai_indic": {"label": "Cloudflare Workers AI · IndicTrans2", "env": ["CF_AI_GATEWAY_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CF_AI_GATEWAY_TOKEN"],
+                             "enabled": _flag("providers.workers_indic")},
+    }
+
+    FEATURE_LABELS = {
+        "english_rag_chat":   ("English chat (RAG)",       "Conversational answers grounded in English notes/MCQs."),
+        "assamese_rag_chat":  ("Assamese chat (RAG)",      "Native Assamese chat. Strict chain — no silent downgrade to English LLMs."),
+        "content":            ("Long-form content",        "Notes, MCQ, admin pipelines — long generations with 1M-token context where possible."),
+        "assamese_content":   ("Assamese content",         "Translation-first content adaptation (IndicTrans2 dominant)."),
+        "tts":                ("Text-to-speech",           "Voice synthesis for SyraAssistant + audio notes."),
+        "stt":                ("Speech-to-text",           "Streaming transcription for SyraAssistant."),
+        "voice":              ("Real-time voice",          "Combined STT+TTS for live voice conversations."),
+        "embed":              ("Text embeddings",          "RAG ingestion + query — multilingual embeddings."),
+        "rerank":             ("Semantic reranking",       "Post-retrieval re-scoring of vector hits."),
+        "vector_search":      ("Vector search",            "Curated chapter-level vector index lookups."),
+        "translate":          ("Translation EN↔Indic",     "Strict chain: IndicTrans2 dominant, Gemini polish for edge cases."),
+        "vision":             ("Vision / OCR",             "Image analysis, OCR, multimodal reasoning."),
+        "safety":             ("Prompt safety",            "Content moderation / guardrails."),
+        "search_rag":         ("RAG-grounded web search",  "Web answers with citations."),
+        "live_search":        ("Live web search",          "Freshness-critical real-time web search."),
+    }
+
+    def _provider_enabled(name: str) -> bool:
+        return bool(PROVIDER_META.get(name, {}).get("enabled", False))
+
+    def _missing_env_keys(name: str) -> list[str]:
+        """Return the env-key alias list ONLY when none are set — semantics
+        are OR-chain: the provider needs *any one* of these keys, not all
+        of them. Returns [] (no missing) once at least one alias resolves,
+        so the UI can render the full alternative list as a guidance hint
+        without misleading admins into thinking every key is required.
+        """
+        meta = PROVIDER_META.get(name, {})
+        keys = meta.get("env", [])
+        any_set = any(os.environ.get(k, "").strip() for k in keys)
+        return [] if any_set else list(keys)
+
+    features_out = []
+    for feature, providers in PROVIDER_PRIORITY.items():
+        pool_override = POOL_WEIGHTS.get(feature, {})
+        weighted = []
+        for p in providers:
+            w = pool_override.get(p, PROVIDER_CREDITS.get(p, 0))
+            weighted.append((p, w))
+
+        positive_weights = [w for _, w in weighted if w > 0]
+        max_w = max(positive_weights) if positive_weights else 0
+        # secondary = next-highest *positive* weight strictly less than max_w
+        secondary = max((w for w in positive_weights if w < max_w), default=0)
+        # Mirror llm.select_provider strict-lock: ONLY when exactly one
+        # max-weight contender AND it dominates next-highest by >=10x (or
+        # is the only positive-weight provider).  Multiple providers tied
+        # at max => weighted rotation, NEVER strict primary.
+        max_contenders = [p for p, w in weighted if w == max_w and w > 0]
+        strict_lock = (
+            len(max_contenders) == 1
+            and bool(max_w)
+            and (secondary == 0 or max_w >= 10 * secondary)
+        )
+
+        provider_rows = []
+        for p, w in weighted:
+            if w == 0:
+                role = "last_resort"
+            elif w == max_w and strict_lock:
+                role = "primary"
+            elif w == max_w:
+                role = "rotation"   # equal-weight rotation across multiple providers
+            else:
+                role = "fallback"
+            meta = PROVIDER_META.get(p, {})
+            provider_rows.append({
+                "name": p,
+                "label": meta.get("label", p),
+                "weight": w,
+                "credits_usd": PROVIDER_CREDITS.get(p, 0),
+                "model": _PROVIDER_DEFAULT_MODELS.get(p, ""),
+                "role": role,
+                "enabled": _provider_enabled(p),
+                "env_keys": meta.get("env", []),
+                "missing_env_keys": _missing_env_keys(p),
+            })
+
+        label, description = FEATURE_LABELS.get(feature, (feature, ""))
+        features_out.append({
+            "key": feature,
+            "label": label,
+            "description": description,
+            "strict_lock": strict_lock,
+            "providers": provider_rows,
+        })
+
+    return {
+        "features": features_out,
+        "notes": {
+            "strict_lock": (
+                "When the primary's weight is ≥ 10× the next-highest, "
+                "select_provider() short-circuits to that primary deterministically "
+                "(no weighted draw). The fallback is only chosen when the primary "
+                "is excluded — saturated, unhealthy, or already-failed-this-request."
+            ),
+            "rotation": "Equal-weight pools draw via random.choices(weights=...) for ~uniform rotation across healthy providers.",
+            "last_resort": "Weight-0 providers never enter the rotation pool — they're only used after all weighted providers are exhausted.",
+        },
+    }
+
+
 @router.get("/admin/vertex/probe-status")
 async def vertex_probe_status(admin: dict = Depends(get_admin_user)):
     """Task #689 — Return the cached state of the periodic Gemini health
