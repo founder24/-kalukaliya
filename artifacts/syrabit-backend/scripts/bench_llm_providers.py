@@ -23,11 +23,12 @@ routing, retries and BYOK):
     bedrock_nova      — providers.bedrock.call_converse   (amazon.nova-micro-v1:0)
     workers_ai_oss20  — providers.cloudflare_ai.chat_stream(model_key="chat_gpt_oss")
     workers_ai_oss120 — providers.cloudflare_ai.chat_stream(model_key="chat_long")
-    vertex_chat       — vertex_chat.stream_chat (delegates to Workers AI llama-70b)
+    gemini_flash      — Gemini 2.5 Flash via Google's OpenAI-compat streaming endpoint
+                        (or CF AI Gateway BYOK when CF_AI_GATEWAY_GEMINI_BASE is set)
   assamese_chat:
     sarvam            — sarvam-m via the sarvam_llm_client streaming pipeline
     workers_ai_indic  — providers.cloudflare_ai.chat_stream(model_key="chat_indic") (gemma-sea-lion)
-    vertex_chat       — vertex_chat.stream_chat (llama-70b)
+    gemini_flash      — Gemini 2.5 Flash (same adapter as above)
 
 Providers that fail to initialise (missing keys, unreachable gateway,
 etc.) are recorded as ``skipped`` with a short reason string instead of
@@ -129,7 +130,11 @@ class Sample:
 class ProviderResult:
     provider: str
     model: str
+    # `samples` are warm runs (post warm-up). `cold_samples` are warm-up runs
+    # we successfully timed — they isolate cold-start TTFT (gateway connect,
+    # CF cache miss, Lambda spin-up, etc.) from steady-state warm TTFT.
     samples: list[Sample] = field(default_factory=list)
+    cold_samples: list[Sample] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
     skipped_reason: Optional[str] = None
 
@@ -142,6 +147,12 @@ class ProviderResult:
                 "reason": self.skipped_reason,
                 "samples": 0,
             }
+        cold_ttft = sorted(s.ttft_ms for s in self.cold_samples)
+        cold_block = {
+            "cold_samples": len(self.cold_samples),
+            "ttft_cold_p50_ms": _percentile(cold_ttft, 50) if cold_ttft else None,
+            "ttft_cold_p95_ms": _percentile(cold_ttft, 95) if cold_ttft else None,
+        }
         if not self.samples:
             return {
                 "provider": self.provider,
@@ -149,6 +160,7 @@ class ProviderResult:
                 "samples": 0,
                 "success_rate": 0.0,
                 "failures": self.failures[:5],
+                **cold_block,
             }
         ttft = sorted(s.ttft_ms for s in self.samples)
         total = sorted(s.total_ms for s in self.samples)
@@ -160,13 +172,17 @@ class ProviderResult:
             "samples": len(self.samples),
             "attempted": attempted,
             "success_rate": round(len(self.samples) / attempted, 3) if attempted else 0.0,
+            # Warm (steady-state) TTFT — what users see on the Nth message.
             "ttft_p50_ms": _percentile(ttft, 50),
             "ttft_p95_ms": _percentile(ttft, 95),
+            "ttft_warm_p50_ms": _percentile(ttft, 50),
+            "ttft_warm_p95_ms": _percentile(ttft, 95),
             "total_p50_ms": _percentile(total, 50),
             "total_p95_ms": _percentile(total, 95),
             "tokens_per_sec_p50": round(_percentile(toksec, 50), 2),
             "mean_output_chars": round(statistics.mean(s.output_chars for s in self.samples)),
             "failures": self.failures[:5],
+            **cold_block,
         }
 
 
@@ -254,13 +270,63 @@ async def _run_cf_chat_indic(messages: list, max_tokens: int, **_):
     )
 
 
-async def _run_vertex_chat(messages: list, max_tokens: int, **_):
-    import vertex_chat
-    if not vertex_chat.is_configured():
-        raise RuntimeError("vertex_chat not configured (Workers AI keys missing)")
-    return await _stream_and_time(
-        lambda: vertex_chat.stream_chat(messages, max_tokens=max_tokens),
+async def _run_gemini_flash(messages: list, max_tokens: int, **_):
+    """Stream from Gemini 2.5 Flash via Google's OpenAI-compatible endpoint.
+
+    Uses GEMINI_API_KEY directly (no Workers AI alias). When the
+    `CF_AI_GATEWAY_GEMINI_BASE` env is set we go through the Cloudflare
+    AI Gateway BYOK path; otherwise we hit
+    generativelanguage.googleapis.com/v1beta/openai/ directly. This matches
+    what production traffic uses for the `gemini-2.5-flash` SLM slot
+    (see llm.py _call_gemini and routes/admin_benchmark.py).
+    """
+    import httpx
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("gemini_flash disabled (GEMINI_API_KEY missing)")
+    base = (
+        os.environ.get("CF_AI_GATEWAY_GEMINI_BASE", "").strip()
+        or "https://generativelanguage.googleapis.com/v1beta/openai"
     )
+    url = base.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": "gemini-2.5-flash",
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.1,
+        "stream": True,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+
+    async def _gen():
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    raise RuntimeError(
+                        f"gemini_flash HTTP {resp.status_code} — "
+                        f"{body.decode(errors='replace')[:200]}"
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                        delta = (chunk.get("choices") or [{}])[0].get("delta", {})
+                        token = delta.get("content") or ""
+                        if token:
+                            yield token
+                    except json.JSONDecodeError:
+                        continue
+
+    return await _stream_and_time(_gen)
 
 
 async def _run_sarvam(messages: list, max_tokens: int, response_lang: str = "as", **_):
@@ -311,14 +377,14 @@ ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], st
     "workers_ai_oss20":  (_run_cf_chat_oss20,  "@cf/openai/gpt-oss-20b"),
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
     "workers_ai_indic":  (_run_cf_chat_indic,  "@cf/aisingapore/gemma-sea-lion-v4-27b-it"),
-    "vertex_chat":       (_run_vertex_chat,    "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+    "gemini_flash":      (_run_gemini_flash,   "gemini-2.5-flash"),
     "sarvam":            (_run_sarvam,         "sarvam-m"),
 }
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
-    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "vertex_chat"],
-    "assamese_chat": ["sarvam", "workers_ai_indic", "vertex_chat"],
-    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "vertex_chat"],
+    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "gemini_flash"],
+    "assamese_chat": ["sarvam", "workers_ai_indic", "gemini_flash"],
+    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "gemini_flash"],
 }
 
 
@@ -341,16 +407,32 @@ async def _run_one_provider(
     max_tokens = suite["max_tokens"]
     extras = {"response_lang": suite.get("response_lang", "")}
 
-    # Warm-ups (don't count, primarily for connection / CF gateway warm cache).
+    # Warm-ups: timed but bookkept separately so we can report cold-start
+    # TTFT (gateway connect, CF cache miss, Lambda spin-up) distinctly from
+    # the steady-state warm TTFT users see on the Nth message.
+    warmup_failures = 0
     for i in range(warm):
         try:
-            await adapter(messages, max_tokens, **extras)
+            ttft_ms, total_ms, text = await adapter(messages, max_tokens, **extras)
+            tokens = len((text or "").split())
+            if tokens > 0 and (text or "").strip():
+                result.cold_samples.append(Sample(
+                    ttft_ms=ttft_ms,
+                    total_ms=total_ms,
+                    output_tokens=tokens,
+                    output_chars=len(text),
+                ))
+                logger.info(
+                    "[bench] %-15s %-18s warm %d/%d — TTFT %5.0fms total %6.0fms (cold)",
+                    suite_id, provider_id, i + 1, warm, ttft_ms, total_ms,
+                )
         except Exception as exc:
-            # If even the warm-up fails persistently, mark skipped + bail.
+            warmup_failures += 1
             reason = f"{type(exc).__name__}: {str(exc)[:160]}"
             logger.warning("[bench] %s/%s warm-up #%d failed — %s",
                            suite_id, provider_id, i + 1, reason)
-            if i == warm - 1 and warm > 0:
+            # If ALL warm-ups failed, the provider is unreachable — bail.
+            if warm > 0 and warmup_failures == warm:
                 result.skipped_reason = reason
                 return result
 
@@ -419,23 +501,26 @@ def _markdown_report(report: dict) -> str:
         lines.append("")
         lines.append(f"_Prompt:_ `{suite['prompt'][:120]}{'…' if len(suite['prompt']) > 120 else ''}`")
         lines.append("")
-        lines.append("| Provider | Model | TTFT p50 | TTFT p95 | Total p50 | tok/s p50 | Success | Samples |")
-        lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        lines.append("| Provider | Model | TTFT cold p50 | TTFT warm p50 | TTFT warm p95 | Total p50 | tok/s p50 | Success | Samples |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
         for pid, r in suite["providers"].items():
             if r.get("skipped"):
                 lines.append(
-                    f"| `{pid}` | `{r.get('model', '?')}` | — | — | — | — | _skipped_ | "
+                    f"| `{pid}` | `{r.get('model', '?')}` | — | — | — | — | — | _skipped_ | "
                     f"_{r.get('reason', '')[:80]}_ |"
                 )
                 continue
             if not r.get("samples"):
                 lines.append(
-                    f"| `{pid}` | `{r.get('model', '?')}` | — | — | — | — | 0% | 0 |"
+                    f"| `{pid}` | `{r.get('model', '?')}` | — | — | — | — | — | 0% | 0 |"
                 )
                 continue
+            cold = r.get("ttft_cold_p50_ms")
+            cold_s = f"{cold:.0f}ms" if cold is not None else "—"
             lines.append(
                 f"| `{pid}` | `{r['model']}` | "
-                f"{r['ttft_p50_ms']:.0f}ms | {r['ttft_p95_ms']:.0f}ms | "
+                f"{cold_s} | "
+                f"{r['ttft_warm_p50_ms']:.0f}ms | {r['ttft_warm_p95_ms']:.0f}ms | "
                 f"{r['total_p50_ms']:.0f}ms | {r['tokens_per_sec_p50']:.1f} | "
                 f"{r['success_rate']*100:.0f}% | {r['samples']} |"
             )
@@ -451,12 +536,20 @@ def _markdown_report(report: dict) -> str:
     return "\n".join(lines)
 
 
-def _write_outputs(report: dict, out_dir: Path) -> tuple[Path, Path, Path]:
+def _write_outputs(
+    report: dict,
+    out_dir: Path,
+    *,
+    json_override: Optional[Path] = None,
+    md_override: Optional[Path] = None,
+) -> tuple[Path, Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = report["generated_at"].replace(":", "").replace("-", "").replace(".", "_")
-    json_path = out_dir / f"{stamp}_provider_speed.json"
-    md_path = out_dir / f"{stamp}_provider_speed.md"
-    latest = out_dir / "latest.json"
+    json_path = (json_override or (out_dir / f"{stamp}_provider_speed.json")).resolve()
+    md_path = (md_override or (out_dir / f"{stamp}_provider_speed.md")).resolve()
+    latest = (out_dir / "latest.json").resolve()
+    for p in (json_path, md_path, latest):
+        p.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     md_path.write_text(_markdown_report(report), encoding="utf-8")
     latest.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -520,7 +613,15 @@ def main() -> int:
     )
     parser.add_argument(
         "--output-dir", default=str(RESULTS_DIR),
-        help="Where to write the JSON + Markdown reports.",
+        help="Directory for the timestamped JSON+MD pair and latest.json. Default bench_results/.",
+    )
+    parser.add_argument(
+        "--output", default=None,
+        help="Explicit JSON output path (overrides the default <ts>_provider_speed.json).",
+    )
+    parser.add_argument(
+        "--markdown", default=None,
+        help="Explicit Markdown output path (overrides the default <ts>_provider_speed.md).",
     )
     parser.add_argument("--quiet", action="store_true", help="Reduce log verbosity.")
     args = parser.parse_args()
@@ -548,7 +649,13 @@ def main() -> int:
         suites=suites, providers_filter=providers_filter,
         out_dir=out_dir,
     ))
-    json_path, md_path, latest = _write_outputs(report, out_dir)
+    json_override = Path(args.output).resolve() if args.output else None
+    md_override = Path(args.markdown).resolve() if args.markdown else None
+    json_path, md_path, latest = _write_outputs(
+        report, out_dir,
+        json_override=json_override,
+        md_override=md_override,
+    )
     print(f"\n✔ Wrote JSON   → {json_path}")
     print(f"✔ Wrote Markdown → {md_path}")
     print(f"✔ Wrote latest  → {latest}\n")
