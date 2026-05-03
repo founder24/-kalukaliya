@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-05-03T06:09:29+00:00",
+  "runs_per_suite": 1,
+  "warmups": 0,
+  "host": "ad761984557a",
+  "suites": {
+    "english_chat": {
+      "label": "English chat",
+      "prompt": "Explain photosynthesis in 3 sentences.",
+      "max_tokens": 256,
+      "providers": {
+        "azure_openai": {
+          "provider": "azure_openai",
+          "model": "gpt-4o-mini",
+          "skipped": true,
+          "reason": "RuntimeError: azure_openai: HTTP 401 — {\"error\":{\"code\":\"401\",\"message\":\"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key",
+          "samples": 0
+        },
+        "bedrock_nova": {
+          "provider": "bedrock_nova",
+          "model": "amazon.nova-micro-v1:0",
+          "skipped": true,
+          "reason": "RuntimeError: bedrock: HTTP 429 from CF gateway — {\"message\":\"Too many tokens per day, please wait before trying again.\"}",
+          "samples": 0
+        },
+        "workers_ai_oss20": {
+          "provider": "workers_ai_oss20",
+          "model": "@cf/openai/gpt-oss-20b",
+          "skipped": true,
+          "reason": "empty_completion (chars=0)",
+          "samples": 0
+        },
+        "vertex_chat": {
+          "provider": "vertex_chat",
+          "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "samples": 1,
+          "attempted": 1,
+          "success_rate": 1.0,
+          "ttft_p50_ms": 193.7,
+          "ttft_p95_ms": 193.7,
+          "total_p50_ms": 196.0,
+          "total_p95_ms": 196.0,
+          "tokens_per_sec_p50": 29070.8,
+          "mean_output_chars": 449,
+          "failures": []
+        }
+      },
+      "winner": {
+        "provider": "vertex_chat",
+        "metric": "ttft_p50_ms",
+        "value": 193.7
+      }
+    },
+    "assamese_chat": {
+      "label": "Assamese chat",
+      "prompt": "ফটোসিনথেছিছ ৩টা বাক্যত বুজাই দিয়া।",
+      "max_tokens": 384,
+      "providers": {
+        "sarvam": {
+          "provider": "sarvam",
+          "model": "sarvam-m",
+          "samples": 1,
+          "attempted": 1,
+          "success_rate": 1.0,
+          "ttft_p50_ms": 1016.9,
+          "ttft_p95_ms": 1016.9,
+          "total_p50_ms": 3603.8,
+          "total_p95_ms": 3603.8,
+          "tokens_per_sec_p50": 75.4,
+          "mean_output_chars": 1285,
+          "failures": []
+        },
+        "workers_ai_indic": {
+          "provider": "workers_ai_indic",
+          "model": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+          "skipped": true,
+          "reason": "empty_completion (chars=0)",
+          "samples": 0
+        },
+        "vertex_chat": {
+          "provider": "vertex_chat",
+          "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "samples": 1,
+          "attempted": 1,
+          "success_rate": 1.0,
+          "ttft_p50_ms": 170.4,
+          "ttft_p95_ms": 170.4,
+          "total_p50_ms": 178.3,
+          "total_p95_ms": 178.3,
+          "tokens_per_sec_p50": 5417.3,
+          "mean_output_chars": 292,
+          "failures": []
+        }
+      },
+      "winner": {
+        "provider": "vertex_chat",
+        "metric": "ttft_p50_ms",
+        "value": 170.4
+      }
+    }
+  }
+}

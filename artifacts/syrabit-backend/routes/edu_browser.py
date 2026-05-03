@@ -964,6 +964,32 @@ async def admin_grounded_recall_latest(
         return {"ok": False, "error": str(e)[:200], "latest": None, "baseline": None}
 
 
+# ───────────────────────── Admin: provider-speed bench (Task #279) ─────────────────────────
+
+@router.get("/admin/bench/latest")
+async def admin_bench_latest(_admin=Depends(get_admin_user)):
+    """Return the most recent LLM provider speed benchmark run.
+
+    The bench script (``python -m scripts.bench_llm_providers``) writes
+    ``bench_results/latest.json`` after every run; this endpoint surfaces
+    that file so the admin Health "Provider Latency" card can render
+    p50 TTFT per provider without re-running the bench in-process.
+    """
+    try:
+        from pathlib import Path as _Path
+        import json as _json
+        # Resolve relative to the syrabit-backend root (this file lives in routes/).
+        latest = _Path(__file__).resolve().parent.parent / "bench_results" / "latest.json"
+        if not latest.exists():
+            return {"ok": True, "has_results": False, "latest": None}
+        with open(latest, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        return {"ok": True, "has_results": True, "latest": data}
+    except Exception as e:
+        logger.warning(f"[admin] bench/latest fetch failed: {e}")
+        return {"ok": False, "error": str(e)[:200], "latest": None}
+
+
 # ───────────────────────── Admin: requested-sites review queue ─────────────────────────
 
 @router.get("/admin/edu/requested-sites")

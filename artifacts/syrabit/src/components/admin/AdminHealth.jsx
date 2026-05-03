@@ -1201,9 +1201,23 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     } catch (err) { console.warn('AdminHealth: llmCosts() failed:', err); } finally { setLlmLoading(false); }
   }, [adminToken, llmDays]);
 
+  // Task #279 — provider speed bench (latest run from bench_results/latest.json).
+  const [benchLatest, setBenchLatest] = useState(null);
+  const [benchLoading, setBenchLoading] = useState(false);
+  const loadBenchLatest = useCallback(() => {
+    setBenchLoading(true);
+    axios.get(`${API_BASE}/admin/bench/latest`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setBenchLatest(r.data))
+      .catch(() => setBenchLatest({ ok: false, has_results: false }))
+      .finally(() => setBenchLoading(false));
+  }, [adminToken]);
+
   useEffect(() => { loadHealth(); }, []);
   useEffect(() => { loadMetrics(); }, [loadMetrics]);
   useEffect(() => { if (healthTab === 'llm') loadLlmCosts(); }, [healthTab, loadLlmCosts]);
+  useEffect(() => { if (healthTab === 'infra') loadBenchLatest(); }, [healthTab, loadBenchLatest]);
 
   useEffect(() => {
     const interval = setInterval(loadMetrics, 60000);
@@ -2496,6 +2510,94 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         )}
 
         {healthTab === 'infra' && (<>
+        <SectionErrorBoundary name="Provider Latency Bench">
+        {(() => {
+          const latest = benchLatest?.latest;
+          const hasResults = benchLatest?.has_results && latest?.suites;
+          const generatedAt = latest?.generated_at;
+          const generatedSec = generatedAt ? Math.floor(new Date(generatedAt).getTime() / 1000) : null;
+          const suiteLabels = {
+            english_chat: 'English chat',
+            assamese_chat: 'Assamese chat',
+            long_form: 'Long-form (~1500w)',
+          };
+          return (
+            <div className="rounded-2xl p-5 bg-white border border-gray-200 shadow-sm">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Provider Latency (TTFT)</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Head-to-head LLM speed bench · Task #279
+                    {generatedSec ? ` · ran ${formatRelative(generatedSec)}` : ''}
+                    {hasResults ? ` · ${latest.runs_per_suite} run${latest.runs_per_suite === 1 ? '' : 's'}/suite` : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={loadBenchLatest}
+                  disabled={benchLoading}
+                  className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                  data-testid="button-refresh-bench-latest"
+                >
+                  <RefreshCw size={14} className={benchLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+              {benchLoading ? (
+                <div className="flex justify-center p-6"><RefreshCw size={18} className="animate-spin text-gray-300" /></div>
+              ) : !hasResults ? (
+                <div className="text-center py-8 text-gray-400">
+                  <p className="text-sm">No benchmark runs yet.</p>
+                  <p className="text-xs mt-1">
+                    Run <code className="bg-gray-50 px-1 rounded border border-gray-200">python -m scripts.bench_llm_providers</code> to populate this tile.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(latest.suites).map(([suiteId, suite]) => (
+                    <div key={suiteId}>
+                      <div className="flex items-baseline justify-between mb-1.5">
+                        <p className="text-xs font-semibold text-gray-700">
+                          {suiteLabels[suiteId] || suite.label || suiteId}
+                        </p>
+                        {suite.winner && (
+                          <p className="text-[10px] text-emerald-600 font-medium">
+                            ⚡ fastest: <span className="font-mono">{suite.winner.provider}</span>
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        {Object.entries(suite.providers || {}).map(([pid, r]) => (
+                          <div key={pid} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono text-gray-700 truncate" title={r.model}>{pid}</span>
+                              <span className="text-[10px] text-gray-300 font-mono truncate hidden sm:inline">{r.model}</span>
+                            </div>
+                            {r.skipped ? (
+                              <span className="text-[10px] text-gray-400 italic truncate ml-2" title={r.reason}>
+                                skipped — {String(r.reason || '').slice(0, 60)}
+                              </span>
+                            ) : r.samples > 0 ? (
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className="text-[10px] text-gray-400">tok/s {r.tokens_per_sec_p50}</span>
+                                <span className="text-[10px] text-gray-400">p95</span>
+                                <LatencyBadge ms={Math.round(r.ttft_p95_ms)} />
+                                <span className="text-[10px] text-gray-400">p50</span>
+                                <LatencyBadge ms={Math.round(r.ttft_p50_ms)} />
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-gray-400 italic">no samples</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        </SectionErrorBoundary>
+
         <SectionErrorBoundary name="System Status Banner">
         <div className={`rounded-2xl p-4 flex items-center gap-3 ${
           loading ? 'bg-gray-50 border border-gray-200' : hasError ? 'bg-red-50 border border-red-200' : 'bg-emerald-50 border border-emerald-200'

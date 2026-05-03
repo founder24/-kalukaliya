@@ -38,6 +38,7 @@ The project is built as a pnpm workspace monorepo, integrating a React + Vite fr
 - **Educational Browser Backend:** Infrastructure for an in-app educational browser with grounded AI chat, including domain allowlisting, content fetching, and kid-safe content filtering.
 - **Unified Log Explorer:** Centralized logging system for frontend, edge-proxy, and backend logs into a single Mongo collection (`unified_logs`), with filtering, searching, export, and tracing capabilities for on-call administration. Includes Cloudflare pull loop and edge worker log shipper.
 - **GitHub Actions Supply-Chain Hardening:** SHA-pinned actions, self-enforcing pin gate, least-privilege `GITHUB_TOKEN`, and workflow-security linter gate using `zizmor`.
+- **LLM Provider Speed Bench (Task #279):** `scripts/bench_llm_providers.py` runs head-to-head TTFT / tokens-per-sec / total-latency benchmarks across English chat, Assamese chat, and long-form prompt suites. Provider matrix per suite — english_chat: azure_openai, bedrock_nova, workers_ai_oss20, vertex_chat; assamese_chat: sarvam, workers_ai_indic, vertex_chat; long_form: azure_openai, bedrock_nova, workers_ai_oss120, vertex_chat. Outputs timestamped Markdown + JSON plus `latest.json` to `artifacts/syrabit-backend/bench_results/`. Admin Health "Infrastructure" tab surfaces latest p50/p95 TTFT per suite via `GET /api/admin/bench/latest`.
 
 ## External Dependencies
 
