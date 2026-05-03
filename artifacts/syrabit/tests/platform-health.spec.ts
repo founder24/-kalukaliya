@@ -16,7 +16,7 @@ const HEALTH_ALL_GREEN = {
   status: 'ok',
   timestamp: new Date().toISOString(),
   services: {
-    vertex_ai: { status: 'ok', latency_ms: 120, provider: 'google', model: 'gemini-1.5-pro' },
+    vertex_ai: { status: 'ok', latency_ms: 120, provider: 'google', model: 'gemini-2.5-flash' },
     mongodb: { status: 'ok', latency_ms: 8, replica_set: 'rs0' },
     redis: { status: 'ok', latency_ms: 2 },
     cloudflare: { status: 'ok' },
@@ -28,7 +28,7 @@ const HEALTH_VERTEX_DOWN = {
   status: 'degraded',
   timestamp: new Date().toISOString(),
   services: {
-    vertex_ai: { status: 'error', error: 'service_unavailable', latency_ms: null, provider: 'google', model: 'gemini-1.5-pro', http_status: 503 },
+    vertex_ai: { status: 'error', error: 'service_unavailable', latency_ms: null, provider: 'google', model: 'gemini-2.5-flash', http_status: 503 },
     mongodb: { status: 'ok', latency_ms: 8, replica_set: 'rs0' },
     redis: { status: 'ok', latency_ms: 2 },
     cloudflare: { status: 'ok' },
@@ -40,7 +40,7 @@ const HEALTH_MONGO_DOWN = {
   status: 'degraded',
   timestamp: new Date().toISOString(),
   services: {
-    vertex_ai: { status: 'ok', latency_ms: 120, provider: 'google', model: 'gemini-1.5-pro' },
+    vertex_ai: { status: 'ok', latency_ms: 120, provider: 'google', model: 'gemini-2.5-flash' },
     mongodb: { status: 'error', error: 'connection_refused', latency_ms: null, replica_set: 'rs0', http_status: 503 },
     redis: { status: 'ok', latency_ms: 2 },
     cloudflare: { status: 'ok' },

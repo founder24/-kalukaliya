@@ -692,7 +692,7 @@ async def _gemini_ocr_image(image_bytes: bytes, mime_type: str = "image/jpeg") -
         # real key directly hits the free-tier quota (429) because the SDK
         # sends "Bearer <real-key>" which bypasses the gateway's key pool.
         gemini_key = BYOK_PLACEHOLDER if CF_GATEWAY_ENABLED else _GEMINI_KEY
-        model = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.0-flash")
+        model = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.5-flash")
         prompt_text = (
             "You are an OCR engine. Extract ALL visible text from this image exactly as written, "
             "preserving question numbers, sub-parts, mathematical notation and formatting. "

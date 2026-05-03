@@ -114,7 +114,7 @@ export default function AdminRateLimits({ adminToken, onNavigate }) {
           </div>
           {stats.cost_degraded && (
             <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-              <AlertTriangle size={11} /> Model degraded to gemini-1.5-flash (reduced capacity)
+              <AlertTriangle size={11} /> Model degraded to gemini-2.5-flash-lite (reduced capacity)
             </p>
           )}
         </div>

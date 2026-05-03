@@ -827,7 +827,7 @@ def _make_gemini_slot():
     return {
         "provider": "gemini",
         "key": "AIza-test",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-2.5-flash",
         "sem": asyncio.Semaphore(8),
         "max_con": 8,
         "last_used": 0.0,

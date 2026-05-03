@@ -29,16 +29,22 @@ class LlmResult(str):
 _MODEL_MAX_OUTPUT_TOKENS = {
     "llama-3.1-8b-instant": 8192,
     "gemini-2.5-flash": 65536,
-    "gemini-2.0-flash": 65536,  # alias → gemini-2.5-flash at call time
 }
 
 # Deprecated / renamed models — resolved before the provider call so we
 # never send a stale model name to the upstream API.
 _MODEL_ALIASES: dict[str, str] = {
-    # Task #247: gemini-2.0-flash is kept as a valid model ID in the SLM pool
-    # (position-2 fallback), so we do NOT alias it to gemini-2.5-flash here.
-    # The existing slot entry uses "gemini-2.0-flash" directly with the Gemini
-    # provider which resolves it through the _stream_gemini path.
+    # gemini-2.0-flash, gemini-2.0-flash-lite-001, gemini-1.5-flash,
+    # gemini-1.5-pro, gemini-flash-latest, gemini-pro-latest are NOT enabled
+    # in the BYOK Vertex project (verified 2026-05-03 — only the 2.5 family
+    # is provisioned). Any historical references are normalised to 2.5-flash.
+    "gemini-2.0-flash":          "gemini-2.5-flash",
+    "gemini-2.0-flash-001":      "gemini-2.5-flash",
+    "gemini-2.0-flash-lite-001": "gemini-2.5-flash",
+    "gemini-1.5-flash":          "gemini-2.5-flash",
+    "gemini-1.5-pro":            "gemini-2.5-flash",
+    "gemini-flash-latest":       "gemini-2.5-flash",
+    "gemini-pro-latest":         "gemini-2.5-flash",
 }
 
 def _clamp_max_tokens(model: str, max_tokens: int) -> int:
@@ -507,7 +513,6 @@ _MODEL_PROVIDER_MAP = {
     "sarvam-105b": "sarvam",
     "sarvam-105b-32k": "sarvam",
     "gemini-2.5-flash": "gemini",
-    "gemini-2.0-flash": "gemini",
     "gpt-4o-mini": "azure_openai",
     "gpt-4.1-mini": "azure_openai",
 }
@@ -518,6 +523,18 @@ _MODEL_ALIAS_MAP = {
     "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
     "llama-3.3-70b-versatile": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    # Gemini deprecations — only the 2.5 family is provisioned in our Vertex
+    # project (verified 2026-05-03). Normalise stale IDs here so provider
+    # selection in _call_llm_raw / call_llm_api_stream picks the gemini
+    # provider with the correct supported model BEFORE dispatch.
+    "gemini-2.0-flash":          "gemini-2.5-flash",
+    "gemini-2.0-flash-001":      "gemini-2.5-flash",
+    "gemini-2.0-flash-lite-001": "gemini-2.5-flash",
+    "gemini-1.5-flash":          "gemini-2.5-flash",
+    "gemini-1.5-pro":            "gemini-2.5-flash",
+    "gemini-flash-latest":       "gemini-2.5-flash",
+    "gemini-pro-latest":         "gemini-2.5-flash",
+    "gemini-2.5-pro":            "gemini-2.5-flash",
 }
 
 # ── SLM slot table ────────────────────────────────────────────────────────────
@@ -550,10 +567,10 @@ _SLM_SLOT_CANDIDATES = [
     ("workers-ai",  "@cf/meta/llama-3.2-3b-instruct",                 128, 3),
     # Tier 4: Workers AI llama-3.1-8b — fast 8B fallback.
     ("workers-ai",  "@cf/meta/llama-3.1-8b-instruct-fp8",              64, 4),
-    # Tier 5: Gemini 2.0 Flash — GCP fallback when Workers AI load > 0.80.
-    # Consumes GCP credits; intentionally NOT a primary slot.
-    # RPM cap: 600 (AI Studio Tier 1) → shared with _GEMINI_KEY.
-    ("gemini",      "gemini-2.0-flash",                                  4, 5),
+    # Tier 5: Vertex Gemini 2.5 Flash — GCP fallback when Workers AI load > 0.80.
+    # Consumes GCP credits via CF AI Gateway BYOK (project blissful-acumen-…).
+    # Only 2.5-flash / 2.5-flash-lite are enabled in the project; 2.0/1.5 are not.
+    ("gemini",      "gemini-2.5-flash",                                  4, 5),
 ]
 
 # Content SmartKeyPool — serves `_CONTENT_INTENTS` (notes, important_questions,

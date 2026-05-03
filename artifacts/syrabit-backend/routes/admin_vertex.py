@@ -732,7 +732,7 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "configured": "vision_ocr" in configured_services,
             },
             "gemini_fallback": {
-                "model": "gemini-2.0-flash",
+                "model": "gemini-2.5-flash",
                 "role": "chat fallback position-2 (workers_ai → gemini → groq)",
                 "trigger": "workers_ai load > 0.80",
                 "pricing": "$0.075/1M tokens",
