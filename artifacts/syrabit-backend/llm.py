@@ -1394,7 +1394,7 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "exa_ai":           "exa",                                       # Exa neural search
     "tavily":           "tavily-search",                             # Tavily search
     "mongodb_atlas":    "vector-search",                             # Atlas $vectorSearch (fallback)
-    "workers_ai":       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",  # CF Workers AI general LLM (last resort)
+    "workers_ai":       "@cf/openai/gpt-oss-20b",                    # CF Workers AI gpt-oss-20b — Task #291 last-resort fallback for content + english_rag_chat (no quota lock-up like llama-3.3-70b)
     "workers_ai_indic": "@cf/ai4bharat/indictrans2-en-indic-1b",     # CF Workers AI IndicTrans2 English→Assamese; primary translate
 }
 
@@ -1501,6 +1501,24 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
         weights.append(credit)
 
     if pool:
+        # Task #291 — STRICT primary→fallback for locked chains.
+        # When the highest weight dominates the next-highest by >=10x (the
+        # lock signal used in POOL_WEIGHTS for content / english_rag_chat /
+        # assamese_rag_chat / translate), pick that primary deterministically
+        # instead of drawing from the weighted distribution. This eliminates
+        # the residual ~1% probability that the secondary wins a draw while
+        # the primary is healthy, giving a true strict-fallback contract.
+        max_w = max(weights)
+        contenders = [(p, w) for p, w in zip(pool, weights) if w == max_w]
+        if len(contenders) == 1:
+            second = max((w for w in weights if w < max_w), default=0)
+            if second == 0 or max_w >= 10 * second:
+                chosen = contenders[0][0]
+                logger.debug(
+                    "select_provider: feature=%s lang=%s → %s [STRICT primary, ratio=%s:%s]",
+                    feature, lang, chosen, max_w, second,
+                )
+                return chosen
         chosen = _random.choices(pool, weights=weights, k=1)[0]
         logger.debug("select_provider: feature=%s lang=%s → %s (pool=%s)", feature, lang, chosen, pool)
         return chosen
@@ -1517,6 +1535,15 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
         logger.info("select_provider: feature=%s — all weighted providers exhausted, using fallback %s", feature, p)
         return p
 
+    # Task #291 — strict-chain features must NOT silently downgrade to a
+    # global workers_ai default. assamese_rag_chat is reasoning-only (Sarvam
+    # / Vertex); falling through to llama/gpt-oss for an Assamese answer
+    # would produce English/garbled output. Return None so the caller errors
+    # out cleanly instead of serving a wrong-language response.
+    _STRICT_CHAIN_FEATURES = ("assamese_rag_chat",)
+    if feature in _STRICT_CHAIN_FEATURES:
+        logger.warning("select_provider: feature=%s — strict chain exhausted, returning None (no silent downgrade)", feature)
+        return None
     logger.warning("select_provider: feature=%s — no provider available, defaulting to workers_ai", feature)
     return "workers_ai"
 

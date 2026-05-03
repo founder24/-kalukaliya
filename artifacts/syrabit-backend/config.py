@@ -1032,10 +1032,14 @@ PROVIDER_PRIORITY: dict = {
     # comment above. POOL_WEIGHTS["english_rag_chat"] gives every provider
     # weight=1000 so the draw is true round-robin (~33% each).
     "english_rag_chat":  ["azure_openai", "vertex", "workers_ai"],
-    # Assamese chat (Task #281): equal-weight rotation across Sarvam (native
-    # Indic), Gemini, and Workers AI IndicTrans2. POOL_WEIGHTS gives every
-    # provider weight=1000 so the draw is true round-robin (~33% each).
-    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
+    # Assamese chat (Task #291 — strict locked chain): Sarvam (native Indic
+    # conversational reasoning) primary, Vertex (Gemini 2.5 Flash) sole
+    # fallback. workers_ai_indic is intentionally NOT in this pool because
+    # IndicTrans2 is a translation model, not an Assamese reasoning/chat
+    # model — silently downgrading reasoning to a translator would produce
+    # nonsense answers. If both Sarvam and Vertex fail the request errors
+    # out cleanly rather than serving a wrong-model response.
+    "assamese_rag_chat": ["sarvam", "vertex"],
     # Long-form content / notes generation (Task #281): equal-weight rotation
     # across Gemini (1M-token context), Azure, and Workers AI. Bedrock
     # removed — see header comment above. POOL_WEIGHTS["content"] gives every
@@ -1095,28 +1099,30 @@ PROVIDER_CREDITS: dict = {
 # Per-pool weight overrides — take precedence over PROVIDER_CREDITS in select_provider.
 # Use this when a provider should have a different priority in one pool vs. the global default.
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
-    # content / english_rag_chat / assamese_rag_chat (Task #281):
-    #   Equal-weight rotational draw across the 3 providers in each pool —
-    #   AWS removed, Gemini restored to english_rag_chat — so no single
-    #   primary gets exhausted before its peers. weight=1000 each →
-    #   ~33% draw probability per provider.
+    # Task #291 — strict primary→fallback chains (locked).
+    # Weights are intentionally orders-of-magnitude apart so the weighted
+    # draw acts as a deterministic priority ladder: the primary wins on
+    # every healthy draw, and only when the primary is excluded (saturated
+    # or already-failed-this-request) does the fallback get selected.
+    #
+    # Chains:
+    #   content              vertex(10000) → azure_openai(100) → workers_ai(0, gpt-oss-20b)
+    #   english_rag_chat     azure_openai(10000) → vertex(100) → workers_ai(0, gpt-oss-20b)
+    #   assamese_rag_chat    sarvam(10000) → vertex(100)              [no workers fallback]
+    #   translate            workers_ai_indic(10000) → vertex(100)
     "content": {
-        "vertex":       1000,   # Gemini 2.5 Flash — 1M-token context, best for long-form notes
-        "azure_openai": 1000,   # GPT-4.1-mini — fastest TPS on Azure
-        "workers_ai":   1000,   # Llama 3.3 70B fp8 — Cloudflare credit pool
+        "vertex":       10000,  # primary — Gemini 2.5 Flash, 1M-token context
+        "azure_openai":   100,  # fallback — GPT-4.1-mini
+        "workers_ai":       0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
-    # english_rag_chat (Task #281): Azure / Gemini / Workers AI equal-weight rotation.
-    # Draw order is randomised by weight, so all three see ~33% of traffic.
     "english_rag_chat": {
-        "azure_openai": 1000,   # GPT-4.1-mini
-        "vertex":       1000,   # Gemini 2.5 Flash — restored to this pool in Task #281
-        "workers_ai":   1000,   # Llama 3.3 70B fp8 fallback
+        "azure_openai": 10000,  # primary — GPT-4.1-mini (Azure)
+        "vertex":         100,  # fallback — Gemini 2.5 Flash
+        "workers_ai":       0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
-    # assamese_rag_chat (Task #281): Sarvam / Gemini / IndicTrans2 equal-weight rotation.
     "assamese_rag_chat": {
-        "sarvam":           1000,   # native Indic conversational
-        "vertex":           1000,   # Gemini 2.5 Flash
-        "workers_ai_indic": 1000,   # CF IndicTrans2 — purpose-built Indic neural MT
+        "sarvam": 10000,  # primary — native Assamese conversational reasoning
+        "vertex":   100,  # fallback — Gemini 2.5 Flash (no further downgrade)
     },
     # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
     # at low weight strictly for formatting / structuring notes. Sarvam removed
@@ -1125,9 +1131,11 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_indic": 5000,   # primary — purpose-built Indic neural MT
         "vertex":            100,   # small slice for note formatting / structure
     },
-    # translate: IndicTrans2 primary (3000) → Vertex fallback (100).
+    # translate: Task #291 strict locked chain — IndicTrans2 (10000) → Vertex (100).
+    # 100x ratio matches the other locked chains so select_provider's strict-primary
+    # short-circuit picks IndicTrans2 deterministically on every healthy draw.
     "translate": {
-        "workers_ai_indic": 3000,   # primary — dedicated Indic MT model, fastest
+        "workers_ai_indic": 10000,  # primary — dedicated Indic MT model, fastest (Task #291 strict lock)
         "vertex":            100,   # fallback — Gemini handles any edge cases
     },
     # vector_search: Pinecone curated index primary (3000) → Atlas/Vertex fallback (500).

@@ -3167,6 +3167,8 @@ def _render_seo_html(
 <meta name="geo.position" content="26.2006;92.9376">
 <meta http-equiv="content-language" content="en-IN">
 <link rel="alternate" hreflang="en-IN" href="{html_mod.escape(page_url)}">
+<link rel="alternate" hreflang="as-IN" href="{html_mod.escape(page_url)}{'&amp;' if '?' in page_url else '?'}lang=as">
+<link rel="alternate" hreflang="x-default" href="{html_mod.escape(page_url)}">
 <meta name="ICBM" content="26.2006, 92.9376">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 {_prev_link}{_next_link}<script type="application/ld+json">{ld_json}</script>
@@ -3604,6 +3606,8 @@ async def get_about_html():
 <meta property="og:locale" content="en_IN">
 <meta http-equiv="content-language" content="en-IN">
 <link rel="alternate" hreflang="en-IN" href="{html_mod.escape(page_url)}">
+<link rel="alternate" hreflang="as-IN" href="{html_mod.escape(page_url)}{'&amp;' if '?' in page_url else '?'}lang=as">
+<link rel="alternate" hreflang="x-default" href="{html_mod.escape(page_url)}">
 <script type="application/ld+json">{schema}</script>
 <style>
 body{{font-family:system-ui,-apple-system,sans-serif;max-width:860px;margin:0 auto;padding:1.25rem;color:#1a1a1a;line-height:1.7}}
@@ -4178,6 +4182,8 @@ async def get_subject_landing_html(board: str, class_slug: str, subject_slug: st
 <meta property="og:locale" content="en_IN">
 <meta http-equiv="content-language" content="en-IN">
 <link rel="alternate" hreflang="en-IN" href="{html_mod.escape(page_url)}">
+<link rel="alternate" hreflang="as-IN" href="{html_mod.escape(page_url)}{'&amp;' if '?' in page_url else '?'}lang=as">
+<link rel="alternate" hreflang="x-default" href="{html_mod.escape(page_url)}">
 <meta name="citation_title" content="{html_mod.escape(title)}">
 <meta name="citation_author" content="Syrabit.ai">
 <meta name="citation_publisher" content="Syrabit.ai">
@@ -4644,9 +4650,12 @@ def _build_urlset(entries: list[dict]) -> str:
         if e.get("has_assamese"):
             sep = "&amp;" if "?" in loc else "?"
             as_loc = f"{loc}{sep}lang=as"
+            # Task #291 — sitemap guard: emit en-IN, as-IN, and x-default
+            # alternates so Google Search Console treats Assamese variants
+            # as first-class siblings of the English page.
             alt = (
-                f'<xhtml:link rel="alternate" hreflang="en" href="{loc}"/>'
-                f'<xhtml:link rel="alternate" hreflang="as" href="{as_loc}"/>'
+                f'<xhtml:link rel="alternate" hreflang="en-IN" href="{loc}"/>'
+                f'<xhtml:link rel="alternate" hreflang="as-IN" href="{as_loc}"/>'
                 f'<xhtml:link rel="alternate" hreflang="x-default" href="{loc}"/>'
             )
         else:
@@ -4881,6 +4890,20 @@ async def get_sitemap_chapters():
             "lastmod": lastmod, "pri": pri, "freq": freq,
             "has_assamese": bool((ch.get("content_as") or "").strip()),
         })
+    # Task #291 — emit a sitemap-time WARNING when published English chapters
+    # are missing their Assamese (content_as) sibling. The hreflang="as-IN"
+    # alternate is rendered in _build_urlset for has_assamese=True only, so
+    # this warning surfaces SEO coverage gaps where users following the
+    # Assamese alternate would 404-equivalently.
+    _missing_as = sum(1 for e in entries if not e.get("has_assamese"))
+    if _missing_as:
+        logger.warning(
+            "[T291][sitemap] %d/%d chapter URLs lack an Assamese (content_as) "
+            "alternate — hreflang='as-IN' will be omitted for those pages. "
+            "Run scripts/embed_assamese_corpus.py + translate the missing "
+            "chapters to close the gap.",
+            _missing_as, len(entries),
+        )
     return _xml_response(_build_urlset(entries))
 
 

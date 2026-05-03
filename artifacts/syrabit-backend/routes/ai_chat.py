@@ -165,56 +165,92 @@ _POLISH_SYSTEM_PROMPT = (
 )
 
 
+_ASSAMESE_SCRIPT_RE = re.compile(r"[\u0980-\u09FF]")
+_LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+# Task #291 — minimum share of letters that must be in Assamese script for
+# the question to be considered "already in Assamese". Below this threshold
+# we treat the input as English / mixed and translate it before embedding,
+# so e.g. "Photosynthesis কি?" (mostly English, 1 Assamese word) still gets
+# routed through ensure_question_in_assamese.
+_AS_SCRIPT_RATIO_THRESHOLD = 0.60
+
+
+def _detect_is_assamese_script(text: str) -> bool:
+    """Return True when *text* is predominantly in the Bengali/Assamese
+    Unicode block (U+0980–U+09FF). Used by the Assamese-mode chat pipeline
+    (Task #291) to decide whether the user's question already arrived in
+    Assamese script or needs to be translated to Assamese before being
+    embedded against the namespace="as" Pinecone index.
+
+    Detection rule (handles mixed-script input correctly):
+      • 0 Assamese chars → False (pure English / numbers / symbols).
+      • Otherwise, compute the ratio of Assamese letters to total letters
+        (Assamese + Latin). If Assamese makes up at least
+        ``_AS_SCRIPT_RATIO_THRESHOLD`` (60%) of the alphabetic content,
+        treat the question as Assamese; otherwise translate it.
+      • Pure-Assamese with no Latin letters → True.
+    """
+    if not text:
+        return False
+    as_count = len(_ASSAMESE_SCRIPT_RE.findall(text))
+    if as_count == 0:
+        return False
+    latin_count = len(_LATIN_LETTER_RE.findall(text))
+    total_letters = as_count + latin_count
+    if total_letters == 0:
+        return False
+    return (as_count / total_letters) >= _AS_SCRIPT_RATIO_THRESHOLD
+
+
 async def _assamese_translate_gemini_main_sarvam_polish(
     text: str,
     *,
     target_lang_code: str = "as-IN",
 ) -> str:
-    """Assamese translation pipeline: Sarvam-primary → Qwen-fallback → Sarvam-polish.
+    """English → Assamese translation pipeline (Task #291 — strict locked chain).
 
-    Step 0 (primary): English text → Assamese via Sarvam translate:v1 (/translate API).
-        Sarvam's dedicated translation model is purpose-built for Indic languages
-        and produces more natural Assamese than Qwen alone. Typical latency: 300-800ms.
-
-    Step 1 (fallback): If Sarvam translate is unavailable or fails, English text →
-        Assamese via Qwen (Cerebras Qwen-3-235B or Workers AI Qwen2.5-72B).
-
-    Step 2 (polish, optional): Qwen Assamese output → polished Assamese
-        via Sarvam-m chat. Skipped for short fragments (< _POLISH_MIN_LEN
-        chars), AND skipped entirely when Step 0 succeeded (Sarvam translate
-        already produces fluent Assamese).
+    Strict translate-then-polish contract per spec:
+      Step 1 (translate, ONLY):    Workers AI IndicTrans2 (en→as).
+                                   IndicTrans2 is the sole translator —
+                                   Vertex is *not* used as a translation
+                                   fallback because it does not match
+                                   IndicTrans2's Assamese fluency profile.
+      Step 2 (polish, ALWAYS):     Vertex / Gemini 2.5 Flash polishes the
+                                   IndicTrans2 output for fluency and
+                                   formatting on every non-empty output
+                                   (no length gating).
+      Sarvam is intentionally NOT used on this path — Sarvam's role in
+      Task #291 is reasoning over Assamese RAG context
+      (`assamese_rag_chat` pool), not English→Assamese translation.
 
     Failure modes:
-        • Sarvam translate fails → falls through to Qwen (Step 1).
-        • Qwen fails or returns empty → returns "" (caller falls back to
-          its own strip / original-text path).
-        • Sarvam polish fails / times out → returns the un-polished Qwen
-          output (graceful degradation — translation still landed).
+      • IndicTrans2 fails / empty → returns "" (no cross-engine translate
+        fallback, by design).
+      • Vertex polish fails       → returns un-polished IndicTrans2 output.
 
     Args:
-        text: Source English text to translate.
-        target_lang_code: Sarvam-style language code (e.g., "as-IN"). The
-            Qwen translator only uses the bare language ("as"); the full
-            code is kept in the signature for symmetry with the legacy
-            Sarvam /translate API and forward-compatibility if other Indic
-            targets are ever added.
+        text:             English source text.
+        target_lang_code: Reserved for future Indic targets ("as-IN", "bn-IN"…).
+                          Only the bare language code ("as") is forwarded to
+                          IndicTrans2; "as-IN" is preserved for backwards
+                          compatibility with callers built around the old
+                          Sarvam /translate API.
 
     Returns:
-        Polished Assamese string, or un-polished Qwen output, or "".
+        Vertex-polished Assamese string, un-polished IndicTrans2 output,
+        or "" if every tier failed.
     """
     src = (text or "").strip()
     if not src:
         return ""
 
-    # Derive bare language ("as-IN" → "as") for the Qwen translator.
     _bare_lang = (target_lang_code or "as-IN").split("-", 1)[0].lower() or "as"
 
-    # ── Redis translation cache (avoids repeated Qwen+Sarvam round-trips) ─
+    # ── Redis translation cache ────────────────────────────────────────────
     _cache_key = "tr:" + hashlib.md5(f"{_bare_lang}:{src[:1000]}".encode()).hexdigest()
     _TRANSLATE_CACHE_TTL = 1800  # 30 minutes
 
     def _tr_cache_store(result: str) -> str:
-        """Store result in Redis and return it unchanged."""
         if result:
             try:
                 if redis_client:
@@ -227,63 +263,15 @@ async def _assamese_translate_gemini_main_sarvam_polish(
         if redis_client:
             _cached = redis_client.get(_cache_key)
             if _cached:
-                logger.debug("[INDIC-TRANSLATE] Redis cache hit for %r", src[:40])
+                logger.debug("[INDIC-TRANSLATE][T291] Redis cache hit for %r", src[:40])
                 return _cached if isinstance(_cached, str) else _cached.decode("utf-8", errors="replace")
     except Exception:
-        pass  # cache miss — proceed normally
+        pass  # cache miss → proceed
 
-    # ── Step 0: Sarvam translate:v1 (primary — dedicated translation model) ─
-    # Sarvam's /translate endpoint is purpose-built for Indic languages and
-    # outperforms Gemini on Assamese fluency. Qwen is the Step 1 fallback.
-    _sarvam_tc = getattr(deps, "sarvam_translate_client", None) or getattr(deps, "sarvam_client", None)
-    if _sarvam_tc:
-        try:
-            _sv_resp = await asyncio.wait_for(
-                _sarvam_tc.post("/translate", json={
-                    "input": src[:1950],
-                    "source_language_code": "en-IN",
-                    "target_language_code": target_lang_code,
-                    "speaker_gender": "Female",
-                    "mode": "formal",
-                    "model": "sarvam-translate:v1",
-                    "enable_preprocessing": False,
-                }),
-                timeout=2.0,
-            )
-            if _sv_resp.status_code == 200:
-                _sv_result = (_sv_resp.json().get("translated_text") or "").strip()
-                if _sv_result:
-                    logger.debug("[INDIC-TRANSLATE] Sarvam translate:v1 primary OK for %r", src[:40])
-                    return _tr_cache_store(_sv_result)
-            else:
-                logger.warning("[INDIC-TRANSLATE] Sarvam translate HTTP %d — falling back to Qwen", _sv_resp.status_code)
-        except asyncio.TimeoutError:
-            logger.info("[INDIC-TRANSLATE] Sarvam translate timed out after 3.5s — falling back to Qwen")
-        except Exception as _sv_err:
-            logger.warning("[INDIC-TRANSLATE] Sarvam translate failed (%s) — falling back to Qwen", _sv_err)
-
-    # ── Step 1: IndicTrans2 fallback (Workers AI) → Gemini fallback ───────────
-    # Workers AI IndicTrans2 (primary): purpose-built Indic neural MT model.
-    #   Fast (~300-600ms), zero LLM quota consumed, best Assamese script output.
-    # Gemini (secondary): handles edge-cases where IndicTrans2 returns empty.
-    #
-    # Translation prompt: explicit Assamese-only instruction so Gemini
-    # doesn't produce code-switched output. Numbers, units, proper nouns
-    # (AHSEC, SEBA, DNA, ATP) are allowed in Latin per the Assamese style guide.
-    _TRANSLATE_SYSTEM = (
-        "You are an expert English-to-Assamese (অসমীয়া) translator. "
-        "Translate the input text to fluent, standard Assamese script. "
-        "Rules: (1) Output ONLY the Assamese translation — no English words "
-        "except pure numbers, scientific units (cm, kg, °C, eV), math symbols, "
-        "and well-known proper nouns/acronyms (AHSEC, SEBA, NCERT, DNA, ATP, GDP, Newton). "
-        "(2) No preamble, no explanation, no quote marks around the output."
-    )
-    _TRANSLATE_USER = f"Translate to Assamese:\n\n{src[:2000]}"
-
+    # ── Step 1 (primary): Workers AI IndicTrans2 ──────────────────────────
     translate_out = ""
     _translate_timed_out = False
 
-    # Tier A: Workers AI IndicTrans2 — dedicated Indic neural MT
     try:
         from providers.workers_indic import call_indic_trans as _indic_trans
         _indic_result = await asyncio.wait_for(
@@ -292,115 +280,77 @@ async def _assamese_translate_gemini_main_sarvam_polish(
         )
         translate_out = (_indic_result or "").strip()
         if translate_out:
-            logger.info("[INDIC-TRANSLATE] Workers AI IndicTrans2 OK for %r", src[:40])
+            logger.info("[INDIC-TRANSLATE][T291] IndicTrans2 primary OK for %r", src[:40])
         else:
-            logger.info("[INDIC-TRANSLATE] Workers AI IndicTrans2 returned empty for %r", src[:40])
+            logger.info("[INDIC-TRANSLATE][T291] IndicTrans2 returned empty for %r", src[:40])
     except asyncio.TimeoutError:
-        logger.warning("[INDIC-TRANSLATE] Workers AI IndicTrans2 timed out after %ss", _QWEN_TRANSLATE_TIMEOUT_SEC)
+        logger.warning("[INDIC-TRANSLATE][T291] IndicTrans2 timed out after %ss", _QWEN_TRANSLATE_TIMEOUT_SEC)
         _translate_timed_out = True
     except Exception as _it_err:
-        logger.warning("[INDIC-TRANSLATE] Workers AI IndicTrans2 failed (%s: %s) — trying Gemini",
+        logger.warning("[INDIC-TRANSLATE][T291] IndicTrans2 failed (%s: %s) — trying Vertex",
                        type(_it_err).__name__, str(_it_err)[:120])
 
-    # Tier B: Gemini (only if Tier A failed/empty AND didn't timeout)
-    if not translate_out and not _translate_timed_out:
-        try:
-            from llm import _call_gemini as _gemini_call, _GEMINI_KEY as _gkey
-            if _gkey:
-                _gemini_result = await asyncio.wait_for(
-                    _gemini_call(
-                        [
-                            {"role": "system", "content": _TRANSLATE_SYSTEM},
-                            {"role": "user", "content": _TRANSLATE_USER},
-                        ],
-                        _gkey, "gemini-2.5-flash", 1200,
-                    ),
-                    timeout=_QWEN_TRANSLATE_TIMEOUT_SEC,
-                )
-                translate_out = (_gemini_result or "").strip()
-                if translate_out:
-                    logger.info("[INDIC-TRANSLATE] Gemini fallback OK for %r", src[:40])
-                else:
-                    logger.info("[INDIC-TRANSLATE] Gemini returned empty for %r", src[:40])
-            else:
-                logger.info("[INDIC-TRANSLATE] Gemini key not available — skipping")
-        except asyncio.TimeoutError:
-            logger.warning("[INDIC-TRANSLATE] Gemini timed out — pipeline exhausted for %r", src[:40])
-            _translate_timed_out = True
-        except Exception as _ge:
-            logger.warning("[INDIC-TRANSLATE] Gemini failed: %s: %s",
-                           type(_ge).__name__, str(_ge)[:120])
-
     if not translate_out:
-        logger.info("[INDIC-TRANSLATE] translation tier exhausted (timeout=%s) for %r", _translate_timed_out, src[:60])
+        logger.info("[INDIC-TRANSLATE][T291] IndicTrans2 produced no output for %r — "
+                    "returning empty (Vertex is polish-only, not a translate fallback)",
+                    src[:60])
         return ""
 
-    # ── Step 2: Sarvam polish (optional, best-effort) ───────────────────
-    if len(translate_out) < _POLISH_MIN_LEN:
-        return _tr_cache_store(translate_out)
-
-    # Read the live `sarvam_llm_client` attribute off the deps module so
-    # tests that monkey-patch `deps.sarvam_llm_client = None` see the
-    # current value rather than the import-time snapshot.
-    _sarvam_chat = getattr(deps, "sarvam_llm_client", None)
-    if _sarvam_chat is None:
-        # No Sarvam client configured — return un-polished translation output.
-        return _tr_cache_store(translate_out)
-
+    # ── Step 2 (polish, ALWAYS): Vertex / Gemini polishes IndicTrans2 ──────
+    # Strict translate-then-polish contract — Vertex polishes every
+    # non-empty IndicTrans2 output (no length gating). Polish failure
+    # returns the un-polished IndicTrans2 string so the user still gets
+    # a translation.
     try:
-        polish_resp = await asyncio.wait_for(
-            _sarvam_chat.post(
-                "/v1/chat/completions",
-                json={
-                    "model": "sarvam-m",
-                    "messages": [
-                        {"role": "system", "content": _POLISH_SYSTEM_PROMPT},
-                        {"role": "user", "content": translate_out[:4000]},
-                    ],
-                    "max_tokens": min(1200, len(translate_out) * 3 + 200),
-                    "temperature": 0.05,
-                    "top_p": 0.9,
-                    "stream": False,
-                    "thinking": {"enabled": False},
-                    "response_language": target_lang_code,
-                },
+        from llm import _call_gemini as _gemini_call, _GEMINI_KEY as _gkey
+        if not _gkey:
+            return _tr_cache_store(translate_out)
+        polished = await asyncio.wait_for(
+            _gemini_call(
+                [
+                    {"role": "system", "content": _POLISH_SYSTEM_PROMPT},
+                    {"role": "user", "content": translate_out[:4000]},
+                ],
+                _gkey, "gemini-2.5-flash",
+                min(1200, len(translate_out) * 3 + 200),
             ),
             timeout=_SARVAM_POLISH_TIMEOUT_SEC,
         )
-        if polish_resp.status_code == 200:
-            _body = polish_resp.json()
-            _polished = (
-                _body.get("choices", [{}])[0].get("message", {}).get("content", "")
-                or ""
-            ).strip()
-            # Strip any sarvam-m <think> blocks (defense; we asked it to skip them).
-            _polished = re.sub(r"<think>[\s\S]*?</think>", "", _polished).strip()
-            # Also strip wrapping quote marks that LLMs sometimes add.
-            if _polished.startswith(('"', "'", "“", "‘")) and _polished.endswith(('"', "'", "”", "’")):
-                _polished = _polished[1:-1].strip()
-            if _polished:
-                return _tr_cache_store(_polished)
-            logger.info(
-                f"[INDIC-TRANSLATE] Sarvam polish returned empty body for "
-                f"{translate_out[:60]!r} — using un-polished translation output"
-            )
-        else:
-            logger.warning(
-                f"[INDIC-TRANSLATE] Sarvam polish HTTP {polish_resp.status_code} "
-                f"for {translate_out[:60]!r} — using un-polished translation output"
-            )
+        polished = (polished or "").strip()
+        polished = re.sub(r"<think>[\s\S]*?</think>", "", polished).strip()
+        if polished.startswith(('"', "'", "“", "‘")) and polished.endswith(('"', "'", "”", "’")):
+            polished = polished[1:-1].strip()
+        if polished:
+            logger.info("[INDIC-TRANSLATE][T291] Vertex polish OK (%d chars)", len(polished))
+            return _tr_cache_store(polished)
     except asyncio.TimeoutError:
-        logger.info(
-            f"[INDIC-TRANSLATE] Sarvam polish timed out after "
-            f"{_SARVAM_POLISH_TIMEOUT_SEC}s — using un-polished translation output"
-        )
+        logger.info("[INDIC-TRANSLATE][T291] Vertex polish timed out — using un-polished output")
     except Exception as _pe:  # pragma: no cover — network defensive
-        logger.warning(
-            f"[INDIC-TRANSLATE] Sarvam polish exception "
-            f"({type(_pe).__name__}: {str(_pe)[:120]}) — using un-polished translation output"
-        )
+        logger.warning("[INDIC-TRANSLATE][T291] Vertex polish exception (%s) — using un-polished",
+                       type(_pe).__name__)
 
     return _tr_cache_store(translate_out)
+
+
+async def ensure_question_in_assamese(question: str) -> str:
+    """Task #291 — when an Assamese-mode chat receives a question that
+    isn't already in Assamese script, translate it to Assamese before
+    embedding so the namespace="as" Pinecone retrieval lands in the
+    correct embedding space. No-op for already-Assamese questions and
+    for empty input."""
+    q = (question or "").strip()
+    if not q or _detect_is_assamese_script(q):
+        return q
+    try:
+        translated = await _assamese_translate_gemini_main_sarvam_polish(q, target_lang_code="as-IN")
+        if translated:
+            logger.info("[T291][CROSS-LANG-Q] translated EN question → AS for RAG embed: %r → %r",
+                        q[:40], translated[:40])
+            return translated
+    except Exception as exc:
+        logger.warning("[T291][CROSS-LANG-Q] translate failed (%s) — embedding raw question",
+                       type(exc).__name__)
+    return q
 
 
 router = APIRouter()
@@ -832,11 +782,18 @@ async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depend
 
     _use_prefetched = _prefetched_chapters if (_prefetched_chapters and _rag_query == _original_message) else None
     _rag_content_budget = 8000 if _detected_intent in ("notes", "important_questions", "pyq") else 4000
+    # Task #291 — Assamese-mode question-language guard. When the answer is
+    # being produced in Assamese but the question arrived in another script
+    # (English / Hindi), translate the question to Assamese before embedding
+    # so the namespace="as" Pinecone lookup uses the correct vector space.
+    if _ns_resp_lang == "as" and _rag_query and not _detect_is_assamese_script(_rag_query):
+        _rag_query = await ensure_question_in_assamese(_rag_query)
     rag_ctx = await resolve_rag_context(
         _rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
         document_text=document_text, intent=_detected_intent,
         prefetched_chapters=_use_prefetched,
         max_content_chars=_rag_content_budget,
+        lang=_ns_resp_lang or "en",
     )
     if _s1_subject_str:
         rag_ctx["_stage1_subject"] = _s1_subject_str
@@ -1949,11 +1906,15 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
 
     _s_use_prefetched = _s_prefetched_chapters if (_s_prefetched_chapters and _s_rag_query == _s_original_message) else None
     _s_rag_content_budget = 8000 if _stream_intent in ("notes", "important_questions", "pyq") else 4000
+    # Task #291 — same Assamese question-language guard for the streaming path.
+    if _resp_lang == "as" and _s_rag_query and not _detect_is_assamese_script(_s_rag_query):
+        _s_rag_query = await ensure_question_in_assamese(_s_rag_query)
     rag_ctx = await resolve_rag_context(
         _s_rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
         document_text=document_text, intent=_stream_intent,
         prefetched_chapters=_s_use_prefetched,
         max_content_chars=_s_rag_content_budget,
+        lang=_resp_lang or "en",
     )
     if _s1_subject_str:
         rag_ctx["_stage1_subject"] = _s1_subject_str

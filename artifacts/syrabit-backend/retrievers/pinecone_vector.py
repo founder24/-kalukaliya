@@ -131,6 +131,7 @@ class PineconeVectorRetriever(Retriever):
         metadata_filter: Optional[dict[str, Any]] = None,
         return_values: bool = False,
         return_metadata: bool = True,
+        namespace: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         if not self.is_configured():
             logger.warning("PineconeVectorRetriever: not configured — returning empty")
@@ -149,6 +150,11 @@ class PineconeVectorRetriever(Retriever):
         }
         if metadata_filter:
             payload["filter"] = metadata_filter
+        if namespace:
+            # Task #291 — Assamese-first cross-language RAG.
+            # Namespace "as" holds multilingual-e5-large vectors over the
+            # Assamese (অসমীয়া) corpus; "en" holds the English corpus.
+            payload["namespace"] = namespace
 
         t0 = time.perf_counter()
         try:
@@ -182,11 +188,20 @@ class PineconeVectorRetriever(Retriever):
             results.append(entry)
         return results
 
-    async def upsert(self, vectors: list[dict[str, Any]]) -> dict[str, Any]:
+    async def upsert(
+        self,
+        vectors: list[dict[str, Any]],
+        *,
+        namespace: Optional[str] = None,
+    ) -> dict[str, Any]:
         """Upsert vectors to Pinecone.
 
         Each input dict must match:
           { "id": str, "values": list[float], "metadata": dict }
+
+        Task #291 — pass ``namespace="as"`` for the Assamese corpus and
+        ``namespace="en"`` for the English corpus so cross-language RAG
+        queries route to the correct embedding space.
         """
         if not vectors:
             return {"upserted": 0}
@@ -204,7 +219,7 @@ class PineconeVectorRetriever(Retriever):
 
         for i in range(0, len(vectors), batch_size):
             batch = vectors[i : i + batch_size]
-            payload = {
+            payload: dict[str, Any] = {
                 "vectors": [
                     {
                         "id": v["id"],
@@ -214,6 +229,8 @@ class PineconeVectorRetriever(Retriever):
                     for v in batch
                 ]
             }
+            if namespace:
+                payload["namespace"] = namespace
             try:
                 async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                     resp = await client.post(
@@ -234,7 +251,7 @@ class PineconeVectorRetriever(Retriever):
             result["errors"] = errors
         return result
 
-    async def delete(self, ids: list[str]) -> int:
+    async def delete(self, ids: list[str], *, namespace: Optional[str] = None) -> int:
         if not ids:
             return 0
         if not self.is_configured():
@@ -244,11 +261,14 @@ class PineconeVectorRetriever(Retriever):
         if not host:
             return 0
 
+        body: dict[str, Any] = {"ids": ids}
+        if namespace:
+            body["namespace"] = namespace
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(
                     f"{host}/vectors/delete",
-                    json={"ids": ids},
+                    json=body,
                     headers=_data_headers(),
                 )
                 resp.raise_for_status()
@@ -257,8 +277,15 @@ class PineconeVectorRetriever(Retriever):
             logger.error("PineconeVectorRetriever.delete failed: %s", exc)
             return 0
 
-    async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
-        """Fetch vectors by ID using Pinecone's /vectors/fetch endpoint."""
+    async def get_by_ids(self, ids: list[str], *, namespace: Optional[str] = None) -> list[dict[str, Any]]:
+        """Fetch vectors by ID using Pinecone's /vectors/fetch endpoint.
+
+        Task #291 — accepts ``namespace`` so the embed scripts can perform
+        namespace-correct idempotency lookups. Without this parameter,
+        ``get_by_ids`` would always read the default namespace and the
+        ``as``/``en`` corpus runs would re-embed every chapter on every
+        invocation (false-miss → wasted Cohere/Pinecone Inference quota).
+        """
         if not ids:
             return []
         if not self.is_configured():
@@ -268,9 +295,11 @@ class PineconeVectorRetriever(Retriever):
         if not host:
             return []
 
-        # Pinecone fetch: GET /vectors/fetch?ids=id1&ids=id2&...
+        # Pinecone fetch: GET /vectors/fetch?ids=id1&ids=id2&[namespace=as]
         try:
-            params = [("ids", i) for i in ids]
+            params: list[tuple[str, str]] = [("ids", i) for i in ids]
+            if namespace:
+                params.append(("namespace", namespace))
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.get(
                     f"{host}/vectors/fetch",

@@ -502,6 +502,7 @@ async def _try_vector_provider(
     query: str,
     limit: int,
     subject_id: Optional[str],
+    lang: str = "en",
 ) -> list:
     """Attempt vector search with a single named provider.
 
@@ -510,17 +511,36 @@ async def _try_vector_provider(
     the provider and redraw from the remaining weighted pool.
 
     Embed strategy per provider:
-      - pinecone_ai   → Cohere embed (1024-dim, matches syrabit-ahsec index)
+      - pinecone_ai   →
+          • lang=="as": Pinecone Inference multilingual-e5-large (1024-dim)
+                        against namespace="as" — Task #291 cross-language RAG.
+          • else      : Cohere embed (1024-dim, matches syrabit-ahsec default ns).
       - mongodb_atlas → Cohere embed (1024-dim, matches Atlas embedding space)
       - vertex        → vertex_services.embed_text (Gemini RETRIEVAL_QUERY)
       - workers_ai    → raises immediately (no vector endpoint available)
     """
     # ── 1. Embed the query using the provider's required embedding model ───────
     q_vec: Optional[list] = None
+    _lang_norm = (lang or "").lower().strip()
+    _is_assamese = _lang_norm == "as"
+    _is_english = _lang_norm in ("", "en")
 
-    if provider in ("pinecone_ai", "mongodb_atlas"):
-        # Cohere 1024-dim vectors match both Pinecone and Atlas indexes.
-        # Do NOT substitute Pinecone Inference (768-dim) — dimension mismatch.
+    if provider == "pinecone_ai":
+        # Task #291 — Pinecone Inference multilingual-e5-large (1024-dim).
+        # The same embedding model is used to populate BOTH namespaces by
+        # scripts/embed_assamese_corpus.py (namespace="as") and
+        # scripts/embed_english_corpus.py (namespace="en"), so the query
+        # embedding space matches the index embedding space for either lang.
+        from providers import pinecone_ai as _pc_ai
+        if not _pc_ai.ENABLED:
+            raise RuntimeError("pinecone_ai: Pinecone Inference not configured (PINECONE_API_KEY missing)")
+        q_vec = await asyncio.wait_for(
+            _pc_ai.embed_one(query, input_type="query"),
+            timeout=4.0,
+        )
+
+    elif provider == "mongodb_atlas":
+        # Atlas vector_index is Cohere 1024-dim — keep Cohere on this leg.
         from providers.cohere import embed_query as _cohere_embed, ENABLED as _cohere_on
         if not _cohere_on:
             raise RuntimeError(f"{provider}: Cohere embeddings not configured (VOYAGE_API_KEY missing?)")
@@ -550,8 +570,21 @@ async def _try_vector_provider(
         _pc = PineconeVectorRetriever()
         if not _pc.is_configured():
             raise RuntimeError("pinecone_ai: PineconeVectorRetriever not configured")
+        # Task #291 — namespace lock by language: "as" for Assamese, "en"
+        # for English. Both namespaces are populated by the embed_*_corpus
+        # scripts using the same multilingual-e5-large model so the query
+        # vector space matches the index vector space in both legs.
+        if _is_assamese:
+            _ns = "as"
+        elif _is_english:
+            _ns = "en"
+        else:
+            _ns = None
+        logger.info("[T291][RAG] Pinecone query namespace=%s subject_id=%s top_k=%d",
+                    _ns, subject_id, limit)
         matches = await asyncio.wait_for(
-            _pc.query(q_vec, top_k=limit, metadata_filter=pc_filter, return_metadata=True),
+            _pc.query(q_vec, top_k=limit, metadata_filter=pc_filter,
+                      return_metadata=True, namespace=_ns),
             timeout=2.0,
         )
         return [
@@ -675,6 +708,49 @@ async def _fetch_chunks_semantic(
     exclude: frozenset = frozenset()
     max_attempts = len(_PP.get("vector_search", [])) + 1
 
+    # Task #291 — STRICT Assamese namespace lock. In Assamese mode, retrieval
+    # is restricted to Pinecone Inference (multilingual-e5-large + namespace="as")
+    # — the only embedding space that contains the Assamese corpus written by
+    # scripts/embed_assamese_corpus.py. We deliberately do NOT fall back to
+    # Vertex/Atlas vector search on miss/error: those indexes are English-only
+    # (Cohere) and would silently surface English chapters as "Assamese
+    # context", breaking the spec's Assamese-first guarantee. A miss here
+    # returns []; the chat layer then performs Sarvam→Vertex answer-only
+    # fallback over the same (empty) Assamese context instead of crossing
+    # corpora.
+    _is_as = (lang or "").lower().strip() == "as"
+    if _is_as:
+        try:
+            raw = await _try_vector_provider("pinecone_ai", _embed_query, limit, subject_id, lang=lang)
+        except Exception as exc:
+            logger.warning("[T291][RAG] Assamese pinecone_ai leg failed (%s) — returning empty (no cross-corpus fallback)",
+                           exc)
+            return []
+        if not raw:
+            logger.info("[T291][RAG] Assamese namespace='as' miss for '%s' — returning empty (strict lock)",
+                        query[:40])
+            return []
+        logger.info("[T291][RAG] Assamese namespace='as' hit: %d matches for '%s'",
+                    len(raw), query[:40])
+        chapter_ids = list({r["chapter_id"] for r in raw if r.get("chapter_id")})
+        if not chapter_ids:
+            return []
+        ch_docs = await db.chapters.find(
+            {"id": {"$in": chapter_ids}, "status": "published"},
+            {"_id": 0, "id": 1, "title": 1, "content": 1, "content_as": 1,
+             "slug": 1, "subject_id": 1, "description": 1},
+        ).to_list(length=len(chapter_ids))
+        chapters_map = {ch["id"]: ch for ch in ch_docs}
+        seen: set = set()
+        result = []
+        for r in raw:
+            cid = r.get("chapter_id", "")
+            if cid in seen or cid not in chapters_map:
+                continue
+            seen.add(cid)
+            result.append(chapters_map[cid])
+        return result
+
     for _ in range(max_attempts):
         try:
             provider = _select_vs("vector_search", lang=lang, exclude=exclude)
@@ -682,7 +758,7 @@ async def _fetch_chunks_semantic(
             break
 
         try:
-            raw = await _try_vector_provider(provider, _embed_query, limit, subject_id)
+            raw = await _try_vector_provider(provider, _embed_query, limit, subject_id, lang=lang)
         except Exception as exc:
             logger.debug("[VECTOR_SEARCH] %s failed: %s — excluding, retrying", provider, exc)
             exclude = exclude | {provider}
@@ -740,6 +816,7 @@ async def _fetch_internal_chapters(
     subject_name: Optional[str] = None,
     limit: int = 3,
     max_content_chars: int = 4000,
+    lang: str = "en",
 ) -> list:
     """Hybrid keyword + semantic retrieval with Pinecone reranking.
 
@@ -798,7 +875,7 @@ async def _fetch_internal_chapters(
         if _pinecone_enabled:
             kw_chapters, sem_chapters = await asyncio.gather(
                 keyword_task,
-                _fetch_chunks_semantic(query, limit=fetch_limit, subject_id=subject_id, hyde_task=_hyde_prefetch),
+                _fetch_chunks_semantic(query, limit=fetch_limit, subject_id=subject_id, lang=lang, hyde_task=_hyde_prefetch),
                 return_exceptions=True,
             )
             if isinstance(kw_chapters, Exception):
@@ -901,6 +978,7 @@ async def resolve_rag_context(
     topic_metadata: Optional[dict] = None,
     prefetched_chapters: Optional[list] = None,
     max_content_chars: int = 4000,
+    lang: str = "en",
 ) -> dict:
     if document_text and document_text.strip():
         relevant = _extract_relevant_sections(document_text, query)
@@ -912,7 +990,7 @@ async def resolve_rag_context(
             "intent": intent or "general",
         }
     if intent not in ("casual", "general") and (subject_id or subject_name):
-        internal_chapters = prefetched_chapters if prefetched_chapters is not None else await _fetch_internal_chapters(query, subject_id=subject_id, subject_name=subject_name, max_content_chars=max_content_chars)
+        internal_chapters = prefetched_chapters if prefetched_chapters is not None else await _fetch_internal_chapters(query, subject_id=subject_id, subject_name=subject_name, max_content_chars=max_content_chars, lang=lang)
         if internal_chapters:
             return {
                 "chunks": internal_chapters, "chapters": internal_chapters, "subjects": [],
