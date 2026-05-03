@@ -29,9 +29,7 @@ __all__ = [
     "_AWS_ACCESS_KEY", "_AWS_REGION", "_AWS_SECRET_KEY",
     "_CF_PROVIDER_SLUGS", "_CORS_ALLOW_CREDENTIALS",
     "_DEEPGRAM_KEY",
-    "_CARTESIA_KEY", "CARTESIA_VOICE_EN", "CARTESIA_VOICE_HI", "CARTESIA_MODEL_ID",
     "_ELEVENLABS_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID",
-    "_GEMINI_KEY", "_GEMINI_KEY_2",
     "_OPENAI_KEY",
     "_PG_DSN",
     "_SARVAM_LLM_KEY", "_SARVAM_LLM_KEY_2", "_SARVAM_LLM_KEY_3",
@@ -449,7 +447,6 @@ _BASETEN_KEY      = os.environ.get('BASETEN_API_KEY',      '').strip()
 _ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
 _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
-_CARTESIA_KEY     = os.environ.get('CARTESIA_API_KEY',     '').strip()
 _VOYAGE_AI_KEY    = os.environ.get('VOYAGE_AI_API_KEY',    '').strip()
 # Search providers (Task #275): Exa neural search + Tavily live web search.
 # Used by PROVIDER_PRIORITY['search_rag'] and ['live_search'] pools.
@@ -462,15 +459,6 @@ BASETEN_MODEL_ID  = os.environ.get('BASETEN_MODEL_ID', '').strip()
 
 # AssemblyAI STT config
 ASSEMBLYAI_STT_MODEL = os.environ.get('ASSEMBLYAI_STT_MODEL', 'best').strip() or 'best'
-
-# Cartesia TTS config (Task #298 round-5: Indian male "CEO" voice for
-# the Syra admin orb). Voice IDs come from Cartesia's public voice
-# library — operators can override per-language without redeploying.
-# When CARTESIA_VOICE_EN is set, Cartesia becomes the primary TTS
-# provider for English in the Syra route, with Deepgram as fallback.
-CARTESIA_VOICE_EN  = os.environ.get('CARTESIA_VOICE_EN', '').strip()
-CARTESIA_VOICE_HI  = os.environ.get('CARTESIA_VOICE_HI', '').strip()
-CARTESIA_MODEL_ID  = os.environ.get('CARTESIA_MODEL_ID', 'sonic-2').strip() or 'sonic-2'
 
 # ElevenLabs TTS config
 ELEVENLABS_VOICE_ID = os.environ.get('ELEVENLABS_VOICE_ID', '').strip()
@@ -518,7 +506,6 @@ if CF_GATEWAY_ENABLED:
     _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
     _DEEPGRAM_KEY    = _DEEPGRAM_KEY    or BYOK_PLACEHOLDER
-    _CARTESIA_KEY    = _CARTESIA_KEY    or BYOK_PLACEHOLDER
     _VOYAGE_AI_KEY   = _VOYAGE_AI_KEY   or BYOK_PLACEHOLDER
     _EXA_KEY         = _EXA_KEY         or BYOK_PLACEHOLDER
     _TAVILY_KEY      = _TAVILY_KEY      or BYOK_PLACEHOLDER
@@ -1063,14 +1050,13 @@ PROVIDER_PRIORITY: dict = {
     # pool — Sarvam stays on the conversational `assamese_rag_chat` path
     # where its native conversational tone matters most.
     "assamese_content":  ["workers_ai_indic", "vertex"],
-    # Text-to-speech: Cartesia (primary, Sonic-2 — used by Syra admin orb for the
-    # Indian male "CEO" voice) → ElevenLabs → Deepgram → Vertex → Workers AI.
+    # Text-to-speech: ElevenLabs (primary) → Deepgram → Vertex → Workers AI.
     # All via CF AI Gateway; rotational so no single provider is exhausted.
-    "tts":               ["cartesia", "elevenlabs", "deepgram", "vertex", "workers_ai"],
+    "tts":               ["elevenlabs", "deepgram", "vertex", "workers_ai"],
     # Speech-to-text: Deepgram (primary) → AssemblyAI → Vertex → Workers AI.
     "stt":               ["deepgram", "assemblyai", "vertex", "workers_ai"],
-    # Combined voice pipeline: Cartesia (TTS leg) → Deepgram → ElevenLabs → Vertex → Workers AI.
-    "voice":             ["cartesia", "deepgram", "elevenlabs", "vertex", "workers_ai"],
+    # Combined voice pipeline: Deepgram → ElevenLabs → Vertex → Workers AI.
+    "voice":             ["deepgram", "elevenlabs", "vertex", "workers_ai"],
     # Embeddings: Cohere (primary) → Voyage AI → Workers AI (last resort).
     "embed":             ["cohere", "voyage_ai", "workers_ai"],
     # Reranking: Pinecone AI (primary) → Workers AI (last resort).
@@ -1096,7 +1082,6 @@ PROVIDER_CREDITS: dict = {
     "bedrock":          1000,   # AWS Activate — $1k
     "azure_openai":     2500,   # Azure for Startups — $2.5k; primary for english_rag_chat
     "sarvam":            500,   # Sarvam startup credits — $500
-    "cartesia":          500,   # Cartesia startup credits — $500; primary TTS (Sonic-2)
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
     "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback

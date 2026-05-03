@@ -19,7 +19,7 @@ Pages) stays intact.
 | AWS Activate | AWS (Bedrock, Lambda, Route 53) | $1,000 | ✅ Yes | TBD |
 | Azure for Startups | Azure OpenAI | $2,500 | ✅ Yes (weight=1 fallback) | TBD |
 | Sarvam Startup Credits | Sarvam LLM | $500 | ✅ Yes | TBD |
-| Cartesia Startup Credits | Cartesia TTS | $500 | ✅ Yes | TBD |
+| Deepgram Startup Credits | Deepgram STT (nova-3, primary) + TTS fallback (aura-2) | $500 | ✅ Yes | TBD |
 | ElevenLabs Startup Credits | ElevenLabs TTS | $500 | ✅ Yes | TBD |
 | AssemblyAI Startup Credits | AssemblyAI STT | $1,000 | ✅ Yes | TBD |
 | Cohere Startup Credits | Cohere embed/rerank | $1,000 | ✅ Yes | TBD |

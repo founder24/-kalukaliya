@@ -41,11 +41,7 @@ _TIMEOUT_S   = 60.0
 ENABLED: bool = bool(_API_KEY and _API_KEY != BYOK_PLACEHOLDER) or (CF_GATEWAY_ENABLED and bool(_API_KEY))
 
 _STT_MODEL     = os.environ.get("DEEPGRAM_STT_MODEL", "nova-3")
-# Default English voice: aura-2-zeus-en — deep, mature, authoritative
-# American male, the closest "CEO" timbre Deepgram offers. Operators
-# wanting a true Indian English male voice should set CARTESIA_VOICE_EN
-# (Cartesia is preferred over Deepgram in the Syra TTS route when set).
-_TTS_VOICE_EN  = os.environ.get("DEEPGRAM_TTS_VOICE_EN",  "aura-2-zeus-en")
+_TTS_VOICE_EN  = os.environ.get("DEEPGRAM_TTS_VOICE_EN",  "aura-2-en-us")
 _TTS_VOICE_HI  = os.environ.get("DEEPGRAM_TTS_VOICE_HI",  "aura-2-hi-in")
 _TTS_VOICE_AS  = os.environ.get("DEEPGRAM_TTS_VOICE_AS",  "aura-2-hi-in")  # Assamese → Hindi voice
 

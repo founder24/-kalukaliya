@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Key, Zap, CreditCard, Mail, Bell, BarChart3, Shield, CheckCircle2, Eye, EyeOff, TestTube2, Loader2, Database, Cpu } from 'lucide-react';
+import { Key, Zap, CreditCard, Mail, Bell, BarChart3, Shield, CheckCircle2, Eye, EyeOff, TestTube2, Loader2, Database, Cpu, Mic, Languages, Layers } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
+import RoutingPools from './RoutingPools';
 import { toast } from 'sonner';
 import { adminGetApiConfig, adminUpdateApiConfig, API_BASE } from '@/utils/api';
 import axios from 'axios';
@@ -12,9 +13,12 @@ const adminHeaders = (token) => {
 };
 
 const SERVICES = [
-  { id: 'chat_model', icon: Cpu,     label: 'Chat Model',       accent: 'violet', desc: 'Active LLM provider for the user-facing chat (Vertex Gemini Flash / Legacy SLM)' },
-  { id: 'emergent',icon: Zap,        label: 'Emergent AI',      accent: 'amber',  desc: 'Universal LLM key — highest priority' },
-  { id: 'groq',    icon: Zap,        label: 'Groq AI',          accent: 'violet', desc: 'Llama 3.1 — AI brain' },
+  { id: 'routing', icon: Layers,     label: 'Routing & Pools',  accent: 'violet', desc: 'Live snapshot of PROVIDER_PRIORITY × POOL_WEIGHTS — locked provider chain' },
+  { id: 'chat_model', icon: Cpu,     label: 'Chat Model',       accent: 'violet', desc: 'Active LLM provider for the user-facing chat (Vertex Gemini Flash / Workers AI)' },
+  { id: 'deepgram',icon: Mic,        label: 'Deepgram',         accent: 'emerald',desc: 'STT primary (nova-3) + TTS fallback (aura-2). Speech pipeline backbone.' },
+  { id: 'workers_ai_indic', icon: Languages, label: 'Workers AI · IndicTrans2', accent: 'orange', desc: 'Cloudflare Workers AI dedicated Indic neural MT — primary for translate + assamese_content pools.' },
+  { id: 'mongodb_atlas', icon: Database, label: 'MongoDB Atlas',accent: 'emerald',desc: 'Atlas $vectorSearch — weight-0 fallback in vector_search pool (free tier).' },
+  { id: 'emergent',icon: Zap,        label: 'Emergent AI',      accent: 'amber',  desc: 'Universal LLM key — admin AI generation' },
   { id: 'supabase',icon: Database,   label: 'Supabase',         accent: 'cyan',   desc: 'Users & conversations DB' },
   { id: 'payment', icon: CreditCard, label: 'Payments',          accent: 'emerald', desc: 'Razorpay / Stripe' },
   { id: 'email',   icon: Mail,       label: 'Email',             accent: 'blue',   desc: 'Resend / SendGrid' },
@@ -50,8 +54,8 @@ function SecretInput({ value, onChange, placeholder }) {
 const inputStyle = "w-full h-9 px-3 rounded-xl text-sm text-gray-900 font-mono outline-none bg-gray-50 border border-gray-200 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/20";
 
 export default function AdminApiConfig({ adminToken, onNavigate }) {
-  const [active, setActive] = useState('groq');
-  const [creds, setCreds] = useState({ chatModelDefault: 'vertex/gemini-flash', emergentKey: '', emergentBaseUrl: '', groqKey: '', supabaseUrl: '', supabaseServiceKey: '', supabaseAnonKey: '', razorpayKeyId: '', razorpayKeySecret: '', razorpayWebhookSecret: '', resendKey: '', oneSignalKey: '', posthogKey: '', googleClientId: '', googleClientSecret: '' });
+  const [active, setActive] = useState('routing');
+  const [creds, setCreds] = useState({ chatModelDefault: 'vertex/gemini-flash', emergentKey: '', emergentBaseUrl: '', supabaseUrl: '', supabaseServiceKey: '', supabaseAnonKey: '', razorpayKeyId: '', razorpayKeySecret: '', razorpayWebhookSecret: '', resendKey: '', oneSignalKey: '', posthogKey: '', googleClientId: '', googleClientSecret: '' });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -65,7 +69,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
           chatModelDefault: cfg.chat_model?.default || 'vertex/gemini-flash',
           emergentKey: cfg.emergent?.key || '',
           emergentBaseUrl: cfg.emergent?.base_url || '',
-          groqKey: cfg.groq?.key || '',
           supabaseUrl: cfg.supabase?.url || '',
           supabaseServiceKey: cfg.supabase?.service_key || '',
           supabaseAnonKey: cfg.supabase?.anon_key || '',
@@ -89,7 +92,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
   const buildPayload = () => ({
     chat_model: { default: creds.chatModelDefault },
     emergent: { key: creds.emergentKey, base_url: creds.emergentBaseUrl },
-    groq: { key: creds.groqKey },
     supabase: { url: creds.supabaseUrl, service_key: creds.supabaseServiceKey, anon_key: creds.supabaseAnonKey },
     payment: { razorpay_key_id: creds.razorpayKeyId, razorpay_key_secret: creds.razorpayKeySecret, razorpay_webhook_secret: creds.razorpayWebhookSecret },
     email: { resend_key: creds.resendKey },
@@ -128,14 +130,25 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
         const llmStatus = res.data?.dependencies?.llm?.status;
         const llmOk = llmStatus === 'ok';
         setTestResult({ ok: llmOk, data: llmOk ? `Chat default = ${creds.chatModelDefault}; LLM service healthy` : `LLM status: ${llmStatus || 'unknown'}` });
+      } else if (active === 'routing') {
+        const res = await adminAxios('get', '/admin/routing-config');
+        const poolCount = (res.data?.pools || []).length;
+        const lockedCount = (res.data?.pools || []).filter((p) => p.strict_primary_lock).length;
+        setTestResult({ ok: poolCount > 0, data: poolCount > 0
+          ? `Routing config reachable — ${poolCount} pools (${lockedCount} strict-primary locked).`
+          : 'Routing config returned empty pools.' });
       } else if (active === 'emergent') {
         const hasKey = !!creds.emergentKey;
         setTestResult({ ok: hasKey, data: hasKey ? 'Emergent API key is configured (used for admin AI generation)' : 'No Emergent API key configured — other providers will be used as fallback' });
-      } else if (active === 'groq') {
-        const res = await adminAxios('get', '/health');
-        const llmStatus = res.data?.dependencies?.llm?.status;
-        const llmOk = llmStatus === 'ok';
-        setTestResult({ ok: llmOk, data: llmOk ? 'LLM service is healthy' : `LLM status: ${llmStatus || 'unknown'}` });
+      } else if (active === 'deepgram' || active === 'workers_ai_indic' || active === 'mongodb_atlas') {
+        const res = await adminAxios('get', '/admin/routing-config');
+        const provName = active;
+        const inAnyPool = (res.data?.pools || []).some((pool) =>
+          (pool.providers || []).some((p) => p.name === provName)
+        );
+        setTestResult({ ok: inAnyPool, data: inAnyPool
+          ? `${provName} is wired into the locked provider chain — see Routing & Pools tab.`
+          : `${provName} is not present in any pool right now.` });
       } else if (active === 'payment') {
         const res = await adminAxios('get', '/health');
         const payStatus = res.data?.dependencies?.payment?.status;
@@ -195,6 +208,44 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
           </div>
 
           <div className="p-4 space-y-4">
+            {active === 'routing' && (
+              <RoutingPools adminToken={adminToken} />
+            )}
+            {active === 'deepgram' && (
+              <div className="space-y-2 text-xs text-gray-600">
+                <p>
+                  <strong>Deepgram</strong> is the primary STT provider (model <code className="font-mono">nova-3</code>)
+                  and the TTS fallback (Aura-2 voices: <code className="font-mono">aura-2-en-us</code>,
+                  <code className="font-mono">aura-2-hi-in</code>). Wired via CF AI Gateway BYOK; the
+                  <code className="font-mono">DEEPGRAM_API_KEY</code> env var is only required when running
+                  outside the gateway.
+                </p>
+                <p>Pools touched: <code className="font-mono">stt</code>, <code className="font-mono">tts</code>, <code className="font-mono">voice</code>.</p>
+              </div>
+            )}
+            {active === 'workers_ai_indic' && (
+              <div className="space-y-2 text-xs text-gray-600">
+                <p>
+                  <strong>Cloudflare Workers AI · IndicTrans2</strong> is the dedicated Indic neural MT model
+                  (<code className="font-mono">@cf/ai4bharat/indictrans2-en-indic-1B</code>). Locked as the
+                  primary in <code className="font-mono">translate</code> (weight 3000) and
+                  <code className="font-mono">assamese_content</code> pools — Vertex Gemini stays at
+                  weight 100 strictly for note-formatting fallback.
+                </p>
+                <p>No separate API key — uses the existing CF Workers AI gateway credentials.</p>
+              </div>
+            )}
+            {active === 'mongodb_atlas' && (
+              <div className="space-y-2 text-xs text-gray-600">
+                <p>
+                  <strong>MongoDB Atlas $vectorSearch</strong> is the weight-0 fallback in the
+                  <code className="font-mono">vector_search</code> pool. Pinecone wins every healthy
+                  draw; Atlas only fires when Pinecone is excluded. Connection string lives in
+                  <code className="font-mono">MONGO_URL</code> (true infrastructure secret — must
+                  remain in Railway, not BYOK-substitutable).
+                </p>
+              </div>
+            )}
             {active === 'supabase' && (
               <div className="space-y-3">
                 <p className="text-xs text-gray-500">Connect to Supabase for user accounts and conversation storage. Find credentials in your Supabase dashboard under Settings &gt; API.</p>

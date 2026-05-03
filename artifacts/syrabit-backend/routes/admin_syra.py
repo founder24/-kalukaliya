@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field
 from auth_deps import get_admin_user
 from llm import call_llm_api_chat
 from providers import deepgram as _deepgram
-from providers import cartesia as _cartesia
 from providers import assemblyai as _assemblyai
 from syra_actions import (
     SyraActionError,
@@ -522,47 +521,28 @@ class _SyraTtsRequest(BaseModel):
     summary="Syra TTS (Deepgram Aura-2, admin-gated)",
 )
 async def syra_tts(req: _SyraTtsRequest, admin: dict = Depends(get_admin_user)):
-    # Provider chain: Cartesia (Indian male "CEO" voice — preferred
-    # when configured) → Deepgram aura-2. Either is enough; both
-    # disabled is an outright 503.
-    if not (_cartesia.ENABLED or _deepgram.ENABLED):
+    if not _deepgram.ENABLED:
         raise HTTPException(
             status_code=503,
-            detail="No TTS provider configured (Cartesia + Deepgram both off).",
+            detail="No TTS provider configured (Deepgram off).",
         )
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Empty text.")
 
-    audio_bytes = b""
-    used = ""
-    primary_error: str | None = None
-
-    if _cartesia.ENABLED:
-        try:
-            audio_bytes = await _cartesia.synthesize(
-                text, voice=req.voice, language=req.language,
-            )
-            used = "cartesia_sonic"
-        except RuntimeError as exc:
-            primary_error = str(exc)
-            logger.warning("[syra-tts] cartesia failed, falling back: %s", exc)
-
-    if not audio_bytes and _deepgram.ENABLED:
-        try:
-            audio_bytes = await _deepgram.synthesize(
-                text, voice=req.voice, language=req.language,
-            )
-            used = "deepgram_aura2"
-        except RuntimeError as exc:
-            logger.error("[syra-tts] deepgram fallback failed: %s", exc)
-            if primary_error is None:
-                primary_error = str(exc)
+    try:
+        audio_bytes = await _deepgram.synthesize(
+            text, voice=req.voice, language=req.language,
+        )
+        used = "deepgram_aura2"
+    except RuntimeError as exc:
+        logger.error("[syra-tts] deepgram failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
 
     if not audio_bytes:
         raise HTTPException(
             status_code=502,
-            detail=primary_error or "TTS providers returned empty audio.",
+            detail="TTS provider returned empty audio.",
         )
 
     return Response(

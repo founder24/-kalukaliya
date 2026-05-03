@@ -67,6 +67,16 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
     # ENABLED flag (which already encodes the real candidate-chain logic, e.g.
     # CF gateway BYOK vs direct key, key + endpoint combos) and fall back to
     # raw env-var presence for providers that don't ship a module.
+    def _gemini_or_vertex_configured() -> bool:
+        """True if either a Gemini key (config-bound) or a Vertex SA JSON exists."""
+        try:
+            from config import _GEMINI_KEY as _gem
+            if _gem:
+                return True
+        except Exception:
+            pass
+        return bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip())
+
     def _flag(modpath: str, attr: str = "ENABLED") -> bool:
         try:
             mod = __import__(modpath, fromlist=[attr])
@@ -75,10 +85,8 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
             return False
 
     PROVIDER_META = {
-        "vertex":           {"label": "Vertex AI / Gemini",          "env": ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GOOGLE_APPLICATION_CREDENTIALS_JSON"],
-                             "enabled": bool(os.environ.get("GEMINI_API_KEY", "").strip()
-                                             or os.environ.get("GEMINI_API_KEY_2", "").strip()
-                                             or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip())},
+        "vertex":           {"label": "Vertex AI / Gemini (google-ai-studio)", "env": ["GOOGLE_APPLICATION_CREDENTIALS_JSON", "VERTEX_PROJECT_ID"],
+                             "enabled": _gemini_or_vertex_configured()},
         "azure_openai":     {"label": "Azure OpenAI",                "env": ["AZURE_OPENAI_KEY_1", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY_2", "AZURE_OPENAI_ENDPOINT"],
                              "enabled": _flag("providers.azure_openai")},
         "bedrock":          {"label": "AWS Bedrock",                 "env": ["CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_ID", "BEDROCK_PROXY_AUTH_TOKEN"],
@@ -513,7 +521,11 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     _check(google_vision, "vision_ocr")
     _check(vertex_embed, "vertex_embed")
 
-    has_gemini = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    try:
+        from config import _GEMINI_KEY as _gem_key
+        has_gemini = bool(_gem_key)
+    except Exception:
+        has_gemini = False
     if has_gemini:
         configured_services.append("gemini_fallback")
     else:

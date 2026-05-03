@@ -122,27 +122,21 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"]: cartesia(primary) → elevenlabs → deepgram →
-      vertex(skip) → workers_ai.
+    PROVIDER_PRIORITY["tts"]: elevenlabs(primary) → deepgram → vertex(skip) → workers_ai.
 
     vertex TTS endpoint not wired; raises RuntimeError which the fallback loop
     catches, excludes from pool, and redraws.
-    cartesia, elevenlabs, deepgram, and workers_ai are the actively synthesizing providers.
+    elevenlabs, deepgram, and workers_ai are the actively synthesizing providers.
     """
     from llm import select_provider
 
     exclude: frozenset = frozenset()
-    max_attempts = 7  # covers all providers in tts priority list
+    max_attempts = 6  # covers all providers in tts priority list
 
     for _ in range(max_attempts):
         provider = select_provider("tts", lang=language, exclude=exclude)
         try:
-            if provider == "cartesia":
-                from providers import cartesia as _cartesia
-                if not _cartesia.ENABLED:
-                    raise RuntimeError("cartesia disabled (missing API key or voice id)")
-                return await _cartesia.synthesize(text, language=language)
-            elif provider == "elevenlabs":
+            if provider == "elevenlabs":
                 return await _tts_elevenlabs(text, voice_id, language)
             elif provider == "deepgram":
                 return await _tts_deepgram(text, voice_id, language)

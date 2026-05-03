@@ -18,10 +18,10 @@ track runway and plan renewals.
 | Service | Model / API | Use Case | Pricing | Est. Monthly Burn |
 |---------|-------------|----------|---------|-------------------|
 | **Cloud Speech-to-Text v2** | `chirp_2` | Indic STT — Hindi (hi-IN), Bengali (bn-IN), Assamese (as-IN). Workers AI Whisper is primary for English. | ~$0.016 / min audio | ~$4 / month |
-| **Cloud Text-to-Speech** | Neural2 — `hi-IN-Neural2-A`, `hi-IN-Neural2-C`, `bn-IN-Neural2-A`, `as-IN-Wavenet-B` | Indic TTS. Cartesia sonic-2 is primary for English and is the fallback for Indic when Google TTS is unavailable. | ~$16 / 1M chars | ~$3 / month |
-| **Cloud Translation v3** | `translateText` endpoint | Indic translation — Hindi, Bengali, Assamese. Workers AI indictrans2 is fallback. Non-Indic bypasses Google entirely. | ~$20 / 1M chars | ~$6 / month |
+| **Cloud Text-to-Speech** | Neural2 — `hi-IN-Neural2-A`, `hi-IN-Neural2-C`, `bn-IN-Neural2-A`, `as-IN-Wavenet-B` | Indic TTS. ElevenLabs is primary for English; Deepgram aura-2 is the universal TTS fallback. | ~$16 / 1M chars | ~$3 / month |
+| **Cloud Translation v3** | `translateText` endpoint | Indic translation — Hindi, Bengali, Assamese. Workers AI IndicTrans2 is the locked primary in the `translate` pool; this is the residual Google fallback for hi/bn. | ~$20 / 1M chars | ~$6 / month |
 | **Cloud Vision** | `DOCUMENT_TEXT_DETECTION` | OCR for Devanagari/Bengali script documents (past papers, textbooks). Triggers when Workers AI vision confidence < 0.80 or document language is Indic. Workers AI vision remains primary for Latin-script. | ~$1.50 / 1K images | ~$2 / month |
-| **Gemini 2.0 Flash** | `gemini-2.0-flash` via AI Studio | Chat fallback — position-2 in the chat chain: `workers_ai → gemini → groq → cerebras`. Activates only when Workers AI load > 80%. | ~$0.075 / 1M tokens (input) | ~$3 / month |
+| **Gemini 2.0 Flash (via Vertex / google-ai-studio CF slug)** | `gemini-2.0-flash` | Chat fallback — position-2 in the locked content chain: `azure_openai → vertex → workers_ai`. Reached through the CF AI Gateway BYOK slug `google-ai-studio/v1beta/openai`; no direct `GEMINI_API_KEY` env reads outside `config.py`. | ~$0.075 / 1M tokens (input) | ~$3 / month |
 | **Vertex AI Embeddings** | `text-embedding-004` (768-dim) | Embed fallback for long-form content (> 2048 tokens) or when Workers AI embed is in cooldown. **NOTE:** 768-dim — do NOT mix with main 1024-dim bge-large index. | ~$0.00013 / 1K chars | ~$1 / month |
 
 **Total estimated monthly burn: ~$19/month → ~8 years runway at current scale.**
@@ -29,7 +29,7 @@ track runway and plan renewals.
 ### Why Google Cloud for Indic Stack?
 
 - **Chirp_2 STT** is the most accurate ASR model for Hindi, Bengali, and Assamese — Whisper and AssemblyAI have significantly higher WER on these languages.
-- **Neural2 TTS** is the only production-grade neural TTS for all three Indic languages — Cartesia, Deepgram, and ElevenLabs have zero native Indic support.
+- **Neural2 TTS** is the only production-grade neural TTS for all three Indic languages — Deepgram aura-2 hi-IN and ElevenLabs multilingual cover Hindi only at lower fidelity.
 - **Translation v3** outperforms Workers AI `indictrans2-en-indic-1B` on Bengali and Assamese (lower BLEU gap on educational domain text).
 - **Vision OCR** is the only provider with trained Devanagari and Bengali script layout-aware document detection — Workers AI llama-3.2 vision treats Devanagari as noisy Latin.
 
@@ -39,20 +39,22 @@ track runway and plan renewals.
 STT:         [Indic audio] → Google Chirp_2 → Sarvam Saaras → Workers AI Whisper
              [English audio] → Sarvam Saaras (unchanged primary) → Workers AI Whisper
 
-TTS:         [Indic] → Google Neural2 → Cartesia sonic-2 (fallback only; no Indic voice)
-             [English] → Cartesia sonic-2 → Workers AI Deepgram Aura-2
+TTS:         [Indic] → Google Neural2 → Deepgram aura-2 (hi-IN voice; Assamese borrows hi-IN)
+             [English] → ElevenLabs multilingual_v2 → Deepgram aura-2-en-us → Workers AI
 
-Translation: [hi/bn/as target] → Google Translation v3 → Workers AI indictrans2 → LLM prompt
-             [other target]    → Workers AI indictrans2 → LLM prompt
+Translation: [hi/bn/as target] → Workers AI IndicTrans2 (primary, weight 3000)
+             → Vertex Gemini (weight 100, formatting fallback only)
 
 OCR:         [Latin script / confidence ≥ 0.80] → Workers AI llama-3.2 vision
              [Devanagari/Bengali / confidence < 0.80] → Google Vision DOCUMENT_TEXT_DETECTION
 
-Chat:        workers_ai(llama-3.3-70b) → gemini-2.0-flash → groq → cerebras → openrouter
+Chat:        english_rag_chat:  azure_openai(10000) → vertex(100) → workers_ai(0)
+             assamese_rag_chat: sarvam(10000) → vertex(100)             [no workers fallback]
+             content:           vertex(10000) → azure_openai(100) → workers_ai(0)
 
-Embeddings:  workers_ai(bge-large-en-v1.5, 1024-dim) [primary]
-             → vertex_ai(text-embedding-004, 768-dim) [long-form fallback only]
-             → cohere(embed-multilingual-v3.0)
+Embeddings:  cohere(embed-multilingual-v3.0) [primary]
+             → voyage_ai [secondary]
+             → workers_ai(bge-large-en-v1.5, 1024-dim) [last-resort]
 ```
 
 ### Credentials Required
@@ -61,7 +63,7 @@ Embeddings:  workers_ai(bge-large-en-v1.5, 1024-dim) [primary]
 |---------|-------------|
 | `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Full service account JSON (single line). Grants access to STT v2, TTS, Translation v3, Vision, and Vertex AI. |
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID (optional — auto-detected from service account JSON if not set). |
-| `GEMINI_API_KEY` | Google AI Studio key for Gemini 2.0 Flash chat fallback (already set for CF BYOK). |
+| `GEMINI_API_KEY` | Google AI Studio key — bound once in `config.py` and reached via the CF AI Gateway slug `google-ai-studio/v1beta/openai`. Direct `os.environ.get('GEMINI_API_KEY')` reads outside `config.py` are blocked by `scripts/check_dead_providers.py`. |
 | `GOOGLE_BILLING_ALERT` | Set to `1` when the GCP budget webhook fires to surface admin panel warning. |
 | `GOOGLE_BILLING_ACCOUNT_ID` | **Task #253** — Billing account ID (format: `XXXXXX-XXXXXX-XXXXXX`). Found in GCP Console → Billing → Account overview. Enables live budget data from the Cloud Billing Budget API. |
 

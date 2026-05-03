@@ -92,11 +92,18 @@ def _validate_env():
     # store (dashboard → AI Gateway → Authentication → BYOK). The backend
     # sends a placeholder; the gateway appends the real key at the edge.
     # Safe to delete from Railway as soon as you've added the key to CF BYOK.
+    # Locked provider chain (Task #297): Vertex (google-ai-studio slug),
+    # Azure OpenAI, Sarvam, Cohere, Baseten, ElevenLabs, Deepgram, AssemblyAI,
+    # Voyage, Pinecone, Workers AI / Workers AI · IndicTrans2. xAI/OpenAI kept
+    # as optional rare-feature endpoints. Banned providers removed: groq,
+    # cartesia, openrouter, cerebras, perplexity.
+    # GEMINI_API_KEY is intentionally still listed here so the BYOK secret-audit
+    # surfaces its lifecycle on every boot (Task #297). It is bound *once* in
+    # config.py as `_GEMINI_KEY` and consumed via the CF AI Gateway slug
+    # `google-ai-studio/v1beta/openai`. Direct `os.environ.get('GEMINI_API_KEY')`
+    # reads outside config.py are blocked by scripts/check_dead_providers.py.
     _BYOK_PRIMARY = {
-        "GROQ_API_KEY":       "groq/openai/v1",
         "GEMINI_API_KEY":     "google-ai-studio/v1beta/openai",
-        "CEREBRAS_API_KEY":   "cerebras/v1",
-        "OPENROUTER_API_KEY": "openrouter/v1",
         "SARVAM_API_KEY":     "custom-sarvam",
         "XAI_API_KEY":        "grok/v1",
         "OPENAI_API_KEY":     "openai/v1",
@@ -109,7 +116,6 @@ def _validate_env():
     # BYOK, the gateway manages a single provider key at the edge and handles
     # retries. All secondary keys can be deleted from Railway unconditionally.
     _BYOK_SECONDARY = [
-        "GEMINI_API_KEY_2",
         "SARVAM_API_KEY_2",
         "SARVAM_API_KEY_3",
     ]
@@ -1816,8 +1822,8 @@ from routes.admin_ga4 import router as admin_ga4_router
 from routes.admin_vertex import router as admin_vertex_router
 from routes.admin_advanced import router as admin_advanced_router
 from routes.admin_retriever import router as admin_retriever_router
-from routes.admin_benchmark import router as admin_benchmark_router
 from routes.admin_kv_health import router as admin_kv_health_router
+from routes.admin_routing_config import router as admin_routing_config_router
 from routes.admin_syra import router as admin_syra_router
 from routes.admin_edge_analytics import router as admin_edge_analytics_router
 from routes.admin_ci_status import router as admin_ci_status_router
@@ -1894,8 +1900,8 @@ api.include_router(admin_ga4_router)
 api.include_router(admin_vertex_router)
 api.include_router(admin_advanced_router)
 api.include_router(admin_retriever_router)
-api.include_router(admin_benchmark_router)
 api.include_router(admin_kv_health_router)
+api.include_router(admin_routing_config_router)
 api.include_router(admin_syra_router)
 api.include_router(admin_edge_analytics_router)
 api.include_router(admin_ci_status_router)
