@@ -50,6 +50,35 @@ def test_provider_credits_all_referenced_providers_have_entry():
     print(f"  PASS: all {len(all_providers)} providers have PROVIDER_CREDITS entries")
 
 
+def test_task_281_bedrock_absent_from_chat_and_content_pools():
+    """Task #281: Bedrock must NOT appear in chat or content pools.
+
+    Bedrock stays in vision/safety/embed/translate pools and PROVIDER_CREDITS,
+    but the four chat/content pools were rebalanced to equal-weight rotation
+    without Bedrock. This guard locks that contract — adding bedrock back to
+    any of these four pools by accident will fail this test immediately.
+    """
+    bedrock_excluded_pools = (
+        "english_rag_chat",
+        "assamese_rag_chat",
+        "content",
+        "assamese_content",
+    )
+    for pool in bedrock_excluded_pools:
+        providers = PROVIDER_PRIORITY.get(pool, [])
+        assert "bedrock" not in providers, (
+            f"Task #281: bedrock must not be in PROVIDER_PRIORITY[{pool!r}]; "
+            f"got {providers}"
+        )
+    # Sanity: bedrock IS still in vision and safety (regression guard the
+    # other way — confirms we didn't over-remove Bedrock).
+    assert "bedrock" in PROVIDER_PRIORITY.get("vision", []), \
+        "bedrock must remain in vision pool"
+    assert "bedrock" in PROVIDER_PRIORITY.get("safety", []), \
+        "bedrock must remain in safety pool"
+    print(f"  PASS: bedrock absent from {bedrock_excluded_pools}, present in vision+safety")
+
+
 def test_workers_ai_credit_is_zero():
     assert PROVIDER_CREDITS.get("workers_ai", -1) == 0, "workers_ai must have weight 0 (last-resort only)"
     print("  PASS: workers_ai has weight=0 (last-resort only)")

@@ -1,9 +1,11 @@
-"""End-to-end routing chain tests for Assamese chat (Task #270).
+"""End-to-end routing chain tests for Assamese chat (Task #270, rebalanced #281).
 
 Verifies the full Sarvam → Vertex/Gemini → Workers AI IndicTrans2 fallback
-chain introduced in Task #267:
+chain. Task #281 rebalanced the assamese_rag_chat pool to **equal weights**
+across all three providers (Bedrock removal across chat/content pools forced
+the rotation to be redistributed):
 
-  assamese_rag_chat pool: sarvam (3000) → vertex (100) → workers_ai_indic (0)
+  assamese_rag_chat pool: sarvam (1000) → vertex (1000) → workers_ai_indic (1000)
 
 Tests cover:
   A. select_provider routing for assamese_rag_chat with lang="as"
@@ -11,8 +13,9 @@ Tests cover:
   C. IndicTrans2 response validated: non-empty + Assamese Unicode U+0980–U+09FF
   D. call_with_provider_fallback fallback chain: 429 on sarvam → vertex → indic
      All order-sensitive tests use a forced deterministic select_provider to
-     avoid flakiness from weighted-random draw.
-  E. English chain: 429 on azure_openai/bedrock triggers next provider
+     avoid flakiness from equal-weight random draw.
+  E. English chain: 429 on azure_openai/vertex triggers next provider
+     (Task #281 — Bedrock removed from english_rag_chat)
   F. workers_ai_indic guarded from non-Assamese feature pools
   G. Route pipeline: _assamese_translate_gemini_main_sarvam_polish IndicTrans2 path
   H. Live integration tests (gated by CF_AI_GATEWAY_ACCOUNT_ID env var)
@@ -77,9 +80,11 @@ _SAMPLE_ASSAMESE = "নমস্কাৰ, আপুনি কেনে আছ�
 class TestSelectProviderAssamese:
     """select_provider returns the correct primary/fallback for assamese_rag_chat."""
 
-    def test_lang_as_draws_from_sarvam_vertex_pool(self):
-        """With lang='as' and no exclusions, selected provider must be sarvam
-        (weight 3000) or vertex (weight 100) — never workers_ai_indic directly."""
+    def test_lang_as_draws_from_assamese_rag_chat_pool(self):
+        """With lang='as' and no exclusions, every selected provider must come
+        from the assamese_rag_chat pool. Task #281 rebalanced the pool to
+        equal-weight rotation (sarvam=vertex=workers_ai_indic=1000), so all
+        three are valid draws and bedrock must never appear."""
         import llm
 
         providers_seen: set = set()
@@ -87,8 +92,13 @@ class TestSelectProviderAssamese:
             p = llm.select_provider("assamese_rag_chat", lang="as")
             providers_seen.add(p)
 
-        assert providers_seen <= {"sarvam", "vertex"}, (
-            f"Expected only sarvam/vertex in assamese_rag_chat weighted pool; got {providers_seen}"
+        allowed = {"sarvam", "vertex", "workers_ai_indic"}
+        assert providers_seen <= allowed, (
+            f"Expected only {allowed} in assamese_rag_chat pool; got {providers_seen}"
+        )
+        assert "bedrock" not in providers_seen, (
+            "Bedrock was removed from assamese_rag_chat in Task #281 — "
+            f"must not be drawn; got {providers_seen}"
         )
 
     def test_sarvam_excluded_draws_vertex(self):
