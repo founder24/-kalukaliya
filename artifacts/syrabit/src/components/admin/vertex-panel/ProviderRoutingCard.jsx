@@ -10,6 +10,45 @@ const ROLE_STYLE = {
   last_resort: { bg: 'rgba(107,114,128,0.10)', border: '1px solid rgba(107,114,128,0.35)', fg: '#4b5563', label: 'LAST RESORT', icon: ArrowDown },
 };
 
+// Task #323 — credit-application status badge sourced from
+// docs/infra/credit-applications.json (via /admin/vertex/provider-routing).
+const APP_STATUS_STYLE = {
+  approved:    { bg: '#dcfce7', fg: '#15803d', border: '#86efac', label: '✅ Credit approved' },
+  submitted:   { bg: '#dbeafe', fg: '#1d4ed8', border: '#93c5fd', label: '📨 Submitted' },
+  in_progress: { bg: '#fef3c7', fg: '#a16207', border: '#fde68a', label: '✏️ Drafting' },
+  ready:       { bg: '#fef3c7', fg: '#a16207', border: '#fde68a', label: '🟡 Ready to claim' },
+  not_started: { bg: '#f3f4f6', fg: '#4b5563', border: '#d1d5db', label: '⚪ Not started' },
+  rejected:    { bg: '#fee2e2', fg: '#b91c1c', border: '#fecaca', label: '❌ Rejected' },
+  expired:     { bg: '#fee2e2', fg: '#b91c1c', border: '#fecaca', label: '⌛ Expired' },
+  disabled:    { bg: '#f3f4f6', fg: '#4b5563', border: '#9ca3af', label: '🚫 Disabled — quota exhausted' },
+};
+
+function ApplicationStatusBadge({ status }) {
+  if (!status) return null;
+  const style = APP_STATUS_STYLE[status.status] || APP_STATUS_STYLE.not_started;
+  const tooltip = [
+    status.programme,
+    status.approved_usd != null ? `Approved: $${status.approved_usd.toLocaleString()}` : `Tier: $${(status.tier_usd || 0).toLocaleString()}`,
+    status.expires_on ? `Expires: ${status.expires_on}` : null,
+    status.notes,
+  ].filter(Boolean).join(' · ');
+  return (
+    <a
+      href={status.url || '#'}
+      target={status.url ? '_blank' : undefined}
+      rel={status.url ? 'noopener noreferrer' : undefined}
+      title={tooltip}
+      style={{
+        fontSize: 10, fontWeight: 700, color: style.fg, background: style.bg,
+        border: `1px solid ${style.border}`, borderRadius: 6, padding: '1px 6px',
+        textDecoration: 'none', whiteSpace: 'nowrap',
+      }}
+    >
+      {style.label}
+    </a>
+  );
+}
+
 function ProviderRow({ p }) {
   const style = ROLE_STYLE[p.role] || ROLE_STYLE.fallback;
   const RoleIcon = style.icon;
@@ -25,12 +64,13 @@ function ProviderRow({ p }) {
       alignItems: 'center', gap: 10, padding: '8px 12px',
       background: style.bg, border: style.border, borderRadius: 10, marginBottom: 6,
     }}>
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 flex-wrap">
         {p.enabled
           ? <CheckCircle size={13} color="#10b981" />
           : <AlertCircle size={13} color="#ef4444" />}
         <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{p.label}</span>
         <span style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace' }}>{p.name}</span>
+        <ApplicationStatusBadge status={p.application_status} />
         {!p.enabled && missing.length > 0 && (
           <span title={missingLabel} style={{ fontSize: 10, color: '#b91c1c', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 6, padding: '1px 6px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320 }}>
             {missing.length === 1 ? `need ${missing[0]}` : `need any of: ${missing.join(' | ')}`}
@@ -142,6 +182,25 @@ export default function ProviderRoutingCard({ token }) {
       </div>
 
       {data.features.map(f => <FeatureBlock key={f.key} f={f} />)}
+
+      {Array.isArray(data.infra_credits) && data.infra_credits.length > 0 && (
+        <div style={{ marginTop: 14, padding: 12, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10 }}>
+          <div className="flex items-center gap-2 mb-2" style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+            <KeyRound size={13} color="#8b5cf6" /> Infra credits (not dispatched by select_provider)
+          </div>
+          <p style={{ fontSize: 11, color: '#6b7280', margin: '0 0 8px 0', lineHeight: 1.5 }}>
+            Providers tracked in <code style={{ fontFamily: 'monospace', background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>credit-applications.json</code> that don't appear in any <code style={{ fontFamily: 'monospace', background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>PROVIDER_PRIORITY</code> pool — usually paid infrastructure (Cloudflare, MongoDB) or intentionally disabled (Bedrock).
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {data.infra_credits.map(row => (
+              <div key={row.provider} className="flex items-center gap-2" style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '4px 8px' }}>
+                <code style={{ fontSize: 11, color: '#4b5563', fontFamily: 'monospace' }}>{row.provider}</code>
+                <ApplicationStatusBadge status={row} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {missingCount > 0 && (
         <div style={{ marginTop: 6, padding: 12, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, fontSize: 12, color: '#7f1d1d', lineHeight: 1.6 }}>

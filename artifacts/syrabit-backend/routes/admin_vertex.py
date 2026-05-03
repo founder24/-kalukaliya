@@ -25,7 +25,12 @@ Routes (all ``/api/admin/vertex/*``):
   * GET  /gcp-credits        — Google Cloud credit burn panel row (Task #247)
 """
 import asyncio
+import json
+import os
 import time
+from functools import lru_cache
+from pathlib import Path
+
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
 import vertex_services
@@ -33,6 +38,93 @@ from auth_deps import get_admin_user
 from deps import db
 
 router = APIRouter()
+
+
+# ── Task #323 — Credit-applications tracker ────────────────────────────────
+# Reads docs/infra/credit-applications.json (workspace root, three levels up
+# from this file: routes/ → syrabit-backend/ → artifacts/ → workspace root)
+# and exposes:
+#   1. /admin/credit-applications  — full tracker payload for an admin tab
+#   2. application_status field on each provider in /admin/vertex/provider-routing
+#      so the existing routing card can render an "Application status" badge.
+_CREDIT_APPS_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "docs" / "infra" / "credit-applications.json"
+)
+
+
+@lru_cache(maxsize=1)
+def _load_credit_applications_cached(mtime: float) -> dict:
+    """File-mtime-keyed cache. Re-reads when the JSON file is updated."""
+    try:
+        return json.loads(_CREDIT_APPS_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"applications": [], "status_legend": {}, "last_updated": None}
+    except json.JSONDecodeError as exc:
+        # Surface parse errors loudly — silent failure here would render an
+        # empty admin badge with no diagnostic.
+        return {
+            "applications": [],
+            "status_legend": {},
+            "last_updated": None,
+            "error": f"credit-applications.json parse error: {exc}",
+        }
+
+
+def _credit_applications() -> dict:
+    try:
+        mtime = _CREDIT_APPS_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return _load_credit_applications_cached(0.0)
+    return _load_credit_applications_cached(mtime)
+
+
+def _application_status_by_provider() -> dict[str, dict]:
+    """Aggregate the JSON's per-application rows into a single status per
+    provider key (matching PROVIDER_PRIORITY names) for the badge.
+
+    Multiple programmes may target the same provider (e.g. Deepgram instant
+    signup + Deepgram Startup Program). The "best" status wins, in this
+    rank order: approved > submitted > in_progress > ready > not_started >
+    rejected > expired > disabled.
+    """
+    rank = {
+        "approved": 0,
+        "submitted": 1,
+        "in_progress": 2,
+        "ready": 3,
+        "not_started": 4,
+        "rejected": 5,
+        "expired": 6,
+        "disabled": 7,
+    }
+    by_provider: dict[str, dict] = {}
+    for app in _credit_applications().get("applications", []):
+        # Normalise the provider key (deepgram_startup → deepgram, etc.) so
+        # multi-programme rows aggregate under the routing-pool name.
+        raw = (app.get("provider") or "").strip()
+        if not raw:
+            continue
+        norm = raw.split("_startup")[0]
+        existing = by_provider.get(norm)
+        candidate = {
+            "status": app.get("status", "not_started"),
+            "programme": app.get("programme"),
+            "approved_usd": app.get("approved_usd"),
+            "tier_usd": app.get("tier_usd"),
+            "expires_on": app.get("expires_on"),
+            "url": app.get("url"),
+            "notes": app.get("notes"),
+        }
+        if existing is None or rank.get(candidate["status"], 99) < rank.get(existing["status"], 99):
+            by_provider[norm] = candidate
+    return by_provider
+
+
+@router.get("/admin/credit-applications", summary="Pre-seed credit-applications tracker (Task #323)")
+async def credit_applications(_admin: dict = Depends(get_admin_user)) -> dict:
+    """Return the full credit-applications.json payload for the admin tracker UI."""
+    return _credit_applications()
 
 
 @router.get("/admin/vertex/health")
@@ -148,6 +240,11 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
         any_set = any(os.environ.get(k, "").strip() for k in keys)
         return [] if any_set else list(keys)
 
+    # Task #323 — annotate each provider with the credit-application status
+    # so the routing card can render an "Application status" badge alongside
+    # the existing weight/credit/role columns.
+    app_status = _application_status_by_provider()
+
     features_out = []
     for feature, providers in PROVIDER_PRIORITY.items():
         pool_override = POOL_WEIGHTS.get(feature, {})
@@ -192,6 +289,10 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
                 "enabled": _provider_enabled(p),
                 "env_keys": meta.get("env", []),
                 "missing_env_keys": _missing_env_keys(p),
+                # Task #323 — credit-application status sourced from
+                # docs/infra/credit-applications.json. None when the
+                # provider has no tracked application (e.g. workers_ai).
+                "application_status": app_status.get(p),
             })
 
         label, description = FEATURE_LABELS.get(feature, (feature, ""))
@@ -203,8 +304,21 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
             "providers": provider_rows,
         })
 
+    # Task #323 — surface tracker rows for providers that aren't in any
+    # routing pool (Bedrock disabled, Cloudflare/MongoDB infra-only) so
+    # the badge isn't silently dropped. Pool membership wins; only providers
+    # never referenced by any feature land here.
+    pool_providers = {p for providers in PROVIDER_PRIORITY.values() for p in providers}
+    infra_credits = [
+        {"provider": prov, **info}
+        for prov, info in app_status.items()
+        if prov not in pool_providers
+    ]
+    infra_credits.sort(key=lambda r: (r.get("status") != "approved", r["provider"]))
+
     return {
         "features": features_out,
+        "infra_credits": infra_credits,
         "notes": {
             "strict_lock": (
                 "When the primary's weight is ≥ 10× the next-highest, "
