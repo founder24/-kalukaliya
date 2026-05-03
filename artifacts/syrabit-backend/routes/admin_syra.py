@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 from auth_deps import get_admin_user
 from llm import call_llm_api_chat
 from providers import deepgram as _deepgram
+from providers import cartesia as _cartesia
+from providers import assemblyai as _assemblyai
 from syra_actions import (
     SyraActionError,
     execute as execute_action,
@@ -447,22 +449,64 @@ async def syra_stt(
     language: str = Form("en"),
     admin: dict = Depends(get_admin_user),
 ):
-    if not _deepgram.ENABLED:
-        raise HTTPException(status_code=503, detail="Deepgram STT is not configured.")
+    # STT requires at least one provider — Deepgram is preferred for
+    # latency, AssemblyAI is used as a middleman fallback when
+    # Deepgram errors OR returns an empty transcript (often happens
+    # for short Indian-accented utterances on Nova-3).
+    if not (_deepgram.ENABLED or _assemblyai.ENABLED):
+        raise HTTPException(
+            status_code=503,
+            detail="No STT provider configured (Deepgram + AssemblyAI both off).",
+        )
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file.")
     if len(audio_bytes) > _MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail="Audio file too large (max 10 MB).")
-    try:
-        transcript = await _deepgram.transcribe(audio_bytes, language_code=language)
-    except RuntimeError as exc:
-        logger.error("[syra-stt] deepgram failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc))
+
+    transcript = ""
+    used_provider = ""
+    primary_error: str | None = None
+
+    if _deepgram.ENABLED:
+        try:
+            transcript = await _deepgram.transcribe(audio_bytes, language_code=language)
+            used_provider = "deepgram_nova3"
+        except RuntimeError as exc:
+            primary_error = str(exc)
+            logger.warning("[syra-stt] deepgram failed, will try fallback: %s", exc)
+
+    # Fallback path: empty transcript or Deepgram errored out. Many
+    # short admin commands ("acknowledge alerts", "show signups
+    # today") are missed by Deepgram on accented English — AssemblyAI
+    # universal-2 is more forgiving, just slower.
+    if (not (transcript or "").strip()) and _assemblyai.ENABLED:
+        try:
+            fb = await _assemblyai.transcribe(audio_bytes, language_code=language)
+            if (fb or "").strip():
+                transcript = fb
+                used_provider = "assemblyai"
+        except RuntimeError as exc:
+            logger.error("[syra-stt] assemblyai fallback failed: %s", exc)
+            if primary_error is None:
+                primary_error = str(exc)
+
+    if not (transcript or "").strip():
+        # Both providers ran but nothing came back — surface a clear
+        # error rather than a silent empty so the orb shows
+        # "Didn't catch that" instead of executing a phantom command.
+        if primary_error and not _assemblyai.ENABLED:
+            raise HTTPException(status_code=502, detail=primary_error)
+        raise HTTPException(
+            status_code=422,
+            detail="Could not transcribe audio. Speak closer to the mic and try again.",
+        )
+
     return {
-        "transcript": (transcript or "").strip(),
+        "transcript": transcript.strip(),
         "language": language,
         "bytes_received": len(audio_bytes),
+        "provider": used_provider,
     }
 
 
@@ -478,25 +522,56 @@ class _SyraTtsRequest(BaseModel):
     summary="Syra TTS (Deepgram Aura-2, admin-gated)",
 )
 async def syra_tts(req: _SyraTtsRequest, admin: dict = Depends(get_admin_user)):
-    if not _deepgram.ENABLED:
-        raise HTTPException(status_code=503, detail="Deepgram TTS is not configured.")
+    # Provider chain: Cartesia (Indian male "CEO" voice — preferred
+    # when configured) → Deepgram aura-2. Either is enough; both
+    # disabled is an outright 503.
+    if not (_cartesia.ENABLED or _deepgram.ENABLED):
+        raise HTTPException(
+            status_code=503,
+            detail="No TTS provider configured (Cartesia + Deepgram both off).",
+        )
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Empty text.")
-    try:
-        audio_bytes = await _deepgram.synthesize(text, voice=req.voice, language=req.language)
-    except RuntimeError as exc:
-        logger.error("[syra-tts] deepgram failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc))
+
+    audio_bytes = b""
+    used = ""
+    primary_error: str | None = None
+
+    if _cartesia.ENABLED:
+        try:
+            audio_bytes = await _cartesia.synthesize(
+                text, voice=req.voice, language=req.language,
+            )
+            used = "cartesia_sonic"
+        except RuntimeError as exc:
+            primary_error = str(exc)
+            logger.warning("[syra-tts] cartesia failed, falling back: %s", exc)
+
+    if not audio_bytes and _deepgram.ENABLED:
+        try:
+            audio_bytes = await _deepgram.synthesize(
+                text, voice=req.voice, language=req.language,
+            )
+            used = "deepgram_aura2"
+        except RuntimeError as exc:
+            logger.error("[syra-tts] deepgram fallback failed: %s", exc)
+            if primary_error is None:
+                primary_error = str(exc)
+
     if not audio_bytes:
-        raise HTTPException(status_code=502, detail="Deepgram returned empty audio.")
+        raise HTTPException(
+            status_code=502,
+            detail=primary_error or "TTS providers returned empty audio.",
+        )
+
     return Response(
         content=audio_bytes,
         media_type="audio/mpeg",
         headers={
             "Content-Disposition": 'inline; filename="syra.mp3"',
             "Cache-Control": "no-store",
-            "X-TTS-Provider": "deepgram_aura2",
+            "X-TTS-Provider": used,
             "X-TTS-Lang": req.language,
             "X-TTS-Chars": str(len(text)),
             "X-TTS-Bytes": str(len(audio_bytes)),
