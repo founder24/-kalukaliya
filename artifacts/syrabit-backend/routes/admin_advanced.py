@@ -1702,16 +1702,17 @@ async def admin_llm_pool_stats(admin: dict = Depends(get_admin_user)):
 
 @router.get("/admin/llm/health")
 async def admin_llm_health(admin: dict = Depends(get_admin_user)):
-    """Routing-chain health panel (Task #267 / Task #269).
+    """Routing-chain health panel (Task #267 / Task #269 / rebalanced #281).
 
     Returns:
-      routing_chains  — ordered provider+model list for each key feature pool,
-                        reflecting the Task #267 rewire (azure_openai/gpt-4.1-mini
-                        primary, bedrock/nova-micro second, workers_ai last resort
-                        for English; sarvam primary, vertex/gemini-2.5-flash second,
-                        workers_ai_indic/indictrans2 last resort for Assamese).
+      routing_chains  — ordered provider+model list for each key feature pool.
+                        After Task #281, English chat rotates equally across
+                        azure_openai/gpt-4.1-mini, vertex/gemini-2.5-flash, and
+                        workers_ai (Bedrock removed from chat/content pools).
+                        Assamese chat rotates equally across sarvam/sarvam-m,
+                        vertex/gemini-2.5-flash, and workers_ai_indic/indictrans2.
       burst_429       — 180-second sliding-window 429 counters for every tracked
-                        provider, including azure_openai and bedrock.
+                        provider (Bedrock still tracked — it serves vision/safety).
       burst_429_60s   — same counters restricted to the last 60 seconds
                         (in-process timestamp list — accurate short window).
     """
@@ -1754,9 +1755,10 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
         "burst_429":      burst_180,
         "burst_429_60s":  burst_60,
         "note": (
-            "routing_chains reflects Task #267 rewire: "
-            "english_rag_chat = azure_openai/gpt-4.1-mini → bedrock/nova-micro → workers_ai; "
-            "assamese_rag_chat = sarvam/sarvam-m → vertex/gemini-2.5-flash → workers_ai_indic/indictrans2. "
+            "routing_chains reflects Task #281 rebalance: "
+            "english_rag_chat = azure_openai/gpt-4.1-mini ↔ vertex/gemini-2.5-flash ↔ workers_ai (equal weight, Bedrock removed); "
+            "assamese_rag_chat = sarvam/sarvam-m ↔ vertex/gemini-2.5-flash ↔ workers_ai_indic/indictrans2 (equal weight). "
+            "Bedrock is retained for vision/safety/embed/translate pools only. "
             "burst_429 uses Redis when available (180s TTL); burst_429_60s is always in-process."
         ),
     }
