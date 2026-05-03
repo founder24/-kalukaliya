@@ -15,13 +15,14 @@ import asyncio
 import sys
 import os
 import unittest.mock as mock
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import logging
 logging.disable(logging.CRITICAL)
 
-from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, cf_gateway_url
+from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, cf_gateway_url, CF_GATEWAY_ENABLED
 
 
 # ── PROVIDER_PRIORITY structure ───────────────────────────────────────────────
@@ -1035,6 +1036,59 @@ def test_azure_openai_call_translate_happy_path():
     call_url = mock_client.post.call_args[0][0] if mock_client.post.call_args[0] else mock_client.post.call_args.args[0]
     assert "translate" in call_url, f"Expected translate in URL, got {call_url}"
     print("  PASS: providers.azure_openai.call_translate happy path — returns translated text, calls Azure Translator API")
+
+
+# ── Task #273: Live smoke test — Azure gpt-4o-mini deployment ─────────────────
+#
+# Opt-in: set AZURE_SMOKE_TEST=1 (plus CF_AI_GATEWAY_ACCOUNT_ID / CF_AI_GATEWAY_ID)
+# to enable the live HTTP call.  Without the explicit opt-in the test is always
+# skipped so partial environments (CF gateway IDs present but Azure BYOK not yet
+# wired) never produce a spurious hard failure.
+#
+# Example (from syrabit-backend directory):
+#   AZURE_SMOKE_TEST=1 python -m pytest tests/test_provider_dispatch.py::test_azure_gpt4o_mini_live_smoke -v
+
+_AZURE_SMOKE_ENABLED: bool = (
+    os.environ.get("AZURE_SMOKE_TEST", "").strip() in ("1", "true", "yes")
+    and CF_GATEWAY_ENABLED
+)
+
+@pytest.mark.skipif(
+    not _AZURE_SMOKE_ENABLED,
+    reason=(
+        "Azure live smoke skipped — set AZURE_SMOKE_TEST=1 (plus CF_AI_GATEWAY_ACCOUNT_ID "
+        "and CF_AI_GATEWAY_ID) to enable. Only run when Azure BYOK is confirmed wired in "
+        "the CF dashboard."
+    ),
+)
+def test_azure_gpt4o_mini_live_smoke():
+    """Live smoke test: Azure gpt-4o-mini deployment returns a non-empty response via CF Gateway.
+
+    Opt-in via AZURE_SMOKE_TEST=1 env var (plus CF_GATEWAY_ENABLED).
+    Skipped by default so partial configurations (CF IDs set, Azure BYOK not yet
+    wired) do not cause spurious CI failures.
+
+    Catches deployment-name drift: asserts _MODEL == 'gpt-4o-mini' before any
+    HTTP call, then confirms call_chat() returns a non-empty string (HTTP 200).
+    """
+    import providers.azure_openai as _az
+    from providers.azure_openai import _MODEL as _az_model
+
+    assert _az_model == "gpt-4o-mini", (
+        f"azure_openai deployment name drift detected: expected 'gpt-4o-mini', got {_az_model!r}. "
+        "Update AZURE_OPENAI_MODEL env var or the provider default."
+    )
+
+    messages = [{"role": "user", "content": "Reply with exactly the word PONG and nothing else."}]
+    result = asyncio.run(_az.call_chat(messages, max_tokens=8))
+
+    assert isinstance(result, str) and result.strip(), (
+        f"azure_openai live smoke: call_chat returned empty or non-string: {result!r}"
+    )
+    print(
+        f"  PASS: azure gpt-4o-mini live smoke — deployment={_az_model!r}, "
+        f"response={result.strip()!r}"
+    )
 
 
 if __name__ == "__main__":
