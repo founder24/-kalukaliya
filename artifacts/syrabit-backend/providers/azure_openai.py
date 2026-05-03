@@ -188,18 +188,55 @@ async def close() -> None:
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
+# Reasoning-model deployments (OpenAI o-series + GPT-5 family) require a
+# different request body shape than classic chat models:
+#   - Use ``max_completion_tokens`` instead of ``max_tokens``.
+#   - Only ``temperature=1`` (the default) is accepted — sending 0.1 returns
+#     HTTP 400 ``unsupported_value``.
+#   - They burn a large slice of the budget on hidden reasoning tokens, so
+#     callers must pass enough headroom or the visible content will be empty
+#     with ``finish_reason="length"``.
+_REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _is_reasoning_model(deployment: str) -> bool:
+    name = (deployment or "").lower()
+    return any(name.startswith(p) for p in _REASONING_PREFIXES)
+
+
+def _build_chat_body(
+    messages: list, deployment: str, max_tokens: int, *, stream: bool = False
+) -> dict:
+    """Construct the chat-completions request body for the given deployment.
+
+    Reasoning models use ``max_completion_tokens`` and omit ``temperature``
+    (the API only accepts the default 1). Classic models use ``max_tokens``
+    and the standard low-temperature setting we use everywhere else.
+    """
+    body: dict = {"messages": messages}
+    if _is_reasoning_model(deployment):
+        body["max_completion_tokens"] = max_tokens
+    else:
+        body["max_tokens"] = max_tokens
+        body["temperature"] = 0.1
+    if stream:
+        body["stream"] = True
+    return body
+
+
 def _endpoint_misconfig_hint(
     endpoint: str, status: int, body: str, deployment: str = ""
 ) -> Optional[str]:
     """Return an actionable diagnostic for two distinct Azure failure modes:
 
-    1. CATALOG endpoint: host is *.api.cognitive.microsoft.com (the regional
-       Cognitive Services model-catalog URL). It exposes /openai/models but
-       has NO deployments, so every chat call 404s. Operator must switch to a
-       per-resource OpenAI endpoint (https://<resource>.openai.azure.com/).
-    2. DEPLOYMENT NOT FOUND on an otherwise-valid per-resource endpoint: the
-       deployment name doesn't exist on this resource (typo, deleted, or never
-       created). Operator must create/rename the deployment in the portal.
+    1. CATALOG endpoint: host is the bare catalog URL
+       ``api.cognitive.microsoft.com`` (no region prefix). It exposes
+       ``/openai/models`` but has NO deployments, so every chat call 404s.
+       NOTE: regional shared endpoints like ``eastus.api.cognitive.microsoft.com``
+       are valid Azure OpenAI endpoints when paired with a regional resource
+       key — they are NOT the catalog URL and must not trip this hint.
+    2. DEPLOYMENT NOT FOUND on an otherwise-valid endpoint: the deployment
+       name doesn't exist on this resource (typo, deleted, or never created).
 
     Returned only on definitive matches; ambiguous failures yield None so the
     generic HTTP-status error is surfaced instead.
@@ -207,21 +244,25 @@ def _endpoint_misconfig_hint(
     host = (endpoint or "").lower()
     body_txt = body or ""
 
-    # Case 1: catalog endpoint — applies regardless of status because every
-    # chat call against this URL is doomed.
-    if "api.cognitive.microsoft.com" in host:
+    # Case 1: catalog endpoint — must be a 404 AND the bare catalog hostname
+    # (no region prefix). Earlier versions fired this for ANY status code on
+    # any host containing "api.cognitive.microsoft.com", which incorrectly
+    # masked legitimate 400s (e.g. unsupported_parameter on reasoning models)
+    # against the regional shared endpoint.
+    if status == 404 and host.split("//", 1)[-1].startswith("api.cognitive.microsoft.com"):
         return (
-            "azure_openai: endpoint is the regional Cognitive Services CATALOG "
-            "URL (api.cognitive.microsoft.com), not a per-resource Azure OpenAI "
-            "endpoint. Catalog URLs host /openai/models but have NO deployments "
-            "— every chat call will 404. FIX in Azure Portal → Azure OpenAI "
+            "azure_openai: endpoint is the BARE Cognitive Services CATALOG URL "
+            "(api.cognitive.microsoft.com with no region prefix), not a "
+            "per-resource Azure OpenAI endpoint. Catalog URLs host /openai/models "
+            "but have NO deployments. FIX in Azure Portal → Azure OpenAI "
             "resource → Keys and Endpoint: use the per-resource URL like "
-            "https://<your-resource>.openai.azure.com/ and create at least one "
-            "deployment (e.g. gpt-4o-mini) under Resource Management → Model "
+            "https://<your-resource>.openai.azure.com/ or the regional shared "
+            "endpoint like https://<region>.api.cognitive.microsoft.com/, and "
+            "create at least one deployment under Resource Management → Model "
             f"deployments. Current AZURE_OPENAI_ENDPOINT={endpoint!r}"
         )
 
-    # Case 2: DeploymentNotFound on a valid-looking per-resource endpoint.
+    # Case 2: DeploymentNotFound on a valid-looking endpoint.
     if status == 404 and "DeploymentNotFound" in body_txt:
         return (
             f"azure_openai: deployment {deployment!r} does not exist on "
@@ -250,7 +291,7 @@ async def call_chat(
         raise RuntimeError("azure_openai: no candidates available (gateway down and no direct keys)")
 
     deployment = model or _MODEL
-    body = {"messages": messages, "max_tokens": max_tokens, "temperature": 0.1}
+    body = _build_chat_body(messages, deployment, max_tokens)
     last_err: Optional[Exception] = None
     client = _get_client()
 
@@ -308,12 +349,7 @@ async def stream_chat(
         raise RuntimeError("azure_openai: no candidates available (gateway down and no direct keys)")
 
     deployment = model or _MODEL
-    body = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "stream": True,
-    }
+    body = _build_chat_body(messages, deployment, max_tokens, stream=True)
     client = _get_client()
     last_err: Optional[Exception] = None
 
