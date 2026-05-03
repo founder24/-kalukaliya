@@ -568,7 +568,10 @@ AZURE_OPENAI_DEPLOYMENT = (
 )
 # Legacy alias kept for callers that imported AZURE_OPENAI_MODEL directly.
 AZURE_OPENAI_MODEL = AZURE_OPENAI_DEPLOYMENT
-AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT', '').strip().rstrip('/')
+AZURE_OPENAI_ENDPOINT = (
+    os.environ.get('AZURE_OPENAI_ENDPOINT', '').strip()
+    or 'https://syrabit-openai.openai.azure.com/'
+).rstrip('/')
 AZURE_OPENAI_API_VERSION = (
     os.environ.get('AZURE_OPENAI_API_VERSION', '2024-12-01-preview').strip()
     or '2024-12-01-preview'

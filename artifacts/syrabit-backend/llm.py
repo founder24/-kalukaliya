@@ -1110,6 +1110,13 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
         return await _call_openai_compat(messages, api_key, model, max_tokens, "xai", "https://api.x.ai/v1")
     if provider == "openrouter":
         return await _call_openai_compat(messages, api_key, model, max_tokens, "openrouter", "https://openrouter.ai/api/v1")
+    if provider == "azure_openai":
+        # Task #290 — route through providers.azure_openai so we get the full
+        # candidate chain (CF BYOK → direct KEY_1 → direct KEY_2) and
+        # consistent failover across every dispatch path.
+        from providers.azure_openai import call_chat as _az_chat
+        from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL
+        return await _az_chat(messages, model=model or _AZ_DEPL, max_tokens=max_tokens)
 
     system_msg = ""
     user_msg = ""
@@ -1395,7 +1402,7 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
 _PROVIDER_CANONICAL: dict[str, str] = {
     "vertex":           "gemini",           # Vertex Gemini = gemini provider
     "bedrock":          "bedrock",
-    "azure_openai":     "openai",           # Azure OpenAI is OpenAI-compatible
+    "azure_openai":     "azure_openai",     # Task #290 — own branch w/ failover chain
     "sarvam":           "sarvam",
     "elevenlabs":       "elevenlabs",
     "assemblyai":       "assemblyai",

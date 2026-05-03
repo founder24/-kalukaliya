@@ -383,7 +383,7 @@ ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], st
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
     "english_chat":  ["azure_openai", "workers_ai_oss20", "vertex_chat"],
-    "assamese_chat": ["sarvam", "vertex_chat"],
+    "assamese_chat": ["azure_openai", "sarvam", "vertex_chat"],
     "long_form":     ["azure_openai", "workers_ai_oss120", "vertex_chat"],
 }
 
