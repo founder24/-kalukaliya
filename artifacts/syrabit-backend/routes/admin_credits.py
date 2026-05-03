@@ -1130,3 +1130,73 @@ async def admin_billing_sentry(
         "errors_limit": errors_limit,
         "note":         "Live Sentry API unreachable — showing env-var fallback values.",
     }
+
+
+# ── Task #271: Persistent LLM provider routing history ────────────────────────
+
+@router.get(
+    "/admin/llm/provider-stats",
+    summary="LLM provider routing history — cost allocation audit (Task #271)",
+    description=(
+        "Returns a per-provider breakdown of every LLM call recorded in the "
+        "persistent Redis sorted set (llm:routing_history). Events survive restarts "
+        "and are retained for 90 days. Each provider row includes: call count, "
+        "success rate, average latency, and the startup credit pool remaining for "
+        "that provider, so operators can audit cost attribution across Azure ($2.5k), "
+        "Bedrock ($1k), and Workers AI (free tier). "
+        "Falls back to the in-memory sliding window when Redis is unavailable. "
+        "Query param: window_seconds (default 3600 = last 1 hour)."
+    ),
+)
+async def admin_llm_provider_stats(
+    window_seconds: int = 3600,
+    _admin: dict = Depends(get_admin_user),
+) -> dict:
+    from llm import get_llm_provider_stats
+    from config import PROVIDER_CREDITS
+
+    stats = get_llm_provider_stats(window_seconds)
+
+    providers_enriched: dict = {}
+    for provider, pstats in stats["providers"].items():
+        # Normalize hyphenated provider names (e.g. "workers-ai") to the
+        # underscore form used in credit maps ("workers_ai") so credit
+        # metadata lookups always hit the right key regardless of which
+        # naming convention the event writer used.
+        credit_key = provider.replace("-", "_")
+        credit_ref = _CREDIT_REFERENCE.get(credit_key, _CREDIT_REFERENCE.get(provider, 0))
+        current_credits = PROVIDER_CREDITS.get(credit_key, PROVIDER_CREDITS.get(provider, 0))
+        pct_remaining = (
+            round(current_credits / credit_ref * 100, 1)
+            if credit_ref > 0 and current_credits > 0
+            else None
+        )
+        providers_enriched[provider] = {
+            **pstats,
+            "programme":            _PROGRAMME_NAMES.get(credit_key, _PROGRAMME_NAMES.get(provider, provider)),
+            "credit_pool_weight":   current_credits,
+            "credit_ref_usd":       credit_ref,
+            "credit_pct_remaining": pct_remaining,
+            "fallback_only":        current_credits == 0,
+        }
+
+    # Sort: most calls first for quick audit focus
+    sorted_providers = dict(
+        sorted(providers_enriched.items(), key=lambda kv: -kv[1]["calls"])
+    )
+
+    data_source = stats.get("data_source", "in-memory")
+
+    return {
+        "providers":            sorted_providers,
+        "total_calls":          stats["total_calls"],
+        "overall_success_rate": stats["overall_success_rate"],
+        "fallback_rate":        stats["fallback_rate"],
+        "window_seconds":       window_seconds,
+        "data_source":          data_source,
+        "note": (
+            "credit_pool_weight reflects PROVIDER_CREDITS routing weight (not raw dollar "
+            "balance). Update PROVIDER_CREDITS in config.py when topping up or consuming "
+            "credits. Redis data persists for 90 days; in-memory data is lost on restart."
+        ),
+    }

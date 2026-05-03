@@ -108,6 +108,15 @@ _ADMIN_LLM_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("ADMIN_LLM_MAX_CONCU
 _LLM_PROVIDER_METRICS: list = []
 _LLM_PROVIDER_METRICS_MAX = 20_000
 
+# ── Persistent routing history (Task #271) ────────────────────────────────────
+# Redis sorted set — score=unix_timestamp, member=JSON event.
+# Survives restarts; enables cost allocation auditing across Azure, Bedrock,
+# and Workers AI credit pools.  In-memory list above is kept as a fast local
+# fallback when Redis is unavailable.
+_LLM_ROUTING_HISTORY_REDIS_KEY = "llm:routing_history"
+_LLM_ROUTING_HISTORY_RETENTION_S = 90 * 86_400   # 90 days
+_LLM_ROUTING_HISTORY_MAX_ENTRIES = 100_000
+
 # ── Per-provider 429 burst tracking (Task #70 + Task #75) ───────────────────
 # Unified sliding-window counter for every LLM provider.
 # Each provider gets its own in-memory list and its own Redis key so the
@@ -256,30 +265,81 @@ def get_workers_ai_429_burst_inprocess(window_seconds: int = 60) -> int:
     return get_provider_429_burst_inprocess("workers-ai", window_seconds)
 
 
-def _record_llm_call(provider: str, model: str, duration_ms: float, success: bool, tokens_approx: int = 0, fallback: bool = False, error_type: str = ""):
-    _LLM_PROVIDER_METRICS.append({
-        "ts": time.time(),
-        "provider": provider,
-        "model": model,
-        "duration_ms": round(duration_ms, 1),
-        "success": success,
+def _record_llm_call(provider: str, model: str, duration_ms: float, success: bool, tokens_approx: int = 0, fallback: bool = False, error_type: str = "", feature_key: str = ""):
+    ts = time.time()
+    dm = round(duration_ms, 1)
+    event = {
+        # Canonical audit fields (Task #271 schema)
+        "timestamp":     int(ts),
+        "latency_ms":    dm,
+        "provider":      provider,
+        "model":         model,
+        "success":       success,
+        "feature_key":   feature_key,
+        # Extended fields for internal consumers
+        "ts":            ts,
+        "duration_ms":   dm,
         "tokens_approx": tokens_approx,
-        "fallback": fallback,
-        "error_type": error_type,
-    })
+        "fallback":      fallback,
+        "error_type":    error_type,
+    }
+    _LLM_PROVIDER_METRICS.append(event)
     if len(_LLM_PROVIDER_METRICS) > _LLM_PROVIDER_METRICS_MAX:
         del _LLM_PROVIDER_METRICS[:1000]
+    # Persist to Redis sorted set (best-effort — never blocks the LLM call path).
+    # Score = unix timestamp so ZRANGEBYSCORE gives events in any time window.
+    try:
+        from deps import redis_client as _rc
+        if _rc:
+            import json as _json_r, random as _rnd_r
+            _rc.zadd(_LLM_ROUTING_HISTORY_REDIS_KEY, {_json_r.dumps(event): ts})
+            # Probabilistic pruning (~1 % of calls) — keeps the sorted set bounded
+            # to _LLM_ROUTING_HISTORY_RETENTION_S and _LLM_ROUTING_HISTORY_MAX_ENTRIES.
+            if _rnd_r.random() < 0.01:
+                _rc.zremrangebyscore(
+                    _LLM_ROUTING_HISTORY_REDIS_KEY,
+                    "-inf",
+                    ts - _LLM_ROUTING_HISTORY_RETENTION_S,
+                )
+                # Also enforce max-entry cap: trim oldest if over the limit.
+                sz = _rc.zcard(_LLM_ROUTING_HISTORY_REDIS_KEY)
+                if sz and sz > _LLM_ROUTING_HISTORY_MAX_ENTRIES:
+                    excess = sz - _LLM_ROUTING_HISTORY_MAX_ENTRIES
+                    _rc.zpopmin(_LLM_ROUTING_HISTORY_REDIS_KEY, excess)
+    except Exception:
+        pass
+
 
 def get_llm_provider_stats(window_seconds: int = 3600) -> dict:
     cutoff = time.time() - window_seconds
-    recent = [m for m in _LLM_PROVIDER_METRICS if m["ts"] >= cutoff]
+    # Primary: Redis sorted set (persists across restarts, cross-worker).
+    recent: list = []
+    _redis_available = False
+    try:
+        from deps import redis_client as _rc
+        if _rc:
+            import json as _json_s
+            raw = _rc.zrangebyscore(_LLM_ROUTING_HISTORY_REDIS_KEY, cutoff, "+inf")
+            if raw is not None:
+                for item in raw:
+                    try:
+                        recent.append(_json_s.loads(item))
+                    except Exception:
+                        pass
+                _redis_available = True
+    except Exception:
+        pass
+    # Fallback: in-memory sliding window (single-process, lost on restart).
+    if not _redis_available:
+        recent = [m for m in _LLM_PROVIDER_METRICS if m["ts"] >= cutoff]
+
     by_provider: dict = {}
     for m in recent:
         p = m["provider"]
         if p not in by_provider:
             by_provider[p] = {"calls": 0, "successes": 0, "failures": 0, "total_ms": 0, "tokens": 0, "models": set()}
         by_provider[p]["calls"] += 1
-        by_provider[p]["tokens"] += m["tokens_approx"]
+        by_provider[p]["tokens"] += m.get("tokens_approx", 0)
         by_provider[p]["total_ms"] += m["duration_ms"]
         by_provider[p]["models"].add(m["model"])
         if m["success"]:
@@ -298,13 +358,14 @@ def get_llm_provider_stats(window_seconds: int = 3600) -> dict:
         }
     total_calls = sum(s["calls"] for s in by_provider.values())
     total_success = sum(s["successes"] for s in by_provider.values())
-    fallback_calls = sum(1 for m in recent if m["fallback"])
+    fallback_calls = sum(1 for m in recent if m.get("fallback"))
     return {
         "providers": result,
         "total_calls": total_calls,
         "overall_success_rate": round(total_success / max(total_calls, 1) * 100, 1),
         "fallback_rate": round(fallback_calls / max(total_calls, 1) * 100, 1),
         "window_seconds": window_seconds,
+        "data_source": "redis" if _redis_available else "in-memory",
     }
 _LLM_BATCH_WINDOW_MS = int(os.environ.get("LLM_BATCH_WINDOW_MS", 5))
 _CONTENT_BATCH_WINDOW_MS = int(os.environ.get("CONTENT_BATCH_WINDOW_MS", 300))
@@ -1068,7 +1129,7 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
     response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
     return response
 
-async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 1024, provider_list=None) -> str:
+async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 1024, provider_list=None, feature_key: str = "") -> str:
     import time as _t
     # Wall-clock start of the whole primary-rotation loop. Used so the
     # Workers AI fallback path (Task #636) can attribute the *real*
@@ -1107,7 +1168,7 @@ async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 102
             )
             _dur = int((_t.perf_counter() - _t0) * 1000)
             tok = len(result.split())
-            _record_llm_call(provider_cfg["provider"], try_model, _dur, True, tok, is_fallback)
+            _record_llm_call(provider_cfg["provider"], try_model, _dur, True, tok, is_fallback, feature_key=feature_key)
             log_prefix = "llm_call provider=" + provider_cfg["provider"] + f" model={try_model} duration_ms={_dur} tokens_approx={tok}"
             if is_fallback:
                 logger.info(log_prefix + " fallback=true")
@@ -1116,13 +1177,13 @@ async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 102
             return (True, LlmResult(result, provider=provider_cfg["provider"]), None)
         except asyncio.TimeoutError:
             _dur = int((_t.perf_counter() - _t0) * 1000)
-            _record_llm_call(provider_cfg["provider"], try_model, _dur, False, 0, is_fallback, "Timeout")
+            _record_llm_call(provider_cfg["provider"], try_model, _dur, False, 0, is_fallback, "Timeout", feature_key=feature_key)
             err = TimeoutError(f"{provider_cfg['provider']}/{try_model} timed out after {_PROVIDER_TIMEOUT}s")
             logger.warning(f"LLM {'fallback' if is_fallback else 'primary'} TIMEOUT ({provider_cfg['provider']}/{try_model}): {_dur}ms > {_PROVIDER_TIMEOUT}s limit")
             return (False, None, err)
         except Exception as e:
             _dur = int((_t.perf_counter() - _t0) * 1000)
-            _record_llm_call(provider_cfg["provider"], try_model, _dur, False, 0, is_fallback, type(e).__name__)
+            _record_llm_call(provider_cfg["provider"], try_model, _dur, False, 0, is_fallback, type(e).__name__, feature_key=feature_key)
             logger.warning(f"LLM {'fallback' if is_fallback else 'primary'} failed ({provider_cfg['provider']}/{try_model}): {type(e).__name__}: {str(e)[:150]}")
             return (False, None, e)
 
@@ -1238,7 +1299,7 @@ async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 102
             if ok and isinstance(value, str) and value:
                 reason = _wai.classify_primary_error(last_err)
                 _record_llm_call("workers-ai", "llama-3.1-8b-instruct", _dur, True,
-                                 len(value.split()), True)
+                                 len(value.split()), True, feature_key=feature_key)
                 logger.info(
                     f"llm_call provider=workers-ai model=llama-3.1-8b-instruct "
                     f"duration_ms={_dur} fallback=true reason={reason}"
@@ -1506,29 +1567,59 @@ async def _dispatch_llm_for_feature(
     Falls back to the Workers AI SmartKeyPool batcher for ``workers_ai`` and
     any unrecognised provider name.
     """
+    import time as _dp_t
+
     if provider == "vertex":
         if not _GEMINI_KEY:
             raise RuntimeError("vertex: GEMINI_API_KEY not available")
-        return await _call_gemini(messages, _GEMINI_KEY, "gemini-2.5-flash", max_tokens)
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _call_gemini(messages, _GEMINI_KEY, "gemini-2.5-flash", max_tokens)
+            _record_llm_call("vertex", "gemini-2.5-flash", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            return result
+        except Exception as _exc:
+            _record_llm_call("vertex", "gemini-2.5-flash", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            raise
 
     if provider == "sarvam":
         sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
         if not sarvam_slot:
             raise RuntimeError("sarvam: no Sarvam LLM key available")
-        return await _call_sarvam_llm(messages, sarvam_slot["key"], "sarvam-m", max_tokens)
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _call_sarvam_llm(messages, sarvam_slot["key"], "sarvam-m", max_tokens)
+            _record_llm_call("sarvam", "sarvam-m", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            return result
+        except Exception as _exc:
+            _record_llm_call("sarvam", "sarvam-m", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            raise
 
     if provider == "bedrock":
         # AWS Bedrock Converse API via CF AI Gateway BYOK (aws-bedrock slug).
         # CF handles SigV4 signing — no AWS SDK required in the backend.
         from providers.bedrock import call_converse as _bedrock_converse
-        return await _bedrock_converse(messages, max_tokens=max_tokens)
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _bedrock_converse(messages, max_tokens=max_tokens)
+            _record_llm_call("bedrock", "amazon.nova-micro-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            return result
+        except Exception as _exc:
+            _record_llm_call("bedrock", "amazon.nova-micro-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            raise
 
     if provider == "azure_openai":
         # Azure OpenAI chat/completions via CF AI Gateway BYOK (azure-openai slug).
         # CF injects the Azure API key stored in the dashboard.
         # Model: gpt-4.1-mini — highest TPS on Azure as of 2025 (Task #267).
         from providers.azure_openai import call_chat as _az_chat
-        return await _az_chat(messages, model="gpt-4.1-mini", max_tokens=max_tokens)
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _az_chat(messages, model="gpt-4.1-mini", max_tokens=max_tokens)
+            _record_llm_call("azure_openai", "gpt-4.1-mini", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            return result
+        except Exception as _exc:
+            _record_llm_call("azure_openai", "gpt-4.1-mini", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            raise
 
     if provider == "workers_ai_indic":
         # CF Workers AI IndicTrans2 — translation-only provider (Task #267).
@@ -1550,7 +1641,14 @@ async def _dispatch_llm_for_feature(
                 break
         if not src_text:
             raise RuntimeError("workers_ai_indic: no user message to translate; route to workers_ai")
-        return await _indic_trans(src_text, direction="en-indic")
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _indic_trans(src_text, direction="en-indic")
+            _record_llm_call("workers_ai_indic", "indictrans2", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            return result
+        except Exception as _exc:
+            _record_llm_call("workers_ai_indic", "indictrans2", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            raise
 
     # workers_ai or any unknown provider → Workers-AI-only dispatch.
     # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
@@ -1558,7 +1656,7 @@ async def _dispatch_llm_for_feature(
     # from PROVIDER_PRIORITY and must stay out of the weighted dispatch chain.
     if not _LLM_PROVIDERS_WORKERS_ONLY:
         raise RuntimeError("workers_ai: Cloudflare AI (CF_AI_ENABLED) is not configured")
-    return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
+    return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key=feature)
 
 
 async def call_with_provider_fallback(
@@ -1658,7 +1756,7 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
             "call_llm_for_rag feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,
         )
-        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
+        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key="english_rag_chat")
 
 
 async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048) -> str:
@@ -1703,7 +1801,7 @@ async def call_llm_api_content(messages: list, model: str = None, max_tokens: in
             "call_llm_api_content feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,
         )
-        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
+        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key="content")
 
 
 async def call_llm_api_content_with_retry(
@@ -1774,7 +1872,7 @@ async def call_llm_api_chat(
             "call_llm_api_chat feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,
         )
-        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
+        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key=feature)
 
 
 _THINK_BUDGET_HINT = "/think in one sentence. Answer immediately.\n"
@@ -3085,7 +3183,7 @@ async def call_translate_with_dispatch(
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
                     {"role": "user", "content": text},
                 ]
-                return await _call_llm_raw(prompt, None, 2048, provider_list=_LLM_PROVIDERS_WORKERS_ONLY)
+                return await _call_llm_raw(prompt, None, 2048, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key="translate")
             else:
                 raise RuntimeError(f"translate: unknown provider {provider!r}")
         except Exception as exc:
