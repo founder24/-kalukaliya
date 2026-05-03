@@ -146,42 +146,45 @@ def test_tts_stt_priority_structure():
 
 
 def test_embed_priority_structure():
-    """embed priority must include vertex, bedrock (Titan), cohere, azure_openai, workers_ai.
+    """embed priority must follow the locked chain: cohere → voyage_ai → workers_ai.
 
-    Per the authoritative provider matrix:
-      vertex(2k) → bedrock(1k, Titan embed) → cohere(1k) → azure_openai(1, RuntimeError) → workers_ai(0)
-    bedrock.embed wired via Amazon Titan Text Embeddings v1; cohere.embed_query wired.
-    pinecone_ai excluded from embed dispatch (vector search only, not feature embed pool).
+    Per the Task #291 locked PROVIDER_PRIORITY chain:
+      cohere(1k) → voyage_ai(500) → workers_ai(0, last-resort)
+    Vertex/Bedrock/Azure embed providers were dropped from this pool — Cohere
+    multilingual + Voyage AI cover the embed surface, with Workers AI as the
+    free-tier last-resort. pinecone_ai excluded from embed (vector_search only).
     """
     embed_pool = PROVIDER_PRIORITY.get("embed", [])
     pool_set = set(embed_pool)
     # pinecone_ai should NOT be in the embed pool (it's a vector search store, not an embed provider)
     assert "pinecone_ai" not in pool_set, "embed: pinecone_ai must not be in embed pool (use vector_search)"
-    assert "vertex" in pool_set, "embed priority must include vertex"
-    assert "bedrock" in pool_set, "embed priority must include bedrock (Titan Text Embeddings)"
-    assert "cohere" in pool_set, "embed priority must include cohere (embed_query wired)"
+    assert "cohere" in pool_set, "embed priority must include cohere (primary embed provider)"
+    assert "voyage_ai" in pool_set, "embed priority must include voyage_ai (secondary embed provider)"
     assert "workers_ai" in pool_set, "embed priority must include workers_ai as last-resort"
     assert embed_pool[-1] == "workers_ai", "embed: workers_ai must be last"
-    assert embed_pool[-2] == "azure_openai", "embed: azure_openai must be second-to-last"
-    print(f"  PASS: PROVIDER_PRIORITY['embed'] = {embed_pool} (vertex/bedrock/cohere wired, azure second-to-last)")
+    print(f"  PASS: PROVIDER_PRIORITY['embed'] = {embed_pool} (cohere/voyage_ai wired, workers_ai last)")
 
 
-def test_translate_priority_includes_bedrock():
-    """bedrock must be in translate priority — translate wired via providers.bedrock.call_converse.
+def test_translate_priority_locked_chain():
+    """translate priority must follow the Task #291 locked chain.
 
-    Authoritative matrix:
-      sarvam(500) → vertex(2k) → bedrock(1k, call_converse) → azure_openai(1, call_chat) → workers_ai(0)
+    Authoritative locked chain (POOL_WEIGHTS['translate']):
+      workers_ai_indic(10000, primary IndicTrans2 MT) → vertex(100, Gemini fallback)
+    Bedrock and Azure were removed from the translate pool — IndicTrans2 is a
+    purpose-built Indic neural MT model and Vertex Gemini handles edge cases.
     """
     translate_pool = PROVIDER_PRIORITY.get("translate", [])
     pool_set = set(translate_pool)
-    assert "bedrock" in pool_set, (
-        "PROVIDER_PRIORITY['translate'] must include bedrock (translate wired via call_converse)"
+    assert "workers_ai_indic" in pool_set, (
+        "PROVIDER_PRIORITY['translate'] must include workers_ai_indic (primary IndicTrans2)"
     )
-    assert "sarvam" in pool_set or "vertex" in pool_set, \
-        "translate priority must contain at least sarvam or vertex"
-    assert translate_pool[-1] == "workers_ai", "translate: workers_ai must be last"
-    assert translate_pool[-2] == "azure_openai", "translate: azure_openai must be second-to-last"
-    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (bedrock wired via call_converse)")
+    assert "vertex" in pool_set, "translate priority must include vertex (Gemini fallback)"
+    assert translate_pool[0] == "workers_ai_indic", (
+        "translate: workers_ai_indic must be first (POOL_WEIGHTS primary at 10000)"
+    )
+    assert "bedrock" not in pool_set, "translate: bedrock removed from locked chain"
+    assert "azure_openai" not in pool_set, "translate: azure_openai removed from locked chain"
+    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (locked workers_ai_indic → vertex chain)")
 
 
 def test_vision_priority_includes_bedrock():
@@ -634,7 +637,7 @@ def test_workers_ai_indic_raises_for_chat_features():
 
     msgs = [{"role": "user", "content": "অসমৰ ৰাজধানী কি?"}]
 
-    chat_features = ["assamese_rag_chat", "english_rag_chat", "safety", "content", ""]
+    chat_features = ["english_rag_chat", "safety", "content", ""]
     for feat in chat_features:
         assert feat not in _INDICTRANS_VALID_FEATURES, (
             f"{feat!r} should NOT be in _INDICTRANS_VALID_FEATURES"
@@ -1024,7 +1027,8 @@ def test_azure_openai_call_stt_happy_path():
     mock_resp = _make_mock_response(json_data={"text": "azure whisper transcript"})
     mock_client = mock.MagicMock()
     mock_client.post = mock.AsyncMock(return_value=mock_resp)
-    with mock.patch("providers.azure_openai._base_url", return_value="https://fake-az-gw.example.com"):
+    fake_chain = [("direct_key_1", "https://fake-az-gw.example.com", {"Content-Type": "application/json", "api-key": "fake"})]
+    with mock.patch("providers.azure_openai._candidates", return_value=fake_chain):
         with mock.patch("providers.azure_openai._get_client", return_value=mock_client):
             result = asyncio.run(_az_stt(b"\x00\x01audio", language="en-US"))
     assert result == "azure whisper transcript", f"Expected transcript, got {result!r}"
@@ -1041,7 +1045,8 @@ def test_azure_openai_call_embed_happy_path():
     mock_resp = _make_mock_response(json_data={"data": [{"embedding": fake_vec}]})
     mock_client = mock.MagicMock()
     mock_client.post = mock.AsyncMock(return_value=mock_resp)
-    with mock.patch("providers.azure_openai._base_url", return_value="https://fake-az-gw.example.com"):
+    fake_chain = [("direct_key_1", "https://fake-az-gw.example.com", {"Content-Type": "application/json", "api-key": "fake"})]
+    with mock.patch("providers.azure_openai._candidates", return_value=fake_chain):
         with mock.patch("providers.azure_openai._get_client", return_value=mock_client):
             result = asyncio.run(_az_embed("test text"))
     assert result == fake_vec, f"Expected embedding list, got {result!r}"
@@ -1131,7 +1136,7 @@ if __name__ == "__main__":
         test_workers_ai_fallback_pool_is_workers_only,
         test_tts_stt_priority_structure,
         test_embed_priority_structure,
-        test_translate_priority_includes_bedrock,
+        test_translate_priority_locked_chain,
         test_vision_priority_includes_bedrock,
         test_live_search_includes_tavily,
         test_assemblyai_uses_cf_gateway_url,
