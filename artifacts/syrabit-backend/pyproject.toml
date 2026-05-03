@@ -4,6 +4,12 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+# Task #284 — `pytest-asyncio` is now a hard test dep (see
+# requirements-test.txt). `auto` mode means `async def test_*` functions
+# are collected automatically without per-function `@pytest.mark.asyncio`,
+# which both unblocks tests that the original authors forgot to mark and
+# keeps the existing sync-wrapper-around-`_run(coro)` pattern working.
+asyncio_mode = "auto"
 markers = [
     "live: marks tests that make real HTTP calls to external services (skip when credentials absent)",
 ]

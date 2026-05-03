@@ -1,0 +1,21 @@
+# Dev-only test dependencies — keep production runtime (requirements.txt) slim.
+# Task #284 — pulled out of requirements.txt so production images don't ship
+# the in-process Mongo / async-test plumbing.
+#
+# Install with:  pip install -r requirements-test.txt
+# CI installs both files; production images install only requirements.txt.
+
+# Async test runner — required for `async def test_*` collection.
+# Configured via `asyncio_mode = "auto"` in pyproject.toml.
+pytest-asyncio>=1.0.0
+
+# In-process Motor (async Mongo) stub used by tests/test_alert_settings.py
+# round-trip + dispatch suites. Drop-in replacement for AsyncIOMotorClient
+# that stores everything in memory.
+mongomock-motor>=0.0.30
+
+# pytest-cov is also test-only but the existing CI step installs it
+# inline; keep it here too so a local `pip install -r requirements-test.txt`
+# gets the same toolchain.
+pytest-cov>=4.0.0
+coverage>=7.0.0

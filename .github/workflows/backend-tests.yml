@@ -74,7 +74,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest-cov coverage
+          # Task #284 — dev-only test deps (pytest-asyncio, mongomock-motor,
+          # pytest-cov, coverage) live in requirements-test.txt so the
+          # production runtime (requirements.txt) stays slim.
+          pip install -r requirements-test.txt
 
       # Task #723 — Symmetric backend gate for the cf_access break-glass
       # contract. The full pytest run below also covers this file, but we

@@ -39,7 +39,13 @@ class _MockTransport:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Task #284 — fresh loop per call (Python 3.11+ no longer auto-creates
+    # a main-thread loop on demand).
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 # ─── fetch_wikidata ────────────────────────────────────────────────────

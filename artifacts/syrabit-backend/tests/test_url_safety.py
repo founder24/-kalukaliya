@@ -158,8 +158,13 @@ def test_validate_rejects_operator_blocked(monkeypatch):
 
 
 def _run(coro):
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(coro)
+    # Task #284 — fresh loop per call (Python 3.11+ no longer auto-creates
+    # a main-thread loop on demand).
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_safe_get_returns_response_when_no_redirect(monkeypatch):

@@ -220,7 +220,16 @@ def test_operator_map_covers_every_canonical_ua_pattern():
 # ── fetch_admin_summary glue ────────────────────────────────────────────────
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Task #284 — `asyncio.get_event_loop()` raises ``RuntimeError: There
+    # is no current event loop in thread 'MainThread'`` on Python 3.11+
+    # when no loop is running. Spin up a fresh loop per call so this helper
+    # is order-independent regardless of what earlier tests did to the
+    # implicit main-thread loop.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_fetch_admin_summary_returns_none_when_unconfigured():
