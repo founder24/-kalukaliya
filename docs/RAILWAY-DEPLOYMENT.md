@@ -455,3 +455,38 @@ When ready to switch:
 7. Once stable, you can stop Replit deployment
 
 **Keep the Replit project as a fallback.** You can switch back anytime by changing `VITE_BACKEND_URL` in CF Pages.
+
+---
+
+## Refreshing the Rust Cargo.lock (`backend/rust-core`)
+
+`backend/rust-core/Cargo.lock` is committed to the repo so that Docker, Railway,
+and GitHub Actions builds all resolve to the exact same crate versions every
+time. The Rust Dockerfile (`backend/rust-core/Dockerfile`) explicitly copies
+`Cargo.toml` and `Cargo.lock` (no wildcard) and runs `cargo build --release`,
+which honors the lockfile.
+
+**Do not** edit `Cargo.lock` by hand. Refresh it only after an intentional
+dependency change in `backend/rust-core/Cargo.toml`:
+
+```bash
+cd backend/rust-core
+
+# 1. Update only the crates whose versions you changed in Cargo.toml
+cargo update -p <crate-name>
+
+# …or, after a major bump (e.g. axum/tonic/reqwest/sqlx like Task #192),
+# regenerate the full lockfile:
+cargo generate-lockfile
+
+# 2. Verify the build still resolves and compiles against the new lock
+cargo build --locked --release
+
+# 3. Commit Cargo.toml + Cargo.lock together in the same commit
+git add Cargo.toml Cargo.lock
+```
+
+CI/Railway will fail fast if `Cargo.lock` is missing or out of sync with
+`Cargo.toml` (because the Dockerfile uses an explicit `COPY` and the build
+runs against the locked graph), which is the desired behavior — it forces
+the lockfile bump to land in the same PR as the manifest change.
