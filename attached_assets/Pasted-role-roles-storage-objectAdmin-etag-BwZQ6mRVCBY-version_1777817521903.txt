@@ -1,0 +1,86 @@
+role: roles/storage.objectAdmin
+etag: BwZQ6mRVCBY=
+version: 1
+Binding roles/websecurityscanner.editor...
+ERROR: Policy modification failed. For a binding with condition, run "gcloud alpha iam policies lint-condition" to identify issues in condition.
+ERROR: (gcloud.projects.add-iam-policy-binding) INVALID_ARGUMENT: Role roles/websecurityscanner.editor is not supported for this resource.
+Binding roles/discoveryengine.viewer...
+Updated IAM policy for project [blissful-acumen-495019-t6].
+bindings:
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  - serviceAccount:syrabit-vertex-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/aiplatform.user
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/cloudscheduler.admin
+- members:
+  - serviceAccount:service-851687450401@gcp-sa-cloudscheduler.iam.gserviceaccount.com
+  role: roles/cloudscheduler.serviceAgent
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/cloudtasks.admin
+- members:
+  - serviceAccount:service-851687450401@gcp-sa-cloudtasks.iam.gserviceaccount.com
+  role: roles/cloudtasks.serviceAgent
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/cloudtranslate.user
+- members:
+  - serviceAccount:851687450401@cloudservices.gserviceaccount.com
+  role: roles/compute.instanceGroupManagerServiceAgent
+- members:
+  - serviceAccount:service-851687450401@compute-system.iam.gserviceaccount.com
+  role: roles/compute.serviceAgent
+- members:
+  - serviceAccount:service-851687450401@gcp-sa-discoveryengine.iam.gserviceaccount.com
+  role: roles/discoveryengine.serviceAgent
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/discoveryengine.viewer
+- members:
+  - user:founder@syrabit.ai
+  role: roles/editor
+- members:
+  - user:founder@syrabit.ai
+  role: roles/iam.devOps
+- members:
+  - user:founder@syrabit.ai
+  role: roles/iam.securityAuditor
+- members:
+  - serviceAccount:syrabit-vertex-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/logging.logWriter
+- members:
+  - serviceAccount:service-851687450401@cloud-ml.google.com.iam.gserviceaccount.com
+  role: roles/ml.serviceAgent
+- members:
+  - serviceAccount:syrabit-vertex-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/monitoring.metricWriter
+- members:
+  - user:founder@syrabit.ai
+  role: roles/orgpolicy.policyViewer
+- members:
+  - user:founder@syrabit.ai
+  role: roles/owner
+- members:
+  - user:founder@syrabit.ai
+  role: roles/policysimulator.orgPolicyAdmin
+- members:
+  - user:founder@syrabit.ai
+  role: roles/recommender.orgPolicyAdmin
+- members:
+  - user:founder@syrabit.ai
+  role: roles/resourcemanager.organizationAdmin
+- members:
+  - serviceAccount:syrabit-vertex-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/serviceusage.serviceUsageConsumer
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/speech.client
+- members:
+  - serviceAccount:syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  - serviceAccount:syrabit-vertex-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com
+  role: roles/storage.objectAdmin
+etag: BwZQ6mS8BRQ=
+version: 1
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ 
