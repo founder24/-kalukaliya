@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "id": "assets-cold-to-ia-30d",
+      "enabled": true,
+      "conditions": { "prefix": "" },
+      "transitions": [
+        {
+          "condition": { "type": "Age", "maxAge": 2592000 },
+          "storageClass": "InfrequentAccess"
+        }
+      ],
+      "abortMultipartUploadsTransition": {
+        "condition": { "type": "Age", "maxAge": 604800 }
+      }
+    }
+  ]
+}

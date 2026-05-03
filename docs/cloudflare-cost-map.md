@@ -60,8 +60,8 @@ AI later, and lets us justify a top-up to the startup rep with a clean
 
 | Product | Usage | Bucket | Policy decision |
 |---|---|---|---|
-| R2 (`syrabit-assets`) | Student PDF uploads via `POST /admin/assets/upload`. Served on `assets.syrabit.ai`. | 🔴 CREDIT-BURN (storage GB + Class A/B ops; egress is free) | **Add lifecycle rule**: move objects untouched for 30d to Infrequent Access. Batch multipart uploads to keep Class A ops minimal. Cap: alert if R2 line item >$10/mo. |
-| R2 (`syrabit-media`) | Generated images / OG cards from the FastAPI backend (`r2_storage.py`). | 🔴 CREDIT-BURN | Same lifecycle policy as `syrabit-assets`. Most writes are immutable + small; review steady-state monthly. |
+| R2 (`syrabit-assets`) | Student PDF uploads via `POST /admin/assets/upload`. Served on `assets.syrabit.ai`. | 🔴 CREDIT-BURN (storage GB + Class A/B ops; egress is free) | Lifecycle rule `assets-cold-to-ia-30d` transitions objects untouched for 30d to Infrequent Access — see [`docs/cloudflare-r2-lifecycle.md`](./cloudflare-r2-lifecycle.md). Batch multipart uploads to keep Class A ops minimal. Cap: alert if R2 line item >$10/mo. |
+| R2 (`syrabit-media`) | Generated images / OG cards from the FastAPI backend (`r2_storage.py`). | 🔴 CREDIT-BURN | Same 30d-to-IA lifecycle policy as `syrabit-assets` (rule `media-cold-to-ia-30d`, see [`docs/cloudflare-r2-lifecycle.md`](./cloudflare-r2-lifecycle.md)). Most writes are immutable + small; review steady-state monthly. |
 | D1 (`syrabit-content`) | Read replica of the Postgres content tables; ~6 hourly sync via cron. | 🔴 CREDIT-BURN (rows read + storage GB) | Free tier is 5GB storage + 25M rows-read/day. Current volume is well under that. Cap: alert if D1 line item >$5/mo. **Do not** add per-user write paths to D1 — it is a read-only edge cache. |
 | KV (`RATE_LIMIT`, `BOT_HTML_CACHE`, `CONTENT_CACHE`) | Rate limit counters, prerendered bot HTML, content cache. | 🔴 CREDIT-BURN (read/write/list ops) | Free tier is 100k reads/day, 1k writes/day per namespace. Bot prerender hits push us above this on traffic spikes. Mitigations already in place: aggressive TTLs, KV monitor with admin alerts (`kv-monitor.ts`). Cap: alert if KV line item >$10/mo. |
 | KV `CONTENT_CACHE` `preview_id` mismatch | `preview_id == id` (production) — known issue flagged in `wrangler.toml`. | n/a (correctness bug, not a billing one) | Out of scope here; tracked in `wrangler.toml` comment. |
@@ -100,7 +100,7 @@ AI later, and lets us justify a top-up to the startup rep with a clean
 | Product | Usage | Bucket | Policy decision |
 |---|---|---|---|
 | GraphQL Analytics API | Read-only queries from `cf_enterprise.py` and the admin dashboard. | 🟢 FREE | Keep. |
-| Logpush destinations (R2 / S3 / external) | Logpush dataset writes ship to R2 `syrabit-media`-adjacent prefix. | 🔴 CREDIT-BURN (R2 storage of log data) | **Add lifecycle rule**: delete log objects after 14 days. Cap: alert if Logpush-driven R2 storage >5GB. |
+| Logpush destinations (R2 / S3 / external) | Logpush dataset writes ship to R2 `syrabit-media` under the `logpush/` prefix. | 🔴 CREDIT-BURN (R2 storage of log data) | Lifecycle rule `media-logpush-delete-14d` deletes objects under `logpush/` after 14d — see [`docs/cloudflare-r2-lifecycle.md`](./cloudflare-r2-lifecycle.md). Cap: alert if Logpush-driven R2 storage >5GB. |
 
 ---
 
@@ -151,6 +151,11 @@ contiguous.
 
 ## Related docs
 
+- `docs/cloudflare-r2-lifecycle.md` — concrete R2 lifecycle rules (30d
+  Standard → IA on `syrabit-assets` + `syrabit-media`; 14d delete on the
+  Logpush prefix), with `wrangler` JSON and dashboard steps. Backed by
+  version-controlled config in `infra/r2-lifecycle/` (apply with
+  `./infra/r2-lifecycle/apply.sh`).
 - `docs/cloudflare-startup-credits-emails.md` — drafts of the unlock-features
   email and the month-9 top-up email.
 - `docs/cloudflare-monthly-cost-review.md` — checklist run on the first

@@ -1,0 +1,26 @@
+{
+  "rules": [
+    {
+      "id": "media-cold-to-ia-30d",
+      "enabled": true,
+      "conditions": { "prefix": "" },
+      "transitions": [
+        {
+          "condition": { "type": "Age", "maxAge": 2592000 },
+          "storageClass": "InfrequentAccess"
+        }
+      ],
+      "abortMultipartUploadsTransition": {
+        "condition": { "type": "Age", "maxAge": 604800 }
+      }
+    },
+    {
+      "id": "media-logpush-delete-14d",
+      "enabled": true,
+      "conditions": { "prefix": "logpush/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 1209600 }
+      }
+    }
+  ]
+}
