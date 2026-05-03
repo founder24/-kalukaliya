@@ -11,7 +11,7 @@ Worker: **syrabit-edge** · Route: `api.syrabit.ai/*`, `syrabit.ai/*`, `www.syra
 |---|---|---|
 | Workers Smart Placement | ✅ Active | `wrangler.toml` `[placement] mode="smart"` |
 | Workers AI binding (fallback fan-out) | ✅ Active | `wrangler.toml` `[ai]` + `handleAiFallback` |
-| Vectorize edge semantic search | ✅ Active | `[[vectorize]]` SYLLABUS_INDEX + SYLLABUS_INDEX_LEGACY |
+| Vectorize edge semantic search | ✅ Active | `[[vectorize]]` SYLLABUS_INDEX (legacy 768-dim binding retired in Task #308) |
 | D1 (content DB replica) | ✅ Active | `[[d1_databases]]` CONTENT_DB |
 | KV (rate limit + bot HTML cache) | ✅ Active | `[[kv_namespaces]]` RATE_LIMIT + BOT_HTML_CACHE |
 | Workers Logpush | ✅ Active | `wrangler.toml` `logpush=true` |
@@ -171,7 +171,7 @@ Modify TTLs in `monitored-urls.json` → redeploy the Worker. No dashboard chang
 | KV — CONTENT_CACHE | `981e939bcca445c481d4be818ebefee7` |
 | D1 — syrabit-content | `da5b5b9d-a8f9-43dd-bd23-a938f5c0cf69` |
 | Vectorize — syllabus-index-v2 | (1024-dim cosine, Gemini multilingual-e5-large) |
-| Vectorize — syllabus-index | (768-dim cosine, BGE — legacy fallback) |
+| ~~Vectorize — syllabus-index~~ | (768-dim BGE legacy fallback — retired in Task #308) |
 | Pages project | `syrabit-zip-convert` |
 
 > **Zone ID**: retrieve from the dashboard sidebar for `syrabit.ai` — needed for Cache Tag purge API calls.

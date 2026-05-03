@@ -591,7 +591,10 @@ fi
 if should_run 8; then
   section 8 "Vectorize Indexes"
 
-  for idx_name in "syllabus-index-v2" "syllabus-index"; do
+  # Task #308 — only `syllabus-index-v2` is provisioned now. The legacy
+  # 768-dim `syllabus-index` was retired and deleted via
+  # `wrangler vectorize delete syllabus-index`; do not re-create it here.
+  for idx_name in "syllabus-index-v2"; do
     resp=$(cf GET "/accounts/${ACCOUNT_ID}/vectorize/v2/indexes/${idx_name}")
     if [[ "$(echo "$resp" | jq -r '.success')" == "true" ]]; then
       DIM=$(echo "$resp" | jq -r '.result.config.dimensions // "?"')
@@ -603,7 +606,6 @@ if should_run 8; then
       if echo "$ERRMSG" | grep -qi "not found\|does not exist"; then
         warn "  ${idx_name} does not exist — creating..."
         DIM=1024
-        [[ "$idx_name" == "syllabus-index" ]] && DIM=768
         CREATE=$(cf POST "/accounts/${ACCOUNT_ID}/vectorize/v2/indexes" \
           "{\"name\":\"${idx_name}\",\"config\":{\"dimensions\":${DIM},\"metric\":\"cosine\"}}")
         check "  create ${idx_name} (${DIM}d cosine)" "$CREATE" || true

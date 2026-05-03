@@ -2,7 +2,7 @@
 Cloudflare Vectorize Client
 ============================
 Async wrapper around the official Cloudflare Python SDK for upserting,
-querying, and managing vectors in the `syllabus-index` Vectorize index.
+querying, and managing vectors in the `syllabus-index-v2` Vectorize index.
 
 Environment variables required:
   CLOUDFLARE_API_TOKEN  — API token with Vectorize read/write permissions
@@ -15,8 +15,10 @@ Setup (run once):
   wrangler vectorize create-metadata-index syllabus-index-v2 --property-name=level --type=string
   wrangler vectorize create-metadata-index syllabus-index-v2 --property-name=board --type=string
 
-Index name is overridable via VECTORIZE_INDEX_NAME env var (rollback: set to
-"syllabus-index" to use the legacy 768-dim Gemini index).
+Index name is overridable via VECTORIZE_INDEX_NAME env var. The legacy
+768-dim `syllabus-index` rollback target was retired in Task #308 and the
+underlying Vectorize index has been deleted, so only `syllabus-index-v2`
+(or another live 1024-dim index) is a valid value.
 """
 
 import asyncio

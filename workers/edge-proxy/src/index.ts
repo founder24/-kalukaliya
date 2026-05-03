@@ -131,13 +131,14 @@ interface Env {
   BOT_CACHE_ALERT_MIN_SAMPLE?: string;
   BOT_CACHE_ALERT_WINDOW_BUCKETS?: string;
   /**
-   * Enterprise Vectorize bindings — enabled in wrangler.toml for edge-side
+   * Enterprise Vectorize binding — enabled in wrangler.toml for edge-side
    * semantic search without a backend round-trip.
-   *   SYLLABUS_INDEX        → syllabus-index-v2 (1024-dim, cosine, Gemini)
-   *   SYLLABUS_INDEX_LEGACY → syllabus-index    (768-dim,  cosine, BGE)
+   *   SYLLABUS_INDEX → syllabus-index-v2 (1024-dim, cosine, Gemini)
+   *
+   * The legacy 768-dim `SYLLABUS_INDEX_LEGACY` binding was retired in
+   * Task #308 along with the underlying `syllabus-index` Vectorize index.
    */
   SYLLABUS_INDEX?: VectorizeIndex;
-  SYLLABUS_INDEX_LEGACY?: VectorizeIndex;
   /**
    * Task #108 — Phase 4: R2 student asset storage.
    * Bound to the syrabit-assets bucket. Admins upload PDFs via
@@ -2683,11 +2684,14 @@ async function _handleEdgeFetch(
     }
 
     // ── Enterprise: edge-side semantic search via Vectorize (no backend RTT) ──
-    // POST /api/edge/search  { query, top_k?, filters?, use_legacy? }
+    // POST /api/edge/search  { query, top_k?, filters? }
     // Embeds the query with Workers AI (bge-large-en-v1.5, 1024-dim) and
     // queries syllabus-index-v2 directly from the isolate. Typical latency
     // is 40–80 ms vs 200–400 ms for the backend round-trip path.
     // Requires X-Edge-AI-Secret header (same secret as /api/ai/fallback/*).
+    //
+    // The `use_legacy` query path was removed in Task #308 along with the
+    // 768-dim `syllabus-index` Vectorize index it targeted.
     if (pathname === "/api/edge/search" && request.method === "POST") {
       const secret = request.headers.get("X-Edge-AI-Secret") ?? "";
       if (!env.EDGE_AI_FALLBACK_SECRET || secret !== env.EDGE_AI_FALLBACK_SECRET) {
@@ -2706,7 +2710,6 @@ async function _handleEdgeFetch(
           query: string;
           top_k?: number;
           filters?: Record<string, string>;
-          use_legacy?: boolean;
         };
         if (!body.query || typeof body.query !== "string") {
           return new Response(JSON.stringify({ ok: false, error: "query_required" }), {
@@ -2721,13 +2724,7 @@ async function _handleEdgeFetch(
           aiGatewayOpts(env, "workers-ai-edge-vector-search"),
         ) as { data: number[][] };
         const vector = embedOut.data[0];
-        // Query Vectorize — use SYLLABUS_INDEX_LEGACY (768-dim) as fallback
-        const index = body.use_legacy ? env.SYLLABUS_INDEX_LEGACY : env.SYLLABUS_INDEX;
-        if (!index) {
-          return new Response(JSON.stringify({ ok: false, error: "index_not_bound" }), {
-            status: 503, headers: { ...cors, "Content-Type": "application/json" },
-          });
-        }
+        const index = env.SYLLABUS_INDEX;
         const queryOpts: VectorizeQueryOptions = {
           topK: body.top_k ?? 10,
           returnMetadata: "all",
@@ -2743,7 +2740,7 @@ async function _handleEdgeFetch(
           matches: matches.matches,
           count: matches.matches.length,
           duration_ms: Date.now() - t0,
-          index: body.use_legacy ? "syllabus-index" : "syllabus-index-v2",
+          index: "syllabus-index-v2",
           model: WORKERS_AI_MODELS.embed,
         }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
       } catch (err) {

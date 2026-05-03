@@ -200,8 +200,8 @@ bucket_name = "syrabit-assets"
 # talks to Vectorize over the Cloudflare REST API using CLOUDFLARE_API_TOKEN
 # and writes to the index named in the VECTORIZE_INDEX_NAME env var
 # (defaults to `syllabus-index-v2`, 1024 dim, cosine — Gemini
-# gemini-embedding-001 at 1024d; the legacy `syllabus-index` 768d
-# index is kept untouched for rollback).
+# gemini-embedding-001 at 1024d). The legacy 768-dim `syllabus-index`
+# rollback target was retired and deleted in Task #308.
 #
 # Re-enable this binding only if/when the edge worker itself needs to do
 # semantic search at the edge (lower latency, no backend round-trip).
@@ -233,19 +233,17 @@ bucket_name = "syrabit-assets"
 #   - Low-latency direct binding (no HTTP round-trip, no CLOUDFLARE_API_TOKEN)
 #
 # SYLLABUS_INDEX   → syllabus-index-v2, 1024-dim cosine (Gemini embeddings)
-#                    Primary index used for semantic chapter/topic search.
-# SYLLABUS_INDEX_LEGACY → syllabus-index, 768-dim cosine (BGE embeddings)
-#                    Kept for rollback if the 1024-dim index is ever
-#                    re-embedded; queries fall back here when v2 returns
-#                    no results above the similarity threshold.
+#                    Sole live index used for semantic chapter/topic search.
+#
+# The legacy `syllabus-index` (768-dim BGE) binding `SYLLABUS_INDEX_LEGACY`
+# was retired in Task #308 after a 60-day window with v2 as the sole live
+# index and zero rollback events. The Vectorize index itself was deleted
+# via `wrangler vectorize delete syllabus-index` to stop the recurring
+# stored-vector credit drain on the $5k Cloudflare credit pool.
 # ---------------------------------------------------------------------------
 [[vectorize]]
 binding    = "SYLLABUS_INDEX"
 index_name = "syllabus-index-v2"
-
-[[vectorize]]
-binding    = "SYLLABUS_INDEX_LEGACY"
-index_name = "syllabus-index"
 
 # ---------------------------------------------------------------------------
 # Phase 5 (Task #109) — Workers Analytics Engine: custom edge metrics dataset.
