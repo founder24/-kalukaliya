@@ -22,8 +22,8 @@ export default function StatusHeader({ token }) {
           <Cpu size={18} color="#8b5cf6" />
         </div>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>Vertex AI Studio</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>10 Google Cloud APIs · Gemini Vision · NLP · MCQ · Flashcards · SEO · OCR</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>AI Studio</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>Multi-provider router · Gemini · Cloudflare Workers AI · Google Translate · Google Vision · Cohere · AWS Textract · Azure Document Intelligence — Translation · NLP · Vision · OCR · MCQ · Flashcards · SEO</div>
         </div>
         {loading ? <Loader2 size={16} className="animate-spin ml-auto" color="#8b5cf6" /> : (
           <div className="ml-auto flex items-center gap-2">
@@ -45,16 +45,18 @@ export default function StatusHeader({ token }) {
       )}
       {status && !status.ok && (
         <div style={{ marginTop: 10, padding: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, fontSize: 12, color: '#fca5a5', lineHeight: 1.8 }}>
-          <strong style={{ color: '#f87171', display: 'block', marginBottom: 6 }}>⚠ GEMINI_API_KEY is missing or invalid</strong>
-          Add one of these to Replit Secrets as <code style={{ background: '#e5e7eb', padding: '1px 5px', borderRadius: 4 }}>GEMINI_API_KEY</code>, then restart the API:
+          <strong style={{ color: '#f87171', display: 'block', marginBottom: 6 }}>⚠ Primary provider (Gemini) is unreachable</strong>
+          AI Studio fans each feature out across several providers — Gemini, Cloudflare Workers AI, Google Translate, Google Vision, Cohere embeddings, AWS Textract, and Azure Document Intelligence. Gemini is the default for content generation (enhance / topic-suggester / SEO meta / MCQ / flashcards) and is currently failing; the Workers AI / Translate / Vision / Textract / Doc Intelligence paths still work for their respective features. See <strong style={{ color: '#111827' }}>API Config</strong> for per-feature provider routing.
+          <br /><br />
+          <strong style={{ color: '#111827' }}>Restoring Gemini</strong> — add a key to Replit Secrets as <code style={{ background: '#e5e7eb', padding: '1px 5px', borderRadius: 4 }}>GEMINI_API_KEY</code>, then restart the API:
           <br /><br />
           <strong style={{ color: '#111827' }}>Option A — Google AI Studio key</strong> (free, instant)
           <br />
           Get it at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#818cf8', textDecoration: 'underline' }}>aistudio.google.com/app/apikey</a> · starts with <code style={{ background: '#e5e7eb', padding: '1px 5px', borderRadius: 4 }}>AIza...</code>
           <br /><br />
-          <strong style={{ color: '#111827' }}>Option B — Vertex AI service account JSON</strong>
+          <strong style={{ color: '#111827' }}>Option B — Google Cloud Vertex AI service-account JSON</strong> (production)
           <br />
-          Paste the full JSON from Google Cloud Console → IAM → Service Accounts. Must have the <em>Vertex AI User</em> role.
+          Paste the full JSON from Google Cloud Console → IAM → Service Accounts. The account must hold the <em>Vertex AI User</em> role. (This is the credential format for the Vertex AI provider specifically — Workers AI, Cohere, Textract, Doc Intelligence and Google Translate use their own keys configured in API Config.)
         </div>
       )}
     </div>

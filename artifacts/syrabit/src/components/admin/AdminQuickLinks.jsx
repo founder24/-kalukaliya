@@ -29,7 +29,7 @@ const LABEL_MAP = {
   roadmap:       'Roadmap',
   content:       'Content',
   seomanager:    'SEO Manager',
-  vertex:        'Vertex AI',
+  vertex:        'AI Studio',
   users:         'Users',
   conversations: 'Conversations',
   analytics:     'Analytics',

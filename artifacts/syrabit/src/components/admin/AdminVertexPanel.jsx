@@ -37,7 +37,7 @@ export default function AdminVertexPanel({ token, adminToken, onNavigate }) {
   const ActiveCard = SERVICE_CARDS.find(s => s.id === active)?.component;
 
   return (
-    <SectionErrorBoundary name="Vertex Studio">
+    <SectionErrorBoundary name="AI Studio">
       <div style={{ padding: '0 2px' }}>
         <StatusHeader token={tk} />
 
@@ -68,13 +68,13 @@ export default function AdminVertexPanel({ token, adminToken, onNavigate }) {
         <div style={{ marginTop: 24, padding: 16, background: '#f5f3ff', border: '1px solid #e9d5ff', borderRadius: 12 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', marginBottom: 8, textTransform: 'uppercase' }}>Also Available In Other Panels</div>
           <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.8 }}>
-            • <strong style={{ color: '#111827' }}>CMS Editor</strong> — Translate button on any document<br />
-            • <strong style={{ color: '#111827' }}>Content Studio</strong> — Enhance + Quality Score on generated blocks<br />
-            • <strong style={{ color: '#111827' }}>Thumbnail Studio</strong> — Gemini Vision analysis (replaces Groq)<br />
-            • <strong style={{ color: '#111827' }}>Document Upload</strong> — Extract topics/MCQs from AHSEC PDFs<br />
-            • <strong style={{ color: '#111827' }}>Vision OCR</strong> — Scan question paper images (Cloud Vision)<br />
-            • <strong style={{ color: '#111827' }}>NLP Concepts</strong> — Entity &amp; keyword extraction (Cloud Natural Language)<br />
-            • <strong style={{ color: '#111827' }}>Flashcard + MCQ</strong> — Generate student revision material from any chapter
+            • <strong style={{ color: '#111827' }}>CMS Editor</strong> — Translate button on any document (Google Translate / Gemini / Workers AI fallback)<br />
+            • <strong style={{ color: '#111827' }}>Content Studio</strong> — Enhance + Quality Score on generated blocks (Gemini → Cloudflare AI fallback)<br />
+            • <strong style={{ color: '#111827' }}>Thumbnail Studio</strong> — Image analysis (Gemini Vision / Cloudflare AI)<br />
+            • <strong style={{ color: '#111827' }}>Document Upload</strong> — Extract topics/MCQs from AHSEC PDFs (Gemini / Azure Document Intelligence)<br />
+            • <strong style={{ color: '#111827' }}>Vision OCR</strong> — Scan question paper images (Google Cloud Vision / Bedrock)<br />
+            • <strong style={{ color: '#111827' }}>NLP Concepts</strong> — Entity &amp; keyword extraction (Cloud Natural Language / Cohere)<br />
+            • <strong style={{ color: '#111827' }}>Flashcard + MCQ</strong> — Generate student revision material from any chapter (Gemini / Workers AI)
           </div>
         </div>
         <AdminQuickLinks links={['seomanager','content','analytics','dashboard']} onNavigate={onNavigate} />

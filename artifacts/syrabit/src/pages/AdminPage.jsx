@@ -47,7 +47,7 @@ const SECTIONS = [
   { id: 'roadmap',       icon: GitBranch,       label: 'Roadmap',           group: 'main'     },
   { id: 'contenthub',    icon: Layers,          label: 'Content Editor',    group: 'content'  },
   { id: 'seomanager',    icon: Globe,           label: 'SEO Manager',       group: 'content'  },
-  { id: 'vertex',        icon: Cpu,             label: 'Vertex AI Studio',  group: 'content'  },
+  { id: 'vertex',        icon: Cpu,             label: 'AI Studio',         group: 'content'  },
   { id: 'automation',    icon: Zap,             label: 'Automation',        group: 'content'  },
   { id: 'users',         icon: Users,           label: 'Users',             group: 'audience' },
   { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience' },
