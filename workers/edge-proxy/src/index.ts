@@ -70,12 +70,30 @@ interface Env {
    * unless --remote or [ai] is configured; routes return 503 in that
    * case so the backend just propagates the original primary error.
    */
-  AI?: { run(model: string, payload: unknown): Promise<unknown> };
+  AI?: { run(model: string, payload: unknown, options?: { gateway?: { id: string; metadata?: Record<string, string> } }): Promise<unknown> };
   /**
    * Shared secret with the FastAPI backend, sent as `X-Edge-AI-Secret`
    * on every /api/ai/fallback/* call. Without it the routes 401.
    */
   EDGE_AI_FALLBACK_SECRET?: string;
+  /**
+   * Task #306 — AI Gateway routing for Workers AI calls.
+   * When set, all `env.AI.run(...)` invocations from this worker are
+   * routed through the named AI Gateway with a `metadata.tag` of
+   * `workers-ai-fallback` (the /api/ai/fallback/* path) or
+   * `workers-ai-edge-vector-search` (the /api/edge/vector-search path).
+   * The tag flows into the Cloudflare invoice line items so the Workers
+   * AI credit draw is cleanly separated from R2 / D1 / KV / Vectorize
+   * burn during the monthly cost review (see
+   * docs/cloudflare-cost-map.md). When unset, calls go direct — no
+   * change in behaviour, just no tag on the invoice.
+   *
+   * AI Gateway also gives us free response caching for deterministic
+   * prompts (embeddings, classification, repeat student questions),
+   * which avoids re-billing the $5k credit pool on cache hits. The
+   * cache TTL is configured per gateway in the dashboard, not here.
+   */
+  WORKERS_AI_GATEWAY_ID?: string;
   /**
    * Task #708 — synthetic external probe of /api/admin/diagnostics. See
    * src/synthetic-probe.ts and docs/CLOUDFLARE_ZERO_TRUST.md §7.1 for
@@ -2070,6 +2088,15 @@ const WORKERS_AI_MODELS = {
 } as const;
 type AiCapability = keyof typeof WORKERS_AI_MODELS;
 
+// Task #306 — build the AI Gateway options bag for env.AI.run(model, payload, opts).
+// When WORKERS_AI_GATEWAY_ID is unset (local dev / before the gateway is
+// provisioned in the dashboard) returns `undefined` so env.AI.run falls
+// back to its 2-argument shape and the call is unaffected.
+function aiGatewayOpts(env: Env, tag: string): { gateway: { id: string; metadata: { tag: string } } } | undefined {
+  if (!env.WORKERS_AI_GATEWAY_ID) return undefined;
+  return { gateway: { id: env.WORKERS_AI_GATEWAY_ID, metadata: { tag } } };
+}
+
 interface AiFallbackResultMeta {
   capability: AiCapability;
   model: string;
@@ -2196,8 +2223,11 @@ async function handleAiFallback(
       payload = { audio: Array.from(bytes) };
     }
 
-    const out = (await env.AI.run(model, payload)) as Record<string, unknown> &
-      { response?: string; data?: number[][] };
+    const out = (await env.AI.run(
+      model,
+      payload,
+      aiGatewayOpts(env, `workers-ai-fallback:${capability}`),
+    )) as Record<string, unknown> & { response?: string; data?: number[][] };
 
     const meta: AiFallbackResultMeta = {
       capability,
@@ -2685,9 +2715,11 @@ async function _handleEdgeFetch(
         }
         const t0 = Date.now();
         // Generate embedding using enterprise bge-large (1024-dim output)
-        const embedOut = await env.AI.run(WORKERS_AI_MODELS.embed, {
-          text: [body.query],
-        }) as { data: number[][] };
+        const embedOut = await env.AI.run(
+          WORKERS_AI_MODELS.embed,
+          { text: [body.query] },
+          aiGatewayOpts(env, "workers-ai-edge-vector-search"),
+        ) as { data: number[][] };
         const vector = embedOut.data[0];
         // Query Vectorize — use SYLLABUS_INDEX_LEGACY (768-dim) as fallback
         const index = body.use_legacy ? env.SYLLABUS_INDEX_LEGACY : env.SYLLABUS_INDEX;
