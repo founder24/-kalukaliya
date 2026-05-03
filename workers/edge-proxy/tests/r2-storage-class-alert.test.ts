@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   runR2StorageClassAlert,
   shouldRunMonthlyR2Check,
+  resetR2StorageWatchdogBlindCounter,
   _readR2StorageClassAlertStateForTests,
   _R2_STORAGE_CLASS_ALERT_STATE_KEY,
   _R2_STORAGE_CLASS_ALERT_DEFAULTS,
@@ -590,5 +591,56 @@ describe("shouldRunMonthlyR2Check", () => {
     expect(shouldRunMonthlyR2Check(new Date(Date.UTC(2026, 6, 1, 0, 1, 0)))).toBe(false);
     expect(shouldRunMonthlyR2Check(new Date(Date.UTC(2026, 6, 1, 1, 0, 0)))).toBe(false);
     expect(shouldRunMonthlyR2Check(new Date(Date.UTC(2026, 6, 1, 12, 0, 0)))).toBe(false);
+  });
+});
+
+describe("resetR2StorageWatchdogBlindCounter (Task #322)", () => {
+  it("zeros consecutive_query_failures and clears query_fail_last_fired_at", async () => {
+    const kv = new FakeKv();
+    await kv.put(
+      _R2_STORAGE_CLASS_ALERT_STATE_KEY,
+      JSON.stringify({
+        last_evaluated_at: "2026-04-01T00:00:00Z",
+        ia_share_last_fired_at: "2026-03-15T12:00:00Z",
+        logpush_last_fired_at: null,
+        last_ia_share: 0.4,
+        last_total_gb: 80,
+        last_logpush_gb: 1.2,
+        consecutive_query_failures: 3,
+        query_fail_last_fired_at: "2026-04-01T00:00:00Z",
+      }),
+    );
+    const result = await resetR2StorageWatchdogBlindCounter(
+      kv as unknown as KVNamespace,
+    );
+    expect(result.consecutive_query_failures).toBe(0);
+    expect(result.query_fail_last_fired_at).toBeNull();
+    // Other fields preserved so the IA-share / Logpush tiles stay
+    // populated after the reset.
+    expect(result.last_ia_share).toBe(0.4);
+    expect(result.last_total_gb).toBe(80);
+    expect(result.ia_share_last_fired_at).toBe("2026-03-15T12:00:00Z");
+    expect(result.last_evaluated_at).toBe("2026-04-01T00:00:00Z");
+    // Persisted to KV (the panel re-reads next mount).
+    const persisted = await _readR2StorageClassAlertStateForTests(
+      kv as unknown as KVNamespace,
+    );
+    expect(persisted.consecutive_query_failures).toBe(0);
+    expect(persisted.query_fail_last_fired_at).toBeNull();
+    expect(persisted.last_ia_share).toBe(0.4);
+  });
+
+  it("is idempotent on an empty / never-evaluated state", async () => {
+    const kv = new FakeKv();
+    const result = await resetR2StorageWatchdogBlindCounter(
+      kv as unknown as KVNamespace,
+    );
+    expect(result.consecutive_query_failures).toBe(0);
+    expect(result.query_fail_last_fired_at).toBeNull();
+    // Calling it twice is also safe (operator double-clicks).
+    const second = await resetR2StorageWatchdogBlindCounter(
+      kv as unknown as KVNamespace,
+    );
+    expect(second.consecutive_query_failures).toBe(0);
   });
 });

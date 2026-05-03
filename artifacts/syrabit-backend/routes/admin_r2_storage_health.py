@@ -20,6 +20,15 @@ Routes:
   short cooldown so the button can't be spammed past the 28-day
   cooldown anchor that protects against duplicate paging.
 
+* ``POST /admin/r2-storage-health/reset-watchdog`` — Task #322.
+  Proxies the worker's ``/api/edge/r2-storage-health/reset-watchdog``
+  endpoint to clear the secondary ``consecutive_query_failures`` +
+  ``query_fail_last_fired_at`` fields after an operator has rotated
+  ``R2_STORAGE_ANALYTICS_TOKEN``, so the red watchdog-blind badge on
+  the admin tile clears immediately instead of waiting ~30 days for
+  the next monthly evaluation. The operator email is logged here for
+  the audit trail (the worker doesn't have an identity to log).
+
 Both routes reuse ``D1_SYNC_SECRET`` for the worker handshake (same
 shared secret as ``/admin/kv-health``). No new secret to provision.
 """
@@ -111,6 +120,52 @@ async def admin_r2_storage_health_run(admin: dict = Depends(get_admin_user)):
     # surface the 429 cooldown / 503 misconfig states without the
     # backend having to translate them.
     if resp.status_code == 200:
+        return resp.json()
+    try:
+        body = resp.json()
+    except Exception:
+        body = {"detail": resp.text[:300]}
+    raise HTTPException(status_code=resp.status_code, detail=body)
+
+
+@router.post("/admin/r2-storage-health/reset-watchdog")
+async def admin_r2_storage_health_reset_watchdog(
+    admin: dict = Depends(get_admin_user),
+):
+    """Task #322 — clear the secondary "watchdog blind" counter in KV
+    after the operator has rotated ``R2_STORAGE_ANALYTICS_TOKEN``.
+
+    The worker performs the actual KV mutation; we proxy with the
+    shared ``D1_SYNC_SECRET`` handshake (same gate as the re-evaluate
+    button) and log the operator email for the audit trail.
+    """
+    secret = _edge_secret()
+    base = _edge_url()
+    if not secret or not base:
+        raise HTTPException(
+            status_code=503,
+            detail="CF_EDGE_PROXY_URL or D1_SYNC_SECRET is not set",
+        )
+    url = f"{base}/api/edge/r2-storage-health/reset-watchdog"
+    try:
+        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_S) as client:
+            resp = await client.post(url, headers={"X-Edge-Admin-Secret": secret})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"[r2-storage-health/reset-watchdog] edge POST failed: {exc}"
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"edge unreachable: {type(exc).__name__}",
+        ) from exc
+    if resp.status_code == 200:
+        actor = (
+            admin.get("email") or admin.get("id") or admin.get("sub") or "unknown"
+        )
+        logger.info(
+            f"[r2-storage-health/reset-watchdog] watchdog-blind counter reset "
+            f"by admin={actor}"
+        )
         return resp.json()
     try:
         body = resp.json()

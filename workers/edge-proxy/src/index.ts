@@ -22,6 +22,7 @@ import { runBotCacheAlert } from "./bot-cache-alert";
 import { runAiGatewayCacheAlert } from "./ai-gateway-cache-alert";
 import {
   runR2StorageClassAlert,
+  resetR2StorageWatchdogBlindCounter,
   shouldRunMonthlyR2Check,
   readR2StorageClassAlertState,
 } from "./r2-storage-class-alert";
@@ -493,6 +494,60 @@ async function handleR2StorageHealthRun(
 
   return new Response(
     JSON.stringify({ ok: true, result, state }),
+    {
+      status: 200,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "X-Source": "edge-r2-storage-health",
+      },
+    },
+  );
+}
+
+/**
+ * Task #322 — companion to {@link handleR2StorageHealthRun}. Clears
+ * the secondary `consecutive_query_failures` + `query_fail_last_fired_at`
+ * fields persisted by the Task #316 watchdog so an operator who has just
+ * rotated `R2_STORAGE_ANALYTICS_TOKEN` can dismiss the red badge on the
+ * admin tile immediately, instead of waiting up to ~30 days for the next
+ * monthly evaluation to confirm the fix.
+ *
+ * Auth: same `X-Edge-Admin-Secret` handshake as the read + run endpoints.
+ * No cooldown — the operation is idempotent and side-effect-free outside
+ * of KV (no GraphQL / R2-list calls), so spamming it cannot burn budget
+ * or fire pages.
+ */
+async function handleR2StorageHealthResetWatchdog(
+  env: Env,
+  request: Request,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const provided = request.headers.get("X-Edge-Admin-Secret") || "";
+  if (!env.D1_SYNC_SECRET || provided !== env.D1_SYNC_SECRET) {
+    return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+      status: 401,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  if (!env.RATE_LIMIT) {
+    return new Response(
+      JSON.stringify({ ok: false, reason: "no_kv_binding" }),
+      { status: 503, headers: { ...cors, "Content-Type": "application/json" } },
+    );
+  }
+  const state = await resetR2StorageWatchdogBlindCounter(env.RATE_LIMIT);
+  // Audit log so the rotation can be traced post-incident. The handshake
+  // already gates this on a shared secret an admin must possess; we don't
+  // have an operator identity at the worker layer (the backend does and
+  // logs it on its side), so we just record the action + timestamp.
+  console.log(
+    `[r2-storage-class-alert] manual watchdog-blind reset by admin ` +
+      `at ${new Date().toISOString()}`,
+  );
+  return new Response(
+    JSON.stringify({ ok: true, state }),
     {
       status: 200,
       headers: {
@@ -2674,6 +2729,18 @@ async function _handleEdgeFetch(
       request.method === "POST"
     ) {
       return handleR2StorageHealthRun(env, request, ctx, cors);
+    }
+    // Task #322 — companion that clears the secondary "watchdog blind"
+    // counter (consecutive_query_failures + query_fail_last_fired_at) in
+    // KV so an operator who just rotated R2_STORAGE_ANALYTICS_TOKEN can
+    // dismiss the red badge immediately rather than waiting up to ~30
+    // days for the next monthly evaluation. Same admin handshake as
+    // /run; no cooldown because the op is KV-only and idempotent.
+    if (
+      pathname === "/api/edge/r2-storage-health/reset-watchdog" &&
+      request.method === "POST"
+    ) {
+      return handleR2StorageHealthResetWatchdog(env, request, cors);
     }
 
     // ── Phase 5: Edge metrics query (Analytics Engine GraphQL API) ──────────

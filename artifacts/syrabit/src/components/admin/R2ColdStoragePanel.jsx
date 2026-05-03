@@ -29,9 +29,18 @@
  *   - onReevaluate:  async () => void — triggers the POST. Caller is
  *                    responsible for refreshing `r2Health` afterwards.
  *   - reevaluating:  boolean — disables the button + shows a spinner.
+ *   - onResetWatchdog: async () => void — Task #322. Clears the
+ *                    secondary `consecutive_query_failures` +
+ *                    `query_fail_last_fired_at` fields in KV after
+ *                    the operator has rotated
+ *                    `R2_STORAGE_ANALYTICS_TOKEN`, so the red badge
+ *                    clears immediately instead of waiting up to ~30
+ *                    days for the next monthly evaluation.
+ *   - resettingWatchdog: boolean — disables the reset button while
+ *                    the request is in flight.
  */
 import React from 'react';
-import { RefreshCw, AlertTriangle, EyeOff } from 'lucide-react';
+import { RefreshCw, AlertTriangle, EyeOff, RotateCcw } from 'lucide-react';
 
 const IA_SHARE_GRACE_DAYS = 30;
 /** Default "watchdog blind" threshold from
@@ -65,7 +74,13 @@ function fmtRelative(iso) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function R2ColdStoragePanel({ r2Health, onReevaluate, reevaluating }) {
+export default function R2ColdStoragePanel({
+  r2Health,
+  onReevaluate,
+  reevaluating,
+  onResetWatchdog,
+  resettingWatchdog,
+}) {
   return (
     <div
       className="mb-3 pb-3 border-b border-gray-200"
@@ -79,8 +94,14 @@ export default function R2ColdStoragePanel({ r2Health, onReevaluate, reevaluatin
           {/* Task #319 — surface the Task #316 "watchdog blind"
               counter inline so on-call sees a single failed monthly
               evaluation immediately, well before the second failure
-              ~60 days later trips the page. */}
-          <WatchdogBlindIndicator health={r2Health} />
+              ~60 days later trips the page. Task #322 adds the
+              inline reset button so on-call can clear the badge after
+              rotating the analytics token. */}
+          <WatchdogBlindIndicator
+            health={r2Health}
+            onReset={onResetWatchdog}
+            resetting={resettingWatchdog}
+          />
         </div>
         <button
           type="button"
@@ -267,7 +288,7 @@ function Body({ health }) {
  * a runbook link so on-call can diagnose without leaving the
  * dashboard.
  */
-function WatchdogBlindIndicator({ health }) {
+function WatchdogBlindIndicator({ health, onReset, resetting }) {
   if (!health || health.configured === false) return null;
   const state = health.state || {};
   const count = Number(state.consecutive_query_failures || 0);
@@ -292,21 +313,46 @@ function WatchdogBlindIndicator({ health }) {
       : 'Never fired. ') +
     `Runbook: ${RUNBOOK_URL}`;
   return (
-    <a
-      href={RUNBOOK_URL}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={tooltip}
-      aria-label={tooltip}
-      data-testid="r2-cold-storage-watchdog-indicator"
-      data-watchdog-state={tripped ? 'tripped' : 'warn'}
-      data-watchdog-count={count}
-      data-watchdog-threshold={threshold}
-      className={`inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-semibold px-1 py-0.5 rounded ring-1 ${cls} no-underline hover:brightness-95`}
-    >
-      <EyeOff size={10} />
-      <span>watchdog {count}/{threshold}</span>
-    </a>
+    <span className="inline-flex items-center gap-1">
+      <a
+        href={RUNBOOK_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={tooltip}
+        aria-label={tooltip}
+        data-testid="r2-cold-storage-watchdog-indicator"
+        data-watchdog-state={tripped ? 'tripped' : 'warn'}
+        data-watchdog-count={count}
+        data-watchdog-threshold={threshold}
+        className={`inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-semibold px-1 py-0.5 rounded ring-1 ${cls} no-underline hover:brightness-95`}
+      >
+        <EyeOff size={10} />
+        <span>watchdog {count}/{threshold}</span>
+      </a>
+      {/* Task #322 — inline reset for on-call. Only rendered when the
+          counter is non-zero (i.e. the indicator itself is visible)
+          and only when the parent supplied an `onReset` callback, so
+          historical callers without the prop don't accidentally show
+          a no-op button. */}
+      {typeof onReset === 'function' && (
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={!!resetting}
+          data-testid="r2-cold-storage-watchdog-reset"
+          title={
+            'Reset the watchdog-blind counter. Use after rotating ' +
+            'R2_STORAGE_ANALYTICS_TOKEN so the badge clears immediately ' +
+            'instead of waiting for the next monthly evaluation.'
+          }
+          aria-label="Reset watchdog-blind counter"
+          className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-semibold px-1 py-0.5 rounded ring-1 ring-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RotateCcw size={10} className={resetting ? 'animate-spin' : ''} />
+          <span>{resetting ? 'Resetting…' : 'Reset'}</span>
+        </button>
+      )}
+    </span>
   );
 }
 

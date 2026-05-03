@@ -424,6 +424,10 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   // monthly lifecycle / Logpush-cap watchdog (Task #314) is still
   // happy between cron ticks without opening the Cloudflare dashboard.
   const [r2Health, setR2Health] = useState(null);
+  // Task #322 — pending state for the inline "Reset" button on the
+  // R2 watchdog-blind indicator. Cleared in the finally block of the
+  // handler below so the button re-enables even if the POST throws.
+  const [r2ResettingWatchdog, setR2ResettingWatchdog] = useState(false);
   const [r2Reevaluating, setR2Reevaluating] = useState(false);
   // Task #689 — Cached state of the periodic Gemini health probe
   // (Task #677). ``null`` while loading; ``{ status, last_check_ts,
@@ -3155,6 +3159,36 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
               <R2ColdStoragePanel
                 r2Health={r2Health}
                 reevaluating={r2Reevaluating}
+                resettingWatchdog={r2ResettingWatchdog}
+                onResetWatchdog={async () => {
+                  // Task #322 — clear `consecutive_query_failures` +
+                  // `query_fail_last_fired_at` after the operator has
+                  // rotated R2_STORAGE_ANALYTICS_TOKEN. The worker
+                  // returns the resulting state inline so the badge
+                  // disappears immediately without a follow-up GET.
+                  if (r2ResettingWatchdog) return;
+                  setR2ResettingWatchdog(true);
+                  try {
+                    const res = await axios.post(
+                      `${API_BASE}/admin/r2-storage-health/reset-watchdog`,
+                      null,
+                      adminHdr(adminToken),
+                    );
+                    if (res.data?.state) {
+                      setR2Health((prev) => ({
+                        ...(prev || { configured: true }),
+                        configured: true,
+                        state: res.data.state,
+                      }));
+                    }
+                    toast.success('R2 watchdog-blind counter reset');
+                  } catch (e) {
+                    toast.error('Reset failed');
+                    log.error('R2 watchdog reset failed', { error: e?.message });
+                  } finally {
+                    setR2ResettingWatchdog(false);
+                  }
+                }}
                 onReevaluate={async () => {
                   if (r2Reevaluating) return;
                   setR2Reevaluating(true);

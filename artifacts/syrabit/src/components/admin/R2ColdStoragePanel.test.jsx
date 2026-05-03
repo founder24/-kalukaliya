@@ -305,4 +305,122 @@ describe('R2ColdStoragePanel', () => {
     );
     expect(screen.getByTestId('r2-cold-storage-reevaluate')).toBeDisabled();
   });
+
+  // ── Task #322 — inline reset for the watchdog-blind indicator ─────
+
+  it('hides the reset button when the watchdog counter is 0', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState()}
+        onReevaluate={() => {}}
+        reevaluating={false}
+        onResetWatchdog={() => {}}
+        resettingWatchdog={false}
+      />,
+    );
+    // Indicator itself is hidden when count=0, so the reset button
+    // (which lives inside it) must also be hidden.
+    expect(screen.queryByTestId('r2-cold-storage-watchdog-indicator')).toBeNull();
+    expect(screen.queryByTestId('r2-cold-storage-watchdog-reset')).toBeNull();
+  });
+
+  it('shows the reset button next to the watchdog indicator when count >= 1', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 1,
+            query_fail_last_fired_at: null,
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+        onResetWatchdog={() => {}}
+        resettingWatchdog={false}
+      />,
+    );
+    expect(screen.getByTestId('r2-cold-storage-watchdog-indicator')).toBeInTheDocument();
+    expect(screen.getByTestId('r2-cold-storage-watchdog-reset')).toBeInTheDocument();
+  });
+
+  it('omits the reset button when no onResetWatchdog handler is supplied', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 2,
+            query_fail_last_fired_at: '2026-04-15T12:00:00Z',
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    expect(screen.getByTestId('r2-cold-storage-watchdog-indicator')).toBeInTheDocument();
+    expect(screen.queryByTestId('r2-cold-storage-watchdog-reset')).toBeNull();
+  });
+
+  it('invokes onResetWatchdog when the reset button is clicked', () => {
+    const onResetWatchdog = vi.fn();
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 2,
+            query_fail_last_fired_at: '2026-04-15T12:00:00Z',
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+        onResetWatchdog={onResetWatchdog}
+        resettingWatchdog={false}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('r2-cold-storage-watchdog-reset'));
+    expect(onResetWatchdog).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the reset button while resettingWatchdog is true', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 2,
+            query_fail_last_fired_at: '2026-04-15T12:00:00Z',
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+        onResetWatchdog={() => {}}
+        resettingWatchdog={true}
+      />,
+    );
+    const btn = screen.getByTestId('r2-cold-storage-watchdog-reset');
+    expect(btn).toBeDisabled();
+    expect(btn.textContent).toMatch(/Resetting/);
+  });
 });

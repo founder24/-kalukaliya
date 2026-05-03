@@ -198,3 +198,102 @@ def test_r2_health_run_503_when_secret_missing(app_client_authed):
                     clear=False):
         res = app_client_authed.post("/admin/r2-storage-health/run")
     assert res.status_code == 503
+
+
+# ── Task #322 — reset-watchdog proxy ─────────────────────────────────
+
+
+def test_r2_health_reset_watchdog_requires_admin_auth(app_client_no_auth):
+    res = app_client_no_auth.post("/admin/r2-storage-health/reset-watchdog")
+    assert res.status_code in (401, 403)
+
+
+def test_r2_health_reset_watchdog_503_when_secret_missing(app_client_authed):
+    with patch.dict(os.environ, {"D1_SYNC_SECRET": "", "CF_EDGE_PROXY_URL": ""},
+                    clear=False):
+        res = app_client_authed.post("/admin/r2-storage-health/reset-watchdog")
+    assert res.status_code == 503
+
+
+def test_r2_health_reset_watchdog_proxies_post(app_client_authed):
+    """Happy path: backend forwards the POST to the worker with the
+    shared secret header and returns the worker's body unchanged so the
+    UI can refresh the tile from the response."""
+    captured = {}
+    payload = {
+        "ok": True,
+        "state": {
+            "last_evaluated_at": "2026-04-15T10:00:00Z",
+            "ia_share_last_fired_at": None,
+            "logpush_last_fired_at": None,
+            "last_ia_share": 0.4,
+            "last_total_gb": 80,
+            "last_logpush_gb": 1.5,
+            "consecutive_query_failures": 0,
+            "query_fail_last_fired_at": None,
+        },
+    }
+
+    class _FakeResp:
+        status_code = 200
+        def json(self): return payload
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            return _FakeResp()
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com"}, clear=False):
+        with patch("routes.admin_r2_storage_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.post("/admin/r2-storage-health/reset-watchdog")
+
+    assert res.status_code == 200
+    assert res.json() == payload
+    assert captured["url"].endswith("/api/edge/r2-storage-health/reset-watchdog")
+    assert captured["headers"].get("X-Edge-Admin-Secret") == "topsecret"
+
+
+def test_r2_health_reset_watchdog_propagates_worker_error(app_client_authed):
+    """A non-200 response from the worker (e.g. 401 from a stale shared
+    secret) must be surfaced to the UI as the same status, not swallowed
+    into a generic 500."""
+    class _FakeResp:
+        status_code = 401
+        text = '{"detail":"Unauthorized"}'
+        def json(self): return {"detail": "Unauthorized"}
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **k): return _FakeResp()
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com"}, clear=False):
+        with patch("routes.admin_r2_storage_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.post("/admin/r2-storage-health/reset-watchdog")
+    assert res.status_code == 401
+
+
+def test_r2_health_reset_watchdog_502_on_network_error(app_client_authed):
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **k):
+            raise RuntimeError("connection refused")
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com"}, clear=False):
+        with patch("routes.admin_r2_storage_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.post("/admin/r2-storage-health/reset-watchdog")
+    assert res.status_code == 502
+    assert "edge unreachable" in res.json()["detail"]

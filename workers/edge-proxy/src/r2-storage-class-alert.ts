@@ -809,6 +809,30 @@ export async function readR2StorageClassAlertState(
   return readState(kv);
 }
 
+/**
+ * Task #322 — clear the secondary "watchdog blind" tracking fields
+ * (`consecutive_query_failures` + `query_fail_last_fired_at`) without
+ * touching the primary IA-share / Logpush-cap fields. Used by the
+ * admin "Reset" button so an operator who just rotated
+ * `R2_STORAGE_ANALYTICS_TOKEN` can clear the red badge immediately
+ * instead of waiting up to ~30 days for the next monthly evaluation
+ * to confirm the fix.
+ *
+ * Returns the resulting state so the caller can push it back to the
+ * UI in the same response (no follow-up GET round-trip needed).
+ *
+ * Idempotent: a no-op when the counter is already 0.
+ */
+export async function resetR2StorageWatchdogBlindCounter(
+  kv: KVNamespace,
+): Promise<R2StorageClassAlertState> {
+  const state = await readState(kv);
+  state.consecutive_query_failures = 0;
+  state.query_fail_last_fired_at = null;
+  await writeState(kv, state);
+  return state;
+}
+
 /** Test-only: read the persisted alert state. */
 export async function _readR2StorageClassAlertStateForTests(
   kv: KVNamespace,
