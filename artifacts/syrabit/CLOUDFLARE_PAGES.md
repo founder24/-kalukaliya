@@ -8,7 +8,7 @@ and is **not** deployed via Pages.
 
 | Setting                    | Value                                                                |
 | -------------------------- | -------------------------------------------------------------------- |
-| **Production branch**      | `main`                                                               |
+| **Production branch**      | `Replit-agent`                                                       |
 | **Framework preset**       | `None` (custom)                                                      |
 | **Root directory** (Project) | `/` (repo root — pnpm monorepo root, do **not** set to `artifacts/syrabit`) |
 | **Build command**          | See below                                                            |

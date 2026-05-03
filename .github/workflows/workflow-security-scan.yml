@@ -70,9 +70,9 @@ name: workflow-security-scan
 
 on:
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
   push:
-    branches: [master]
+    branches: [Replit-agent]
 
 # Read-only token: this job greps every workflow file and runs the
 # linter. It does not push back to the repo, comment on PRs, or

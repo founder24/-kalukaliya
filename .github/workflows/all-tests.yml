@@ -31,9 +31,9 @@ name: all-tests
 
 on:
   push:
-    branches: [master]
+    branches: [Replit-agent]
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
 
 # Read-only token: checks out the repo, runs tests, uploads a Playwright
 # report artifact on failure. Does not write back to the repo.

@@ -11,7 +11,7 @@
  *   "post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)"
  *
  * The script:
- *   1. Iterates over BRANCHES (comma-separated, default: "master,main").
+ *   1. Iterates over BRANCHES (comma-separated, default: "Replit-agent,main").
  *   2. For each branch: GETs the current protection rule.
  *        - 404 → branch exists but has no protection yet → creates a minimal rule.
  *        - 403 → PAT lacks admin permission → exits 1 immediately.
@@ -41,7 +41,7 @@
  *   GITHUB_REPOSITORY        — "owner/repo" — set automatically by GitHub Actions.
  *
  * Optional env vars:
- *   BRANCHES  — comma-separated list of branches to update (default: "master,main")
+ *   BRANCHES  — comma-separated list of branches to update (default: "Replit-agent,main")
  *   DRY_RUN   — set to "1" to print the payload without sending it
  */
 
@@ -231,7 +231,7 @@ async function enforceBranch(repo, branch, dryRun) {
 async function main() {
   const repo    = env('GITHUB_REPOSITORY');
   const dryRun  = process.env.DRY_RUN === '1';
-  const branches = (env('BRANCHES', 'master,main'))
+  const branches = (env('BRANCHES', 'Replit-agent,main'))
     .split(',')
     .map(b => b.trim())
     .filter(Boolean);

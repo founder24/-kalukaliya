@@ -52,7 +52,7 @@ permissions:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:

@@ -117,7 +117,7 @@ name: edge-proxy-deploy
 
 on:
   push:
-    branches: [master, main]
+    branches: [Replit-agent, main]
     paths:
       - "workers/edge-proxy/**"
       - ".github/workflows/edge-proxy-deploy.yml"
@@ -142,7 +142,7 @@ permissions:
 jobs:
   deploy-preview:
     name: wrangler deploy --env preview
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -299,7 +299,7 @@ jobs:
     name: wrangler deploy (prod) — manual approval
     needs: smoke-preview
     if: >-
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') &&
+      (github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main') &&
       !(github.event_name == 'workflow_dispatch' && inputs.skip_prod)
     runs-on: ubuntu-latest
     timeout-minutes: 10

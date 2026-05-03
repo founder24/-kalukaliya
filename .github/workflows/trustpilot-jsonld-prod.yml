@@ -39,7 +39,7 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
     paths:
       - "artifacts/syrabit/scripts/verify-trustpilot-jsonld.mjs"
       - ".github/workflows/trustpilot-jsonld-prod.yml"

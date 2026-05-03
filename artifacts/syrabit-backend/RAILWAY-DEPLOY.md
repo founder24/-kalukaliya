@@ -265,7 +265,7 @@ RAILWAY_PROJECT_ID=… RAILWAY_SERVICE_ID=… RAILWAY_ENVIRONMENT=staging \
 ```
 
 The same scripts run from CI via `.github/workflows/railway-deploy.yml`
-(`workflow_dispatch` only, gated to `master`/`main`).
+(`workflow_dispatch` only, gated to `Replit-agent`/`main`).
 
 See [`docs/RAILWAY-DEPLOYMENT.md`](../../docs/RAILWAY-DEPLOYMENT.md#driving-deploys-from-replit--ci)
 for the full reference.

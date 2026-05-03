@@ -432,7 +432,7 @@ https://dash.cloudflare.com/<account-id>/pages/view/syrabit-analytics/deployment
 curl -X POST "https://api.cloudflare.com/client/v4/accounts/<account-id>/pages/projects/syrabit-analytics/deployments" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  --data '{"deployment_trigger":{"branch":"main"},"production_branch":"main"}'
+  --data '{"deployment_trigger":{"branch":"Replit-agent"},"production_branch":"Replit-agent"}'
 ```
 
 **Rollback Backend**:

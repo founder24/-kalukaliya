@@ -46,7 +46,7 @@ on:
     - cron: "30 4 * * *"
   workflow_dispatch:
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
     paths:
       - "artifacts/syrabit-backend/bench/**"
       - "artifacts/syrabit-backend/grounded_answer.py"

@@ -27,9 +27,9 @@ name: pinned-actions-check
 
 on:
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
   push:
-    branches: [master]
+    branches: [Replit-agent]
 
 permissions:
   contents: read

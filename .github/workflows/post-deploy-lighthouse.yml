@@ -51,7 +51,7 @@ name: post-deploy-lighthouse
 
 on:
   push:
-    branches: [master, main]
+    branches: [Replit-agent, main]
   workflow_dispatch:
     inputs:
       skip_lighthouse:
@@ -78,7 +78,7 @@ jobs:
   lighthouse-check:
     name: Lighthouse post-deploy check (LCP / CLS / INP)
     # Only run on the production branches Pages watches.
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # 10 min for the Pages deploy poll (up to 20 min budget) + 10 min per page
     # for the Observatory test + headroom = 35 min ceiling.

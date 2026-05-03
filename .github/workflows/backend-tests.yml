@@ -26,9 +26,9 @@ name: backend-tests
 
 on:
   push:
-    branches: [master]
+    branches: [Replit-agent]
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
 
 # Permissions: `pull-requests: write` for the PR coverage-comment step
 # (guarded with `continue-on-error` on forks where the token is downgraded).
@@ -272,10 +272,10 @@ jobs:
           PYEOF
 
       # Auto-commit the updated snapshot when drift is detected on a direct
-      # push to master.  The GITHUB_TOKEN now has `contents: write` so the
+      # push to Replit-agent.  The GITHUB_TOKEN now has `contents: write` so the
       # bot can push back without a separate deploy key.  [skip ci] prevents
       # this commit from re-triggering the workflow.
-      - name: Auto-update OpenAPI snapshot (push to master only)
+      - name: Auto-update OpenAPI snapshot (push to Replit-agent only)
         if: steps.schema_drift.outcome == 'failure' && github.event_name == 'push'
         working-directory: ${{ github.workspace }}
         env:

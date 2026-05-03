@@ -1,7 +1,7 @@
 name = "syrabit-email"
 main = "src/index.ts"
 account_id = "d66e40eac539fff1db270fddf384a5ec"
-compatibility_date = "2025-05-01"
+compatibility_date = "2026-05-01"
 
 send_email = [
   { name = "EMAIL_SENDER" }

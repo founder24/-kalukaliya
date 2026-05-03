@@ -41,9 +41,9 @@ on:
   workflow_dispatch:
     inputs:
       branches:
-        description: "Comma-separated list of branches to update (default: master,main)"
+        description: "Comma-separated list of branches to update (default: Replit-agent,main)"
         required: false
-        default: "master,main"
+        default: "Replit-agent,main"
         type: string
       dry_run:
         description: "Print the PUT payload without sending it (smoke-test mode)."
@@ -91,8 +91,8 @@ jobs:
           BRANCH_PROTECTION_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           # workflow_dispatch: use the user-supplied branch list.
-          # schedule: update both master and main (one or both may not exist;
+          # schedule: update both Replit-agent and main (one or both may not exist;
           # the script skips branches that are absent).
-          BRANCHES: ${{ inputs.branches || 'master,main' }}
+          BRANCHES: ${{ inputs.branches || 'Replit-agent,main' }}
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
         run: node artifacts/syrabit/scripts/enforce-branch-protection.js

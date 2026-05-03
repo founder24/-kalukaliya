@@ -430,7 +430,7 @@ and accepts these inputs:
   set it to that target's public hostname; otherwise the probe will
   pass/fail based on production rather than what you actually deployed.
 
-The workflow is gated to `master`/`main` and prints status before and
+The workflow is gated to `Replit-agent`/`main` and prints status before and
 after the deploy. There is no auto-deploy on push from this workflow —
 Railway's own GitHub integration handles that separately.
 

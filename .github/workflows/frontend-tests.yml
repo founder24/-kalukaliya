@@ -26,9 +26,9 @@ name: frontend-tests
 
 on:
   push:
-    branches: [master]
+    branches: [Replit-agent]
   pull_request:
-    branches: [master]
+    branches: [Replit-agent]
 
 # Read-only token: this job checks out the repo, runs vitest in two
 # packages, and produces a Vite build under each package's local dist/.
