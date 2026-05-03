@@ -137,8 +137,12 @@ wrangler r2 bucket lifecycle list syrabit-media
 Each command should print the rules above. Re-run after any bucket migration
 or account change.
 
-The `cf_enterprise.py` monthly cost review (see
-`docs/cloudflare-monthly-cost-review.md`) should confirm the R2 storage line
-item is split between *Standard* and *Infrequent Access* classes from month
-two onward — if 100% is still *Standard* after 30 days of traffic, the
-transition rules are not active.
+The monthly cost review (see
+[`docs/cloudflare-monthly-cost-review.md`](./cloudflare-monthly-cost-review.md),
+**Step 5**) explicitly confirms the R2 storage line item is split between
+*Standard* and *Infrequent Access* classes from month two onward, and that
+Logpush-driven R2 storage stays under the 5GB cap. If 100% is still
+*Standard* after 30+ days of traffic, the transition rules are not active —
+Step 5 contains the diagnose-and-re-apply procedure (run
+`./infra/r2-lifecycle/apply.sh --verify`, re-apply if needed, ticket
+Cloudflare if the rules are present but not acting).

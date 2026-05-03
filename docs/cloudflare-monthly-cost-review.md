@@ -40,7 +40,41 @@ AI inference as possible.
      Analytics Engine >$5/mo, **any non-Workers-AI line item >$20/mo**.)
      If yes, file a follow-up task to investigate before next month.
 
-5. **Verify the Workers AI tagging is intact.**
+5. **Verify the R2 cold-storage lifecycle rules are working.**
+   Cloudflare Dashboard → Billing → most recent invoice → R2 line item
+   detail (or Dashboard → R2 → Usage → filter by storage class).
+   Record three numbers in the running log's R2 columns:
+   - **R2 Standard GB-month** billed across `syrabit-assets` +
+     `syrabit-media`.
+   - **R2 Infrequent Access GB-month** billed across the same buckets.
+   - **Logpush R2 GB** stored under the `syrabit-media/logpush/` prefix
+     (Dashboard → R2 → `syrabit-media` → Metrics → filter prefix
+     `logpush/`).
+
+   Then check:
+   - **Is the IA share > 0?** From month two onward (i.e. once the rules
+     have been live for ≥30 days of traffic) we expect a *meaningful*
+     share — at least ~20% of total R2 GB-month — to be billed as
+     Infrequent Access. If the split is still 100% Standard, the
+     transition rules are not active. **Diagnose**:
+     1. Run `./infra/r2-lifecycle/apply.sh --verify` and confirm the
+        rules from `docs/cloudflare-r2-lifecycle.md` are present on
+        both buckets with `enabled: true`.
+     2. If absent or disabled, re-apply via `./infra/r2-lifecycle/apply.sh`
+        and note the re-apply in the running log's "Action items" column.
+     3. If present and enabled but the invoice still shows 100%
+        Standard, open a Cloudflare support ticket referencing the rule
+        IDs (`assets-cold-to-ia-30d`, `media-cold-to-ia-30d`) — this
+        means the rules are configured but the platform isn't acting on
+        them.
+   - **Is Logpush R2 storage < 5GB?** This is the cap from the cost map
+     (`docs/cloudflare-cost-map.md`, Logpush row). If it's over,
+     confirm `media-logpush-delete-14d` is present and enabled (same
+     `apply.sh --verify` as above) and inspect the oldest object's
+     timestamp in the `logpush/` prefix to confirm 14d-old objects are
+     actually being deleted.
+
+6. **Verify the Workers AI tagging is intact.**
    Cloudflare Dashboard → AI → AI Gateway → `syrabit-ai-gw` (or whatever
    `WORKERS_AI_GATEWAY_ID` is set to) → Logs.
    Confirm recent requests carry the `workers-ai-fallback:*` and
@@ -50,16 +84,16 @@ AI inference as possible.
    `env.AI.run(...)` callsite was added without going through
    `aiGatewayOpts(env, ...)`. Fix before next review.
 
-6. **Confirm AI Gateway caching is still saving credits.**
+7. **Confirm AI Gateway caching is still saving credits.**
    Same panel → Cache hit-rate. Anything below ~30% on the embed /
    classification routes is suspicious; raise the per-route TTL or
    inspect whether prompts have started embedding a timestamp /
    nonce that's defeating the cache.
 
-7. **Append a row to the running log** (table below). Commit the
+8. **Append a row to the running log** (table below). Commit the
    updated doc.
 
-8. **If month index ≥ 9** (i.e. ~February 2027), trigger the top-up
+9. **If month index ≥ 9** (i.e. ~February 2027), trigger the top-up
    email — see `docs/cloudflare-startup-credits-emails.md` §2.
 
 ---
@@ -69,9 +103,10 @@ AI inference as possible.
 Append a new row at the **top** of the table each month. Round dollars
 to the nearest dollar; round percentages to the nearest whole number.
 
-| Month | Date reviewed | Reviewer | Credits remaining | Workers AI $ | Non-AI $ | Largest non-AI line item | Action items / anomalies |
-|---|---|---|---|---|---|---|---|
-| _e.g. 2026-06_ | _2026-06-01_ | _@name_ | _$4,720_ | _$210_ | _$70_ | _R2 $42_ | _none_ |
+| Month | Date reviewed | Reviewer | Credits remaining | Workers AI $ | Non-AI $ | Largest non-AI line item | R2 Standard GB-mo | R2 IA GB-mo | R2 IA % of total | Logpush R2 GB | Action items / anomalies |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| _e.g. 2026-06_ | _2026-06-01_ | _@name_ | _$4,720_ | _$210_ | _$70_ | _R2 $42_ | _18_ | _0_ | _0% (rules <30d old, expected)_ | _2.1_ | _none_ |
+| _e.g. 2026-07_ | _2026-07-01_ | _@name_ | _$4,500_ | _$220_ | _$60_ | _R2 $35_ | _9_ | _12_ | _57% ✅_ | _2.4_ | _none_ |
 
 (Add new rows above this placeholder; delete the placeholder once the
 first real entry exists.)
