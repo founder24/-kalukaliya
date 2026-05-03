@@ -198,6 +198,15 @@ async def close() -> None:
 #     with ``finish_reason="length"``.
 _REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 
+# Reasoning effort tier passed to gpt-5 / o-series models. ``minimal`` cuts
+# hidden-reasoning token spend (and therefore latency) ~3-5x vs the default
+# ``medium`` for short user-facing replies. Override via env when a feature
+# genuinely needs deeper reasoning (e.g. AZURE_REASONING_EFFORT=low|medium|high).
+# Valid values: minimal | low | medium | high.
+_REASONING_EFFORT = (_os.environ.get("AZURE_REASONING_EFFORT") or "minimal").strip().lower()
+if _REASONING_EFFORT not in {"minimal", "low", "medium", "high"}:
+    _REASONING_EFFORT = "minimal"
+
 
 def _is_reasoning_model(deployment: str) -> bool:
     name = (deployment or "").lower()
@@ -209,13 +218,15 @@ def _build_chat_body(
 ) -> dict:
     """Construct the chat-completions request body for the given deployment.
 
-    Reasoning models use ``max_completion_tokens`` and omit ``temperature``
-    (the API only accepts the default 1). Classic models use ``max_tokens``
-    and the standard low-temperature setting we use everywhere else.
+    Reasoning models use ``max_completion_tokens``, omit ``temperature`` (only
+    the default 1 is accepted), and pass ``reasoning_effort`` to bound how
+    many hidden reasoning tokens the model burns before answering. Classic
+    models use ``max_tokens`` and the standard low-temperature setting.
     """
     body: dict = {"messages": messages}
     if _is_reasoning_model(deployment):
         body["max_completion_tokens"] = max_tokens
+        body["reasoning_effort"] = _REASONING_EFFORT
     else:
         body["max_tokens"] = max_tokens
         body["temperature"] = 0.1
