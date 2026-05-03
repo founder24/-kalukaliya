@@ -1,8 +1,10 @@
 //! gRPC service implementation for Edge communication
 
-use tonic::{Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status};
 use tokio::sync::broadcast;
 use sqlx::PgPool;
+use std::pin::Pin;
+use futures::Stream;
 use crate::generated::syrabit::{
     neural_mesh_service_server::NeuralMeshService,
     ChatRequest, ChatResponse,
@@ -14,6 +16,9 @@ use crate::generated::syrabit::{
 
 /// gRPC service implementation
 pub struct NeuralMeshGrpcService {
+    // Held for future LLM/RAG implementations of the streaming RPCs;
+    // currently unused while those handlers return placeholder data.
+    #[allow(dead_code)]
     db: PgPool,
     metrics_tx: broadcast::Sender<MetricsUpdate>,
 }
@@ -33,10 +38,16 @@ impl Clone for NeuralMeshGrpcService {
     }
 }
 
+// Tonic streaming methods require `Stream<Item = Result<T, Status>>`.
+// `BroadcastStream` yields `Result<T, BroadcastStreamRecvError>`, so we
+// wrap it in a boxed stream that maps the recv error into a `Status`.
+type ChatResponseStream = Pin<Box<dyn Stream<Item = Result<ChatResponse, Status>> + Send + 'static>>;
+type MetricsUpdateStream = Pin<Box<dyn Stream<Item = Result<MetricsUpdate, Status>> + Send + 'static>>;
+
 #[tonic::async_trait]
 impl NeuralMeshService for NeuralMeshGrpcService {
-    type ChatStream = tokio_stream::wrappers::BroadcastStream<ChatResponse>;
-    type StreamMetricsStream = tokio_stream::wrappers::BroadcastStream<MetricsUpdate>;
+    type ChatStream = ChatResponseStream;
+    type StreamMetricsStream = MetricsUpdateStream;
 
     /// Chat with AI assistant (streaming response)
     async fn chat(
@@ -46,13 +57,14 @@ impl NeuralMeshService for NeuralMeshGrpcService {
         let msg = request.into_inner();
         tracing::info!("gRPC Chat request from user: {}", msg.user_id);
 
-        // TODO: Implement actual chat logic with LLM
-        // For now, return a simple response stream
-        
-        use tokio_stream::wrappers::BroadcastStream;
-        let (tx, _rx) = broadcast::channel(10);
-        
-        Ok(Response::new(BroadcastStream::new(tx)))
+        // TODO: Implement actual chat logic with LLM. Until then, return a
+        // well-formed empty stream that completes cleanly (End-Of-Stream)
+        // rather than emitting a synthetic recv error to the client.
+        // We deliberately use `futures::stream::empty()` instead of a
+        // BroadcastStream whose sender is dropped immediately — the latter
+        // would surface as a `BroadcastStreamRecvError` on the wire.
+        let stream = futures::stream::empty::<Result<ChatResponse, Status>>();
+        Ok(Response::new(Box::pin(stream)))
     }
 
     /// RAG query with GraphRAG support
@@ -118,7 +130,7 @@ impl NeuralMeshService for NeuralMeshGrpcService {
     }
 
     /// Health check
-    async fn health_check(
+    async fn healthz(
         &self,
         request: Request<HealthCheck>,
     ) -> Result<Response<HealthCheck>, Status> {
@@ -160,8 +172,11 @@ impl NeuralMeshService for NeuralMeshGrpcService {
 
         // Subscribe to metrics broadcasts
         let rx = self.metrics_tx.subscribe();
-        
+
         use tokio_stream::wrappers::BroadcastStream;
-        Ok(Response::new(BroadcastStream::new(rx)))
+        use futures::StreamExt;
+        let stream = BroadcastStream::new(rx)
+            .map(|r| r.map_err(|e| Status::internal(format!("broadcast recv: {e}"))));
+        Ok(Response::new(Box::pin(stream)))
     }
 }

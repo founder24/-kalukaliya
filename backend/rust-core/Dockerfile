@@ -2,7 +2,7 @@
 # Produces a minimal production image
 
 # Stage 1: Build stage
-FROM rust:1.75-slim-bookworm AS builder
+FROM rust:1.82-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,10 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy manifest files
+# Copy manifest files. Cargo.lock is checked in (Task #192 / #300) and is
+# required for reproducible, locked builds; do NOT use a wildcard COPY here
+# because that silently succeeds when the file is missing and would yield
+# non-deterministic dependency resolution at image-build time.
 COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY proto ./proto/

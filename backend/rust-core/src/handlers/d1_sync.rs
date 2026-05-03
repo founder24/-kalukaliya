@@ -10,10 +10,10 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use crate::AppState;
 
 /// Query parameters for D1 sync endpoint
+#[allow(dead_code)] // `table`/`since` parsed by serde, not yet used by stub handler
 #[derive(Debug, Deserialize)]
 pub struct D1SyncParams {
     #[serde(default = "default_limit")]
@@ -373,11 +373,12 @@ pub async fn d1_sync_status(
         }
     }
 
+    let synced_count = tables_synced.len();
     Ok(Json(D1SyncStatus {
         success: true,
         tables_synced,
         total_records,
         last_sync_at: Some(chrono::Utc::now().timestamp_millis()),
-        message: format!("{} tables ready for D1 sync with {} total records", tables_synced.len(), total_records),
+        message: format!("{} tables ready for D1 sync with {} total records", synced_count, total_records),
     }))
 }

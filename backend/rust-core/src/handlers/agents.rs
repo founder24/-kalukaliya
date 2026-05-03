@@ -17,6 +17,7 @@ pub struct AgentInfo {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[allow(dead_code)] // `parameters` is parsed by serde but not yet consumed (handler stub)
 #[derive(Debug, Deserialize)]
 pub struct ExecuteAgentRequest {
     pub action: String,

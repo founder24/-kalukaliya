@@ -27,6 +27,11 @@ pub struct AuthResponse {
     pub message: String,
 }
 
+// Request payload structs deserialized from JSON. Fields are read by
+// serde during deserialization but not yet consumed by handler bodies
+// (handlers are stubs pending DB writes — see follow-up #302), so we
+// explicitly silence the dead-code lint.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct CreateSubjectRequest {
     pub name: String,
@@ -35,12 +40,14 @@ pub struct CreateSubjectRequest {
     pub description: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct UpdateSubjectRequest {
     pub name: Option<String>,
     pub description: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct CreatePageRequest {
     pub subject_id: String,
@@ -49,6 +56,7 @@ pub struct CreatePageRequest {
     pub page_order: Option<i32>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct UpdatePageRequest {
     pub title: Option<String>,
@@ -93,23 +101,23 @@ pub async fn verify_otp(
     let is_valid = verify_mock_otp(&payload.otp);
 
     if !is_valid {
-        return Ok(AuthResponse {
+        return Ok(Json(AuthResponse {
             success: false,
             token: None,
             role: "".to_string(),
             message: "Invalid OTP".to_string(),
-        });
+        }));
     }
 
     // Generate JWT token with staff role
     let token = generate_staff_jwt(&payload.phone, &state.config.jwt_secret);
 
-    Ok(AuthResponse {
+    Ok(Json(AuthResponse {
         success: true,
         token: Some(token),
         role: "staff".to_string(),
         message: "Authentication successful".to_string(),
-    })
+    }))
 }
 
 /// Get content hub data for staff (read-only for boards/classes)
@@ -159,7 +167,7 @@ pub async fn create_subject(
 pub async fn update_subject(
     State(_state): State<AppState>,
     Path(subject_id): Path<String>,
-    Json(payload): Json<UpdateSubjectRequest>,
+    Json(_payload): Json<UpdateSubjectRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // TODO: Update subject in database
     

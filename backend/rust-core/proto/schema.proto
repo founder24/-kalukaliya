@@ -125,8 +125,10 @@ service NeuralMeshService {
   // Execute agent commands
   rpc ExecuteAgent(AgentCommand) returns (AgentResponse);
   
-  // Health check
-  rpc HealthCheck(HealthCheck) returns (HealthCheck);
+  // Health check — rpc method renamed from `HealthCheck` to `Healthz` so
+  // its symbol does not collide with the `HealthCheck` message type
+  // inside the same service scope (protoc rejects the shadowed name).
+  rpc Healthz(HealthCheck) returns (HealthCheck);
   
   // Stream metrics for JARVIS HUD
   rpc StreamMetrics(MetricsRequest) returns (stream MetricsUpdate);

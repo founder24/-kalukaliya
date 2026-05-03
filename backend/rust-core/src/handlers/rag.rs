@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use crate::AppState;
-use crate::generated::syrabit::{RagQuery, RagResult};
+use crate::generated::syrabit::RagQuery;
 
 #[derive(Debug, Deserialize)]
 pub struct RagQueryRequest {

@@ -52,9 +52,9 @@ pub async fn execute_graph_rag(
 
 /// Perform vector similarity search
 async fn vector_search(
-    pool: &PgPool,
+    _pool: &PgPool,
     query: &str,
-    top_k: i32,
+    _top_k: i32,
     filters: &[String],
 ) -> Result<Vec<GraphRagResult>, Box<dyn std::error::Error + Send + Sync>> {
     // TODO: Implement actual vector search using pgvector or similar
@@ -76,10 +76,10 @@ async fn vector_search(
 
 /// Perform keyword/full-text search
 async fn keyword_search(
-    pool: &PgPool,
+    _pool: &PgPool,
     query: &str,
-    top_k: i32,
-    filters: &[String],
+    _top_k: i32,
+    _filters: &[String],
 ) -> Result<Vec<GraphRagResult>, Box<dyn std::error::Error + Send + Sync>> {
     // TODO: Implement full-text search using PostgreSQL ts_vector
     
@@ -144,7 +144,7 @@ async fn traverse_graph(
 
 /// Fetch documents related to the given document ID
 async fn fetch_related_documents(
-    pool: &PgPool,
+    _pool: &PgPool,
     document_id: &str,
 ) -> Result<Vec<GraphRagResult>, Box<dyn std::error::Error + Send + Sync>> {
     // TODO: Query graph edges table to find related documents

@@ -3,12 +3,20 @@
 use sqlx::PgPool;
 use crate::db::models::*;
 use uuid::Uuid;
+use chrono::Utc;
 
-/// Repository for database operations
+/// Repository for database operations.
+///
+/// The struct and most of its methods are not constructed yet — handlers
+/// currently operate on mocked data. The Repository is part of the
+/// crate's public surface and will be wired up in follow-up #302
+/// (replace staff handler stubs). Suppress the dead-code lint until then.
+#[allow(dead_code)]
 pub struct Repository {
     pool: PgPool,
 }
 
+#[allow(dead_code)]
 impl Repository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -33,7 +41,7 @@ impl Repository {
     
     pub async fn list_classes(&self, board_id: Option<&str>) -> Result<Vec<Class>, sqlx::Error> {
         let query = match board_id {
-            Some(bid) => "SELECT * FROM classes WHERE board_id = $1 ORDER BY grade_level",
+            Some(_) => "SELECT * FROM classes WHERE board_id = $1 ORDER BY grade_level",
             None => "SELECT * FROM classes ORDER BY grade_level",
         };
         

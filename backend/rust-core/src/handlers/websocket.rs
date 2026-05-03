@@ -97,10 +97,12 @@ async fn handle_socket(socket: WebSocket, tx: broadcast::Sender<MetricsUpdate>) 
         }
     });
 
-    // Send metrics updates to client
+    // Send metrics updates to client. The protobuf-generated `MetricsUpdate`
+    // does not derive `serde::Serialize`, so we hand-build the JSON payload
+    // from its fields rather than calling `serde_json::to_string`.
     let send_task = tokio::spawn(async move {
         while let Ok(metrics) = rx.recv().await {
-            let json = serde_json::to_string(&metrics).unwrap_or_default();
+            let json = serialize_metrics_update(&metrics);
             if sender
                 .send(axum::extract::ws::Message::Text(json.into()))
                 .await
@@ -120,4 +122,32 @@ async fn handle_socket(socket: WebSocket, tx: broadcast::Sender<MetricsUpdate>) 
     tracing::info!("WebSocket client disconnected");
 }
 
-// Add rand dependency to Cargo.toml for random metrics generation
+/// Serialize a `MetricsUpdate` (prost-generated, no serde derives) into a
+/// JSON string for the JARVIS HUD WebSocket clients.
+fn serialize_metrics_update(m: &MetricsUpdate) -> String {
+    let system = m.system.as_ref().map(|s| serde_json::json!({
+        "cpu_usage": s.cpu_usage,
+        "memory_usage": s.memory_usage,
+        "active_connections": s.active_connections,
+        "requests_per_second": s.requests_per_second,
+        "avg_latency_ms": s.avg_latency_ms,
+    }));
+    let agents = m.agents.as_ref().map(|a| serde_json::json!({
+        "total": a.total,
+        "idle": a.idle,
+        "running": a.running,
+        "paused": a.paused,
+        "error": a.error,
+    }));
+    let health = m.health.as_ref().map(|h| serde_json::json!({
+        "healthy": h.healthy,
+        "load_factor": h.load_factor,
+        "warnings": h.warnings,
+    }));
+    serde_json::json!({
+        "timestamp": m.timestamp,
+        "system": system,
+        "agents": agents,
+        "health": health,
+    }).to_string()
+}

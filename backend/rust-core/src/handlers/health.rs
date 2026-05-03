@@ -18,6 +18,9 @@ pub async fn health_check() -> Json<serde_json::Value> {
 }
 
 /// Detailed health check with system metrics
+/// Wired up by an upcoming admin route; kept public so the symbol is part
+/// of the crate's API surface even before the route exists.
+#[allow(dead_code)]
 pub async fn health_detailed(state: axum::extract::State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
     // Check database connectivity
     let db_health = match sqlx::query("SELECT 1").fetch_one(&state.db).await {

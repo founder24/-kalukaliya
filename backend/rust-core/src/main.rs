@@ -12,12 +12,15 @@ mod services;
 mod models;
 mod db;
 mod grpc;
-mod websocket;
+
+// WebSocket handler lives in handlers/websocket.rs; alias for ergonomics.
+use crate::handlers::websocket;
 
 use axum::{
-    routing::{get, post},
+    routing::{get, post, put, delete},
     Router,
 };
+use crate::generated::syrabit::neural_mesh_service_server::NeuralMeshServiceServer;
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -25,10 +28,9 @@ use tower_http::{
 use tokio::sync::broadcast;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use crate::grpc::NeuralMeshGrpcService;
-use crate::websocket::MetricsBroadcaster;
+use crate::handlers::websocket::MetricsBroadcaster;
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -97,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create metrics broadcast channel for WebSocket streaming
     let (metrics_tx, _metrics_rx) = broadcast::channel::<generated::syrabit::MetricsUpdate>(100);
-    let metrics_broadcaster = Arc::new(MetricsBroadcaster::new(metrics_tx.clone()));
+    let metrics_broadcaster = MetricsBroadcaster::new(metrics_tx.clone());
 
     // Clone for gRPC server
     let grpc_db = db_pool.clone();
@@ -133,7 +135,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/rag/search", post(handlers::rag::hybrid_search))
         // Agent endpoints
         .route("/api/agents", get(handlers::agents::list_agents))
-        .route("/api/agents/:id/execute", post(handlers::agents::execute_agent))
         // WebSocket endpoint for JARVIS HUD
         .route("/ws/metrics", get(websocket::metrics_handler))
         // Staff management endpoints (Phone auth + CMS)
@@ -141,10 +142,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/staff/verify", post(handlers::staff::verify_otp))
         .route("/api/staff/content-hub", get(handlers::staff::get_content_hub))
         .route("/api/staff/subjects", post(handlers::staff::create_subject))
-        .route("/api/staff/subjects/:id", put(handlers::staff::update_subject))
+        // Axum 0.8: path params changed from `:id` to `{id}` (matchit 0.8).
+        .route("/api/staff/subjects/{id}", put(handlers::staff::update_subject))
         .route("/api/staff/subject-pages", post(handlers::staff::create_page))
-        .route("/api/staff/subject-pages/:id", put(handlers::staff::update_page))
-        .route("/api/staff/subject-pages/:id", delete(handlers::staff::delete_page))
+        .route("/api/staff/subject-pages/{id}", put(handlers::staff::update_page))
+        .route("/api/staff/subject-pages/{id}", delete(handlers::staff::delete_page))
+        // Agent execute path also affected by the 0.7 → 0.8 router syntax change.
+        .route("/api/agents/{id}/execute", post(handlers::agents::execute_agent))
         // Layer middleware
         .layer(cors)
         .layer(TraceLayer::new_for_http())
@@ -155,13 +159,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("📡 gRPC server listening on {} (HTTP/2 + gRPC-Web)", grpc_addr);
 
     let grpc_service = NeuralMeshGrpcService::new(grpc_db, grpc_metrics_tx);
-    
-    // Enable gRPC-Web support for Cloudflare Workers compatibility
+
+    // Enable gRPC-Web support for Cloudflare Workers compatibility.
+    // tonic 0.12: services are constructed via the generated `*Server::new`
+    // wrapper; the previous `into_service` shim no longer exists.
+    // gRPC server reflection (Task #192 — required for grpcurl/probe
+    // tooling and for the Cloudflare gRPC-Web edge proxy to discover
+    // service definitions at runtime). The descriptor set is generated
+    // by build.rs and embedded at compile time.
+    const FILE_DESCRIPTOR_SET: &[u8] =
+        include_bytes!(concat!(env!("OUT_DIR"), "/syrabit_descriptor.bin"));
+
     let grpc_handle = tokio::spawn(async move {
+        let server = NeuralMeshServiceServer::new(grpc_service);
+        let reflection = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
+            .build_v1()
+            .expect("Failed to build gRPC reflection service");
         tonic::transport::Server::builder()
             .accept_http1(true)  // Required for gRPC-Web
-            .add_service(NeuralMeshGrpcService::into_service(grpc_service))
-            .add_service(tonic_web::enable(NeuralMeshGrpcService::into_service(grpc_service.clone())))
+            .add_service(tonic_web::enable(server))
+            .add_service(reflection)
             .serve(grpc_addr)
             .await
             .expect("Failed to start gRPC server");
