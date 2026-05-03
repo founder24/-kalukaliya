@@ -71,8 +71,19 @@ _RETRYABLE_STATUS = frozenset({401, 403, 408, 425, 429, 500, 502, 503, 504})
 
 # Direct-endpoint mode is viable when we have an endpoint AND at least one key.
 _DIRECT_ENABLED = bool(_DIRECT_ENDPOINT and (_KEY_1 or _KEY_2))
-# Gateway mode is viable when CF gateway is configured with the azure-openai slug.
-_GATEWAY_AVAILABLE = CF_GATEWAY_ENABLED and bool(cf_gateway_url("azure_openai"))
+# CF AI Gateway path is intentionally DISABLED for Azure OpenAI.
+#
+# CF AI Gateway's azure-openai provider requires URLs of shape
+#   /azure-openai/{resource-name}/{deployment}/chat/completions?api-version=...
+# where {resource-name} maps to a per-resource subdomain
+# (https://{resource-name}.openai.azure.com). Our Azure resource is provisioned
+# on the shared regional endpoint (https://eastus.api.cognitive.microsoft.com)
+# without a custom subdomain, so CF cannot route requests to it — every call
+# returned HTTP 401 "wrong API endpoint" before always failing over to direct.
+#
+# Re-enabling requires creating an Azure OpenAI resource WITH a custom
+# subdomain and pointing AZURE_OPENAI_ENDPOINT at it.
+_GATEWAY_AVAILABLE = False
 
 ENABLED: bool = _GATEWAY_AVAILABLE or _DIRECT_ENABLED
 
@@ -98,7 +109,13 @@ else:
 # ── Candidate chain ───────────────────────────────────────────────────────────
 
 def _gateway_headers() -> dict:
-    """CF AI Gateway BYOK headers for Azure OpenAI."""
+    """CF AI Gateway BYOK headers for Azure OpenAI.
+
+    Currently dead code — _GATEWAY_AVAILABLE is False because our Azure
+    resource lives on the shared regional endpoint which CF's azure-openai
+    provider does not support. Kept so re-enabling the gateway path (after
+    provisioning a custom-subdomain Azure resource) is a one-line revert.
+    """
     h: dict = {
         "Content-Type": "application/json",
         "api-key": BYOK_PLACEHOLDER,
