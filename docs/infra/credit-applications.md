@@ -84,22 +84,22 @@ Why pre-seed entry tier (not the headline ceiling):
 > Status legend matches the JSON: `approved`, `submitted`, `in_progress`,
 > `ready`, `not_started`, `rejected`, `expired`, `disabled`.
 
-| Provider | Programme | Pre-seed eligibility | Tier USD | Status | Approved $ | Expires |
-|---|---|---|---:|---|---:|---|
-| `mongodb_atlas` | MongoDB for Startups | Pre-seed to Series A, < $10M raised | 500 | ✅ approved | 500 | 2026-12-01 |
-| `cloudflare` | Cloudflare for Startups | Partner-accelerator carve-out | 5,000 | ✅ approved | 5,000 | 2026-09-01 |
-| `deepgram` | Deepgram (instant signup) | Anyone | 200 | 🟡 ready | — | — |
-| `deepgram` | Deepgram Startup Program | Pre-seed to Series B, < $10M | 1,000 | ⚪ not started | — | — |
-| `assemblyai` | AssemblyAI (instant signup) | Anyone | 50 | 🟡 ready | — | — |
-| `assemblyai` | AssemblyAI Startup | Pre-Series B, < $10M | 1,500 | ⚪ not started | — | — |
-| `elevenlabs` | ElevenLabs Grants | Pre-seed to Series A | 4,000 | ⚪ not started | — | — |
-| `sarvam` | Sarvam (instant signup) | Indian phone | 13 | 🟡 ready | — | — |
-| `sarvam` | Sarvam Startup Programme (India) | Indian-incorporated, pre-Series A | 0 | ⚪ not started | — | — |
-| `openrouter` | OpenRouter (free starter) | Anyone | 0 | 🟡 ready | — | — |
-| `openrouter` | OpenRouter Startup Program | Pre-Series B, unfunded OK | 5,000 | ⚪ not started | — | — |
-| `exa_ai` | Exa Startup | Pre-Series A | 0 | ⚪ not started | — | — |
-| `pinecone_ai` | Pinecone for Startups | Pre-Series B | 0 | ⚪ not started | — | — |
-| `bedrock` | AWS Activate (Bedrock) | n/a — already enrolled | 1,000 | 🚫 disabled | 1,000 | — |
+| Provider | Programme | URL | Tied email | Tier USD | Status | Approved $ | Expires | Notes |
+|---|---|---|---|---:|---|---:|---|---|
+| `mongodb_atlas` | MongoDB for Startups | <https://www.mongodb.com/startups> | founder@syrabit.ai | 500 | ✅ approved | 500 | 2026-12-01 | Atlas free-tier cluster + $500 promo credit applied. |
+| `cloudflare` | Cloudflare for Startups | <https://www.cloudflare.com/forstartups/> | founder@syrabit.ai | 5,000 | ✅ approved | 5,000 | 2026-09-01 | Enterprise zone — WAF, Turnstile, mTLS, Zero Trust, Pages, R2, D1, Vectorize. |
+| `deepgram` | Deepgram (instant signup) | <https://console.deepgram.com/signup> | founder@syrabit.ai | 200 | 🟡 ready | — | — | No review — instant. Capture `DEEPGRAM_API_KEY`. |
+| `deepgram_startup` | Deepgram Startup Program | <https://deepgram.com/startup-program> | founder@syrabit.ai | 1,000 | ⚪ not started | — | — | Stacks on the $200 instant signup. |
+| `assemblyai` | AssemblyAI (instant signup) | <https://www.assemblyai.com/dashboard/signup> | founder@syrabit.ai | 50 | 🟡 ready | — | — | No review — instant. Capture `ASSEMBLYAI_API_KEY`. |
+| `assemblyai_startup` | AssemblyAI Startup | <https://www.assemblyai.com/startups> | founder@syrabit.ai | 1,500 | ⚪ not started | — | — | Stacks on the $50 instant signup. |
+| `elevenlabs` | ElevenLabs Grants | <https://elevenlabs.io/grants> | founder@syrabit.ai | 4,000 | ⚪ not started | — | — | Highest-yield easy form, ~70% landing rate with packet. |
+| `sarvam` | Sarvam (instant signup) | <https://dashboard.sarvam.ai/signup> | founder@syrabit.ai | 13 | 🟡 ready | — | — | ₹1,100 ≈ $13. Capture `SARVAM_API_KEY`. |
+| `sarvam_startup` | Sarvam Startup Programme (India) | <https://www.sarvam.ai/startup-programme> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Stacks on ₹1,100 signup; tier amount varies. |
+| `openrouter` | OpenRouter (free starter) | <https://openrouter.ai/sign-up> | founder@syrabit.ai | 0 | 🟡 ready | — | — | No card required. Capture `OPENROUTER_API_KEY`. |
+| `openrouter_startup` | OpenRouter Startup Program | <https://openrouter.ai/startups> | founder@syrabit.ai | 5,000 | ⚪ not started | — | — | Largest single ask; explicit pre-seed framing. |
+| `exa_ai` | Exa Startup | <https://exa.ai/startups> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Grants 6 months Enterprise Pro (not USD). |
+| `pinecone_ai` | Pinecone for Startups | <https://www.pinecone.io/startups/> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Grants free Standard Tier + Pro Support (not USD). |
+| `bedrock` | AWS Activate (Bedrock) | <https://aws.amazon.com/activate/> | founder@syrabit.ai | 1,000 | 🚫 disabled | 1,000 | — | Disabled — AWS Bedrock daily token quota exhausted. |
 
 ---
 

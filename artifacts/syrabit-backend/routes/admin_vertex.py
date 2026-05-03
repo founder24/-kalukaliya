@@ -47,10 +47,37 @@ router = APIRouter()
 #   1. /admin/credit-applications  — full tracker payload for an admin tab
 #   2. application_status field on each provider in /admin/vertex/provider-routing
 #      so the existing routing card can render an "Application status" badge.
-_CREDIT_APPS_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "docs" / "infra" / "credit-applications.json"
-)
+def _resolve_credit_apps_path() -> Path:
+    """Locate ``credit-applications.json`` in a deployment-safe way.
+
+    Resolution order (first existing wins):
+      1. ``$CREDIT_APPLICATIONS_PATH`` env override — explicit absolute path
+         for non-monorepo container layouts (e.g. ``/app/data/...``).
+      2. Monorepo layout: ``<workspace>/docs/infra/credit-applications.json``
+         (this file lives at ``<workspace>/artifacts/syrabit-backend/routes/``).
+      3. Backend-colocated fallback: ``<backend>/docs/infra/credit-applications.json``
+         so the file can be copied next to the app inside a container image.
+      4. CWD fallback: ``./docs/infra/credit-applications.json``.
+
+    Returns the *first existing* candidate, or the monorepo path as a last
+    resort so error messages stay informative.
+    """
+    override = os.environ.get("CREDIT_APPLICATIONS_PATH", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent.parent.parent.parent / "docs" / "infra" / "credit-applications.json",
+        here.parent.parent / "docs" / "infra" / "credit-applications.json",
+        Path.cwd() / "docs" / "infra" / "credit-applications.json",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[0]
+
+
+_CREDIT_APPS_PATH = _resolve_credit_apps_path()
 
 
 @lru_cache(maxsize=1)
