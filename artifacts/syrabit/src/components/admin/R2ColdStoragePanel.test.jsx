@@ -145,6 +145,156 @@ describe('R2ColdStoragePanel', () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
+  // ── Task #319 — watchdog-blind indicator ────────────────────────────
+  it('hides the watchdog indicator when consecutive_query_failures is 0', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          query_fail_threshold: 2,
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: 0.4,
+            last_total_gb: 50,
+            last_logpush_gb: 1.5,
+            consecutive_query_failures: 0,
+            query_fail_last_fired_at: null,
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    expect(screen.queryByTestId('r2-cold-storage-watchdog-indicator')).toBeNull();
+  });
+
+  it('renders the watchdog indicator amber when below threshold', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          query_fail_threshold: 2,
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 1,
+            query_fail_last_fired_at: null,
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    const ind = screen.getByTestId('r2-cold-storage-watchdog-indicator');
+    expect(ind.getAttribute('data-watchdog-state')).toBe('warn');
+    expect(ind.getAttribute('data-watchdog-count')).toBe('1');
+    expect(ind.getAttribute('data-watchdog-threshold')).toBe('2');
+    expect(ind.className).toMatch(/amber/);
+    expect(ind.textContent).toMatch(/watchdog 1\/2/i);
+    const tip = ind.getAttribute('title') || '';
+    expect(tip).toMatch(/1 of 2/);
+    expect(tip).toMatch(/1 more failed monthly evaluation will trip/);
+    expect(tip).toMatch(/Never fired/);
+    expect(tip).toMatch(/Runbook:/);
+  });
+
+  it('reports the correct remaining-evaluations count for custom thresholds', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          query_fail_threshold: 4,
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 1,
+            query_fail_last_fired_at: null,
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    const ind = screen.getByTestId('r2-cold-storage-watchdog-indicator');
+    expect(ind.getAttribute('data-watchdog-state')).toBe('warn');
+    expect(ind.textContent).toMatch(/watchdog 1\/4/i);
+    const tip = ind.getAttribute('title') || '';
+    expect(tip).toMatch(/1 of 4/);
+    expect(tip).toMatch(/3 more failed monthly evaluations will trip/);
+  });
+
+  it('renders the watchdog indicator red once the threshold is crossed', () => {
+    const fired = '2026-04-15T12:00:00Z';
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          query_fail_threshold: 2,
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 2,
+            query_fail_last_fired_at: fired,
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    const ind = screen.getByTestId('r2-cold-storage-watchdog-indicator');
+    expect(ind.getAttribute('data-watchdog-state')).toBe('tripped');
+    expect(ind.className).toMatch(/red/);
+    expect(ind.textContent).toMatch(/watchdog 2\/2/i);
+    const tip = ind.getAttribute('title') || '';
+    expect(tip).toMatch(/Watchdog-blind page has fired/);
+    expect(tip).toMatch(/Last fired:/);
+    expect(ind.getAttribute('href')).toMatch(/cloudflare-monthly-cost-review\.md#step-5/);
+  });
+
+  it('falls back to the default threshold when query_fail_threshold is missing', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={withState({
+          state: {
+            last_evaluated_at: new Date().toISOString(),
+            ia_share_last_fired_at: null,
+            logpush_last_fired_at: null,
+            last_ia_share: null,
+            last_total_gb: null,
+            last_logpush_gb: null,
+            consecutive_query_failures: 1,
+            query_fail_last_fired_at: null,
+          },
+        })}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    const ind = screen.getByTestId('r2-cold-storage-watchdog-indicator');
+    expect(ind.getAttribute('data-watchdog-threshold')).toBe('2');
+  });
+
+  it('hides the watchdog indicator when configured=false', () => {
+    render(
+      <R2ColdStoragePanel
+        r2Health={{ configured: false, reason: 'unset' }}
+        onReevaluate={() => {}}
+        reevaluating={false}
+      />,
+    );
+    expect(screen.queryByTestId('r2-cold-storage-watchdog-indicator')).toBeNull();
+  });
+
   it('disables the button while reevaluating', () => {
     render(
       <R2ColdStoragePanel

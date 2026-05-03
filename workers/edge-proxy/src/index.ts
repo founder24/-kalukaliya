@@ -189,6 +189,11 @@ interface Env {
   R2_LIFECYCLE_RULES_APPLIED_AT?: string;
   R2_STORAGE_ALERT_LOGPUSH_CAP_GB?: string;
   R2_STORAGE_ALERT_BUCKETS?: string;
+  /** Task #316 — N consecutive query failures before the secondary
+   *  "watchdog blind" alert pages. Surfaced to the admin tile via
+   *  /api/edge/r2-storage-health (Task #319) so the indicator can
+   *  render the right-coloured badge. */
+  R2_STORAGE_ALERT_QUERY_FAIL_THRESHOLD?: string;
   R2_STORAGE_ANALYTICS_TOKEN?: string;
   /**
    * Task: D1 Cache Warming on Startup — preload hot content into D1/KV cache
@@ -389,6 +394,15 @@ async function handleR2StorageHealth(
   const buckets = (env.R2_STORAGE_ALERT_BUCKETS || "syrabit-assets,syrabit-media")
     .split(",").map((s) => s.trim()).filter(Boolean);
   const disabled = (env.R2_STORAGE_ALERT_DISABLED || "").toLowerCase() === "true";
+  // Surface the configured "watchdog blind" threshold (Task #316) so the
+  // admin tile (Task #319) can render the running counter as yellow at
+  // ≥1 and red once it crosses the threshold without having to mirror
+  // the worker's default in the frontend.
+  const queryFailThreshold = (() => {
+    const raw = env.R2_STORAGE_ALERT_QUERY_FAIL_THRESHOLD;
+    const n = raw ? Number(raw) : 2;
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
+  })();
 
   return new Response(
     JSON.stringify({
@@ -398,6 +412,7 @@ async function handleR2StorageHealth(
       logpush_cap_gb: logpushCapGb,
       rules_applied_at: rulesAppliedAt,
       rules_age_days: rulesAgeDays,
+      query_fail_threshold: queryFailThreshold,
       state,
     }),
     {

@@ -20,17 +20,28 @@
  *                 /admin/r2-storage-health. Shape:
  *                   { configured, disabled?, buckets?, logpush_cap_gb?,
  *                     rules_applied_at?, rules_age_days?,
+ *                     query_fail_threshold?,
  *                     state: { last_evaluated_at, ia_share_last_fired_at,
  *                              logpush_last_fired_at, last_ia_share,
- *                              last_total_gb, last_logpush_gb }, reason? }
+ *                              last_total_gb, last_logpush_gb,
+ *                              consecutive_query_failures,
+ *                              query_fail_last_fired_at }, reason? }
  *   - onReevaluate:  async () => void — triggers the POST. Caller is
  *                    responsible for refreshing `r2Health` afterwards.
  *   - reevaluating:  boolean — disables the button + shows a spinner.
  */
 import React from 'react';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, EyeOff } from 'lucide-react';
 
 const IA_SHARE_GRACE_DAYS = 30;
+/** Default "watchdog blind" threshold from
+ *  workers/edge-proxy/src/r2-storage-class-alert.ts
+ *  (DEFAULT_QUERY_FAIL_THRESHOLD). Used as a fallback when the backend
+ *  payload omits `query_fail_threshold` so the indicator still renders
+ *  correctly against an older worker. */
+const DEFAULT_QUERY_FAIL_THRESHOLD = 2;
+const RUNBOOK_URL =
+  'https://github.com/syrabit/syrabit/blob/main/docs/cloudflare-monthly-cost-review.md#step-5';
 
 function fmtGb(v) {
   if (v == null || !Number.isFinite(v)) return '—';
@@ -61,9 +72,16 @@ export default function R2ColdStoragePanel({ r2Health, onReevaluate, reevaluatin
       data-testid="notif-prefs-r2-cold-storage"
     >
       <div className="flex items-center justify-between mb-1.5">
-        <label className="text-[10px] text-gray-500 font-medium">
-          R2 cold storage — lifecycle health
-        </label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-[10px] text-gray-500 font-medium">
+            R2 cold storage — lifecycle health
+          </label>
+          {/* Task #319 — surface the Task #316 "watchdog blind"
+              counter inline so on-call sees a single failed monthly
+              evaluation immediately, well before the second failure
+              ~60 days later trips the page. */}
+          <WatchdogBlindIndicator health={r2Health} />
+        </div>
         <button
           type="button"
           onClick={onReevaluate}
@@ -228,6 +246,67 @@ function Body({ health }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Task #319 — small inline indicator that surfaces the secondary
+ * "watchdog blind" counter (`consecutive_query_failures`) from the
+ * Task #316 alert. Operators see a single failed monthly evaluation
+ * immediately instead of having to wait for the second failure
+ * (~60 days later) to trip the actual page.
+ *
+ * Color rules:
+ *   - hidden when `state.consecutive_query_failures` is 0/missing
+ *     (the common case — keeps the header uncluttered).
+ *   - amber/yellow at `>= 1` and below threshold.
+ *   - red once the counter reaches the configured threshold (the
+ *     watchdog-blind page has fired or is firing).
+ *
+ * Tooltip surfaces the counter, threshold, last-fired timestamp, and
+ * a runbook link so on-call can diagnose without leaving the
+ * dashboard.
+ */
+function WatchdogBlindIndicator({ health }) {
+  if (!health || health.configured === false) return null;
+  const state = health.state || {};
+  const count = Number(state.consecutive_query_failures || 0);
+  if (!Number.isFinite(count) || count < 1) return null;
+  const threshold = Number(
+    health.query_fail_threshold ?? DEFAULT_QUERY_FAIL_THRESHOLD,
+  );
+  const tripped = count >= threshold;
+  const cls = tripped
+    ? 'bg-red-100 text-red-700 ring-red-200'
+    : 'bg-amber-100 text-amber-700 ring-amber-200';
+  const lastFired = state.query_fail_last_fired_at;
+  const remaining = Math.max(0, threshold - count);
+  const tooltip =
+    `Watchdog query failures: ${count} of ${threshold} ` +
+    `(monthly evaluation; ~${count} month${count === 1 ? '' : 's'} blind). ` +
+    (tripped
+      ? 'Watchdog-blind page has fired — primary IA-share + Logpush-cap alerts cannot fire while this is broken. '
+      : `${remaining} more failed monthly evaluation${remaining === 1 ? '' : 's'} will trip the watchdog-blind page. `) +
+    (lastFired
+      ? `Last fired: ${new Date(lastFired).toLocaleString()}. `
+      : 'Never fired. ') +
+    `Runbook: ${RUNBOOK_URL}`;
+  return (
+    <a
+      href={RUNBOOK_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={tooltip}
+      aria-label={tooltip}
+      data-testid="r2-cold-storage-watchdog-indicator"
+      data-watchdog-state={tripped ? 'tripped' : 'warn'}
+      data-watchdog-count={count}
+      data-watchdog-threshold={threshold}
+      className={`inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-semibold px-1 py-0.5 rounded ring-1 ${cls} no-underline hover:brightness-95`}
+    >
+      <EyeOff size={10} />
+      <span>watchdog {count}/{threshold}</span>
+    </a>
   );
 }
 
