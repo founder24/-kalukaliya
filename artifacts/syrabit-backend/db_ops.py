@@ -293,15 +293,36 @@ def _redis_atomic_deduct(client, key: str, seed: int, limit: int, ttl: int) -> i
     """Run the atomic deduct script. The registered ``Script`` object is cached
     per Redis client so we don't re-register on every call (registration only
     needs to happen once; ``Script.__call__`` uses EVALSHA with EVAL fallback).
-    Falls back to a raw ``eval`` for clients without ``register_script``
-    (some test doubles)."""
+
+    Falls back to a raw ``eval`` for clients without ``register_script``. Two
+    raw-eval signatures are tried, in order:
+
+    1. Upstash REST client: ``client.eval(script, keys=[...], args=[...])``.
+       The Upstash client exposes ``eval`` but has no ``register_script``,
+       so it lands here on first call. Its signature only accepts the two
+       keyword lists — passing redis-py-style positional ``numkeys`` raises
+       ``TypeError: Commands.eval() takes from 2 to 4 positional arguments
+       but 7 were given``, which is exactly the failure mode that caused
+       every IP-coarse-cap deduction to fail-closed and return a spurious
+       429 to guests on this environment.
+
+    2. redis-py-shaped test doubles: positional
+       ``client.eval(script, numkeys, key, *args)``. Kept as the second
+       attempt so legacy unit-test stubs that mimic redis-py's positional
+       signature still work.
+    """
     cached = _REDIS_DEDUCT_SCRIPT_CACHE.get(id(client))
     if cached is None:
         try:
             cached = client.register_script(_REDIS_DEDUCT_LUA)
             _REDIS_DEDUCT_SCRIPT_CACHE[id(client)] = cached
         except AttributeError:
-            return int(client.eval(_REDIS_DEDUCT_LUA, 1, key, seed, limit, ttl))
+            try:
+                return int(
+                    client.eval(_REDIS_DEDUCT_LUA, keys=[key], args=[seed, limit, ttl])
+                )
+            except TypeError:
+                return int(client.eval(_REDIS_DEDUCT_LUA, 1, key, seed, limit, ttl))
     return int(cached(keys=[key], args=[seed, limit, ttl]))
 
 
