@@ -129,27 +129,57 @@ def _augment_with_aeo(text: str, title: str) -> str:
     return text + "\n\n" + " ".join(variants)
 
 
+def _coerce_text(v: Any) -> str:
+    """Some chapter fields (e.g. ``important_questions``) are persisted as
+    lists of dicts/strings rather than free-form strings. Flatten those
+    safely into a single embedding-friendly text blob."""
+    if not v:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, list):
+        parts: list[str] = []
+        for item in v:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                q = item.get("question") or item.get("q") or item.get("text") or ""
+                a = item.get("answer") or item.get("a") or ""
+                if q and a:
+                    parts.append(f"{q}\n{a}")
+                elif q:
+                    parts.append(str(q))
+                elif a:
+                    parts.append(str(a))
+                else:
+                    parts.append(" ".join(str(x) for x in item.values() if x))
+        return "\n\n".join(p for p in parts if p).strip()
+    if isinstance(v, dict):
+        return _coerce_text(list(v.values()))
+    return str(v).strip()
+
+
 def _iter_corpus_items(ch: dict) -> Iterable[tuple[str, str, str, str]]:
     cid = ch.get("id") or ""
     title = (ch.get("title") or "").strip()
 
-    body = (ch.get("content") or "").strip()
+    body = _coerce_text(ch.get("content"))
     if body:
         yield ("chapter", "ch:", body, title)
 
-    notes = (ch.get("notes") or "").strip()
+    notes = _coerce_text(ch.get("notes"))
     if notes:
         yield ("notes", "nt:", notes, f"{title} — Notes")
 
-    mcqs = (ch.get("mcqs") or "").strip()
+    mcqs = _coerce_text(ch.get("mcqs"))
     if mcqs:
         yield ("mcqs", "mcq:", mcqs, f"{title} — MCQs")
 
-    pyqs = (ch.get("pyqs") or "").strip()
+    pyqs = _coerce_text(ch.get("pyqs"))
     if pyqs:
         yield ("pyqs", "pyq:", pyqs, f"{title} — Previous-year questions")
 
-    iq = (ch.get("important_qs") or ch.get("important_questions") or "").strip()
+    iq = _coerce_text(ch.get("important_qs")) or _coerce_text(ch.get("important_questions"))
     if iq:
         yield ("important_questions", "iq:", iq, f"{title} — Important questions")
 
@@ -164,8 +194,6 @@ async def _embed_batch(pinecone_ai, items: list[dict]) -> list[list[float]] | No
             _augment_with_aeo(it["text"], it.get("title", ""))[:8192]
             for it in items
         ]
-        if hasattr(pinecone_ai, "embed_passages"):
-            return await pinecone_ai.embed_passages(passages, model=EMBED_MODEL)
         return await pinecone_ai.embed(
             passages, input_type="passage", model=EMBED_MODEL,
         )
@@ -175,7 +203,7 @@ async def _embed_batch(pinecone_ai, items: list[dict]) -> list[list[float]] | No
 
 
 async def main() -> int:
-    from db import db
+    from deps import db
     from providers import pinecone_ai
     from retrievers.pinecone_vector import PineconeVectorRetriever, ensure_pinecone_index
 
