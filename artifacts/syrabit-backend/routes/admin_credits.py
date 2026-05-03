@@ -25,7 +25,7 @@ GET /admin/credits/smoke-test
     assemblyai  GET  /v2/transcript (list)                (BYOK: Authorization: "")
     elevenlabs  GET  /v1/models (model list)              (BYOK: xi-api-key: "")
     sarvam      POST /v1/chat/completions  max_tokens=1   (BYOK: api-subscription-key: "")
-    bedrock     POST /model/nova-micro/converse max_tokens=1  (CF SigV4 BYOK)
+    bedrock     POST /model/amazon.nova-lite-v1:0/converse max_tokens=1  (CF SigV4 BYOK)
     azure_openai POST /chat/completions    max_tokens=1   (BYOK: api-key + Authorization: "")
 
   Providers without a CF AI Gateway slug (vertex, workers_ai, pinecone_ai,
@@ -164,12 +164,13 @@ _PROVIDER_PROBE_SPECS: dict[str, dict] = {
         },
         "description": "1-token completion → validates BYOK sarvam key",
     },
-    # AWS Bedrock — POST /model/amazon.nova-micro-v1:0/converse (max_tokens=1).
-    # Nova Micro is the smallest/cheapest Bedrock model (~$0.000035/1k tokens).
+    # AWS Bedrock — POST /model/amazon.nova-lite-v1:0/converse (max_tokens=1).
+    # Nova Lite is Amazon's all-in-one multimodal model (text + image + video,
+    # 300K context, ~$0.06/$0.24 per 1M tokens) — Task #304.
     # CF AI Gateway handles AWS SigV4 signing via BYOK — no AWS keys in this request.
     "bedrock": {
         "method": "POST",
-        "path": "/model/amazon.nova-micro-v1:0/converse",
+        "path": "/model/amazon.nova-lite-v1:0/converse",
         "body": {
             "messages": [
                 {"role": "user", "content": [{"type": "text", "text": "hi"}]}
@@ -632,7 +633,7 @@ async def admin_credits_provider_weights(
         "CF AI Gateway slug to exercise BYOK auth and upstream reachability. "
         "Probes: cohere POST /embed, assemblyai GET "
         "/v2/transcript, elevenlabs GET /v1/models, sarvam POST /v1/chat/completions, "
-        "bedrock POST /model/nova-micro/converse, azure_openai POST /chat/completions. "
+        "bedrock POST /model/amazon.nova-lite-v1:0/converse, azure_openai POST /chat/completions. "
         "Providers without a CF slug (vertex, workers_ai, etc.) are marked 'skip'. "
         "Fires a Slack alert (SMOKE_TEST_SLACK_WEBHOOK) on non-200 or connection error. "
         "All probes run concurrently."

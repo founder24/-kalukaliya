@@ -18,7 +18,7 @@
         },
         "bedrock_nova": {
           "provider": "bedrock_nova",
-          "model": "amazon.nova-micro-v1:0",
+          "model": "amazon.nova-lite-v1:0",
           "skipped": true,
           "reason": "RuntimeError: bedrock: HTTP 429 from CF gateway — {\"message\":\"Too many tokens per day, please wait before trying again.\"}",
           "samples": 0
@@ -153,7 +153,7 @@
         },
         "bedrock_nova": {
           "provider": "bedrock_nova",
-          "model": "amazon.nova-micro-v1:0",
+          "model": "amazon.nova-lite-v1:0",
           "skipped": true,
           "reason": "RuntimeError: bedrock: HTTP 429 from CF gateway — {\"message\":\"Too many tokens per day, please wait before trying again.\"}",
           "samples": 0
@@ -191,5 +191,6 @@
         "value": 81.6
       }
     }
-  }
+  },
+  "task_304_note": "Bedrock Nova Lite (amazon.nova-lite-v1:0) is wired into all three suites via providers.bedrock.call_converse, but the CF AI Gateway daily token quota for the aws-bedrock BYOK slug is currently exhausted (HTTP 429 \"Too many tokens per day\"). The bench is unblocked the moment quota resets at the next 24h CF window or when the slug is bumped to a higher tier — no code change required. Until then, Nova Lite is recorded as skipped with the live 429 reason string so operators see the actual gateway response, not a stale benchmark."
 }

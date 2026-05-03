@@ -1701,17 +1701,18 @@ async def admin_llm_pool_stats(admin: dict = Depends(get_admin_user)):
 
 @router.get("/admin/llm/health")
 async def admin_llm_health(admin: dict = Depends(get_admin_user)):
-    """Routing-chain health panel (Task #267 / Task #269 / rebalanced #281).
+    """Routing-chain health panel (Task #267 / Task #269 / Task #304).
 
     Returns:
       routing_chains  — ordered provider+model list for each key feature pool.
-                        After Task #281, English chat rotates equally across
-                        azure_openai/gpt-4.1-mini, vertex/gemini-2.5-flash, and
-                        workers_ai (Bedrock removed from chat/content pools).
-                        Assamese chat rotates equally across sarvam/sarvam-m,
-                        vertex/gemini-2.5-flash, and workers_ai_indic/indictrans2.
+                        Task #304 reinstates Bedrock (Nova Lite all-in-one) at a
+                        conservative weight=50 across chat/content/embed/tts/stt/
+                        translate so primaries (Azure/Vertex/Cohere/ElevenLabs/
+                        Deepgram/IndicTrans2) still dominate; Bedrock also leads
+                        the safety pool and is the in-pool vision fallback.
       burst_429       — 180-second sliding-window 429 counters for every tracked
-                        provider (Bedrock still tracked — it serves vision/safety).
+                        provider (Bedrock 429/5xx bursts deprioritize it just like
+                        Groq/Gemini).
       burst_429_60s   — same counters restricted to the last 60 seconds
                         (in-process timestamp list — accurate short window).
     """
@@ -1754,10 +1755,11 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
         "burst_429":      burst_180,
         "burst_429_60s":  burst_60,
         "note": (
-            "routing_chains reflects Task #281 rebalance: "
-            "english_rag_chat = azure_openai/gpt-4.1-mini ↔ vertex/gemini-2.5-flash ↔ workers_ai (equal weight, Bedrock removed); "
-            "assamese_rag_chat = sarvam/sarvam-m ↔ vertex/gemini-2.5-flash ↔ workers_ai_indic/indictrans2 (equal weight). "
-            "Bedrock is retained for vision/safety/embed/translate pools only. "
+            "routing_chains reflects Task #304 rebalance: "
+            "english_rag_chat = azure_openai/gpt-4.1-mini (10000) → vertex/gemini-2.5-flash (100) → bedrock/amazon.nova-lite-v1:0 (50) → workers_ai (0); "
+            "assamese_rag_chat = sarvam/sarvam-m (10000) → vertex/gemini-2.5-flash (100) → bedrock/amazon.nova-lite-v1:0 (50). "
+            "Bedrock (Nova Lite) is a first-class permanent provider in chat/content/embed/tts/stt/translate at conservative weight, "
+            "primary in safety, and in-pool vision fallback (Claude 3.5 Sonnet retried within the bedrock branch when Nova Lite fails). "
             "burst_429 uses Redis when available (180s TTL); burst_429_60s is always in-process."
         ),
     }

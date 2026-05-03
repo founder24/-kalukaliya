@@ -145,8 +145,17 @@ async def _synthesize_with_fallback(
             elif provider == "vertex":
                 raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired")
             elif provider == "bedrock":
+                # Task #304: feed Polly outcome into the shared bedrock 429-burst
+                # lifecycle so /admin/llm/health throttle indicator stays uniform.
                 from providers.bedrock import call_tts as _bk_tts
-                return await _bk_tts(text, voice=voice_id)
+                from llm import _bedrock_track_outcome as _bk_track
+                try:
+                    _audio = await _bk_tts(text, voice=voice_id)
+                    _bk_track(True)
+                    return _audio
+                except Exception as _bk_exc:
+                    _bk_track(False, _bk_exc)
+                    raise
             elif provider == "azure_openai":
                 from providers.azure_openai import call_tts as _az_tts
                 return await _az_tts(text, voice=voice_id)
@@ -188,8 +197,17 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
             elif provider == "vertex":
                 raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired")
             elif provider == "bedrock":
+                # Task #304: feed Transcribe outcome into the shared bedrock
+                # 429-burst lifecycle for uniform throttle visibility.
                 from providers.bedrock import call_stt as _bk_stt
-                return await _bk_stt(audio_bytes, language=language)
+                from llm import _bedrock_track_outcome as _bk_track
+                try:
+                    _txt = await _bk_stt(audio_bytes, language=language)
+                    _bk_track(True)
+                    return _txt
+                except Exception as _bk_exc:
+                    _bk_track(False, _bk_exc)
+                    raise
             elif provider == "azure_openai":
                 from providers.azure_openai import call_stt as _az_stt
                 return await _az_stt(audio_bytes, language=language)

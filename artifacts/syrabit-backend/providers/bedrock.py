@@ -2,8 +2,12 @@
 
 Routes:
   Chat (LLM):
-    call_converse()         — Claude 3.5 Haiku via CF AI Gateway aws-bedrock BYOK slug
-    call_converse_vision()  — Claude 3.5 Sonnet v2 multimodal via same slug
+    call_converse()         — Amazon Nova Lite via CF AI Gateway aws-bedrock BYOK slug
+                              (true multimodal, 300K context — also serves vision)
+    call_converse_vision()  — Amazon Nova Lite multimodal via Converse API (default).
+                              Pass model="anthropic.claude-3-5-sonnet-20241022-v2:0"
+                              for higher-quality fallback when Nova Lite output is
+                              insufficient (Task #304).
 
   Feature services (Task #256):
     call_tts()      — Amazon Polly TTS via bedrock-proxy Worker (SigV4)
@@ -42,7 +46,7 @@ from config import (
 
 logger = logging.getLogger("providers.bedrock")
 
-_MODEL_ID = "amazon.nova-micro-v1:0"   # Task #267: Nova Micro — fastest/cheapest Bedrock LLM
+_MODEL_ID = "amazon.nova-lite-v1:0"   # Task #304: Nova Lite — true multimodal (text+image+video), 300K ctx, ~150 TPS
 _ANTHROPIC_VERSION = "bedrock-2023-05-31"
 _TIMEOUT_S = 30.0
 
@@ -216,17 +220,21 @@ async def call_converse_vision(
     model: Optional[str] = None,
     max_tokens: int = 1024,
 ) -> str:
-    """Analyse an image using Claude multimodal via Bedrock Converse API (CF gateway BYOK).
+    """Analyse an image via Bedrock Converse API (CF gateway BYOK).
 
-    Uses Claude 3.5 Sonnet v2 by default (supports vision via the Converse API).
+    Defaults to Amazon Nova Lite (`amazon.nova-lite-v1:0`) — true multimodal,
+    300K context, fast & cheap (Task #304). Pass
+    ``model="anthropic.claude-3-5-sonnet-20241022-v2:0"`` to use Claude 3.5
+    Sonnet as a higher-quality in-pool fallback when Nova Lite output is
+    insufficient.
     Raises RuntimeError if the CF gateway is unavailable or bedrock not configured.
     """
     base = _base_url()
     if not base:
         raise RuntimeError("bedrock vision: CF AI Gateway not available for vision")
 
-    # Claude claude-3-5-sonnet supports multimodal via Converse API.
-    vision_model_id = model or "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    # Default to Nova Lite — multimodal via Converse API.
+    vision_model_id = model or _MODEL_ID
     url = f"{base}/bedrock-runtime/{_AWS_REGION}/model/{vision_model_id}/converse"
 
     # Bedrock Converse image format: image block with format + base64 bytes.

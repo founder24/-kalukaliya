@@ -203,6 +203,42 @@ def _reset_provider_429(provider: str) -> None:
         pass
 
 
+import re as _re_bedrock
+_BEDROCK_HTTP_STATUS_RE = _re_bedrock.compile(r"HTTP\s+(\d{3})")
+
+
+def _bedrock_track_outcome(success: bool, exc: Optional[BaseException] = None) -> None:
+    """Task #304 — feed bedrock dispatch outcomes into the shared 429-burst lifecycle.
+
+    Mirrors the SmartKeyPool ``mark_ok`` / ``mark_429`` semantics for every
+    Bedrock-backed dispatch path (chat/safety/embed/translate/vision/tts/stt)
+    so ``/admin/llm/health`` shows the same throttle indicator operators
+    already have for Workers-AI / Gemini / Azure / Deepgram.
+
+    On success we clear the bedrock 429 counter (Redis + in-process) just
+    like ``SmartKeyPool.mark_ok`` does for SLM slots.  On failure we parse
+    the ``RuntimeError("bedrock …: HTTP <code> …")`` message that
+    ``providers.bedrock`` raises and bump the burst counter when the status
+    code is 429 or 5xx — the two classes ``select_provider`` deprioritizes.
+    Other failure modes (auth, validation, network) are left out of the
+    throttle metric so they do not drown the legitimate burst signal.
+    """
+    if success:
+        _reset_provider_429("bedrock")
+        return
+    if exc is None:
+        return
+    match = _BEDROCK_HTTP_STATUS_RE.search(str(exc))
+    if not match:
+        return
+    try:
+        code = int(match.group(1))
+    except ValueError:
+        return
+    if code == 429 or 500 <= code < 600:
+        _track_provider_429("bedrock")
+
+
 def get_provider_429_burst(provider: str,
                            window_seconds: int = _PROVIDER_429_BURST_WINDOW_S) -> int:
     """Return the number of 429s for *provider* in the last *window_seconds*.
@@ -1399,7 +1435,7 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "vertex":           "gemini-2.5-flash",                          # Vertex AI Gemini 2.5 Flash — highest TPS
-    "bedrock":          "amazon.nova-micro-v1:0",                    # AWS Bedrock Nova Micro — fastest/cheapest Nova
+    "bedrock":          "amazon.nova-lite-v1:0",                     # AWS Bedrock Nova Lite — true multimodal (chat+vision), 300K ctx (Task #304)
     "azure_openai":     AZURE_OPENAI_DEPLOYMENT,                     # Azure OpenAI deployment from config (Task #290 — env-driven, no hard-coded model drift)
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
@@ -1653,10 +1689,12 @@ async def _dispatch_llm_for_feature(
         _t0 = _dp_t.perf_counter()
         try:
             result = await _bedrock_converse(messages, max_tokens=max_tokens)
-            _record_llm_call("bedrock", "amazon.nova-micro-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            _record_llm_call("bedrock", "amazon.nova-lite-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            _bedrock_track_outcome(True)
             return result
         except Exception as _exc:
-            _record_llm_call("bedrock", "amazon.nova-micro-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            _record_llm_call("bedrock", "amazon.nova-lite-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            _bedrock_track_outcome(False, _exc)
             raise
 
     if provider == "azure_openai":
@@ -1793,9 +1831,9 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
     Dispatches through PROVIDER_PRIORITY["english_rag_chat"] weighted round-robin
     via call_with_provider_fallback → _dispatch_llm_for_feature.
 
-    Weighted provider priority (Task #267):
-      Azure OpenAI (gpt-4.1-mini, weight 2500) → Bedrock (nova-micro, weight 1000)
-      → Workers AI (llama-3.3-70b, weight 0, last-resort).
+    Weighted provider priority (Task #304):
+      Azure OpenAI gpt-4.1-mini (10000, primary) → Vertex Gemini 2.5 Flash (100, fallback)
+      → Bedrock Nova Lite (50, conservative) → Workers AI (0, last-resort).
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
     (Groq, Cerebras, Gemini direct) can be introduced after the weighted pool exhausts.
@@ -1838,7 +1876,7 @@ async def call_llm_api_content(messages: list, model: str = None, max_tokens: in
 
     Feature key: "content" — chain (POOL_WEIGHTS["content"] in config.py):
       Vertex / Gemini 2.5 Flash (weight 5000, ~58%) → Azure OpenAI gpt-4.1-mini (weight 2500, ~29%)
-      → Bedrock nova-micro (weight 1000, ~12%) → Workers AI llama-3.3-70b (weight 0, last-resort).
+      → Bedrock Nova Lite (weight 50, conservative) → Workers AI llama-3.3-70b (weight 0, last-resort).
 
     Gemini leads because its 1M-token context window is ideal for long-form notes generation.
 
@@ -1904,9 +1942,9 @@ async def call_llm_api_chat(
 
     Feature key: "english_rag_chat" (default) or "assamese_rag_chat" when lang="as".
 
-    English chain (Task #267):
-      Azure OpenAI (gpt-4.1-mini, weight 2500) → Bedrock (nova-micro, weight 1000)
-      → Workers AI (llama-3.3-70b, weight 0, last-resort).
+    English chain (Task #304):
+      Azure OpenAI gpt-4.1-mini (10000) → Vertex Gemini 2.5 Flash (100)
+      → Bedrock Nova Lite (50, conservative) → Workers AI (0, last-resort).
 
     Assamese chain (Task #267):
       Sarvam (sarvam-m, weight 500) → Vertex/Gemini (gemini-2.5-flash, weight 2000)
@@ -2177,7 +2215,7 @@ async def _stream_openai_compat(messages: list, api_key: str, model: str, max_to
 async def _stream_bedrock(messages: list, model: str, max_tokens: int):
     """Token-by-token streaming from Amazon Bedrock via Converse streaming API.
     boto3 is synchronous — runs in a thread pool; tokens passed back via asyncio.Queue.
-    Supports Amazon Nova family (nova-micro, nova-lite, nova-pro) and any Converse-compatible model.
+    Supports Amazon Nova family (nova-lite default, nova-pro, etc.) and any Converse-compatible model.
     """
     if not _AWS_ACCESS_KEY or not _AWS_SECRET_KEY:
         raise ValueError("AWS credentials not configured (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)")
@@ -3117,9 +3155,9 @@ async def call_embed_with_dispatch(
     """Embed *text* via the weighted provider selected for the 'embed' feature key.
 
     Priority (PROVIDER_PRIORITY['embed']):
-      vertex(2000) → bedrock(1000, Titan embed) → cohere(1000) → azure_openai(1, skip) → workers_ai(0)
+      cohere(1000) → voyage_ai(500) → bedrock(50, Titan v2, conservative) → workers_ai(0)
 
-    bedrock: Amazon Titan Text Embeddings v1 via CF gateway BYOK (/model/.../invoke).
+    bedrock: Amazon Titan Text Embeddings v2 via CF gateway BYOK (/model/.../invoke).
     cohere: providers.cohere.embed_query (1024-dim, embed-multilingual-v3.0).
     azure_openai: embeddings endpoint not wired (Task #257) — excluded gracefully.
     Returns a float list on success, raises RuntimeError if all providers fail.
@@ -3142,8 +3180,15 @@ async def call_embed_with_dispatch(
                 return await _cf_embed(text)
             elif provider == "bedrock":
                 # Amazon Titan Embeddings v2 via CF AI Gateway BYOK (Task #256).
+                # Task #304: feed outcome into the shared 429-burst lifecycle.
                 from providers.bedrock import call_embed as _bk_embed
-                return await _bk_embed(text, task_type=task_type)
+                try:
+                    _vec = await _bk_embed(text, task_type=task_type)
+                    _bedrock_track_outcome(True)
+                    return _vec
+                except Exception as _bk_exc:
+                    _bedrock_track_outcome(False, _bk_exc)
+                    raise
             elif provider == "cohere":
                 from providers.cohere import embed_query as _cohere_embed_q, ENABLED as _cohere_enabled
                 if not _cohere_enabled:
@@ -3214,9 +3259,15 @@ async def call_translate_with_dispatch(
                 return await _call_gemini(prompt, _GEMINI_KEY, "gemini-2.5-flash", 2048)
             elif provider == "bedrock":
                 # Amazon Translate via bedrock-proxy Worker (SigV4) — Task #256.
-                # Falls back to RuntimeError if BEDROCK_PROXY_URL not configured.
+                # Task #304: feed outcome into the shared 429-burst lifecycle.
                 from providers.bedrock import call_translate as _bk_translate
-                return await _bk_translate(text, target_lang=target_lang, source_lang=source_lang)
+                try:
+                    _tr = await _bk_translate(text, target_lang=target_lang, source_lang=source_lang)
+                    _bedrock_track_outcome(True)
+                    return _tr
+                except Exception as _bk_exc:
+                    _bedrock_track_outcome(False, _bk_exc)
+                    raise
             elif provider == "azure_openai":
                 # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
                 # Falls back to RuntimeError if AZURE_TRANSLATOR_KEY not configured.
@@ -3377,10 +3428,11 @@ async def call_vision_with_dispatch(
     """Analyse *b64_image* via the weighted provider selected for 'vision'.
 
     Priority (PROVIDER_PRIORITY['vision']):
-      vertex(2000, Gemini) → bedrock(1000, Claude multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
+      vertex(2000, Gemini) → bedrock(1000, Nova Lite multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
 
     vertex: Gemini 2.5 Flash vision via _call_gemini with image_url content.
-    bedrock: Claude 3.5 Sonnet v2 multimodal via providers.bedrock.call_converse_vision.
+    bedrock: Amazon Nova Lite multimodal via providers.bedrock.call_converse_vision (Task #304).
+             Claude 3.5 Sonnet kept as in-pool higher-quality fallback if Nova Lite fails.
     azure_openai: GPT-4o vision via providers.azure_openai.call_chat with image_url content.
     workers_ai: no multimodal endpoint — excluded gracefully.
 
@@ -3411,8 +3463,33 @@ async def call_vision_with_dispatch(
                 ]
                 return await _call_gemini(vision_messages, _GEMINI_KEY, "gemini-2.5-flash", 1024)
             elif provider == "bedrock":
+                # Task #304: Nova Lite primary (multimodal Converse), Claude 3.5 Sonnet
+                # as in-pool higher-quality fallback if Nova Lite fails. Both attempts
+                # feed the shared 429-burst lifecycle so /admin/llm/health surfaces the
+                # throttle indicator consistently.
                 from providers.bedrock import call_converse_vision as _bk_vision
-                return await _bk_vision(b64_image, mime_type, prompt, max_tokens=1024)
+                try:
+                    _vis = await _bk_vision(b64_image, mime_type, prompt, max_tokens=1024)
+                    _bedrock_track_outcome(True)
+                    return _vis
+                except Exception as _nova_exc:
+                    _bedrock_track_outcome(False, _nova_exc)
+                    logger.warning(
+                        "bedrock vision Nova Lite failed (%s) — retrying in-pool "
+                        "with Claude 3.5 Sonnet as higher-quality fallback",
+                        _nova_exc,
+                    )
+                    try:
+                        _vis = await _bk_vision(
+                            b64_image, mime_type, prompt,
+                            model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+                            max_tokens=1024,
+                        )
+                        _bedrock_track_outcome(True)
+                        return _vis
+                    except Exception as _claude_exc:
+                        _bedrock_track_outcome(False, _claude_exc)
+                        raise
             elif provider == "azure_openai":
                 from providers import azure_openai as _az_prov
                 _az_vision_msgs = [

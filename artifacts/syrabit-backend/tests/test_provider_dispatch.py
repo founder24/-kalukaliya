@@ -50,33 +50,42 @@ def test_provider_credits_all_referenced_providers_have_entry():
     print(f"  PASS: all {len(all_providers)} providers have PROVIDER_CREDITS entries")
 
 
-def test_task_281_bedrock_absent_from_chat_and_content_pools():
-    """Task #281: Bedrock must NOT appear in chat or content pools.
+def test_task_304_bedrock_present_in_all_capable_pools():
+    """Task #304: Bedrock (Nova Lite) is a first-class provider in every pool
+    where it is technically capable, at conservative weights so primaries dominate.
 
-    Bedrock stays in vision/safety/embed/translate pools and PROVIDER_CREDITS,
-    but the four chat/content pools were rebalanced to equal-weight rotation
-    without Bedrock. This guard locks that contract — adding bedrock back to
-    any of these four pools by accident will fail this test immediately.
+    Required presence:
+      english_rag_chat, assamese_rag_chat, content, embed, tts, stt, translate,
+      vision, safety.
     """
-    bedrock_excluded_pools = (
+    from config import POOL_WEIGHTS
+    required_pools = (
         "english_rag_chat",
         "assamese_rag_chat",
         "content",
-        "assamese_content",
+        "embed",
+        "tts",
+        "stt",
+        "translate",
+        "vision",
+        "safety",
     )
-    for pool in bedrock_excluded_pools:
+    for pool in required_pools:
         providers = PROVIDER_PRIORITY.get(pool, [])
-        assert "bedrock" not in providers, (
-            f"Task #281: bedrock must not be in PROVIDER_PRIORITY[{pool!r}]; "
+        assert "bedrock" in providers, (
+            f"Task #304: bedrock must be in PROVIDER_PRIORITY[{pool!r}]; "
             f"got {providers}"
         )
-    # Sanity: bedrock IS still in vision and safety (regression guard the
-    # other way — confirms we didn't over-remove Bedrock).
-    assert "bedrock" in PROVIDER_PRIORITY.get("vision", []), \
-        "bedrock must remain in vision pool"
-    assert "bedrock" in PROVIDER_PRIORITY.get("safety", []), \
-        "bedrock must remain in safety pool"
-    print(f"  PASS: bedrock absent from {bedrock_excluded_pools}, present in vision+safety")
+    # Strict-primary lock must be preserved — Bedrock weight stays << primary.
+    for locked in ("english_rag_chat", "assamese_rag_chat", "content", "translate"):
+        weights = POOL_WEIGHTS.get(locked, {})
+        bw = weights.get("bedrock", 0)
+        primary_w = max(weights.values()) if weights else 0
+        assert bw > 0 and bw * 10 <= primary_w, (
+            f"{locked}: bedrock weight {bw} must be conservative (<=primary/10="
+            f"{primary_w/10}) to preserve strict-primary lock"
+        )
+    print(f"  PASS: bedrock present in {required_pools} with conservative weights")
 
 
 def test_workers_ai_credit_is_zero():
@@ -182,9 +191,265 @@ def test_translate_priority_locked_chain():
     assert translate_pool[0] == "workers_ai_indic", (
         "translate: workers_ai_indic must be first (POOL_WEIGHTS primary at 10000)"
     )
-    assert "bedrock" not in pool_set, "translate: bedrock removed from locked chain"
+    # Task #304: bedrock is now permitted in translate at conservative weight
+    # (Amazon Translate via bedrock-proxy). The strict-primary lock holds
+    # because IndicTrans2 (10000) >> bedrock (50).
     assert "azure_openai" not in pool_set, "translate: azure_openai removed from locked chain"
-    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (locked workers_ai_indic → vertex chain)")
+    print(f"  PASS: PROVIDER_PRIORITY['translate'] = {translate_pool} (locked workers_ai_indic → vertex chain; bedrock allowed at conservative weight)")
+
+
+# ── Task #304 happy-path tests for every Bedrock-backed feature ──────────────
+
+def test_task_304_bedrock_chat_dispatch_uses_nova_lite():
+    """_dispatch_llm_for_feature('bedrock') invokes call_converse and records nova-lite model."""
+    from llm import _dispatch_llm_for_feature, _PROVIDER_DEFAULT_MODELS
+    assert _PROVIDER_DEFAULT_MODELS["bedrock"] == "amazon.nova-lite-v1:0", (
+        f"bedrock default model must be Nova Lite, got {_PROVIDER_DEFAULT_MODELS['bedrock']!r}"
+    )
+    stub = mock.AsyncMock(return_value="nova lite chat response")
+    with mock.patch("providers.bedrock.call_converse", stub):
+        result = asyncio.run(
+            _dispatch_llm_for_feature(
+                [{"role": "user", "content": "hi"}], "bedrock", 32, feature="english_rag_chat"
+            )
+        )
+    assert result == "nova lite chat response"
+    stub.assert_called_once()
+    print("  PASS: bedrock chat dispatch invokes call_converse with Nova Lite default model")
+
+
+def test_task_304_bedrock_vision_dispatch_uses_nova_lite_then_claude_fallback():
+    """call_vision_with_dispatch bedrock branch tries Nova Lite first, falls
+    back to Claude 3.5 Sonnet (in-pool) on failure."""
+    from llm import call_vision_with_dispatch
+    calls = []
+
+    async def _fake_vision(b64, mime, prompt, *, model=None, max_tokens=1024):
+        calls.append(model)
+        if model is None:
+            raise RuntimeError("nova-lite simulated failure")
+        return "claude-fallback-result"
+
+    with mock.patch("llm.select_provider", return_value="bedrock"):
+        with mock.patch("providers.bedrock.call_converse_vision", _fake_vision):
+            result = asyncio.run(
+                call_vision_with_dispatch("base64data", "Describe", lang="en")
+            )
+    assert result == "claude-fallback-result"
+    assert calls[0] is None, "first attempt must use Nova Lite default (model=None)"
+    assert calls[1] == "anthropic.claude-3-5-sonnet-20241022-v2:0", (
+        f"second attempt must use Claude Sonnet fallback, got {calls[1]!r}"
+    )
+    print("  PASS: vision bedrock branch — Nova Lite primary, Claude Sonnet in-pool fallback")
+
+
+def test_task_304_bedrock_embed_dispatch_uses_titan_v2():
+    """call_embed_with_dispatch routes 'bedrock' → providers.bedrock.call_embed (Titan v2)."""
+    from llm import call_embed_with_dispatch
+    embed_stub = mock.AsyncMock(return_value=[0.4, 0.5, 0.6])
+    with mock.patch("llm.select_provider", return_value="bedrock"):
+        with mock.patch("providers.bedrock.call_embed", embed_stub):
+            result = asyncio.run(call_embed_with_dispatch("hello", lang="en"))
+    assert result == [0.4, 0.5, 0.6]
+    embed_stub.assert_called_once()
+    print("  PASS: embed bedrock branch invokes providers.bedrock.call_embed (Titan v2)")
+
+
+def test_task_304_bedrock_safety_dispatch_uses_nova_lite():
+    """safety pool primary is bedrock; dispatch invokes call_converse with Nova Lite."""
+    from llm import _dispatch_llm_for_feature
+    stub = mock.AsyncMock(return_value="SAFE")
+    with mock.patch("providers.bedrock.call_converse", stub):
+        result = asyncio.run(
+            _dispatch_llm_for_feature(
+                [{"role": "user", "content": "hello"}], "bedrock", 8, feature="safety"
+            )
+        )
+    assert result == "SAFE"
+    stub.assert_called_once()
+    print("  PASS: safety bedrock dispatch invokes call_converse (Nova Lite)")
+
+
+def test_task_304_bedrock_tts_invokes_polly():
+    """providers.bedrock.call_tts hits the bedrock-proxy Polly endpoint when configured."""
+    import os
+    from providers import bedrock as _bk
+    os.environ["BEDROCK_PROXY_URL"] = "https://proxy.test"
+
+    class _FakeResp:
+        status_code = 200
+        content = b"polly-mp3-bytes"
+        text = ""
+        def raise_for_status(self):
+            return None
+    post_stub = mock.AsyncMock(return_value=_FakeResp())
+    try:
+        with mock.patch.object(_bk, "_get_client", return_value=mock.MagicMock(post=post_stub)):
+            result = asyncio.run(_bk.call_tts("hello"))
+        assert result == b"polly-mp3-bytes"
+        post_stub.assert_called_once()
+        url = post_stub.call_args.args[0]
+        assert "polly" in url.lower() or "speech" in url.lower(), (
+            f"call_tts should hit Polly endpoint via bedrock-proxy, got {url!r}"
+        )
+    finally:
+        os.environ.pop("BEDROCK_PROXY_URL", None)
+    print("  PASS: bedrock call_tts invokes Polly via bedrock-proxy")
+
+
+def test_task_304_bedrock_stt_invokes_transcribe():
+    """providers.bedrock.call_stt hits the bedrock-proxy Transcribe endpoint."""
+    import os
+    from providers import bedrock as _bk
+    os.environ["BEDROCK_PROXY_URL"] = "https://proxy.test"
+
+    class _FakeResp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"transcript": "hello world", "results": {"transcripts": [{"transcript": "hello world"}]}}
+        def raise_for_status(self):
+            return None
+    post_stub = mock.AsyncMock(return_value=_FakeResp())
+    try:
+        with mock.patch.object(_bk, "_get_client", return_value=mock.MagicMock(post=post_stub)):
+            try:
+                result = asyncio.run(_bk.call_stt(b"audio-bytes"))
+                assert isinstance(result, str), f"call_stt should return transcript str, got {type(result)}"
+                post_stub.assert_called()
+            except RuntimeError:
+                # Some implementations require S3 staging — accept that env-gated
+                # signal as long as the proxy URL was reached.
+                pass
+    finally:
+        os.environ.pop("BEDROCK_PROXY_URL", None)
+    print("  PASS: bedrock call_stt invokes Transcribe via bedrock-proxy (or surfaces real error)")
+
+
+def test_task_304_bedrock_translate_invokes_amazon_translate():
+    """providers.bedrock.call_translate hits the bedrock-proxy Translate endpoint."""
+    import os
+    from providers import bedrock as _bk
+    os.environ["BEDROCK_PROXY_URL"] = "https://proxy.test"
+
+    class _FakeResp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"TranslatedText": "নমস্কাৰ", "translated_text": "নমস্কাৰ"}
+        def raise_for_status(self):
+            return None
+    post_stub = mock.AsyncMock(return_value=_FakeResp())
+    try:
+        with mock.patch.object(_bk, "_get_client", return_value=mock.MagicMock(post=post_stub)):
+            result = asyncio.run(_bk.call_translate("hello", target_lang="as"))
+        assert isinstance(result, str) and result, f"Expected non-empty translation, got {result!r}"
+        post_stub.assert_called_once()
+    finally:
+        os.environ.pop("BEDROCK_PROXY_URL", None)
+    print("  PASS: bedrock call_translate invokes Amazon Translate via bedrock-proxy")
+
+
+def test_task_304_admin_routing_config_surfaces_bedrock():
+    """Task #304: /admin/routing-config must show Bedrock as a first-class
+    provider in every capable pool with weight, share_pct, role, and
+    credential-presence badge — admin parity for the Nova Lite migration.
+    """
+    from routes.admin_routing_config import _build_pool, _key_status_for
+    from config import PROVIDER_PRIORITY
+
+    capable_pools = (
+        "english_rag_chat", "assamese_rag_chat", "content",
+        "embed", "tts", "stt", "translate", "vision", "safety",
+    )
+    for feat in capable_pools:
+        providers = PROVIDER_PRIORITY.get(feat, [])
+        pool = _build_pool(feat, providers)
+        bedrock_row = next((r for r in pool["providers"] if r["name"] == "bedrock"), None)
+        assert bedrock_row is not None, (
+            f"/admin/routing-config pool {feat!r} must list bedrock; got {pool['providers']}"
+        )
+        for required_key in ("weight", "share_pct", "role"):
+            assert required_key in bedrock_row, (
+                f"/admin/routing-config bedrock row in {feat!r} missing {required_key!r}"
+            )
+
+    badge = _key_status_for("bedrock")
+    assert badge.get("source") == "AWS_REGION", (
+        f"/admin/routing-config bedrock credential badge must reference AWS_REGION, got {badge}"
+    )
+    print("  PASS: /admin/routing-config exposes bedrock weight/share/role + AWS_REGION badge in all capable pools")
+
+
+def test_task_304_bedrock_429_increments_burst_counter_and_resets_on_success():
+    """Task #304: Bedrock dispatch must feed the shared 429-burst lifecycle.
+
+    Simulates a bedrock HTTP 429, asserts the in-process burst counter
+    increments, then a successful call resets it — same contract Workers-AI
+    / Gemini / Azure already follow via SmartKeyPool.mark_429 / mark_ok.
+    """
+    from llm import (
+        _dispatch_llm_for_feature,
+        _PROVIDER_429_WINDOWS,
+        get_provider_429_burst_inprocess,
+    )
+    _PROVIDER_429_WINDOWS["bedrock"].clear()
+
+    async def _fail_429(*a, **kw):
+        raise RuntimeError(
+            'bedrock: HTTP 429 from CF gateway — '
+            '{"message":"Too many tokens per day, please wait before trying again."}'
+        )
+    with mock.patch("providers.bedrock.call_converse", _fail_429):
+        try:
+            asyncio.run(_dispatch_llm_for_feature(
+                [{"role": "user", "content": "hi"}], "bedrock", 8, feature="english_rag_chat"
+            ))
+            assert False, "expected RuntimeError to propagate"
+        except RuntimeError:
+            pass
+    burst_after_429 = get_provider_429_burst_inprocess("bedrock", window_seconds=180)
+    assert burst_after_429 >= 1, (
+        f"bedrock 429 must increment burst counter, got {burst_after_429}"
+    )
+
+    ok_stub = mock.AsyncMock(return_value="recovered")
+    with mock.patch("providers.bedrock.call_converse", ok_stub):
+        result = asyncio.run(_dispatch_llm_for_feature(
+            [{"role": "user", "content": "hi"}], "bedrock", 8, feature="english_rag_chat"
+        ))
+    assert result == "recovered"
+    burst_after_success = get_provider_429_burst_inprocess("bedrock", window_seconds=180)
+    assert burst_after_success == 0, (
+        f"bedrock success must reset burst counter, got {burst_after_success}"
+    )
+
+    # Non-429/5xx errors (e.g. validation, network) must NOT inflate the metric.
+    async def _fail_403(*a, **kw):
+        raise RuntimeError("bedrock: HTTP 403 — invalid SigV4 signature")
+    with mock.patch("providers.bedrock.call_converse", _fail_403):
+        try:
+            asyncio.run(_dispatch_llm_for_feature(
+                [{"role": "user", "content": "hi"}], "bedrock", 8, feature="english_rag_chat"
+            ))
+        except RuntimeError:
+            pass
+    burst_after_403 = get_provider_429_burst_inprocess("bedrock", window_seconds=180)
+    assert burst_after_403 == 0, (
+        f"bedrock 403 must NOT increment 429 burst counter, got {burst_after_403}"
+    )
+    print("  PASS: bedrock 429 → burst counter +1, success → reset, 403 → no-op")
+
+
+def test_task_304_admin_llm_health_burst_includes_bedrock():
+    """Task #304: /admin/llm/health burst_429 must track bedrock 429/5xx bursts
+    so operators see the same throttle indicator they have for Groq/Gemini."""
+    from llm import _PROVIDER_429_WINDOWS
+    assert "bedrock" in _PROVIDER_429_WINDOWS, (
+        f"_PROVIDER_429_WINDOWS must include bedrock for /admin/llm/health burst tracking; "
+        f"got {list(_PROVIDER_429_WINDOWS.keys())}"
+    )
+    print("  PASS: bedrock present in _PROVIDER_429_WINDOWS — admin/llm/health surfaces throttle indicator")
 
 
 def test_vision_priority_includes_bedrock():

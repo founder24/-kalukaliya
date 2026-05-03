@@ -92,6 +92,10 @@ ALLOWLIST_FILES = {
     # AdminHealth retains a 'groq_throttle' state field consumed by the
     # backend cms_sarvam_health endpoint (kept until that field is renamed).
     "artifacts/syrabit/src/components/admin/AdminHealth.jsx",
+    # Provider credit-matrix doc lists removed providers in the
+    # "explicitly excluded" section so operators understand they are NOT
+    # part of PROVIDER_PRIORITY (documentation-only references).
+    "artifacts/syrabit/docs/infra/provider-credit-matrix.md",
     # Deployment / performance-monitoring runbooks — historical config
     # snippets (env-var tables, gcloud secret examples, OTel tag values)
     # operators still encounter on legacy CF Workers + Cloud Run deploys.
