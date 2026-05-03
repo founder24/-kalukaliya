@@ -492,6 +492,22 @@ export const adminSyraExecuteAction = (token, actionId, params, confirmed) =>
     { headers: adminHeaders(token), withCredentials: true, timeout: 30000 },
   );
 
+// Task #298 — per-admin Syra preferences (server-side, so two operators
+// sharing a workstation don't clobber each other's mute / wake-word /
+// persona choices). The frontend still mirrors the response into a
+// namespaced localStorage entry for offline reads.
+export const adminSyraGetPrefs = (token) =>
+  axios.get(`${API_BASE}/admin/syra/prefs`, {
+    headers: adminHeaders(token), withCredentials: true, timeout: 10000,
+  });
+
+export const adminSyraSavePrefs = (token, prefs) =>
+  axios.put(
+    `${API_BASE}/admin/syra/prefs`,
+    { prefs: prefs || {} },
+    { headers: adminHeaders(token), withCredentials: true, timeout: 10000 },
+  );
+
 // Task #298 — daily briefing: open alerts + cron failures + negative
 // feedback + new signups, packaged as a short paragraph the orb reads
 // out on the first open of each UTC day.

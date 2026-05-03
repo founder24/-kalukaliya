@@ -281,6 +281,81 @@ async def syra_execute_action(req: _ExecuteRequest, admin: dict = Depends(get_ad
     return result
 
 
+# ── Per-admin preferences ───────────────────────────────────────────────────
+# Code review (#298) flagged that storing prefs only in localStorage is not
+# per-admin: two operators sharing a workstation (or one operator across
+# multiple devices) would clobber each other's mute lists / wake-word
+# choice. We keep a tiny ``admin_syra_prefs`` collection keyed by admin
+# email; the frontend still mirrors the response into a namespaced
+# localStorage entry for offline reads.
+_PREF_KEYS = {
+    "wakeWord", "briefing", "voiceRate", "persona",
+    "mutedCategories", "proactiveAlerts", "greeting",
+}
+
+
+def _admin_pref_key(admin: dict) -> str:
+    return (admin.get("email") or admin.get("username") or "admin").lower()
+
+
+def _sanitize_prefs(raw: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k, v in (raw or {}).items():
+        if k not in _PREF_KEYS:
+            continue
+        if k == "mutedCategories":
+            if isinstance(v, list):
+                out[k] = [str(x)[:32] for x in v if isinstance(x, (str, int))][:16]
+        elif k == "voiceRate":
+            try:
+                out[k] = max(0.7, min(1.3, float(v)))
+            except Exception:
+                pass
+        elif k in {"wakeWord", "briefing", "proactiveAlerts", "greeting"}:
+            out[k] = bool(v)
+        elif k == "persona":
+            out[k] = str(v)[:32]
+    return out
+
+
+@router.get("/admin/syra/prefs")
+async def syra_get_prefs(admin: dict = Depends(get_admin_user)):
+    try:
+        from deps import db  # type: ignore
+
+        doc = await db.admin_syra_prefs.find_one({"admin_email": _admin_pref_key(admin)})
+        prefs = (doc or {}).get("prefs") if isinstance(doc, dict) else None
+    except Exception as exc:
+        logger.debug("[syra-prefs] load failed: %s", exc)
+        prefs = None
+    return {"prefs": _sanitize_prefs(prefs or {})}
+
+
+class _PrefsRequest(BaseModel):
+    prefs: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.put("/admin/syra/prefs")
+async def syra_save_prefs(req: _PrefsRequest, admin: dict = Depends(get_admin_user)):
+    cleaned = _sanitize_prefs(req.prefs or {})
+    try:
+        from deps import db  # type: ignore
+
+        await db.admin_syra_prefs.update_one(
+            {"admin_email": _admin_pref_key(admin)},
+            {"$set": {
+                "admin_email": _admin_pref_key(admin),
+                "prefs": cleaned,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("[syra-prefs] save failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Could not save preferences right now.")
+    return {"prefs": cleaned}
+
+
 # ── Daily briefing ──────────────────────────────────────────────────────────
 async def _gather_briefing_facts(admin: dict) -> dict[str, Any]:
     facts: dict[str, Any] = {

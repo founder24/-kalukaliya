@@ -14,6 +14,8 @@ Locks down the contracts the frontend orb relies on:
 from __future__ import annotations
 
 import json
+import sys
+import types
 from unittest.mock import patch, AsyncMock
 
 import pytest
@@ -122,6 +124,49 @@ def test_execute_destructive_succeeds_when_confirmed(client):
     assert r.status_code == 200, r.text
     assert r.json()["ok"] is True
     fake.assert_awaited_once()
+
+
+def test_prefs_round_trip_per_admin(client):
+    """Code review #298: prefs must persist per-admin server-side, not
+    just in localStorage. Round-trip through PUT then GET, ensuring
+    sanitisation strips unknown keys + clamps ``voiceRate``."""
+    from routes import admin_syra
+
+    store: dict[str, dict] = {}
+
+    class _FakeColl:
+        async def find_one(self, query):
+            return store.get(query["admin_email"])
+        async def update_one(self, query, update, upsert=False):
+            key = query["admin_email"]
+            store[key] = update["$set"]
+            class R: matched_count = 1
+            return R()
+
+    class _FakeDB:
+        admin_syra_prefs = _FakeColl()
+
+    fake_module = types.SimpleNamespace(db=_FakeDB())
+    sys.modules["deps"] = fake_module
+    try:
+        r = client.put("/api/admin/syra/prefs", json={"prefs": {
+            "wakeWord": True, "voiceRate": 99.0, "persona": "Atlas",
+            "mutedCategories": ["security", "queue_lag"],
+            "bogus_key": "drop me",
+        }})
+        assert r.status_code == 200, r.text
+        saved = r.json()["prefs"]
+        assert saved["wakeWord"] is True
+        assert saved["voiceRate"] == 1.3  # clamped
+        assert saved["persona"] == "Atlas"
+        assert saved["mutedCategories"] == ["security", "queue_lag"]
+        assert "bogus_key" not in saved
+
+        r = client.get("/api/admin/syra/prefs")
+        assert r.status_code == 200
+        assert r.json()["prefs"]["persona"] == "Atlas"
+    finally:
+        sys.modules.pop("deps", None)
 
 
 def test_executor_value_error_surfaces_as_400(client):

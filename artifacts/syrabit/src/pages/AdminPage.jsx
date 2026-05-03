@@ -251,7 +251,7 @@ export default function AdminPage() {
   const sc = statusConfig[sysStatus];
 
   return (
-    <SyraProvider activeSection={activeSection}>
+    <SyraProvider activeSection={activeSection} adminToken={adminToken} adminEmail={adminEmail}>
     <div className="min-h-screen flex bg-[#f8f9fc]" data-testid="admin-dashboard">
       <aside
         className="flex flex-col h-screen sticky top-0 transition-all duration-300 flex-shrink-0 z-20 bg-white"
