@@ -23,6 +23,7 @@ import { runAiGatewayCacheAlert } from "./ai-gateway-cache-alert";
 import {
   runR2StorageClassAlert,
   shouldRunMonthlyR2Check,
+  readR2StorageClassAlertState,
 } from "./r2-storage-class-alert";
 import {
   recordBotCacheEvent,
@@ -328,6 +329,165 @@ async function handleKvUsage(env: Env, request: Request, cors: Record<string, st
       "X-Source": "edge-kv-monitor",
     },
   });
+}
+
+/**
+ * Task #315 — KV key behind the manual `/api/edge/r2-storage-health/run`
+ * cooldown gate. The 28-day cooldown inside `runR2StorageClassAlert`
+ * already prevents duplicate paging; this gate exists so a stuck
+ * "Re-evaluate now" button (or a malicious admin replay) cannot burn
+ * an unbounded number of GraphQL + R2-list calls. 60 s is short enough
+ * that an operator who just re-applied the lifecycle rules can still
+ * verify within a normal incident window, and long enough that holding
+ * the button down does not accumulate cost.
+ */
+const R2_HEALTH_RUN_COOLDOWN_KEY = "r2_storage_class_alert:manual_run_at";
+const R2_HEALTH_RUN_COOLDOWN_S = 60;
+
+async function handleR2StorageHealth(
+  env: Env,
+  request: Request,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const provided = request.headers.get("X-Edge-Admin-Secret") || "";
+  if (!env.D1_SYNC_SECRET || provided !== env.D1_SYNC_SECRET) {
+    return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+      status: 401,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  if (!env.RATE_LIMIT) {
+    return new Response(
+      JSON.stringify({
+        configured: false,
+        reason: "RATE_LIMIT KV binding not bound on the worker",
+        state: null,
+      }),
+      {
+        status: 200,
+        headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
+      },
+    );
+  }
+  const state = await readR2StorageClassAlertState(env.RATE_LIMIT);
+  // Surface the configured cap + rules-applied date so the admin tile
+  // can compute "rules age (days)" and "Logpush GB / cap" without a
+  // second round-trip to the worker.
+  const logpushCapGb = (() => {
+    const raw = env.R2_STORAGE_ALERT_LOGPUSH_CAP_GB;
+    const n = raw ? Number(raw) : 5;
+    return Number.isFinite(n) && n > 0 ? n : 5;
+  })();
+  const rulesAppliedAt = env.R2_LIFECYCLE_RULES_APPLIED_AT || null;
+  let rulesAgeDays: number | null = null;
+  if (rulesAppliedAt) {
+    const t = Date.parse(rulesAppliedAt);
+    if (Number.isFinite(t)) {
+      rulesAgeDays = Math.max(0, Math.floor((Date.now() - t) / (24 * 60 * 60 * 1000)));
+    }
+  }
+  const buckets = (env.R2_STORAGE_ALERT_BUCKETS || "syrabit-assets,syrabit-media")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  const disabled = (env.R2_STORAGE_ALERT_DISABLED || "").toLowerCase() === "true";
+
+  return new Response(
+    JSON.stringify({
+      configured: true,
+      disabled,
+      buckets,
+      logpush_cap_gb: logpushCapGb,
+      rules_applied_at: rulesAppliedAt,
+      rules_age_days: rulesAgeDays,
+      state,
+    }),
+    {
+      status: 200,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "X-Source": "edge-r2-storage-health",
+      },
+    },
+  );
+}
+
+async function handleR2StorageHealthRun(
+  env: Env,
+  request: Request,
+  ctx: ExecutionContext,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const provided = request.headers.get("X-Edge-Admin-Secret") || "";
+  if (!env.D1_SYNC_SECRET || provided !== env.D1_SYNC_SECRET) {
+    return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+      status: 401,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  if (!env.RATE_LIMIT) {
+    return new Response(
+      JSON.stringify({ ok: false, reason: "no_kv_binding" }),
+      { status: 503, headers: { ...cors, "Content-Type": "application/json" } },
+    );
+  }
+  // Cooldown gate. Read-modify-write on a single key — race-free enough
+  // for a manual admin button (KV's eventual consistency at worst lets
+  // two clicks within the same isolate window through, which is fine;
+  // the 28-day fire cooldown inside the alert module catches actual
+  // duplicate paging).
+  try {
+    const lastRaw = await env.RATE_LIMIT.get(R2_HEALTH_RUN_COOLDOWN_KEY);
+    const nowMs = Date.now();
+    const lastMs = lastRaw ? Number(lastRaw) : 0;
+    if (lastMs && nowMs - lastMs < R2_HEALTH_RUN_COOLDOWN_S * 1000) {
+      const retryAfter = Math.ceil(
+        (R2_HEALTH_RUN_COOLDOWN_S * 1000 - (nowMs - lastMs)) / 1000,
+      );
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          reason: "cooldown",
+          retry_after_seconds: retryAfter,
+        }),
+        {
+          status: 429,
+          headers: {
+            ...cors,
+            "Content-Type": "application/json",
+            "Retry-After": String(retryAfter),
+          },
+        },
+      );
+    }
+    await env.RATE_LIMIT.put(R2_HEALTH_RUN_COOLDOWN_KEY, String(nowMs), {
+      expirationTtl: Math.max(60, R2_HEALTH_RUN_COOLDOWN_S * 4),
+    });
+  } catch {
+    /* if KV is unhealthy the request still proceeds — the watchdog
+       will skip with no_kv_binding / query_failed and the response
+       below surfaces that cleanly to the admin */
+  }
+
+  const result = await runR2StorageClassAlert(env);
+  // Re-read the persisted state so the caller gets the canonical
+  // "what's now stored" view (last_evaluated_at / last_*_gb fields)
+  // without the UI having to make a second GET round-trip.
+  const state = await readR2StorageClassAlertState(env.RATE_LIMIT);
+  void ctx;
+
+  return new Response(
+    JSON.stringify({ ok: true, result, state }),
+    {
+      status: 200,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "X-Source": "edge-r2-storage-health",
+      },
+    },
+  );
 }
 
 interface D1Database {
@@ -2474,6 +2634,31 @@ async function _handleEdgeFetch(
 
     if (pathname === "/api/edge/kv-usage" && request.method === "GET") {
       return handleKvUsage(env, request, cors);
+    }
+
+    // Task #315 — R2 cold-storage health for the admin dashboard. The
+    // monthly watchdog (Task #314) writes its last evaluation to KV;
+    // this route just reads that snapshot back so an operator can
+    // confirm the IA share / Logpush GB / rules-age between the
+    // once-a-month cron tick without opening the Cloudflare dashboard.
+    // Auth: same X-Edge-Admin-Secret pattern as /api/edge/kv-usage.
+    if (
+      pathname === "/api/edge/r2-storage-health" &&
+      request.method === "GET"
+    ) {
+      return handleR2StorageHealth(env, request, cors);
+    }
+    // POST companion — re-runs `runR2StorageClassAlert` on demand
+    // after an operator re-applies the lifecycle rules. KV-rate-limited
+    // to ~1/min/IP so it can't be spammed past the 28-day cooldown
+    // anchor inside the alert module (the cooldown protects against
+    // duplicate pages; this gate protects the GraphQL + R2-list
+    // budget from a stuck refresh button).
+    if (
+      pathname === "/api/edge/r2-storage-health/run" &&
+      request.method === "POST"
+    ) {
+      return handleR2StorageHealthRun(env, request, ctx, cors);
     }
 
     // ── Phase 5: Edge metrics query (Analytics Engine GraphQL API) ──────────

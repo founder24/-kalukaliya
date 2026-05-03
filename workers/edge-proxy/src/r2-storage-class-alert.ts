@@ -797,6 +797,18 @@ export function shouldRunMonthlyR2Check(now: Date): boolean {
   );
 }
 
+/**
+ * Read the persisted alert state for the admin dashboard tile (Task
+ * #315). Returns the empty-state shape (all `null`) when nothing has
+ * been written yet, so the UI can render a "never evaluated" placeholder
+ * instead of crashing on a missing key.
+ */
+export async function readR2StorageClassAlertState(
+  kv: KVNamespace,
+): Promise<R2StorageClassAlertState> {
+  return readState(kv);
+}
+
 /** Test-only: read the persisted alert state. */
 export async function _readR2StorageClassAlertStateForTests(
   kv: KVNamespace,

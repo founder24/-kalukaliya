@@ -1860,6 +1860,7 @@ from routes.admin_vertex import router as admin_vertex_router
 from routes.admin_advanced import router as admin_advanced_router
 from routes.admin_retriever import router as admin_retriever_router
 from routes.admin_kv_health import router as admin_kv_health_router
+from routes.admin_r2_storage_health import router as admin_r2_storage_health_router
 from routes.admin_routing_config import router as admin_routing_config_router
 from routes.admin_syra import router as admin_syra_router
 from routes.admin_edge_analytics import router as admin_edge_analytics_router
@@ -1963,6 +1964,7 @@ api.include_router(admin_vertex_router)
 api.include_router(admin_advanced_router)
 api.include_router(admin_retriever_router)
 api.include_router(admin_kv_health_router)
+api.include_router(admin_r2_storage_health_router)
 api.include_router(admin_routing_config_router)
 api.include_router(admin_syra_router)
 api.include_router(admin_edge_analytics_router)

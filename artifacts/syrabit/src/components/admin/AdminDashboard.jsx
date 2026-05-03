@@ -5,6 +5,7 @@ import AdminQuickLinks from './AdminQuickLinks';
 import AdminDraftServedSubjects from './AdminDraftServedSubjects';
 import AlertReasonsRow from './AlertReasonsRow';
 import BotCachePanel from './BotCachePanel';
+import R2ColdStoragePanel from './R2ColdStoragePanel';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
@@ -417,6 +418,13 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   // see read/write counters & quota % at a glance and react before a
   // KV outage starts dropping pages and the analytics beacon.
   const [kvHealth, setKvHealth] = useState(null);
+  // Task #315 — R2 cold-storage watchdog snapshot from the edge worker.
+  // ``null`` while loading; ``{ configured, state?, ... }`` once the
+  // backend responds. Surfaced as a tile so admins can confirm the
+  // monthly lifecycle / Logpush-cap watchdog (Task #314) is still
+  // happy between cron ticks without opening the Cloudflare dashboard.
+  const [r2Health, setR2Health] = useState(null);
+  const [r2Reevaluating, setR2Reevaluating] = useState(false);
   // Task #689 — Cached state of the periodic Gemini health probe
   // (Task #677). ``null`` while loading; ``{ status, last_check_ts,
   // reason, consecutive_failures, ... }`` once the backend responds.
@@ -510,6 +518,16 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
       setKvHealth(kvRes.data || null);
     } catch {
       setKvHealth({ configured: false, reason: 'Backend unreachable' });
+    }
+    // Task #315 — R2 cold-storage watchdog snapshot.
+    try {
+      const r2Res = await axios.get(
+        `${API_BASE}/admin/r2-storage-health`,
+        adminHdr(adminToken),
+      );
+      setR2Health(r2Res.data || null);
+    } catch {
+      setR2Health({ configured: false, reason: 'Backend unreachable' });
     }
     // Task #470 — latest CI build status (backend + frontend workflows).
     try {
@@ -3129,6 +3147,74 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                   sparkline geometry can be unit-tested without
                   rendering the whole admin dashboard. */}
               <BotCachePanel kvHealth={kvHealth} />
+
+              {/* Task #315 — R2 cold-storage / Logpush watchdog snapshot
+                  (Task #314 watchdog persists state to KV; this surfaces
+                  it so an operator can confirm the rules are working
+                  between monthly cron ticks). */}
+              <R2ColdStoragePanel
+                r2Health={r2Health}
+                reevaluating={r2Reevaluating}
+                onReevaluate={async () => {
+                  if (r2Reevaluating) return;
+                  setR2Reevaluating(true);
+                  try {
+                    const runRes = await axios.post(
+                      `${API_BASE}/admin/r2-storage-health/run`,
+                      null,
+                      adminHdr(adminToken),
+                    );
+                    // The worker returns the fresh state inline so the
+                    // tile updates immediately without a follow-up GET.
+                    if (runRes.data?.state) {
+                      setR2Health((prev) => ({
+                        ...(prev || { configured: true }),
+                        configured: true,
+                        state: runRes.data.state,
+                        // Keep the prior config metadata if the run
+                        // response didn't echo it back.
+                        buckets: runRes.data.result?.buckets || prev?.buckets,
+                        logpush_cap_gb:
+                          runRes.data.result?.logpush_cap_gb ??
+                          prev?.logpush_cap_gb,
+                        rules_age_days:
+                          runRes.data.result?.rules_age_days ??
+                          prev?.rules_age_days,
+                      }));
+                    }
+                    // The worker returns 200 even when the underlying
+                    // run was skipped (no KV binding, GraphQL query
+                    // failed, etc) — surface that honestly so the
+                    // operator doesn't see a green toast for a no-op.
+                    const r = runRes.data?.result;
+                    if (r && r.ok === false) {
+                      toast.error(
+                        `Re-evaluate skipped: ${r.reason || 'unknown reason'}`,
+                      );
+                    } else if (r && r.skipped) {
+                      toast.message(
+                        `Re-evaluate skipped: ${r.reason || 'no work to do'}`,
+                      );
+                    } else {
+                      toast.success('R2 cold-storage watchdog re-evaluated');
+                    }
+                  } catch (e) {
+                    const status = e?.response?.status;
+                    const detail = e?.response?.data?.detail;
+                    if (status === 429) {
+                      const retry =
+                        (typeof detail === 'object' && detail?.retry_after_seconds) ||
+                        '?';
+                      toast.error(`Cooldown — try again in ${retry}s`);
+                    } else {
+                      toast.error('Re-evaluate failed');
+                      log.error('R2 re-evaluate failed', { error: e?.message });
+                    }
+                  } finally {
+                    setR2Reevaluating(false);
+                  }
+                }}
+              />
 
               {/* Task #474 — recent SEO summary dispatch history. */}
               <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-seo-summary-history">
