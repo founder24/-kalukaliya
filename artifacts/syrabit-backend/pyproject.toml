@@ -4,6 +4,9 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+markers = [
+    "live: marks tests that make real HTTP calls to external services (skip when credentials absent)",
+]
 
 [tool.coverage.run]
 source = ["."]

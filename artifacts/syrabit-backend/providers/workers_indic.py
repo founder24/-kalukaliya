@@ -156,11 +156,33 @@ async def call_indic_trans(
             f"workers_indic: empty translation returned — raw={str(data)[:200]}"
         )
 
+    translated = translated.strip()
+
+    # For en-indic (English → Assamese) validate that the output actually
+    # contains Bengali-script Assamese characters (Unicode U+0980–U+09FF).
+    # The CF Workers AI IndicTrans2 model has been observed to return Devanagari
+    # (Hindi, U+0900–U+097F) for target_lang="asm_Beng" despite the FLORES-200
+    # code requesting Assamese.  When that happens we raise so the caller's
+    # fallback chain (e.g. Gemini Tier B in _assamese_translate_gemini_main_sarvam_polish)
+    # can produce correct Assamese script output instead.
+    if direction == "en-indic":
+        if not any("\u0980" <= ch <= "\u09FF" for ch in translated):
+            logger.warning(
+                "workers_indic: en-indic returned no Assamese script "
+                "(U+0980–U+09FF) — got %r; CF endpoint may be returning "
+                "Devanagari/wrong script",
+                translated[:60],
+            )
+            raise RuntimeError(
+                f"workers_indic: en-indic returned non-Assamese script "
+                f"(got {translated[:40]!r}, no Bengali-block U+0980–U+09FF chars)"
+            )
+
     logger.info(
         "workers_indic: %s translated %d chars → %d chars",
         direction, len(text), len(translated),
     )
-    return translated.strip()
+    return translated
 
 
 async def health_check() -> dict:
