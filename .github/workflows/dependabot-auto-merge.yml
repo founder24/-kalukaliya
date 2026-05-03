@@ -31,19 +31,36 @@
 #   and merge PRs.  Without this the `auto-approve` and `auto-merge` steps
 #   will fail with a 403.
 
+# zizmor: pull_request_target is required so the GITHUB_TOKEN has the
+# write scopes needed to approve and enable auto-merge on Dependabot PRs.
+# Plain `pull_request` only grants a read-only token to fork-equivalent
+# events (Dependabot is fork-equivalent), which is why this is the
+# documented pattern in https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions.
+# Risk is mitigated by:
+#   * Strict actor guard via github.event.pull_request.user.login (not spoofable
+#     like github.actor in pull_request_target).
+#   * Permissions scoped to the jobs that need them (not the workflow root).
+#   * No checkout of PR-controlled code in any job — we only call `gh pr ...`.
 on:
-  pull_request_target:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers]
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Default workflow permissions: read-only. Per-job permissions below grant the
+# minimum write scopes required, satisfying zizmor[excessive-permissions].
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   ecosystem-filter:
     name: Filter to github-actions ecosystem PRs
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    permissions:
+      contents: read
+    # Use pull_request.user.login (not github.actor) — github.actor on
+    # pull_request_target reflects whoever last touched the PR and is spoofable
+    # by anyone with push to a feature branch. The PR author field is set by
+    # GitHub at creation time and cannot be spoofed.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     outputs:
       is_actions_bump: ${{ steps.check.outputs.is_actions_bump }}
     steps:
@@ -63,6 +80,9 @@ jobs:
     needs: ecosystem-filter
     if: needs.ecosystem-filter.outputs.is_actions_bump == 'true'
     runs-on: ubuntu-latest
+    # `gh pr review --approve` needs pull-requests: write only.
+    permissions:
+      pull-requests: write
     steps:
       - name: Approve PR
         env:
@@ -79,6 +99,11 @@ jobs:
     needs: [ecosystem-filter, auto-approve]
     if: needs.ecosystem-filter.outputs.is_actions_bump == 'true'
     runs-on: ubuntu-latest
+    # `gh pr merge --auto` needs both contents: write (to merge) and
+    # pull-requests: write (to enable auto-merge).
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable auto-merge (squash)
         env:

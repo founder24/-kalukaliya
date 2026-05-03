@@ -88,7 +88,10 @@ jobs:
         env:
           MONGODB_URL: "mongodb://localhost:27017/test"
           DB_NAME: "syrabit_test"
-          JWT_SECRET: "ci-test-secret-not-real"
+          # Backend hardening requires JWT_SECRET >= 64 chars of high entropy.
+          # These are throwaway CI-only test values, never used in production.
+          JWT_SECRET: "ci-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-aaaaaa"
+          ADMIN_JWT_SECRET: "ci-admin-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-bbbbbb"
         run: |
           pytest tests/test_cf_access.py -v --no-header
 
@@ -99,7 +102,10 @@ jobs:
           # avoid import-time failures in modules that read os.environ.
           MONGODB_URL: "mongodb://localhost:27017/test"
           DB_NAME: "syrabit_test"
-          JWT_SECRET: "ci-test-secret-not-real"
+          # Backend hardening requires JWT_SECRET >= 64 chars of high entropy.
+          # These are throwaway CI-only test values, never used in production.
+          JWT_SECRET: "ci-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-aaaaaa"
+          ADMIN_JWT_SECRET: "ci-admin-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-bbbbbb"
         run: |
           pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=60
 
