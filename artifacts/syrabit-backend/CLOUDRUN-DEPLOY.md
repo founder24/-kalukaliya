@@ -35,13 +35,18 @@ RUNTIME_SA=syrabit-backend@${PROJECT_ID}.iam.gserviceaccount.com
 gcloud config set project ${PROJECT_ID}
 
 # Enable APIs
+# Note: Cloud Error Reporting (clouderrorreporting.googleapis.com) was
+# previously enabled here, but no application code emits structured error
+# events to it — Cloud Run streams stderr to Cloud Logging, which is a
+# different surface. Re-add it here AND grant roles/errorreporting.writer
+# below if/when an actual emitter is wired (e.g. google-cloud-error-reporting
+# SDK calls from a global exception handler).
 gcloud services enable \
   run.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   secretmanager.googleapis.com \
-  logging.googleapis.com \
-  clouderrorreporting.googleapis.com
+  logging.googleapis.com
 
 # Artifact Registry repo (Docker)
 gcloud artifacts repositories create ${AR_REPO} \
@@ -56,8 +61,10 @@ gcloud iam service-accounts create syrabit-backend \
 # Allow the runtime SA to read every secret it binds to (we set --update-secrets
 # below, which requires roles/secretmanager.secretAccessor).
 for ROLE in roles/secretmanager.secretAccessor roles/logging.logWriter \
-            roles/monitoring.metricWriter roles/cloudtrace.agent \
-            roles/errorreporting.writer; do
+            roles/monitoring.metricWriter roles/cloudtrace.agent; do
+  # roles/errorreporting.writer was removed alongside the
+  # clouderrorreporting.googleapis.com API enable above — re-add both
+  # together when an actual error-reporting emitter is wired.
   gcloud projects add-iam-policy-binding ${PROJECT_ID} \
     --member="serviceAccount:${RUNTIME_SA}" --role="${ROLE}"
 done

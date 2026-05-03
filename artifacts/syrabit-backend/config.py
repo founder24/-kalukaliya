@@ -1196,13 +1196,21 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "tts": {
         "elevenlabs": 500,   # primary — eleven_multilingual_v2
         "deepgram":   500,   # secondary — Aura-2
-        "vertex":    2000,   # tertiary — Vertex TTS
+        # Vertex TTS endpoint is intentionally not wired (see routes/voice.py
+        # _synthesize_with_fallback); it stays in PROVIDER_PRIORITY['tts'] only
+        # as a placeholder so the "graceful exclusion" path is exercised. Weight
+        # MUST be 0 — any positive weight makes the weighted draw pick a known-
+        # failing provider on a sizeable fraction of requests, burning a
+        # dispatch attempt + log line per voice call before redrawing.
+        "vertex":       0,
         "workers_ai":   0,   # last-resort
     },
     "stt": {
         "deepgram":   500,   # primary — Deepgram Nova-3
         "assemblyai":1000,   # secondary — AssemblyAI best
-        "vertex":    2000,   # tertiary — Vertex STT
+        # Vertex STT endpoint is intentionally not wired — see the tts note
+        # above; same rationale for pinning to weight 0.
+        "vertex":       0,
         "workers_ai":   0,   # last-resort
     },
     # vector_search: Pinecone curated index primary (3000) → Atlas/Vertex fallback (500).
