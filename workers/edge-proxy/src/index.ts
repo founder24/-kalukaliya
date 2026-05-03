@@ -19,6 +19,7 @@ import {
 import { runSyntheticProbe } from "./synthetic-probe";
 import { runCfBlockProbe } from "./cf-block-probe";
 import { runBotCacheAlert } from "./bot-cache-alert";
+import { runAiGatewayCacheAlert } from "./ai-gateway-cache-alert";
 import {
   recordBotCacheEvent,
   getBotCacheStats,
@@ -130,6 +131,22 @@ interface Env {
   BOT_CACHE_ALERT_FALLBACK_PCT?: string;
   BOT_CACHE_ALERT_MIN_SAMPLE?: string;
   BOT_CACHE_ALERT_WINDOW_BUCKETS?: string;
+  /**
+   * Task #311 — AI Gateway 24h embed cache-hit-rate watchdog. Pages
+   * on-call when the rolling 24h hit-rate for embed-tagged requests
+   * through `syrabit-ai-gw` falls below the floor documented in
+   * docs/ops/ai-gateway-activation.md (~50%). Re-uses
+   * SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL with a distinct alert_type so
+   * the receiver can route it independently. See
+   * src/ai-gateway-cache-alert.ts. AI_GATEWAY_ANALYTICS_TOKEN must be
+   * set as a Wrangler secret with `AI Gateway: Read` scope; without
+   * it the watchdog skips silently.
+   */
+  AI_GATEWAY_CACHE_ALERT_DISABLED?: string;
+  AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT?: string;
+  AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE?: string;
+  AI_GATEWAY_CACHE_ALERT_EMBED_TAG?: string;
+  AI_GATEWAY_ANALYTICS_TOKEN?: string;
   /**
    * Enterprise Vectorize binding — enabled in wrangler.toml for edge-side
    * semantic search without a backend round-trip.
@@ -3334,6 +3351,21 @@ export default {
         const msg = e instanceof Error ? e.message : "unknown";
         console.error(`[bot-cache-alert] unhandled error: ${msg.slice(0, 300)}`);
       }));
+      // Task #311 — AI Gateway 24h embed cache-hit-rate watchdog.
+      // Runs only on the :00, :15, :30, :45 minute marks (4 times per
+      // hour). The 24h window moves slowly and each iteration costs
+      // one Cloudflare GraphQL query against the AI Gateway analytics
+      // dataset; running it every minute would burn ~1,440 calls/day
+      // with no signal benefit. The handler still runs on every
+      // minute for the synthetic / cf-block / bot-cache probes; only
+      // this single watchdog is gated.
+      const minuteOfHour = new Date(event.scheduledTime).getUTCMinutes();
+      if (minuteOfHour % 15 === 0) {
+        ctx.waitUntil(runAiGatewayCacheAlert(wrapped).catch((e) => {
+          const msg = e instanceof Error ? e.message : "unknown";
+          console.error(`[ai-gateway-cache-alert] unhandled error: ${msg.slice(0, 300)}`);
+        }));
+      }
       return;
     }
     if (cron === "0 */6 * * *") {

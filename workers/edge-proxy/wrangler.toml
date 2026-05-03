@@ -338,6 +338,41 @@ new_classes = ["RateLimiter"]
 #                   BOT_CACHE_ALERT_WINDOW_BUCKETS (default 3 → 15m),
 #                   BOT_CACHE_ALERT_DISABLED=true to pause.
 #
+#                   ALSO runs Task #311 AI Gateway 24h embed cache-hit
+#                   -rate watchdog, but ONLY on minutes where
+#                   `getUTCMinutes() % 15 === 0` (i.e. 4 times per
+#                   hour). Each iteration costs one GraphQL query
+#                   against the Cloudflare AI Gateway analytics
+#                   dataset, and the 24h window moves slowly enough
+#                   that 15-minute granularity is more than adequate.
+#                   Pages on:
+#                     - 24h `cached_requests / total_requests` for
+#                       metadata.tag = "workers-ai-fallback:embed"
+#                       falls below the documented floor (default
+#                       50% — matches docs/ops/ai-gateway-activation.md).
+#                   Re-uses SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL but
+#                   tags payloads with alert_type=
+#                   ai_gateway_cache_hit_rate_low, and includes a link
+#                   to the rollback runbook
+#                   docs/ops/ai-gateway-activation.md in the payload.
+#                   Required secrets:
+#                     WORKERS_AI_GATEWAY_ID — already required by
+#                       Task #307; absent ⇒ watchdog skips silently
+#                       because no embed-tagged rows exist.
+#                     AI_GATEWAY_ANALYTICS_TOKEN — Cloudflare API
+#                       token with `AI Gateway: Read` scope on the
+#                       account. Distinct from CF_ANALYTICS_TOKEN
+#                       (Workers Analytics scope) so each can be
+#                       rotated independently. Set via
+#                       `wrangler secret put AI_GATEWAY_ANALYTICS_TOKEN
+#                       --name syrabit-edge`. Absent ⇒ watchdog skips
+#                       with a console warning.
+#                   Optional knobs: AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT
+#                   (default 50), AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE
+#                   (default 50), AI_GATEWAY_CACHE_ALERT_EMBED_TAG
+#                   (default "workers-ai-fallback:embed"),
+#                   AI_GATEWAY_CACHE_ALERT_DISABLED=true to pause.
+#
 #   "0 */6 * * *" → 6-hourly D1 content sync from the Railway backend.
 crons = ["* * * * *", "0 */6 * * *"]
 

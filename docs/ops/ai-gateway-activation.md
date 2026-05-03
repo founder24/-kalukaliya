@@ -160,3 +160,12 @@ no tagging, no caching. Re-run Step 2 to re-arm.
   `env.AI.run` callsites in `handleAiFallback` + the edge
   vector-search handler.
 - `workers/edge-proxy/tests/workers-ai-tagging.test.ts` — CI guard.
+- `workers/edge-proxy/src/ai-gateway-cache-alert.ts` — Task #311
+  watchdog. Pages via `SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL` when the
+  rolling 24h embed cache-hit-rate falls below the 50% floor
+  documented above. Required additional secret:
+  `AI_GATEWAY_ANALYTICS_TOKEN` (CF API token with `AI Gateway: Read`
+  scope on account `d66e40eac539fff1db270fddf384a5ec`). When the
+  watchdog fires, the on-call action is the **Rollback** section
+  above — disable the gateway routing, investigate the cache-key
+  regression, then re-arm via Step 2.
