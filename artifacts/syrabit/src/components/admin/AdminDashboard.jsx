@@ -4728,7 +4728,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                 <Legend wrapperStyle={{ fontSize: 9 }} />
                 <Bar dataKey="gemini_tokens" fill="#8b5cf6" name="Gemini" radius={[3,3,0,0]} />
                 <Bar dataKey="xai_tokens" fill="#06b6d4" name="xAI" radius={[3,3,0,0]} />
-                <Bar dataKey="groq_tokens" fill="#10b981" name="Groq" radius={[3,3,0,0]} />
+                <Bar dataKey="vertex_tokens" fill="#10b981" name="Vertex AI" radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (

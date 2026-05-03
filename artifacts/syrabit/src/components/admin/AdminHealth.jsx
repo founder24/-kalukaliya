@@ -972,8 +972,13 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   // Piggybacked on the 30s workers-ai poll so no extra interval is needed.
   const [waiThrottle, setWaiThrottle] = useState(null);
   // Tasks #85/#90 — Groq and Gemini 429 burst gauges, same shape as waiThrottle.
+  // groqThrottle retained for the legacy backend `groq_throttle` payload
+  // surfaced by /admin/dashboard/metrics; not rendered as a card after Task #297.
   const [groqThrottle, setGroqThrottle] = useState(null);
   const [geminiThrottle, setGeminiThrottle] = useState(null);
+  // Task #297 — locked provider chain surfacing (deepgram, workers_ai_indic,
+  // mongodb_atlas) sourced from GET /admin/routing-config.
+  const [routingConfig, setRoutingConfig] = useState(null);
   // Task #93 — embed 429 cooldown stats from GET /admin/llm/pool-stats.
   const [embedBurst, setEmbedBurst] = useState(null);
   // Task #98 — live countdown display for the embed cooldown timer.
@@ -2396,10 +2401,59 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           <SectionErrorBoundary name="Workers AI Fallback">
             <div className="space-y-4">
 
+              {/* Task #297 — locked provider chain surfacing */}
+              <div className="rounded-2xl p-4 border border-emerald-200 bg-emerald-50/40 shadow-sm" data-testid="locked-provider-chain">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-800">Locked Provider Chain (Task #297)</p>
+                    <p className="text-[10px] text-emerald-700/70">Speech, Indic translation and primary datastore — sourced from <code className="font-mono">GET /admin/routing-config</code>.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      axios.get(`${API_BASE}/admin/routing-config`, {
+                        headers: adminHeaders(adminToken), withCredentials: true,
+                      })
+                        .then((r) => setRoutingConfig(r.data))
+                        .catch(() => setRoutingConfig({ _error: true }));
+                    }}
+                    className="px-2.5 py-1 rounded-md text-[11px] border border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+                    data-testid="btn-refresh-routing-config"
+                  >↻ Load</button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+                  {[
+                    { key: 'deepgram',         label: 'Deepgram',         pool: 'stt',    note: 'Speech-to-text primary' },
+                    { key: 'workers_ai_indic', label: 'workers_ai_indic', pool: 'indic',  note: 'IndicTrans2 (Workers AI)' },
+                    { key: 'mongodb_atlas',    label: 'MongoDB Atlas',    pool: 'datastore', note: 'Primary persistence layer' },
+                  ].map((p) => {
+                    const pool = routingConfig?.pools?.[p.pool];
+                    const slot = pool?.providers?.find?.((x) => x.name === p.key);
+                    const present = !!slot;
+                    const role = slot?.role || (present ? 'configured' : '—');
+                    const sharePct = slot?.share_pct;
+                    return (
+                      <div key={p.key} className="rounded-lg p-3 bg-white border border-emerald-100" data-testid={`provider-card-${p.key}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`inline-block w-2 h-2 rounded-full ${routingConfig === null ? 'bg-gray-300' : present ? 'bg-emerald-500' : routingConfig?._error ? 'bg-red-500' : 'bg-amber-400'}`} />
+                          <span className="text-xs font-semibold text-gray-700">{p.label}</span>
+                        </div>
+                        <div className="text-[10px] text-gray-500 mb-1">{p.note}</div>
+                        <div className="text-[11px] font-mono text-gray-600">
+                          pool: <span className="text-emerald-700">{p.pool}</span> · role: <span className="text-emerald-700">{role}</span>
+                          {typeof sharePct === 'number' && <> · {sharePct}%</>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {routingConfig?._error && (
+                  <p className="mt-2 text-[11px] text-red-600">Failed to load routing config — check admin token / api workflow.</p>
+                )}
+              </div>
+
               {/* Tasks #85/#90 — reusable burst gauge for any provider */}
               {[
                 { key: 'workers-ai', label: 'Workers AI', thr: waiThrottle },
-                { key: 'groq',       label: 'Groq',       thr: groqThrottle },
                 { key: 'gemini',     label: 'Gemini',     thr: geminiThrottle },
               ].map(({ key, label, thr: _thr }) => (
                 <div key={key}>

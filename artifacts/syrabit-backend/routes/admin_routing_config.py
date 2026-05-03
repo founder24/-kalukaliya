@@ -19,16 +19,6 @@ from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, POOL_WEIGHTS
 router = APIRouter()
 
 
-def _role_for(weight: int, max_weight: int) -> str:
-    if weight == 0:
-        return "fallback_only"
-    if max_weight > 0 and weight == max_weight and weight >= 10 * max(
-        (w for w in (max_weight,) if w < max_weight), default=0
-    ):
-        return "primary"
-    return "secondary"
-
-
 def _build_pool(feature: str, providers: list[str]) -> dict[str, Any]:
     """Mirror ``select_provider``'s strict-primary lock contract.
 

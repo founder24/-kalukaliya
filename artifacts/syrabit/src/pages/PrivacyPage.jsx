@@ -48,7 +48,7 @@ const sections = [
     title: '5. Data Sharing & Third Parties',
     body: `We do not sell, rent, or trade your personal data. We may share data only in the following circumstances:`,
     list: [
-      'AI providers — We use third-party AI model providers (such as Groq, Google Gemini, xAI, and others) to power AI responses. Your questions are sent to these providers for processing. These providers are bound by their respective privacy policies and data processing agreements.',
+      'AI providers — We use third-party AI model providers (such as Google Gemini via Vertex AI, Sarvam AI, Cloudflare Workers AI, Deepgram, xAI, and others) to power AI responses. Your questions are sent to these providers for processing. These providers are bound by their respective privacy policies and data processing agreements.',
       'Payment processor — Razorpay processes payments on our behalf, subject to their privacy policy.',
       'Legal obligations — We may disclose data if required by law, court order, or regulatory authority in India.',
       'We do not share identifiable personal data with advertisers or marketing companies.',

@@ -266,7 +266,7 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
                   Choose which provider powers the user-facing chat stream.
                   Vertex AI Gemini Flash gives the lowest first-token latency.
                   If the active provider fails before the first token is sent,
-                  the backend automatically falls back to the legacy SLM pool —
+                  the backend automatically falls back to the Workers AI pool —
                   citations, guardrails and rate limits are preserved either way.
                 </p>
                 <div>
@@ -278,7 +278,7 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
                     className={inputStyle}
                   >
                     <option value="vertex/gemini-flash">Vertex AI — Gemini Flash (recommended, lowest TTFT)</option>
-                    <option value="openai/gpt-oss-20b">Legacy — Syrabit SLM (Cerebras / Groq / OpenRouter pool)</option>
+                    <option value="workers-ai/@cf/openai/gpt-oss-20b">Workers AI — gpt-oss-20b (fallback)</option>
                   </select>
                 </div>
                 <p className="text-[11px] text-gray-400">
@@ -308,14 +308,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
                 </div>
                 <div><label className="text-xs text-gray-500 block mb-1">Base URL (optional)</label>
                   <input value={creds.emergentBaseUrl} onChange={(e) => setCreds((c) => ({...c, emergentBaseUrl: e.target.value}))} placeholder="https://api.emergent.sh/v1" className={inputStyle} />
-                </div>
-              </div>
-            )}
-            {active === 'groq' && (
-              <div className="space-y-3">
-                <p className="text-xs text-gray-500">Groq API key is configured as a backend environment variable. Use the field below to override for testing.</p>
-                <div><label className="text-xs text-gray-500 block mb-1">GROQ_API_KEY (optional override)</label>
-                  <SecretInput value={creds.groqKey} onChange={(e) => setCreds((c) => ({...c, groqKey: e.target.value}))} placeholder="gsk_..." />
                 </div>
               </div>
             )}

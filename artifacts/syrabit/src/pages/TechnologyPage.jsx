@@ -158,7 +158,7 @@ const FEATURE_CATALOG = {
     {
       group: 'AI Study Assistant',
       items: [
-        'Multi-model AI chat (Cerebras, Groq, Fireworks, OpenRouter, Gemini, xAI)',
+        'Multi-model AI chat (Vertex AI Gemini Flash, Workers AI, xAI)',
         'Source-cited answers grounded in your syllabus',
         'Bilingual conversations (English + Assamese)',
         'Streaming responses with thinking indicator',
@@ -266,7 +266,7 @@ const FEATURE_CATALOG = {
     {
       group: 'AI অধ্যয়ন সহায়ক',
       items: [
-        'বহু-মডেল AI চেট (Cerebras, Groq, Fireworks, OpenRouter, Gemini, xAI)',
+        'বহু-মডেল AI চেট (Vertex AI Gemini Flash, Workers AI, xAI)',
         'আপোনাৰ পাঠ্যক্ৰমত ভিত্তি কৰি উৎস-উদ্ধৃত উত্তৰ',
         'দ্বিভাষিক বাৰ্তালাপ (ইংৰাজী + অসমীয়া)',
         'চিন্তা সূচকৰ সৈতে ষ্ট্ৰীমিং উত্তৰ',

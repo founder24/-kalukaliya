@@ -17,7 +17,7 @@ export default function TermsPage() {
           <div className="space-y-8 text-foreground/70 leading-relaxed">
             {[
               { title: '1. Acceptance of Terms', body: 'By accessing Syrabit.ai, you agree to these Terms of Service. If you do not agree, please do not use our service.' },
-              { title: '2. Service Description', body: 'Syrabit.ai provides AI-powered educational assistance for AssamBoard students (AHSEC, DEGREE, and SEBA divisions). The service includes access to subject content and an AI tutor powered by Groq.' },
+              { title: '2. Service Description', body: 'Syrabit.ai provides AI-powered educational assistance for AssamBoard students (AHSEC, DEGREE, and SEBA divisions). The service includes access to subject content and an AI tutor powered by Google Gemini (via Vertex AI).' },
               { title: '3. User Accounts', body: 'You are responsible for maintaining the confidentiality of your account credentials. You must provide accurate information when creating your account.' },
               { title: '4. Credit System', body: 'Free users get 0 credits — upgrade to Starter (300 credits, ₹99) or Pro (4000 credits, ₹999) to unlock AI tutoring. Credits are consumed with each AI interaction. Unused paid credits do not expire within the validity period.' },
               { title: '5. Acceptable Use', body: 'You agree not to misuse the service, share your account, use it for commercial purposes without permission, or attempt to circumvent any restrictions.' },

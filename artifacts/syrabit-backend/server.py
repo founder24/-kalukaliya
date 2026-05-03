@@ -95,13 +95,13 @@ def _validate_env():
     # Locked provider chain (Task #297): Vertex (google-ai-studio slug),
     # Azure OpenAI, Sarvam, Cohere, Baseten, ElevenLabs, Deepgram, AssemblyAI,
     # Voyage, Pinecone, Workers AI / Workers AI · IndicTrans2. xAI/OpenAI kept
-    # as optional rare-feature endpoints. Banned providers removed: groq,
-    # cartesia, openrouter, cerebras, perplexity.
-    # GEMINI_API_KEY is intentionally still listed here so the BYOK secret-audit
-    # surfaces its lifecycle on every boot (Task #297). It is bound *once* in
-    # config.py as `_GEMINI_KEY` and consumed via the CF AI Gateway slug
+    # as optional rare-feature endpoints. Providers removed from the active
+    # routing chain are documented in scripts/check_dead_providers.py.
+    # GEMINI_API_KEY stays here so the BYOK secret-audit surfaces its
+    # lifecycle on every boot. It is bound *once* in config.py as
+    # `_GEMINI_KEY` and consumed via the CF AI Gateway slug
     # `google-ai-studio/v1beta/openai`. Direct `os.environ.get('GEMINI_API_KEY')`
-    # reads outside config.py are blocked by scripts/check_dead_providers.py.
+    # reads outside config.py are blocked by the dead-provider guard.
     _BYOK_PRIMARY = {
         "GEMINI_API_KEY":     "google-ai-studio/v1beta/openai",
         "SARVAM_API_KEY":     "custom-sarvam",

@@ -135,7 +135,7 @@ export default function ThumbnailStudio({ adminToken, selSubject, subjectData, o
           <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.20)' }}>
             <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: '#a78bfa' }} />
             <div>
-              <p className="text-xs font-semibold" style={{ color: '#7c3aed' }}>Groq Vision detecting text regions…</p>
+              <p className="text-xs font-semibold" style={{ color: '#7c3aed' }}>Vision model detecting text regions…</p>
               <p className="text-[10px] mt-0.5" style={{ color: 'rgba(167,139,250,0.60)' }}>Locating text → removing it → generating 3 clean replicas</p>
             </div>
           </div>
