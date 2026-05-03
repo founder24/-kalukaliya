@@ -3233,8 +3233,8 @@ async def call_search_rag_with_dispatch(
                     for r in (results.results or [])
                 ]
             elif provider == "tavily":
-                import os as _os_tv
-                _tavily_key = _os_tv.environ.get("TAVILY_API_KEY") or _os_tv.environ.get("TAVILY_KEY")
+                from config import _TAVILY_KEY
+                _tavily_key = _TAVILY_KEY
                 if not _tavily_key:
                     raise RuntimeError("tavily: TAVILY_API_KEY not set")
                 import httpx as _httpx_tv

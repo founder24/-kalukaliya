@@ -35,6 +35,7 @@ __all__ = [
     "_PG_DSN",
     "_SARVAM_LLM_KEY", "_SARVAM_LLM_KEY_2", "_SARVAM_LLM_KEY_3",
     "_VOYAGE_AI_KEY",
+    "_EXA_KEY", "_TAVILY_KEY",
     "_XAI_KEY",
     "cf_gateway_url", "get_provider_base_url",
     "is_cf_gateway_up", "mark_cf_gateway_down",
@@ -448,6 +449,13 @@ _ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
 _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
 _VOYAGE_AI_KEY    = os.environ.get('VOYAGE_AI_API_KEY',    '').strip()
+# Search providers (Task #275): Exa neural search + Tavily live web search.
+# Used by PROVIDER_PRIORITY['search_rag'] and ['live_search'] pools.
+# Read directly by llm.py:3219 (Exa) and llm.py:3237 (Tavily) at request time;
+# binding here ensures Railway env vars are picked up and BYOK substitution
+# works under CF AI Gateway.
+_EXA_KEY          = os.environ.get('EXA_API_KEY',          '').strip()
+_TAVILY_KEY       = os.environ.get('TAVILY_API_KEY',       '').strip()
 BASETEN_MODEL_ID  = os.environ.get('BASETEN_MODEL_ID', '').strip()
 
 # AssemblyAI STT config
@@ -500,6 +508,8 @@ if CF_GATEWAY_ENABLED:
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
     _DEEPGRAM_KEY    = _DEEPGRAM_KEY    or BYOK_PLACEHOLDER
     _VOYAGE_AI_KEY   = _VOYAGE_AI_KEY   or BYOK_PLACEHOLDER
+    _EXA_KEY         = _EXA_KEY         or BYOK_PLACEHOLDER
+    _TAVILY_KEY      = _TAVILY_KEY      or BYOK_PLACEHOLDER
     # Secondary/tertiary keys (_GEMINI_KEY_2, _SARVAM_LLM_KEY_2/3)
     # stay empty if not set — CF Gateway manages rate limiting at the edge via
     # the single BYOK key per provider. Delete these from Railway to clean up.
