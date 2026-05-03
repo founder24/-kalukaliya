@@ -20,16 +20,15 @@ so the benchmark exercises the real code path including CF AI Gateway
 routing, retries and BYOK):
   english_chat / long_form:
     azure_openai          — providers.azure_openai.stream_chat (gpt-4.1-mini default)
-    bedrock_nova          — providers.bedrock.call_converse   (amazon.nova-micro-v1:0)
     workers_ai_oss20      — providers.cloudflare_ai.chat_stream(model_key="chat_gpt_oss")
     workers_ai_oss120     — providers.cloudflare_ai.chat_stream(model_key="chat_long")
     vertex_chat           — vertex_chat.stream_chat (Vertex/Gemini path, currently
                             configured to llama-3.3-70b-instruct via Workers AI)
+    gemini_flash          — Gemini 2.5 Flash via Google's OpenAI-compat endpoint
   assamese_chat:
-    sarvam                  — sarvam-m via the sarvam_llm_client streaming pipeline
-    workers_ai_indictrans2  — providers.workers_indic.call_indic_trans
-                              (@cf/ai4bharat/indictrans2-en-indic-1b)
-    vertex_chat             — vertex_chat.stream_chat (same Vertex/Gemini path)
+    sarvam                — sarvam-m via the sarvam_llm_client streaming pipeline
+    vertex_chat           — vertex_chat.stream_chat (same Vertex/Gemini path)
+    gemini_flash          — Gemini 2.5 Flash
 
 Providers that fail to initialise (missing keys, unreachable gateway,
 etc.) are recorded as ``skipped`` with a short reason string instead of
@@ -239,17 +238,6 @@ async def _run_azure_openai(messages: list, max_tokens: int, **_):
     )
 
 
-async def _run_bedrock_nova(messages: list, max_tokens: int, **_):
-    from providers import bedrock
-    if not bedrock.ENABLED:
-        raise RuntimeError("bedrock disabled (CF gateway slug missing)")
-    t0 = time.perf_counter()
-    text = await bedrock.call_converse(messages, max_tokens=max_tokens)
-    total_ms = (time.perf_counter() - t0) * 1000.0
-    # Bedrock Converse is non-streaming; TTFT is indistinguishable from total.
-    return total_ms, total_ms, text or ""
-
-
 def _cf_oss_stream(model: str, messages: list, max_tokens: int):
     """Stream from Workers AI gpt-oss via the OpenAI-compatible v1 endpoint.
 
@@ -392,36 +380,6 @@ async def _run_vertex_chat(messages: list, max_tokens: int, **_):
     )
 
 
-async def _run_workers_ai_indictrans2(messages: list, max_tokens: int, **_):
-    """Bench the IndicTrans2 last-resort Assamese path (``providers.workers_indic``).
-
-    IndicTrans2 is a translation model rather than a chat LLM, so we
-    extract the user prompt from the OpenAI-style messages list and
-    translate it English→Assamese.  ``call_indic_trans`` is non-streaming,
-    so the measured TTFT == total latency (a single request/response).
-    """
-    from providers import workers_indic
-    if not workers_indic.ENABLED:
-        raise RuntimeError(
-            "workers_ai_indictrans2 disabled (CF_AI_GATEWAY_ACCOUNT_ID / CLOUDFLARE_API_TOKEN missing)"
-        )
-    # IndicTrans2 is a translation model; only the en-indic 1B variant is
-    # currently routable on Workers AI for this account (indic-en returns
-    # a 7000 'No route' error). Always send an English source so the
-    # bench measures the en-indic latency the production fallback uses.
-    user_text = next(
-        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-        "",
-    )
-    is_assamese = any("\u0980" <= ch <= "\u09FF" for ch in user_text)
-    src_text = "Explain photosynthesis in 3 sentences." if is_assamese or not user_text else user_text
-    t0 = time.perf_counter()
-    translated = await workers_indic.call_indic_trans(src_text, direction="en-indic")
-    total_ms = (time.perf_counter() - t0) * 1000.0
-    # Non-streaming endpoint → first byte == final response.
-    return total_ms, total_ms, translated or ""
-
-
 async def _run_sarvam(messages: list, max_tokens: int, response_lang: str = "as", **_):
     # Direct streaming call against sarvam_llm_client. We avoid importing
     # the heavyweight ``llm`` module so the bench script can run in a thin
@@ -466,19 +424,17 @@ async def _run_sarvam(messages: list, max_tokens: int, response_lang: str = "as"
 # Adapter registry: ``provider_id -> (callable, model_label)``.
 ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], str]] = {
     "azure_openai":      (_run_azure_openai,   os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o-mini")),
-    "bedrock_nova":      (_run_bedrock_nova,   "amazon.nova-micro-v1:0"),
     "workers_ai_oss20":  (_run_cf_chat_oss20,  "@cf/openai/gpt-oss-20b"),
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
-    "workers_ai_indictrans2": (_run_workers_ai_indictrans2, "@cf/ai4bharat/indictrans2-en-indic-1b"),
     "vertex_chat":            (_run_vertex_chat,            "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
     "gemini_flash":           (_run_gemini_flash,           "gemini-2.5-flash"),
     "sarvam":                 (_run_sarvam,                 "sarvam-m"),
 }
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
-    "english_chat":  ["azure_openai", "bedrock_nova", "workers_ai_oss20", "vertex_chat", "gemini_flash"],
-    "assamese_chat": ["sarvam", "workers_ai_indictrans2", "vertex_chat", "gemini_flash"],
-    "long_form":     ["azure_openai", "bedrock_nova", "workers_ai_oss120", "vertex_chat", "gemini_flash"],
+    "english_chat":  ["azure_openai", "workers_ai_oss20", "vertex_chat", "gemini_flash"],
+    "assamese_chat": ["sarvam", "vertex_chat", "gemini_flash"],
+    "long_form":     ["azure_openai", "workers_ai_oss120", "vertex_chat", "gemini_flash"],
 }
 
 
