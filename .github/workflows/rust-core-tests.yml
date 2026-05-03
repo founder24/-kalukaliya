@@ -10,6 +10,9 @@ name: rust-core-tests
 # PR that touches the crate, and validates:
 #   * `cargo fmt --check`
 #   * `cargo check --locked` (warnings-as-errors via RUSTFLAGS)
+#   * `cargo clippy --locked -- -D warnings`
+#   * `cargo build --release --locked` (catches release-only regressions
+#     pre-merge instead of waiting for the Railway Docker build)
 #   * `cargo test --locked`
 #   * `cargo audit` (advisory DB scan)
 # The lockfile is checked in (Cargo.lock), so all steps use --locked to
@@ -81,6 +84,16 @@ jobs:
 
       - name: cargo check --locked
         run: cargo check --locked --all-targets
+
+      - name: cargo clippy --locked -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: cargo build --release --locked
+        # Catches release-only regressions (codegen, optimizer-triggered
+        # `unused`/overflow checks, feature-resolver differences) pre-merge
+        # so we no longer rely on the post-merge Railway Docker build as
+        # the sole release-build signal. See task #301.
+        run: cargo build --release --locked
 
       - name: cargo test --locked
         run: cargo test --locked --all-targets
