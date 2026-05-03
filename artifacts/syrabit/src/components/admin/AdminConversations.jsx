@@ -4,7 +4,7 @@ import {
   ChevronRight, Crown, X, Clock, ArrowLeft, Sparkles, TrendingUp, RefreshCw, Flag,
 } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
-import { useSyraSelection } from '@/components/admin/syra/SyraContext';
+import { useSyraSelection, useSyraFilters, useSyraVisibleError } from '@/components/admin/syra/SyraContext';
 import { adminGetConversations, extractFaqs, conversationsSentiment, syncConversations, API_BASE } from '@/utils/api';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -81,13 +81,21 @@ export default function AdminConversations({ adminToken, onNavigate }) {
   const [filterMode, setFilterMode] = useState('all');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  // Section-level load error surfaced to Syra via useSyraVisibleError so
+  // the orb can offer "want me to retry?" when Conversations fails.
+  const [error, setError] = useState(null);
   const chatEndRef = useRef(null);
 
   const loadConversations = (token) => {
     setLoading(true);
+    setError(null);
     adminGetConversations(token)
-      .then((res) => setConversations(Array.isArray(res?.data) ? res.data : []))
-      .catch(() => toast.error('Failed to load conversations'))
+      .then((res) => { setConversations(Array.isArray(res?.data) ? res.data : []); setError(null); })
+      .catch((e) => {
+        const msg = e?.response?.data?.detail || 'Failed to load conversations';
+        setError(msg);
+        toast.error(msg);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -171,6 +179,13 @@ export default function AdminConversations({ adminToken, onNavigate }) {
         }
       : null
   ), [selectedConv?.id, selectedConv?.title, selectedConv?.user_name]));
+  // Task #298 — publish active filters + load error so Syra can answer
+  // "what am I filtering by?" and offer a retry on visible errors.
+  useSyraFilters(useMemo(() => ({
+    search: search || undefined,
+    mode: filterMode !== 'all' ? filterMode : undefined,
+  }), [search, filterMode]));
+  useSyraVisibleError(error || null);
 
   useEffect(() => {
     if (chatEndRef.current) {

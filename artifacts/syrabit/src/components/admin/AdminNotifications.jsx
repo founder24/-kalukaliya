@@ -4,6 +4,7 @@ import AdminQuickLinks from './AdminQuickLinks';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { getNotificationTriggers, createNotificationTrigger, updateNotificationTrigger, deleteNotificationTrigger, API_BASE } from '@/utils/api';
+import { useSyraFilters, useSyraVisibleError } from '@/components/admin/syra/SyraContext';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 const adminHeaders = (token) => {
@@ -64,6 +65,15 @@ export default function AdminNotifications({ adminToken, onNavigate }) {
   const [dispatchDetail, setDispatchDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statsDays, setStatsDays] = useState(7);
+
+  // Task #298 — publish active filters + visible error so Syra can
+  // contextualise replies on the Notifications screen.
+  useSyraFilters({
+    tab: mainTab !== 'broadcast' ? mainTab : undefined,
+    audience: audience !== 'all' ? audience : undefined,
+    type: type !== 'info' ? type : undefined,
+  });
+  useSyraVisibleError(error || null);
 
   useEffect(() => {
     axios.get(`${API_BASE}/admin/notifications`, {

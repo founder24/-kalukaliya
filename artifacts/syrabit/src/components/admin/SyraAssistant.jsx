@@ -31,13 +31,14 @@ import {
   adminSyraChat,
   adminSyraSTT,
   adminSyraTTS,
+  adminSyraActions,
   adminSyraExecuteAction,
   adminSyraBriefing,
   adminGetDashboard,
   adminGetUsers,
   adminGetAnalytics,
   adminGetConversations,
-  adminGetUnacknowledgedAlertCount,
+  adminGetAlerts,
 } from '@/utils/api';
 import { useSyraContext } from '@/components/admin/syra/SyraContext';
 
@@ -143,6 +144,15 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   const confirmListenRef = useRef(null); // SpeechRecognition for the confirm window
   const lastSeenAlertCountRef = useRef(null);
   const lastAlertSpokenAtRef = useRef({});
+  const seenAlertIdsRef = useRef(new Set());
+  // Action registry — fetched once per mount. Authoritative source for
+  // ``destructive``: code review #298 flagged that inferring it from
+  // ``data.confirm`` (which the LLM may forget to emit) silently
+  // bypasses the confirm card on dangerous verbs. We instead resolve
+  // by ``action_id`` against this map and force the confirm flow for
+  // anything marked destructive.
+  const actionRegistryRef = useRef({});
+  const pendingTimerRef = useRef(null);
   // Refs mirroring busy/listening so the wake-word callback (which is
   // captured once per prefs.wakeWord toggle) always reads the latest
   // state instead of a stale closure. Without this, the wake handler
@@ -162,6 +172,27 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     const ok = !!(window.MediaRecorder && navigator?.mediaDevices?.getUserMedia);
     setSupported(ok);
   }, []);
+
+  // ── Load action registry once per session ──────────────────────────────
+  // The registry is the single source of truth for which actions are
+  // destructive. We block any run_action through it before showing
+  // confirm UX or hitting the backend.
+  useEffect(() => {
+    if (!adminToken) return;
+    let cancelled = false;
+    adminSyraActions(adminToken)
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res?.data?.actions) ? res.data.actions : [];
+        const map = {};
+        for (const a of list) {
+          if (a && a.id) map[a.id] = a;
+        }
+        actionRegistryRef.current = map;
+      })
+      .catch(() => { /* registry stays empty — destructive treated as safe-by-default */ });
+    return () => { cancelled = true; };
+  }, [adminToken]);
 
   const clearAutoStopTimer = useCallback(() => {
     if (autoStopTimerRef.current) {
@@ -220,7 +251,27 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   }, [adminToken, stopPlayback, prefsRef]);
 
   // ── Action execution ────────────────────────────────────────────────────
+  const clearPendingTimer = useCallback(() => {
+    if (pendingTimerRef.current) {
+      clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelPending = useCallback((spokenMsg) => {
+    clearPendingTimer();
+    try { confirmListenRef.current?.stop?.(); } catch (_e) { /* ignore */ }
+    confirmListenRef.current = null;
+    setPendingAction(null);
+    const msg = spokenMsg || 'Cancelled.';
+    setReply(msg);
+    speak(msg);
+  }, [clearPendingTimer, speak]);
+
   const runAction = useCallback(async (actionId, params, confirmed) => {
+    clearPendingTimer();
+    try { confirmListenRef.current?.stop?.(); } catch (_e) { /* ignore */ }
+    confirmListenRef.current = null;
     try {
       const res = await adminSyraExecuteAction(adminToken, actionId, params || {}, !!confirmed);
       const summary = res?.data?.summary || 'Done.';
@@ -235,15 +286,31 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     } finally {
       setPendingAction(null);
     }
-  }, [adminToken, speak]);
+  }, [adminToken, speak, clearPendingTimer]);
 
-  // Brief 6-second voice listen for "yes/ok/no/cancel" while the
-  // confirm card is showing. Uses the browser's SpeechRecognition for
-  // zero-latency local matching — never sends audio to the backend.
+  // Brief 6-second voice listen for "yes/ok/no/cancel/not needed" while
+  // the confirm card is showing. Uses the browser's SpeechRecognition
+  // for zero-latency local matching — never sends audio to the backend.
+  // On timeout we **auto-cancel** the pending action so the orb never
+  // sits indefinitely in a half-confirmed state.
   const startConfirmListen = useCallback((onYes, onNo) => {
     if (typeof window === 'undefined') return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
+    let answered = false;
+    const arm = () => {
+      // Always start the auto-cancel timer, even if the browser has no
+      // SpeechRecognition — the operator can still click Yes/No, and a
+      // forgotten card needs to clear itself eventually.
+      clearPendingTimer();
+      pendingTimerRef.current = setTimeout(() => {
+        if (!answered) {
+          try { confirmListenRef.current?.stop?.(); } catch (_e) { /* ignore */ }
+          confirmListenRef.current = null;
+          onNo && onNo();
+        }
+      }, 6000);
+    };
+    if (!SR) { arm(); return; }
     try {
       const rec = new SR();
       rec.lang = 'en-US';
@@ -255,10 +322,12 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
           text += ev.results[i][0].transcript;
         }
         const t = text.toLowerCase();
-        if (/\b(yes|yeah|yep|ok|okay|confirm|do it|go ahead|sure)\b/.test(t)) {
+        if (/\b(yes|yeah|yep|ok|okay|confirm|do it|go ahead|sure|please)\b/.test(t)) {
+          answered = true;
           try { rec.stop(); } catch (_e) { /* ignore */ }
           onYes && onYes();
-        } else if (/\b(no|nope|cancel|stop|abort|never mind|nevermind)\b/.test(t)) {
+        } else if (/\b(no|nope|cancel|stop|abort|never\s*mind|nevermind|not\s*needed|skip|forget\s*it|don'?t)\b/.test(t)) {
+          answered = true;
           try { rec.stop(); } catch (_e) { /* ignore */ }
           onNo && onNo();
         }
@@ -267,12 +336,9 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
       rec.onerror = () => { confirmListenRef.current = null; };
       confirmListenRef.current = rec;
       rec.start();
-      // Hard timeout — auto-cancel after 6 seconds of no clear answer.
-      setTimeout(() => {
-        try { rec.stop(); } catch (_e) { /* ignore */ }
-      }, 6000);
     } catch (_e) { /* speech recognition not available */ }
-  }, []);
+    arm();
+  }, [clearPendingTimer]);
 
   // ── Chat submission ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(async (text) => {
@@ -320,21 +386,39 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
           } catch (_e) { spoken += " (Couldn't fetch that data.)"; }
         }
       } else if (action === 'run_action' && data.action_id) {
-        const destructive = !!data.confirm;
+        // Authoritative destructive lookup against the registry — the
+        // LLM occasionally forgets to emit ``confirm`` for dangerous
+        // verbs, so we never trust ``!!data.confirm`` alone.
+        const meta = actionRegistryRef.current[data.action_id] || null;
+        // Strict registry-authoritative policy: if the registry is
+        // loaded and we don't recognise the id, force confirm rather
+        // than silently treating an unknown verb as safe. Only when
+        // the registry hasn't loaded yet (race on first turn) do we
+        // fall back to the model's hint, and even then we err on the
+        // side of confirming.
+        const registryLoaded = Object.keys(actionRegistryRef.current).length > 0;
+        const destructive = meta
+          ? !!meta.destructive
+          : (registryLoaded ? true : !!data.confirm || true);
+        const confirmText =
+          data.confirm
+          || (meta && meta.label ? `${meta.label}?` : `Run ${data.action_id}?`);
         if (destructive) {
           setPendingAction({
             action_id: data.action_id,
             params: data.params || {},
-            confirm: data.confirm,
-            label: data.confirm,
+            confirm: confirmText,
+            label: meta?.label || data.action_id,
             destructive: true,
           });
-          setReply(data.confirm || spoken);
-          speak(data.confirm || spoken);
-          // Open a brief voice-confirm window so the operator never has to touch the keyboard.
+          setReply(confirmText);
+          speak(confirmText);
+          // Open a brief voice-confirm window with hard timeout so the
+          // operator never has to touch the keyboard — and a forgotten
+          // card auto-cancels in 6 seconds rather than lingering.
           startConfirmListen(
             () => runAction(data.action_id, data.params || {}, true),
-            () => { setPendingAction(null); setReply('Cancelled.'); speak('Cancelled.'); },
+            () => cancelPending('Cancelled. Let me know if you want to retry.'),
           );
           setBusy(false);
           return;
@@ -353,7 +437,7 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
     } finally {
       setBusy(false);
     }
-  }, [activeSection, adminToken, onNavigate, speak, selectedEntity, filters, visibleError, runAction, startConfirmListen]);
+  }, [activeSection, adminToken, onNavigate, speak, selectedEntity, filters, visibleError, runAction, startConfirmListen, cancelPending]);
 
   useEffect(() => { handleSubmitRef.current = handleSubmit; }, [handleSubmit]);
 
@@ -550,8 +634,13 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
   }, [prefs.wakeWord]);
 
   // ── First-open-of-day greeting + briefing ───────────────────────────────
+  // Code review #298: this MUST trigger the first time the operator
+  // opens the orb each day, not on session load. Loading the admin
+  // panel in a background tab while AFK shouldn't blow the briefing
+  // budget — we wait until they actually engage with Syra.
   useEffect(() => {
     if (!adminToken || typeof window === 'undefined') return;
+    if (!open) return;
     const today = todayKey();
     let saidGreeting = false;
     if (prefs.greeting) {
@@ -567,7 +656,6 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
       const last = window.localStorage.getItem('syra:lastBriefingDate');
       if (last !== today) {
         window.localStorage.setItem('syra:lastBriefingDate', today);
-        // Defer the briefing so it doesn't collide with the greeting.
         const delay = saidGreeting ? 2200 : 200;
         setTimeout(() => {
           adminSyraBriefing(adminToken)
@@ -583,35 +671,59 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
         }, delay);
       }
     }
-    // We only want this to fire once per session per token — listing
-    // adminToken in deps keeps it bound to the verified session.
+    // Re-runs are guarded by the lastGreetingDate / lastBriefingDate
+    // localStorage keys, so toggling `open` on/off in the same day is
+    // a no-op after the first announcement.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken]);
+  }, [adminToken, open]);
 
   // ── Proactive alert poller ──────────────────────────────────────────────
+  // Code review #298: per-category mute is only meaningful if the
+  // poller actually classifies alerts. We pull the unack list (capped
+  // small for cost) and bucket by ``classifyAlert(type)`` so the
+  // operator's mute toggles in the settings panel are honoured.
   useEffect(() => {
     if (!adminToken || !prefs.proactiveAlerts) return undefined;
     let cancelled = false;
     const tick = async () => {
       try {
-        const r = await adminGetUnacknowledgedAlertCount(adminToken);
+        const r = await adminGetAlerts(adminToken, { limit: 25, acknowledged: false });
         if (cancelled) return;
-        const count = r.data?.count || 0;
-        const prev = lastSeenAlertCountRef.current;
-        lastSeenAlertCountRef.current = count;
-        if (prev != null && count > prev) {
-          const cat = 'general'; // unack count is type-agnostic; per-type would need /alerts list
-          const muted = (prefsRef.current?.mutedCategories || []).includes(cat);
-          if (!muted) {
-            const lastSpoken = lastAlertSpokenAtRef.current[cat] || 0;
-            if (Date.now() - lastSpoken > 5 * 60_000) {
-              lastAlertSpokenAtRef.current[cat] = Date.now();
-              const text = `${count - prev} new alert${count - prev === 1 ? '' : 's'} fired. ${count} open in total.`;
-              setOpen(true);
-              setReply(text);
-              speak(text);
-            }
-          }
+        const list = Array.isArray(r?.data?.alerts) ? r.data.alerts : [];
+        const seen = seenAlertIdsRef.current;
+        // First sweep: just record what's open. Don't barge in with
+        // alerts that already existed when the orb mounted.
+        if (lastSeenAlertCountRef.current == null) {
+          for (const a of list) seen.add(String(a._id || a.id));
+          lastSeenAlertCountRef.current = list.length;
+          return;
+        }
+        lastSeenAlertCountRef.current = list.length;
+        // Bucket new alerts by category, then announce one phrase per
+        // unmuted bucket (debounced 5 min/category) so a burst doesn't
+        // turn into a wall of TTS.
+        const newByCat = {};
+        for (const a of list) {
+          const id = String(a._id || a.id);
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const cat = classifyAlert(a.type || a.alert_type);
+          (newByCat[cat] = newByCat[cat] || []).push(a);
+        }
+        const muted = new Set(prefsRef.current?.mutedCategories || []);
+        for (const [cat, items] of Object.entries(newByCat)) {
+          if (muted.has(cat)) continue;
+          const lastSpoken = lastAlertSpokenAtRef.current[cat] || 0;
+          if (Date.now() - lastSpoken < 5 * 60_000) continue;
+          lastAlertSpokenAtRef.current[cat] = Date.now();
+          const catLabel = cat.replace(/_/g, ' ');
+          const sample = items[0]?.title || items[0]?.message || `${cat} alert`;
+          const text = items.length === 1
+            ? `New ${catLabel} alert: ${String(sample).slice(0, 120)}.`
+            : `${items.length} new ${catLabel} alerts. Latest: ${String(sample).slice(0, 100)}.`;
+          setOpen(true);
+          setReply(text);
+          speak(text);
         }
       } catch (_e) { /* ignore — alerts endpoint may be down */ }
     };
@@ -627,6 +739,7 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
       try { if (mediaRecRef.current?.state === 'recording') mediaRecRef.current.stop(); } catch (_e) { /* ignore */ }
       try { wakeRecRef.current?.stop(); } catch (_e) { /* ignore */ }
       try { confirmListenRef.current?.stop(); } catch (_e) { /* ignore */ }
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
       stopMediaTracks();
       stopPlayback();
     };
@@ -663,17 +776,18 @@ export default function SyraAssistant({ activeSection, onNavigate, adminToken })
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => { setPendingAction(null); setReply('Cancelled.'); speak('Cancelled.'); }}
+              data-testid="syra-confirm-no"
+              onClick={() => cancelPending('Cancelled.')}
               className="flex-1 py-1.5 rounded-xl text-xs font-medium border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
             >
-              Cancel
+              No
             </button>
             <button
               data-testid="syra-confirm-yes"
               onClick={() => runAction(pendingAction.action_id, pendingAction.params || {}, true)}
               className="flex-1 py-1.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 inline-flex items-center justify-center gap-1"
             >
-              <Check size={12} /> Confirm
+              <Check size={12} /> Yes
             </button>
           </div>
         </div>

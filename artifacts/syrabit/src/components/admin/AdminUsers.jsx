@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { adminGetUsers, adminUpdateUserStatus, adminUpdateUserPlan, adminUpdateUserRole, churnRisk, adminUpdateUserCredits, adminGetQuizQuota, adminResetQuizQuota } from '@/utils/api';
 import { toast } from 'sonner';
+import { useSyraSelection, useSyraFilters } from '@/components/admin/syra/SyraContext';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 const PLAN_COLORS = {
@@ -173,6 +174,19 @@ export default function AdminUsers({ adminToken, navContext, onNavigate }) {
   }, [adminToken]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  // Task #298 — publish current filter set + selected user (the one
+  // whose credits modal is open) onto SyraContext so the orb can
+  // resolve "ban this user" / "show me only the suspended ones".
+  useSyraFilters(useCallback(() => ({
+    search: search || undefined,
+    tab: tab !== 'all' ? tab : undefined,
+  }), [search, tab])());
+  useSyraSelection(creditsUser ? {
+    type: 'user',
+    id: creditsUser.id,
+    label: creditsUser.name || creditsUser.email,
+  } : null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
