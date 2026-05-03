@@ -781,56 +781,13 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     loadCfOverview(cfRange);
   }, [cfRange, loadCfOverview]);
 
-  // Locked Cloudflare visitors window — used ONLY by the "Unique Visitors"
-  // tile in the Traffic card so the headline always reads "uniques over
-  // the last 30 days" regardless of which range pill (24h / 7d / 30d) is
-  // currently active for the rest of the tiles. Refreshes hourly since the
-  // 30-day window moves slowly enough that minute-level updates would be
-  // wasted CF GraphQL calls.
-  //
-  // Fallback chain: prefer the 30-day window, but if that call fails OR
-  // comes back empty (CF GraphQL occasionally returns ``connected:false``
-  // for the 30d range under quota pressure / token churn), retry with
-  // the 7-day window so the tile never goes blank. We cache the window
-  // we actually used in `cfVisitorsWindow` so the tile sub-label can
-  // honestly say which one is being shown when we degrade.
-  const [cfVisitors30d, setCfVisitors30d] = useState(null);
-  const [cfVisitorsWindow, setCfVisitorsWindow] = useState('30d');
-  useEffect(() => {
-    if (!adminToken) return;
-    let cancelled = false;
-    const isUsable = (data) => {
-      if (!data || data.connected === false) return false;
-      const v = data?.totals?.visitors;
-      return v !== null && v !== undefined;
-    };
-    const tryRange = async (range) => {
-      try {
-        const r = await adminGetCfOverview(adminToken, range);
-        return isUsable(r?.data) ? r.data : null;
-      } catch (e) {
-        log.warn(`CF visitors ${range} fetch failed`, { error: e.message });
-        return null;
-      }
-    };
-    const fetchVisitors = async () => {
-      let data = await tryRange('30d');
-      let window = '30d';
-      if (!data) {
-        data = await tryRange('7d');
-        window = '7d';
-        if (data) log.warn('CF visitors fell back to 7d window — 30d returned no data');
-      }
-      if (cancelled) return;
-      if (data) {
-        setCfVisitors30d(data);
-        setCfVisitorsWindow(window);
-      }
-    };
-    fetchVisitors();
-    const interval = setInterval(fetchVisitors, 60 * 60 * 1000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [adminToken]);
+  // NOTE: previously kept a separate "locked 30d" CF fetch and used it to
+  // drive the Unique Visitors tile on the Traffic card. That intentionally
+  // ignored the 24h / 7d / 30d range pills, which (correctly) read as a
+  // bug — clicking 24h or 7d left the visitors number frozen at the 30d
+  // value while the other three tiles updated. The visitors tile now
+  // follows the active `cfRange` like every other tile, so this dedicated
+  // fetch was removed.
 
   // Dedicated 24-hour unique-visitors fetch for the Unique Visitors stat card.
   // Uses the hourly CF dataset (`httpRequests1hGroups`) so the total is the
@@ -1349,19 +1306,15 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
             if (n < 1e9) return `${(n / 1e6).toFixed(2).replace(/\.?0+$/, '')}M`;
             return `${(n / 1e9).toFixed(2)}B`;
           };
-          // "Unique Visitors" headline — uses `totals.visitors` (unique
-          // visitor count from Cloudflare's httpRequests1dGroups dataset,
-          // which retains 30 days on all plans) rather than `totals.visits`
-          // (session count, capped at ~8 days on most CF plans).
-          // The sparkline already uses key `'visitors'` so the chart stays
-          // consistent with the headline.
-          const visitorsLockedTotal = cfVisitors30d?.totals?.visitors ?? totals.visitors;
-          const visitorsLabel = 'Unique Visitors';
+          // "Unique Visitors" — sourced from Cloudflare's `uniq.uniques`
+          // (sum across the active range's daily/hourly buckets). Now
+          // follows the active `cfRange` pill like every other tile so
+          // clicking 24h / 7d / 30d actually updates the number.
           const visitorsToday = useOverview ? (lastBucket?.visitors ?? lastBucket?.uniques) : cf.visitors_today;
           const tiles = [
             { key: 'requests',   label: 'Interactions',     total: totals.requests,       today: useOverview ? lastBucket?.requests   : cf.requests_today,   fmt: fmtNum },
             { key: 'bytes',      label: 'Bandwidth',        total: totals.bytes,          today: useOverview ? lastBucket?.bytes      : cf.bytes_today,      fmt: fmtBytes },
-            { key: 'visitors',   label: visitorsLabel,      total: visitorsLockedTotal,   today: visitorsToday,                                              fmt: fmtNum },
+            { key: 'visitors',   label: 'Unique Visitors',  total: totals.visitors,       today: visitorsToday,                                              fmt: fmtNum },
             { key: 'page_views', label: 'Page views',       total: totals.page_views,     today: useOverview ? lastBucket?.page_views : cf.page_views_today, fmt: fmtNum },
           ];
           const hasData = (useOverview ? series.length > 0 : (vs.cloudflare && series.length > 0));
