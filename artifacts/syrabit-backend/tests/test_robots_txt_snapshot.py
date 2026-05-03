@@ -62,6 +62,21 @@ def test_disallow_ai_training_bots():
             )
 
 
+def test_allow_ai_answer_bots():
+    """Task #287 — citation-driving LLM crawlers must be Allow:'d so AHSEC
+    HS1/HS2 notes appear in Perplexity / ChatGPT browse / SearchGPT.
+    Training crawlers stay blocked (test_disallow_ai_training_bots)."""
+    body = _read_robots()
+    for ua in ("ChatGPT-User", "OAI-SearchBot", "PerplexityBot", "Perplexity-User"):
+        block = _block_for(ua, body)
+        assert block, f"missing User-agent: {ua} block"
+        assert "Allow: /" in block, f"{ua} block must Allow: /\n{block}"
+        for line in block.splitlines()[1:]:
+            assert line.strip() != "Disallow: /", (
+                f"{ua} must not Disallow: / (would conflict with Allow: /)"
+            )
+
+
 def test_sitemap_index_line_present():
     body = _read_robots()
     assert "Sitemap: https://syrabit.ai/sitemap-index.xml" in body

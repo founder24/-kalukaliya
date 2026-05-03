@@ -1188,6 +1188,11 @@ SEED_DATA = {
         {"id": "s51", "class_id": "c10", "name": "VAC",   "slug": "vac",   "description": "Value-Added Course",                    "icon": "✨", "created_at": "2024-01-01T00:00:00Z"},
         {"id": "s52", "class_id": "c10", "name": "AEC",   "slug": "aec",   "description": "Ability Enhancement Compulsory Course", "icon": "🧠", "created_at": "2024-01-01T00:00:00Z"},
         {"id": "s53", "class_id": "c10", "name": "SEC",   "slug": "sec",   "description": "Skill Enhancement Course",              "icon": "⚡", "created_at": "2024-01-01T00:00:00Z"},
+        # AHSEC HS Common streams (Task #287) — for AHSEC "common course"
+        # subjects shared across Sci/Arts/Commerce streams: English (compulsory),
+        # MIL/Alternative English, Environmental Education.
+        {"id": "s_common_hs1", "class_id": "c1", "name": "Common", "slug": "common", "description": "AHSEC HS 1st Year — Common subjects (English, MIL, Environmental Education)", "icon": "📘", "created_at": "2024-01-01T00:00:00Z"},
+        {"id": "s_common_hs2", "class_id": "c2", "name": "Common", "slug": "common", "description": "AHSEC HS 2nd Year — Common subjects (English, MIL, Environmental Education)", "icon": "📘", "created_at": "2024-01-01T00:00:00Z"},
         # SEBA Class 9 streams
         {"id": "s21", "class_id": "c5", "name": "General", "slug": "general", "description": "General stream — SEBA Class 9", "icon": "📚", "created_at": "2024-01-01T00:00:00Z"},
         # SEBA Class 10 streams

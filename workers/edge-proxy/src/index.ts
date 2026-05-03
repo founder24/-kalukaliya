@@ -373,7 +373,10 @@ const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectionto
 // so robots.txt, this hard block, and the dashboard analytics agree.
 // Each pattern is anchored with \b so "GPTBotHelper" would not be falsely
 // matched. Case-insensitive because real UAs use mixed case.
-const AI_BOT_UA = /\b(?:GPTBot|CCBot|Google-Extended|Applebot-Extended|Meta-ExternalAgent|Bytespider|Amazonbot|Cohere-AI|Diffbot)\b/i;
+// Task #287: ClaudeBot, Claude-Web, anthropic-ai added — keep training
+// crawlers blocked while still allowing answer bots (PerplexityBot,
+// ChatGPT-User, OAI-SearchBot) which are intentionally absent here.
+const AI_BOT_UA = /\b(?:GPTBot|CCBot|Google-Extended|Applebot-Extended|Meta-ExternalAgent|Bytespider|Amazonbot|Cohere-AI|Diffbot|ClaudeBot|Claude-Web|anthropic-ai)\b/i;
 
 interface CidrRange { network: number; mask: number }
 

@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-05-03T07:44:08.808610+00:00",
+  "executed": true,
+  "target_classes": [
+    "c1",
+    "c2"
+  ],
+  "subject_ids": [
+    "sub7",
+    "sub47",
+    "sub45",
+    "sub46",
+    "sub54",
+    "sub43",
+    "sub6",
+    "sub52",
+    "sub1",
+    "sub2",
+    "sub5",
+    "sub8",
+    "sub48",
+    "sub55",
+    "sub3",
+    "sub51",
+    "sub53",
+    "sub10",
+    "sub13",
+    "sub4",
+    "sub49",
+    "sub44",
+    "sub50",
+    "048076cd-71a1-4451-a1f0-87c5a6bb5168",
+    "sub11",
+    "fb77ccab-2e0a-4c32-b230-9acf29e6fb4c",
+    "sub12",
+    "sub9"
+  ],
+  "chapter_ids_count": 292,
+  "before": {
+    "subjects": 28,
+    "chapters": 292,
+    "topics": 292,
+    "seo_pages": 0,
+    "qa_pairs": 0,
+    "chunks": 0
+  },
+  "deleted": {
+    "subjects": 28,
+    "chapters": 292,
+    "topics": 292,
+    "seo_pages": 0,
+    "qa_pairs": 0,
+    "chunks": 0
+  },
+  "vectorize": {
+    "skipped": true
+  },
+  "after": {
+    "subjects": 0,
+    "chapters": 0,
+    "topics": 0,
+    "seo_pages": 0,
+    "qa_pairs": 0,
+    "chunks": 0
+  }
+}

@@ -24,7 +24,24 @@ Allow: /
 User-agent: Yeti
 Allow: /
 
-# --- AI training & answer crawlers: explicitly disallowed. ---
+# --- AI ANSWER bots (cite sources, drive referral traffic): allowed. ---
+# Task #287 policy: invite citation-driving LLM crawlers so AHSEC HS1/HS2
+# notes appear in Perplexity / ChatGPT browse / OpenAI SearchGPT answers.
+# Training-only crawlers (GPTBot, ClaudeBot, Google-Extended, etc.) remain
+# disallowed below — we want citations, not silent corpus ingestion.
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+# --- AI training crawlers: explicitly disallowed. ---
 # Mirrors `_AI_BOT_NAMES` in artifacts/syrabit-backend/cf_bot_report.py
 # and the `AI_BOT_UA` regex in workers/edge-proxy/src/index.ts so the
 # polite advisory (this file), the hard edge-block (worker), and the
@@ -32,12 +49,6 @@ Allow: /
 # are excluded. Only well-behaved bots respect robots.txt — the worker
 # enforces the same set with HTTP 403 for misbehaving ones.
 User-agent: GPTBot
-Disallow: /
-
-User-agent: ChatGPT-User
-Disallow: /
-
-User-agent: OAI-SearchBot
 Disallow: /
 
 User-agent: ClaudeBot
@@ -50,12 +61,6 @@ User-agent: anthropic-ai
 Disallow: /
 
 User-agent: Anthropic-AI
-Disallow: /
-
-User-agent: PerplexityBot
-Disallow: /
-
-User-agent: Perplexity-User
 Disallow: /
 
 User-agent: CCBot
