@@ -125,6 +125,20 @@ def edu_app():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _deterministic_quiz_shuffle(monkeypatch):
+    """Disable the question / choice shuffling that ``_sample_and_shuffle``
+    performs so the assertions in this file (which compare against the
+    raw LLM payload order) remain stable. Production behaviour is
+    exercised separately in dedicated shuffle tests; here we want to
+    verify pass-through of the cleaned payload."""
+    import routes.edu_study as _es
+    monkeypatch.setattr(_es.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(_es.random, "sample",
+                        lambda population, k: list(population)[:k])
+    yield
+
+
 # ───────────────────────── Pure helpers ─────────────────────────
 
 def test_sm2_failed_recall_resets_progress():
@@ -215,7 +229,7 @@ _GOOD_LLM = (
 
 
 def test_quiz_generate_returns_cleaned_questions(edu_app):
-    with patch("routes.edu_study.call_llm_api", new=AsyncMock(return_value=_GOOD_LLM)):
+    with patch("routes.edu_study._az_quiz_chat", new=AsyncMock(return_value=_GOOD_LLM)):
         res = edu_app.post("/api/edu/quiz/generate", json={
             "context": "Some chapter text about basic facts." * 5,
             "topic": "General knowledge",
@@ -242,7 +256,7 @@ def test_quiz_generate_drops_questions_with_wrong_choice_count(edu_app):
         '  {"q":"good one","choices":["a","b","c","d"],"answer":3,"explanation":"d wins"}'
         ']}'
     )
-    with patch("routes.edu_study.call_llm_api", new=AsyncMock(return_value=bad)):
+    with patch("routes.edu_study._az_quiz_chat", new=AsyncMock(return_value=bad)):
         res = edu_app.post("/api/edu/quiz/generate", json={
             "context": "Lorem ipsum dolor sit amet " * 10,
             "count": 3,
@@ -262,7 +276,7 @@ def test_quiz_generate_clamps_out_of_range_answer_index(edu_app):
         '  {"q":"x?","choices":["a","b","c","d"],"answer":7,"explanation":""}'
         ']}'
     )
-    with patch("routes.edu_study.call_llm_api", new=AsyncMock(return_value=bad)):
+    with patch("routes.edu_study._az_quiz_chat", new=AsyncMock(return_value=bad)):
         res = edu_app.post("/api/edu/quiz/generate", json={
             "context": "ctx " * 30, "count": 3,
         })
@@ -281,7 +295,7 @@ def test_quiz_generate_returns_502_when_llm_returns_no_valid_questions(edu_app):
     route must surface a 502 instead of returning an empty list (which
     the frontend would render as "0 / 0", a confusing dead-end)."""
     bad = '{"questions": [{"q":"x","choices":["a","b","c"],"answer":0}]}'
-    with patch("routes.edu_study.call_llm_api", new=AsyncMock(return_value=bad)):
+    with patch("routes.edu_study._az_quiz_chat", new=AsyncMock(return_value=bad)):
         res = edu_app.post("/api/edu/quiz/generate", json={
             "context": "ctx " * 30, "count": 3,
         })
@@ -295,7 +309,7 @@ def test_quiz_generate_rate_limiter_caps_at_15_per_5_min(edu_app):
     misbehaving client."""
     from auth_deps import _rate_windows
     _rate_windows.clear()
-    with patch("routes.edu_study.call_llm_api", new=AsyncMock(return_value=_GOOD_LLM)):
+    with patch("routes.edu_study._az_quiz_chat", new=AsyncMock(return_value=_GOOD_LLM)):
         for _ in range(15):
             r = edu_app.post("/api/edu/quiz/generate",
                              json={"context": "abc " * 30, "count": 3})

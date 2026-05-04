@@ -39,6 +39,9 @@ def test_build_urlset_no_alt_when_no_assamese():
 
 
 def test_build_urlset_emits_hreflang_triple_when_has_assamese():
+    """Phase E hreflang: regional codes (en-IN/as-IN/x-default) and
+    path-based Assamese URL (/as/...) — switched away from query-string
+    lang=as because path-based slugs are stronger Bing/Google signals."""
     from seo_engine import _build_urlset
     xml = _build_urlset([
         {"loc": "https://syrabit.ai/seba/class-10/science/atoms",
@@ -46,23 +49,25 @@ def test_build_urlset_emits_hreflang_triple_when_has_assamese():
          "has_assamese": True},
     ])
     assert 'xmlns:xhtml="http://www.w3.org/1999/xhtml"' in xml
-    assert ('<xhtml:link rel="alternate" hreflang="en" '
+    assert ('<xhtml:link rel="alternate" hreflang="en-IN" '
             'href="https://syrabit.ai/seba/class-10/science/atoms"/>') in xml
-    assert ('<xhtml:link rel="alternate" hreflang="as" '
-            'href="https://syrabit.ai/seba/class-10/science/atoms?lang=as"/>'
+    assert ('<xhtml:link rel="alternate" hreflang="as-IN" '
+            'href="https://syrabit.ai/as/seba/class-10/science/atoms"/>'
             ) in xml
     assert ('<xhtml:link rel="alternate" hreflang="x-default" '
             'href="https://syrabit.ai/seba/class-10/science/atoms"/>') in xml
 
 
-def test_build_urlset_uses_amp_separator_when_loc_has_query():
+def test_build_urlset_uses_path_prefix_when_loc_has_query():
+    """Path-based Assamese URL preserves the original query string —
+    /as/x?ref=seo (not x?ref=seo&lang=as) per the Phase E rewrite."""
     from seo_engine import _build_urlset
     xml = _build_urlset([
         {"loc": "https://syrabit.ai/x?ref=seo",
          "lastmod": "2026-04-16", "pri": "0.5", "freq": "weekly",
          "has_assamese": True},
     ])
-    assert "ref=seo&amp;lang=as" in xml
+    assert 'href="https://syrabit.ai/as/x?ref=seo"' in xml
 
 
 # ---------------------------------------------------------------------------

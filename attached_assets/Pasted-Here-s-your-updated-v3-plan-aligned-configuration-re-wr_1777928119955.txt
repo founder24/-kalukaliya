@@ -1,0 +1,43 @@
+Here’s your **updated v3‑plan‑aligned configuration**, re‑written in the **same style** and structure you used, but tightened to match the **latest v3 + sharding + provider‑mapping** we discussed:
+
+***
+
+App infra is split across four surfaces:
+
+**Cloudflare runs the edge, routing, and RAG‑primary**:
+
+- All Workers‑AI‑based exam‑Q&A and fast‑mode RAG (including Assamese‑Indic‑switch‑handling via `@cf/ai4bharat/indictrans2‑en‑indic‑1b`) are routed through **Cloudflare Workers** as the primary‑v3‑dispatch layer.  
+- **Cloudflare Vectorize** acts as the **edge‑vector‑cache**; **Pinecone** is the **main vector store** for syllabus‑aware‑RAG indexes (per‑Assam‑Board‑+‑national‑board‑`namespace`).  
+- **Cloudflare Workers** and **R2 / KV** handle edge‑state, v3‑mode A/B‑flags, `syllabus_board`‑anchoring, and region‑based‑routing between Workers‑AI / Vertex‑fallback.  
+- **Cloudflare AI Gateway** BYOK paths expose **Google AI Studio / Gemini** and **Azure OpenAI** for **rollback‑only‑direct‑SDK** use, not for primary‑v3‑turns.  
+
+**Azure runs the backend, auth, and AI‑safety services**:
+
+- Python **FastAPI** and Rust‑core backend run on **Azure Container Apps**, fronted by **Cloudflare‑edge**, for long‑running‑orchestration and non‑realtime‑ops (e.g., nightly‑RAG‑index‑tuning, `#361`‑ROI‑batch, `#363`‑shard‑rebalancing‑simulation).  
+- **Azure AI Content Safety** operates as the **moderation‑secondary** after Llama‑Guard‑style‑pre‑filter in v3‑dispatch.  
+- **Azure‑Translator** is the **fallback‑only** translator for **Indic‑→‑English‑only** paths; real‑time‑mixed‑language‑chat prefers Workers‑AI‑native‑Indic‑handling.  
+- **SendGrid** (provisioned via Azure / startup‑credits) remains the **primary‑transactional‑email** service for exam‑alerts, reset‑password, and onboarding‑sequences.  
+
+**Google Cloud / Vertex provides validation‑only and safety‑only roles in v3**:
+
+- **Vertex Gemini 2.5 Flash** is the **default‑content‑validation model** for high‑risk‑turns (`exam_model_paper`, `answer‑bank‑style‑query`) but is **not** the primary‑RAG / MCQ / notes / translation‑engine.  
+- **Gemini‑RAI** is **opt‑in only** for `content_type = 'exam_model_paper'` review‑mode, used sparingly for safety‑cross‑checks.  
+- **Web Risk API** powers **malicious‑URL checks** for any link‑shared‑in‑chat.  
+- **Cloud Billing API** feeds **daily‑budget / cost‑cap alerts** into your `#360`‑metering‑dashboard.  
+- **Vertex Vector Search (Matching Engine)** and **Vertex Discovery Engine** have been **retired** from your primary‑RAG / grounded‑search chains; they are kept **only for rollback** in case you need to rebuild‑old‑indexes.  
+- **Cloud Vision / TTS / STT / Cloud Translation** remain callable, but are **not primary**; **embeddings, TTS, STT, and translation** are now routed through **Cohere‑direct**, **Workers‑AI**, **Sarvam‑AI** (Assamese‑speech), **ElevenLabs**, **Deepgram**, **AssemblyAI**, and **Azure‑Translator**.  
+
+**AWS runs serverless workers, storage, and eventing within free‑tier‑friendly profiles at 100k–800k DAU**:
+
+- **S3**, **SQS**, **Lambda**, **EventBridge**, **DynamoDB**, **SNS**, **Step Functions**, and **CloudWatch** host **event‑driven** backend workers (e.g., `#361`‑batch‑embed‑ops, Pinecone‑index‑maintenance, `#363`‑shard‑state‑aggregation).  
+- **Event‑driven backend workers** (not the main‑HTTP‑face) run on **Lambda / Step Functions**, while **Cloudflare** fronts **all user‑facing traffic** (chat‑WebSocket, v3‑dispatch‑HTTP‑fallback).  
+- **MongoDB‑sharded‑cluster** (M30+) and **Redis‑cluster** (ElastiCache / Upstash‑style) are **hosted on AWS** but **logically sharded** by `user_id` and `board`‑aware‑`namespace`‑keys.  
+
+***
+
+This layout matches your **v3‑plan**:
+
+- **Cloudflare** = **edge‑+‑Workers‑AI‑+‑RAG‑primary**.  
+- **Azure** = **backend‑+‑auth‑+‑moderation‑safety**.  
+- **Google Cloud / Vertex** = **validation‑+‑RAI‑+‑safety‑only**.  
+- **AWS** = **event‑based‑serverless‑backbone‑+‑sharded‑data‑infra**.

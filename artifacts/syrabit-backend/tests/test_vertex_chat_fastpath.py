@@ -168,21 +168,19 @@ def test_vertex_fastpath_pre_first_token_failure_falls_back(monkeypatch):
         _async_gen_that_raises(RuntimeError("boom: vertex 503")),
     )
 
-    # Route the legacy path through a valid-looking provider + key
-    # and keep the resolved model pass-through so no real network
-    # call is required.
-    monkeypatch.setattr(llm, "_resolve_provider_for_model",
-                        lambda model, providers: ("cerebras", "fake_cerebras_key"))
-    monkeypatch.setattr(llm, "_safe_model_for_provider",
-                        lambda model, provider, providers: model)
+    # Route the legacy fallback through the Azure OpenAI fast-path
+    # (T007) — production routes "openai/gpt-oss-20b" requests through
+    # Azure first when configured, before the SLM hedged pool. Mocking
+    # `_stream_cerebras` here is a red herring: the resolver path is
+    # never reached when Azure is enabled. We assert "user gets a real
+    # answer" by mocking the actual surface that serves traffic.
+    from providers import azure_openai as _az_prov
+    monkeypatch.setattr(_az_prov, "ENABLED", True, raising=False)
 
-    # Pretend the legacy Cerebras-compatible stream works and returns a
-    # coherent reply. The content reconstructed on the client side is
-    # the real proof that "chat keeps working when Gemini Flash fails".
-    async def _fake_legacy_stream(messages, api_key, model, max_tokens):
+    async def _fake_azure_stream(messages, max_tokens=None):
         for tok in ("Sure", ", ", "here", " is ", "your ", "answer."):
             yield tok
-    monkeypatch.setattr(llm, "_stream_cerebras", _fake_legacy_stream)
+    monkeypatch.setattr(_az_prov, "stream_chat", _fake_azure_stream)
 
     msgs = [{"role": "user", "content": "hi"}]
     chunks = _run(_collect(llm.call_llm_api_stream(
@@ -360,15 +358,17 @@ def test_vertex_fastpath_skipped_when_breaker_open(monkeypatch):
     vertex_spy = AsyncMock()
     monkeypatch.setattr(vertex_chat, "stream_chat", vertex_spy)
 
-    monkeypatch.setattr(llm, "_resolve_provider_for_model",
-                        lambda model, providers: ("cerebras", "fake_key"))
-    monkeypatch.setattr(llm, "_safe_model_for_provider",
-                        lambda model, provider, providers: model)
+    # Production routes the legacy fallback for "openai/gpt-oss-20b"
+    # through the Azure OpenAI fast-path (T007) when Azure is enabled,
+    # so mock that surface — not `_stream_cerebras`, which is not on
+    # this code path.
+    from providers import azure_openai as _az_prov
+    monkeypatch.setattr(_az_prov, "ENABLED", True, raising=False)
 
-    async def _fake_legacy_stream(messages, api_key, model, max_tokens):
+    async def _fake_azure_stream(messages, max_tokens=None):
         for tok in ("Hello", " ", "world"):
             yield tok
-    monkeypatch.setattr(llm, "_stream_cerebras", _fake_legacy_stream)
+    monkeypatch.setattr(_az_prov, "stream_chat", _fake_azure_stream)
 
     msgs = [{"role": "user", "content": "hi"}]
     chunks = _run(_collect(llm.call_llm_api_stream(

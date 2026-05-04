@@ -1128,6 +1128,28 @@ async def notify_url_updated(
     if not _under_tier_quota_and_reserve(effective_tier):
         result["status"] = "quota_blocked"
         result["reason"] = f"tier_{effective_tier}_limit_reached"
+        # Tier-cap blocks count toward `quota_blocks` so admin dashboards
+        # don't undercount blocked submissions whenever the tier sub-cap
+        # tripped before (or together with) the global daily-limit cap.
+        with _stats_lock:
+            _roll_day_if_needed()
+            _stats["quota_blocks"] = _stats.get("quota_blocks", 0) + 1
+            _day_now = _stats.get("day", "")
+            _sent_now = int(_stats.get("sent", 0))
+        _schedule_flush()
+        # Only escalate to the daily-quota ops alert when the tier block
+        # *coincides* with the global cap being exhausted (sent >= limit).
+        # That covers Tier-1 (whose sub-cap equals the daily limit) and
+        # any tier whose cumulative submissions caught up to the global
+        # cap — both cases the "Google Indexing daily quota exhausted"
+        # alert message describes accurately. A pure sub-cap-only block
+        # (e.g. Tier-3 25% cap hit while Tier-1 still has capacity) is
+        # observable on the dashboard via `quota_blocks` but must NOT
+        # consume the once-per-day alert slot, otherwise an early sub-cap
+        # event could suppress a later true daily-cap alert via dedupe.
+        _limit = _daily_limit()
+        if _sent_now >= _limit:
+            _schedule_quota_alert(_day_now, _sent_now, _limit)
         return result
 
     if not await _reserve_quota(_daily_limit()):

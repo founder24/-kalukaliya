@@ -121,7 +121,10 @@ def test_call_chat_fails_fast_on_404(monkeypatch):
 
     monkeypatch.setattr(az, "_get_client", lambda: _FakeClient())
 
-    with pytest.raises(RuntimeError, match=r"HTTP 404"):
+    # Production now raises a more actionable error message that explains
+    # how to fix the misconfiguration in the Azure Portal, instead of
+    # surfacing the raw HTTP 404. Match the new "does not exist" phrase.
+    with pytest.raises(RuntimeError, match=r"does not exist"):
         asyncio.run(az.call_chat([{"role": "user", "content": "hi"}], max_tokens=4))
     assert posts == ["k1"], "fail-fast: must NOT call KEY_2 on non-retryable status"
 

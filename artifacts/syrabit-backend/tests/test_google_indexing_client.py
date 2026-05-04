@@ -207,9 +207,13 @@ def test_daily_quota_stops_further_sends(monkeypatch):
     fake = _FakeAsyncClient(post_response=_FakeResponse(200, "{}"))
     _install_httpx(monkeypatch, gic, fake)
 
-    r1 = _run(gic.notify_url_updated("https://syrabit.ai/a"))
-    r2 = _run(gic.notify_url_updated("https://syrabit.ai/b"))
-    r3 = _run(gic.notify_url_updated("https://syrabit.ai/c"))
+    # Pass tier=1 explicitly so the per-tier sub-cap (Task #246) does not
+    # gate these calls before the global daily limit is reached. The bare
+    # 1-segment URLs below would otherwise classify as Tier-3, which is
+    # capped at 25% of the daily limit (= 1 with limit=2).
+    r1 = _run(gic.notify_url_updated("https://syrabit.ai/a", tier=1))
+    r2 = _run(gic.notify_url_updated("https://syrabit.ai/b", tier=1))
+    r3 = _run(gic.notify_url_updated("https://syrabit.ai/c", tier=1))
 
     assert r1["status"] == "ok"
     assert r2["status"] == "ok"
@@ -615,9 +619,11 @@ def test_counters_hydrate_from_mongo_on_first_call(monkeypatch):
 
     async def _drive():
         # First call — hydrates, then sends (bumping sent 4→5).
-        r1 = await gic.notify_url_updated("https://syrabit.ai/a")
+        # tier=1 bypasses the per-tier sub-cap (Task #246) so the assertion
+        # exercises the global daily-limit cap rather than tier-3 throttling.
+        r1 = await gic.notify_url_updated("https://syrabit.ai/a", tier=1)
         # Second call — cap of 5 reached after first send, must block.
-        r2 = await gic.notify_url_updated("https://syrabit.ai/b")
+        r2 = await gic.notify_url_updated("https://syrabit.ai/b", tier=1)
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         return r1, r2
@@ -1214,9 +1220,11 @@ def test_quota_exhausted_fires_ops_alert_once_per_day(monkeypatch):
 
     async def _drive():
         # First call uses the only slot; second + third both quota_block.
-        await gic.notify_url_updated("https://syrabit.ai/a")
-        await gic.notify_url_updated("https://syrabit.ai/b")
-        await gic.notify_url_updated("https://syrabit.ai/c")
+        # tier=1 bypasses the per-tier sub-cap so the test exercises the
+        # *global* limit-exhaustion path the alert pipeline cares about.
+        await gic.notify_url_updated("https://syrabit.ai/a", tier=1)
+        await gic.notify_url_updated("https://syrabit.ai/b", tier=1)
+        await gic.notify_url_updated("https://syrabit.ai/c", tier=1)
         # Let the create_task'd alert dispatcher actually run.
         for _ in range(4):
             await asyncio.sleep(0)
@@ -1327,8 +1335,10 @@ def test_quota_alert_dedupes_across_workers_via_mongo_claim(monkeypatch):
         _install_httpx(monkeypatch, gic, fake_http)
         _install_alert_db(monkeypatch, gic, claims_coll=shared_claims)
 
-        await gic.notify_url_updated(f"https://syrabit.ai/{label}-a")
-        await gic.notify_url_updated(f"https://syrabit.ai/{label}-b")  # blocks
+        # tier=1 bypasses the per-tier sub-cap (Task #246) so the test
+        # exercises the cross-worker dedupe path on a global-limit hit.
+        await gic.notify_url_updated(f"https://syrabit.ai/{label}-a", tier=1)
+        await gic.notify_url_updated(f"https://syrabit.ai/{label}-b", tier=1)  # blocks
         for _ in range(4):
             await asyncio.sleep(0)
 
@@ -1427,8 +1437,10 @@ def test_quota_alert_falls_back_when_mongo_unavailable(monkeypatch):
     monkeypatch.setitem(sys.modules, "metrics", fake_metrics)
 
     async def _drive():
-        await gic.notify_url_updated("https://syrabit.ai/a")
-        await gic.notify_url_updated("https://syrabit.ai/b")
+        # tier=1 bypasses the per-tier sub-cap so the test exercises the
+        # mongo-fallback path on a global-limit hit.
+        await gic.notify_url_updated("https://syrabit.ai/a", tier=1)
+        await gic.notify_url_updated("https://syrabit.ai/b", tier=1)
         for _ in range(4):
             await asyncio.sleep(0)
 

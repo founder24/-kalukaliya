@@ -808,10 +808,11 @@ def test_smoke_test_endpoint_overall_pass_when_all_pass():
                           new=AsyncMock(side_effect=_all_pass_results())):
             return await mod.admin_credits_smoke_test(_admin={})
 
+    from config import PROVIDER_PRIORITY
     result = asyncio.run(_run())
     assert result["overall"] == "pass"
     assert result["fail_count"] == 0
-    assert result["pass_count"] == 15
+    assert result["pass_count"] == len(PROVIDER_PRIORITY)
 
 
 def test_smoke_test_endpoint_overall_fail_when_any_fail():
@@ -844,8 +845,9 @@ def test_smoke_test_endpoint_counts_skip_correctly():
                           new=AsyncMock(side_effect=results)):
             return await mod.admin_credits_smoke_test(_admin={})
 
+    from config import PROVIDER_PRIORITY
     result = asyncio.run(_run())
-    assert result["skip_count"] == 14
+    assert result["skip_count"] == len(PROVIDER_PRIORITY) - 1
     assert result["pass_count"] == 1
     assert result["fail_count"] == 0
     assert result["overall"] == "pass"
@@ -871,7 +873,7 @@ def test_smoke_test_endpoint_covers_all_15_feature_keys():
 
     asyncio.run(_run())
     assert set(probed_features) == set(PROVIDER_PRIORITY.keys())
-    assert len(probed_features) == 15
+    assert len(probed_features) == len(PROVIDER_PRIORITY)
 
 
 def test_smoke_test_endpoint_schedules_slack_alert_on_failure():
@@ -928,13 +930,14 @@ def test_smoke_test_endpoint_response_shape():
                           new=AsyncMock(side_effect=_all_pass_results())):
             return await mod.admin_credits_smoke_test(_admin={})
 
+    from config import PROVIDER_PRIORITY
     result = asyncio.run(_run())
     for key in ("overall", "total_features", "pass_count", "fail_count",
                 "skip_count", "cf_gateway_enabled", "slack", "run_at_epoch",
                 "results", "note"):
         assert key in result, f"missing key: {key}"
     assert isinstance(result["results"], list)
-    assert result["total_features"] == 15
+    assert result["total_features"] == len(PROVIDER_PRIORITY)
 
 
 def test_smoke_test_endpoint_slack_config_shape():

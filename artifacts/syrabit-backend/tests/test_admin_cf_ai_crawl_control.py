@@ -390,9 +390,16 @@ def test_admin_route_happy_path_returns_summary(app_client):
     assert r.status_code == 200
     body = r.json()
     assert body["available"] is True
-    assert body["totals"]["requests"] == 200
+    # The route strips AI crawlers from the totals (per the policy
+    # decision that AI crawlers are blocked at the edge AND hidden from
+    # this card — see route docstring at routes/bot_discovery.py L6138).
+    # Post-strip totals.requests equals search_totals.requests (150),
+    # NOT the raw input totals.requests (200).
+    assert body["totals"]["requests"] == 150
     assert body["per_bot"][0]["name"] == "Googlebot"
-    assert body["daily_series"]["top_bots"] == ["Googlebot", "GPTBot"]
+    # AI bots also stripped from per_bot and daily_series.top_bots.
+    assert all(b["category"] != "ai" for b in body["per_bot"])
+    assert "GPTBot" not in body["daily_series"]["top_bots"]
 
 
 def test_admin_route_swallows_unexpected_exception(app_client):

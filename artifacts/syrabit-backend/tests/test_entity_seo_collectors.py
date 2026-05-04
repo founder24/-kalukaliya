@@ -223,8 +223,12 @@ def test_fetch_sameas_aggregate_status():
 # ─── fetch_google_kg ───────────────────────────────────────────────────
 
 
-def test_fetch_google_kg_no_api_key_returns_error_with_configured_false():
+def test_fetch_google_kg_no_api_key_returns_error_with_configured_false(monkeypatch):
     # No API key + no env: surfaces as configurable-but-disabled.
+    # Must scrub the env var so this test is hermetic — otherwise a
+    # GOOGLE_KG_API_KEY exported by the dev shell would push the call
+    # past the empty-key guard and the assertion would flip.
+    monkeypatch.delenv("GOOGLE_KG_API_KEY", raising=False)
     sig = _run(esh.fetch_google_kg(api_key="", http_get=_MockTransport({})))
     assert sig["status"] == "error"
     assert sig["fields"]["configured"] is False

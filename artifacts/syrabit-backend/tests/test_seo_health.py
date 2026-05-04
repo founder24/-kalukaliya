@@ -4,11 +4,24 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 from tests._deps_stub import install_deps_stub  # noqa: E402
 
 install_deps_stub()
 from routes import bot_discovery  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_seo_health_cache():
+    """``seo_health_check`` caches its expensive inner probe for 30
+    minutes. Without clearing the module-level cache between tests the
+    second test would receive whatever the first test produced, so the
+    `httpx.AsyncClient` patch would never fire and the assertions would
+    drift unpredictably between runs."""
+    bot_discovery._seo_health_response_cache.clear()
+    yield
+    bot_discovery._seo_health_response_cache.clear()
 
 
 VALID_SITEMAP_XML = (
@@ -561,18 +574,22 @@ def _httpx_call_with_named_headers(func, expected_kwarg: str) -> bool:
 # ---- 1. AST inspection ----
 
 def test_seo_health_check_constructs_client_with_self_check_headers_in_source():
-    """Source-level pin: ``seo_health_check`` must construct its
-    httpx client with ``headers=_SEO_SELF_CHECK_HEADERS``.
+    """Source-level pin: the SEO health probe must construct its httpx
+    client with ``headers=_SEO_SELF_CHECK_HEADERS``.
+
+    The actual network work was extracted into
+    ``_run_seo_health_check_inner`` when ``seo_health_check`` gained a
+    cache layer; that inner function is what carries the kwarg now.
 
     Failure means a future edit dropped the ``headers=`` kwarg or
     routed it to a different constant — re-introducing the
     Cloudflare 403 storm that triggered Task #819 / #821.
     """
     assert _httpx_call_with_named_headers(
-        bot_discovery.seo_health_check, "_SEO_SELF_CHECK_HEADERS"
+        bot_discovery._run_seo_health_check_inner, "_SEO_SELF_CHECK_HEADERS"
     ), (
-        "seo_health_check no longer constructs httpx.AsyncClient with "
-        "`headers=_SEO_SELF_CHECK_HEADERS`. This will cause every "
+        "_run_seo_health_check_inner no longer constructs httpx.AsyncClient "
+        "with `headers=_SEO_SELF_CHECK_HEADERS`. This will cause every "
         "internal SEO probe to be served a Cloudflare 403 (default "
         "python-httpx UA is classified by SBFM as automated). "
         "Restore `headers=_SEO_SELF_CHECK_HEADERS` on the "
@@ -657,17 +674,21 @@ def _assert_self_check_headers(headers: dict) -> None:
 
 
 def test_seo_health_check_passes_self_check_headers_at_runtime(reset_capture):
-    """Behavioural pin: when ``seo_health_check`` actually runs, the
+    """Behavioural pin: when the SEO health probe actually runs, the
     httpx client receives the expected ``headers={...}`` kwarg
-    (User-Agent + ``X-Syrabit-Internal: 1``)."""
+    (User-Agent + ``X-Syrabit-Internal: 1``).
+
+    Drives ``_run_seo_health_check_inner`` directly because the public
+    ``seo_health_check`` wraps a 30-minute response cache that would
+    short-circuit the construction path being verified."""
     with patch("httpx.AsyncClient", _CapturingAsyncClient), \
          patch("deps.is_mongo_available", AsyncMock(return_value=False)):
-        # Run with no admin (deep_scan=None branch); function will
-        # iterate sitemaps, get 404 on each, and return.
-        asyncio.run(bot_discovery.seo_health_check(request=None, deep_scan=None))
+        # Run inner probe directly; it will hit 404 on each sitemap fetch
+        # and return without further probing.
+        asyncio.run(bot_discovery._run_seo_health_check_inner())
 
     assert len(_CapturingAsyncClient.captured_kwargs) >= 1, (
-        "seo_health_check did not construct an httpx.AsyncClient — "
+        "_run_seo_health_check_inner did not construct an httpx.AsyncClient — "
         "did the function signature change?"
     )
     headers = _CapturingAsyncClient.captured_kwargs[0].get("headers")
