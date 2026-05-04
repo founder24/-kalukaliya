@@ -6,6 +6,10 @@
 > Companion docs:
 > - `infra/per-cloud-feature-delegation.md` — full v3 spec (authoritative).
 > - `infra/provider-priority-map.md` — per-feature provider table.
+> - `infra/capacity-roadmap-363.md` — revised burn rates / meter
+>   thresholds / new flag rows post-capacity-tier upgrade. See Task
+>   #363 §B for the row deltas; the rows here remain authoritative
+>   until the §1–§4 cutovers complete.
 
 **Status:** locked v3 — 2026-05-04
 **On-call channel:** `#syrabit-oncall` (Slack)

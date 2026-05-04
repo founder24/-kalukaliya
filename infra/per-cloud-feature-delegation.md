@@ -5,6 +5,9 @@
 > Companion docs:
 > - `infra/provider-priority-map.md` — machine-friendly per-feature table.
 > - `infra/credit-burn-runbook.md` — flag mechanics, meters, escalation.
+> - `infra/capacity-roadmap-363.md` — capacity tier (Mongo sharded,
+>   Redis multi-shard, Pinecone scale-out, Vertex co-primary,
+>   async-batch isolation, 500k–1M DAU load test). See Task #363.
 >
 > **Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5,
 > Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.**

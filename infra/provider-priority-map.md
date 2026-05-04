@@ -6,6 +6,9 @@
 > Companion docs:
 > - `infra/per-cloud-feature-delegation.md` — full v3 spec.
 > - `infra/credit-burn-runbook.md` — flag mechanics + meters.
+> - `infra/capacity-roadmap-363.md` — capacity-tier table extensions
+>   (sharded Mongo / Redis multi-shard / Pinecone namespace-shard +
+>   separate batch index / Vertex chat co-primary). See Task #363 §A.
 
 **Status:** locked v3 — 2026-05-04
 
