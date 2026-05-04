@@ -10,6 +10,11 @@
 >   thresholds / new flag rows post-capacity-tier upgrade. See Task
 >   #363 §B for the row deltas; the rows here remain authoritative
 >   until the §1–§4 cutovers complete.
+> - `infra/perf-roadmap-361.md` — perf-tier flags (`cache:rag_enabled`,
+>   `cache:embed_enabled`, `curriculum:version`, `FAST_MODE_AB_*`,
+>   `MAX_HISTORY_TURNS`, `MAX_CHUNK_TOKENS`, `LLM_TURN_TIMEOUT_S`)
+>   and the A/B promotion-decision + cache-sunset decision logs.
+>   See Task #361 §F.
 
 **Status:** locked v3 — 2026-05-04
 **On-call channel:** `#syrabit-oncall` (Slack)
@@ -172,6 +177,13 @@ traffic during a flip).
 | `chat:routing_mode` *(post-#363)* | Redis hot-flag, read every turn | on-call | `"quality_weighted"` | on-call | < 5 ms | `redis-cli SET chat:routing_mode "workers_only"` |
 | `pinecone:n_namespaces` *(post-#363)* | env var read at process start (overridable via Redis) | on-call | `1` (pre-cutover) → `N` (post-cutover) | on-call | next deploy or sub-ms via Redis | `redis-cli SET pinecone:n_namespaces 1` |
 | `redis:shard_count` *(post-#363)* | env var read at process start | on-call | `1` (pre-cutover) → `N` (post-cutover) | infra owner | ACA revision rollout | redeploy ACA with previous `REDIS_SHARD_COUNT` |
+| `cache:rag_enabled` *(post-#361)* | Redis hot-flag, read every turn | on-call (manual) + App Insights staleness rule (auto-disable) | `0` (off until #361 §6.2 promotion gate clears) | on-call + automation | < 5 ms | `redis-cli DEL cache:rag_enabled` (then `SET 1` to re-enable after fix) |
+| `cache:embed_enabled` *(post-#361)* | Redis hot-flag, read every turn | on-call | `1` | on-call | < 5 ms | `redis-cli SET cache:embed_enabled 0` |
+| `curriculum:version` *(post-#361)* | Redis string, read at process start + on every cache lookup | release engineer (atomic write during syllabus deploy) | `"2026.05"` | release engineer | < 5 ms | `redis-cli SET curriculum:version <previous>` |
+| `FAST_MODE_AB_1B_TRAFFIC_PCT` *(post-#361)* | env var read at process start (overridable via Redis `chat:fast_mode_ab_pct`) | A/B owner | `0` (ramps `0 → 10 → 25 → 50`) | A/B owner | next deploy or sub-ms via Redis | `redis-cli SET chat:fast_mode_ab_pct 0` |
+| `MAX_HISTORY_TURNS` *(post-#361)* | env var read at process start (overridable via Redis) | on-call | `12` | on-call | next deploy or sub-ms via Redis | `redis-cli SET chat:max_history_turns 12` |
+| `MAX_CHUNK_TOKENS` *(post-#361)* | env var read at process start (overridable via Redis) | on-call | `512` | on-call | next deploy or sub-ms via Redis | `redis-cli SET rag:max_chunk_tokens 512` |
+| `LLM_TURN_TIMEOUT_S` *(post-#361)* | env var read at process start (overridable via Redis) | on-call | `15` | on-call | next deploy or sub-ms via Redis | `redis-cli SET chat:llm_turn_timeout_s 15` |
 
 ---
 

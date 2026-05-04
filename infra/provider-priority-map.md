@@ -9,6 +9,8 @@
 > - `infra/capacity-roadmap-363.md` — capacity-tier table extensions
 >   (sharded Mongo / Redis multi-shard / Pinecone namespace-shard +
 >   separate batch index / Vertex chat co-primary). See Task #363 §A.
+> - `infra/perf-roadmap-361.md` — perf-tier (RAG/embed cache,
+>   fast-mode 1b vs 3b A/B, p99 instrumentation). See Task #361.
 
 **Status:** locked v3 — 2026-05-04
 

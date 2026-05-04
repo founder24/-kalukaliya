@@ -8,6 +8,9 @@
 > - `infra/capacity-roadmap-363.md` — capacity tier (Mongo sharded,
 >   Redis multi-shard, Pinecone scale-out, Vertex co-primary,
 >   async-batch isolation, 500k–1M DAU load test). See Task #363.
+> - `infra/perf-roadmap-361.md` — perf tier (RAG/embed cache,
+>   fast-mode 1b vs 3b A/B, p99 instrumentation, ROI gate +
+>   kill-switch). See Task #361.
 >
 > **Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5,
 > Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.**
@@ -554,6 +557,22 @@ restored for 7 consecutive days, resume.
     chat path is forbidden — it adds 200–500 ms cross-cloud per turn.
     Sampling rate is configurable via `VALIDATION_SAMPLE_RATE` and
     recorded in the runbook.
+
+13. **Two-stage cache lookup before pipeline (post-#361).** On every
+    turn: (a) compute the content-normalized query hash; (b) read
+    `cache:rag_enabled` and the RAG-result cache by key
+    (`rag:syllabus:<curriculum_version>:query_hash:<hash>`); (c) on
+    hit, serve the cached `(rag_chunks, llm_answer)` and skip the
+    entire pipeline (Pinecone query + LLM call). On miss, proceed to
+    the standard concurrent-read path (Rule 2). The embed cache
+    (`embed:question:<hash>`) is consulted inside the embed step
+    (between user-message hash and `bge-m3` call). Both caches are
+    populated **only by stable queries** (no per-user attachments,
+    no ephemeral hints, syllabus version matches). Both lookups are
+    sub-5 ms; their cost on miss is negligible compared to the
+    pipeline they short-circuit on hit. Cache served only after the
+    #361 §6.2 promotion gate clears; default `cache:rag_enabled=0`.
+    See `infra/perf-roadmap-361.md` for the full spec.
 
 ---
 
