@@ -1,5 +1,13 @@
 # Syrabit.ai Neural Mesh Architecture & Staff Management Panel
 
+> ⚠️ **HISTORICAL — Railway-era summary.** Task #336 migrated the
+> backend (and the Rust core) off Railway onto Digital Ocean App
+> Platform. Active runbooks: [`docs/DIGITALOCEAN-DEPLOYMENT.md`](docs/DIGITALOCEAN-DEPLOYMENT.md)
+> + [`docs/ops/digitalocean-cutover.md`](docs/ops/digitalocean-cutover.md).
+> Anything below this banner that says "Railway" should be read as
+> "Digital Ocean App Platform"; do not run the Railway CLI commands
+> verbatim.
+
 ## Implementation Summary
 
 This implementation delivers two major upgrades to the Syrabit.ai Education Platform:

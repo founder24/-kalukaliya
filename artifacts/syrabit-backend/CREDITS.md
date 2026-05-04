@@ -80,7 +80,7 @@ static $19/month estimate.
    Copy the ID in the format `XXXXXX-XXXXXX-XXXXXX`.
 
 2. **Set the secret:** Add `GOOGLE_BILLING_ACCOUNT_ID=XXXXXX-XXXXXX-XXXXXX` to
-   Replit Secrets (or Railway env vars).
+   Replit Secrets (or Digital Ocean App Platform env vars — Task #336 replaced the legacy Railway env).
 
 3. **Grant permission to the service account:**
    - GCP Console → Billing → Account management → Permissions
@@ -154,7 +154,7 @@ webhook flow below.
    - **$1,800 (90%)** — warning threshold
    - **$1,900 (95%)** — critical threshold
 3. Set Pub/Sub topic to forward to the ops Slack channel webhook
-4. When the webhook fires, set `GOOGLE_BILLING_ALERT=1` in the Railway/Replit environment
+4. When the webhook fires, set `GOOGLE_BILLING_ALERT=1` in the Digital Ocean App Platform / Replit environment (Task #336 — `bash scripts/digitalocean.sh var-set syrabit-backend GOOGLE_BILLING_ALERT=1`)
 5. **With Task #253 live data enabled:** the thresholds are auto-read from the budget
    and `GOOGLE_BILLING_ALERT` is only needed as a real-time override when a Pub/Sub
    notification fires between polling cycles.

@@ -3,7 +3,7 @@
  * Task #749 — Off-host Trustpilot aggregate refresh.
  *
  * Why this exists:
- *   The production backend container (Cloud Run / Railway) and the
+ *   The production backend container (Digital Ocean App Platform — Task #336) and the
  *   Cloudflare Pages build container both have egress that is fully
  *   WAF-blocked from `api.trustpilot.com`, `www.trustpilot.com`, and
  *   `widget.trustpilot.com` (CloudFront 403 on every endpoint shape —

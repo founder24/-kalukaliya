@@ -1,9 +1,23 @@
 # mTLS Activation Operational Checklist
 
 **Purpose:** Fully activate the mTLS "fail-closed" gate between the Cloudflare
-edge worker (`syrabit-edge`) and the Railway backend. Complete all four steps in
-order — skipping or misordering them will either break production traffic or
-leave the gate unarmed.
+edge worker (`syrabit-edge`) and the Digital Ocean App Platform backend
+(Task #336 — replaces the legacy Railway origin). Complete all four steps
+in order — skipping or misordering them will either break production
+traffic or leave the gate unarmed.
+
+> **Origin migration note (Task #336).** Every reference to "Railway"
+> below means the same operation on the Digital Ocean App Platform
+> service `syrabit-backend`. Concretely, replace any
+> `railway variables set FOO=bar` with
+> `bash scripts/digitalocean.sh var-set syrabit-backend FOO=bar`, and
+> any Railway dashboard click-path with the equivalent `doctl apps`
+> command (or App Platform UI under cloud.digitalocean.com → Apps →
+> syrabit-backend → Settings → App-Level Environment Variables).
+> The TLS-level "require client certificate" toggle on the Railway
+> Networking tab maps to **App Platform → Settings → Domains →
+> Custom Domain → Edit → Client Certificate "Require"** on the
+> `api.syrabit.ai` custom domain.
 
 **Scope:** Manual operational steps only. Code automation is covered by
 `inject-mtls-cert-id.js` (CI gate) and the `MtlsClientCertMiddleware` in the

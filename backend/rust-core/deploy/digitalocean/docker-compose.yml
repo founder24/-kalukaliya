@@ -1,0 +1,95 @@
+# backend/rust-core/deploy/digitalocean/docker-compose.yml
+#
+# Task #336 — Droplet-hosted alternative to the App Platform spec at
+# `.do/app-rust-core.yaml`. Use this when:
+#   * raw TCP gRPC on :50051 must be reachable from outside the DO VPC
+#     (App Platform only exposes internal ports inside the VPC), or
+#   * cost-per-hour matters more than managed rolling deploys (a basic
+#     Droplet @ ~$6/mo undercuts basic-xs App Platform).
+#
+# Provisioning:
+#   1. Create the Droplet:
+#        doctl compute droplet create rust-core-blr1 \
+#          --region blr1 --size s-1vcpu-2gb \
+#          --image docker-20-04 --vpc-uuid "$DO_VPC_UUID" \
+#          --ssh-keys "$DO_SSH_KEY_FP" --enable-monitoring --wait
+#   2. SSH in, clone the deploy folder, populate .env from the snapshot
+#      stored in the team 1Password (`syrabit/digital-ocean/rust-core`):
+#        scp .env root@<droplet-ip>:/srv/rust-core/.env
+#   3. `docker compose pull && docker compose up -d`
+#   4. Open the firewall:
+#        doctl compute firewall create --name rust-core-fw \
+#          --droplet-ids <id> \
+#          --inbound-rules "protocol:tcp,ports:80,sources:address:0.0.0.0/0 \
+#                           protocol:tcp,ports:50051,sources:address:0.0.0.0/0 \
+#                           protocol:tcp,ports:22,sources:address:<your-ip>/32" \
+#          --outbound-rules "protocol:tcp,ports:all,destinations:address:0.0.0.0/0 \
+#                            protocol:udp,ports:all,destinations:address:0.0.0.0/0"
+#
+# Updating the image: `docker compose pull rust-core && docker compose up -d`
+# rolls the container with no-downtime when paired with the optional
+# Caddy front-end below (Caddy keeps the listening sockets while the
+# rust-core container is being recreated).
+
+version: "3.9"
+
+services:
+  rust-core:
+    # Image is published by `.github/workflows/digitalocean-deploy.yml`
+    # to the syrabit team's DOCR. Pin to a specific SHA in production;
+    # `latest` is fine on staging Droplets.
+    image: registry.digitalocean.com/syrabit/rust-core:${RUST_CORE_TAG:-latest}
+    container_name: rust-core
+    restart: unless-stopped
+    ports:
+      # HTTP (REST + /health) on 3000, fronted by Caddy on :80/:443.
+      - "127.0.0.1:3000:3000"
+      # gRPC on 50051 — exposed publicly for `grpc.syrabit.ai` ingress.
+      # Cloudflare Spectrum (or the DO firewall ACL above) restricts
+      # the source to the Cloudflare IP ranges.
+      - "0.0.0.0:50051:50051"
+    environment:
+      HTTP_PORT: "3000"
+      GRPC_PORT: "50051"
+      ENVIRONMENT: "production"
+      RUST_LOG: "info"
+      DATABASE_URL:             "${DATABASE_URL}"
+      JWT_SECRET:               "${JWT_SECRET}"
+      UPSTASH_REDIS_REST_URL:   "${UPSTASH_REDIS_REST_URL}"
+      UPSTASH_REDIS_REST_TOKEN: "${UPSTASH_REDIS_REST_TOKEN}"
+      SENTRY_DSN:               "${SENTRY_DSN:-}"
+      AXIOM_TOKEN:              "${AXIOM_TOKEN:-}"
+      AXIOM_DATASET:            "${AXIOM_DATASET:-rust-core-do-droplet}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Caddy fronts HTTP on 80/443, terminates TLS via the syrabit.ai
+  # Cloudflare Origin CA cert mounted from the host. gRPC is not proxied
+  # — clients dial :50051 directly so HTTP/2 isn't downgraded.
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    depends_on:
+      - rust-core
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -105,15 +105,15 @@ deploy_rust_core() {
         fi
     fi
     
-    # Railway deployment
-    if command -v railway &> /dev/null; then
-        echo -e "${YELLOW}Deploying to Railway...${NC}"
-        railway up --detach
+    # Digital Ocean App Platform deployment (Task #336 — replaces Railway)
+    if command -v doctl &> /dev/null; then
+        echo -e "${YELLOW}Deploying to Digital Ocean App Platform...${NC}"
+        bash "$(git rev-parse --show-toplevel)/scripts/digitalocean.sh" deploy rust-core
     else
-        echo -e "${YELLOW}Railway CLI not found. Manual deployment required.${NC}"
-        echo "   1. Install Railway CLI: npm i -g @railway/cli"
-        echo "   2. Login: railway login"
-        echo "   3. Deploy: cd $RUST_CORE_DIR && railway up"
+        echo -e "${YELLOW}doctl CLI not found. Manual deployment required.${NC}"
+        echo "   1. Install doctl: brew install doctl  (or see docs/DIGITALOCEAN-DEPLOYMENT.md)"
+        echo "   2. Authenticate: doctl auth init -t \"\$DIGITALOCEAN_ACCESS_TOKEN\""
+        echo "   3. Deploy: bash scripts/digitalocean.sh deploy rust-core"
     fi
     
     cd - > /dev/null
@@ -259,12 +259,12 @@ show_next_steps() {
     echo "Next steps:"
     echo "  1. Verify services: curl $RUST_CORE_URL/health"
     echo "  2. Test D1 sync: curl $RUST_CORE_URL/api/edge/d1-status"
-    echo "  3. Check logs: railway logs (or your platform)"
+    echo "  3. Check logs: bash scripts/digitalocean.sh logs rust-core"
     echo "  4. Test JARVIS HUD: https://syrabit.ai/jarvis"
     echo "  5. Test staff login: https://syrabit.ai/staff/login"
     echo ""
     echo "Rollback instructions:"
-    echo "  - Railway: railway rollback"
+    echo "  - Digital Ocean: doctl apps create-deployment \"\$DO_APP_ID_RUST_CORE\" --rollback-deployment <prev-uuid>"
     echo "  - Cloudflare: wrangler rollback"
     echo ""
 }

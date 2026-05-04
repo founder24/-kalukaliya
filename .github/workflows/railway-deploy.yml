@@ -1,127 +1,54 @@
-name: Railway deploy (manual)
+name: Railway deploy (DEPRECATED — Task #336)
 
 #
-# Supply-chain hardening: every `uses:` reference in this file is pinned to a
-# full 40-char commit SHA (with a trailing `# vX.Y.Z` tag comment for
-# readability). Float tags like `actions/checkout@v4` are forbidden because a
-# compromise of the upstream tag — as happened with tj-actions/changed-files in
-# 2025 — would let an attacker silently exfiltrate this repo's secrets on the
-# next push. See https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
-# To upgrade an action: look up the SHA for the new tag (e.g.
-# `gh api repos/actions/checkout/git/refs/tags/v4.3.0 --jq .object.sha`) and
-# update both the SHA and the trailing tag comment.
+# Task #336 migrated the syrabit-backend FastAPI service and the
+# rust-core gRPC+HTTP service off Railway and onto Digital Ocean App
+# Platform. The active CI deploy lives at
+# `.github/workflows/digitalocean-deploy.yml`.
 #
-# Driving Railway from CI. This workflow exists so the same scripts that
-# work from the Replit workspace also work from GitHub Actions, using the
-# RAILWAY_API_TOKEN repo secret. Trigger is workflow_dispatch only — we
-# don't auto-deploy on push from here. Railway's own GitHub integration
-# (auto-deploy on push to master) is unaffected.
+# This workflow is kept ONLY as a deprecation shim so anyone who
+# bookmarked / scripted against the old `Railway deploy (manual)`
+# trigger gets a loud failure with a pointer to the replacement
+# instead of a silent successful no-op deploy.
+#
+# Remove this file once the Railway project itself is decommissioned
+# (see docs/ops/digitalocean-cutover.md §Decommission).
+#
+
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "redeploy = re-run latest built image; deploy-from-source = upload artifacts/syrabit-backend/ and rebuild."
-        required: true
-        default: redeploy
-        type: choice
-        options:
-          - redeploy
-          - deploy-from-source
-      service:
-        description: "Optional Railway service ID override (defaults to syrabit-backend production)."
-        required: false
-        type: string
-      environment:
-        description: "Optional Railway environment name (default: production)."
-        required: false
-        default: production
-        type: string
-      health_url:
-        description: "Public URL to probe for HTTP 200 after the deploy. Leave blank to skip (recommended for non-production targets)."
-        required: false
-        default: "https://api.syrabit.ai/api/health"
-        type: string
-
-# Hard-gate to the protected branches so a fork PR can't trigger this.
-concurrency:
-  group: railway-deploy
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
-    if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main'
+  deprecated:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-      RAILWAY_SERVICE_ID: ${{ inputs.service }}
-      RAILWAY_ENVIRONMENT: ${{ inputs.environment }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # Task #906 — strip the GITHUB_TOKEN from .git/config after
-          # checkout. This job drives Railway via the RAILWAY_API_TOKEN
-          # secret; it does not push back to the repo, so credentials
-          # are not needed afterwards.
-          persist-credentials: false
-
-      - name: Set up Node (for the Railway CLI)
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "20"
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli@4
-
-      - name: Verify token is present
+      - name: Refuse to run — Railway has been replaced by Digital Ocean
         run: |
-          if [ -z "${RAILWAY_API_TOKEN}" ]; then
-            echo "::error::RAILWAY_API_TOKEN repo secret is not set."
-            exit 1
-          fi
-          railway --version
+          cat <<'EOF'
+          ❌  This workflow is DEPRECATED.
 
-      - name: Print pre-deploy status
-        run: bash scripts/railway.sh status
+          Task #336 cut the syrabit-backend and rust-core services
+          over from Railway to Digital Ocean App Platform. The
+          replacement workflow is:
 
-      - name: Run requested deploy mode
-        run: |
-          case "${{ inputs.mode }}" in
-            redeploy)
-              bash scripts/railway.sh redeploy
-              ;;
-            deploy-from-source)
-              bash scripts/railway.sh deploy
-              ;;
-            *)
-              echo "::error::unknown mode: ${{ inputs.mode }}"
-              exit 1
-              ;;
-          esac
+              .github/workflows/digitalocean-deploy.yml
+              (workflow name: "Digital Ocean deploy (manual)")
 
-      - name: Print post-deploy status
-        if: always()
-        run: bash scripts/railway.sh status || true
+          Equivalent inputs:
+              old: mode=redeploy / deploy-from-source
+              new: mode=redeploy / deploy
+              old: service=<railway-service-id>
+              new: app=syrabit-backend|rust-core|both
 
-      - name: Probe public health endpoint
-        env:
-          HEALTH_URL: ${{ inputs.health_url }}
-        run: |
-          if [ -z "${HEALTH_URL}" ]; then
-            echo "health_url input is blank — skipping health probe (typical for non-production targets)."
-            exit 0
-          fi
-          for i in 1 2 3 4 5; do
-            code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "${HEALTH_URL}" || echo "000")
-            echo "attempt $i: HTTP $code"
-            if [ "$code" = "200" ]; then
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::${HEALTH_URL} did not return 200 after the deploy."
+          Required repo secrets on the new workflow:
+              DIGITALOCEAN_ACCESS_TOKEN
+              DO_APP_ID_SYRABIT_BACKEND
+              DO_APP_ID_RUST_CORE
+
+          Cutover & rollback runbook: docs/ops/digitalocean-cutover.md
+          Day-to-day runbook        : docs/DIGITALOCEAN-DEPLOYMENT.md
+          EOF
           exit 1

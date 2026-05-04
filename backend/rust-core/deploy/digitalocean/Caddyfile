@@ -1,0 +1,44 @@
+# backend/rust-core/deploy/digitalocean/Caddyfile
+#
+# Task #336 — minimal TLS terminator for the rust-core Droplet. Cloudflare
+# fronts this hostname, so we accept the Cloudflare Origin CA pinned cert
+# and proxy plaintext to the local rust-core container on :3000.
+#
+# gRPC (port 50051) is NOT proxied here — clients dial the Droplet
+# directly so HTTP/2 stays end-to-end without Caddy re-encoding the
+# stream.
+
+{
+	# Disable Caddy's automatic HTTPS — the cert is provided by Cloudflare
+	# Origin CA and mounted from the host.
+	auto_https off
+	admin off
+}
+
+(common_headers) {
+	header {
+		# Forwarded by Cloudflare; preserve so app logs see the real client.
+		?X-Forwarded-For {http.request.header.cf-connecting-ip}
+		?X-Forwarded-Proto https
+		# Strip server banner.
+		-Server
+	}
+}
+
+:80 {
+	# Plain HTTP redirects to https; Cloudflare always upgrades the public
+	# hostname so this only fires on misconfigured direct hits.
+	redir https://{host}{uri} permanent
+}
+
+:443 {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+	import common_headers
+
+	# /health and everything else go to rust-core HTTP.
+	reverse_proxy http://rust-core:3000 {
+		health_uri /health
+		health_interval 10s
+		health_timeout 3s
+	}
+}

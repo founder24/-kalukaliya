@@ -1,13 +1,19 @@
 # Syrabit.ai Backend — Railway Deployment Guide
 
-> ⚠️ **RETIRED PATH — DO NOT FOLLOW.** Railway is being decommissioned in
-> Task #335. The canonical backend origin is now **AWS App Runner** in
-> us-west-2 per
-> [`docs/infra/cloud-allocation-plan.md`](./infra/cloud-allocation-plan.md)
-> §4.2. The App Runner runbook lives at
-> [`../artifacts/syrabit-backend/DEPLOY.md`](../artifacts/syrabit-backend/DEPLOY.md).
-> This file is kept only for historical reference and rollback during the
-> cutover soak window.
+> ⚠️ **RETIRED PATH — DO NOT FOLLOW.** Railway was decommissioned in
+> Task #336. The canonical backend origin is now **Digital Ocean App
+> Platform** (`syrabit-backend` in region `blr1`); the Rust core moved
+> to the matching DO `rust-core` app (or the optional Droplet under
+> `backend/rust-core/deploy/digitalocean/`). The active runbooks are:
+>
+> * Day-to-day operations: [`./DIGITALOCEAN-DEPLOYMENT.md`](./DIGITALOCEAN-DEPLOYMENT.md)
+> * Cutover & rollback   : [`./ops/digitalocean-cutover.md`](./ops/digitalocean-cutover.md)
+> * Per-app spec         : [`../.do/app.yaml`](../.do/app.yaml), [`../.do/app-rust-core.yaml`](../.do/app-rust-core.yaml)
+> * Helper script        : `bash scripts/digitalocean.sh …` (replaces `scripts/railway.sh`)
+>
+> This file is kept only as a tombstone redirect so external bookmarks
+> still resolve. Everything below is historical Railway content; do not
+> use it for new deploys.
 
 ---
 

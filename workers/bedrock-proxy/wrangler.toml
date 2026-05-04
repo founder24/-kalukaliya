@@ -18,7 +18,10 @@ compatibility_date = "2026-05-01"
 #   pnpm --filter bedrock-proxy run deploy
 #
 # Then set BEDROCK_PROXY_URL=https://bedrock-proxy.<your-subdomain>.workers.dev
-# in Railway / Replit Secrets so the backend can route TTS/STT/Translate calls.
+# on the Digital Ocean `syrabit-backend` app via
+#   scripts/digitalocean.sh var-set syrabit-backend BEDROCK_PROXY_URL=…
+# (or in Replit Secrets for local dev) so the backend can route
+# TTS/STT/Translate calls.
 
 [env.preview]
 name = "bedrock-proxy-preview"

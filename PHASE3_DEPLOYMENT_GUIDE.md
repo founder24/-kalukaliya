@@ -1,5 +1,13 @@
 # Phase 3: Production Deployment Guide 🚀
 
+> ⚠️ **HISTORICAL — Railway-era guide.** Task #336 migrated the backend
+> off Railway onto Digital Ocean App Platform. For active deployment
+> instructions use [`docs/DIGITALOCEAN-DEPLOYMENT.md`](docs/DIGITALOCEAN-DEPLOYMENT.md)
+> and the cutover runbook at
+> [`docs/ops/digitalocean-cutover.md`](docs/ops/digitalocean-cutover.md).
+> The content below is preserved for context on the original Phase 3
+> rollout; do not follow the Railway-specific steps verbatim.
+
 **Status:** READY FOR DEPLOYMENT  
 **Last Updated:** $(date)  
 **Prerequisites:** Phase 1 ✅ Complete, Phase 2 ✅ Complete

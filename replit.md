@@ -38,6 +38,10 @@ The project is structured as a pnpm workspace monorepo, combining a React + Vite
 - **Databases:** MongoDB, PostgreSQL, Cloudflare D1, Cloudflare Vectorize.
 - **Authentication:** Supabase Auth for email/password and Google OAuth, issuing custom httpOnly session cookies and JWTs.
 - **Caching:** Cloudflare AI Gateway (LLM cache) and Cloudflare edge worker KV bindings. Neural Mesh provides multi-tier caching and inflight deduplication.
+
+## Hosting
+
+The FastAPI backend (`artifacts/syrabit-backend`) and the Rust core (`backend/rust-core`) run on **Digital Ocean App Platform** in region `blr1` (Task #336). Deploy specs live at `.do/app.yaml` and `.do/app-rust-core.yaml`; an alternative Droplet path for the Rust core lives at `backend/rust-core/deploy/digitalocean/`. The operational helper is `bash scripts/digitalocean.sh …` (with `pnpm run do:*` aliases). The Cloudflare edge worker (`workers/edge-proxy`) reads `BACKEND_URL=https://api.syrabit.ai`, which fronts the DO origin. Day-to-day runbook: `docs/DIGITALOCEAN-DEPLOYMENT.md`. Cutover & rollback runbook: `docs/ops/digitalocean-cutover.md`. The legacy Railway hosting was decommissioned by Task #336; the deprecated `scripts/railway.sh` and `pnpm run railway:*` aliases now print a one-line pointer to the DO replacement and exit non-zero.
 - **LLM Providers:** Cloudflare Workers AI (primary for chat, content generation, translation, embeddings), with Gemini, Groq, Cerebras, and OpenRouter as fallbacks. Pinecone is used for inference (embeddings and reranking).
 - **Translation:** Sarvam `translate:v1` (primary for Indic languages), with Gemini as fallback, and an Assamese translation cache in Upstash Redis.
 - **Payment Gateways:** Razorpay (INR) and Stripe (USD).

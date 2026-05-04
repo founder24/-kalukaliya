@@ -15,7 +15,7 @@ This project has secrets that live in **up to five places** at once:
 | **Replit Secrets** | Everything the local dev backend needs | Workspace → Secrets pane (or Replit secrets MCP) |
 | **Cloudflare Worker** (`syrabit-edge`) | Worker-side shared secrets | `wrangler secret put NAME` from `workers/edge-proxy/` |
 | **Cloudflare Pages** (`syrabit-zip-convert`) | Build-time `VITE_*` only | `pnpm run pages:apply-config` (see `apply-pages-config.mjs`) |
-| **Backend deploy env** (Railway *or* Cloud Run) | Runtime backend secrets | Railway dashboard / `railway variables set …` <br> Cloud Run via Secret Manager (`gcloud secrets …`) |
+| **Backend deploy env** (Digital Ocean App Platform — Task #336) | Runtime backend secrets | `bash scripts/digitalocean.sh var-set syrabit-backend KEY=VAL` (under the hood: `doctl apps update --spec`). Bulk import from a key=value file: `bash scripts/digitalocean.sh import-env syrabit-backend do-backend-vars.env`. |
 | **`.dev.vars`** (worker, gitignored) | Local `wrangler dev` only | Plain text file in `workers/edge-proxy/.dev.vars` |
 
 A secret that lives in **more than one place** is the dangerous kind —
@@ -39,8 +39,7 @@ job to pull content from the backend into Cloudflare D1.
 | Place | Variable | How |
 |---|---|---|
 | Worker | `D1_SYNC_SECRET` | `cd workers/edge-proxy && wrangler secret put D1_SYNC_SECRET` |
-| Backend (Railway) | `D1_SYNC_SECRET` | `railway variables set D1_SYNC_SECRET="<value>"` |
-| Backend (Cloud Run) | `D1_SYNC_SECRET` | `gcloud secrets versions add d1-sync-secret --data-file=-` then redeploy |
+| Backend (Digital Ocean) | `D1_SYNC_SECRET` | `bash scripts/digitalocean.sh var-set syrabit-backend D1_SYNC_SECRET="<value>"` (Task #336) |
 | Replit Secrets | `D1_SYNC_SECRET` | Secrets pane (so local dev can still call the export route) |
 | `workers/edge-proxy/.dev.vars` | `D1_SYNC_SECRET=<value>` | Edit file, restart `wrangler dev` |
 
@@ -53,7 +52,7 @@ NEW=$(openssl rand -hex 32)
 #    so the window between this and step 2 will fail D1 sync. That's tolerable;
 #    sync is nightly. If you can't tolerate it, deploy a temporary "accept either"
 #    backend first.)
-railway variables set D1_SYNC_SECRET="$NEW"
+bash scripts/digitalocean.sh var-set syrabit-backend D1_SYNC_SECRET="$NEW"   # Task #336 — DO replaces Railway
 
 # 2. Worker
 cd workers/edge-proxy && echo "$NEW" | wrangler secret put D1_SYNC_SECRET
@@ -109,7 +108,7 @@ echo "$NEW" | wrangler secret put BACKEND_ORIGIN_SECRET
 through `api.syrabit.ai` returns 401 immediately — total outage.
 Always backend → worker.
 
-(Skip this entire section on Railway — Railway doesn't enforce origin
+(Skip this entire section if you're on Digital Ocean and ORIGIN_SHARED_SECRET is enforced — DO doesn't enforce origin
 secrets; the variable is unused.)
 
 ### 1.3 `EDGE_AI_FALLBACK_SECRET` ↔ `WORKERS_AI_FALLBACK_SECRET`
@@ -122,7 +121,7 @@ hitting `api.syrabit.ai/api/ai/fallback/*` directly.
 | Place | Variable | How |
 |---|---|---|
 | Worker | `EDGE_AI_FALLBACK_SECRET` | `wrangler secret put EDGE_AI_FALLBACK_SECRET` |
-| Backend (Railway / Cloud Run) | `WORKERS_AI_FALLBACK_SECRET` | dashboard / secret manager |
+| Backend (Digital Ocean — Task #336) | `WORKERS_AI_FALLBACK_SECRET` | `bash scripts/digitalocean.sh var-set syrabit-backend WORKERS_AI_FALLBACK_SECRET=…` |
 | Replit Secrets | `WORKERS_AI_FALLBACK_SECRET` | Secrets pane |
 
 **Rotation order:** worker first (so it accepts new), then backend.
@@ -135,8 +134,8 @@ NEW=$(openssl rand -hex 32)
 # 1. Worker (accepts new value)
 echo "$NEW" | wrangler secret put EDGE_AI_FALLBACK_SECRET
 
-# 2. Backend — Railway
-railway variables set WORKERS_AI_FALLBACK_SECRET="$NEW"
+# 2. Backend — Digital Ocean (Task #336)
+bash scripts/digitalocean.sh var-set syrabit-backend WORKERS_AI_FALLBACK_SECRET="$NEW"
 
 # 2b. Backend — Cloud Run (if both backends are live in parallel)
 gcloud secrets versions add workers-ai-fallback-secret --data-file=- <<< "$NEW"
@@ -153,7 +152,7 @@ invalidates every existing session of that audience.
 | Place | Variable | Notes |
 |---|---|---|
 | Replit Secrets | `JWT_SECRET`, `ADMIN_JWT_SECRET` | required — backend won't boot without them |
-| Backend (Railway) | same | `railway variables set JWT_SECRET="$(openssl rand -hex 48)"` |
+| Backend (Digital Ocean — Task #336) | same | `bash scripts/digitalocean.sh var-set syrabit-backend JWT_SECRET="$(openssl rand -hex 48)"` |
 | Backend (Cloud Run) | same | Secret Manager bindings |
 
 **Direction of break:** rotating `JWT_SECRET` logs out every signed-in
@@ -207,7 +206,7 @@ to prevent leaking into the public build log.
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | upstash.com | backend |
 | `SESSION_SECRET` | self-generated (`openssl rand -hex 48`) | backend |
 | `CF_ANALYTICS_API_TOKEN`, `CF_PAGES_API_TOKEN`, `CF_ZONE_ID` | Cloudflare dashboard → API Tokens | backend (analytics + deploy automation) |
-| `RAILWAY_API_TOKEN` | railway.app → Account Settings | local tooling (`scripts/railway.sh`, `pnpm run railway:*`) + GitHub Actions (`.github/workflows/railway-deploy.yml` repo secret of the same name) |
+| `DIGITALOCEAN_ACCESS_TOKEN` (Task #336 — replaces `RAILWAY_API_TOKEN`) | cloud.digitalocean.com → API → Tokens & Keys | local tooling (`scripts/digitalocean.sh`, `pnpm run do:*`) + GitHub Actions (`.github/workflows/digitalocean-deploy.yml` repo secret of the same name). Companion repo secrets: `DO_APP_ID_SYRABIT_BACKEND`, `DO_APP_ID_RUST_CORE`. |
 | `GITHUB_TOKEN` | github.com → Developer Settings | local tooling only |
 | `TRUSTPILOT_API_KEY` | Trustpilot dashboard | backend |
 | `KV_ALERT_SECRET` | self-generated | worker only (`wrangler secret put`) |
@@ -215,7 +214,7 @@ to prevent leaking into the public build log.
 After rotating any of these, mirror to:
 
 1. **Replit Secrets** (so local dev keeps working).
-2. **Backend deploy env** — Railway *and* Cloud Run if both are live.
+2. **Backend deploy env** — Digital Ocean App Platform (Task #336 made it the sole runtime origin; Railway and Cloud Run are decommissioned).
 3. Restart the workflow / redeploy.
 
 ---
@@ -294,7 +293,7 @@ the worker and the backend. Re-check §1 in order.
   bootstrap
 - `artifacts/syrabit-backend/CLOUDRUN-DEPLOY.md` — Cloud Run secret
   manager bindings
-- `artifacts/syrabit-backend/RAILWAY-DEPLOY.md` — Railway env setup
+- `docs/DIGITALOCEAN-DEPLOYMENT.md` — Digital Ocean env setup (Task #336; replaces the retired Railway runbook at `artifacts/syrabit-backend/RAILWAY-DEPLOY.md`)
 - `artifacts/syrabit/scripts/apply-pages-config.mjs` — the
   deny-list of secrets that must never reach Pages
 - `docs/audits/FULL_APP_AUDIT_2026-04-23.md` — findings S1

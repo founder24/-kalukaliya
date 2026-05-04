@@ -1,0 +1,124 @@
+name: Digital Ocean deploy (manual)
+
+#
+# Task #336 — replaces .github/workflows/railway-deploy.yml.
+# Drives `bash scripts/digitalocean.sh deploy <app>` from CI using
+# the DIGITALOCEAN_ACCESS_TOKEN repo secret. Trigger is
+# workflow_dispatch only — auto-deploys on push are owned by the
+# per-app deploy workflows referenced in
+# `artifacts/syrabit/docs/infra/api-on-do.md`.
+#
+# Supply-chain hardening: every `uses:` reference is pinned to a full
+# 40-char commit SHA (with a trailing `# vX.Y.Z` tag comment). Float
+# tags are forbidden — see the original railway-deploy.yml header for
+# the rationale (tj-actions/changed-files 2025 incident).
+#
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Which DO App Platform app to deploy."
+        required: true
+        default: syrabit-backend
+        type: choice
+        options:
+          - syrabit-backend
+          - rust-core
+          - both
+      mode:
+        description: "deploy = build + push DOCR + roll. redeploy = re-roll the latest already-built image."
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - redeploy
+      health_url:
+        description: "Optional public URL probed for HTTP 200 after the deploy. Leave blank to use the script default."
+        required: false
+        default: ""
+        type: string
+
+# Hard-gate to the protected branches so a fork PR can't trigger this.
+concurrency:
+  group: digitalocean-deploy-${{ github.event.inputs.app }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      DO_APP_ID_SYRABIT_BACKEND: ${{ secrets.DO_APP_ID_SYRABIT_BACKEND }}
+      DO_APP_ID_RUST_CORE:       ${{ secrets.DO_APP_ID_RUST_CORE }}
+      DO_HEALTHCHECK_URL_BACKEND: ${{ inputs.health_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # This job drives DO via the DIGITALOCEAN_ACCESS_TOKEN secret;
+          # it does not push back to the repo, so credentials are not
+          # needed afterwards.
+          persist-credentials: false
+
+      - name: Verify token is present
+        run: |
+          if [ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]; then
+            echo "::error::DIGITALOCEAN_ACCESS_TOKEN secret is not set on this repository."
+            exit 1
+          fi
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@135ac0aa0eed4437d547c6f12c364d3006b42824 # v2.5.1
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Install yq + grpcurl + Docker buildx
+        run: |
+          set -euo pipefail
+          # yq for spec patching (var-set / import-env paths).
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          # grpcurl for the rust-core post-deploy probe.
+          GRPCURL_VER=1.9.1
+          curl -sSL https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VER}/grpcurl_${GRPCURL_VER}_linux_x86_64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin grpcurl
+          docker buildx version
+
+      - name: doctl registry login (DOCR)
+        run: doctl registry login --expiry-seconds 3600
+
+      - name: Run deploy
+        run: |
+          set -euo pipefail
+          MODE="${{ inputs.mode }}"
+          APP="${{ inputs.app }}"
+          if [ "$APP" = "both" ]; then
+            bash scripts/digitalocean.sh "$MODE" syrabit-backend
+            bash scripts/digitalocean.sh "$MODE" rust-core
+          else
+            bash scripts/digitalocean.sh "$MODE" "$APP"
+          fi
+
+      - name: Post-deploy health probe
+        if: success()
+        run: |
+          set -euo pipefail
+          APP="${{ inputs.app }}"
+          if [ "$APP" = "both" ]; then
+            bash scripts/digitalocean.sh verify syrabit-backend
+            bash scripts/digitalocean.sh verify rust-core
+            bash scripts/digitalocean.sh grpc-check
+          elif [ "$APP" = "rust-core" ]; then
+            bash scripts/digitalocean.sh verify rust-core
+            bash scripts/digitalocean.sh grpc-check
+          else
+            bash scripts/digitalocean.sh verify syrabit-backend
+          fi

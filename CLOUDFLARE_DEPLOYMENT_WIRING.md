@@ -1,6 +1,13 @@
 # Cloudflare Deployment Wiring Guide
 ## Pydantic-Settings Configuration Integration
 
+> ⚠️ **HISTORICAL — Railway-era wiring.** Task #336 migrated the backend
+> origin off Railway onto Digital Ocean App Platform. Wherever this
+> document references Railway env vars or `railway variables set …`,
+> the equivalent today is `bash scripts/digitalocean.sh var-set syrabit-backend KEY=VAL`
+> (canonical runbook: [`docs/DIGITALOCEAN-DEPLOYMENT.md`](docs/DIGITALOCEAN-DEPLOYMENT.md)).
+> The Pydantic-Settings shape itself is unchanged.
+
 > **Canonical hosting plan:**
 > [`docs/infra/cloud-allocation-plan.md`](./docs/infra/cloud-allocation-plan.md)
 > — Cloudflare owns **frontend + edge + R2 + KV + D1 + Vectorize + Workers

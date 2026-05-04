@@ -269,8 +269,8 @@ wrangler deploy
 Before you flip the dashboard `BACKEND_URL`, run both origins in parallel:
 
 ```bash
-# Direct hit Railway (today's prod, control)
-curl -fsS https://workspacemockup-sandbox-production-df37.up.railway.app/api/health
+# Direct hit Digital Ocean App Platform (today's prod, control — Task #336)
+curl -fsS https://syrabit-backend-app.ondigitalocean.app/api/health
 
 # Direct hit Cloud Run with the shared secret (proves the new origin works)
 curl -fsS -H "X-Origin-Auth: ${ORIGIN_SHARED_SECRET}" \

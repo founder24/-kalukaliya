@@ -3,7 +3,7 @@
 This runbook covers the operator-side provisioning of Cloudflare Zero
 Trust for the admin / internal surface area, paired with the in-repo
 JWT enforcement that defends the origin even if someone learns the
-direct Cloud Run / Railway URL.
+direct Digital Ocean App Platform URL (Task #336 — replaces the legacy Cloud Run / Railway origins).
 
 ```
 admin user
@@ -36,10 +36,10 @@ Task #702 shipped the *code-side* gate on `/api/admin/login` (fail-closed
 503 if the env vars are partially set, 401 if the JWT is missing) plus
 the regression tests. **Until an operator completes the steps below in
 production, the protection is a no-op** — `/api/admin/login` is still
-reachable on the bare Railway URL with only the origin shared secret.
+reachable on the bare Digital Ocean App Platform URL (Task #336 — replaces the legacy Railway URL) with only the origin shared secret.
 
 This checklist must be executed by someone with **both** Cloudflare
-dashboard access **and** Railway env access. The agent cannot perform
+dashboard access **and** Digital Ocean App Platform env access (Task #336 — replaces Railway). The agent cannot perform
 any of these steps. Tick each item in the rollout ticket:
 
 - [ ] **Zero Trust team domain live.** Cloudflare dashboard → Zero Trust
@@ -57,7 +57,7 @@ any of these steps. Tick each item in the rollout ticket:
 - [ ] **(Optional) Internal Access app + AUD tag.** Only required once
   `/api/_internal/*` routes ship; the env var can be left unset
   until then (the dependency is a no-op when the AUD is empty).
-- [ ] **All four env vars set on Railway production** (Project →
+- [ ] **All four env vars set on the Digital Ocean App Platform `syrabit-backend` app** (Task #336; use `bash scripts/digitalocean.sh var-set syrabit-backend KEY=VAL` or the App Platform UI: cloud.digitalocean.com → Apps → syrabit-backend → Settings → App-Level Environment Variables. Legacy: Railway Project →
   syrabit-backend → Variables):
   ```
   CF_ACCESS_TEAM_DOMAIN=syrabit
@@ -69,7 +69,7 @@ any of these steps. Tick each item in the rollout ticket:
   > place. If `CF_ACCESS_ENFORCE=true` but `CF_ACCESS_AUD_ADMIN` is
   > empty, the backend fails closed with a 503 on every admin request
   > (intentional — see `cf_access._fail_closed_if_misconfigured`).
-- [ ] **FastAPI restarted.** Railway → syrabit-backend → Deployments →
+- [ ] **FastAPI restarted.** Digital Ocean App Platform → syrabit-backend → Activity → "Force Rebuild and Deploy" (or `bash scripts/digitalocean.sh redeploy syrabit-backend`). Legacy: Railway → syrabit-backend → Deployments →
   Restart (or trigger a redeploy). Required because env vars are
   read at process start.
 - [ ] **Diagnostics confirms enforcement is on.** From an authenticated
@@ -82,8 +82,9 @@ any of these steps. Tick each item in the rollout ticket:
   one of the four env vars is missing or the service was not
   restarted.
 - [ ] **Bare-origin bypass returns 401 on `/api/admin/login`.** Run the
-  curl in §6 step 3 against the **bare Railway URL** (e.g.
-  `https://syrabit-backend-production.up.railway.app`) with the
+  curl in §6 step 3 against the **bare Digital Ocean URL** (Task #336;
+  e.g. `https://syrabit-backend-app.ondigitalocean.app`, replacing the
+  legacy `https://syrabit-backend-production.up.railway.app`) with the
   `X-Origin-Auth` header set but **no** `Cf-Access-Jwt-Assertion`
   header. Expected status: `401`. This is the regression check that
   proves Task #702's gate on the login route is actually live in
@@ -172,9 +173,15 @@ accepts traffic from the tunnel.
   findings into the existing notification pipeline using the webhook
   in admin/notifications.
 
-## 5. Backend env vars (Railway production — and `.env` for local)
+## 5. Backend env vars (Digital Ocean App Platform production — and `.env` for local)
 
-Set on the FastAPI service in **Railway → syrabit-backend → Variables**
+> Task #336 migrated this from Railway to Digital Ocean App Platform.
+> Use `bash scripts/digitalocean.sh var-set syrabit-backend KEY=VAL`
+> (or the App Platform UI under Apps → syrabit-backend → Settings →
+> App-Level Environment Variables). The variable names below are
+> unchanged.
+
+Set on the FastAPI service in **App Platform → syrabit-backend → Settings → App-Level Environment Variables** (legacy: Railway → syrabit-backend → Variables)
 (or in `.env` for local development). **All four must be set before
 flipping enforcement on**:
 
@@ -217,9 +224,12 @@ cloudflared access curl \
   --service-token-secret "$CF_SERVICE_TOKEN_SECRET" \
   https://api.syrabit.ai/api/_internal/health
 
-# 3. Origin bypass attempt → must be 401 (run against the BARE Railway
-#    URL, not api.syrabit.ai, so you actually skip the Cloudflare edge)
-RAILWAY_URL="https://syrabit-backend-production.up.railway.app"
+# 3. Origin bypass attempt → must be 401 (run against the BARE Digital
+#    Ocean URL, not api.syrabit.ai, so you actually skip the Cloudflare
+#    edge). Task #336 — DO replaces the legacy Railway URL; the variable
+#    name is kept as RAILWAY_URL only to avoid breaking embedded
+#    copy-paste snippets in older runbooks.
+RAILWAY_URL="https://syrabit-backend-app.ondigitalocean.app"
 
 curl -sS -X POST \
      -H "X-Origin-Auth: $ORIGIN_SHARED_SECRET" \
@@ -256,14 +266,16 @@ and §5 before continuing.
 | Team domain renamed         | Update `CF_ACCESS_TEAM_DOMAIN`, restart service.   |
 | JWKS rotation               | No action — `cf_access.py` refetches on KID miss.  |
 | Suspected token leak        | Revoke the user's session in Zero Trust → Sessions; revoke the matching service token if CI was the source. |
-| Need temporary bypass       | Use the break-glass paths in §7.1 (60-second recovery, no Railway access required). The Railway env-flip is the slow fallback. |
+| Need temporary bypass       | Use the break-glass paths in §7.1 (60-second recovery, no Digital Ocean App Platform access required — Task #336 replaced Railway). The DO env-flip via `bash scripts/digitalocean.sh var-set syrabit-backend CF_ACCESS_ENFORCE=false` is the slow fallback. |
 
 ### 7.1 What to do if Cloudflare Access goes down (Task #706)
 
 A Cloudflare Zero Trust outage, an IdP failure, or an AUD-tag misrotation
 will lock every admin out of the dashboard at the exact moment they need
-to react. The original "set `CF_ACCESS_ENFORCE=false` on Railway and
-restart" recovery requires Railway access plus a service restart — that
+to react. The original "set `CF_ACCESS_ENFORCE=false` on the backend
+host and restart" recovery (Task #336 — Digital Ocean App Platform,
+formerly Railway) requires DO dashboard / `doctl` access plus a service
+restart — that
 can take 5–10 minutes during an active incident. The two break-glass
 paths below cap recovery at **~60 seconds** and do **not** require a
 FastAPI restart.
@@ -285,7 +297,7 @@ FastAPI restart.
    another Worker secret (e.g. `CF_ACCESS_BREAK_GLASS_ENABLED=true`) is
    set. Both secrets are editable from the Cloudflare dashboard alone.
 
-**Recovery path A — non-Railway (preferred, ~60s):**
+**Recovery path A — non-backend-host (preferred, ~60s; Task #336 — formerly "non-Railway"):**
 
 1. Cloudflare dashboard → Workers & Pages → `syrabit-edge` → Settings →
    Variables and Secrets → set `CF_ACCESS_BREAK_GLASS_ENABLED=true`,
@@ -303,13 +315,14 @@ FastAPI restart.
    `CF_ACCESS_BREAK_GLASS_ENABLED` back to `false`** on the Worker.
    Re-confirm `"break_glass_active": false`.
 
-**Recovery path B — One-Time-PIN admin login (Railway untouchable):**
+**Recovery path B — One-Time-PIN admin login (backend host untouchable; Task #336 — formerly "Railway untouchable"):**
 
-If both Workers and Railway are unreachable but the admin team domain is
+If both Workers and the Digital Ocean App Platform `syrabit-backend`
+app are unreachable but the admin team domain is
 still serving the OTP IdP, founders can log in via OTP (step 1 of §1)
 and reach `/admin/*` directly. Use this when path A is also blocked.
 
-**Recovery path C — Railway env-flip (legacy fallback, 5–10 min):**
+**Recovery path C — backend-host env-flip (legacy fallback, 5–10 min; Task #336 — Digital Ocean App Platform via `bash scripts/digitalocean.sh var-set syrabit-backend CF_ACCESS_ENFORCE=false` then `redeploy syrabit-backend`; formerly the Railway dashboard env edit):**
 
 1. Railway → syrabit-backend → Variables → set
    `CF_ACCESS_BREAK_GLASS=true`. Save (this triggers a redeploy).

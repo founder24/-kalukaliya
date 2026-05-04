@@ -1,0 +1,87 @@
+# .do/app-rust-core.yaml — DO App Platform spec for the Rust core
+#
+# Task #336 — App-Platform-managed home for the Rust gRPC + HTTP core,
+# replacing the Railway service. App Platform supports HTTP/2 + gRPC end
+# to end, so the gRPC port is declared as an `internal_ports` entry
+# instead of needing a separate Droplet.
+#
+# A self-managed Droplet alternative (docker-compose) is also provided
+# under `backend/rust-core/deploy/digitalocean/` for environments that
+# need raw TCP ingress on 50051 from outside the DO VPC.
+#
+# Image is published by `.github/workflows/digitalocean-deploy.yml`
+# (matrix job: rust-core), which builds `backend/rust-core/Dockerfile`,
+# pushes to DOCR (`registry.digitalocean.com/syrabit/rust-core:sha-...`),
+# rewrites `image.tag`, and runs `doctl apps update --wait`.
+
+name: rust-core
+region: blr1
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+  - rule: CPU_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: MEM_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: RESTART_COUNT
+    value: 3
+    operator: GREATER_THAN
+    window: TEN_MINUTES
+
+services:
+  - name: core
+    instance_size_slug: basic-xs
+    instance_count: 1
+    autoscaling:
+      min_instance_count: 1
+      max_instance_count: 3
+      metrics:
+        cpu:
+          percent: 75
+    http_port: 3000
+    internal_ports:
+      - 50051
+    image:
+      registry_type: DOCR
+      repository: rust-core
+      tag: bootstrap
+      deploy_on_push:
+        enabled: false
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 5
+      period_seconds: 10
+      timeout_seconds: 3
+      success_threshold: 1
+      failure_threshold: 3
+    deployment_strategy:
+      type: ROLLING
+      max_surge: 1
+      max_unavailable: 0
+    envs:
+      - { key: HTTP_PORT,                value: "3000",  scope: RUN_AND_BUILD_TIME }
+      - { key: GRPC_PORT,                value: "50051", scope: RUN_AND_BUILD_TIME }
+      - { key: ENVIRONMENT,              value: "production", scope: RUN_TIME }
+      - { key: RUST_LOG,                 value: "info",  scope: RUN_TIME }
+
+      - { key: DATABASE_URL,             value: "PLACEHOLDER_SET_VIA_doctl", type: SECRET, scope: RUN_TIME }
+      - { key: JWT_SECRET,               value: "PLACEHOLDER_SET_VIA_doctl", type: SECRET, scope: RUN_TIME }
+      - { key: UPSTASH_REDIS_REST_URL,   value: "PLACEHOLDER_SET_VIA_doctl", type: SECRET, scope: RUN_TIME }
+      - { key: UPSTASH_REDIS_REST_TOKEN, value: "PLACEHOLDER_SET_VIA_doctl", type: SECRET, scope: RUN_TIME }
+
+      - { key: SENTRY_DSN,               value: "PLACEHOLDER_SET_VIA_doctl", type: SECRET, scope: RUN_TIME }
+      - { key: AXIOM_TOKEN,              value: "PLACEHOLDER_SET_VIA_doctl", type: SECRET, scope: RUN_TIME }
+      - { key: AXIOM_DATASET,            value: "rust-core-do", scope: RUN_TIME }
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: core

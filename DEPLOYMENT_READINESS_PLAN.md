@@ -1,5 +1,13 @@
 # 🚀 Syrabit.ai Neural Mesh Deployment Readiness Plan
 
+> ⚠️ **HISTORICAL — Railway-era plan.** Task #336 migrated the backend
+> off Railway onto Digital Ocean App Platform. The current
+> infrastructure-alignment checklist now lives at
+> [`docs/DIGITALOCEAN-DEPLOYMENT.md`](docs/DIGITALOCEAN-DEPLOYMENT.md)
+> and the cutover/rollback runbook at
+> [`docs/ops/digitalocean-cutover.md`](docs/ops/digitalocean-cutover.md).
+> Treat anything below this banner as historical context only.
+
 **Status**: Code Complete ✅ | Infrastructure Alignment: **NOT READY** ❌  
 **Estimated Effort**: 10-15 hours  
 **Priority**: Critical Blockers Must Be Fixed Before Deployment

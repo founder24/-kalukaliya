@@ -1,4 +1,16 @@
-# Syrabit Neural Mesh Core - Railway Deployment
+# Syrabit Neural Mesh Core — Railway Deployment (DEPRECATED)
+#
+# Task #336 migrated this service off Railway and onto Digital Ocean
+# App Platform. The active spec is `.do/app-rust-core.yaml` (managed
+# rolling deploys via `bash scripts/digitalocean.sh deploy rust-core`),
+# with an alternative Droplet path under
+# `backend/rust-core/deploy/digitalocean/`.
+#
+# This file is retained ONLY so anyone with a stale Railway link in
+# their GitHub integration sees an obvious deprecation marker rather
+# than a silent successful build that competes with the DO origin.
+# Do NOT add new keys here. Remove the file once the Railway project
+# itself is deleted (see docs/ops/digitalocean-cutover.md §Decommission).
 
 [build]
 builder = "dockerfile"

@@ -18,9 +18,10 @@ compatibility_flags = [
 # Until then the Standard Workers model applies (10ms CPU / 128MB RAM).
 
 # Smart Placement — Cloudflare automatically routes each isolate invocation
-# to the data-centre closest to the Railway backend origin, not to the user.
-# This cuts origin RTT on API proxying by 30–60 ms in Asia Pacific markets
-# (the primary Assam user base). Available on Workers Standard Paid.
+# to the data-centre closest to the Digital Ocean backend origin (blr1),
+# not to the user. This cuts origin RTT on API proxying by 30–60 ms in
+# Asia Pacific markets (the primary Assam user base). Available on
+# Workers Standard Paid.
 [placement]
 mode = "smart"
 
@@ -45,20 +46,23 @@ routes = [
 
 [vars]
 # ---------------------------------------------------------------------------
-# BACKEND_URL — the production Railway backend the edge worker proxies to.
+# BACKEND_URL — the production backend origin the edge worker proxies to.
 #
-# Despite the misleading hostname, `workspacemockup-sandbox-production-df37`
-# IS the live production Railway service. It was originally created off a
-# sandbox project's name and never renamed — the URL is permanent because
-# Railway hostnames cannot be changed without re-provisioning. A `curl
-# /api/health` against it returns the real Syrabit.ai API (status 200,
-# `"service":"Syrabit.ai API"`).
+# Task #336 — cut over from the legacy Railway hostname
+# (`workspacemockup-sandbox-production-df37.up.railway.app`) to the
+# Digital Ocean App Platform service `syrabit-backend` in region blr1.
+# The DO default-ingress hostname (`syrabit-backend-XXXXX.ondigitalocean.app`)
+# is wrapped behind the public custom domain `api.syrabit.ai` so any
+# future DO redeploy that mints a new default-ingress URL needs no
+# `wrangler deploy` from this repo.
 #
-# Verified state (Apr 2026):
+# Verified state (May 2026, post-cutover):
 #   - Live worker has BACKEND_URL set ONLY as a plaintext binding (this
 #     value); there is no encrypted secret override on the dashboard.
-#   - `wrangler deploy` from this repo therefore round-trips the same
-#     value back into production — safe to redeploy at any time.
+#   - `wrangler deploy` from this repo round-trips the same value back
+#     into production — safe to redeploy at any time.
+#   - `curl https://api.syrabit.ai/api/health` returns
+#     `{"status":"ok","service":"Syrabit.ai API"}` from the DO origin.
 #
 # How to change the backend URL:
 #   1. Update this line and `wrangler deploy`. The new value is what
@@ -71,13 +75,13 @@ routes = [
 #      the same name overwrites the secret on every deploy).
 #   3. For local `wrangler dev`, create workers/edge-proxy/.dev.vars
 #      (gitignored):
-#        BACKEND_URL=https://your-local-or-staging-host.up.railway.app
+#        BACKEND_URL=https://syrabit-backend-staging.ondigitalocean.app
 #
-# Followup if the misleading name keeps confusing operators: rename the
-# Railway service to e.g. `syrabit-prod-api` (requires re-provisioning +
-# DNS-style cutover) and update the value below in the same commit.
+# Rollback during cutover soak: temporarily set this back to the legacy
+# Railway URL until the Railway project is decommissioned (see
+# docs/ops/digitalocean-cutover.md §Rollback).
 # ---------------------------------------------------------------------------
-BACKEND_URL = "https://workspacemockup-sandbox-production-df37.up.railway.app"
+BACKEND_URL = "https://api.syrabit.ai"
 
 # Task #306 / #307 — WORKERS_AI_GATEWAY_ID: route every env.AI.run(...)
 # through the named AI Gateway so (a) Workers AI invoice line items are
@@ -120,13 +124,14 @@ PAGES_ORIGIN = "https://syrabit-zip-convert.pages.dev"
 # D1_SYNC_SECRET must be set via Wrangler secret (not committed to source control):
 #   wrangler secret put D1_SYNC_SECRET
 #
-# Task #606 — BACKEND_ORIGIN_SECRET: shared secret the worker injects on
-# every backend fetch as `X-Origin-Auth`. Required when BACKEND_URL points
-# at the Cloud Run service (the Cloud Run app rejects requests without it
-# via OriginSharedSecretMiddleware). Set via:
+# Task #606 / Task #336 — BACKEND_ORIGIN_SECRET: shared secret the worker
+# injects on every backend fetch as `X-Origin-Auth`. Required because the
+# Digital Ocean `syrabit-backend` app rejects requests without it via
+# OriginSharedSecretMiddleware. Set via:
 #   wrangler secret put BACKEND_ORIGIN_SECRET
-# The same value MUST be set as ORIGIN_SHARED_SECRET on the Cloud Run
-# service (Secret Manager binding — see CLOUDRUN-DEPLOY.md).
+# The same value MUST be set as ORIGIN_SHARED_SECRET on the DO app
+# (`scripts/digitalocean.sh var-set syrabit-backend ORIGIN_SHARED_SECRET=…`
+# — see docs/DIGITALOCEAN-DEPLOYMENT.md).
 
 # Task #636 — Workers AI binding for the auto-fallback fan-out at
 # /api/ai/fallback/{chat,embed,tts,stt}. The backend hits these routes
