@@ -1,9 +1,9 @@
 # Pre-Seed Startup Credit Applications Tracker
 
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-04
 **Status:** Active — see machine-readable sidecar `credit-applications.json`
 **Owner:** founder@syrabit.ai
-**Task:** #323
+**Task:** #323 (created), #339 (claimed queued credits — see Tracker table)
 
 This doc is the **single source of truth** for every pre-seed-eligible startup-credit
 programme Syrabit is claiming. The tracker table below is rendered in the admin
@@ -88,17 +88,17 @@ Why pre-seed entry tier (not the headline ceiling):
 |---|---|---|---|---:|---|---:|---|---|
 | `mongodb_atlas` | MongoDB for Startups | <https://www.mongodb.com/startups> | founder@syrabit.ai | 500 | ✅ approved | 500 | 2026-12-01 | Atlas free-tier cluster + $500 promo credit applied. |
 | `cloudflare` | Cloudflare for Startups | <https://www.cloudflare.com/forstartups/> | founder@syrabit.ai | 5,000 | ✅ approved | 5,000 | 2026-09-01 | Enterprise zone — WAF, Turnstile, mTLS, Zero Trust, Pages, R2, D1, Vectorize. |
-| `deepgram` | Deepgram (instant signup) | <https://console.deepgram.com/signup> | founder@syrabit.ai | 200 | 🟡 ready | — | — | No review — instant. Capture `DEEPGRAM_API_KEY`. |
-| `deepgram_startup` | Deepgram Startup Program | <https://deepgram.com/startup-program> | founder@syrabit.ai | 1,000 | ⚪ not started | — | — | Stacks on the $200 instant signup. |
-| `assemblyai` | AssemblyAI (instant signup) | <https://www.assemblyai.com/dashboard/signup> | founder@syrabit.ai | 50 | 🟡 ready | — | — | No review — instant. Capture `ASSEMBLYAI_API_KEY`. |
-| `assemblyai_startup` | AssemblyAI Startup | <https://www.assemblyai.com/startups> | founder@syrabit.ai | 1,500 | ⚪ not started | — | — | Stacks on the $50 instant signup. |
-| `elevenlabs` | ElevenLabs Grants | <https://elevenlabs.io/grants> | founder@syrabit.ai | 4,000 | ⚪ not started | — | — | Highest-yield easy form, ~70% landing rate with packet. |
-| `sarvam` | Sarvam (instant signup) | <https://dashboard.sarvam.ai/signup> | founder@syrabit.ai | 13 | 🟡 ready | — | — | ₹1,100 ≈ $13. Capture `SARVAM_API_KEY`. |
-| `sarvam_startup` | Sarvam Startup Programme (India) | <https://www.sarvam.ai/startup-programme> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Stacks on ₹1,100 signup; tier amount varies. |
-| `openrouter` | OpenRouter (free starter) | <https://openrouter.ai/sign-up> | founder@syrabit.ai | 0 | 🟡 ready | — | — | No card required. Capture `OPENROUTER_API_KEY`. |
-| `openrouter_startup` | OpenRouter Startup Program | <https://openrouter.ai/startups> | founder@syrabit.ai | 5,000 | ⚪ not started | — | — | Largest single ask; explicit pre-seed framing. |
-| `exa_ai` | Exa Startup | <https://exa.ai/startups> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Grants 6 months Enterprise Pro (not USD). |
-| `pinecone_ai` | Pinecone for Startups | <https://www.pinecone.io/startups/> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Grants free Standard Tier + Pro Support (not USD). |
+| `deepgram` | Deepgram (instant signup) | <https://console.deepgram.com/signup> | founder@syrabit.ai | 200 | ✅ approved | 200 | — | Instant credit auto-applied 2026-05-04. `DEEPGRAM_API_KEY` in Replit Secrets. |
+| `deepgram_startup` | Deepgram Startup Program | <https://deepgram.com/startup-program> | founder@syrabit.ai | 1,000 | 📨 submitted | — | — | Submitted 2026-05-04 with §Company Facts packet. Stacks on $200 instant signup. |
+| `assemblyai` | AssemblyAI (instant signup) | <https://www.assemblyai.com/dashboard/signup> | founder@syrabit.ai | 50 | ✅ approved | 50 | — | Instant credit auto-applied 2026-05-04. `ASSEMBLYAI_API_KEY` in Replit Secrets. |
+| `assemblyai_startup` | AssemblyAI Startup | <https://www.assemblyai.com/startups> | founder@syrabit.ai | 1,500 | 📨 submitted | — | — | Submitted 2026-05-04. Stacks on $50 instant signup. |
+| `elevenlabs` | ElevenLabs Grants | <https://elevenlabs.io/grants> | founder@syrabit.ai | 4,000 | 📨 submitted | — | — | Submitted 2026-05-04 with Assamese audio-first use-case framing. ~70% landing rate. |
+| `sarvam` | Sarvam (instant signup) | <https://dashboard.sarvam.ai/signup> | founder@syrabit.ai | 13 | ✅ approved | 13 | — | ₹1,100 ≈ $13 auto-applied 2026-05-04. `SARVAM_API_KEY` in Replit Secrets. |
+| `sarvam_startup` | Sarvam Startup Programme (India) | <https://www.sarvam.ai/startup-programme> | founder@syrabit.ai | 0 | 📨 submitted | — | — | Submitted 2026-05-04 with Udyam MSME proof; tier amount varies. |
+| `openrouter` | OpenRouter (free starter) | <https://openrouter.ai/sign-up> | founder@syrabit.ai | 0 | ✅ approved | 0 | — | Free starter active 2026-05-04. `OPENROUTER_API_KEY` in Replit Secrets. |
+| `openrouter_startup` | OpenRouter Startup Program | <https://openrouter.ai/startups> | founder@syrabit.ai | 5,000 | 📨 submitted | — | — | Submitted 2026-05-04 with explicit pre-seed/unfunded framing. Largest single ask. |
+| `exa_ai` | Exa Startup | <https://exa.ai/startups> | founder@syrabit.ai | 0 | 📨 submitted | — | — | Submitted 2026-05-04. Grants 6 months Enterprise Pro (not USD). |
+| `pinecone_ai` | Pinecone for Startups | <https://www.pinecone.io/startups/> | founder@syrabit.ai | 0 | 📨 submitted | — | — | Submitted 2026-05-04. Grants free Standard Tier + Pro Support. |
 | `bedrock` | AWS Activate (Bedrock) | <https://aws.amazon.com/activate/> | founder@syrabit.ai | 1,000 | 🚫 disabled | 1,000 | — | Disabled — AWS Bedrock daily token quota exhausted. |
 
 ---
