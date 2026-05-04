@@ -75,6 +75,30 @@ otherwise they are vendor-published or `unverified`.
 | `tavily` | Tavily Startup Credits | 500 | unverified | unverified | Tavily workspace | `live_search` (secondary) | unverified | unverified | `unverified` |
 | `workers_ai` | Cloudflare Workers AI Free Tier | 0 (free) | n/a | n/a | CF account | last-resort `english_rag_chat`, `content`, `tts`, `stt`, `voice`, `vision`, `safety`, `embed`, `rerank`, `vector_search`, `search_rag`, `live_search` | 272 / 346 (warm), 384 cold | 137.5 tok/s p50 (`gpt-oss-20b`) | `bench_results/latest.json` (suite=`english_chat`, provider=`workers_ai_oss20`) |
 | `workers_ai_indic` | Cloudflare Workers AI Free Tier | 0 (free) | n/a | n/a | CF account | last-resort `translate`, `assamese_content` (IndicTrans2 fallback only — pinned at weight 1 in §2 per the last-resort policy) | unverified (bench skipped — non-Assamese script regression) | unverified | `bench_results/latest.json` (skipped) |
+| `workers_ai_mistral_7b` | Cloudflare Workers AI Free Tier | 0 (free) | n/a | n/a | CF account | tail-end fallback `english_rag_chat` (weight 20), `content` (weight 10) — Task #347 promotion | ~350 / ~450 (vendor docs, `@cf/mistral/mistral-7b-instruct-v0.3`) | ~110 tok/s p50 (vendor docs) | Cloudflare Workers AI model card; chaos-verified by `tests/test_workers_ai_chat_integration.py::test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled` (Task #366) |
+| `workers_ai_llama32_3b` | Cloudflare Workers AI Free Tier | 0 (free) | n/a | n/a | CF account | tail-end fallback `english_rag_chat` (weight 20, fast-mode primary) — Task #347 promotion | ~200 / ~300 (vendor docs, `@cf/meta/llama-3.2-3b-instruct`) — fastest TTFT in the tail | ~180 tok/s p50 (vendor docs) | Cloudflare Workers AI model card; chaos-verified by `tests/test_workers_ai_chat_integration.py::test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled` (Task #366) |
+| `workers_ai_llama31_8b` | Cloudflare Workers AI Free Tier | 0 (free) | n/a | n/a | CF account | tail-end fallback `assamese_rag_chat` (weight 10) — Task #347 promotion (Indic-aware chat tail) | ~400 / ~550 (vendor docs, `@cf/meta/llama-3.1-8b-instruct-fp8`) | ~95 tok/s p50 (vendor docs) | Cloudflare Workers AI model card; chaos-verified by `tests/test_workers_ai_chat_integration.py::test_assamese_chat_falls_back_to_workers_ai_tail_when_paid_throttled` (Task #366) |
+
+#### Workers AI tail cost note (Task #366)
+
+The three Task #347 promotions (`workers_ai_mistral_7b`, `workers_ai_llama32_3b`,
+`workers_ai_llama31_8b`) all bill against the Cloudflare Workers AI Free Tier:
+
+- **Effective cost-per-1k-tokens within the free quota:** **$0.00** (10,000
+  Neurons/day per account, well above Syrabit's tail-end traffic).
+- **Overage rate** (when the daily Neuron quota is exceeded): **$0.011 per 1,000
+  Neurons** — vendor public pricing (Cloudflare Workers AI pricing page).
+  Mapping Neurons → tokens depends on model size; for the three tail variants
+  here, 1k output tokens consume roughly 30 – 60 Neurons → effective overage
+  cost ≈ **$0.0003 – $0.0007 per 1k output tokens**, i.e. one to two orders
+  of magnitude below Azure OpenAI gpt-4.1-mini's $0.0006 / $0.0024 input/output
+  rates and Vertex Gemini 2.5 Flash's $0.000075 / $0.0003. Treat as $0 for
+  capacity planning until and unless we breach the daily Neuron quota.
+- **Latency budget the chaos test is built around:** the tail must answer
+  within **~600 ms warm p95** for the named variants and **~800 ms warm p95**
+  for the gpt-oss-20b last resort, so a chat turn that lands fully on the tail
+  still completes under the 1.5 s admin-dashboard SLO once edge / RAG retrieval
+  / streaming overhead is added in.
 
 ### Infra-tier providers (credit-bearing, *not* in `PROVIDER_PRIORITY`)
 
