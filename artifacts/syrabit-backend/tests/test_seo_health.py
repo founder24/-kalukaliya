@@ -351,21 +351,20 @@ def test_email_sent_with_csv_attachment_when_above_threshold(monkeypatch):
         EMAIL_FROM="Syrabit.ai <noreply@syrabit.ai>",
     )
 
-    monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+    monkeypatch.setenv("SENDGRID_API_KEY", "sg_test_123")
 
-    sent_payloads = []
-    fake_resend = types.SimpleNamespace(
-        api_key=None,
-        Emails=types.SimpleNamespace(
-            send=lambda payload: sent_payloads.append(payload),
-        ),
-    )
+    sent_calls = []
+
+    def _fake_send_admin_email(**kwargs):
+        sent_calls.append(kwargs)
+        return True
+
+    fake_email_templates.send_admin_email = _fake_send_admin_email
 
     with patch.dict(sys.modules, {
         "db_ops": fake_db_ops,
         "metrics": fake_metrics,
         "email_templates": fake_email_templates,
-        "resend": fake_resend,
     }):
         result = asyncio.run(bot_discovery._maybe_email_failing_csv(
             "sitemap-learn.xml",
@@ -376,8 +375,8 @@ def test_email_sent_with_csv_attachment_when_above_threshold(monkeypatch):
     assert result["sent"] is True, result
     assert result["to"] == "oncall@syrabit.ai"
     assert "75" in result["subject"] and "sitemap-learn.xml" in result["subject"]
-    assert len(sent_payloads) == 1
-    payload = sent_payloads[0]
+    assert len(sent_calls) == 1
+    payload = sent_calls[0]
     assert payload["to"] == ["oncall@syrabit.ai"]
     # Exactly one attachment with the right shape and base64 content.
     assert len(payload["attachments"]) == 1
@@ -428,8 +427,8 @@ def test_deep_scan_route_invokes_email_helper_and_attaches_result():
     assert captured_calls[0]["admin_id"] == "admin-42"
 
 
-def test_email_skipped_without_resend_key(monkeypatch):
-    """Missing RESEND_API_KEY must be a graceful no-op, not an
+def test_email_skipped_without_sendgrid_key(monkeypatch):
+    """Missing SENDGRID_API_KEY must be a graceful no-op, not an
     exception — the deep scan itself still succeeded and we don't want
     email delivery problems to blow up the response."""
     async def _prefs(_admin_id):
@@ -443,7 +442,7 @@ def test_email_skipped_without_resend_key(monkeypatch):
         _notification_channels={"email": "oncall@syrabit.ai"},
         _load_alert_settings=_noop_load,
     )
-    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
 
     with patch.dict(sys.modules, {
         "db_ops": fake_db_ops, "metrics": fake_metrics,
@@ -454,7 +453,7 @@ def test_email_skipped_without_resend_key(monkeypatch):
             admin_id="admin-1",
         ))
     assert result["sent"] is False
-    assert result["reason"] == "no_resend_key"
+    assert result["reason"] == "no_sendgrid_key"
 
 
 # -------- Task #822: pin the self-check User-Agent contract --------

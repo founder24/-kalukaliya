@@ -97,7 +97,7 @@ def _patch_dispatch_environment(*, webhook_url="https://hooks.slack.test/abc"):
             {"email": "", "webhook_url": webhook_url,
              "seo_slack_enabled": True, "hydrate_slack_enabled": True},
         ),
-        patch.dict("os.environ", {"RESEND_API_KEY": "", "ALERT_EMAIL": ""}, clear=False),
+        patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False),
     ]
 
 
@@ -174,7 +174,7 @@ def test_hydrate_slack_enabled_false_mutes_webhook_only():
                       {"email": "", "webhook_url": "https://hooks.slack.test/x",
                        "seo_slack_enabled": True, "hydrate_slack_enabled": False}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
         asyncio.run(metrics._dispatch_alert(
             "hydrate_failure_spike", "title", "body",
             threshold_snapshot=_failure_spike_snap(),
@@ -203,7 +203,7 @@ def test_seo_mute_does_not_affect_hydrate_routing():
                       {"email": "", "webhook_url": "https://hooks.slack.test/x",
                        "seo_slack_enabled": False, "hydrate_slack_enabled": True}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
         asyncio.run(metrics._dispatch_alert(
             "hydrate_failure_spike", "title", "body",
             threshold_snapshot=_failure_spike_snap(),
@@ -213,7 +213,7 @@ def test_seo_mute_does_not_affect_hydrate_routing():
 
 
 def test_hydrate_mute_does_not_suppress_email_or_push():
-    """hydrate_slack_enabled=False must mute ONLY the webhook — Resend
+    """hydrate_slack_enabled=False must mute ONLY the webhook — SendGrid
     email and the browser-push fan-out must still run.
     """
     fake_db = MagicMock()
@@ -221,15 +221,10 @@ def test_hydrate_mute_does_not_suppress_email_or_push():
     sent_email = {"called": False}
     pushed = {"called": False, "payload": None}
 
-    class _FakeResendEmails:
-        @staticmethod
-        def send(payload):
-            sent_email["called"] = True
-            sent_email["payload"] = payload
-
-    class _FakeResendModule:
-        api_key = ""
-        Emails = _FakeResendEmails
+    def _fake_send_admin_email(**kwargs):
+        sent_email["called"] = True
+        sent_email["payload"] = kwargs
+        return True
 
     class _FakeClient:
         def __init__(self, *a, **kw): pass
@@ -246,6 +241,7 @@ def test_hydrate_mute_does_not_suppress_email_or_push():
     fake_admin_notif = types.ModuleType("routes.admin_notifications")
     fake_admin_notif._dispatch_push_to_admins = _fake_push
 
+    import email_templates as _et
     metrics._alert_last_fired.pop("hydrate_failure_spike", None)
     with patch.object(metrics, "db", fake_db), \
          patch.object(metrics, "_notification_channels",
@@ -253,8 +249,8 @@ def test_hydrate_mute_does_not_suppress_email_or_push():
                        "seo_slack_enabled": True, "hydrate_slack_enabled": False}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
          patch.dict(sys.modules, {"routes.admin_notifications": fake_admin_notif}), \
-         patch.dict("sys.modules", {"resend": _FakeResendModule}), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "re_fake", "ALERT_EMAIL": ""},
+         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "sg_fake", "ALERT_EMAIL": ""},
                     clear=False):
         asyncio.run(metrics._dispatch_alert(
             "hydrate_failure_spike", "title", "body",
@@ -293,7 +289,7 @@ def test_hydrate_mute_does_not_affect_seo_alert_routing():
                       {"email": "", "webhook_url": "https://hooks.slack.test/x",
                        "seo_slack_enabled": True, "hydrate_slack_enabled": False}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
         asyncio.run(metrics._dispatch_alert(
             "seo_health_degraded", "title", "body",
             threshold_snapshot={"actual": "degraded"},

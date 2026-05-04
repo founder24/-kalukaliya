@@ -178,13 +178,6 @@ ALLOWLIST_FILES = {
     # operators following the runbook still see this shape on older
     # production deploys until the CF Workers env is fully migrated.
     "artifacts/syrabit/CLOUDFLARE_PAGES.md",
-    # Task #347 — the admin-alert routes have been fully migrated off Resend
-    # onto the new SendGrid helper ``email_templates.send_admin_email``. The
-    # matching test files use ``patch.dict("sys.modules", {"resend": ...})``
-    # mock-injection patterns rather than real ``import resend`` statements
-    # (which is what BANNED_VENDOR_USES catches), so they no longer require
-    # an allowlist exemption. Migrating those mocks to patch the new
-    # ``send_admin_email`` helper directly is tracked as a follow-up.
     # Failure-mode strings + AI Gateway routing tables that name historical
     # providers ("Bedrock-Cohere", "Groq", "Azure OpenAI") inside operator
     # documentation. Removing these would erase the routing breadcrumb

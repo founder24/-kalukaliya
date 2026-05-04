@@ -97,35 +97,38 @@ def test_send_skipped_when_no_admin_email():
     )
     fake_stats = bot_discovery._compose_seo_weekly_digest([_snap("ok", hours_ago=1)])
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.dict("os.environ", {"ALERT_EMAIL": "", "RESEND_API_KEY": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": "", "SENDGRID_API_KEY": ""}, clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is False
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_uses_resend_when_email_and_key_present():
+def test_send_uses_sendgrid_when_email_and_key_present():
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
     )
-    sent_payloads = []
-    fake_resend = types.SimpleNamespace(
-        api_key=None,
-        Emails=types.SimpleNamespace(send=lambda payload: sent_payloads.append(payload)),
-    )
+    sent_calls = []
+
+    def _fake_send_admin_email(**kwargs):
+        sent_calls.append(kwargs)
+        return True
+
+    import email_templates as _et
     fake_stats = bot_discovery._compose_seo_weekly_digest(
         [_snap("ok", hours_ago=h) for h in (1, 2, 3)]
     )
-    with patch.dict(sys.modules, {"metrics": metrics_stub, "resend": fake_resend}), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "test-key"}, clear=False):
+    with patch.dict(sys.modules, {"metrics": metrics_stub}), \
+         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "test-key"}, clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is True
     assert result["to"] == "admin@syrabit.ai"
-    assert sent_payloads, "Resend.Emails.send should have been called once"
-    payload = sent_payloads[0]
-    assert payload["to"] == ["admin@syrabit.ai"]
-    assert "weekly digest" in payload["subject"].lower()
-    assert "SEO weekly digest" in payload["html"]
+    assert sent_calls, "send_admin_email should have been called once"
+    call = sent_calls[0]
+    assert call["to"] == ["admin@syrabit.ai"]
+    assert "weekly digest" in call["subject"].lower()
+    assert "SEO weekly digest" in call["html"]
 
 
 # ── _gather_weekly_digest_inputs ────────────────────────────────────────────

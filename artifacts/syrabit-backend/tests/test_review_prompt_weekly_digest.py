@@ -522,7 +522,7 @@ def test_try_send_rolls_back_marker_on_send_failure():
 
 def test_send_email_skipped_without_admin_email(monkeypatch):
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
-    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
     fake_stats = {"iso_week": "2026-W17", "shown": 1, "clicked": 0,
                   "dismissed": 0, "ctr_pct": None}
     # Force _notification_channels lookup to return no email.
@@ -540,8 +540,8 @@ def test_send_email_skipped_without_admin_email(monkeypatch):
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_email_skipped_without_resend_key(monkeypatch):
-    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+def test_send_email_skipped_without_sendgrid_key(monkeypatch):
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
     monkeypatch.setenv("ALERT_EMAIL", "ops@example.com")
     # Reset the in-memory ``metrics._notification_channels`` dict — earlier
     # tests in the suite (e.g. ``test_admin_assamese_purity``,
@@ -564,7 +564,7 @@ def test_send_email_skipped_without_resend_key(monkeypatch):
     )
     assert result["sent"] is False
     assert result["to"] == "ops@example.com"
-    assert result["reason"] == "no_resend_key"
+    assert result["reason"] == "no_sendgrid_key"
 
 
 def test_send_email_returns_no_stats_when_called_with_empty_dict():

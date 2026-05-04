@@ -254,37 +254,40 @@ def test_send_skipped_when_no_admin_email():
         {"by_category": {}, "bot_total": 0, "bot_5xx": 0, "source": "cloudflare"},
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.dict("os.environ", {"ALERT_EMAIL": "", "RESEND_API_KEY": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": "", "SENDGRID_API_KEY": ""}, clear=False):
         result = asyncio.run(bot_traffic_report._send_bot_traffic_report_email(fake_stats))
     assert result["sent"] is False
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_uses_resend_when_email_and_key_present():
+def test_send_uses_sendgrid_when_email_and_key_present():
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
     )
-    sent_payloads = []
-    fake_resend = types.SimpleNamespace(
-        api_key=None,
-        Emails=types.SimpleNamespace(send=lambda payload: sent_payloads.append(payload)),
-    )
+    sent_calls = []
+
+    def _fake_send_admin_email(**kwargs):
+        sent_calls.append(kwargs)
+        return True
+
+    import email_templates as _et
     fake_stats = bot_traffic_report._compose_bot_traffic_report(
         {"by_category": {"Search Engine Crawler": 280}, "bot_total": 280, "bot_5xx": 0,
          "source": "cloudflare"},
         {"by_category": {"Search Engine Crawler": 219}, "bot_total": 219, "bot_5xx": 0,
          "source": "cloudflare"},
     )
-    with patch.dict(sys.modules, {"metrics": metrics_stub, "resend": fake_resend}), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "test-key"}, clear=False):
+    with patch.dict(sys.modules, {"metrics": metrics_stub}), \
+         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "test-key"}, clear=False):
         result = asyncio.run(bot_traffic_report._send_bot_traffic_report_email(fake_stats))
     assert result["sent"] is True
-    assert sent_payloads
-    payload = sent_payloads[0]
-    assert payload["to"] == ["admin@syrabit.ai"]
-    assert "bot traffic weekly report" in payload["subject"].lower()
-    assert "219 → 280" in payload["html"]
+    assert sent_calls
+    call = sent_calls[0]
+    assert call["to"] == ["admin@syrabit.ai"]
+    assert "bot traffic weekly report" in call["subject"].lower()
+    assert "219 → 280" in call["html"]
 
 
 def test_send_refuses_when_stats_has_error():

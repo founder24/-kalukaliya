@@ -610,7 +610,7 @@ def test_url_spike_no_alert_when_only_one_low_rate():
 
 def test_dispatch_alert_email_includes_by_sitemap_html():
     """Verify _dispatch_alert renders threshold_snapshot['by_sitemap_html']
-    inside the outgoing Resend email body, so the seo_url_spike alert
+    inside the outgoing SendGrid email body, so the seo_url_spike alert
     actually shows the per-sitemap breakdown to admins."""
     # Drop the test stub for metrics so we exercise the real implementation.
     sys.modules.pop("metrics", None)
@@ -628,36 +628,33 @@ def test_dispatch_alert_email_includes_by_sitemap_html():
     metrics._alert_last_fired = {}
     captured = {}
 
-    class _FakeResend:
-        api_key = ""
-        class Emails:
-            @staticmethod
-            def send(payload):
-                captured["payload"] = payload
+    import email_templates as _et
+    def _fake_send_admin_email(**kwargs):
+        captured["payload"] = kwargs
+        return True
 
-    sys.modules["resend"] = _FakeResend
     metrics._notification_channels = {"email": "admin@example.com", "webhook_url": ""}
-    import os as _os
     from config import Configurator
-    Configurator.set_runtime_env("RESEND_API_KEY", "test-key")
+    Configurator.set_runtime_env("SENDGRID_API_KEY", "test-key")
 
     by_sitemap_html = (
         "<table><tr><td>sitemap-learn.xml</td><td>2/10</td></tr></table>"
     )
-    asyncio.run(metrics._dispatch_alert(
-        "seo_url_spike",
-        "SEO: URL 404 spike (50% OK)",
-        "URL spot-check success rate has been at 50%\nfor two consecutive hourly checks.",
-        threshold_snapshot={
-            "metric": "url_404_spike_pct",
-            "value": 20.0,
-            "actual": 50.0,
-            "by_sitemap_html": by_sitemap_html,
-        },
-    ))
+    with patch.object(_et, "send_admin_email", _fake_send_admin_email):
+        asyncio.run(metrics._dispatch_alert(
+            "seo_url_spike",
+            "SEO: URL 404 spike (50% OK)",
+            "URL spot-check success rate has been at 50%\nfor two consecutive hourly checks.",
+            threshold_snapshot={
+                "metric": "url_404_spike_pct",
+                "value": 20.0,
+                "actual": 50.0,
+                "by_sitemap_html": by_sitemap_html,
+            },
+        ))
 
     payload = captured.get("payload")
-    assert payload, "Expected Resend email payload to be sent"
+    assert payload, "Expected SendGrid email payload to be sent"
     html = payload.get("html", "")
     assert "sitemap-learn.xml" in html, "Per-sitemap HTML must appear in email body"
     assert "2/10" in html

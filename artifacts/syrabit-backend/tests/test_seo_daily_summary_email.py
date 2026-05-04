@@ -214,59 +214,61 @@ def test_send_skipped_with_no_recipients():
     assert res["reason"] == "no_recipients"
 
 
-def test_send_skipped_without_resend_key():
+def test_send_skipped_without_sendgrid_key():
     fake_stats = seo_engine._compose_seo_daily_summary({"job_id": "j", "total_generated": 1})
-    with patch.dict("os.environ", {"RESEND_API_KEY": ""}, clear=False):
+    with patch.dict("os.environ", {"SENDGRID_API_KEY": ""}, clear=False):
         res = asyncio.run(seo_engine._send_seo_daily_summary_email(
             fake_stats, [{"admin_id": "a", "email": "a@b.com"}]
         ))
     assert res["sent"] == 0
-    assert res["reason"] == "no_resend_key"
+    assert res["reason"] == "no_sendgrid_key"
 
 
-def test_send_dispatches_per_recipient_via_resend():
+def test_send_dispatches_per_recipient_via_sendgrid():
     fake_stats = seo_engine._compose_seo_daily_summary({
         "job_id": "j", "total_generated": 5, "errors": 1,
         "outcomes": [_outcome("failed", "x")],
     })
-    sent_payloads = []
-    fake_resend = types.SimpleNamespace(
-        api_key=None,
-        Emails=types.SimpleNamespace(send=lambda payload: sent_payloads.append(payload)),
-    )
+    sent_calls = []
+
+    def _fake_send_admin_email(**kwargs):
+        sent_calls.append(kwargs)
+        return True
+
+    import email_templates as _et
     recipients = [
         {"admin_id": "a1", "email": "one@x.com"},
         {"admin_id": "a2", "email": "two@x.com"},
     ]
-    with patch.dict(sys.modules, {"resend": fake_resend}), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "test-key"}, clear=False):
+    with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "test-key"}, clear=False):
         res = asyncio.run(seo_engine._send_seo_daily_summary_email(fake_stats, recipients))
     assert res["sent"] == 2
     assert res["failed"] == 0
-    assert len(sent_payloads) == 2
-    assert sent_payloads[0]["to"] == ["one@x.com"]
-    assert sent_payloads[1]["to"] == ["two@x.com"]
-    assert "SEO daily summary" in sent_payloads[0]["subject"]
+    assert len(sent_calls) == 2
+    assert sent_calls[0]["to"] == "one@x.com"
+    assert sent_calls[1]["to"] == "two@x.com"
+    assert "SEO daily summary" in sent_calls[0]["subject"]
 
 
 def test_send_continues_when_one_recipient_fails():
     fake_stats = seo_engine._compose_seo_daily_summary({"job_id": "j", "total_generated": 1})
     calls = []
 
-    def _send(payload):
-        calls.append(payload)
-        if payload["to"] == ["bad@x.com"]:
+    def _fake_send_admin_email(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("to") == "bad@x.com":
             raise RuntimeError("smtp boom")
+        return True
 
-    fake_resend = types.SimpleNamespace(api_key=None,
-                                        Emails=types.SimpleNamespace(send=_send))
+    import email_templates as _et
     recipients = [
         {"admin_id": "a1", "email": "ok@x.com"},
         {"admin_id": "a2", "email": "bad@x.com"},
         {"admin_id": "a3", "email": "ok2@x.com"},
     ]
-    with patch.dict(sys.modules, {"resend": fake_resend}), \
-         patch.dict("os.environ", {"RESEND_API_KEY": "k"}, clear=False):
+    with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.dict("os.environ", {"SENDGRID_API_KEY": "k"}, clear=False):
         res = asyncio.run(seo_engine._send_seo_daily_summary_email(fake_stats, recipients))
     assert res["sent"] == 2
     assert res["failed"] == 1

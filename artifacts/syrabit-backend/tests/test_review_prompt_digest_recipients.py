@@ -130,7 +130,7 @@ def test_resolve_returns_empty_list_when_nothing_configured(monkeypatch):
 
 def test_send_returns_recipients_field_when_no_admin_email(monkeypatch):
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
-    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
     saved = _with_channels({"email": "", "review_prompt_digest_emails": []})
     try:
         result = asyncio.run(
@@ -146,8 +146,8 @@ def test_send_returns_recipients_field_when_no_admin_email(monkeypatch):
     assert result["recipients"] == []
 
 
-def test_send_uses_digest_list_and_passes_all_to_resend(monkeypatch):
-    monkeypatch.setenv("RESEND_API_KEY", "test-key")
+def test_send_uses_digest_list_and_passes_all_to_sendgrid(monkeypatch):
+    monkeypatch.setenv("SENDGRID_API_KEY", "test-key")
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
     saved = _with_channels({
         "email": "fallback@example.com",
@@ -156,18 +156,14 @@ def test_send_uses_digest_list_and_passes_all_to_resend(monkeypatch):
 
     captured: dict = {}
 
-    class _FakeEmails:
-        @staticmethod
-        def send(payload):
-            captured["payload"] = payload
-            return {"id": "re_test"}
+    def _fake_send_admin_email(**kwargs):
+        captured["payload"] = kwargs
+        return True
 
-    fake_resend = MagicMock()
-    fake_resend.Emails = _FakeEmails
-    fake_resend.api_key = None
+    import email_templates as _et
 
     try:
-        with patch.dict("sys.modules", {"resend": fake_resend}), \
+        with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
              patch.object(_m, "_load_alert_settings", AsyncMock()):
             result = asyncio.run(
                 arp._send_review_prompt_weekly_digest_email(
@@ -188,7 +184,7 @@ def test_send_uses_digest_list_and_passes_all_to_resend(monkeypatch):
 def test_send_override_to_targets_explicit_recipients(monkeypatch):
     """The admin "send me a test now" path posts the draft list as
     ``to`` so admins can validate a recipient before persisting it."""
-    monkeypatch.setenv("RESEND_API_KEY", "test-key")
+    monkeypatch.setenv("SENDGRID_API_KEY", "test-key")
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
     saved = _with_channels({
         "email": "fallback@example.com",
@@ -197,18 +193,14 @@ def test_send_override_to_targets_explicit_recipients(monkeypatch):
 
     captured: dict = {}
 
-    class _FakeEmails:
-        @staticmethod
-        def send(payload):
-            captured["payload"] = payload
-            return {"id": "re_test"}
+    def _fake_send_admin_email(**kwargs):
+        captured["payload"] = kwargs
+        return True
 
-    fake_resend = MagicMock()
-    fake_resend.Emails = _FakeEmails
-    fake_resend.api_key = None
+    import email_templates as _et
 
     try:
-        with patch.dict("sys.modules", {"resend": fake_resend}), \
+        with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
              patch.object(_m, "_load_alert_settings", AsyncMock()):
             result = asyncio.run(
                 arp._send_review_prompt_weekly_digest_email(
