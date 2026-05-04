@@ -31,6 +31,13 @@
 > sized to fit inside its own startup-credit annualized headroom, with
 > the two tightest pools explicitly mitigated), see
 > [`docs/infra/10k-dau-cost-audit.md`](./10k-dau-cost-audit.md).
+>
+> **For the auxiliary-provider delegation** (Mongo, Pinecone, Upstash,
+> Axiom, Sentry, Deepgram, ElevenLabs, Groq, Cerebras, Cartesia, Voyage,
+> Cohere-direct, Resend, GitHub, etc. — what role each plays in the
+> dispatcher and whether each is covered by free tier or credit at 10k
+> DAU), see
+> [`docs/infra/auxiliary-providers-delegation.md`](./auxiliary-providers-delegation.md).
 
 ---
 
