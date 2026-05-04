@@ -10,9 +10,11 @@ compatibility_flags = ["nodejs_compat"]
 # Non-secret vars; secrets set via: wrangler secret put <NAME> --env <env>
 NODE_ENV = "production"
 # Origin selector — "do" | "cloudrun" | "railway".
-# Task #331 added "do" as a target; the production cutover task flips
-# this from "cloudrun" → "do" without redeploying the worker.
-ORIGIN_TARGET = "cloudrun"
+# Task #331 added "do" as a target; Task #334 (production cutover)
+# flipped the default and both env overrides from "cloudrun" → "do".
+# The legacy "cloudrun" / "railway" values are still valid rollback
+# targets until Task #335 decommissions those origins.
+ORIGIN_TARGET = "do"
 
 [env.production]
 name = "syrabit-edge-proxy"
@@ -21,7 +23,9 @@ routes = [
 ]
 
 [env.production.vars]
-ORIGIN_TARGET = "cloudrun"
+# Cut over to Digital Ocean by Task #334 — see docs/infra/cutover.md
+# for the timeline, validation, and rollback procedure.
+ORIGIN_TARGET = "do"
 
 [env.staging]
 name = "syrabit-edge-proxy-staging"
@@ -30,16 +34,18 @@ routes = [
 ]
 
 [env.staging.vars]
-# Staging is the first to flip — exercise the DO origin end-to-end
-# before touching production.
+# Staging flipped first in Task #331 to exercise the DO origin
+# end-to-end before production followed in Task #334.
 ORIGIN_TARGET = "do"
 
 # ORIGIN_TARGET is a routing knob (not a credential) and lives in
-# [vars] / [env.*.vars] above. Flip it for cutover via:
-#   wrangler deploy --env production --var ORIGIN_TARGET:do
+# [vars] / [env.*.vars] above. To roll back to the legacy origin
+# without redeploying the worker source, override the var inline:
+#   wrangler deploy --env production --var ORIGIN_TARGET:cloudrun
+#   wrangler deploy --env production --var ORIGIN_TARGET:railway
 #
 # Actual secrets — set with `wrangler secret put <NAME> --env <env>`:
 #   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
-#   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app
-#   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app
+#   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app  (rollback only)
+#   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app  (rollback only)
 #   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret

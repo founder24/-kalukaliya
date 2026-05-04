@@ -14,8 +14,9 @@
  *   ORIGIN_TARGET=cloudrun  → DISPATCH_CLOUD_RUN_URL (legacy GCP Cloud Run)
  *   ORIGIN_TARGET=railway   → BACKEND_RAILWAY_URL (legacy Railway)
  *
- * Default is `cloudrun` for backwards-compatibility with the prior
- * deploy. The cutover task flips the production secret to `do`.
+ * Default is `do` after the Task #334 production cutover. The
+ * `cloudrun` and `railway` values remain valid rollback targets
+ * until Task #335 decommissions those origins.
  *
  * Performance boost wiring
  * ────────────────────────
@@ -27,7 +28,7 @@
  *
  * Required wrangler secrets / vars
  * ─────────────────────────────────
- *   ORIGIN_TARGET            — "do" | "cloudrun" | "railway" (default "cloudrun")
+ *   ORIGIN_TARGET            — "do" | "cloudrun" | "railway" (default "do")
  *   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
  *   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app
  *   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app
@@ -48,15 +49,15 @@ const EARLY_HINTS_ASSETS = [
 ];
 
 function resolveOrigin(env: Env): { url: string; target: string } | null {
-  const target = (env.ORIGIN_TARGET ?? 'cloudrun').toLowerCase();
+  const target = (env.ORIGIN_TARGET ?? 'do').toLowerCase();
   switch (target) {
-    case 'do':
-      return env.DO_APP_BACKEND_URL ? { url: env.DO_APP_BACKEND_URL, target } : null;
+    case 'cloudrun':
+      return env.DISPATCH_CLOUD_RUN_URL ? { url: env.DISPATCH_CLOUD_RUN_URL, target } : null;
     case 'railway':
       return env.BACKEND_RAILWAY_URL ? { url: env.BACKEND_RAILWAY_URL, target } : null;
-    case 'cloudrun':
+    case 'do':
     default:
-      return env.DISPATCH_CLOUD_RUN_URL ? { url: env.DISPATCH_CLOUD_RUN_URL, target: 'cloudrun' } : null;
+      return env.DO_APP_BACKEND_URL ? { url: env.DO_APP_BACKEND_URL, target: 'do' } : null;
   }
 }
 

@@ -2,6 +2,8 @@
   "captured_at": "2026-05-03T00:00:00Z",
   "method": "Static enumeration of Railway-bound services in the repo (artifacts/syrabit-backend/RAILWAY-DEPLOY.md, Dockerfile, apprunner.yaml fallback, scripts/run_grounded_recall_nightly.py).",
   "project": "syrabit-prod",
+  "traffic_share": 0,
+  "status": "Standby for rollback only — Task #334 cut all production traffic to DO. Decommission in Task #335.",
   "services": [
     {
       "name": "syrabit-backend",

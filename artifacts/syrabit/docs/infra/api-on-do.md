@@ -189,9 +189,12 @@ inline for one deploy:
 wrangler deploy --env production --var ORIGIN_TARGET:do
 ```
 
-The flip is config-only — no source change required. The actual
-production cutover is a separate task ("Cut production traffic over
-to the Digital Ocean origin behind Cloudflare").
+The flip is config-only — no source change required. The production
+cutover (Task #334) has already been performed — see
+[`cutover.md`](cutover.md) for the timeline, validation queries,
+gRPC verification, and rollback procedure. The defaults committed in
+`wrangler.toml` and `src/index.ts` now point at DO for both the
+production and staging environments.
 
 ## Common failure modes
 
