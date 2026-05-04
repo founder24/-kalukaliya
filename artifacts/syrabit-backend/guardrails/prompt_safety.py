@@ -63,8 +63,27 @@ _OUTPUT_VIOLATION_PATTERNS = [
 ]
 
 
+def _apply_mode(category: str, base_message: str) -> str:
+    """Task #362 §4 — wrap *base_message* with the active moderation mode's
+    friendlier rephrase hint. Soft-fail: any error returns the base
+    message unchanged so a guardrail block always reaches the user.
+    """
+    try:
+        from chat_turn_context import get_current_moderation_mode
+        from moderation_modes import friendly_message
+        mode = get_current_moderation_mode()
+        return friendly_message(base_message, category=category, mode=mode)
+    except Exception:
+        return base_message
+
+
 def evaluate_prompt_safety(prompt: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Evaluate a user prompt for safety violations.
+
+    The three regex categories below (injection, sensitive, cheating)
+    correspond to the hard-floor categories from Task #362 §4 — they
+    block in every moderation mode. The user-visible message is
+    enriched with a rephrase hint via :func:`_apply_mode`.
 
     Returns:
         (original_prompt_or_None, fallback_message_or_None, tag_or_None)
@@ -79,17 +98,21 @@ def evaluate_prompt_safety(prompt: str) -> Tuple[Optional[str], Optional[str], O
     for pat in _INJECTION_PATTERNS:
         if pat.search(text):
             logger.warning(f"[guardrails] BLOCKED injection attempt: {text[:120]!r}")
-            return (None, _FALLBACK_MESSAGES["injection"], "blocked:injection")
+            return (None, _apply_mode("injection", _FALLBACK_MESSAGES["injection"]), "blocked:injection")
 
     for pat in _SENSITIVE_PATTERNS:
         if pat.search(text):
             logger.warning(f"[guardrails] BLOCKED sensitive content: {text[:120]!r}")
-            return (None, _FALLBACK_MESSAGES["sensitive"], "blocked:sensitive")
+            # The "sensitive" category covers self-harm + violence-against-
+            # persons + CSAM signals. We tag with the most distress-
+            # appropriate moderation_modes category so the friendly_message
+            # helper suppresses the bureaucratic moderation tag line.
+            return (None, _apply_mode("self_harm", _FALLBACK_MESSAGES["sensitive"]), "blocked:sensitive")
 
     for pat in _CHEATING_PATTERNS:
         if pat.search(text):
             logger.warning(f"[guardrails] BLOCKED cheating request: {text[:120]!r}")
-            return (None, _FALLBACK_MESSAGES["cheating"], "blocked:cheating")
+            return (None, _apply_mode("cheating", _FALLBACK_MESSAGES["cheating"]), "blocked:cheating")
 
     return (text, None, None)
 

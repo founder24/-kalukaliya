@@ -28,6 +28,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -379,6 +380,22 @@ async def stream_grounded_answer(
     t0 = time.perf_counter()
     mid = message_id or f"msg_{uuid.uuid4().hex[:16]}"
 
+    # Task #362 §1 — Tier-1 recall-intent classifier. Detects "earlier
+    # you said…" style turns so an upstream summary-vector lookup can
+    # be gated. Fires a counter for calibration; downstream consumers
+    # read the flag from the chat-turn context (no signature change).
+    _is_recall_turn = False
+    try:
+        from recall_intent import is_recall_intent as _is_recall
+        _is_recall_turn = _is_recall(query)
+        if _is_recall_turn:
+            _pipeline_metrics["recall_intent_hits"] = (
+                _pipeline_metrics.get("recall_intent_hits", 0) + 1
+            )
+            logger.debug("[grounded_answer] recall-intent detected: %s", query[:120])
+    except Exception:
+        pass
+
     # 1. Prompt safety
     safe_prompt, fallback_msg, guardrail_tag = evaluate_prompt_safety(query)
     if fallback_msg:
@@ -573,6 +590,29 @@ async def stream_grounded_answer(
             )
         except Exception as e:
             logger.debug(f"[grounded_answer] cache write failed: {e}")
+
+        # Task #361 §1 — RAG result cache (shadow-mode write). The
+        # cache is in shadow until the operator flips
+        # `cache:rag_serve_enabled = "1"` in Redis. Soft-fail: a write
+        # failure here never affects the user-visible answer.
+        try:
+            from rag_cache import record_rag_result as _rag_cache_set
+            _curr_ver = os.environ.get("CURRICULUM_VERSION", "v0")
+            _rag_cache_set(
+                query,
+                {
+                    "answer": answer,
+                    "citations": citations,
+                    "rag_source": rag_ctx["source"],
+                    "elapsed_ms": elapsed_ms,
+                },
+                retriever=rag_ctx.get("source") or "default",
+                top_k=len(citations or []),
+                lang=(response_lang or "en"),
+                curriculum_version=_curr_ver,
+            )
+        except Exception as e:
+            logger.debug(f"[grounded_answer] rag_cache write failed: {e}")
 
     yield _sse({
         "event": "syrabit_done", "message_id": mid,
