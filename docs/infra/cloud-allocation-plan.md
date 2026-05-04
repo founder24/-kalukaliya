@@ -21,6 +21,11 @@
 > long-running workers + the Rust core + cron move to **Azure Container
 > Apps**. Cloudflare keeps frontend + edge. Vertex remains inference-only
 > (Gemini API + retained legacy AI APIs). Three hosting clouds, not four.
+>
+> **For the per-feature cost-minimization comparison** (3-cloud-only vs
+> 3-cloud + Vertex, cash leakage, credit headroom by feature), see the
+> companion analysis at
+> [`docs/infra/cost-per-feature-comparison.md`](./cost-per-feature-comparison.md).
 
 ---
 
