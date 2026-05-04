@@ -6,7 +6,7 @@ import PageMeta from '@/components/seo/PageMeta';
 import ContinueLearning from '@/components/content/ContinueLearning';
 import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
 import AdSlot from '@/components/ads/AdSlot';
-import useQuge5Multitag from '@/components/ads/useQuge5Multitag';
+// Quge5 multitag removed in Task #347 — AdSense is the sole monetised network.
 import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
 import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
 import { useLibraryBundle } from '@/hooks/useContent';
@@ -55,7 +55,6 @@ function deriveMetaFromSlug(slug, title, description) {
 }
 
 export default function PYQReplicaPage() {
-  useQuge5Multitag();
   useAdsenseAutoAds();
   const { slug } = useParams();
   const navigate = useNavigate();

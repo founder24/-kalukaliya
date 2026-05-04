@@ -15,13 +15,13 @@ import {
   adminAdsenseSync,
 } from '@/utils/api';
 
-const NETWORKS = ['adsense', 'adpushup', 'adsterra', 'propellerads', 'quge5'];
+// Task #347 — Quge5 removed (popunders + adult creatives, off site-wide).
+const NETWORKS = ['adsense', 'adpushup', 'adsterra', 'propellerads'];
 const NETWORK_COLORS = {
   adsense:      '#4285f4',
   adpushup:     '#8b5cf6',
   adsterra:     '#10b981',
   propellerads: '#f59e0b',
-  quge5:        '#ec4899',
 };
 
 const LIGHT_TOOLTIP = {

@@ -445,11 +445,12 @@ async def _send_bot_traffic_report_email(
     except Exception:
         admin_email = (to or os.environ.get("ALERT_EMAIL", "")).strip()
 
-    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+    # Task #347 — Resend removed; SendGrid is the sole admin transport.
+    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
-    if not resend_key:
-        return {"sent": False, "to": admin_email, "reason": "no_resend_key"}
+    if not sendgrid_key:
+        return {"sent": False, "to": admin_email, "reason": "no_sendgrid_key"}
 
     try:
         from email_templates import EMAIL_FROM  # type: ignore
@@ -467,18 +468,20 @@ async def _send_bot_traffic_report_email(
         f"{stats.get('iso_week','')}"
     )
     try:
-        import resend as _resend_sdk  # type: ignore
-        _resend_sdk.api_key = resend_key
-        _resend_sdk.Emails.send({
-            "from": EMAIL_FROM,
-            "to": [admin_email],
-            "subject": subject,
-            "html": html,
-        })
+        from email_templates import send_admin_email  # type: ignore
+        ok = send_admin_email(
+            to=[admin_email],
+            subject=subject,
+            html=html,
+            sender=EMAIL_FROM,
+        )
+        if not ok:
+            return {"sent": False, "to": admin_email,
+                    "reason": "send_error:sendgrid_non_2xx"}
         logger.info(f"[bot-report] sent weekly report → {admin_email} ({stats.get('iso_week','')})")
         return {"sent": True, "to": admin_email, "subject": subject}
     except Exception as exc:
-        logger.warning(f"[bot-report] Resend send failed: {exc}")
+        logger.warning(f"[bot-report] SendGrid send failed: {exc}")
         return {"sent": False, "to": admin_email, "reason": f"send_error:{type(exc).__name__}"}
 
 

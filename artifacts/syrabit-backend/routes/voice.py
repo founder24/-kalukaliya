@@ -234,18 +234,8 @@ async def _synthesize_with_fallback(
                 return await _tts_workers_ai(text, language)
             elif provider == "vertex":
                 raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired")
-            elif provider == "bedrock":
-                # Task #304: feed Polly outcome into the shared bedrock 429-burst
-                # lifecycle so /admin/llm/health throttle indicator stays uniform.
-                from providers.bedrock import call_tts as _bk_tts
-                from llm import _bedrock_track_outcome as _bk_track
-                try:
-                    _audio = await _bk_tts(text, voice=voice_id)
-                    _bk_track(True)
-                    return _audio
-                except Exception as _bk_exc:
-                    _bk_track(False, _bk_exc)
-                    raise
+            # Task #347: bedrock TTS branch removed (providers/bedrock.py deleted).
+            # AWS Polly survives via the explicit ``_tts_aws_polly`` fallback below.
             elif provider == "azure_openai":
                 # Task #338 — gated by azure.speech.enabled (Azure Neural TTS
                 # rides on the same Azure Speech resource as STT/Custom Voice).
@@ -315,18 +305,8 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
                 return await _stt_workers_ai(audio_bytes)
             elif provider == "vertex":
                 raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired")
-            elif provider == "bedrock":
-                # Task #304: feed Transcribe outcome into the shared bedrock
-                # 429-burst lifecycle for uniform throttle visibility.
-                from providers.bedrock import call_stt as _bk_stt
-                from llm import _bedrock_track_outcome as _bk_track
-                try:
-                    _txt = await _bk_stt(audio_bytes, language=language)
-                    _bk_track(True)
-                    return _txt
-                except Exception as _bk_exc:
-                    _bk_track(False, _bk_exc)
-                    raise
+            # Task #347: bedrock STT branch removed (providers/bedrock.py deleted).
+            # AWS Transcribe survives via the explicit fallback below.
             elif provider == "azure_openai":
                 from providers.azure_openai import call_stt as _az_stt
                 return await _az_stt(audio_bytes, language=language)

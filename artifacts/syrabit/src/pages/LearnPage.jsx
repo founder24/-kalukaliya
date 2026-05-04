@@ -19,7 +19,7 @@ import StickyToc from '@/components/ui/StickyToc';
 import { learnArticleSchema } from '@/lib/jsonld';
 import ContinueLearning from '@/components/content/ContinueLearning';
 import AdSlot from '@/components/ads/AdSlot';
-import useQuge5Multitag from '@/components/ads/useQuge5Multitag';
+// Quge5 multitag removed in Task #347 — AdSense is the sole monetised network.
 import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
 
 function buildToc(headingsJson) {
@@ -52,7 +52,6 @@ function injectHeadingIds(html) {
 }
 
 export default function LearnPage() {
-  useQuge5Multitag();
   useAdsenseAutoAds();
   const { slug } = useParams();
   const navigate = useNavigate();

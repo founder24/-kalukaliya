@@ -102,10 +102,11 @@ def _validate_env():
     # (GOOGLE_APPLICATION_CREDENTIALS_JSON). The env var is no longer read by
     # the backend — operators should delete it from Railway. The dead-provider
     # guard continues to block any new `os.environ.get('GEMINI_API_KEY')`.
+    # Task #347 — XAI_API_KEY and OPENAI_API_KEY removed from the audit
+    # map alongside the SDK uninstall. The dead-provider guard blocks any
+    # new os.environ.get('XAI_API_KEY' | 'OPENAI_API_KEY') reads.
     _BYOK_PRIMARY = {
         "SARVAM_API_KEY":     "custom-sarvam",
-        "XAI_API_KEY":        "grok/v1",
-        "OPENAI_API_KEY":     "openai/v1",
         "COHERE_API_KEY":     "cohere/v1",
     }
 
@@ -118,10 +119,10 @@ def _validate_env():
         "SARVAM_API_KEY_3",
     ]
 
-    # ── Category 3: AWS / Bedrock — BYOK via CF Gateway aws-bedrock ──────────
-    # CF AI Gateway supports AWS Bedrock (slug: aws-bedrock/v1). Store the
-    # AWS credentials in CF BYOK instead of Railway. Until migrated, the
-    # backend falls back to direct Bedrock calls using these Railway vars.
+    # ── Category 3: AWS — SQS fanout + R2 (Bedrock decommissioned in #347) ──
+    # AWS_* credentials are still required for the SQS producer
+    # (sqs_fanout.py) and AWS-native voice (Polly/Transcribe). Bedrock
+    # itself is gone — providers/bedrock.py was deleted in Task #347.
     _BYOK_AWS = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
 
     # ── Category 4: Supabase-managed (already removed from Railway) ───────────
@@ -138,9 +139,9 @@ def _validate_env():
     # Payment and webhook credentials are read from the Supabase DB first
     # (admin settings table). Railway vars are a fallback that can be removed
     # once the values are saved via the Admin panel → Settings → Payments.
+    # Task #347 — STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET removed:
+    # Stripe is fully decommissioned, Razorpay is the sole live processor.
     _DB_FIRST = [
-        "STRIPE_SECRET_KEY",
-        "STRIPE_WEBHOOK_SECRET",
         "RAZORPAY_KEY_SECRET",
         "RAZORPAY_WEBHOOK_SECRET",
         "ADSENSE_CLIENT_SECRET",
@@ -176,7 +177,7 @@ def _validate_env():
         "CF_ZONE_ID",             # CF zone for cache purge
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
-        "RESEND_API_KEY",         # Transactional email
+        "SENDGRID_API_KEY",       # Transactional email (Task #347 — replaces RESEND_API_KEY)
         "GOOGLE_OAUTH_CLIENT_ID",     # GA4 reporting OAuth (not user auth)
         "GOOGLE_OAUTH_CLIENT_SECRET", # GA4 reporting OAuth (not user auth)
         "R2_ACCESS_KEY_ID",       # Cloudflare R2 storage
@@ -221,9 +222,9 @@ def _validate_env():
             status = "not set ✓"
         lines.append(f"    {name:<30} {status}")
 
-    # AWS / Bedrock BYOK
+    # AWS — SQS fanout + AWS-native voice (Bedrock removed in Task #347)
     lines.append("")
-    lines.append("  [3] AWS / Bedrock (can migrate to CF Gateway BYOK slug: aws-bedrock/v1):")
+    lines.append("  [3] AWS (SQS fanout + Polly/Transcribe voice — Bedrock removed in Task #347):")
     for name in _BYOK_AWS:
         raw = os.environ.get(name, "").strip()
         status = "SET — move to CF BYOK when ready" if raw else "not set"

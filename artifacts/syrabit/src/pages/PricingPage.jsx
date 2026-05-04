@@ -42,7 +42,7 @@ const faqJsonLd = {
       name: 'What payment methods does Syrabit.ai accept?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Syrabit.ai accepts payments through Razorpay and Stripe, supporting UPI, debit cards, credit cards, net banking, and wallets. Both Starter (₹99) and Pro (₹999) are one-time payments with no recurring subscriptions or lock-in.',
+        text: 'Syrabit.ai accepts payments through Razorpay, supporting UPI, debit cards, credit cards, net banking, and wallets. Both Starter (₹99) and Pro (₹999) are one-time payments with no recurring subscriptions or lock-in.',
       },
     },
     {

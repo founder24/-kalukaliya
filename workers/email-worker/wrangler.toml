@@ -3,9 +3,17 @@ main = "src/index.ts"
 account_id = "d66e40eac539fff1db270fddf384a5ec"
 compatibility_date = "2026-05-01"
 
-send_email = [
-  { name = "EMAIL_SENDER" }
-]
+# Task #347 — transactional email migrated to SendGrid v3 HTTP API.
+# The previous `send_email = [{ name = "EMAIL_SENDER" }]` binding for
+# Cloudflare Email Workers is no longer needed; we POST to the SendGrid
+# Web API directly from the Worker.
+#
+# Required secrets (set with `wrangler secret put <NAME>`):
+#   SENDGRID_API_KEY   — SendGrid v3 key with Mail Send full access
+#   BACKEND_AUTH_KEY   — shared secret for backend → worker auth
+# Optional plain vars:
+#   EMAIL_FROM_ADDRESS (default noreply@syrabit.ai)
+#   EMAIL_FROM_NAME    (default Syrabit.ai)
 
 routes = [
   { pattern = "syrabit.ai/email/*", zone_name = "syrabit.ai" },

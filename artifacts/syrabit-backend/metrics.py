@@ -1831,18 +1831,17 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
                 "</p>"
             )
 
-    # 1) Email alert via Resend (to admin)
+    # 1) Email alert via SendGrid (to admin) — Task #347 migrated from Resend.
     try:
         admin_email = (_notification_channels.get("email") or os.environ.get("ALERT_EMAIL", "")).strip()
-        resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+        sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
         if not admin_email:
             outcomes["email"]["skipped_reason"] = "no admin email configured"
-        elif not resend_key:
-            outcomes["email"]["skipped_reason"] = "RESEND_API_KEY not set"
-        if admin_email and resend_key:
+        elif not sendgrid_key:
+            outcomes["email"]["skipped_reason"] = "SENDGRID_API_KEY not set"
+        if admin_email and sendgrid_key:
             outcomes["email"]["attempted"] = True
-            import resend as _resend_sdk
-            _resend_sdk.api_key = resend_key
+            from email_templates import send_admin_email as _send_admin_email
             threshold_html = ""
             if threshold_snapshot:
                 metric = threshold_snapshot.get("metric", "N/A")
@@ -1875,12 +1874,12 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
             # Render newlines in the body as <br> so multi-line bodies (e.g.
             # the seo_url_spike text fallback) read cleanly in HTML email.
             body_html = (body or "").replace("\n", "<br>")
-            _resend_sdk.Emails.send({
-                "from": EMAIL_FROM,
-                "to": [admin_email],
-                "subject": f"🚨 Syrabit Alert: {title}",
-                "html": f"<h2>{title}</h2><p>{body_html}</p>{push_silent_warn_html}{threshold_html}{extra_html}<p style='color:#888'>Alert type: {alert_type}<br>Cooldown: {_ALERT_COOLDOWN_S // 60} min</p>",
-            })
+            _send_admin_email(
+                to=admin_email,
+                subject=f"🚨 Syrabit Alert: {title}",
+                html=f"<h2>{title}</h2><p>{body_html}</p>{push_silent_warn_html}{threshold_html}{extra_html}<p style='color:#888'>Alert type: {alert_type}<br>Cooldown: {_ALERT_COOLDOWN_S // 60} min</p>",
+                sender=EMAIL_FROM,
+            )
             outcomes["email"]["ok"] = True
     except Exception as e:
         outcomes["email"]["error"] = str(e)

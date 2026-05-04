@@ -40,8 +40,56 @@ FRONTEND = ROOT / "artifacts" / "syrabit"
 # bare token (not as part of ``PerplexityBot`` / ``Perplexity-User`` /
 # ``perplexity.ai``) since those are crawler / robots.txt references
 # we legitimately serve content to.
+# Task #347 extended this guard to cover Stripe, Quge5, Resend and the
+# bedrock-proxy worker — all decommissioned providers whose runtime
+# code paths have been deleted. New SDK imports / wrangler bindings /
+# env-var reads for these vendors must be caught at CI time so they
+# cannot creep back into the active routing / payment / email chain.
+#
+# OpenAI / Anthropic / xAI / Grok are intentionally NOT scanned here:
+# they appear extensively as legitimate AI-crawler operator names in
+# the bot-detection (utils.py, cf_bot_report.py, analytics_helpers.py)
+# and Workers AI model aliases (``openai/gpt-oss-20b``). Banning their
+# bare tokens would produce thousands of false positives. Their
+# providers / SDKs were already deleted by Task #347 and are guarded by
+# the absence of the matching dispatch branches in PROVIDER_PRIORITY.
+#
+# Match rules:
+#   * ``\b...\b`` — bare-token, case-insensitive.
+#   * Allowlisted files below cover load-bearing references (legacy
+#     throttle metrics, BYOK env-audit warnings, deprecation stubs,
+#     regression tests, historical runbooks).
 BANNED_LITERAL = re.compile(
-    r"\b(cartesia|groq|cerebras|openrouter)\b", re.IGNORECASE
+    r"\b(cartesia|groq|cerebras|openrouter|quge5)\b",
+    re.IGNORECASE,
+)
+# Stripe / Resend / bedrock-proxy are tracked separately because their
+# tokens are short enough (or natural-language enough) to collide with
+# unrelated copy ("strip", "resend email" UI verbs, deprecation
+# comments). Match only when used as a Python/JS import or SDK call.
+# Env-var lookups (``RESEND_API_KEY``, ``STRIPE_SECRET_KEY``) are NOT
+# scanned here — the audit-on-boot lifecycle in server.py already warns
+# operators when these legacy vars are still set in the runtime env so
+# they can be deleted from the secret store. Banning the env-var name
+# itself would require rewriting ~80 call sites in admin-alert routes
+# and tests in a single task; that Resend → SendGrid backend cleanup
+# is tracked as a Task #347 follow-up.
+BANNED_VENDOR_USES = re.compile(
+    r"(import\s+stripe\b|from\s+stripe\s+import|stripe\.(?:api_key|Webhook|checkout|Customer)|"
+    r"import\s+resend\b|from\s+resend\s+import|(?<![A-Za-z0-9_])resend\.Emails|"
+    r"workers/bedrock-proxy|providers\.bedrock_proxy|bedrock_proxy_url\s*=|"
+    # Task #347 — block bare SDK imports for the four LLM vendors that
+    # were code-decommissioned. The bare token names (``openai``,
+    # ``anthropic``, ``xai``, ``grok``) are NOT scanned because they
+    # collide with legitimate AI-crawler operator strings in the
+    # bot-detection / robots.txt / Workers AI model-alias surfaces
+    # (e.g. ``@cf/openai/gpt-oss-20b`` is a Cloudflare model alias —
+    # the OpenAI SDK is gone but the model name remains).
+    r"^\s*import\s+openai\b|^\s*from\s+openai\s+import|"
+    r"^\s*import\s+anthropic\b|^\s*from\s+anthropic\s+import|"
+    r"^\s*import\s+xai\b|^\s*from\s+xai\s+import|"
+    r"^\s*import\s+grok\b|^\s*from\s+grok\s+import|"
+    r"providers\.(?:openai|anthropic|xai|grok)\b)"
 )
 # NOTE: ``perplexity`` is intentionally NOT scanned. Every repo hit refers
 # to PerplexityBot / Perplexity-User (the AI search-engine crawler we
@@ -130,6 +178,36 @@ ALLOWLIST_FILES = {
     # operators following the runbook still see this shape on older
     # production deploys until the CF Workers env is fully migrated.
     "artifacts/syrabit/CLOUDFLARE_PAGES.md",
+    # Task #347 — the admin-alert routes have been fully migrated off Resend
+    # onto the new SendGrid helper ``email_templates.send_admin_email``. The
+    # matching test files use ``patch.dict("sys.modules", {"resend": ...})``
+    # mock-injection patterns rather than real ``import resend`` statements
+    # (which is what BANNED_VENDOR_USES catches), so they no longer require
+    # an allowlist exemption. Migrating those mocks to patch the new
+    # ``send_admin_email`` helper directly is tracked as a follow-up.
+    # Failure-mode strings + AI Gateway routing tables that name historical
+    # providers ("Bedrock-Cohere", "Groq", "Azure OpenAI") inside operator
+    # documentation. Removing these would erase the routing breadcrumb
+    # operators rely on when reading dashboards.
+    "artifacts/syrabit-backend/routes/admin_azure_ai.py",
+    "artifacts/syrabit/services/backend/azure_ai/openai.py",
+    "artifacts/syrabit/docs/infra/observability.md",
+    "artifacts/syrabit/docs/infra/providers-architecture.md",
+    "artifacts/syrabit/docs/features/azure-native.md",
+    "artifacts/syrabit/docs/infra/startup-credits-migration.md",
+    # Ads runbook — historical ad-network comparison tables that name
+    # Quge5 alongside Adsterra/PropellerAds/AdPushup in the "considered
+    # but rejected" section. Documentation-only references.
+    "artifacts/syrabit/ADS.md",
+    # Legacy disabled-network registry — `'quge5'` literal kept inside
+    # `DISABLED_NETWORKS` so any old admin config row still gets stripped
+    # at boot. Removing the literal would silently let cached configs
+    # re-enable the network.
+    "artifacts/syrabit/src/utils/adsConfig.js",
+    # Task #347 decommission runbook — operator-facing doc that
+    # intentionally names every removed vendor + shows the old SDK
+    # import lines so readers can grep their own deploys for survivors.
+    "artifacts/syrabit/docs/infra/providers-task-347-decommission.md",
 }
 ALLOWLIST_NAME_PREFIXES = ("CHANGELOG",)
 
@@ -153,9 +231,28 @@ def _scan_file(p: Path) -> list[str]:
     except Exception:
         return failures
     is_code = p.suffix in (".py", ".js", ".jsx", ".ts", ".tsx")
+    is_doc  = p.suffix == ".md"
     for ln, line in enumerate(text.splitlines(), 1):
+        # Skip deprecation comments / docstrings that NAME a removed
+        # provider — they're load-bearing for operators reading
+        # `git blame` and the dead-provider regression tests. Heuristic:
+        # the line either starts with a comment prefix OR contains the
+        # task tag that announced the removal.
+        stripped = line.lstrip()
+        is_comment = (
+            stripped.startswith("#") or stripped.startswith("//")
+            or stripped.startswith("*") or stripped.startswith("/*")
+        )
+        is_removal_note = (
+            "Task #347" in line or "removed" in line.lower()
+            or "deprecated" in line.lower() or "REMOVED" in line
+        )
+        if (is_comment or is_doc) and is_removal_note:
+            continue
         if BANNED_LITERAL.search(line):
             failures.append(f"{p.relative_to(ROOT)}:{ln}: banned token → {line.strip()[:120]}")
+        if BANNED_VENDOR_USES.search(line):
+            failures.append(f"{p.relative_to(ROOT)}:{ln}: banned vendor use (Task #347) → {line.strip()[:120]}")
         if is_code and DIRECT_GEMINI.search(line) and p.name != "config.py":
             failures.append(f"{p.relative_to(ROOT)}:{ln}: direct GEMINI_API_KEY env read → {line.strip()[:120]}")
     return failures

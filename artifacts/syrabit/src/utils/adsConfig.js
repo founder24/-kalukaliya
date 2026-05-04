@@ -171,7 +171,7 @@ export function setAdsOptOut(optedOut) {
       window.localStorage.removeItem(ADS_OPT_OUT_KEY);
     }
     // Unified consent-change event so `<AdSlot />` and the page-level
-    // hooks (`useAdsenseAutoAds`, `useQuge5Multitag`) can re-evaluate
+    // hooks (`useAdsenseAutoAds`) can re-evaluate
     // `adsConsentGranted()` and tear down already-injected scripts
     // when the user toggles the privacy opt-out mid-session — Task #555.
     window.dispatchEvent(

@@ -147,7 +147,9 @@ GOOGLE_OAUTH_CLIENT_ID     = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '').strip(
 GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET', '').strip()
 
 # ── Email Configuration ───────────────────────────────────────────────────────
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '').strip()
+# Task #347 — Resend removed; SendGrid is the in-process Tier-2 email
+# provider (Tier-1 = CF Email Worker, Tier-3 = Amazon SES via SQS).
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '').strip()
 EMAIL_FROM     = os.environ.get('EMAIL_FROM', 'noreply@syrabit.ai').strip()
 FRONTEND_URL   = os.environ.get('FRONTEND_URL', 'https://syrabit.ai').strip().rstrip('/')
 
@@ -294,8 +296,10 @@ CF_GATEWAY_BASE = (
 CF_CACHE_TTL = int(os.environ.get('CF_AI_GATEWAY_CACHE_TTL', '86400'))
 
 _CF_PROVIDER_SLUGS = {
-    "openai":      "openai",
-    "xai":         "grok/v1",
+    # OpenAI / xAI-Grok / AWS Bedrock entries removed in Task #347 — those
+    # providers were purged from PROVIDER_PRIORITY + POOL_WEIGHTS and from
+    # the BYOK cf-aig-byok-key chain. Re-add only if a future task
+    # explicitly re-enables them.
     "gemini":      "google-ai-studio/v1beta/openai",
     # Sarvam: slug has NO /v1 because callers already send
     # /v1/chat/completions, /translate, /text-to-speech, etc.
@@ -307,14 +311,12 @@ _CF_PROVIDER_SLUGS = {
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
     "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
     "voyage_ai":   "voyage-ai/v1",   # Embeddings — voyage-3-large (1024-dim)
-    # Phase 2 providers routed via CF AI Gateway BYOK
-    "bedrock":      "aws-bedrock",       # AWS Bedrock — Converse API; CF handles SigV4
+    # Phase 2 — Azure OpenAI is the sole non-Sarvam managed-LLM left after #347.
     "azure_openai": "azure-openai",      # Azure OpenAI — chat/completions; CF handles key
 }
 
 _DIRECT_PROVIDER_URLS = {
-    "openai":      None,
-    "xai":         "https://api.x.ai/v1",
+    # openai / xai entries removed (Task #347 — providers decommissioned).
     # NOTE: "gemini" entry removed (Task: vertex-only Gemini auth, 2026-05-03).
     # All Gemini calls now route through Vertex AI service-account auth via
     # `_call_vertex_chat` / `vertex_chat.stream_chat`. The direct
@@ -327,8 +329,7 @@ _DIRECT_PROVIDER_URLS = {
     "cohere":      "https://api.cohere.com/v1",
     "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
     "voyage_ai":   "https://api.voyageai.com/v1",  # Voyage AI embeddings direct fallback
-    # Bedrock direct: region-scoped; Azure direct: tenant endpoint (requires env var)
-    "bedrock":     None,   # Set at runtime via BEDROCK_DIRECT_URL or derived from AWS_REGION
+    # Azure direct: tenant endpoint (requires env var). Bedrock removed (Task #347).
     "azure_openai": None,  # Set at runtime via AZURE_OPENAI_ENDPOINT
 }
 
@@ -435,8 +436,13 @@ _GEMINI_KEY = ""
 _GEMINI_KEY_2 = ""
 _GEMINI_KEY_RAW = ""
 _GEMINI_KEY_2_RAW = ""
-_XAI_KEY = os.environ.get('XAI_API_KEY', '').strip()
-_OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '').strip()
+# Task #347 — OpenAI and xAI-Grok decommissioned. The keys are no
+# longer read from the environment; the symbols are kept bound to ""
+# so any in-flight ``from config import _XAI_KEY / _OPENAI_KEY`` import
+# degrades gracefully (the ``if _XAI_KEY:`` guards become False and the
+# legacy code paths short-circuit). Safe to delete from cloud secrets.
+_XAI_KEY = ""
+_OPENAI_KEY = ""
 _SARVAM_LLM_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 _SARVAM_LLM_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
 _SARVAM_LLM_KEY_3 = os.environ.get('SARVAM_API_KEY_3', '').strip()
@@ -524,8 +530,9 @@ if CF_GATEWAY_ENABLED:
     # (Task: vertex-only Gemini auth, 2026-05-03). The Gemini provider has
     # been removed from every dispatch chain — Vertex SA is the only path.
     _SARVAM_LLM_KEY = _SARVAM_LLM_KEY or BYOK_PLACEHOLDER
-    _XAI_KEY        = _XAI_KEY        or BYOK_PLACEHOLDER
-    _OPENAI_KEY     = _OPENAI_KEY     or BYOK_PLACEHOLDER  # CF slug: openai/v1
+    # _XAI_KEY / _OPENAI_KEY BYOK substitution removed in Task #347 — both
+    # providers were dropped from _CF_PROVIDER_SLUGS so BYOK can no longer
+    # route them. Symbols stay bound to "" above.
     # Provider keys — BYOK allows CF gateway to inject keys stored in the
     # CF dashboard, so the local env var is optional in production.
     _COHERE_KEY      = _COHERE_KEY      or BYOK_PLACEHOLDER
@@ -560,21 +567,15 @@ AZURE_DOC_INTEL_ENDPOINT = os.environ.get(
     os.environ.get('AZURE_FORM_RECOGNIZER_ENDPOINT', '')
 ).strip()
 
-# ── Bedrock feature-service proxy (Task #256) ─────────────────────────────────
-# The bedrock-proxy Cloudflare Worker signs AWS SigV4 requests for services
-# not natively supported by the CF AI Gateway BYOK path (Polly, Transcribe,
-# Translate). Deploy workers/bedrock-proxy and set BEDROCK_PROXY_URL to its URL.
-# When unset, bedrock TTS/STT/Translate raise RuntimeError → excluded gracefully.
-BEDROCK_PROXY_URL = os.environ.get('BEDROCK_PROXY_URL', '').strip()
-# Shared secret for authenticating backend → bedrock-proxy Worker requests.
-# Must match the BEDROCK_PROXY_AUTH_TOKEN wrangler secret on the Worker.
-# When set, every Polly/Transcribe/Translate proxy call sends:
-#   Authorization: Bearer <BEDROCK_PROXY_AUTH_TOKEN>
-# When unset, no auth header is sent (acceptable for private/internal Workers).
-BEDROCK_PROXY_AUTH_TOKEN = os.environ.get('BEDROCK_PROXY_AUTH_TOKEN', '').strip()
-# Default Polly voice for bedrock TTS. "Raveena" is the Neural Indian English
-# voice; swap to "Joanna", "Matthew", "Aditi", etc. via env var.
-BEDROCK_POLLY_VOICE = os.environ.get('BEDROCK_POLLY_VOICE', 'Raveena').strip() or 'Raveena'
+# ── Bedrock feature-service proxy — REMOVED in Task #347 ─────────────────────
+# REMOVED: the workers/bedrock-proxy Cloudflare Worker (SigV4 → Polly /
+# Transcribe / Translate) and the providers.bedrock module are decommissioned.
+# These symbols stay bound to "" so any in-flight import degrades to a no-op
+# (`if BEDROCK_PROXY_URL:` becomes False) and the runtime never tries to
+# talk to a Worker that no longer exists. Safe to delete from cloud secrets.
+BEDROCK_PROXY_URL = ""
+BEDROCK_PROXY_AUTH_TOKEN = ""
+BEDROCK_POLLY_VOICE = ""
 
 # ── Azure OpenAI deployment / direct-endpoint config (Task #256, #290) ───────
 # Azure uses a "deployment name" (created in the Azure portal) — not a model
@@ -703,10 +704,7 @@ elif _EXPLICIT_PROVIDER == 'sarvam' and _SARVAM_LLM_KEY:
     LLM_PROVIDER = 'sarvam'
     LLM_API_KEY = _SARVAM_LLM_KEY
     LLM_MODEL = os.environ.get('LLM_MODEL', 'sarvam-m')
-elif _EXPLICIT_PROVIDER == 'openai' and _OPENAI_KEY and _OPENAI_KEY != 'x':
-    LLM_PROVIDER = 'openai'
-    LLM_API_KEY = _OPENAI_KEY
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4o-mini')
+# OpenAI explicit-provider branches removed in Task #347 (provider purged).
 elif _CF_API_TOKEN_FOR_LLM and _CF_ACCOUNT_ID_FOR_LLM:
     LLM_PROVIDER = 'workers-ai'
     LLM_API_KEY = _CF_API_TOKEN_FOR_LLM
@@ -715,10 +713,6 @@ elif _SARVAM_LLM_KEY:
     LLM_PROVIDER = 'sarvam'
     LLM_API_KEY = _SARVAM_LLM_KEY
     LLM_MODEL = os.environ.get('LLM_MODEL', 'sarvam-m')
-elif _OPENAI_KEY and _OPENAI_KEY != 'x':
-    LLM_PROVIDER = 'openai'
-    LLM_API_KEY = _OPENAI_KEY
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4o-mini')
 else:
     LLM_PROVIDER = 'workers-ai'
     LLM_API_KEY = ''
@@ -1035,14 +1029,15 @@ PLAN_PRICES = {
 # in 6 regions returned the same dailyTokensExceeded error). The active
 # chat/content allowlist per current ops policy is:
 #     Cloudflare Workers AI + GCP Vertex + Azure OpenAI + Sarvam.
-# Bedrock entries remain in PROVIDER_CREDITS / SLM RPM dict / 429-burst
-# tracker as harmless dead code so re-enabling is a one-line PROVIDER_PRIORITY
-# edit once AWS Service Quotas are raised. See providers/bedrock.py for the
-# actionable daily-quota error message operators see when Bedrock is dispatched.
+# Task #347 — Bedrock fully decommissioned: providers/bedrock.py is
+# deleted, every dispatch branch has been removed from llm.py /
+# routes/voice.py, and ``bedrock`` no longer appears in PROVIDER_CREDITS,
+# the SLM RPM dict, the 429-burst tracker, or any PROVIDER_PRIORITY pool.
+# Re-enabling would require restoring the provider module + dispatch
+# branches first, not just a PROVIDER_PRIORITY edit.
 #
 # Credit reference table (minimum confirmed startup-programme amounts):
 #   vertex        Google Cloud for Startups          $2,000
-#   bedrock       AWS Activate                       $1,000  (REMOVED from all routing pools — AWS daily token quota exhausted; informational only)
 #   azure_openai  Azure for Startups                 $2,500
 #   sarvam        Sarvam startup credits             $500
 #   elevenlabs    ElevenLabs startup credits         $500
@@ -1055,22 +1050,28 @@ PLAN_PRICES = {
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
     # English chat + RAG: Azure GPT-4.1-mini (primary) → Vertex/Gemini 2.5
-    # Flash → Sarvam (Indic-aware fallback) → Workers AI (last-resort).
-    # Bedrock removed (account-wide daily token quota exhausted across every
-    # on-demand model in every region — see providers/bedrock.py for the
-    # actionable error). Re-add only after AWS Service Quotas are raised.
-    "english_rag_chat":  ["azure_openai", "vertex", "sarvam", "workers_ai"],
-    # Assamese chat: Sarvam (native Indic conversational reasoning) primary
-    # → Vertex (Gemini 2.5 Flash) → workers_ai_indic (IndicTrans2 last-resort,
-    # weight 0). IndicTrans2 is a translation model not a chat model, so it's
-    # intentionally weight-zero — only fires when both Sarvam AND Vertex are
-    # excluded, as a degraded-but-online fallback rather than serving an
-    # error. Bedrock removed (see english_rag_chat note).
-    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
+    # Flash → Sarvam (Indic-aware fallback) → Workers AI fast-mode (Llama 3.2
+    # 3B) → balanced Mistral 7B → generic Workers AI (last-resort gpt-oss-20b).
+    # Bedrock + OpenAI/xAI removed in Task #347 — Azure is the sole managed
+    # English LLM, with native Workers AI variants picking up tail traffic.
+    "english_rag_chat":  [
+        "azure_openai", "vertex", "sarvam",
+        "workers_ai_llama32_3b", "workers_ai_mistral_7b", "workers_ai",
+    ],
+    # Assamese chat: Sarvam (native Indic conversational reasoning) primary →
+    # Vertex (Gemini 2.5 Flash) → Llama 3.1 8B (CF Workers AI Indic-friendly
+    # fallback, Task #347) → workers_ai_indic (IndicTrans2 weight-zero last
+    # resort — translation model, not a chat model, used only when every chat
+    # provider is excluded as a degraded-but-online fallback rather than an
+    # error). Bedrock removed (see english_rag_chat note).
+    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_llama31_8b", "workers_ai_indic"],
     # Long-form content / notes generation: Vertex/Gemini 2.5 Flash (primary,
-    # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI (last-resort).
-    # Bedrock removed (see english_rag_chat note).
-    "content":           ["vertex", "azure_openai", "sarvam", "workers_ai"],
+    # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI variants.
+    # Bedrock removed (Task #347 — provider decommissioned).
+    "content":           [
+        "vertex", "azure_openai", "sarvam",
+        "workers_ai_mistral_7b", "workers_ai",
+    ],
     # Assamese content generation (Task #281): IndicTrans2 dominant primary
     # (purpose-built Indic neural MT), Gemini reserved at low weight strictly
     # for note-formatting / structuring fallback. Sarvam removed from this
@@ -1117,7 +1118,7 @@ PROVIDER_PRIORITY: dict = {
 
 PROVIDER_CREDITS: dict = {
     "vertex":           2000,   # Google Cloud for Startups — $2k
-    "bedrock":          1000,   # AWS Activate — $1k
+    # bedrock entry removed in Task #347 (provider decommissioned).
     "azure_openai":     2500,   # Azure for Startups — $2.5k; primary for english_rag_chat
     "sarvam":            500,   # Sarvam startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
@@ -1129,8 +1130,15 @@ PROVIDER_CREDITS: dict = {
     "exa_ai":           1000,   # Exa startup credits — $1k
     "tavily":            500,   # Tavily startup credits — $500
     "mongodb_atlas":       0,   # MongoDB Atlas free tier — weight 0 (fallback only)
-    "workers_ai":          0,   # Cloudflare free tier — absolute last resort
+    "workers_ai":          0,   # Cloudflare free tier — generic Workers AI pool
     "workers_ai_indic":    0,   # CF Workers AI IndicTrans2 — weight comes from POOL_WEIGHTS per-pool overrides
+    # Task #347 — Workers AI named promotions. Each is a separately
+    # addressable pool entry that resolves to a specific @cf/* model so
+    # operators can shift traffic between fast/balanced/large variants
+    # without code changes. Per-pool weight comes from POOL_WEIGHTS.
+    "workers_ai_mistral_7b": 0,  # @cf/mistral/mistral-7b-instruct-v0.3     — balanced English fallback
+    "workers_ai_llama32_3b": 0,  # @cf/meta/llama-3.2-3b-instruct           — ultrafast 3B for burst / fast-mode
+    "workers_ai_llama31_8b": 0,  # @cf/meta/llama-3.1-8b-instruct-fp8       — Indic chat fallback
 }
 
 # Per-pool weight overrides — take precedence over PROVIDER_CREDITS in select_provider.
@@ -1148,20 +1156,32 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     #   assamese_rag_chat    sarvam(10000) → vertex(100)              [no workers fallback]
     #   translate            workers_ai_indic(10000) → vertex(100)
     "content": {
-        "vertex":       10000,  # primary — Gemini 2.5 Flash, 1M-token context
-        "azure_openai":   100,  # fallback — GPT-4.1-mini
-        "sarvam":          50,  # tertiary — Sarvam-M (Indic-aware fallback)
-        "workers_ai":       0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
+        "vertex":                 10000,  # primary — Gemini 2.5 Flash, 1M-token context
+        "azure_openai":             100,  # fallback — GPT-4.1-mini
+        "sarvam":                    50,  # tertiary — Sarvam-M (Indic-aware fallback)
+        # Task #347 — Workers AI named promotions sit at non-zero but tiny
+        # weights so they only fire after every paid provider is excluded.
+        "workers_ai_mistral_7b":     10,  # quaternary — Mistral 7B Instruct (balanced)
+        "workers_ai":                 0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
     "english_rag_chat": {
-        "azure_openai": 10000,  # primary — GPT-4.1-mini (Azure)
-        "vertex":         100,  # fallback — Gemini 2.5 Flash
-        "sarvam":          50,  # tertiary — Sarvam-M
-        "workers_ai":       0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
+        "azure_openai":           10000,  # primary — GPT-4.1-mini (Azure)
+        "vertex":                   100,  # fallback — Gemini 2.5 Flash
+        "sarvam":                    50,  # tertiary — Sarvam-M
+        # Workers AI promotions (Task #347) — fast-mode 3B picks up first
+        # because it has the lowest TTFT; mistral-7b is the second swing
+        # for slightly more capable answers when 3B is overloaded.
+        "workers_ai_llama32_3b":     20,  # fast-mode — Llama 3.2 3B
+        "workers_ai_mistral_7b":     10,  # balanced — Mistral 7B Instruct
+        "workers_ai":                 0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
     "assamese_rag_chat": {
-        "sarvam": 10000,  # primary — native Assamese conversational reasoning
-        "vertex":   100,  # fallback — Gemini 2.5 Flash (no further downgrade)
+        "sarvam":                 10000,  # primary — native Assamese conversational reasoning
+        "vertex":                   100,  # fallback — Gemini 2.5 Flash
+        # Task #347 — Llama 3.1 8B is a competent Indic chat fallback when
+        # both Sarvam and Vertex are saturated; weight-zero IndicTrans2
+        # remains the absolute degraded-online tail.
+        "workers_ai_llama31_8b":     10,  # tertiary — Llama 3.1 8B FP8
     },
     # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
     # at low weight strictly for formatting / structuring notes. Sarvam removed

@@ -1,12 +1,13 @@
 """
 Transactional email helpers for Syrabit.ai.
 
-Provider priority:
+Provider priority (Task #347 — Resend removed):
   1. Cloudflare Email Worker (EMAIL_WORKER_URL) — zero-cost under CF $5k credits,
-     routes via CF Email Workers send_email binding.  Activated automatically when
-     EMAIL_WORKER_URL is set AND CF Email Routing is live (MX records pointing to CF).
-  2. Resend (RESEND_API_KEY) — reliable third-party fallback while CF routing is
-     being configured.
+     routes the message via SendGrid v3 HTTP API from the Worker.
+  2. SendGrid v3 HTTP API (SENDGRID_API_KEY) direct from the backend, used when
+     the Worker is unreachable or returns a 5xx. Same template, same `From`.
+  3. Amazon SES via the ``email-fallback`` SQS queue — final-tier retry handled
+     by the email-worker Lambda (kept as 5xx-only fallback per Task #347).
 
 All functions are fire-and-forget — they log warnings on failure and never raise.
 """
@@ -17,7 +18,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
-RESEND_API_KEY     = os.environ.get("RESEND_API_KEY", "").strip()
+SENDGRID_API_KEY   = os.environ.get("SENDGRID_API_KEY", "").strip()
 EMAIL_FROM         = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
 EMAIL_WORKER_URL   = os.environ.get("EMAIL_WORKER_URL", "").rstrip("/")
 EMAIL_WORKER_KEY   = os.environ.get("EMAIL_WORKER_AUTH_KEY", "").strip()
@@ -58,14 +59,27 @@ def _button(label: str, url: str) -> str:
             f'font-size:14px;">{label}</a>')
 
 
-def _send_via_cf_worker(to: str, subject: str, html: str) -> bool:
+def _parse_from(frm: str) -> tuple[str, str]:
+    """Parse ``Display Name <addr@host>`` into ``(addr, name)``.
+
+    Falls back to ``(frm, "")`` for a bare address.
     """
-    Send email via the Cloudflare Email Worker.
-    Returns True on success, False on any failure (caller should fallback to
-    Resend, then SES via the `email-fallback` SQS queue — see `_send`).
+    frm = frm.strip()
+    if "<" in frm and frm.endswith(">"):
+        name = frm[: frm.index("<")].strip().strip('"')
+        addr = frm[frm.index("<") + 1 : -1].strip()
+        return addr, name
+    return frm, ""
+
+
+def _send_via_cf_worker(to: str, subject: str, html: str) -> bool:
+    """Send email via the Cloudflare Email Worker (Tier-1).
+
+    Returns True on success, False on any failure (caller falls back to
+    SendGrid in-process, then SES via the ``email-fallback`` SQS queue).
     Requires:
-      - EMAIL_WORKER_URL to be set (e.g. https://syrabit-email.axomxplain.workers.dev)
-      - CF Email Routing MX records pointing to Cloudflare (not Hostinger)
+      - ``EMAIL_WORKER_URL`` set (e.g. https://syrabit-email.<acct>.workers.dev)
+      - The Worker's ``SENDGRID_API_KEY`` secret bound (set via wrangler).
     """
     worker_url = os.environ.get("EMAIL_WORKER_URL", "").rstrip("/")
     auth_key   = os.environ.get("EMAIL_WORKER_AUTH_KEY", "").strip()
@@ -88,59 +102,228 @@ def _send_via_cf_worker(to: str, subject: str, html: str) -> bool:
         return False
 
 
-def _send_sync(to: str, subject: str, html: str) -> str:
+# Tri-state outcome from the SendGrid attempt so _send_sync can apply the
+# Task #347 fallback policy (only retryable failures escalate to SES).
+#
+#   "ok"        — 2xx, message accepted; nothing more to do.
+#   "no_key"    — SENDGRID_API_KEY missing → treat as configuration outage,
+#                 escalate so SES can carry the load.
+#   "retry_5xx" — SendGrid returned a 5xx OR the HTTP call itself failed
+#                 (timeout / DNS / TLS). These are infrastructure failures
+#                 SES is qualified to retry.
+#   "perm_4xx"  — SendGrid returned a 4xx (auth, rate-limit, invalid
+#                 payload, suppressed recipient). Re-sending the same
+#                 payload via SES would just produce the same error and
+#                 risk reputation damage — log + drop instead.
+_SENDGRID_OK         = "ok"
+_SENDGRID_NO_KEY     = "no_key"
+_SENDGRID_RETRY_5XX  = "retry_5xx"
+_SENDGRID_PERM_4XX   = "perm_4xx"
+
+
+def _send_via_sendgrid(to: str, subject: str, html: str) -> str:
+    """Send via SendGrid v3 and report Task #347 fallback policy outcome.
+
+    See ``_SENDGRID_*`` constants above for the contract. The legacy
+    bool-returning callers were rewritten in the same task, so this
+    function is now the sole API.
     """
-    Tier-1 + Tier-2 of the email-send chain.
+    key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    if not key:
+        return _SENDGRID_NO_KEY
+    try:
+        import httpx
+        frm = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
+        addr, name = _parse_from(frm)
+        body = {
+            "personalizations": [{"to": [{"email": to}]}],
+            "from": {"email": addr, "name": name} if name else {"email": addr},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": html}],
+        }
+        r = httpx.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            json=body,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            timeout=10.0,
+        )
+        if 200 <= r.status_code < 300:
+            logger.info(f"[Email/SendGrid] Sent '{subject}' → {to}")
+            return _SENDGRID_OK
+        if r.status_code >= 500:
+            logger.warning(
+                f"[Email/SendGrid] retryable HTTP {r.status_code}: "
+                f"{r.text[:200]} — escalating to SES"
+            )
+            return _SENDGRID_RETRY_5XX
+        # 4xx — permanent. Do NOT escalate; SES will produce the same error.
+        logger.warning(
+            f"[Email/SendGrid] permanent HTTP {r.status_code} — dropping (no SES retry): "
+            f"{r.text[:200]}"
+        )
+        return _SENDGRID_PERM_4XX
+    except Exception as e:
+        # Transport-level failure (timeout, DNS, TLS, connection reset). SES
+        # handles these well — escalate.
+        logger.warning(f"[Email/SendGrid] transport failure → escalating to SES: {e}")
+        return _SENDGRID_RETRY_5XX
+
+
+def send_admin_email(
+    *,
+    to,
+    subject: str,
+    html: str,
+    attachments=None,
+    sender: str = "",
+) -> bool:
+    """Synchronous SendGrid-only sender for admin / digest / alert emails.
+
+    Replaces the Task #347-deleted Resend SDK call sites in
+    ``routes/admin_review_prompts.py``, ``routes/bot_traffic_report.py``
+    and ``routes/bot_discovery.py``. Mirrors the previous Resend
+    semantics (single SDK call, multi-recipient, optional attachments).
+
+    Args:
+        to: a single address string OR an iterable of address strings.
+        subject: subject line.
+        html: rendered HTML body.
+        attachments: optional list of ``{"filename": str, "content": str}``
+            entries where ``content`` is the **base64-encoded** payload
+            (matches the Resend SDK contract the call sites already use).
+        sender: optional ``Display Name <addr@host>`` override; defaults
+            to ``EMAIL_FROM``.
+
+    Returns ``True`` on a 2xx, ``False`` otherwise. Never raises — admin
+    alert paths must be fire-and-forget.
+    """
+    key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    if not key:
+        logger.warning("[Email/SendGrid:admin] no SENDGRID_API_KEY — skipping send")
+        return False
+    if isinstance(to, str):
+        recipients = [to]
+    else:
+        recipients = [t for t in to if t]
+    if not recipients:
+        return False
+    frm = (sender or os.environ.get(
+        "EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>")).strip()
+    addr, name = _parse_from(frm)
+    body = {
+        "personalizations": [
+            {"to": [{"email": r} for r in recipients]},
+        ],
+        "from": {"email": addr, "name": name} if name else {"email": addr},
+        "subject": subject,
+        "content": [{"type": "text/html", "value": html}],
+    }
+    if attachments:
+        body["attachments"] = [
+            {
+                "filename": a["filename"],
+                "content":  a["content"],
+                "type": a.get("type", "text/csv"),
+                "disposition": "attachment",
+            }
+            for a in attachments
+        ]
+    try:
+        import httpx
+        r = httpx.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            json=body,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            timeout=10.0,
+        )
+        if 200 <= r.status_code < 300:
+            logger.info(
+                f"[Email/SendGrid:admin] Sent '{subject}' → {', '.join(recipients)}"
+            )
+            return True
+        logger.warning(
+            f"[Email/SendGrid:admin] HTTP {r.status_code}: {r.text[:200]}"
+        )
+        return False
+    except Exception as exc:
+        logger.warning(f"[Email/SendGrid:admin] send failed: {exc}")
+        return False
+
+
+def _send_sync(to: str, subject: str, html: str) -> str:
+    """Tier-1 + Tier-2 of the email-send chain.
 
     Returns:
-      "cf"      — sent via Cloudflare Email Worker (Tier-1, zero-cost)
-      "resend"  — sent via Resend (Tier-2)
-      "fallback"— both prior tiers failed; caller must enqueue to the
-                  ``email-fallback`` SQS queue so the email-worker
-                  Lambda can retry via Amazon SES (Tier-3).
-      "skip"    — no provider configured AND fallback not viable.
+      "cf"        — sent via Cloudflare Email Worker (Tier-1, zero-cost).
+      "sendgrid"  — sent via SendGrid v3 HTTP API (Tier-2).
+      "fallback"  — Tier-2 returned a *retryable* failure (5xx, transport
+                    error, or no SENDGRID_API_KEY); caller enqueues the
+                    message to the ``email-fallback`` SQS queue so the
+                    Lambda can retry via Amazon SES (Tier-3).
+                    Per Task #347 policy, **permanent 4xx** failures (bad
+                    auth, suppressed recipient, validation error) deliberately
+                    do NOT escalate — SES would produce the same error and
+                    repeated retries hurt sender reputation. They terminate
+                    here as ``"dropped_perm"`` (logged-and-forgotten).
+      "dropped_perm" — see above.
+
+    The ``EMAIL_FALLBACK`` env var (``"sendgrid"``, ``"ses"``, ``"both"``)
+    forces the policy: ``"ses"`` always escalates (operator override for
+    SES burn-in or SendGrid outages); ``"sendgrid"`` never escalates;
+    unset / ``"both"`` uses the 5xx-only policy described above.
 
     Fire-and-forget: never raises.
     """
     if _send_via_cf_worker(to, subject, html):
         return "cf"
-    key = os.environ.get("RESEND_API_KEY", "").strip()
-    if not key:
-        # No Resend key but we still want SES to take a shot.
-        logger.info(f"[Email] Resend not configured — handing off to SES fallback for {to}: {subject}")
+    sg_outcome = _send_via_sendgrid(to, subject, html)
+    if sg_outcome == _SENDGRID_OK:
+        return "sendgrid"
+    override = os.environ.get("EMAIL_FALLBACK", "").strip().lower()
+    if override == "sendgrid":
+        logger.info(
+            f"[Email] EMAIL_FALLBACK=sendgrid — not escalating to SES for {to}: {subject}"
+        )
+        return "dropped_perm"
+    if override == "ses":
+        logger.info(
+            f"[Email] EMAIL_FALLBACK=ses — operator-forced escalation for {to}: {subject}"
+        )
         return "fallback"
-    try:
-        import resend as _resend
-        _resend.api_key = key
-        frm = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
-        _resend.Emails.send({"from": frm, "to": [to], "subject": subject, "html": html})
-        logger.info(f"[Email/Resend] Sent '{subject}' → {to}")
-        return "resend"
-    except Exception as e:
-        # Tier-2 failed — Tier-3 (SES via SQS) will retry. Don't log
-        # warning yet; the SQS consumer logs success/final failure.
-        logger.info(f"[Email/Resend] failed for {to}, falling back to SES: {e}")
-        return "fallback"
+    # Default policy: only retryable failures (5xx / transport / missing key)
+    # escalate to SES. Permanent 4xx terminates as dropped.
+    if sg_outcome == _SENDGRID_PERM_4XX:
+        logger.info(
+            f"[Email] SendGrid 4xx permanent — dropping (no SES retry) for {to}: {subject}"
+        )
+        return "dropped_perm"
+    logger.info(
+        f"[Email] Tier-2 retryable failure ({sg_outcome}) — handing off to SES for {to}: {subject}"
+    )
+    return "fallback"
 
 
 async def _send(to: str, subject: str, html: str):
-    """Tier-1 → Tier-2 → Tier-3 send chain (Task #332).
+    """Tier-1 → Tier-2 → Tier-3 send chain (Task #347).
 
-    Tiers 1 and 2 run in-process (CF Email Worker, then Resend). On
-    failure of both, the message is enqueued to the ``email-fallback``
+    Tiers 1 and 2 run in-process (CF Email Worker → SendGrid v3 HTTP API).
+    On failure of both, the message is enqueued to the ``email-fallback``
     SQS queue so the ``syrabit-email-worker`` Lambda can deliver via
-    Amazon SES with full DLQ + alarm coverage. The chain is:
+    Amazon SES with full DLQ + alarm coverage.
 
-        CF Email Worker → Resend → SES (via email-fallback SQS) → log warn
-
-    See `routes/admin_aws_infra.py:_QUEUE_INVENTORY["email-fallback"]`
-    and `infra/aws/lambda-workers.tf` for the consumer wiring.
+        CF Email Worker → SendGrid → SES (via email-fallback SQS) → log warn
     """
     outcome = await asyncio.to_thread(_send_sync, to, subject, html)
+    # Only the explicit "fallback" outcome enqueues to SES; "cf", "sendgrid"
+    # and the new "dropped_perm" terminal state all return immediately.
     if outcome != "fallback":
         return
-    # Tier-3 — enqueue for SES delivery via Lambda. We import lazily
-    # so unit tests of this module don't have to stub boto3.
     try:
         from sqs_fanout import enqueue as _sqs_enqueue
         await _sqs_enqueue(
@@ -155,9 +338,7 @@ async def _send(to: str, subject: str, html: str):
         )
         logger.info(f"[Email/SES-fallback] enqueued '{subject}' → {to}")
     except Exception as e:
-        # Tier-3 enqueue failed — final tier is the warn log so on-call
-        # has a breadcrumb the email never went out.
-        logger.warning(f"[Email] All tiers failed for {to} (CF→Resend→SES enqueue: {e})")
+        logger.warning(f"[Email] All tiers failed for {to} (CF→SendGrid→SES enqueue: {e})")
 
 
 async def send_plan_activation(email: str, name: str, plan: str, credits: int, amount_paise: int):
@@ -183,7 +364,7 @@ async def send_plan_activation(email: str, name: str, plan: str, credits: int, a
         {_button("Open Syrabit.ai", "https://syrabit.ai")}
       </p>
       <p style="color:{_MUTED};font-size:13px;">
-        Your credits are ready to use. Start chatting with AI on any subject, 
+        Your credits are ready to use. Start chatting with AI on any subject,
         access full notes, and unlock important questions.
       </p>
     """)

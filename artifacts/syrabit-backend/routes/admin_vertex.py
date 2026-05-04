@@ -204,8 +204,8 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
                              "enabled": _gemini_or_vertex_configured()},
         "azure_openai":     {"label": "Azure OpenAI",                "env": ["AZURE_OPENAI_KEY_1", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY_2", "AZURE_OPENAI_ENDPOINT"],
                              "enabled": _flag("providers.azure_openai")},
-        "bedrock":          {"label": "AWS Bedrock",                 "env": ["CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_ID", "BEDROCK_PROXY_AUTH_TOKEN"],
-                             "enabled": _flag("providers.bedrock")},
+        # Task #347 — bedrock entry removed from the admin routing config
+        # (provider decommissioned; providers/bedrock.py deleted).
         "sarvam":           {"label": "Sarvam (Indic LLM)",          "env": ["SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"],
                              "enabled": any(os.environ.get(k, "").strip() for k in ("SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"))},
         "elevenlabs":       {"label": "ElevenLabs",                  "env": ["ELEVENLABS_API_KEY"],

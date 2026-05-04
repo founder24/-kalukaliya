@@ -15,7 +15,6 @@ redis>=5.0.1
 fakeredis>=2.20  # Task #631 — in-memory Redis for ai_cache integration tests
 lupa>=2.8  # Task #765 — enables fakeredis Lua/EVAL execution for atomic credit deduct test
 
-openai==2.29.0
 google-auth==2.49.1
 google-auth-oauthlib==1.3.0
 google-api-core==2.30.0
@@ -25,6 +24,12 @@ aiohttp==3.13.5
 
 # Task #332 — AWS SQS producer + Azure ARM cron-health proxy.
 boto3>=1.35.0  # Used by sqs_fanout.py + routes/admin_aws_infra.py
+# Task #347 — OpenAI SDK retained as a generic OpenAI-compatible HTTP
+# client (AsyncOpenAI) used to talk to Azure OpenAI / Workers AI /
+# Cloudflare AI Gateway endpoints. The OpenAI provider itself is
+# decommissioned (no calls to api.openai.com) — the SDK class is kept
+# only for its base_url/api_key plumbing and typed exception classes.
+openai>=1.51.0,<3.0.0
 azure-identity>=1.17.0  # Used by routes/admin_azure_cron.py for ARM token
 h2==4.3.0
 httptools==0.7.1
@@ -44,7 +49,6 @@ mistune==3.2.0
 nh3==0.3.5
 
 razorpay==2.0.1
-resend==2.26.0
 boto3>=1.34.0  # R2 Object Storage — S3-compatible API for Cloudflare R2
 duckduckgo_search==8.1.1
 dnspython==2.7.0
@@ -52,7 +56,6 @@ dnspython==2.7.0
 pywebpush==2.3.0
 py-vapid==1.9.4
 pypdf>=6.10.2
-stripe>=9.0.0
 cloudflare>=4.3.0
 
 # ── Observability (Task #610) — OpenTelemetry distributed tracing ──────────

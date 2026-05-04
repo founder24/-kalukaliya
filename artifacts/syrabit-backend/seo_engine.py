@@ -6072,44 +6072,48 @@ async def _resolve_seo_summary_recipients(db, now_utc: datetime) -> list:
 
 
 async def _send_seo_daily_summary_email(stats: dict, recipients: list) -> dict:
-    """Send the rendered summary to each recipient via Resend.
+    """Send the rendered summary to each recipient via SendGrid.
+    Task #347 — migrated from Resend to SendGrid (send_admin_email).
     Fire-and-forget — never raises; returns a small report dict."""
     if not stats:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_stats"}
     if not recipients:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_recipients"}
     import os as _os
-    resend_key = _os.environ.get("RESEND_API_KEY", "").strip()
-    if not resend_key:
-        return {"sent": 0, "failed": 0, "total": len(recipients), "reason": "no_resend_key"}
+    sendgrid_key = _os.environ.get("SENDGRID_API_KEY", "").strip()
+    if not sendgrid_key:
+        return {"sent": 0, "failed": 0, "total": len(recipients), "reason": "no_sendgrid_key"}
     try:
-        from email_templates import EMAIL_FROM
-    except Exception:
-        EMAIL_FROM = _os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
+        from email_templates import EMAIL_FROM, send_admin_email as _send_admin_email
+    except Exception as exc:
+        logger.warning(f"[seo-daily-summary] sendgrid helper import failed: {exc}")
+        return {"sent": 0, "failed": len(recipients), "total": len(recipients),
+                "reason": f"send_error:{type(exc).__name__}"}
     html = _format_seo_daily_summary_html(stats)
     subject = (
         f"Syrabit SEO daily summary · "
         f"{stats['pages_generated']} pages · "
         f"avg SEO {stats['avg_seo_score']} / GEO {stats['avg_geo_score']}"
     )
-    try:
-        import resend as _resend_sdk
-        _resend_sdk.api_key = resend_key
-    except Exception as exc:
-        logger.warning(f"[seo-daily-summary] resend import failed: {exc}")
-        return {"sent": 0, "failed": len(recipients), "total": len(recipients),
-                "reason": f"send_error:{type(exc).__name__}"}
     sent = failed = 0
     errors: list = []  # Task #474 — per-admin failures surfaced in admin UI.
     for r in recipients:
         try:
-            _resend_sdk.Emails.send({
-                "from": EMAIL_FROM,
-                "to": [r["email"]],
-                "subject": subject,
-                "html": html,
-            })
-            sent += 1
+            ok = _send_admin_email(
+                to=r["email"],
+                subject=subject,
+                html=html,
+                sender=EMAIL_FROM,
+            )
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+                errors.append({
+                    "admin_id": r.get("admin_id", ""),
+                    "email": r.get("email", ""),
+                    "error": "sendgrid_returned_false",
+                })
         except Exception as exc:
             failed += 1
             err_msg = f"{type(exc).__name__}: {exc}"[:200]
@@ -6182,7 +6186,7 @@ async def _maybe_dispatch_seo_daily_summary(job_id: str, log_doc: dict) -> dict:
         result = {"sent": 0, "failed": 0, "total": len(audience["recipients"]),
                   "reason": f"dispatch_error:{type(exc).__name__}"}
     # Persist regardless of success so operators can see "0 sent because
-    # no_resend_key" or "0 sent because all admins in quiet hours".
+    # no_sendgrid_key" or "0 sent because all admins in quiet hours".
     enriched = {
         "at": now,
         "job_id": job_id,

@@ -1,22 +1,30 @@
 /**
- * Syrabit Email Worker
+ * Syrabit Email Worker — SendGrid v3 HTTP transport (Task #347)
  *
- * Cloudflare Worker that handles transactional email delivery for syrabit.ai.
- * Uses Cloudflare Email Workers (send_email binding) to send emails from
- * noreply@syrabit.ai — covered under $5k CF credits.
+ * Cloudflare Worker that handles transactional email delivery for syrabit.ai
+ * by forwarding to the SendGrid v3 Web API. Resend has been removed; the
+ * earlier `cloudflare:email` send_email binding is no longer used because we
+ * now standardise on a single transactional provider.
  *
  * POST /email/send     — Send a transactional email
  * POST /email/welcome  — Welcome email to new user
  * POST /email/otp      — OTP verification email
  * POST /email/reset    — Password reset email
  * GET  /email/health   — Worker health check
+ *
+ * Required secrets (set via `wrangler secret put <NAME>`):
+ *   SENDGRID_API_KEY   — SendGrid v3 API key with "Mail Send" full access
+ *   BACKEND_AUTH_KEY   — Shared secret authenticating backend → worker
+ * Optional:
+ *   EMAIL_FROM_ADDRESS — Sender address (default: noreply@syrabit.ai)
+ *   EMAIL_FROM_NAME    — Sender display name (default: Syrabit.ai)
  */
 
-import { EmailMessage } from "cloudflare:email";
-
 interface Env {
-  EMAIL_SENDER: SendEmail;
+  SENDGRID_API_KEY: string;
   BACKEND_AUTH_KEY: string;
+  EMAIL_FROM_ADDRESS?: string;
+  EMAIL_FROM_NAME?: string;
 }
 
 interface EmailPayload {
@@ -51,41 +59,6 @@ function authenticate(request: Request, env: Env): boolean {
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   return env.BACKEND_AUTH_KEY ? token === env.BACKEND_AUTH_KEY : true;
-}
-
-// ─── Pure-CF MIME builder (no npm deps) ──────────────────────────────────────
-function buildMimeRaw(
-  from: string,
-  fromName: string,
-  to: string,
-  subject: string,
-  html: string,
-  text: string,
-): string {
-  const boundary = `sb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const encodeQP = (s: string) => s; // RFC2045 passthrough for UTF-8
-  return [
-    "MIME-Version: 1.0",
-    `Date: ${new Date().toUTCString()}`,
-    `From: ${fromName} <${from}>`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    encodeQP(text),
-    "",
-    `--${boundary}`,
-    "Content-Type: text/html; charset=UTF-8",
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    encodeQP(html),
-    "",
-    `--${boundary}--`,
-  ].join("\r\n");
 }
 
 // ─── HTML templates ──────────────────────────────────────────────────────────
@@ -180,7 +153,7 @@ function resetHtml(reset_link: string, name?: string): string {
   );
 }
 
-// ─── Email send helper ────────────────────────────────────────────────────────
+// ─── SendGrid send helper ────────────────────────────────────────────────────
 async function sendEmail(
   env: Env,
   to: string,
@@ -188,10 +161,32 @@ async function sendEmail(
   html: string,
   text: string,
 ): Promise<void> {
-  const from = "noreply@syrabit.ai";
-  const mimeRaw = buildMimeRaw(from, "Syrabit.ai", to, subject, html, text);
-  const message = new EmailMessage(from, to, mimeRaw);
-  await env.EMAIL_SENDER.send(message);
+  if (!env.SENDGRID_API_KEY) {
+    throw new Error("SENDGRID_API_KEY secret not set on Worker");
+  }
+  const fromAddress = env.EMAIL_FROM_ADDRESS || "noreply@syrabit.ai";
+  const fromName = env.EMAIL_FROM_NAME || "Syrabit.ai";
+  const body = {
+    personalizations: [{ to: [{ email: to }] }],
+    from: { email: fromAddress, name: fromName },
+    subject,
+    content: [
+      ...(text ? [{ type: "text/plain", value: text }] : []),
+      { type: "text/html", value: html },
+    ],
+  };
+  const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (resp.status >= 300) {
+    const detail = await resp.text();
+    throw new Error(`SendGrid HTTP ${resp.status}: ${detail.slice(0, 200)}`);
+  }
 }
 
 function jsonResp(body: unknown, status = 200): Response {
@@ -208,7 +203,12 @@ export default {
     const { pathname } = url;
 
     if (pathname === "/email/health") {
-      return jsonResp({ ok: true, worker: "syrabit-email", ts: Date.now() });
+      return jsonResp({
+        ok: true,
+        worker: "syrabit-email",
+        provider: "sendgrid",
+        ts: Date.now(),
+      });
     }
 
     if (request.method !== "POST") {
@@ -254,12 +254,7 @@ export default {
       }
 
       if (pathname === "/email/otp") {
-        const {
-          to,
-          name,
-          otp,
-          purpose,
-        } = payload as unknown as OtpPayload;
+        const { to, name, otp, purpose } = payload as unknown as OtpPayload;
         if (!to || !otp)
           return jsonResp(
             { error: "Missing required fields: to, otp" },
@@ -284,11 +279,7 @@ export default {
       }
 
       if (pathname === "/email/reset") {
-        const {
-          to,
-          name,
-          reset_link,
-        } = payload as unknown as ResetPayload;
+        const { to, name, reset_link } = payload as unknown as ResetPayload;
         if (!to || !reset_link)
           return jsonResp(
             { error: "Missing required fields: to, reset_link" },

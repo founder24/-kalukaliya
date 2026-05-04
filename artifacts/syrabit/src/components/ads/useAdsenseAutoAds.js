@@ -3,11 +3,11 @@
  *
  * AdSense's Auto Ads tag (`adsbygoogle.js?client=…`) is a single
  * page-level script that auto-discovers ad slots once loaded. It is
- * stacked alongside the existing Quge5 multitag on the only two
+ * AdSense is the sole monetised network as of Task #347 (Quge5 removed). Lives on the only two
  * monetised routes: Notes (`/learn/:slug`) and PYQ (`/pyq/:slug`).
  * All other routes stay ad-free — see `scripts/verify-no-ads.mjs`.
  *
- * Gating mirrors `useQuge5Multitag` and `<AdSlot />`: production
+ * Gating mirrors `<AdSlot />`: production
  * build only AND `adsConsentGranted()` true (which also honours the
  * `syrabit_ads_optout` localStorage flag and the Task #552 paid-plan
  * gate). Dev builds, opted-out users, and paying subscribers never

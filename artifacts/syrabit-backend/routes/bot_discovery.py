@@ -2967,7 +2967,10 @@ async def _gather_weekly_digest_inputs(now: Optional[datetime] = None) -> dict:
 
 
 async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None) -> dict:
-    """Send the rendered digest via Resend. Returns ``{sent, to, reason?}``."""
+    """Send the rendered digest via SendGrid (Task #347 — Resend removed).
+
+    Returns ``{sent, to, reason?}``.
+    """
     if not stats:
         return {"sent": False, "to": "", "reason": "no_stats"}
     try:
@@ -2980,11 +2983,11 @@ async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None
                        or os.environ.get("ALERT_EMAIL", "")).strip()
     except Exception:
         admin_email = (to or os.environ.get("ALERT_EMAIL", "")).strip()
-    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
-    if not resend_key:
-        return {"sent": False, "to": admin_email, "reason": "no_resend_key"}
+    if not sendgrid_key:
+        return {"sent": False, "to": admin_email, "reason": "no_sendgrid_key"}
     try:
         from email_templates import EMAIL_FROM
     except Exception:
@@ -2996,18 +2999,20 @@ async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None
         f"{stats.get('iso_week', '')}"
     )
     try:
-        import resend as _resend_sdk
-        _resend_sdk.api_key = resend_key
-        _resend_sdk.Emails.send({
-            "from": EMAIL_FROM,
-            "to": [admin_email],
-            "subject": subject,
-            "html": html,
-        })
+        from email_templates import send_admin_email
+        ok = send_admin_email(
+            to=[admin_email],
+            subject=subject,
+            html=html,
+            sender=EMAIL_FROM,
+        )
+        if not ok:
+            return {"sent": False, "to": admin_email,
+                    "reason": "send_error:sendgrid_non_2xx"}
         logger.info(f"[SEO digest] sent weekly digest → {admin_email} ({stats.get('iso_week','')})")
         return {"sent": True, "to": admin_email, "subject": subject}
     except Exception as exc:
-        logger.warning(f"[SEO digest] Resend send failed: {exc}")
+        logger.warning(f"[SEO digest] SendGrid send failed: {exc}")
         return {"sent": False, "to": admin_email, "reason": f"send_error:{type(exc).__name__}"}
 
 
@@ -3983,11 +3988,11 @@ async def _maybe_email_failing_csv(
     except Exception:
         admin_email = os.environ.get("ALERT_EMAIL", "").strip()
 
-    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
     if not admin_email:
         return {"sent": False, "reason": "no_admin_email"}
-    if not resend_key:
-        return {"sent": False, "to": admin_email, "reason": "no_resend_key"}
+    if not sendgrid_key:
+        return {"sent": False, "to": admin_email, "reason": "no_sendgrid_key"}
 
     try:
         from email_templates import EMAIL_FROM
@@ -4029,18 +4034,19 @@ async def _maybe_email_failing_csv(
     )
 
     try:
-        import resend as _resend_sdk
-        _resend_sdk.api_key = resend_key
-        _resend_sdk.Emails.send({
-            "from": EMAIL_FROM,
-            "to": [admin_email],
-            "subject": subject,
-            "html": html,
-            "attachments": [{
-                "filename": filename,
-                "content": csv_b64,
-            }],
-        })
+        from email_templates import send_admin_email
+        ok = send_admin_email(
+            to=[admin_email],
+            subject=subject,
+            html=html,
+            sender=EMAIL_FROM,
+            attachments=[{"filename": filename, "content": csv_b64}],
+        )
+        if not ok:
+            return {
+                "sent": False, "to": admin_email,
+                "reason": "send_error:sendgrid_non_2xx",
+            }
         logger.info(
             f"[SEO deep-scan email] sent failing CSV → {admin_email} "
             f"({sitemap_name}, {failing_count} URLs)"
@@ -4050,7 +4056,7 @@ async def _maybe_email_failing_csv(
             "filename": filename, "failing_count": failing_count,
         }
     except Exception as exc:
-        logger.warning(f"[SEO deep-scan email] Resend send failed: {exc}")
+        logger.warning(f"[SEO deep-scan email] SendGrid send failed: {exc}")
         return {
             "sent": False, "to": admin_email,
             "reason": f"send_error:{type(exc).__name__}",

@@ -141,14 +141,14 @@ _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps
     "workers-ai":   [],
     "gemini":       [],
     "azure_openai": [],
-    "bedrock":      [],
+    # bedrock removed in Task #347
     "deepgram":     [],
 }
 _PROVIDER_429_REDIS_KEYS: dict = {
     "workers-ai":   "wai_429_burst",
     "gemini":       "gemini_429_burst",
     "azure_openai": "azure_429_burst",
-    "bedrock":      "bedrock_429_burst",
+    # bedrock removed in Task #347
     "deepgram":     "deepgram_429_burst",
 }
 
@@ -203,40 +203,10 @@ def _reset_provider_429(provider: str) -> None:
         pass
 
 
-import re as _re_bedrock
-_BEDROCK_HTTP_STATUS_RE = _re_bedrock.compile(r"HTTP\s+(\d{3})")
-
-
-def _bedrock_track_outcome(success: bool, exc: Optional[BaseException] = None) -> None:
-    """Task #304 — feed bedrock dispatch outcomes into the shared 429-burst lifecycle.
-
-    Mirrors the SmartKeyPool ``mark_ok`` / ``mark_429`` semantics for every
-    Bedrock-backed dispatch path (chat/safety/embed/translate/vision/tts/stt)
-    so ``/admin/llm/health`` shows the same throttle indicator operators
-    already have for Workers-AI / Gemini / Azure / Deepgram.
-
-    On success we clear the bedrock 429 counter (Redis + in-process) just
-    like ``SmartKeyPool.mark_ok`` does for SLM slots.  On failure we parse
-    the ``RuntimeError("bedrock …: HTTP <code> …")`` message that
-    ``providers.bedrock`` raises and bump the burst counter when the status
-    code is 429 or 5xx — the two classes ``select_provider`` deprioritizes.
-    Other failure modes (auth, validation, network) are left out of the
-    throttle metric so they do not drown the legitimate burst signal.
-    """
-    if success:
-        _reset_provider_429("bedrock")
-        return
-    if exc is None:
-        return
-    match = _BEDROCK_HTTP_STATUS_RE.search(str(exc))
-    if not match:
-        return
-    try:
-        code = int(match.group(1))
-    except ValueError:
-        return
-    if code == 429 or 500 <= code < 600:
-        _track_provider_429("bedrock")
+# Task #347: ``_BEDROCK_HTTP_STATUS_RE`` and ``_bedrock_track_outcome`` were
+# deleted alongside ``providers/bedrock.py``. AWS Bedrock is no longer in
+# PROVIDER_PRIORITY for any feature pool, so the 429-burst lifecycle has
+# no bedrock outcomes to record.
 
 
 def get_provider_429_burst(provider: str,
@@ -671,9 +641,13 @@ _POOL_RPM_LIMITS = {
     "workers-ai":   _parse_rpm_limit("WORKERS_AI_RPM_LIMIT", 10000),
     "sarvam":       _parse_rpm_limit("SARVAM_RPM_LIMIT",        30),
     "gemini":       _parse_rpm_limit("GEMINI_RPM_LIMIT",       600),
+    # Task #347 — bare ``openai`` RPM entry retained because the AsyncOpenAI
+    # SDK is still the transport for Azure OpenAI / Workers AI / CF AI Gateway
+    # calls (no api.openai.com traffic). The SLM RPM key is keyed by the
+    # transport slug, not by the OpenAI provider itself.
     "azure_openai": _parse_rpm_limit("AZURE_OPENAI_RPM_LIMIT", 500),
     "openai":       60,
-    "bedrock":      30,
+    # bedrock removed in Task #347
 }
 logger.info("SLM RPM limits (overridable via env): %s", _POOL_RPM_LIMITS)
 
@@ -723,10 +697,10 @@ class _SmartKeyPool:
             key_idx = int(pname.split(":")[1]) - 1 if ":" in pname else 0
             keys = pmap.get(real_provider, [])
             key = keys[key_idx] if key_idx < len(keys) else ""
-            if key or real_provider in ("sarvam", "bedrock"):
-                if real_provider == "bedrock" and not (_AWS_ACCESS_KEY and _AWS_SECRET_KEY):
-                    logger.info("SLM pool: skipping bedrock slot (AWS credentials not set)")
-                    continue
+            # Task #347: ``bedrock`` removed from the keyless-eligible set;
+            # only ``sarvam`` is allowed to claim a slot without a key
+            # (uses platform-managed creds).
+            if key or real_provider == "sarvam":
                 rpm = self._PROVIDER_RPM_LIMITS.get(real_provider, 30)
                 rpm_key = f"{real_provider}:{key_idx}"
                 if rpm_key not in shared_rpm:
@@ -1249,8 +1223,8 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
         return await _call_cerebras(messages, api_key, model, max_tokens)
     if provider == "groq":
         return await _call_openai_compat(messages, api_key, model, max_tokens, "groq", "https://api.groq.com/openai/v1")
-    if provider == "xai":
-        return await _call_openai_compat(messages, api_key, model, max_tokens, "xai", "https://api.x.ai/v1")
+    # Task #347: xAI/Grok dispatch branch removed — provider is no longer
+    # in PROVIDER_PRIORITY and the SDK is uninstalled.
     if provider == "openrouter":
         return await _call_openai_compat(messages, api_key, model, max_tokens, "openrouter", "https://openrouter.ai/api/v1")
     if provider == "azure_openai":
@@ -1524,7 +1498,7 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "vertex":           "gemini-2.5-flash",                          # Vertex AI Gemini 2.5 Flash — highest TPS
-    "bedrock":          "amazon.nova-lite-v1:0",                     # AWS Bedrock Nova Lite — true multimodal (chat+vision), 300K ctx (Task #304)
+    # bedrock removed in Task #347
     "azure_openai":     AZURE_OPENAI_DEPLOYMENT,                     # Azure OpenAI deployment from config (Task #290 — env-driven, no hard-coded model drift)
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
@@ -1536,15 +1510,22 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "exa_ai":           "exa",                                       # Exa neural search
     "tavily":           "tavily-search",                             # Tavily search
     "mongodb_atlas":    "vector-search",                             # Atlas $vectorSearch (fallback)
-    "workers_ai":       "@cf/openai/gpt-oss-20b",                    # CF Workers AI gpt-oss-20b — Task #291 last-resort fallback for content + english_rag_chat (no quota lock-up like llama-3.3-70b)
-    "workers_ai_indic": "@cf/ai4bharat/indictrans2-en-indic-1b",     # CF Workers AI IndicTrans2 English→Assamese; primary translate
+    "workers_ai":            "@cf/openai/gpt-oss-20b",                  # CF Workers AI gpt-oss-20b — Task #291 last-resort fallback for content + english_rag_chat (no quota lock-up like llama-3.3-70b)
+    "workers_ai_indic":      "@cf/ai4bharat/indictrans2-en-indic-1b",   # CF Workers AI IndicTrans2 English→Assamese; primary translate
+    # Task #347 — named Workers AI promotions used at small tail weights
+    # in POOL_WEIGHTS so they fire only after every paid provider is
+    # excluded. Each is a thin alias that routes through the canonical
+    # ``workers-ai`` dispatch with a model override.
+    "workers_ai_mistral_7b": "@cf/mistral/mistral-7b-instruct-v0.3",   # balanced English fallback
+    "workers_ai_llama32_3b": "@cf/meta/llama-3.2-3b-instruct",         # ultrafast 3B for burst / fast-mode
+    "workers_ai_llama31_8b": "@cf/meta/llama-3.1-8b-instruct-fp8",     # Indic chat fallback tail
 }
 
 # Maps provider names to the canonical provider string used by _call_single_provider.
 # This bridges Task #250's semantic provider names to llm.py's internal strings.
 _PROVIDER_CANONICAL: dict[str, str] = {
     "vertex":           "gemini",           # Vertex Gemini = gemini provider
-    "bedrock":          "bedrock",
+    # bedrock removed in Task #347
     "azure_openai":     "azure_openai",     # Task #290 — own branch w/ failover chain
     "sarvam":           "sarvam",
     "elevenlabs":       "elevenlabs",
@@ -1556,8 +1537,14 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     "exa_ai":           "exa_ai",
     "tavily":           "tavily",
     "mongodb_atlas":    "mongodb_atlas",
-    "workers_ai":       "workers-ai",
-    "workers_ai_indic": "workers-ai-indic",  # CF IndicTrans2 — primary for translate + assamese pools
+    "workers_ai":            "workers-ai",
+    "workers_ai_indic":      "workers-ai-indic",  # CF IndicTrans2 — primary for translate + assamese pools
+    # Task #347 — Workers AI promotions all canonicalize to "workers-ai"
+    # so the standard CF AI dispatch handles them; the per-alias model
+    # comes from _PROVIDER_DEFAULT_MODELS above.
+    "workers_ai_mistral_7b": "workers-ai",
+    "workers_ai_llama32_3b": "workers-ai",
+    "workers_ai_llama31_8b": "workers-ai",
 }
 
 # CF AI Gateway saturation threshold — providers above this RPM ratio are
@@ -1771,20 +1758,8 @@ async def _dispatch_llm_for_feature(
             _record_llm_call("sarvam", "sarvam-m", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
             raise
 
-    if provider == "bedrock":
-        # AWS Bedrock Converse API via CF AI Gateway BYOK (aws-bedrock slug).
-        # CF handles SigV4 signing — no AWS SDK required in the backend.
-        from providers.bedrock import call_converse as _bedrock_converse
-        _t0 = _dp_t.perf_counter()
-        try:
-            result = await _bedrock_converse(messages, max_tokens=max_tokens)
-            _record_llm_call("bedrock", "amazon.nova-lite-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
-            _bedrock_track_outcome(True)
-            return result
-        except Exception as _exc:
-            _record_llm_call("bedrock", "amazon.nova-lite-v1:0", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
-            _bedrock_track_outcome(False, _exc)
-            raise
+    # Task #347: bedrock dispatch branch deleted — providers/bedrock.py is gone
+    # and no PROVIDER_PRIORITY pool routes to "bedrock" any more.
 
     if provider == "azure_openai":
         # Azure OpenAI chat/completions — providers/azure_openai handles the
@@ -2230,37 +2205,10 @@ async def _stream_cerebras(messages: list, api_key: str, model: str, max_tokens:
         if delta and delta.content:
             yield delta.content
 
-async def _stream_xai(messages: list, api_key: str, model: str, max_tokens: int):
-    """Token-by-token streaming from xAI Grok via its OpenAI-compatible endpoint."""
-    direct_base = "https://api.x.ai/v1"
-    base = get_provider_base_url("xai") or direct_base
-    client = _get_oai_client(api_key, base)
-    try:
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-        )
-    except _oai.APIConnectionError as e:
-        if base != direct_base and _is_cf_connection_error(e):
-            _handle_cf_connection_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            stream = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-            )
-        else:
-            raise
-    except _oai.AuthenticationError as e:
-        if base != direct_base:
-            _handle_cf_gateway_auth_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            stream = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-            )
-        else:
-            raise
-    async for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta and delta.content:
-            yield delta.content
+# Task #347: ``_stream_xai`` was deleted. xAI/Grok is no longer in any
+# PROVIDER_PRIORITY pool, the SDK is uninstalled, and no dispatch path
+# routes to provider == "xai".
+
 
 async def _stream_openai_compat(messages: list, api_key: str, model: str, max_tokens: int, provider: str, fallback_base: str):
     """Token-by-token streaming from any OpenAI-compatible provider."""
@@ -2293,70 +2241,15 @@ async def _stream_openai_compat(messages: list, api_key: str, model: str, max_to
         if delta and delta.content:
             yield delta.content
 
-async def _stream_bedrock(messages: list, model: str, max_tokens: int):
-    """Token-by-token streaming from Amazon Bedrock via Converse streaming API.
-    boto3 is synchronous — runs in a thread pool; tokens passed back via asyncio.Queue.
-    Supports Amazon Nova family (nova-lite default, nova-pro, etc.) and any Converse-compatible model.
-    """
-    if not _AWS_ACCESS_KEY or not _AWS_SECRET_KEY:
-        raise ValueError("AWS credentials not configured (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)")
-
-    # Convert OpenAI-format messages to Bedrock Converse format
-    system_parts = []
-    converse_messages = []
-    for m in messages:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if role == "system":
-            system_parts.append({"text": content})
-        else:
-            converse_messages.append({"role": role, "content": [{"text": content}]})
-
-    loop = asyncio.get_event_loop()
-    queue: asyncio.Queue = asyncio.Queue()
-
-    def _sync_stream():
-        try:
-            import boto3 as _boto3
-            client = _boto3.client(
-                "bedrock-runtime",
-                region_name=_AWS_REGION,
-                aws_access_key_id=_AWS_ACCESS_KEY,
-                aws_secret_access_key=_AWS_SECRET_KEY,
-            )
-            kwargs = dict(
-                modelId=model,
-                messages=converse_messages,
-                inferenceConfig={"maxTokens": max_tokens, "temperature": 0.1},
-            )
-            if system_parts:
-                kwargs["system"] = system_parts
-            resp = client.converse_stream(**kwargs)
-            for event in resp["stream"]:
-                if "contentBlockDelta" in event:
-                    text = event["contentBlockDelta"].get("delta", {}).get("text", "")
-                    if text:
-                        loop.call_soon_threadsafe(queue.put_nowait, text)
-            loop.call_soon_threadsafe(queue.put_nowait, None)   # sentinel → done
-        except Exception as exc:
-            loop.call_soon_threadsafe(queue.put_nowait, exc)
-
-    loop.run_in_executor(None, _sync_stream)
-
-    while True:
-        item = await queue.get()
-        if item is None:
-            break
-        if isinstance(item, Exception):
-            raise item
-        yield item
+# Task #347: ``_stream_bedrock`` was deleted alongside providers/bedrock.py.
+# boto3 / Bedrock Converse streaming is no longer a supported path.
 
 
 async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int = 2048, intent: str = "", response_lang: str = ""):
     """
     Real token-by-token streaming from the LLM provider.
     Uses native streaming APIs for instant first-token delivery.
-    Supports: Sarvam, Groq, Fireworks, Gemini, Cerebras, xAI, Bedrock.
+    Supports: Sarvam, Groq, Fireworks, Gemini, Cerebras, Workers AI, Vertex, Azure OpenAI.
     'openai/gpt-oss-20b' triggers the smart SLM pool (Fireworks/Groq/Cerebras/Gemini).
     When response_lang is an Indic code (as/hi/etc), optimized Sarvam routing is applied.
     """
@@ -2670,18 +2563,14 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             logger.info(f"LLM stream: provider=groq, model={p_model}")
             async for token in _stream_openai_compat(messages, p_key, p_model, _mt, "groq", "https://api.groq.com/openai/v1"):
                 yield token
-        elif p_name == "xai":
-            logger.info(f"LLM stream: provider=xai, model={p_model}")
-            async for token in _stream_xai(messages, p_key, p_model, _mt):
-                yield token
+        # Task #347: xAI/Grok stream branch removed — _stream_xai is gone
+        # and PROVIDER_PRIORITY no longer routes to "xai".
         elif p_name == "openrouter":
             logger.info(f"LLM stream: provider=openrouter, model={p_model}")
             async for token in _stream_openai_compat(messages, p_key, p_model, _mt, "openrouter", "https://openrouter.ai/api/v1"):
                 yield token
-        elif p_name == "bedrock":
-            logger.info(f"LLM stream: provider=bedrock, model={p_model}")
-            async for token in _stream_bedrock(messages, p_model, _mt):
-                yield token
+        # Task #347: bedrock stream branch removed — providers/bedrock.py and
+        # _stream_bedrock are gone; PROVIDER_PRIORITY no longer lists bedrock.
         else:
             logger.info(f"LLM stream: provider={p_name}, model={p_model}")
             chat = LlmChat(api_key=p_key or OPENAI_API_KEY, session_id=str(uuid.uuid4())).with_model(p_name, p_model)
@@ -2703,7 +2592,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         "gemini": 500000,
         "openrouter": 200000,
         "openai": 80000,
-        "bedrock": 40000,
+        # bedrock removed in Task #347
     }
 
     if use_model_raw == "openai/gpt-oss-20b":
@@ -3298,8 +3187,9 @@ async def call_embed_with_dispatch(
     voyage_ai: providers.voyage_ai.embed_query (1024-dim, voyage-3.5).
     cohere:    providers.cohere.embed_query    (1024-dim, embed-multilingual-v3.0).
     workers_ai: cloudflare_ai.embed (1024-dim, @cf/baai/bge-m3).
-    azure_openai/bedrock: branches kept for back-compat in case POOL_WEIGHTS
+    azure_openai: branch kept for back-compat in case POOL_WEIGHTS
     is overridden at runtime; not selected by the default hybrid pools.
+    (bedrock embed branch removed in Task #347.)
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP
@@ -3324,17 +3214,7 @@ async def call_embed_with_dispatch(
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
                 return await _cf_embed(text)
-            elif provider == "bedrock":
-                # Amazon Titan Embeddings v2 via CF AI Gateway BYOK (Task #256).
-                # Task #304: feed outcome into the shared 429-burst lifecycle.
-                from providers.bedrock import call_embed as _bk_embed
-                try:
-                    _vec = await _bk_embed(text, task_type=task_type)
-                    _bedrock_track_outcome(True)
-                    return _vec
-                except Exception as _bk_exc:
-                    _bedrock_track_outcome(False, _bk_exc)
-                    raise
+            # Task #347: bedrock embed branch removed (providers/bedrock.py deleted).
             elif provider == "cohere":
                 from providers.cohere import embed_query as _cohere_embed_q, ENABLED as _cohere_enabled
                 if not _cohere_enabled:
@@ -3411,17 +3291,8 @@ async def call_translate_with_dispatch(
                     {"role": "user", "content": text},
                 ]
                 return await _call_vertex_chat(prompt, "gemini-2.5-flash", 2048)
-            elif provider == "bedrock":
-                # Amazon Translate via bedrock-proxy Worker (SigV4) — Task #256.
-                # Task #304: feed outcome into the shared 429-burst lifecycle.
-                from providers.bedrock import call_translate as _bk_translate
-                try:
-                    _tr = await _bk_translate(text, target_lang=target_lang, source_lang=source_lang)
-                    _bedrock_track_outcome(True)
-                    return _tr
-                except Exception as _bk_exc:
-                    _bedrock_track_outcome(False, _bk_exc)
-                    raise
+            # Task #347: bedrock translate branch removed (Amazon Translate via
+            # bedrock-proxy Worker decommissioned together with providers/bedrock.py).
             elif provider == "azure_openai":
                 # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
                 # Task #338: gated by the azure.translator.enabled admin
@@ -3624,34 +3495,8 @@ async def call_vision_with_dispatch(
                     }
                 ]
                 return await _call_vertex_chat(vision_messages, "gemini-2.5-flash", 1024)
-            elif provider == "bedrock":
-                # Task #304: Nova Lite primary (multimodal Converse), Claude 3.5 Sonnet
-                # as in-pool higher-quality fallback if Nova Lite fails. Both attempts
-                # feed the shared 429-burst lifecycle so /admin/llm/health surfaces the
-                # throttle indicator consistently.
-                from providers.bedrock import call_converse_vision as _bk_vision
-                try:
-                    _vis = await _bk_vision(b64_image, mime_type, prompt, max_tokens=1024)
-                    _bedrock_track_outcome(True)
-                    return _vis
-                except Exception as _nova_exc:
-                    _bedrock_track_outcome(False, _nova_exc)
-                    logger.warning(
-                        "bedrock vision Nova Lite failed (%s) — retrying in-pool "
-                        "with Claude 3.5 Sonnet as higher-quality fallback",
-                        _nova_exc,
-                    )
-                    try:
-                        _vis = await _bk_vision(
-                            b64_image, mime_type, prompt,
-                            model="anthropic.claude-3-5-sonnet-20241022-v2:0",
-                            max_tokens=1024,
-                        )
-                        _bedrock_track_outcome(True)
-                        return _vis
-                    except Exception as _claude_exc:
-                        _bedrock_track_outcome(False, _claude_exc)
-                        raise
+            # Task #347: bedrock vision branch removed (Nova Lite + Claude
+            # Sonnet via providers/bedrock.py deleted alongside the SDK).
             elif provider == "azure_openai":
                 from providers import azure_openai as _az_prov
                 _az_vision_msgs = [

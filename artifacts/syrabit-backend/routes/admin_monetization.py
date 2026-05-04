@@ -3,7 +3,7 @@ import re, json, asyncio, time, logging, hashlib, os, hmac
 from typing import Optional
 from datetime import datetime, timezone
 from fastapi import (
-    APIRouter, HTTPException, Depends,
+    APIRouter, HTTPException, Depends, Request,
 )
 from pydantic import BaseModel
 import mistune as _mistune
@@ -67,7 +67,10 @@ async def admin_patch_plan_tier(plan: str, data: dict, admin: dict = Depends(get
 DEFAULT_API_CONFIG = {
     "groq":        {"key": ""},
     "payment":     {"razorpay_key_id": "", "razorpay_key_secret": "", "razorpay_webhook_secret": ""},
-    "email":       {"resend_key": ""},
+    # Task #347 — Resend removed; SendGrid is the sole transactional
+    # email transport. Key lives in env var SENDGRID_API_KEY rather than
+    # admin DB config so it's managed alongside other secrets.
+    "email":       {"sendgrid_key": ""},
     "push":        {"onesignal_key": ""},
     "analytics":   {"posthog_key": ""},
     "google_auth": {"client_id": "", "client_secret": "", "enabled": False},
@@ -566,244 +569,19 @@ async def recover_failed_payment(user: dict = Depends(get_current_user)):
         raise HTTPException(500, "Recovery failed. Please contact admin@syrabit.ai.")
 
 # ─────────────────────────────────────────────
-# STRIPE PAYMENT (OPTIONAL — configurable via api-config)
+# STRIPE PAYMENT — REMOVED in Task #347
 # ─────────────────────────────────────────────
-PLAN_PRICES_USD = {"starter": 199, "pro": 1299}
+# Task #347 — Stripe fully removed. Razorpay (INR) is now the sole
+# payment surface in admin_monetization.py. The legacy
+# /payments/stripe/create-checkout, /webhooks/stripe and PLAN_PRICES_USD
+# symbols are deleted — clients hitting the old URLs get a normal
+# FastAPI 404 (the same response any other unknown URL returns).
 
-async def _get_stripe_key() -> str:
-    cfg = await db.api_config.find_one({}, {"_id": 0})
-    if cfg:
-        sk = cfg.get("payment", {}).get("stripe_secret_key", "").strip()
-        if sk:
-            return sk
-    return os.environ.get("STRIPE_SECRET_KEY", "").strip()
-
-class StripeCheckoutRequest(BaseModel):
-    plan: str
-    success_url: str = ""
-    cancel_url: str = ""
-
-@router.post("/payments/stripe/create-checkout")
-async def stripe_create_checkout(body: StripeCheckoutRequest, user: dict = Depends(get_current_user)):
-    plan = body.plan.lower()
-    if plan not in PLAN_PRICES_USD:
-        raise HTTPException(400, f"Invalid plan '{plan}'.")
-    stripe_key = await _get_stripe_key()
-    if not stripe_key:
-        raise HTTPException(503, "Stripe not configured.")
-    try:
-        import stripe
-        stripe.api_key = stripe_key
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": f"Syrabit.ai {plan.capitalize()} Plan"},
-                    "unit_amount": PLAN_PRICES_USD[plan],
-                },
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url=body.success_url or f"{FRONTEND_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=body.cancel_url or f"{FRONTEND_URL}/payment/cancel",
-            metadata={"user_id": str(user["id"]), "plan": plan},
-        )
-        return {"checkout_url": session.url, "session_id": session.id}
-    except ImportError:
-        raise HTTPException(503, "Stripe SDK not installed.")
-    except Exception as e:
-        logger.error(f"Stripe checkout error: {e}")
-        raise HTTPException(502, "Failed to create Stripe checkout.")
-
-from starlette.requests import Request as StarletteRequest2
-
-@router.post("/webhooks/stripe")
-async def stripe_webhook(request: StarletteRequest2):
-    stripe_key = await _get_stripe_key()
-    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
-    if not stripe_key:
-        raise HTTPException(503, "Stripe not configured")
-    if not webhook_secret:
-        logger.error("STRIPE_WEBHOOK_SECRET not set — rejecting webhook")
-        raise HTTPException(503, "Stripe webhook secret not configured")
-    try:
-        import stripe
-        stripe.api_key = stripe_key
-        payload = await request.body()
-        sig = request.headers.get("stripe-signature", "")
-        if not sig:
-            raise HTTPException(400, "Missing stripe-signature header")
-        event = stripe.Webhook.construct_event(payload, sig, webhook_secret)
-
-        if event.get("type") == "checkout.session.completed":
-            session = event["data"]["object"]
-            meta = session.get("metadata", {})
-            user_id = meta.get("user_id")
-            plan = meta.get("plan")
-            stripe_session_id = session.get("id", "")
-            if user_id and plan and plan in PLAN_CREDITS:
-                existing = await db.payments.find_one({"stripe_session_id": stripe_session_id})
-                if existing and existing.get("status") == "completed":
-                    logger.info(f"Stripe duplicate event ignored: session={stripe_session_id}")
-                    return {"received": True}
-                credits = PLAN_CREDITS[plan]
-                doc_acc = PLAN_DOC_ACCESS[plan]
-                now_iso = datetime.now(timezone.utc).isoformat()
-                # Task #773: read the *pre-update* user doc once and use
-                # it for the downgrade guard, the supa-mirror credit
-                # math, and the activation-email recipient. Reading
-                # again *after* the mongo $inc would observe the
-                # already-incremented credits_limit and double-count
-                # it on the supa side.
-                wh_user = await db.users.find_one({"id": user_id}) or {}
-                wh_current_plan = wh_user.get("plan", "free")
-                # Defensive cast: a stale row could carry None or a
-                # stringified int (legacy import). Crashing the webhook
-                # over a numeric anomaly would force Stripe into
-                # at-least-once retry hell — fall back to 0 instead.
-                try:
-                    wh_prev_credits = int(wh_user.get("credits_limit") or 0)
-                except (TypeError, ValueError):
-                    logger.warning(
-                        f"Stripe webhook: non-numeric credits_limit on user={user_id} "
-                        f"(value={wh_user.get('credits_limit')!r}) — treating as 0"
-                    )
-                    wh_prev_credits = 0
-                if PLAN_RANK_MAP.get(plan, 0) < PLAN_RANK_MAP.get(wh_current_plan, 0):
-                    logger.warning(
-                        f"Stripe webhook: skipping downgrade {wh_current_plan}→{plan} "
-                        f"for user={user_id} session={stripe_session_id} — payment logged only"
-                    )
-                    await db.payments.insert_one(await _enrich_payment_record({
-                        "user_id": user_id, "plan": plan, "provider": "stripe",
-                        "status": "skipped",
-                        "stripe_session_id": stripe_session_id,
-                        "amount_cents": session.get("amount_total", 0),
-                        "currency": session.get("currency", "usd"),
-                        "verified_at": now_iso, "activation_skipped": True,
-                        "skip_reason": f"user already on higher plan ({wh_current_plan})",
-                    }))
-                    return {"received": True}
-                await db.payments.insert_one(await _enrich_payment_record({
-                    "user_id": user_id,
-                    "plan": plan,
-                    "provider": "stripe",
-                    "status": "completed",
-                    "stripe_session_id": stripe_session_id,
-                    "amount_cents": session.get("amount_total", 0),
-                    "currency": session.get("currency", "usd"),
-                    "verified_at": now_iso,
-                }))
-                await db.users.update_one(
-                    {"id": user_id},
-                    {"$set": {"plan": plan, "document_access": doc_acc, "updated_at": now_iso},
-                     "$inc": {"credits_limit": credits}},
-                )
-                if deps.pg_pool:
-                    async with deps.pg_pool.acquire() as conn:
-                        await conn.execute(
-                            "UPDATE users SET plan=$1, credits_limit=credits_limit+$2, document_access=$3, updated_at=$4 WHERE id=$5",
-                            plan, credits, doc_acc, now_iso, user_id,
-                        )
-                # Task #773: bring Stripe webhook to parity with the
-                # Razorpay webhook + verify path — mirror to Supabase
-                # and queue the activation email so a paying customer
-                # who funnels through Stripe Checkout actually receives
-                # confirmation and the supa-side users mirror reflects
-                # their new plan. `wh_prev_credits` was captured BEFORE
-                # the mongo $inc above, so `_new_limit` is exactly the
-                # post-update value (re-reading users.find_one here
-                # would observe the already-incremented row and
-                # double-count the grant on the supa side).
-                _new_limit = wh_prev_credits + credits
-                _supa_mirror(lambda: supa.table("users").update({
-                    "plan": plan, "document_access": doc_acc,
-                    "credits_limit": _new_limit, "updated_at": now_iso,
-                }).eq("id", str(user_id)).execute())
-                _redis_invalidate_session(user_id)
-                logger.info(f"Stripe payment: user={user_id} plan={plan} credits+={credits}")
-                asyncio.create_task(email_templates.send_plan_activation(
-                    email=wh_user.get("email", ""),
-                    name=wh_user.get("name", wh_user.get("email", "")),
-                    plan=plan,
-                    credits=credits,
-                    # Stripe charges in USD cents; activation email
-                    # shows the INR price the customer was quoted at
-                    # checkout-create time so the receipt matches the
-                    # plan card they clicked.
-                    amount_paise=PLAN_PRICES_INR.get(plan, 0),
-                ))
-
-        elif event.get("type") == "invoice.paid":
-            # Task #773: subscription renewals. The one-time
-            # /payments/stripe/create-checkout above uses
-            # mode="payment", but customers on a Stripe-managed
-            # subscription (created out-of-band or via a future
-            # subscription endpoint) will fire `invoice.paid` on
-            # every renewal. We must top up credits for the same
-            # plan, but never re-flip the plan column (the user
-            # already owns it from the original checkout) and
-            # never downgrade.
-            invoice = event["data"]["object"]
-            inv_id = invoice.get("id", "")
-            if not inv_id:
-                return {"received": True}
-            # Stripe puts subscription metadata on the invoice's
-            # `subscription_details.metadata` (API >= 2024-09); fall
-            # back to the first line item's metadata for older API
-            # versions / hand-rolled subscriptions.
-            inv_meta = (invoice.get("subscription_details") or {}).get("metadata") or {}
-            if not inv_meta:
-                lines = ((invoice.get("lines") or {}).get("data") or [{}])
-                inv_meta = (lines[0] or {}).get("metadata") or {}
-            user_id = inv_meta.get("user_id")
-            plan = inv_meta.get("plan")
-            if not user_id or plan not in PLAN_CREDITS:
-                logger.info(f"Stripe invoice.paid ignored (no user/plan metadata): invoice={inv_id}")
-                return {"received": True}
-            existing = await db.payments.find_one({"stripe_invoice_id": inv_id})
-            if existing and existing.get("status") == "completed":
-                logger.info(f"Stripe duplicate invoice.paid ignored: invoice={inv_id}")
-                return {"received": True}
-            credits = PLAN_CREDITS[plan]
-            now_iso = datetime.now(timezone.utc).isoformat()
-            await db.payments.insert_one(await _enrich_payment_record({
-                "user_id": user_id,
-                "plan": plan,
-                "provider": "stripe",
-                "status": "completed",
-                "stripe_invoice_id": inv_id,
-                "stripe_subscription_id": invoice.get("subscription", ""),
-                "amount_cents": invoice.get("amount_paid", 0),
-                "currency": invoice.get("currency", "usd"),
-                "verified_at": now_iso,
-                "renewal": True,
-            }))
-            await db.users.update_one(
-                {"id": user_id},
-                {"$set": {"updated_at": now_iso},
-                 "$inc": {"credits_limit": credits}},
-            )
-            if deps.pg_pool:
-                async with deps.pg_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET credits_limit=credits_limit+$1, updated_at=$2 WHERE id=$3",
-                        credits, now_iso, user_id,
-                    )
-            _redis_invalidate_session(user_id)
-            logger.info(f"Stripe renewal: user={user_id} plan={plan} credits+={credits} invoice={inv_id}")
-        return {"received": True}
-    except ImportError:
-        raise HTTPException(503, "Stripe SDK not installed.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Stripe webhook error: {e}")
-        raise HTTPException(400, f"Webhook error: {str(e)[:100]}")
+# Original Stripe checkout + webhook handlers fully removed in Task #347.
+# The Razorpay webhook below is the sole supported payment-completion path.
 
 @router.post("/webhooks/razorpay")
-async def razorpay_webhook(request: StarletteRequest2):
+async def razorpay_webhook(request: Request):
     _, _, webhook_secret = await _get_razorpay_keys()
     if not webhook_secret:
         logger.error("RAZORPAY_WEBHOOK_SECRET not set — rejecting webhook")
@@ -1158,6 +936,9 @@ async def get_user_payments(user: dict = Depends(get_current_user)):
             description = f"{plan_raw.capitalize()} Plan"
 
         result.append({
+            # Task #347 — Stripe removed; ``stripe_session_id`` lookup retained
+            # only so legacy payment rows (pre-decommission) still surface a
+            # readable id in the admin UI. No new rows carry that field.
             "id": p.get("razorpay_payment_id") or p.get("stripe_session_id") or "",
             "date": p.get("verified_at", ""),
             "amount": display_amount,
@@ -1182,6 +963,9 @@ class RefundRequestBody(BaseModel):
 @router.post("/payments/refund-request")
 async def request_refund(body: RefundRequestBody, user: dict = Depends(get_current_user)):
     user_id = str(user["id"])
+    # Task #347 — Stripe removed; ``stripe_session_id`` $or branch retained
+    # only so refunds on legacy pre-decommission payments still resolve.
+    # All NEW payments go through Razorpay (INR).
     payment = await db.payments.find_one({
         "user_id": user_id,
         "$or": [
@@ -1246,15 +1030,22 @@ async def admin_usage_summary(admin: dict = Depends(get_admin_user)):
     total_users = await supa_count_users()
     total_convs = await supa_count_conversations()
     payments = await db.payments.find({}, {"_id": 0}).sort("verified_at", -1).to_list(1000)
-    total_revenue_inr = sum(p.get("amount_paise", 0) for p in payments if p.get("provider") != "stripe")
-    total_revenue_usd = sum(p.get("amount_cents", 0) for p in payments if p.get("provider") == "stripe")
-    # Task #731 S3 — Stripe-aware unified INR total. Prefers persisted
-    # `amount_inr` (set by S2's enrich helper at insert time using the
-    # FX rate of the moment) so this number actually answers "how much
-    # money have we made, in rupees" — including Stripe payments. The
-    # legacy split fields above stay for back-compat with older admin
-    # dashboards still in the wild.
+    # Task #347 — Stripe (USD) is fully decommissioned; Razorpay (INR) is
+    # the sole live payment provider. Historical Stripe rows are excluded
+    # from the live INR aggregate and surfaced separately as a read-only
+    # legacy figure so old admin dashboards don't break.
+    total_revenue_inr = sum(
+        p.get("amount_paise", 0) for p in payments if p.get("provider") != "stripe"
+    )
+    legacy_stripe_usd_cents = sum(
+        p.get("amount_cents", 0) for p in payments if p.get("provider") == "stripe"
+    )
+
     def _row_inr_local(p: dict) -> float:
+        # Pre-Task-#347 enrichment: ``amount_inr`` was set at insert time
+        # using the FX rate of the moment so historical Stripe rows can
+        # still be totalled in INR. Live rows always populate this field
+        # via Razorpay's native INR payload.
         v = p.get("amount_inr")
         if isinstance(v, (int, float)) and v >= 0:
             return float(v)
@@ -1269,10 +1060,10 @@ async def admin_usage_summary(admin: dict = Depends(get_admin_user)):
         "total_conversations": total_convs,
         "total_payments": len(payments),
         "revenue_inr_paise": total_revenue_inr,
-        "revenue_usd_cents": total_revenue_usd,
+        # Read-only — historical Stripe rows only; no live ingest.
+        "legacy_stripe_usd_cents": legacy_stripe_usd_cents,
         # Single source-of-truth INR figure for revenue tiles.
         "revenue_inr_unified": total_revenue_inr_unified,
-        "revenue_includes_stripe": True,
         "recent_payments": payments[:20],
     }
 

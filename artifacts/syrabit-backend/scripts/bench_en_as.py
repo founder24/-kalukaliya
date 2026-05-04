@@ -55,8 +55,7 @@ CANDIDATES = [
     ("cloudflare/llama-3.1-8b",     "workers-ai",   "@cf/meta/llama-3.1-8b-instruct-fp8",       "CLOUDFLARE_API_TOKEN"),
     ("cloudflare/gpt-oss-120b",     "workers-ai",   "@cf/openai/gpt-oss-120b",                  "CLOUDFLARE_API_TOKEN"),
     ("cloudflare/sea-lion-indic",   "workers-ai",   "@cf/aisingapore/gemma-sea-lion-v4-27b-it", "CLOUDFLARE_API_TOKEN"),
-    # ── AWS Bedrock (via CF AI Gateway BYOK) ───────────────────────────────
-    ("aws-bedrock/nova-lite-v1",    "bedrock",      "amazon.nova-lite-v1:0",                    "AWS_ACCESS_KEY_ID"),
+    # ── AWS Bedrock removed in Task #347 (provider decommissioned) ─────────
     # ── Azure OpenAI (CF BYOK → KEY_1 → KEY_2 chain) ───────────────────────
     ("azure-openai/gpt-4.1-mini",   "azure_openai", "",                                          "AZURE_OPENAI_KEY_1"),
     # ── GCP Vertex AI Gemini (direct, OAuth via SA JSON) ───────────────────

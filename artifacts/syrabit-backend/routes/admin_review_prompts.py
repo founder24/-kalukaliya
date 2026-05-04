@@ -1705,16 +1705,19 @@ async def _send_review_prompt_weekly_digest_email(
     except Exception:
         pass
     recipients = _resolve_review_prompt_digest_recipients(to)
-    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+    # Task #347 — Resend removed; SendGrid is now the sole admin-email
+    # transport. The env-var name kept for backward-compat with the
+    # `no_sendgrid_key` short-circuit.
+    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
     if not recipients:
         return {"sent": False, "to": "", "recipients": [], "reason": "no_admin_email"}
     # Preserve legacy single-string ``to`` field for callers / tests that
     # only inspected the first recipient (the digest used to be 1:1).
     primary = recipients[0]
-    if not resend_key:
+    if not sendgrid_key:
         return {
             "sent": False, "to": primary, "recipients": recipients,
-            "reason": "no_resend_key",
+            "reason": "no_sendgrid_key",
         }
     try:
         from email_templates import EMAIL_FROM as _from
@@ -1731,14 +1734,18 @@ async def _send_review_prompt_weekly_digest_email(
         f"{stats.get('iso_week','')}"
     )
     try:
-        import resend as _resend_sdk
-        _resend_sdk.api_key = resend_key
-        _resend_sdk.Emails.send({
-            "from": _from,
-            "to": list(recipients),
-            "subject": subject,
-            "html": html,
-        })
+        from email_templates import send_admin_email
+        ok = send_admin_email(
+            to=list(recipients),
+            subject=subject,
+            html=html,
+            sender=_from,
+        )
+        if not ok:
+            return {
+                "sent": False, "to": primary, "recipients": recipients,
+                "reason": "send_error:sendgrid_non_2xx",
+            }
         logger.info(
             f"[review-prompt digest] sent → {', '.join(recipients)} "
             f"({stats.get('iso_week','')})"
@@ -1748,7 +1755,7 @@ async def _send_review_prompt_weekly_digest_email(
             "subject": subject,
         }
     except Exception as exc:
-        logger.warning(f"[review-prompt digest] Resend send failed: {exc}")
+        logger.warning(f"[review-prompt digest] SendGrid send failed: {exc}")
         return {
             "sent": False, "to": primary, "recipients": recipients,
             "reason": f"send_error:{type(exc).__name__}",

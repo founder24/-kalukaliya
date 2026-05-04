@@ -38,7 +38,8 @@ router = APIRouter()
 # ─────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────
-KNOWN_NETWORKS = {"adsense", "adpushup", "adsterra", "propellerads", "quge5"}
+# Task #347 — quge5 removed (popunders + adult creatives, off site-wide).
+KNOWN_NETWORKS = {"adsense", "adpushup", "adsterra", "propellerads"}
 _AD_IMPRESSIONS_TTL_SECONDS = 60 * 60 * 24 * 60  # 60 days
 _AD_INDEXES_READY = False
 

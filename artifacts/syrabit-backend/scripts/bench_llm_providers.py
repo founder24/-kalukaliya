@@ -331,28 +331,8 @@ async def _run_vertex_chat(messages: list, max_tokens: int, **_):
     )
 
 
-async def _run_bedrock_nova(messages: list, max_tokens: int, **_):
-    """Bench Amazon Nova Lite via Bedrock Converse through CF AI Gateway BYOK.
-
-    Task #304 — Nova Lite is the all-in-one chat+vision model. Uses the
-    production providers.bedrock.call_converse path so the bench measures
-    the same code traffic uses (CF AI Gateway aws-bedrock BYOK slug,
-    SigV4 signing handled by the gateway).
-
-    Converse is non-streaming, so we record total_ms == ttft_ms — the
-    bench framework treats first-token == total when no streaming is
-    available, matching how Polly/Transcribe and other one-shot Bedrock
-    services would be timed.
-    """
-    from providers import bedrock as _bk
-    if not _bk.ENABLED:
-        raise RuntimeError(
-            "bedrock_nova disabled (CF_GATEWAY_ENABLED unset or aws-bedrock slug missing)"
-        )
-    t0 = time.perf_counter()
-    text = await _bk.call_converse(messages, max_tokens=max_tokens)
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    return elapsed_ms, elapsed_ms, text or ""
+# Task #347 — _run_bedrock_nova removed; AWS Bedrock has been
+# decommissioned and providers/bedrock.py is gone.
 
 
 async def _run_sarvam(messages: list, max_tokens: int, response_lang: str = "as", **_):
@@ -403,13 +383,13 @@ ADAPTERS: dict[str, tuple[Callable[..., Awaitable[tuple[float, float, str]]], st
     "workers_ai_oss120": (_run_cf_chat_oss120, "@cf/openai/gpt-oss-120b"),
     "vertex_chat":            (_run_vertex_chat,            "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
     "sarvam":                 (_run_sarvam,                 "sarvam-m"),
-    "bedrock_nova":           (_run_bedrock_nova,           "amazon.nova-lite-v1:0"),
+    # Task #347 — bedrock_nova entry removed (provider decommissioned).
 }
 
 SUITE_PROVIDER_DEFAULTS: dict[str, list[str]] = {
-    "english_chat":  ["azure_openai", "workers_ai_oss20", "vertex_chat", "bedrock_nova"],
-    "assamese_chat": ["azure_openai", "sarvam", "vertex_chat", "bedrock_nova"],
-    "long_form":     ["azure_openai", "workers_ai_oss120", "vertex_chat", "bedrock_nova"],
+    "english_chat":  ["azure_openai", "workers_ai_oss20", "vertex_chat"],
+    "assamese_chat": ["azure_openai", "sarvam", "vertex_chat"],
+    "long_form":     ["azure_openai", "workers_ai_oss120", "vertex_chat"],
 }
 
 
