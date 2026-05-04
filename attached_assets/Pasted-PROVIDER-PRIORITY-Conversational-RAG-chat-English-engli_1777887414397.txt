@@ -1,0 +1,102 @@
+PROVIDER_PRIORITY = {
+
+    # Conversational RAG chat — English
+    "english_rag_chat": [
+        "vertex",          # Gemini 2.5 Pro / Flash (Google Cloud for Startups credits)
+        "azure_openai",    # GPT‑4‑class via Microsoft Founders Hub
+        "bedrock",         # AWS Bedrock (Claude / Titan / Jamba via AWS Activate)
+        "workers_ai",      # Cloudflare llama‑3.2‑11b‑instruct as fallback
+    ],
+
+    # Conversational RAG chat — Assamese
+    # Only Sarvam does true Assamese; Vertex is English‑only fallback.
+    "assamese_rag_chat": [
+        "sarvam",          # Native Assamese conversational stack (Sarvam startup credits)
+        "vertex",          # Gemini 2.5 Flash fallback (Google Cloud credits)
+        "workers_ai",      # Cloudflare fallback
+    ],
+
+    # Long-form content generation (MCQ, notes, admin pipelines)
+    "content": [
+        "vertex",          # Gemini 2.5 Flash / Flash‑Lite
+        "azure_openai",    # GPT‑4‑class for structured content
+        "bedrock",         # AWS Bedrock for batch / overflow
+        "workers_ai",      # Cloudflare llama‑3.2‑11b‑instruct fallback
+    ],
+
+    # Assamese content (translated/adapted from English)
+    "assamese_content": [
+        "sarvam",          # Native Assamese adaptation (Sarvam credits)
+        "vertex",          # Vertex Translate / Gemini‑based translation (Google Cloud)
+        "workers_ai",      # Cloudflare fallback
+    ],
+
+    # Text-to-speech
+    "tts": [
+        "cartesia",        # Lowest‑latency natural voices
+        "elevenlabs",      # High‑quality expressive voices
+        "vertex",          # Google Cloud TTS (via Google Cloud for Startups)
+        "workers_ai",      # Cloudflare‑based Aura‑2 / fallback TTS
+    ],
+
+    # Speech-to-text
+    "stt": [
+        "assemblyai",      # English‑biased STT primary (no Deepgram)
+        "vertex",          # Google Cloud Speech‑to‑Text (Chirp) via credits
+        "workers_ai",      # Cloudflare Whisper‑based fallback
+    ],
+
+    # Real-time voice pipeline (streaming STT + TTS combined)
+    "voice": [
+        "assemblyai",      # STT leg (no Deepgram)
+        "cartesia",        # TTS leg
+        "elevenlabs",      # Alternative TTS leg
+        "vertex",          # Google Cloud low‑latency TTS + STT combo (credits)
+        "workers_ai",      # Cloudflare fallback
+    ],
+
+    # Text embeddings (RAG ingestion + query)
+    "embed": [
+        "cohere",          # embed‑multilingual‑v3.0 (best quality)
+        "voyage_ai",       # high‑quality multilingual retrieval
+        "workers_ai",      # bge‑large‑en‑v1.5 / bge‑m3 via Cloudflare
+    ],
+
+    # Semantic reranking (post-retrieval scoring)
+    "rerank": [
+        "pinecone_ai",     # bge‑reranker‑v2‑m3 (multilingual)
+        "cohere",          # rerank‑v3
+        "workers_ai",      # bge‑reranker‑base via Cloudflare
+    ],
+
+    # Translation (English ↔ Assamese / other Indic scripts)
+    "translate": [
+        "sarvam",          # Native Assamese / Indic‑first (Sarvam credits)
+        "vertex",          # Cloud Translation / Gemini‑based via Google Cloud
+        "workers_ai",      # Cloudflare indictrans‑style fallback
+    ],
+
+    # Vision / OCR / image analysis
+    "vision": [
+        "vertex",          # Gemini Flash‑vision (Google Cloud credits)
+        "workers_ai",      # Cloudflare llama‑3.2‑11b‑vision‑instruct fallback
+    ],
+
+    # Prompt safety / content moderation
+    "safety": [
+        "workers_ai",      # llama‑guard‑3‑8b (Cloudflare credits)
+    ],
+
+    # RAG‑grounded web search (answers with citations)
+    "search_rag": [
+        "perplexity",      # Citation‑rich RAG answers
+        "workers_ai",      # Cloudflare fallback
+    ],
+
+    # Live / real‑time web search (freshness‑critical queries)
+    "live_search": [
+        "exa_ai",          # Neural search
+        "tavily",          # Structured results
+        "workers_ai",      # Cloudflare fallback
+    ],
+}
