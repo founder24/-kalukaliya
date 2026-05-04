@@ -301,8 +301,9 @@ _CF_PROVIDER_SLUGS = {
     # /v1/chat/completions, /translate, /text-to-speech, etc.
     # CF custom provider forwards {base}/custom-sarvam/<path> → https://api.sarvam.ai/<path>
     "sarvam":      "custom-sarvam",
-    # New providers routed through CF AI Gateway
-    "cohere":      "cohere/v1",      # Embeddings/RAG — embed-multilingual-v3.0 (1024-dim)
+    # New providers routed through CF AI Gateway.
+    # NOTE: Cohere is intentionally absent — Cohere models (Embed Multilingual v3,
+    # Rerank 3.5) are now served via the aws-bedrock slug. See providers/cohere.py.
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
     "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
@@ -323,8 +324,9 @@ _DIRECT_PROVIDER_URLS = {
     # Sarvam direct URL has NO /v1 — callers already supply /v1/chat/completions
     # and non-LLM endpoints like /translate, /text-to-speech live at root.
     "sarvam":      "https://api.sarvam.ai",
-    # Fallback direct URLs (used when CF gateway is down)
-    "cohere":      "https://api.cohere.com/v1",
+    # Fallback direct URLs (used when CF gateway is down).
+    # NOTE: "cohere" intentionally absent — Cohere now reaches us only through
+    # the aws-bedrock CF gateway slug; there is no direct api.cohere.com path.
     "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
     "voyage_ai":   "https://api.voyageai.com/v1",  # Voyage AI embeddings direct fallback
     # Bedrock direct: region-scoped; Azure direct: tenant endpoint (requires env var)
@@ -1088,8 +1090,8 @@ PROVIDER_PRIORITY: dict = {
     # the last-resort weight-0 fallback in both pools.
     "embed_en":          ["voyage_ai", "cohere", "workers_ai"],
     "embed_indic":       ["cohere", "voyage_ai", "workers_ai"],
-    # Reranking: Pinecone AI (primary) → Workers AI (last resort).
-    "rerank":            ["pinecone_ai", "workers_ai"],
+    # Reranking: Pinecone AI (primary) → Cohere Rerank 3.5 via Bedrock (fallback) → Workers AI.
+    "rerank":            ["pinecone_ai", "cohere", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
     # Translation (English→Assamese):
@@ -1116,7 +1118,7 @@ PROVIDER_CREDITS: dict = {
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
     "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback
-    "cohere":           1000,   # Cohere startup credits — $1k; primary embed
+    "cohere":           1000,   # Cohere via AWS Bedrock — billed against AWS Activate ($1k); primary embed
     "voyage_ai":         500,   # Voyage AI startup credits — $500; secondary embed
     "pinecone_ai":       500,   # Pinecone startup credits — $500; primary rerank
     "exa_ai":           1000,   # Exa startup credits — $1k
@@ -1223,6 +1225,13 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "vector_search": {
         "pinecone_ai": 3000,   # primary — curated Syrabit chapter index
         "vertex":       500,   # fallback — Atlas $vectorSearch with Vertex embeddings
+    },
+    # rerank: Pinecone bge-reranker-v2-m3 primary; Cohere Rerank 3.5 via Bedrock
+    # as a true working fallback (was previously stubbed pre-Task #340).
+    "rerank": {
+        "pinecone_ai": 10000,  # primary — bge-reranker-v2-m3 (multilingual, fast)
+        "cohere":        100,  # fallback — Cohere Rerank 3.5 via aws-bedrock BYOK
+        "workers_ai":      0,  # last-resort no-op
     },
 }
 

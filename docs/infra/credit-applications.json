@@ -199,15 +199,15 @@
       "provider": "bedrock",
       "programme": "AWS Activate (Bedrock)",
       "url": "https://aws.amazon.com/activate/",
-      "eligibility": "n/a — already enrolled but Bedrock daily token quota exhausted account-wide.",
+      "eligibility": "Enrolled on a fresh AWS account (2026-05); Bedrock model access granted in us-west-2.",
       "tier_usd": 1000,
-      "status": "disabled",
+      "status": "approved",
       "approved_usd": 1000,
       "expires_on": null,
       "tied_email": "founder@syrabit.ai",
-      "submitted_on": null,
+      "submitted_on": "2026-05-04",
       "reference_id": null,
-      "notes": "Disabled — AWS quota exhausted. Re-enable by raising Service Quotas; tracked separately."
+      "notes": "Live — used ONLY for Cohere Embed Multilingual v3 + Cohere Rerank 3.5 via CF AI Gateway BYOK (aws-bedrock slug, us-west-2). Direct Cohere connection retired the same day. Anthropic/Nova/Titan/Mistral routes intentionally not wired (Azure GPT-4.1-nano + Vertex Gemini cover those). Verified 2026-05-04: embed HTTP 200, rerank HTTP 429 (new-account RPM throttle, raise Service Quota for production volume)."
     }
   ]
 }

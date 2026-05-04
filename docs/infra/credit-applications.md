@@ -99,7 +99,7 @@ Why pre-seed entry tier (not the headline ceiling):
 | `openrouter_startup` | OpenRouter Startup Program | <https://openrouter.ai/startups> | founder@syrabit.ai | 5,000 | ⚪ not started | — | — | Largest single ask; explicit pre-seed framing. |
 | `exa_ai` | Exa Startup | <https://exa.ai/startups> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Grants 6 months Enterprise Pro (not USD). |
 | `pinecone_ai` | Pinecone for Startups | <https://www.pinecone.io/startups/> | founder@syrabit.ai | 0 | ⚪ not started | — | — | Grants free Standard Tier + Pro Support (not USD). |
-| `bedrock` | AWS Activate (Bedrock) | <https://aws.amazon.com/activate/> | founder@syrabit.ai | 1,000 | 🚫 disabled | 1,000 | — | Disabled — AWS Bedrock daily token quota exhausted. |
+| `bedrock` | AWS Activate (Bedrock) | <https://aws.amazon.com/activate/> | founder@syrabit.ai | 1,000 | ✅ approved | 1,000 | — | Live (2026-05-04) — Cohere Embed Multilingual v3 + Rerank 3.5 only, via CF AI Gateway BYOK in us-west-2. Direct Cohere retired. |
 
 ---
 

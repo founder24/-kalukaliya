@@ -20,7 +20,6 @@ from config import (
     POOL_WEIGHTS,
     MONGO_URL,
     _DEEPGRAM_KEY,
-    _COHERE_KEY,
     _ASSEMBLYAI_KEY,
     _ELEVENLABS_KEY,
     _VOYAGE_AI_KEY,
@@ -70,7 +69,13 @@ def _key_status_for(name: str) -> dict[str, Any]:
     if name == "assemblyai":
         return {"configured": _present(_ASSEMBLYAI_KEY), "source": "ASSEMBLYAI_API_KEY"}
     if name == "cohere":
-        return {"configured": _present(_COHERE_KEY), "source": "COHERE_API_KEY"}
+        # Cohere now reaches us only via AWS Bedrock (CF AI Gateway aws-bedrock
+        # slug) — its readiness is the Bedrock readiness, not a separate Cohere
+        # key. Direct api.cohere.com path retired 2026-05-04 (Task #340).
+        return {
+            "configured": bool(os.environ.get("AWS_REGION")) and bool(os.environ.get("CF_AI_GATEWAY_BASE_URL")),
+            "source": "AWS_REGION + CF_AI_GATEWAY_BASE_URL (via Bedrock BYOK)",
+        }
     if name == "voyage_ai":
         return {"configured": _present(_VOYAGE_AI_KEY), "source": "VOYAGE_AI_API_KEY"}
     if name == "pinecone_ai":
