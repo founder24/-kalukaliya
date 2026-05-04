@@ -1,5 +1,14 @@
 # Syrabit.ai Backend — Railway Deployment Guide
 
+> ⚠️ **RETIRED PATH — DO NOT FOLLOW.** Railway is being decommissioned in
+> Task #335. The canonical backend origin is **Digital Ocean App Platform**
+> per [`docs/infra/cloud-allocation-plan.md`](./infra/cloud-allocation-plan.md)
+> §4.2. Migration is tracked in Task #336. This file is kept only for
+> historical reference and rollback during the cutover soak window.
+
+---
+
+
 ## Architecture
 
 ```

@@ -1,6 +1,16 @@
 # Cloudflare Deployment Wiring Guide
 ## Pydantic-Settings Configuration Integration
 
+> **Canonical hosting plan:**
+> [`docs/infra/cloud-allocation-plan.md`](./docs/infra/cloud-allocation-plan.md)
+> — Cloudflare owns **frontend + edge + R2 + KV + D1 + Workers AI** in the
+> four-cloud plan. Per-service inventory:
+> [`docs/infra/cloud-service-breakdown.md`](./docs/infra/cloud-service-breakdown.md)
+> §1.
+
+---
+
+
 **Task**: Wire all Cloudflare Pages, Edge Worker, and Proxy Edge Worker deployments to support the new centralized pydantic-settings configuration system.
 
 ---

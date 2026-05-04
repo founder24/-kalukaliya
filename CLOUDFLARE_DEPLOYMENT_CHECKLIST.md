@@ -1,5 +1,15 @@
 # Cloudflare Deployment Checklist - Pydantic Settings Upgrade
 
+> **Canonical hosting plan:**
+> [`docs/infra/cloud-allocation-plan.md`](./docs/infra/cloud-allocation-plan.md)
+> — Cloudflare owns **frontend + edge + R2 + KV + D1 + Workers AI** in the
+> four-cloud plan. Per-service inventory:
+> [`docs/infra/cloud-service-breakdown.md`](./docs/infra/cloud-service-breakdown.md)
+> §1.
+
+---
+
+
 ## ✅ Pre-Commit Checklist
 
 Before committing changes, complete these steps to ensure Cloudflare services are properly wired:

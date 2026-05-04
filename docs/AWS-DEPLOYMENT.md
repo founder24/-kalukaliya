@@ -1,5 +1,18 @@
 # Syrabit.ai Backend — AWS ECS Express Mode Deployment Guide
 
+> ⚠️ **RETIRED PATH — DO NOT FOLLOW.** AWS ECS / Fargate / App Runner are
+> **not** the backend home in the current architecture. The canonical backend
+> origin is **Digital Ocean App Platform** per
+> [`docs/infra/cloud-allocation-plan.md`](./infra/cloud-allocation-plan.md)
+> §4.2. AWS in this plan owns **S3 + SES + Lambda + SQS + CloudWatch +
+> Bedrock-Cohere-API only** — see
+> [`docs/infra/cloud-service-breakdown.md`](./infra/cloud-service-breakdown.md)
+> §3 for the full AWS service inventory. This file is kept only for historical
+> reference until Task #335 (decommission) lands.
+
+---
+
+
 ## Architecture
 
 ```
