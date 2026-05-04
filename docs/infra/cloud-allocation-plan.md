@@ -42,7 +42,7 @@
 | **Digital Ocean** | **Backend API** (FastAPI on App Platform), background workers, Rust core service, scheduled cron container, dev/staging environments | Cheapest predictable compute ($12/mo for 1GB app vs $30+ on AWS Fargate), no egress to Cloudflare (Bandwidth Alliance), zero AWS-config tax. Already ported in Task #331. | DO Hatch credits (apply if not already), then cash ~$25–40/mo |
 | **AWS** | **Bedrock Cohere** (embed-multilingual-v3 + rerank-v3.5), **S3** (audio notes, PDF uploads, generated content), **SES** (transactional email), **Lambda + SQS** (heavy async jobs that exceed DO worker memory or need fan-out) | Bedrock is the only place to get Cohere multilingual at this price point on direct AWS auth — verified working today. S3+SES+Lambda are best-in-class at the free tier. Activate $1k credit covers Bedrock spend. | $1,000 AWS Activate (approved); free tier covers S3/SES/Lambda/SQS for year 1 |
 | **Azure** | **Azure OpenAI** (GPT-4.1-mini for `english_rag_chat` + `content` pools), **Container Apps cron + Logic Apps** (Task #329 landing zone — observability + scheduled cleanups), **App Insights** (alerting) | Azure OpenAI has the highest rate limits and lowest latency for GPT-4.1-mini in Asia-South region. Microsoft for Startups credit pool is large and dedicated to Azure-only spend, so not using Azure forfeits the credit. | $2,500 Azure for Startups (approved) |
-| **GCP / Vertex** | **Gemini 2.5 Flash** (primary `content`, `vision`, `safety`, fallback `english_rag_chat`/`assamese_rag_chat`), **Cloud Run** (optional secondary backend origin per Task #606), **Cloud Build** (image registry for Cloud Run) | Gemini 2.5 Flash is the only 1M-context model in budget; Vertex is the cheapest path to it. GCP for Startups credit is generous and Vertex-bound. | $2,000 GCP Startups (approved) |
+| **GCP / Vertex** | **Gemini 2.5 Flash API** only — serves *six* feature pools: primary for `content` / `vision` / `safety`, fallback for `english_rag_chat` / `assamese_rag_chat` / `translate` / `vector_search`. No Cloud Run, no Cloud Build, no Compute Engine — Vertex's plate is already full handling multiple AI API services. | Gemini 2.5 Flash is the only 1M-context model in budget; Vertex is the cheapest path to it. Keeping Vertex scoped to inference avoids spreading the credit across compute too. | $2,000 GCP Startups (approved) — fully spent on Gemini calls |
 
 ---
 
@@ -168,14 +168,20 @@ The dispatcher (`config.PROVIDER_PRIORITY` + `POOL_WEIGHTS`) is the **only** pla
 | **Application Insights** | Distributed tracing for backend ↔ AI providers | Best-in-class for Python OpenTelemetry; integrates with Logic Apps for alerts | $0 within credit |
 | ~~App Service / Functions / VMs~~ | **Not used** for backend API (DO does that) | Avoid double-booking the same workload | — |
 
-### 4.7 GCP / Vertex workloads (beyond Gemini)
+### 4.7 GCP / Vertex workloads — **inference only**
+
+Vertex is intentionally scoped to a single job: serving **Gemini 2.5 Flash via
+the Vertex AI API**. That single API already powers six feature pools in the
+dispatcher, so the $2k credit is fully spoken for on inference alone. We do
+**not** spread the credit across compute (Cloud Run), CI (Cloud Build), or
+storage (GCS) — those roles are owned by other clouds in this plan.
 
 | Service | Use | Why GCP | Cost shape |
 |---|---|---|---|
-| **Vertex AI Gemini 2.5 Flash** | Primary `content`, `vision`, `safety`; fallback `english_rag_chat` | Only 1M-context model in budget; native multimodal; cheapest at our token mix | covered by $2k credit |
-| **Cloud Run (optional secondary origin)** | Per Task #606 — second backend origin for warm failover | Cold-start mitigated by min-instances=1; same image as DO | ~$5/mo at min-instances=1 |
-| **Cloud Build** | Image registry + CI build for Cloud Run image | Native; integrates with Cloud Run; included in credit | $0 within credit |
-| ~~Compute Engine / GKE / Cloud SQL~~ | **Not used** | DO + Mongo Atlas cover compute and DB | — |
+| **Vertex AI Gemini 2.5 Flash** | Primary for `content`, `vision`, `safety`. Fallback for `english_rag_chat`, `assamese_rag_chat`, `translate`, `vector_search`. | Only 1M-context model in budget; native multimodal; cheapest at our token mix; serves *six* of our pools from one API. | covered by $2k credit |
+| ~~Cloud Run~~ | **Not used** for backend origin | DO is the canonical origin (§4.3). Adding a second cloud for the same workload is operational debt. If a warm-failover origin is ever needed, we'd add it on DO (different region) before adding GCP. | — |
+| ~~Cloud Build / Artifact Registry~~ | **Not used** | DO App Platform builds images directly from GitHub on push; no separate registry needed. | — |
+| ~~Compute Engine / GKE / Cloud SQL / GCS~~ | **Not used** | DO + Mongo Atlas + S3 + R2 already cover compute, DB, and blob storage. Adding GCP equivalents would dilute the credit pool. | — |
 
 ---
 
@@ -202,7 +208,7 @@ The dispatcher (`config.PROVIDER_PRIORITY` + `POOL_WEIGHTS`) is the **only** pla
 |---|---:|---|---|
 | Cloudflare | $5,000 | $200/mo (mostly Workers/R2 above free tier as we grow) | month 25+ |
 | Azure | $2,500 | $150/mo (GPT-4.1-mini + Container Apps + AppInsights) | month 16+ |
-| Vertex | $2,000 | $120/mo (Gemini Flash + Cloud Run) | month 16+ |
+| Vertex | $2,000 | $120/mo (Gemini Flash API — six feature pools) | month 16+ |
 | AWS Activate | $1,000 | $50/mo (Bedrock Cohere mostly) | month 20+ |
 | Mongo Atlas | $500 | M0 free tier covers MVP; credit applies after upgrade | month 24+ |
 | Total runway | **$11,000** | ~$520/mo all-in cloud | **20 months at MVP scale** |
@@ -225,7 +231,7 @@ Add credits being chased (`credit-applications.md`): OpenRouter $5k + ElevenLabs
 
 ## 8. What NOT to do (explicit guardrails)
 
-- **Do not** put the backend API on multiple clouds simultaneously. One canonical origin (DO) + one warm-failover origin (Cloud Run if Task #606 ships). Anything else is operational debt.
+- **Do not** put the backend API on multiple clouds simultaneously. One canonical origin (DO). Vertex is **inference-only** — do not deploy backend code (Cloud Run / GKE / Compute Engine) on GCP; it would compete with DO and dilute the Vertex credit pool that's already fully booked for Gemini.
 - **Do not** use Azure Blob Storage or GCS — S3 is the chosen object store. Mixing is a footgun for SDK churn and lifecycle policy drift.
 - **Do not** use AWS Bedrock for chat (Anthropic, Nova, Mistral, Titan). Azure GPT-4.1-mini and Vertex Gemini cover those roles cheaper. Bedrock is **Cohere-only** in this architecture.
 - **Do not** use Cloudflare Workers for long-running backend logic (>10s CPU). Use DO for that; the worker is a proxy, not the app.
@@ -239,5 +245,5 @@ Add credits being chased (`credit-applications.md`): OpenRouter $5k + ElevenLabs
 > **Cloudflare** is the front door and edge brain, **Digital Ocean** is the
 > backend's home, **AWS** is the blob store + transactional email + Cohere
 > transport, **Azure** is GPT-4.1-mini + scheduled cron + observability, and
-> **Vertex** is Gemini's home and the warm-failover backend origin — and the
-> dispatcher routes every AI call to the cheapest credit-funded path.
+> **Vertex** is Gemini-only (inference for six feature pools, no compute) —
+> and the dispatcher routes every AI call to the cheapest credit-funded path.
