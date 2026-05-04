@@ -292,6 +292,30 @@ implementation.
 
 ---
 
+## recall_summary_vector_query *(post-#362)*
+
+> Long-term-summary embedding lookup, **gated by the two-tier
+> recall-intent detector** in `infra/features-roadmap-362.md` §1.2.
+> Per-turn unconditional cost is zero; only recall-intent turns pay
+> the ~30–60 ms summary-vector lookup. Per Latency Rule 14,
+> per-turn synchronous summary-vector queries on every chat turn
+> are forbidden.
+
+| tier | provider_slug | model_id | region | notes |
+|---|---|---|---|---|
+| primary | pinecone | (n/a, vector store; index `syrabit-summaries`, namespace = `user_id`) | aws-us-east-1 | top-k=3; metadata `{session_id, summary_version, summary_text, last_updated_iso, source_turn_count}`; 90-day idle eviction by background sweeper |
+| primary | upstash_redis | (n/a, kv; key `summary:short:{session_id}`) | upstash-eu-west-1 | short-conversation fast path (< 8 turns total); 24h TTL; skips Pinecone round-trip when full history is already cheap to scan |
+| secondary | pinecone | (same as primary, replica namespace) | aws-us-east-1 | rollback only — read-only mirror used if primary namespace returns 5xx; populated by the same off-critical-path summarizer |
+
+**Embed model for summary vectors:** `@cf/baai/bge-m3` (canonical
+`embed_hotpath`; same model used for the per-turn user-message
+embedding so the vector spaces are compatible).
+
+--- removed ---
+- (none)
+
+---
+
 ## Excluded providers (global)
 
 - **cerebras** — absent from every chain
