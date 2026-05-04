@@ -1,0 +1,66 @@
+{
+  "captured_at": "2026-05-03T00:00:00Z",
+  "method": "Static enumeration of Railway-bound services in the repo (artifacts/syrabit-backend/RAILWAY-DEPLOY.md, Dockerfile, apprunner.yaml fallback, scripts/run_grounded_recall_nightly.py).",
+  "project": "syrabit-prod",
+  "services": [
+    {
+      "name": "syrabit-backend",
+      "language": "python311",
+      "entry": "gunicorn server:app -c gunicorn.conf.py",
+      "port": 8000,
+      "public_hostname": "api.syrabit.ai",
+      "replicas_today": "2 (autoscale 2-6)",
+      "external_dependencies": [
+        "MongoDB Atlas",
+        "Supabase",
+        "Upstash Redis",
+        "Cloudflare AI Gateway",
+        "Vertex AI (via AIG)",
+        "Pinecone",
+        "Resend",
+        "Razorpay",
+        "Stripe",
+        "AWS Lambda (bedrock-proxy, email-worker)",
+        "GCP Cloud Tasks",
+        "GCP Cloud Scheduler"
+      ],
+      "secrets_required": [
+        "MONGO_URL", "DB_NAME", "JWT_SECRET", "ADMIN_JWT_SECRET",
+        "SARVAM_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION",
+        "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN",
+        "RESEND_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY",
+        "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
+        "ADMIN_EMAILS", "ADMIN_PASSWORDS", "ADMIN_NAMES",
+        "FRONTEND_URL", "CORS_ORIGINS",
+        "GOOGLE_APPLICATION_CREDENTIALS_JSON"
+      ],
+      "target_landing": "Digital Ocean App Platform service syrabit-api (HTTP/2)"
+    },
+    {
+      "name": "syrabit-core (Rust)",
+      "language": "rust",
+      "entry": "/usr/local/bin/syrabit-core",
+      "ports": {
+        "grpc": 50051,
+        "http_shim": 8080
+      },
+      "public_hostname": "core-internal (private; called from syrabit-backend)",
+      "replicas_today": "1 (single replica, no autoscale)",
+      "external_dependencies": [
+        "Pinecone",
+        "MongoDB Atlas",
+        "Cloudflare AI Gateway"
+      ],
+      "secrets_required": [
+        "PINECONE_API_KEY", "MONGO_URL", "AIG_BASE_URL",
+        "RUST_LOG", "CORE_GRPC_TOKEN"
+      ],
+      "target_landing": "Digital Ocean App Platform service syrabit-core (HTTP/2 + gRPC). Fallback: DO Droplet if bidi gRPC streaming GA blocks port."
+    }
+  ],
+  "verification": {
+    "command": "railway service list -p syrabit-prod",
+    "owner_action": "Snapshot Railway env vars to 1Password before Phase 7 deletion."
+  }
+}

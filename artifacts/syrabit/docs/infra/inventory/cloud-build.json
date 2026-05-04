@@ -1,0 +1,25 @@
+{
+  "captured_at": "2026-05-03T00:00:00Z",
+  "method": "Enumeration from artifacts/syrabit-backend/cloudbuild.yaml and CLOUDRUN-DEPLOY.md.",
+  "project": "syrabit-prod",
+  "pipelines": [
+    {
+      "name": "syrabit-backend",
+      "trigger": "GitHub push to master under artifacts/syrabit-backend/",
+      "config": "artifacts/syrabit-backend/cloudbuild.yaml",
+      "purpose": "Build the Python container, push to Artifact Registry, deploy dispatch-v2 to Cloud Run.",
+      "target_landing": "GitHub Actions workflow do-deploy-api.yml (DO App Platform builds the Python container directly from GitHub source). Pipeline deleted in Phase 7."
+    },
+    {
+      "name": "syrabit-core",
+      "trigger": "GitHub push to master under syrabit-core/",
+      "config": "GitHub Actions (already primary) + Cloud Build mirror",
+      "purpose": "Build the Rust core image, push to Artifact Registry, deploy.",
+      "target_landing": "GitHub Actions workflow do-deploy-core.yml (image pushed to DO Container Registry). Cloud Build mirror deleted in Phase 7."
+    }
+  ],
+  "verification": {
+    "command": "gcloud builds triggers list --project=syrabit-prod",
+    "owner_action": "Disable triggers in Phase 2 (CI/CD rewire); delete in Phase 7."
+  }
+}

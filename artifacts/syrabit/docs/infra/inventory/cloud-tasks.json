@@ -1,0 +1,85 @@
+{
+  "captured_at": "2026-05-03T00:00:00Z",
+  "method": "Static enumeration of every Cloud Tasks producer in artifacts/syrabit-backend/. Wrapper at cloud_tasks_client.py looks up queues by full resource name; queue names below are the project-level convention used by routes/admin_gcp_infra.py and the producers cited.",
+  "project": "syrabit-prod",
+  "location": "asia-south1",
+  "queues": [
+    {
+      "name": "seo-indexnow",
+      "producer_files": ["seo_engine.py", "routes/bot_discovery.py"],
+      "consumer_route": "/internal/seo/indexnow",
+      "purpose": "Submit newly published SEO pages to IndexNow + Bing within seconds of publish.",
+      "target_sqs_queue": "syrabit-seo-indexnow",
+      "target_lambda": "syrabit-seo-indexnow-consumer",
+      "dlq": "syrabit-seo-indexnow-dlq"
+    },
+    {
+      "name": "seo-internal-linker",
+      "producer_files": ["seo_internal_linker.py"],
+      "consumer_route": "/internal/seo/relink",
+      "purpose": "Stage 3 per-page internal-link suggestions written to internal_link_history (action=drafted).",
+      "target_sqs_queue": "syrabit-seo-internal-linker",
+      "target_lambda": "syrabit-seo-internal-linker-consumer",
+      "dlq": "syrabit-seo-internal-linker-dlq"
+    },
+    {
+      "name": "discovery-engine-ingest",
+      "producer_files": ["discovery_engine_ingest.py"],
+      "consumer_route": "/internal/dei/ingest",
+      "purpose": "Push newly published documents into Vertex AI Discovery Engine for in-app site search.",
+      "target_sqs_queue": "syrabit-discovery-ingest",
+      "target_lambda": "syrabit-discovery-ingest-consumer",
+      "dlq": "syrabit-discovery-ingest-dlq"
+    },
+    {
+      "name": "bing-keyword-refresh",
+      "producer_files": ["bing_keyword_client.py"],
+      "consumer_route": "/internal/bing/keyword",
+      "purpose": "Monthly Bing Keyword Research API refresh, fanned out per-query.",
+      "target_sqs_queue": "syrabit-bing-keyword",
+      "target_lambda": "syrabit-bing-keyword-consumer",
+      "dlq": "syrabit-bing-keyword-dlq"
+    },
+    {
+      "name": "bing-submit",
+      "producer_files": ["bing_submit_client.py", "routes/bot_discovery.py"],
+      "consumer_route": "/internal/bing/submit",
+      "purpose": "Daily Bing URL Submission API push; one task per URL batch.",
+      "target_sqs_queue": "syrabit-bing-submit",
+      "target_lambda": "syrabit-bing-submit-consumer",
+      "dlq": "syrabit-bing-submit-dlq"
+    },
+    {
+      "name": "cf-bot-crosscheck",
+      "producer_files": ["cf_bot_crosscheck.py"],
+      "consumer_route": "/internal/cf/bot-recheck",
+      "purpose": "Re-validate suspicious bot signatures observed in CF logs.",
+      "target_sqs_queue": "syrabit-cf-bot-crosscheck",
+      "target_lambda": "syrabit-cf-bot-crosscheck-consumer",
+      "dlq": "syrabit-cf-bot-crosscheck-dlq"
+    },
+    {
+      "name": "unified-logs-cf-pull",
+      "producer_files": ["unified_logs_dao.py"],
+      "consumer_route": "/internal/logs/pull",
+      "purpose": "Backfill / catch-up CF GraphQL log pulls when the in-process loop is paused.",
+      "target_sqs_queue": "syrabit-unified-logs-pull",
+      "target_lambda": "syrabit-unified-logs-pull-consumer",
+      "dlq": "syrabit-unified-logs-pull-dlq"
+    },
+    {
+      "name": "email-fallback",
+      "producer_files": ["notify.py"],
+      "consumer_route": "https://<lambda-url>/email-fallback",
+      "purpose": "Resend → SES fallback when the primary email path returns 5xx or 429.",
+      "target_sqs_queue": "syrabit-email-fallback",
+      "target_lambda": "syrabit-email-worker (existing)",
+      "dlq": "syrabit-email-fallback-dlq"
+    }
+  ],
+  "verification": {
+    "command": "GET https://cloudtasks.googleapis.com/v2/projects/syrabit-prod/locations/asia-south1/queues",
+    "wrapper": "artifacts/syrabit-backend/cloud_tasks_client.py:list_queues",
+    "owner_action": "Re-run at the start of Phase 4 (AWS workers + Azure cron port) to confirm the live queue set still matches this inventory. Any queue present in the API response that is not listed here must be added before producers are switched."
+  }
+}
