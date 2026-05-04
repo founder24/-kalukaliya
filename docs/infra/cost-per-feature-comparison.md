@@ -98,12 +98,24 @@ Columns:
 | Safety / moderation | Azure OpenAI content filter (built-in) + admin review | $0 | Vertex Gemini safety + Azure filter | $0 | $0 | Azure / Vertex |
 | **URL safety** | (none under credit — Cloudflare Radar is read-only; would need PhishTank/Google Safe Browsing API integration) | **$5–15 cash or self-host** | **GCP Web Risk API (10k/mo free)** | **$0** | **+$5–15** | (cash) → Vertex free tier |
 | Vector index (primary) | Pinecone (existing free tier) | $0 | same | $0 | $0 | Pinecone free tier |
-| Vector index (fallback) | CF Vectorize | $0 | same | $0 | $0 | CF credit |
-| Vector index (3rd fallback) | (none — graceful degrade to Pinecone retry) | $0 | Vertex Discovery Engine | $0 | $0 | (none) / Vertex credit |
+| Vector index (fallback 1, active) | CF Vectorize | $0 | **Vertex AI Vector Search / Matching Engine** (`retrievers/vertex.py` already calls `findNeighbors`/`upsertDatapoints`) | $15–30 with traffic | **−$15–30 in cash, but uses Vertex credit** | CF / Vertex credit |
+| Vector index (fallback 2) | CF Vectorize | $0 | CF Vectorize | $0 | $0 | CF credit |
+| Vector index (3rd fallback) | (none — graceful degrade to Pinecone retry) | $0 | Vertex Discovery Engine (`discovery_engine_client.py`) | $0–10 | $0 | (none) / Vertex credit |
 
 **Inference subtotal (3-cloud only):** ~$295–355/mo, of which **~$70–90/mo is uncovered cash** (Sarvam, AWS Polly post-#337, Web Risk substitute).
 
-**Inference subtotal (3-cloud + Vertex):** ~$215–235/mo, **all under credit**.
+**Inference subtotal (3-cloud + Vertex):** ~$215–265/mo (the upper bound includes Vertex Vector Search if it stays an active fallback rather than a code-only rollback), **all under credit**.
+
+> **Routing note:** Generative Gemini calls in production go through
+> **Cloudflare AI Gateway BYOK → google-ai-studio**, not directly to Vertex
+> AI. This is the path `vertex_services.py` takes for embeddings, translation,
+> MCQ/flashcards, content enhancement, SEO meta, gap analysis, and the
+> long-doc reader. The CF AI Gateway adds $0 and earns cache hits on hot
+> prompts. Direct Vertex SA path (`vertex_chat.py`, `providers/vertex_embed.py`,
+> `retrievers/vertex.py`, `discovery_engine_client.py`, Cloud Vision) is used
+> for streaming chat, vector search, and rollback.
+> Auth priority: `VERTEX_SERVICE_ACCOUNT` → `GEMINI_API_KEY` (legacy) →
+> `CF_AI_GATEWAY_*` (prod default).
 
 ---
 

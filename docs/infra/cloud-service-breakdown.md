@@ -145,19 +145,54 @@ too, with the reason (avoiding silent re-introduction later).
 
 ## 4. GCP / Vertex — inference only, no hosting
 
+The codebase touches **four distinct Google API surfaces**, all called from the
+AWS App Runner backend (no GCP compute). The prod default for *generative*
+calls is **Cloudflare AI Gateway BYOK → google-ai-studio (Gemini)**; direct
+Vertex AI Platform calls are kept as rollback. Vector + Discovery + Vision
+calls go direct (no AI Gateway).
+
+**Auth priority recognized by the dispatcher** (highest first):
+1. `VERTEX_SERVICE_ACCOUNT` — Vertex AI Platform service-account JSON (used by `vertex_chat.py`, `providers/vertex_embed.py`, `retrievers/vertex.py`, `discovery_engine_client.py`, Cloud Vision)
+2. `GEMINI_API_KEY` — raw AI Studio API key (legacy fallback, kept for rollback only)
+3. `CF_AI_GATEWAY_*` — Cloudflare AI Gateway BYOK to `google-ai-studio` (**prod default for `vertex_services.py`** — embeddings, translation, MCQ/flashcards, content enhancement, SEO meta, gap analysis, long-doc reader)
+
 ### 4.1 Used
 
-| Service | Use in Syrabit | Region | Cost shape |
-|---|---|---|---|
-| **Vertex AI — Gemini 2.5 Flash** | The headliner. Primary for `content`, `vision`, `safety`. Fallback for `english_rag_chat`, `assamese_rag_chat`, `translate`, `vector_search`. Six pools served from one API. Called from AWS App Runner backend via service-account JSON. | `us-central1`. | ~$120/mo within $2k credit |
-| **Vertex AI — Embedding API (`text-embedding-004`) — *standby*** | Standby fallback embed if both Workers AI bge-m3 and Bedrock Cohere embed are throttled. Pool weight = 1 (last-resort). | `us-central1`. | $0 typical (rarely hit) |
-| **Cloud Vision API** | Generic OCR + image labelling fallback in the OCR chain. Retained from the earlier GCP build; cheaper than spinning up Textract just for this. | global. | $0–2/mo within credit |
-| **Cloud Speech-to-Text (Chirp)** | STT fallback after Workers AI Whisper and Deepgram. Indic-strong. | `asia-south1`. | $0–2/mo within credit |
-| **Cloud Text-to-Speech (Neural2/Studio)** | TTS fallback after ElevenLabs and Sarvam for English Read-Aloud. | global. | $0–2/mo within credit |
-| **Discovery Engine (Vertex AI Search)** | Optional second-source library retriever for RAG, parallel to Pinecone. Used only when Pinecone returns 5xx or zero hits. | global. | $0 within credit |
-| **Web Risk API** | URL safety check for any user-pasted external link before previewing. | global. | $0 within credit (10k/mo free) |
-| **Service Accounts + IAM** | Minimal: one SA per AI API the backend calls; no human IAM users. | global. | $0 |
-| **Cloud Billing alerts** | $5/day alarm → Telegram. | global. | $0 |
+#### Surface A — Vertex AI Platform API (`*-aiplatform.googleapis.com`)
+
+| Service | Caller in repo | Use in Syrabit | Region | Cost shape |
+|---|---|---|---|---|
+| **Vertex AI — Vector Search (Matching Engine)** | `retrievers/vertex.py` | `findNeighbors`, `upsertDatapoints`, `removeDatapoints`, `readIndexDatapoints` against the deployed Index / IndexEndpoint. Active retriever surface (not just a Pinecone fallback). | `us-central1` | ~$15–30/mo within $2k credit at MVP scale |
+| **Vertex AI — Text Embeddings (`text-embedding-004`, 768-dim)** | `providers/vertex_embed.py` | Long-form embed fallback via `…:predict` when Workers AI bge-m3 and Bedrock Cohere are throttled or out of band for context length. | `us-central1` | $0–5/mo (rarely hit) |
+| **Vertex AI — Gemini streaming chat (direct SA path)** | `vertex_chat.py` | The **only** generative path that still hits Vertex AI directly with a service account (rather than going through CF AI Gateway). Kept as a rollback when AI Gateway is degraded. | `us-central1` | $0–10/mo (rollback only) |
+
+#### Surface B — Discovery Engine API (`discoveryengine.googleapis.com`)
+
+| Service | Caller in repo | Use in Syrabit | Region | Cost shape |
+|---|---|---|---|---|
+| **Discovery Engine (Vertex AI Search)** | `discovery_engine_client.py` | `{servingConfig}:search` for retrieval. Second-source library retriever for RAG, parallel/fallback to Pinecone + Vector Search. | global | $0–10/mo within credit |
+
+#### Surface C — Generative Language / Gemini API via Cloudflare AI Gateway BYOK *(prod default)*
+
+| Service | Caller in repo | Use in Syrabit | Region | Cost shape |
+|---|---|---|---|---|
+| **Gemini 2.5 Flash via CF AI Gateway → google-ai-studio** | `vertex_services.py` (umbrella) | All non-streaming generative work: embeddings (short-form), translation, MCQ + flashcard generation, content enhancement, SEO meta-tag generation, gap analysis, long-doc (1M-context) reader. Routed through the CF AI Gateway for caching, observability, and rate-limit pooling. The direct Vertex SA path and raw `GEMINI_API_KEY` path are kept only as rollback. | edge (CF) → `us-central1` (Gemini) | ~$80–120/mo within $2k credit (CF Gateway adds $0; cache hits reduce spend further) |
+
+#### Surface D — Google Cloud Vision API (separate service, same SA setup)
+
+| Service | Caller in repo | Use in Syrabit | Region | Cost shape |
+|---|---|---|---|---|
+| **Cloud Vision API** | `vertex_services.py` (OCR path) | OCR backend after the 2026-05-03 "vertex-only Gemini" migration: image text extraction for PDF lecture notes, MCQ-from-photo, diagram labelling. Lives in the same SA / auth surface even though it's a separate API. | global | $0–2/mo within credit (1k/mo free) |
+
+#### Other GCP services still in use
+
+| Service | Caller in repo | Use in Syrabit | Region | Cost shape |
+|---|---|---|---|---|
+| **Cloud Speech-to-Text (Chirp)** | dispatcher fallback | STT fallback after Workers AI Whisper and Deepgram. Indic-strong. | `asia-south1` | $0–2/mo within credit |
+| **Cloud Text-to-Speech (Neural2/Studio)** | dispatcher fallback | TTS fallback after ElevenLabs and Sarvam for English Read-Aloud. 4M chars/mo free. | global | $0 within free tier |
+| **Web Risk API** | dispatcher | URL safety check for user-pasted external links before previewing. 10k/mo free. | global | $0 within free tier |
+| **Service Accounts + IAM** | infra | One SA per surface the backend calls (Vertex AI Platform, Discovery, Vision). No human IAM users. Same SA also signs `vertex_services.py` rollback path. | global | $0 |
+| **Cloud Billing alerts** | infra | $5/day alarm → Telegram. | global | $0 |
 
 ### 4.2 Not used (and why)
 
@@ -198,11 +233,11 @@ When you're holding a *feature* and asking "which cloud serves this?", read this
 | **Async queue** | AWS SQS | — | — | — |
 | **Primary DB** | Mongo Atlas (M0 → M10 with $500 credit) | — | — | — |
 | **Cache + sessions** | Upstash Redis REST | CF KV (edge) | — | — |
-| **Vector index** | Pinecone | CF Vectorize | Vertex Discovery Engine | — |
+| **Vector index** | Pinecone | Vertex AI Vector Search (Matching Engine, via `retrievers/vertex.py`) | CF Vectorize | Vertex Discovery Engine |
 | **Distributed tracing / APM** | Azure App Insights | Axiom (parallel) | — | — |
 | **Logs (long-term)** | Axiom | App Insights (subset) | CloudWatch (AWS-native only) | — |
 | **Alerts → Slack/Telegram** | Azure Logic Apps | Sentry direct | — | — |
-| **Embed (Indic + EN)** | CF Workers AI bge-m3 | AWS Bedrock Cohere `embed-multilingual-v3` | Vertex `text-embedding-004` | — |
+| **Embed (Indic + EN)** | CF Workers AI bge-m3 | AWS Bedrock Cohere `embed-multilingual-v3` (1024-dim) | Vertex `text-embedding-004` (768-dim, via `providers/vertex_embed.py`) | — |
 | **Rerank** | AWS Bedrock Cohere `rerank-v3-5` | (none — graceful degrade) | — | — |
 | **Chat — `english_rag_chat` / `content`** | Azure OpenAI GPT-4.1-mini | Vertex Gemini 2.5 Flash | Groq Llama (free tier) | CF Workers AI gpt-oss-20b |
 | **Chat — `assamese_rag_chat`** | Vertex Gemini 2.5 Flash | Sarvam-M (Indic-tuned) | Azure OpenAI GPT-4.1-mini | CF Workers AI gpt-oss-20b |
