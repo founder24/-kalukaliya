@@ -1,12 +1,12 @@
 # Deploying Syrabit Backend on AWS App Runner
 
-> ⚠️ **RETIRED PATH — DO NOT FOLLOW.** AWS App Runner is **not** the backend
-> home in the current architecture. The canonical backend origin is
-> **Digital Ocean App Platform** per
-> [`../../docs/infra/cloud-allocation-plan.md`](../../docs/infra/cloud-allocation-plan.md)
-> §4.2. AWS in this plan owns **S3 + SES + Lambda + SQS + CloudWatch +
-> Bedrock-Cohere-API only** — never the backend origin. This file is kept
-> only for historical reference until Task #335 (decommission) lands.
+> ✅ **CANONICAL PATH — this is the active backend deployment runbook.**
+> AWS App Runner in `us-west-2` is the single canonical FastAPI origin
+> per [`../../docs/infra/cloud-allocation-plan.md`](../../docs/infra/cloud-allocation-plan.md)
+> §4.2. Cloudflare Worker fronts it via mTLS at `api.syrabit.ai`.
+> Per-service inventory at
+> [`../../docs/infra/cloud-service-breakdown.md`](../../docs/infra/cloud-service-breakdown.md)
+> §2. Workers, Rust core, and cron live on Azure Container Apps (§3).
 
 ---
 

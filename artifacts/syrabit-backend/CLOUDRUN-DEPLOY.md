@@ -1,13 +1,14 @@
 # Syrabit Backend on Google Cloud Run (Task #606)
 
 > ⚠️ **RETIRED PATH — DO NOT FOLLOW.** Google Cloud Run is **not** part of
-> the current four-cloud hosting plan. **GCP / Vertex is inference-only**
+> the current three-cloud hosting plan. **GCP / Vertex is inference-only**
 > (Gemini API, plus retained Vision/STT/TTS/Discovery/Web Risk APIs) per
 > [`../../docs/infra/cloud-allocation-plan.md`](../../docs/infra/cloud-allocation-plan.md)
 > §6 — there is no GCP compute, no GCP secondary backend origin, and Task
 > #606 has been dropped from the plan. The canonical backend origin is
-> **Digital Ocean App Platform** (§4.2). This file is kept only for
-> historical context.
+> **AWS App Runner** in us-west-2 (§4.2); see
+> [`./DEPLOY.md`](./DEPLOY.md) for the active runbook. This file is kept
+> only for historical context.
 
 ---
 

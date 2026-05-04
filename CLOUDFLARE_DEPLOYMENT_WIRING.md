@@ -3,8 +3,9 @@
 
 > **Canonical hosting plan:**
 > [`docs/infra/cloud-allocation-plan.md`](./docs/infra/cloud-allocation-plan.md)
-> — Cloudflare owns **frontend + edge + R2 + KV + D1 + Workers AI** in the
-> four-cloud plan. Per-service inventory:
+> — Cloudflare owns **frontend + edge + R2 + KV + D1 + Vectorize + Workers
+> AI** in the three-cloud plan. Backend origin is **AWS App Runner**;
+> workers + cron live on **Azure Container Apps**. Per-service inventory:
 > [`docs/infra/cloud-service-breakdown.md`](./docs/infra/cloud-service-breakdown.md)
 > §1.
 

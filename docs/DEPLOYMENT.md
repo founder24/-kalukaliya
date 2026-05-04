@@ -2,22 +2,23 @@
 
 > **Canonical hosting plan (read first):**
 > [`docs/infra/cloud-allocation-plan.md`](./infra/cloud-allocation-plan.md)
-> — the four-cloud delegation (Cloudflare frontend, Digital Ocean backend,
-> AWS + Azure for additional hosting/infra, Vertex inference-only).
+> — the **three-cloud** delegation (Cloudflare frontend, **AWS App Runner**
+> backend, Azure workers + cron + APM + GPT, Vertex inference-only).
+> Digital Ocean has been removed.
 > [`docs/infra/cloud-service-breakdown.md`](./infra/cloud-service-breakdown.md)
-> is the per-service inventory (used / not used) for all five clouds.
+> is the per-service inventory (used / not used) for all four clouds.
 >
 > **Rotating a secret?** See [`docs/SECRET_ROTATION.md`](./SECRET_ROTATION.md)
 > for the end-to-end runbook (which secrets live in multiple places, what
 > order to rotate them, and how to verify).
 
-> ⚠️ **Task #606 (Cloud Run secondary origin) — DROPPED.** The four-cloud
-> hosting plan has **one canonical backend origin: Digital Ocean App
-> Platform**. There is no GCP compute, no Cloud Run secondary origin, and
-> no Cloud Build pipeline. GCP / Vertex is **inference-only** (Gemini API +
+> ⚠️ **Retired backend origins — DO NOT USE.** Cloud Run (Task #606),
+> Digital Ocean App Platform (Tasks #330/#331), and Railway are all
+> **dropped**. The single canonical backend origin is **AWS App Runner**
+> in `us-west-2`. GCP / Vertex remains **inference-only** (Gemini API +
 > retained Vision/STT/TTS/Discovery/Web Risk). See
 > [`docs/infra/cloud-allocation-plan.md`](./infra/cloud-allocation-plan.md)
-> §6 (hosting vs inference) and §9 (guardrails).
+> §4.2 (AWS workloads), §6 (hosting vs inference), §9 (guardrails).
 
 ## Architecture Overview
 
@@ -34,14 +35,16 @@ Users
                                   • D1 edge cache for content reads
                                   • CORS enforcement
                                   │
-                                  └──► Digital Ocean App Platform (FastAPI backend)
-                                        • Docker-based deployment
+                                  └──► AWS App Runner (FastAPI backend, us-west-2)
+                                        • Docker-based deployment, autoscale 1→10
                                         • Mongo Atlas, Upstash Redis, Pinecone
                                         • AI chat (dispatcher → Vertex / Azure OpenAI /
                                           Bedrock-Cohere / Workers AI), auth, payments, admin
                                         • S3 (AWS) for blobs, SES (AWS) for email,
-                                          SQS+Lambda (AWS) for async, Container Apps
-                                          cron + Logic Apps + App Insights (Azure)
+                                          SQS+Lambda (AWS) for heavy async
+                                        • Azure Container Apps for workers, rust-core
+                                          (gRPC), and Container Apps Jobs cron
+                                        • Azure App Insights central APM, Logic Apps alerts
 ```
 
 ## Frontend — Cloudflare Pages
