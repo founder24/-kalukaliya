@@ -257,6 +257,23 @@ resource "azurerm_container_app_job" "cron" {
         name        = "APP_INSIGHTS_CONNECTION_STRING"
         secret_name = "app-insights-conn-string"
       }
+      # Phase 5b — Task #338. Azure AI wrappers in
+      # `services/backend/azure_ai/_resolver.py` resolve their per-
+      # service endpoint URLs from Key Vault at first call. Pass the
+      # vault URI as plain env so the resolver can construct a
+      # SecretClient with the cron-tier managed identity. The
+      # endpoint URLs themselves are not pre-injected here because
+      # they are looked up lazily — most jobs never touch an Azure AI
+      # service so injecting all ten as secrets per-job would waste
+      # cold-start time.
+      env {
+        name  = "AZURE_CRON_OBS_KV_URI"
+        value = azurerm_key_vault.cron_obs.vault_uri
+      }
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.cron_jobs_runtime.client_id
+      }
       # ─── Runtime secrets pulled from Key Vault via managed identity ──
       # The legacy backend modules (server.py, seo_engine.py, routes/*)
       # read these env vars on import. The list mirrors the API tier's

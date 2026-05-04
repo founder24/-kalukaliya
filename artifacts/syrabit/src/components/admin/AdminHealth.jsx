@@ -13,6 +13,13 @@ import CfAuditCard from './CfAuditCard';
 // Infrastructure tab so the on-call has a single pane of glass.
 import AdminAwsInfraCard from './AdminAwsInfraCard';
 import AdminCronJobsCard from './AdminCronJobsCard';
+// Phase 5b — Task #338. Azure-native AI features panel (Azure OpenAI,
+// AI Speech, Translator, Document Intelligence, AI Vision, Content
+// Safety, AI Language, AI Search, Anomaly Detector, Personalizer).
+// Renders below the AWS + Azure cron tiles so the admin sees the
+// per-feature throttle / latency / spend together with the rest of
+// the migrated infrastructure.
+import AdminAzureAiPanel from './AdminAzureAiPanel';
 import { toast } from 'sonner';
 import AdminQuickLinks from './AdminQuickLinks';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, LineChart, Line } from 'recharts';
@@ -2789,6 +2796,10 @@ export default function AdminHealth({ adminToken, onNavigate }) {
 
         <SectionErrorBoundary name="Cron (Azure Container Apps Jobs)">
           <AdminCronJobsCard adminToken={adminToken} />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="Azure-native AI features">
+          <AdminAzureAiPanel token={adminToken} />
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="Provider Latency Bench">

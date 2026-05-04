@@ -1977,6 +1977,11 @@ from routes.internal_jobs import router as internal_jobs_router
 # Task #332 — AWS workers + Azure cron admin proxies.
 from routes.admin_aws_infra import router as admin_aws_infra_router
 from routes.admin_azure_cron import router as admin_azure_cron_router
+# Phase 5b — Task #338. Azure-native AI features admin proxy
+# (toggle + health for Azure OpenAI, Speech, Translator, Document
+# Intelligence, Vision, Content Safety, Language, AI Search, Anomaly
+# Detector, Personalizer). Backs the AdminAzureAiPanel React tile.
+from routes.admin_azure_ai import router as admin_azure_ai_router
 
 
 def _gcp_scheduler_takeover() -> bool:
@@ -2121,6 +2126,7 @@ api.include_router(admin_discovery_router)
 api.include_router(admin_gcp_infra_router)
 api.include_router(admin_aws_infra_router)
 api.include_router(admin_azure_cron_router)
+api.include_router(admin_azure_ai_router)
 api.include_router(admin_gcp_status_router)
 api.include_router(internal_jobs_router)
 

@@ -157,8 +157,27 @@ async def _synthesize_with_fallback(
                     _bk_track(False, _bk_exc)
                     raise
             elif provider == "azure_openai":
+                # Task #338 — gated by azure.speech.enabled (Azure Neural TTS
+                # rides on the same Azure Speech resource as STT/Custom Voice).
+                # Disabled => raise so the outer fallback loop drops to the
+                # next TTS provider in PROVIDER_PRIORITY['tts'].
+                from azure_ai_runtime import is_enabled as _az_enabled
+                if not await _az_enabled("speech"):
+                    raise RuntimeError(
+                        "azure speech disabled via admin toggle "
+                        "(azure.speech.enabled=false) — routing to next provider"
+                    )
                 from providers.azure_openai import call_tts as _az_tts
-                return await _az_tts(text, voice=voice_id)
+                from azure_ai_metrics import record_latency as _rl, record_error as _re
+                import time as _t
+                _t0 = _t.perf_counter()
+                try:
+                    audio = await _az_tts(text, voice=voice_id)
+                    _rl("speech", (_t.perf_counter() - _t0) * 1000)
+                    return audio
+                except Exception as _exc:
+                    _re("speech", f"{type(_exc).__name__}: {_exc}")
+                    raise
             else:
                 raise RuntimeError(f"TTS: unknown provider {provider!r}")
         except Exception as exc:

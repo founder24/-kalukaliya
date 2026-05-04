@@ -1791,15 +1791,33 @@ async def _dispatch_llm_for_feature(
         # candidate chain (CF AI Gateway BYOK → direct KEY_1 → direct KEY_2).
         # Deployment name comes from AZURE_OPENAI_DEPLOYMENT (Task #290; default
         # set via config.py, falls back to legacy AZURE_OPENAI_MODEL alias).
+        # Task #338: gated by the azure.openai.enabled admin toggle so ops can
+        # drop the Azure path without a redeploy when MI auth/quotas misbehave.
+        from azure_ai_runtime import is_enabled as _az_enabled
+        if not await _az_enabled("openai"):
+            raise RuntimeError(
+                "azure openai disabled via admin toggle "
+                "(azure.openai.enabled=false) — routing to next provider"
+            )
         from providers.azure_openai import call_chat as _az_chat
         from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL
         _t0 = _dp_t.perf_counter()
         try:
             result = await _az_chat(messages, model=_AZ_DEPL, max_tokens=max_tokens)
             _record_llm_call("azure_openai", _AZ_DEPL, int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
+            try:
+                from azure_ai_metrics import record_latency as _rl
+                _rl("openai", (_dp_t.perf_counter() - _t0) * 1000)
+            except Exception:
+                pass
             return result
         except Exception as _exc:
             _record_llm_call("azure_openai", _AZ_DEPL, int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
+            try:
+                from azure_ai_metrics import record_error as _re
+                _re("openai", f"{type(_exc).__name__}: {_exc}")
+            except Exception:
+                pass
             raise
 
     if provider == "workers_ai_indic":
@@ -3406,7 +3424,16 @@ async def call_translate_with_dispatch(
                     raise
             elif provider == "azure_openai":
                 # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
-                # Falls back to RuntimeError if AZURE_TRANSLATOR_KEY not configured.
+                # Task #338: gated by the azure.translator.enabled admin
+                # toggle so ops can drop the Azure path without a redeploy
+                # when MI auth/quotas misbehave. Disabled => raise to the
+                # outer loop which moves to the next provider in pool.
+                from azure_ai_runtime import is_enabled as _az_enabled
+                if not await _az_enabled("translator"):
+                    raise RuntimeError(
+                        "azure translator disabled via admin toggle "
+                        "(azure.translator.enabled=false) — routing to next provider"
+                    )
                 from providers.azure_openai import call_translate as _az_translate
                 return await _az_translate(text, target_lang=target_lang, source_lang=source_lang)
             elif provider == "workers_ai_indic":
