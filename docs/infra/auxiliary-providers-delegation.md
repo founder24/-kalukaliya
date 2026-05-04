@@ -12,7 +12,7 @@ free tier or credit?*
 
 > Scope: data layer (Mongo / Pinecone / Azure Cache for Redis / Momento),
 > observability (Axiom / Sentry), specialized inference (Deepgram /
-> ElevenLabs / Sarvam / Groq / Cerebras / Cartesia / Voyage / Cohere-direct),
+> ElevenLabs / Sarvam (Assamese chat only) / Cartesia / Voyage / Cohere-direct),
 > email (Resend), and CI/CD (GitHub). Each is an API surface the AWS App
 > Runner backend calls; none host compute.
 
@@ -191,22 +191,32 @@ Net cash at 10k DAU: $0 at every tier.
 | Coverage if $4k lands | At enterprise rate ~$0.05/1k chars on Scale plan: 10M chars = $500/mo ⇒ ~8 months. Or with caching to 6M effective: ~13 months. |
 | Coverage today (only free 10k chars/mo) | ~minutes |
 | Cash exposure if credit doesn't land | ⚠️ **prohibitive** (~$500–3000/mo depending on plan) |
-| Fallback chain | ElevenLabs → **GCP Cloud TTS Standard** (4M chars/mo free, then $4/M = $24/mo for 6M extra) → **Cartesia** (free credit) → **AWS Polly** (post-#337 = paid, ~$16/M chars Neural) → **Sarvam TTS** (Indic, future credit) |
+| Fallback chain | ElevenLabs → **GCP Cloud TTS Standard** (4M chars/mo free, then $4/M = $24/mo for 6M extra) → **Cartesia** (free credit) → **CF Workers AI MeloTTS** (within CF credit) → **AWS Polly** (post-#337 = paid, ~$16/M chars Neural) |
 | **Status** | ⚠️ **DEPENDS on $4k credit landing.** Mitigation: if pursuit fails, demote ElevenLabs to "premium voice" feature flag and promote GCP TTS Standard as primary (quality drop on Indic, but $24/mo all-in within Vertex pool). |
 
-### 3.3 Sarvam — Indic LLM (future)
+### 3.3 Sarvam — Indic LLM (Assamese chat only, future activation)
 
 | Item | Value |
 |---|---|
-| Role | Indic-tuned LLM. Currently NOT used (Vertex Gemini 2.5 Flash is asm-chat primary). Reserved for swap-in if Sarvam credit lands. |
+| Role | Indic-tuned LLM **scoped to the `assamese_rag_chat` chain only** (Tier-2 fallback after Vertex Gemini 2.5 Flash). Removed from voice/TTS chain — Indic TTS now goes GCP Cloud TTS Neural2 → CF Workers AI MeloTTS. |
 | Sizing if active | 50k asm chats × 1.5k tokens = 75M tokens/mo |
 | Pay-as-you-go cost | Sarvam-M ~$5/M tokens = ~$375/mo |
 | Credit status | None pursued yet (Vertex Gemini fills the slot) |
 | Cash exposure | $0 (not currently in dispatcher rotation) |
 | Fallback role today | Reserved as fallback below Vertex Gemini for asm chat |
-| **Status** | ✅ inactive; activate only if a Sarvam credit lands. Otherwise Vertex Gemini handles asm chat at ~$15/mo within Vertex pool. |
+| **Status** | ✅ inactive; activate only if a Sarvam credit lands and only inside the Assamese chat chain. Otherwise Vertex Gemini handles asm chat at ~$15/mo within Vertex pool. |
 
-### 3.4 Groq — fast Llama inference (free tier)
+### 3.4 ~~Groq — fast Llama inference~~ (REMOVED from chat chain)
+
+**Removed from the chat fallback chain.** Reason: chat chain consolidated
+to Vertex Gemini 2.5 Flash → Azure GPT-4.1-mini → CF Workers AI
+gpt-oss-20b/Llama-3, all within existing Tier-1 credit pools. Groq's
+"fast Llama overflow" tier added latency-vs-coverage complexity with no
+credit-pool benefit since CF Workers AI Llama is already on the CF $5k
+credit pool. Account/key may stay provisioned for future re-introduction
+but is not in the dispatcher.
+
+### 3.5 ~~Cerebras — fast Llama inference (alternative to Groq)~~ (REMOVED from chat chain)
 
 | Item | Value |
 |---|---|
@@ -218,16 +228,16 @@ Net cash at 10k DAU: $0 at every tier.
 | Fallback role | Tier-3 fallback for english chat (after Azure OpenAI, after Vertex Gemini) |
 | **Status** | ✅ free tier vastly oversized for our overflow volume |
 
-### 3.5 Cerebras — fast Llama inference (free tier alternative)
+### 3.5 ~~Cerebras — fast Llama inference~~ (REMOVED from chat chain — duplicate header retained intentionally for back-link safety)
 
 | Item | Value |
 |---|---|
-| Role | Same role as Groq (latency-critical chat overflow), kept as a *parallel* alternative so a Groq outage doesn't take down the fast-path tier. Llama-3.3-70B at ~2000 tok/s (faster than Groq). |
+| Role | **Removed from chat chain** alongside Groq for the same consolidation reason. Account/key may stay provisioned for future re-introduction but is not in the dispatcher. |
 | Tier at 10k DAU | Free tier: 30 req/min, 14.4k req/day |
 | Sizing | Same overflow volume; not exhausted |
 | Credit | API key already in secrets (`CEREBRAS_API_KEY`) |
 | Cash exposure | $0 |
-| Fallback role | Tier-3 alternative beside Groq (dispatcher round-robins between them) |
+| Fallback role | None (removed from chat dispatcher) |
 | **Status** | ✅ free tier sufficient |
 
 ### 3.6 Cartesia — alternative TTS
@@ -322,9 +332,9 @@ Net cash at 10k DAU: $0 at every tier.
 | Sentry | Error tracking | $0 | free tier |
 | Deepgram | Primary STT | $0 today / $65 from M4 if no credit | ⚠️ **DEPENDS on $1k credit** |
 | ElevenLabs | Primary TTS | $0 today / $500–3000 if no credit | ⚠️ **DEPENDS on $4k credit** |
-| Sarvam | Reserved Indic LLM | $0 | inactive |
-| Groq | Fast chat overflow | $0 | free tier |
-| Cerebras | Fast chat overflow | $0 | free tier |
+| Sarvam | Reserved Indic LLM (Assamese chat only) | $0 | inactive — activates only in `assamese_rag_chat` chain if Sarvam credit lands |
+| ~~Groq~~ | ~~Fast chat overflow~~ | $0 | **REMOVED from chat chain** (consolidated to Vertex/Azure/CF Workers AI) |
+| ~~Cerebras~~ | ~~Fast chat overflow~~ | $0 | **REMOVED from chat chain** (consolidated to Vertex/Azure/CF Workers AI) |
 | Cartesia | TTS fallback | $0 | inactive (free credits standby) |
 | Voyage | Embedding standby | $0 | inactive (free trial standby) |
 | Cohere (via Bedrock) | Embed + rerank | $21 | AWS Activate (already counted) |
@@ -341,7 +351,7 @@ Net cash at 10k DAU: $0 at every tier.
 | AWS | ~$75 | ✅ within $83 credit headroom (90% draw, mitigated) |
 | Azure | ~$78 | ✅ within $208 credit headroom (37% draw) |
 | Vertex | ~$150 | ✅ within $167 credit headroom (90% draw, mitigated) |
-| Mongo + Pinecone + Axiom + Sentry + Groq/Cerebras/Cartesia/Voyage + Resend + GitHub | ~$0 | ✅ free tiers / Mongo $500 credit |
+| Mongo + Pinecone + Axiom + Sentry + Cartesia/Voyage + Resend + GitHub | ~$0 | ✅ free tiers / Mongo $500 credit |
 | Azure Cache for Redis (primary) + Momento (Tier-2) + CF KV (Tier-3) | **$0** | ✅ **cash eliminated** — Azure Cache on existing Azure credit, Momento on free tier, CF KV on CF credit |
 | Deepgram | $0 today / $65 from M4 | ⚠️ DEPENDS on $1k credit |
 | ElevenLabs | $0 today / $500+ if no credit | ⚠️ DEPENDS on $4k credit |

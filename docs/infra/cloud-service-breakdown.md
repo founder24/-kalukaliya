@@ -189,7 +189,7 @@ calls go direct (no AI Gateway).
 | Service | Caller in repo | Use in Syrabit | Region | Cost shape |
 |---|---|---|---|---|
 | **Cloud Speech-to-Text (Chirp)** | dispatcher fallback | STT fallback after Workers AI Whisper and Deepgram. Indic-strong. | `asia-south1` | $0–2/mo within credit |
-| **Cloud Text-to-Speech (Neural2/Studio)** | dispatcher fallback | TTS fallback after ElevenLabs and Sarvam for English Read-Aloud. 4M chars/mo free. | global | $0 within free tier |
+| **Cloud Text-to-Speech (Neural2/Studio)** | dispatcher fallback / Indic primary | TTS fallback after ElevenLabs for English Read-Aloud; PRIMARY for Indic Read-Aloud (as/hi/bn) since Sarvam is reserved for Assamese chat only. 4M chars/mo free. | global | $0 within free tier |
 | **Web Risk API** | dispatcher | URL safety check for user-pasted external links before previewing. 10k/mo free. | global | $0 within free tier |
 | **Service Accounts + IAM** | infra | One SA per surface the backend calls (Vertex AI Platform, Discovery, Vision). No human IAM users. Same SA also signs `vertex_services.py` rollback path. | global | $0 |
 | **Cloud Billing alerts** | infra | $5/day alarm → Telegram. | global | $0 |
@@ -239,11 +239,11 @@ When you're holding a *feature* and asking "which cloud serves this?", read this
 | **Alerts → Slack/Telegram** | Azure Logic Apps | Sentry direct | — | — |
 | **Embed (Indic + EN)** | CF Workers AI bge-m3 | AWS Bedrock Cohere `embed-multilingual-v3` (1024-dim) | Vertex `text-embedding-004` (768-dim, via `providers/vertex_embed.py`) | — |
 | **Rerank** | AWS Bedrock Cohere `rerank-v3-5` | (none — graceful degrade) | — | — |
-| **Chat — `english_rag_chat` / `content`** | Azure OpenAI GPT-4.1-mini | Vertex Gemini 2.5 Flash | Groq Llama (free tier) | CF Workers AI gpt-oss-20b |
-| **Chat — `assamese_rag_chat`** | Vertex Gemini 2.5 Flash | Sarvam-M (Indic-tuned) | Azure OpenAI GPT-4.1-mini | CF Workers AI gpt-oss-20b |
+| **Chat — `english_rag_chat` / `content`** | Azure OpenAI GPT-4.1-mini | Vertex Gemini 2.5 Flash | CF Workers AI gpt-oss-20b | CF Workers AI Llama-3 |
+| **Chat — `assamese_rag_chat`** | Vertex Gemini 2.5 Flash | Sarvam-M (Indic-tuned, only used in Assamese chat) | Azure OpenAI GPT-4.1-mini | CF Workers AI gpt-oss-20b |
 | **Vision (image understanding)** | Vertex Gemini 2.5 Flash (multimodal) | Google Cloud Vision (legacy) | — | — |
 | **STT** | Deepgram | Google Cloud Speech (Chirp) | CF Workers AI Whisper | AWS Transcribe (post-#337) |
-| **TTS** | ElevenLabs | Sarvam | Google Cloud TTS | AWS Polly (post-#337) |
+| **TTS** | ElevenLabs | Google Cloud TTS Neural2 | CF Workers AI MeloTTS | AWS Polly Neural (post-#337) |
 | **Translate (Indic↔EN)** | Sarvam | CF Workers AI IndicTrans2 | Vertex Gemini | Azure Translator (post-#338) |
 | **Safety / moderation** | Vertex Gemini safety | (admin review) | — | — |
 | **URL safety** | GCP Web Risk | — | — | — |

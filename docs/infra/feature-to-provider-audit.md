@@ -36,13 +36,14 @@ the Tier-1 startup credit pool that absorbs that cost at 10k DAU.
 | **AWS Activate** | $1,000 | ~$75/mo (~90% draw, mitigated) | $83/mo headroom | AWS Activate Founders |
 | **Microsoft for Startups (Azure)** | $2,500 | ~$94/mo (~45% draw) | $192/mo headroom | MS for Startups Founders Hub |
 | **Google Vertex / GCP** | $2,000 | ~$150/mo (~90% draw, mitigated) | $167/mo headroom | GCP for Startups |
-| **MongoDB Atlas** | $500 | ~$0–9/mo (M0 free → M2) | ~55 mo runway | Atlas Startup Program |
+| **MongoDB Atlas Startup** | $500 (+ up to $5k via Atlas for Startups extended track) | ~$0–9/mo (M0 free → M2) | ~55 mo runway on $500 alone | Atlas Startup Program |
+| **Pinecone Startup** | up to $5,000 | $0 today (perpetual Starter free tier) | $5k reserved for scale-up to Standard/Enterprise tier | Pinecone Startup Program |
 | **AWS Bedrock — Cohere** | (within $1k Activate) | ~$21/mo embed+rerank | within Activate pool | — |
-| **Pinecone Free Tier** | $0 (perpetual) | $0 | unlimited at 10k DAU | Pinecone free Starter |
 | **Pending: Deepgram** | $1,000 | $0 today / $65/mo from M4 | TBD | application open |
 | **Pending: ElevenLabs** | $4,000 | $0 today / $500–3000/mo | TBD | application open |
 | **Reserved: Momento Startup** | $500–1,000 | $0 (free tier sufficient) | reserved | safety margin |
-| **Combined annual coverage** | **~$11,000** | **~$339/mo** | **~$917/mo** | **~32 months** |
+| **Combined annual coverage (confirmed)** | **~$11,000** | **~$339/mo** | **~$917/mo** | **~32 months** |
+| **Combined annual coverage (with Pinecone Startup grant)** | **~$16,000** | **~$339/mo** | **~$1,333/mo** | **~47 months** |
 
 ---
 
@@ -56,9 +57,9 @@ last resort), and the **credit pool** that absorbs each tier's cost.
 
 | Feature | Handle | Provider chain (priority order) | Credit pool | Monthly $ at 10k DAU |
 |---|---|---|---|---:|
-| Streaming AI chat with RAG | `POST /api/ai/chat/stream` (`ai_chat.py`) | Vertex Gemini 2.5 Flash → Azure OpenAI GPT-4.1-mini → CF Workers AI Llama-3 → Cerebras → Groq | Vertex $2k → Azure $2.5k → CF $5k → free | ~$110/mo |
+| Streaming AI chat with RAG | `POST /api/ai/chat/stream` (`ai_chat.py`) | Vertex Gemini 2.5 Flash → Azure OpenAI GPT-4.1-mini → CF Workers AI Llama-3 / gpt-oss-20b | Vertex $2k → Azure $2.5k → CF $5k | ~$110/mo |
 | Assamese chat mode (translate-then-embed) | `ensure_question_in_assamese` (`ai_chat.py`) | CF Workers AI IndicTrans2 → Vertex Gemini polish → Azure GPT-4.1-mini fallback | CF $5k → Vertex $2k → Azure $2.5k | ~$5/mo |
-| Grounded answer (strict-RAG) | `POST /api/edu/grounded-answer` (`edu_browser.py`) | Vertex Gemini 2.5 Flash → Azure GPT-4.1-mini → Cerebras | Vertex $2k → Azure $2.5k → free | ~$15/mo (rolled into chat) |
+| Grounded answer (strict-RAG) | `POST /api/edu/grounded-answer` (`edu_browser.py`) | Vertex Gemini 2.5 Flash → Azure GPT-4.1-mini → CF Workers AI gpt-oss-20b | Vertex $2k → Azure $2.5k → CF $5k | ~$15/mo (rolled into chat) |
 | PDF → MCQ ingest + RAG indexing | `POST /api/admin/content/cms-documents/{doc_id}/process-rag` (`cms_sarvam_health.py`) | AWS Lambda (PDF parse) → Cohere embed-multilingual-v3 via Bedrock → Pinecone upsert | AWS $1k → Bedrock-in-AWS $1k → Pinecone free | ~$8/mo (one-shot, amortized) |
 | Vision OCR for chat input | `POST /api/ai/ocr-image` (`ai_chat.py`) | Vertex Gemini Vision → Cloud Vision API → CF Workers AI llava | Vertex $2k → Vertex $2k → CF $5k | ~$3/mo |
 | Conversation history persistence | (rolling within all chat handlers) | MongoDB Atlas M0 → M2 | Mongo $500 | $0–9/mo |
@@ -82,7 +83,7 @@ last resort), and the **credit pool** that absorbs each tier's cost.
 | Feature | Handle | Provider chain | Credit pool | Monthly $ at 10k DAU |
 |---|---|---|---|---:|
 | Read-Aloud (TTS) — English | `POST /api/voice/tts` (`voice.py`) | **ElevenLabs** (PENDING $4k credit) → Deepgram TTS → GCP Cloud TTS Neural2 → CF Workers AI MeloTTS | ElevenLabs $4k (PENDING) → fallback ladder | $0 today / $500+/mo if both credits fail |
-| Read-Aloud (TTS) — Indic (as/hi/bn) | `POST /api/voice/tts` (Indic branch) | **GCP Cloud TTS Neural2** → Sarvam → CF Workers AI MeloTTS | GCP $2k → free → CF $5k | ~$6/mo |
+| Read-Aloud (TTS) — Indic (as/hi/bn) | `POST /api/voice/tts` (Indic branch) | **GCP Cloud TTS Neural2** → CF Workers AI MeloTTS → AWS Polly Neural | GCP $2k → CF $5k → AWS $1k | ~$6/mo |
 | STT (audio → text) | `POST /api/voice/stt` (`voice.py`) | **Deepgram Nova-3** (PENDING $1k credit) → AssemblyAI → CF Workers AI Whisper | Deepgram $1k (PENDING) → free → CF $5k | $0 today / $65/mo from M4 if no credit |
 | Two-leg voice pipeline (STT→LLM→TTS) | `POST /api/voice/voice` (`voice.py`) | concurrent STT + chat + TTS chains above | (sums of above) | (rolled in) |
 
@@ -184,20 +185,43 @@ its share at 10k DAU.
 | Cloud Vision API (vision fallback) | $5 | metered |
 | Cloud TTS Neural2 (Indic primary, fallback elsewhere) | $25 | metered |
 | Cloud Logging (subset) | $5 | within free quota |
-| **Subtotal** | **~$150/mo** | **~90% draw** — mitigated via Cerebras + Groq absorbing chat overflow on credit-low days |
+| **Subtotal** | **~$150/mo** | **~90% draw** — mitigated via dispatcher demoting chat overflow to Azure GPT-4.1-mini (Azure pool 45% drawn — has room) and CF Workers AI gpt-oss-20b (CF pool 10% drawn) on credit-low days |
 
-### 2.5 MongoDB Atlas Startup ($500)
+### 2.5 MongoDB Atlas Startup ($500 base + up to $5k extended)
 
 | Use | Monthly | Notes |
 |---|---:|---|
 | Atlas M0 (current, free) → M2 once dataset > 512 MB | $0–9 | M2 = $9/mo |
-| **Subtotal** | **~$9/mo** | **~55 months runway** on $500 |
+| Future: M10 dedicated (when sustained writes > 100/s) | $57 | covered by extended Atlas for Startups grant |
+| **Subtotal at 10k DAU** | **~$9/mo** | **~55 months runway** on $500 base |
+| **Subtotal at 100k DAU (M10)** | **~$57/mo** | **~7 yr** with the extended $5k grant added |
 
-### 2.6 Pinecone, Momento, Axiom, Sentry, Resend, GitHub (free tiers — no application needed)
+> **Atlas for Startups** has a base $500 grant (already secured) and an
+> extended track that can reach **up to $5,000** for qualifying startups
+> with traction milestones. The base $500 is already counted in the
+> "confirmed" headline; the extended $5k is reserved as scale-up
+> headroom for the M10/M20 dedicated tier when traffic grows past 10k DAU.
+
+### 2.6 Pinecone Startup (up to $5k credit + perpetual Starter free tier)
+
+| Use | Monthly | Notes |
+|---|---:|---|
+| Pinecone Starter (1 index, ~100k vectors free) | $0 | covers 10k DAU vector retrieval comfortably |
+| Pinecone Standard (when index > 5M vectors or QPS > 20) | $70 | within Pinecone Startup credit ($5k ÷ $70 ≈ 71 mo) |
+| **Subtotal at 10k DAU** | **$0** | free tier sufficient |
+| **Subtotal at scale-up (Standard tier)** | **$70/mo** | covered by Pinecone Startup grant for ~6 years |
+
+> **Pinecone Startup Program** awards up to $5,000 in credits for
+> qualifying early-stage companies. The free Starter tier already covers
+> Syrabit at 10k DAU, so the grant is **reserved as scale-up headroom**:
+> the moment we cross the Starter limits (~5M vectors or 20 QPS sustained),
+> the grant absorbs the upgrade to Standard tier without any cash hit
+> for ~6 years.
+
+### 2.8 Free-tier providers (no application needed)
 
 | Provider | Use | Monthly |
 |---|---|---:|
-| Pinecone Starter | Primary vector index | $0 |
 | Momento Cache | Cache Tier-2 fallback | $0 |
 | Axiom | Long-term log retention | $0 |
 | Sentry | Error tracking | $0 |
@@ -205,7 +229,7 @@ its share at 10k DAU.
 | GitHub Free | CI/CD, repo, OIDC trust | $0 |
 | **Subtotal** | | **$0/mo** — no credit needed |
 
-### 2.7 Pending credit dependencies
+### 2.9 Pending credit dependencies
 
 | Provider | Status | Cash if grant fails | Mitigation |
 |---|---|---:|---|
@@ -246,8 +270,10 @@ its share at 10k DAU.
 | Deployment, cron, async, APM, logging — all on credit | ✅ |
 | Two PENDING credit dependencies have cash-free fallbacks if they fail | ✅ |
 | Total monthly burn at 10k DAU | **~$339/mo** |
-| Total Tier-1 credit headroom | **~$917/mo** |
-| Combined runway | **~32 months** |
+| Total Tier-1 credit headroom (confirmed) | **~$917/mo** |
+| Total Tier-1 credit headroom (with Pinecone Startup + Atlas extended grants) | **~$1,333/mo** |
+| Combined runway (confirmed pools) | **~32 months** |
+| Combined runway (with Pinecone + Atlas extended grants) | **~47 months** |
 | **Guaranteed cash spend at 10k DAU** | **$0** |
 
 > **Certified zero-cash at 10k DAU** for the entire feature surface
@@ -256,6 +282,13 @@ its share at 10k DAU.
 > cache primary — is the only "look like cash" item, and it sits
 > entirely inside the existing Microsoft for Startups Azure credit pool
 > (which still has 55% headroom after this allocation).
+>
+> **Scale-up headroom secured for the data layer:** Pinecone Startup
+> ($5k credit reserved) covers the eventual Standard-tier upgrade
+> (~$70/mo) for ~6 years; Atlas for Startups extended track ($5k
+> reserved) covers M10 dedicated (~$57/mo) for ~7 years. Neither is
+> needed at 10k DAU but both are pre-negotiated so there is no
+> cash exposure when the data layer outgrows free tiers.
 
 ---
 
@@ -265,7 +298,7 @@ its share at 10k DAU.
 |---|---|---|---|
 | 🔴 ElevenLabs $4k credit grant doesn't land | Need TTS at >$24/mo | Promote GCP Cloud TTS to TTS primary on English (quality drop) | Self-host Coqui TTS on Azure Container Apps (~$15/mo within Azure pool) |
 | 🟠 Deepgram $1k credit doesn't land by month 4 | Free $200 exhausted | Promote CF Workers AI Whisper to STT primary | Accept slight quality drop; **$0 cash** |
-| 🟠 Vertex pool runs hot (90% draw) | Vertex daily > $8 alert | Shift chat overflow to Cerebras + Groq (free tiers) | Demote chat to Azure GPT-4.1-mini (Azure pool 45% drawn — has room) |
+| 🟠 Vertex pool runs hot (90% draw) | Vertex daily > $8 alert | Demote chat to Azure GPT-4.1-mini (Azure pool 45% drawn — has room) | Spill further to CF Workers AI gpt-oss-20b (CF pool 10% drawn) |
 | 🟠 AWS Activate runs hot (90% draw) | AWS daily > $5 alert | Scale staging App Runner to zero | Move 50% of read-only blob traffic to CF R2 + Cache Reserve (already CF-credited) |
 | 🟢 Azure Cache for Redis Basic C0 saturates | hit rate < 80% | Bump to Basic C1 ($33/mo, still on Azure credit ~50% draw) | Promote Momento for prompt-cache load; Azure Redis keeps atomic ops only |
 

@@ -34,7 +34,7 @@
 >
 > **For the auxiliary-provider delegation** (Mongo, Pinecone, **Azure
 > Cache for Redis (cache primary)**, **Momento (cache Tier-2)**, Axiom,
-> Sentry, Deepgram, ElevenLabs, Groq, Cerebras, Cartesia, Voyage,
+> Sentry, Deepgram, ElevenLabs, Cartesia, Voyage,
 > Cohere-direct, Resend, GitHub, etc. — what role each plays in the
 > dispatcher and whether each is covered by free tier or credit at 10k
 > DAU), see
