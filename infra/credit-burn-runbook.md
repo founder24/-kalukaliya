@@ -52,30 +52,41 @@ shape the meter must conform to:
 ## §3 — Per-provider credit-window table
 
 > One row per provider in the all-provider credit policy. Update
-> `last_reviewed_date` monthly.
+> `last_reviewed_date` monthly. **Post-#363 burn-rate revisions are
+> tracked side-by-side in the `monthly_burn_post_363_usd` and
+> `expected_exhaustion_post_363` columns** — those values become the
+> authoritative numbers when the §1–§4 cutovers in
+> `infra/capacity-roadmap-363.md` complete; until then, the original
+> `monthly_burn_usd` and `expected_exhaustion_date` columns are
+> authoritative.
 
-| provider | program_name | credit_balance_usd | monthly_burn_usd | expected_exhaustion_date | migration_checkpoint_date | migration_owner | paid_billing_handoff_status | documented_fallback | last_reviewed_date |
-|---|---|---:|---:|---|---|---|---|---|---|
-| Azure | Microsoft for Startups | 5000 | 200 | 2028-09-04 | 2028-08-05 | founder@syrabit.ai | not_started | Pay-as-you-go on existing Azure account | 2026-05-04 |
-| AWS | AWS Activate | 1000 | 80 | 2027-05-04 | 2027-04-04 | founder@syrabit.ai | not_started | Pay-as-you-go on existing AWS account | 2026-05-04 |
-| Cloudflare | Cloudflare for Startups | 5000 | 200 | 2028-09-04 | 2028-08-05 | founder@syrabit.ai | not_started | Workers Paid + Pinecone Standard direct billing | 2026-05-04 |
-| MongoDB Atlas | Atlas for Startups | 500 | 60 | 2027-02-04 | 2027-01-05 | founder@syrabit.ai | not_started | M10+ direct billing | 2026-05-04 |
-| Pinecone | Pinecone for Startups | 5000 | 50 | 2031-05-04 | 2031-04-04 | founder@syrabit.ai | not_started | Standard tier direct billing | 2026-05-04 |
-| Upstash | Upstash for Startups | 1000 | 20 | 2030-05-04 | 2030-04-05 | founder@syrabit.ai | not_started | Pro tier direct billing | 2026-05-04 |
-| Google Cloud | Google for Startups | 2000 | 120 | 2027-09-04 | 2027-08-05 | founder@syrabit.ai | not_started | Pay-as-you-go on existing GCP project | 2026-05-04 |
-| Cohere | Cohere for Startups | 1000 | 50 | 2028-01-04 | 2027-12-05 | founder@syrabit.ai | not_started | Pay-as-you-go on Cohere direct API | 2026-05-04 |
-| Razorpay | Razorpay startup program | 0 | 0 | n/a (perpetual live mode) | n/a | founder@syrabit.ai | live | n/a — already on direct billing | 2026-05-04 |
-| SendGrid | (via Azure Marketplace) | (drawn from Azure pool) | (in Azure burn) | tied to Azure | 2028-08-05 | founder@syrabit.ai | not_started | Essentials Free 100/day fallback tier | 2026-05-04 |
+| provider | program_name | credit_balance_usd | monthly_burn_usd | monthly_burn_post_363_usd | expected_exhaustion_date | expected_exhaustion_post_363 | migration_checkpoint_date | migration_owner | paid_billing_handoff_status | documented_fallback | last_reviewed_date |
+|---|---|---:|---:|---:|---|---|---|---|---|---|---|
+| Azure | Microsoft for Startups | 5000 | 200 | 200 | 2028-09-04 | 2028-09-04 | 2028-08-05 | founder@syrabit.ai | not_started | Pay-as-you-go on existing Azure account | 2026-05-04 |
+| AWS | AWS Activate | 1000 | 80 | 80 | 2027-05-04 | 2027-05-04 | 2027-04-04 | founder@syrabit.ai | not_started | Pay-as-you-go on existing AWS account | 2026-05-04 |
+| Cloudflare | Cloudflare for Startups | 5000 | 200 | **2000** *(Workers-AI Enterprise tier)* | 2028-09-04 | **2026-08-04** | **2026-07-05** *(post-#363)* | founder@syrabit.ai | not_started | Workers Paid + Pinecone Standard direct billing | 2026-05-04 |
+| MongoDB Atlas | Atlas for Startups | 500 | 60 | **250** *(M30+ sharded, ~4× M10)* | 2027-02-04 | **2026-07-04** | **2026-06-04** *(post-#363)* | founder@syrabit.ai | not_started | M30+ direct billing | 2026-05-04 |
+| Pinecone | Pinecone for Startups | 5000 | 50 | **150** *(scale-out + separate batch index)* | 2031-05-04 | **2028-10-04** | **2028-09-04** *(post-#363)* | founder@syrabit.ai | not_started | Standard tier direct billing per index | 2026-05-04 |
+| Upstash | Upstash for Startups | 1000 | 20 | **80** *(cluster or N-fanout)* | 2030-05-04 | **2027-04-04** | **2027-03-05** *(post-#363)* | founder@syrabit.ai | not_started | Pro tier direct billing per shard | 2026-05-04 |
+| Google Cloud | Google for Startups | 2000 | 120 | 120 | 2027-09-04 | 2027-09-04 | 2027-08-05 | founder@syrabit.ai | not_started | Pay-as-you-go on existing GCP project | 2026-05-04 |
+| Cohere | Cohere for Startups | 1000 | 50 | 50 | 2028-01-04 | 2028-01-04 | 2027-12-05 | founder@syrabit.ai | not_started | Pay-as-you-go on Cohere direct API | 2026-05-04 |
+| Razorpay | Razorpay startup program | 0 | 0 | 0 | n/a (perpetual live mode) | n/a | n/a | founder@syrabit.ai | live | n/a — already on direct billing | 2026-05-04 |
+| SendGrid | (via Azure Marketplace) | (drawn from Azure pool) | (in Azure burn) | (in Azure burn) | tied to Azure | tied to Azure | 2028-08-05 | founder@syrabit.ai | not_started | Essentials Free 100/day fallback tier | 2026-05-04 |
 
 ---
 
 ## §4 — Per-meter threshold table
 
-| meter_id | metric | warning_threshold | trip_threshold | auto_clear_threshold | propagation_path | last_calibrated_date | tunable_via_env_var |
-|---|---|---|---|---|---|---|---|
-| A | RAG API calls / UTC day | 8000 | 10000 | next UTC day rollover (00:00 UTC) | redis_hot_flag | 2026-05-04 | `METER_A_DAILY_LIMIT` |
-| B | Workers-AI RAG RPM (rolling 1-min window) | 60% of model RPM | 70% of model RPM | < 50% for 5 consecutive minutes | redis_hot_flag | 2026-05-04 | `METER_B_TRIP_PCT`, `METER_B_CLEAR_PCT`, `METER_B_SUSTAIN_MIN`, `METER_B_WINDOW_S` |
-| C | Cumulative Workers-AI RAG cost / 365-day rolling | 60% of $5000 | 70% of $5000 | n/a (notify-only) | notify_only | 2026-05-04 | `METER_C_BUDGET_USD`, `METER_C_ALERT_PCT` |
+| meter_id | metric | warning_threshold | trip_threshold | warning_post_363 | trip_post_363 | auto_clear_threshold | propagation_path | last_calibrated_date | tunable_via_env_var |
+|---|---|---|---|---|---|---|---|---|---|
+| A | RAG API calls / UTC day | 8000 | 10000 | **80000** | **100000** | next UTC day rollover (00:00 UTC) | redis_hot_flag | 2026-05-04 | `METER_A_DAILY_LIMIT` |
+| B | Workers-AI RAG RPM (rolling 1-min window) | 60% of model RPM | 70% of model RPM | 60% of model RPM | 70% of model RPM | < 50% for 5 consecutive minutes | redis_hot_flag | 2026-05-04 | `METER_B_TRIP_PCT`, `METER_B_CLEAR_PCT`, `METER_B_SUSTAIN_MIN`, `METER_B_WINDOW_S` |
+| C | Cumulative Workers-AI RAG cost / 365-day rolling | 60% of $5000 | 70% of $5000 | **60% of $24000** | **70% of $24000** | n/a (notify-only) | notify_only | 2026-05-04 | `METER_C_BUDGET_USD`, `METER_C_ALERT_PCT` |
+
+> **Post-#363 columns become authoritative when the §1 Workers-AI tier
+> upgrade ships.** Until then, the pre-#363 columns are the on-call
+> reference. Both sets are kept side-by-side here so on-call doesn't
+> have to cross-read `infra/capacity-roadmap-363.md` mid-incident.
 
 **Active Workers-AI model RPM (refresh whenever active model changes):**
 
@@ -157,6 +168,10 @@ traffic during a flip).
 | `email:fallback` | Redis hot-flag, read on email send | on-call manual + SendGrid bounce monitor | `0` | on-call + automation | < 5 ms | `redis-cli DEL email:fallback` |
 | `VALIDATION_SAMPLE_RATE` | env var read at process start (overridable via Redis `validation:sample_rate`) | on-call | `0.10` | on-call | next deploy or sub-ms via Redis override | `redis-cli DEL validation:sample_rate` |
 | `CHAT_FALLBACK` (env var, durable) | ACA env var (cold-start default only) | ACA revision rollout | `0` | infra owner | ~30–60 s (cold-start only) | redeploy ACA revision with `CHAT_FALLBACK=0` |
+| `mongo:primary` *(post-#363)* | Redis hot-flag, read on Mongo client init | on-call | `"sharded"` (post-cutover) / `"legacy"` (pre-cutover) | on-call | < 5 ms (with reconnect) | `redis-cli SET mongo:primary "legacy"` |
+| `chat:routing_mode` *(post-#363)* | Redis hot-flag, read every turn | on-call | `"quality_weighted"` | on-call | < 5 ms | `redis-cli SET chat:routing_mode "workers_only"` |
+| `pinecone:n_namespaces` *(post-#363)* | env var read at process start (overridable via Redis) | on-call | `1` (pre-cutover) → `N` (post-cutover) | on-call | next deploy or sub-ms via Redis | `redis-cli SET pinecone:n_namespaces 1` |
+| `redis:shard_count` *(post-#363)* | env var read at process start | on-call | `1` (pre-cutover) → `N` (post-cutover) | infra owner | ACA revision rollout | redeploy ACA with previous `REDIS_SHARD_COUNT` |
 
 ---
 

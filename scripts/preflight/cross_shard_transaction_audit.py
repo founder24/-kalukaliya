@@ -25,63 +25,99 @@ import re
 import sys
 from pathlib import Path
 
+# Broad txn-begin detector. Covers the common Motor / PyMongo patterns
+# AND the wrapper patterns commonly used in our codebase.
 TXN_BEGIN = re.compile(
-    r"\b(start_transaction\(|with_transaction\(|client\.start_session\(\s*causal_consistency=)"
+    r"\b("
+    r"start_transaction\s*\(|"
+    r"with_transaction\s*\(|"
+    r"start_session\s*\(|"
+    r"in_transaction\s*\(|"
+    r"transactional\b|"
+    r"Transaction\s*\(|"
+    r"@\s*atomic\b|"
+    r"@\s*transactional\b"
+    r")"
 )
-COLL_CONV = re.compile(r"\b(conversations|chat_history)\b")
-COLL_PROF = re.compile(r"\b(user_profile|user_profiles)\b")
+COLL_CONV = re.compile(
+    r"\b(conversations|chat_history|chat_messages|messages|sessions)\b"
+)
+COLL_PROF = re.compile(
+    r"\b(user_profile|user_profiles|profiles|users|user_state)\b"
+)
 ANNOTATION = re.compile(r"#\s*shard-safe:\s*same\s+user_id", re.IGNORECASE)
+# An additional weaker signal: any `async with` / `with` block that
+# includes both collection names within the same indented block.
+WITH_BLOCK = re.compile(r"^\s*(async\s+)?with\s+")
+
+
+def _block_extent(lines: list[str], start: int) -> int:
+    """Return the line index where the indented block starting at `start`
+    ends (exclusive). Falls back to start+200 to bound the scan."""
+    if start >= len(lines):
+        return start
+    base_indent = len(lines[start]) - len(lines[start].lstrip())
+    end = min(len(lines), start + 200)
+    for j in range(start + 1, end):
+        s = lines[j]
+        if s.strip() == "":
+            continue
+        ind = len(s) - len(s.lstrip())
+        if ind <= base_indent and not s.lstrip().startswith("#"):
+            return j
+    return end
 
 
 def scan_file(path: Path) -> list[tuple[int, str, bool]]:
-    """Returns (line_no, line_text, has_annotation) for each suspect block."""
+    """Returns (line_no, line_text, has_annotation) for each suspect block.
+
+    Uses an indentation-aware block scan (no fragile bounded-line heuristic).
+    Both explicit txn-begin patterns AND `with`/`async with` blocks
+    that touch both collections are reported.
+    """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return []
     lines = text.splitlines()
     hits: list[tuple[int, str, bool]] = []
-    in_txn = False
-    txn_start = -1
-    saw_conv = False
-    saw_prof = False
-    annotated = False
+    visited: set[int] = set()
 
     for i, line in enumerate(lines):
-        if TXN_BEGIN.search(line):
-            in_txn = True
-            txn_start = i
-            saw_conv = COLL_CONV.search(line) is not None
-            saw_prof = COLL_PROF.search(line) is not None
-            annotated = bool(
-                ANNOTATION.search(line)
-                or (i > 0 and ANNOTATION.search(lines[i - 1]))
-            )
+        if i in visited:
             continue
-        if in_txn:
-            if COLL_CONV.search(line):
-                saw_conv = True
-            if COLL_PROF.search(line):
-                saw_prof = True
-            if ANNOTATION.search(line):
-                annotated = True
-            close_block = (
-                line.strip() == ""
-                or "end_session" in line
-                or "commit_transaction" in line
-                or i - txn_start > 60
-            )
-            if close_block:
-                if saw_conv and saw_prof:
-                    hits.append(
-                        (txn_start + 1, lines[txn_start].strip(), annotated)
-                    )
-                in_txn = False
-                saw_conv = saw_prof = annotated = False
-                txn_start = -1
+        is_txn_begin = bool(TXN_BEGIN.search(line))
+        is_with_block = bool(WITH_BLOCK.match(line))
+        if not (is_txn_begin or is_with_block):
+            continue
 
-    if in_txn and saw_conv and saw_prof:
-        hits.append((txn_start + 1, lines[txn_start].strip(), annotated))
+        end = _block_extent(lines, i)
+        block = "\n".join(lines[i:end])
+        # Skip pure `with` blocks that don't carry a collection mention
+        if not (COLL_CONV.search(block) and COLL_PROF.search(block)):
+            continue
+        # Require at least one mongo-ish call inside (filters out e.g.
+        # generic httpx context managers that happen to contain the
+        # words "users" and "messages" only as URL paths).
+        mongo_signal = any(
+            tok in block
+            for tok in (
+                ".find(", ".find_one(", ".update_one(", ".update_many(",
+                ".insert_one(", ".insert_many(", ".delete_one(",
+                ".delete_many(", ".bulk_write(", ".aggregate(",
+                ".replace_one(", ".find_one_and_update(",
+            )
+        )
+        if not mongo_signal:
+            continue
+
+        annotated = bool(
+            ANNOTATION.search(block)
+            or (i > 0 and ANNOTATION.search(lines[i - 1]))
+        )
+        hits.append((i + 1, lines[i].strip(), annotated))
+        for k in range(i, end):
+            visited.add(k)
 
     return hits
 
