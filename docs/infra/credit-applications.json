@@ -207,7 +207,7 @@
       "tied_email": "founder@syrabit.ai",
       "submitted_on": "2026-05-04",
       "reference_id": null,
-      "notes": "Live — used ONLY for Cohere Embed Multilingual v3 + Cohere Rerank 3.5 via CF AI Gateway BYOK (aws-bedrock slug, us-west-2). Direct Cohere connection retired the same day. Anthropic/Nova/Titan/Mistral routes intentionally not wired (Azure GPT-4.1-nano + Vertex Gemini cover those). Verified 2026-05-04: embed HTTP 200, rerank HTTP 429 (new-account RPM throttle, raise Service Quota for production volume)."
+      "notes": "Wired — used ONLY for Cohere Embed Multilingual v3 + Cohere Rerank 3.5 via CF AI Gateway BYOK (aws-bedrock slug, us-west-2). Direct Cohere connection retired the same day. Anthropic/Nova/Titan/Mistral routes intentionally not wired (Azure GPT-4.1-nano + Vertex Gemini cover those). Verification 2026-05-04 morning: embed HTTP 200, rerank HTTP 429 (new-account RPM throttle). Verification 2026-05-04 afternoon: HTTP 403 INVALID_PAYMENT_INSTRUMENT — AWS Marketplace requires a valid payment method on the account before Cohere subscriptions activate. ACTION REQUIRED: add a card in AWS Console → Billing → Payment preferences, then re-verify; the code path is already correct and fully unit-tested."
     }
   ]
 }

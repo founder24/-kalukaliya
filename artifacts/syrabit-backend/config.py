@@ -1050,20 +1050,21 @@ PLAN_PRICES = {
 PROVIDER_PRIORITY: dict = {
     # English chat + RAG: Azure GPT-4.1-mini (primary) → Vertex/Gemini 2.5
     # Flash → Sarvam (Indic-aware fallback) → Workers AI (last-resort).
-    # Bedrock removed (account-wide daily token quota exhausted across every
-    # on-demand model in every region — see providers/bedrock.py for the
-    # actionable error). Re-add only after AWS Service Quotas are raised.
+    # Bedrock-native chat models intentionally NOT wired: Task #340 keeps
+    # Bedrock scoped strictly to Cohere transport (Embed v3 + Rerank 3.5);
+    # Anthropic/Nova/Titan/Mistral routes are replaced by Azure GPT-4.1-nano
+    # and Vertex Gemini per user instruction.
     "english_rag_chat":  ["azure_openai", "vertex", "sarvam", "workers_ai"],
     # Assamese chat: Sarvam (native Indic conversational reasoning) primary
     # → Vertex (Gemini 2.5 Flash) → workers_ai_indic (IndicTrans2 last-resort,
     # weight 0). IndicTrans2 is a translation model not a chat model, so it's
     # intentionally weight-zero — only fires when both Sarvam AND Vertex are
     # excluded, as a degraded-but-online fallback rather than serving an
-    # error. Bedrock removed (see english_rag_chat note).
+    # error. Bedrock-native chat not wired (see english_rag_chat note).
     "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
     # Long-form content / notes generation: Vertex/Gemini 2.5 Flash (primary,
     # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI (last-resort).
-    # Bedrock removed (see english_rag_chat note).
+    # Bedrock-native chat not wired (see english_rag_chat note).
     "content":           ["vertex", "azure_openai", "sarvam", "workers_ai"],
     # Assamese content generation (Task #281): IndicTrans2 dominant primary
     # (purpose-built Indic neural MT), Gemini reserved at low weight strictly
@@ -1099,10 +1100,11 @@ PROVIDER_PRIORITY: dict = {
     #   POOL_WEIGHTS gives workers_ai_indic=3000, vertex=100.
     "translate":         ["workers_ai_indic", "vertex"],
     # Vision / OCR: Vertex (Gemini 2.5 Flash multimodal) → Azure OpenAI →
-    # Workers AI. Bedrock removed.
+    # Workers AI. Bedrock-native vision (Nova Lite) not wired — Task #340
+    # scopes Bedrock strictly to Cohere transport.
     "vision":            ["vertex", "azure_openai", "workers_ai"],
     # Safety checks: Vertex (Gemini safety classifier) → Workers AI.
-    # Bedrock removed.
+    # Bedrock-native safety classifiers not wired (see vision note).
     "safety":            ["vertex", "workers_ai"],
     # RAG search with external web results: Exa neural search → Workers AI.
     "search_rag":        ["exa_ai", "workers_ai"],
@@ -1174,7 +1176,8 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     },
     # embed/tts/stt explicit overrides so the established primaries
     # (Cohere/ElevenLabs/Deepgram) keep deterministic priority over generic
-    # fallbacks. Bedrock removed across the board (account-wide quota dead).
+    # fallbacks. Bedrock-native embed (Titan v2) not wired — the `cohere`
+    # entry below already routes through Bedrock for Cohere Embed v3.
     "embed": {
         "cohere":     1000,   # primary — embed-multilingual-v3.0 (generic / fallback path)
         "voyage_ai":   500,   # secondary — voyage-3.5
