@@ -1,0 +1,261 @@
+Here’s a **tight, trim‑and‑solidify** version of your **top‑level delegation plan**, aligned with your 13‑section layout, and expanded to cover:
+
+- English‑exam‑Q&A RAG (AHSEC / Degree) delegation to **Workers AI** as pipeline,  
+- RAG pipeline design,  
+- Library‑page latency minimization,  
+- Content‑generation pipeline,  
+- **AWS / Azure / Cloudflare** infra delegation,  
+- **Vertex‑based API services** and **Chat‑RAG speed‑maximization** configuration.
+
+***
+
+## **Top‑line policy**
+
+> **“Each major function uses 2 or 3 providers only where a meaningful Tier‑3 exists. Functions that are inherently single‑provider (e.g., Razorpay, AdSense, Trustpilot, Web Risk) are declared as such. English exam‑Q&A RAG is Vertex‑first, via Cloudflare‑Workers‑AI‑managed pipeline; embeddings‑primary is Cohere‑via‑Bedrock; Vector‑DB tertiary is Pinecone → Vertex Vector Search → CF Vectorize; Indic‑chat / Indic‑translation is Sarvam‑first; Assamese‑chat is Sarvam‑M‑first; Assamese‑content‑translation is CF‑IndicTrans2‑first. All providers are distributed across AWS, Azure, and Cloudflare, with Cloudflare as the single AI gateway and edge‑plane.”**
+
+***
+
+## **1. AI — Chat / LLM (English exam‑Q&A RAG, AHSEC / Degree)**
+
+- **Function**:  
+  English‑exam‑Q&A RAG (AHSEC / Degree), structured explanations, exam‑style answers, question‑analysis, answer‑ranking.  
+- **Primary RAG‑pipeline**:  
+  - RAG‑work happens in **Cloudflare Workers AI** (via `@cf/...` models), **orchestrated** by **Vertex Gemini 2.5 Flash** (as routing / scaffolding layer).  
+- **Chain (per `provider‑priority‑map.md`)**:  
+  - **Primary (exam‑Q&A)**: `Vertex Gemini 2.5 Flash` (chat‑to‑exam‑Q&A prompt / orchestration).  
+  - **Secondary**: `Azure OpenAI GPT‑4.1‑mini` (fallback / overflow).  
+  - **Tertiary**: `CF Workers AI llama‑3.3‑70b‑instruct‑fp8‑fast` (worker‑level RAG‑pipeline model).  
+
+### **RAG pipeline design**
+
+- **Steps**:
+  1. **Query preprocessing** (in Cloudflare Workers AI):
+     - Normalize question, detect board / exam‑type.  
+  2. **Embed + retrieve** (in Vertex‑orchestrated call):
+     - Embed question → `Cohere embed‑multilingual‑v3.0` (via Bedrock).  
+     - Retrieve from `Pinecone` (via `Vertex Vector Search` fallback / `CF Vectorize` edge‑cache).  
+  3. **Context‑injection + RAG**:
+     - Inject relevant chunks into `Vertex Gemini 2.5 Flash` prompt.  
+     - Vertex Gemini → generates **structured exam‑answer** (step‑by‑step explanation, marking‑scheme‑style).  
+  4. **Post‑processing / filtering**:
+     - Run `Llama Guard` / `Azure AI Content Safety` moderation.  
+  5. **Response** → back to **Cloudflare AI Gateway** → client.
+
+- **Delegation**:
+  - **Cloudflare**: query‑preprocessing, worker‑AI calls, gateway, caching.  
+  - **AWS**: `Cohere` embeddings + rerank (via Bedrock).  
+  - **Azure / GCP**: `Vertex Gemini`, `Pinecone`, `Vector Search`, `Discovery Engine`.
+
+***
+
+## **2. Library Page Load Latency Minimization**
+
+**Goal**: Minimize **page‑load latency** for **library‑page** (assam‑board‑question‑bank‑style pages), including metadata, exam‑info, question‑preview‑text.
+
+- **Architecture**:
+
+| Layer                    | Provider / Tool                                      | Role / Optimization                                                            |
+|---------------------------|-------------------------------------------------------|---------------------------------------------------------------------------------|
+| **Edge / CDN**           | `Cloudflare Pages` + `Cloudflare Cache Reserve`      | Cache full‑page / SSR‑output; edge‑deliver from nearest PoP.                  |
+| **Edge‑logic**           | `Cloudflare Workers`                                  | Inject exam‑block / exam‑meta‑scripts at edge; no full‑RAG on‑first‑load.     |
+| **Metadata / CMS**       | `MongoDB Atlas` (via `Supabase`‑sync / GraphQL)      | Pre‑render question‑metadata into HTML; avoid runtime‑fetch‑heavy‑render.     |
+| **Static assets**        | `Cloudflare R2`                                       | Serve PDF‑thumbnails, images, audio, etc. from edge.                           |
+| **Client‑side hydration**| `React / Vite` + `Cloudflare Pages`                   | Hydrate content only if needed; lazy‑load heavy‑chunks (e.g., exam‑Pdf‑viewer). |
+
+- **Latency‑specific tactics**:
+  - **Pre‑bake exam‑meta**:  
+    - Cache exam‑metadata (board, class, subject, chapter) as **static JSON chunks** at edge.  
+  - **Edge‑precompute**:  
+    - Use `Cloudflare Workers` to **pre‑embed / pre‑rank** top‑100 Qs per‑exam (for “fast‑preview” sidebar).  
+  - **Pinecone‑edge‑cache**:  
+    - Use `CF Vectorize` to cache **top‑100 embeddings** per‑exam.  
+  - **Lazy‑RAG**:  
+    - Full RAG‑parsing (via `Vertex Gemini`) is done **on‑request** for “deep‑exam‑analysis” tab, not on‑page‑load.  
+  - **CDN‑busting policy**:  
+    - Use short‑TTL for **question‑change‑detected** flags, but long‑TTL for static‑exam‑layout.
+
+***
+
+## **3. Content Generation Pipeline**
+
+**Goal**: Auto‑generate **MCQs, notes, flashcards, summaries, internal‑link‑anchors, SEO‑topic‑clusters**, from syllabus‑PDFs / AHSEC‑board‑data.
+
+- **Pipeline**:
+
+| Step                              | Provider / Service                                                              | Role / Optimization                                                                 |
+|------------------------------------|----------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| **1. PDF / syllabus ingestion**   | `AWS Lambda` (via `SQS` + `EventBridge`) + `S3` storage                          | Convert PDF → text / JSON; store in S3; trigger embedding pipeline.                 |
+| **2. Embed + RAG‑ingest**         | `Cohere embed‑multilingual‑v3.0` (via `Bedrock`) + `Pinecone`                   | Embed questions / notes; store in Pinecone; `Vertex Vector Search` as fallback.     |
+| **3. RAG‑based content gen**      | `Vertex Gemini 2.5 Pro` (for long‑RAG) / `Vertex Gemini 2.5 Flash` (for fast)  | Generate MCQs, notes, explanations, flashcards, anchor‑links, SEO‑topic‑clusters.   |
+| **4. Validation + fact‑check**    | `Azure OpenAI GPT‑4.1‑mini` + `Gemini RAI`                                      | Validate correctness, consistency, fact‑checks.                                     |
+| **5. Publishing / CMS**           | `Cloudflare Workers` → `MongoDB Atlas` + `Supabase`                            | Push to CMS; regenerate library‑page metadata if needed.                            |
+| **6. SEO / internal‑links**       | `Google Search Console API` + `Vertex Discovery Engine`                         | Auto‑generate internal‑link‑anchors, SEO‑descriptions, metadata.                   |
+
+- **Delegation**:
+  - **AWS**: ingestion + embedding.  
+  - **Azure / GCP**: RAG‑generation, validation, search‑indexing.  
+  - **Cloudflare**: edge‑orchestration, metadata‑updates.
+
+***
+
+## **4. Infra delegation: AWS, Azure, Cloudflare**
+
+### **AWS‑plane**
+
+- **Role**: **Worker‑plane**, **storage**, **ingestion**, **async**.
+- **Services used**:
+  - `S3` → canonical PDF / audio / raw‑data storage.  
+  - `SQS` → distributed‑task queue for ingestion / embedding / indexing.  
+  - `Lambda` → PDF‑→‑text extraction, text‑cleanup, embedding‑orchestration.  
+  - `EventBridge` → schedule‑RAG‑refresh / syllabus‑update events.  
+  - `DynamoDB` → AWS‑side state / idempotency / signed‑URL cache.  
+  - `SNS` → mobile‑push / ops‑alerting.  
+  - `Step Functions` → multi‑step RAG‑pipeline orchestration (PDF → extract → embed → index → publish).  
+  - `CloudWatch` → AWS‑side logs / alarms for Lambda / SQS.
+
+### **Azure‑plane**
+
+- **Role**: **App‑backend**, **auth**, **payments**.
+- **Services used**:
+  - `Azure Container Apps` (Python + Rust) → main FastAPI / Rust‑core backend.  
+  - `Azure Container Apps Jobs` (KEDA) → cron / scheduled‑RAG / syllabus‑refresh jobs.  
+  - `Azure Monitor / App Insights` → APM, tracing for backend.  
+  - `Azure AI Content Safety` → moderation‑layer.  
+  - `Azure Translator` → non‑Indic‑translation.  
+
+### **Cloudflare‑plane**
+
+- **Role**: **Edge‑gateway**, **frontend**, **RAG‑orchestration**, **caching**.
+- **Services used**:
+  - `Cloudflare Pages` → static‑site / SSR pages.  
+  - `Cloudflare Workers` → edge‑proxy, RAG‑orchestration, library‑page pre‑render.  
+  - `Cloudflare R2` → edge‑cache / static‑asset storage.  
+  - `Cloudflare D1` → edge‑metadata‑SQL.  
+  - `Cloudflare KV` + `Cache Reserve` → edge‑caching.  
+  - `Cloudflare Vectorize` → edge‑vector‑cache.  
+  - `Cloudflare Access` / `WAF` → security / auth.  
+  - `Cloudflare AI Gateway` → single‑AI‑ingress, caching, ratelimiting.
+
+***
+
+## **5. API services used: Vertex / RAG / chat**
+
+### **Vertex‑based services**
+
+- **Vertex Generative AI (Gemini)**:
+  - `gemini‑2.5‑flash` (text) → primary RAG‑exam‑Q&A.  
+  - `gemini‑2.5‑flash` (multimodal) → image‑understanding / OCR‑input.  
+  - `gemini‑2.5‑pro` → long‑context‑PDF‑synthesis.  
+- **Vertex Search & Retrieval**:
+  - `Vertex AI Vector Search` (Matching Engine) → fallback vector‑store.  
+  - `Vertex Discovery Engine` → grounded‑search‑index over CMS + web‑corpus.
+- **Vertex embeddings / safety**:
+  - `Vertex text‑embedding‑004` → explicitly **not used**; you use `Cohere`‑via‑Bedrock.  
+  - `Gemini built‑in safety + RAI` → moderation.
+
+### **Chat‑RAG speed‑maximization configuration**
+
+- **Goal**: Maximize **RPS / latency** for **English‑exam‑Q&A RAG**.
+
+- **Optimization settings**:
+
+  - **Model‑choice**:
+    - Use `gemini‑2.5‑flash` as **primary** (low‑latency, RAG‑first).  
+    - Reserve `gemini‑2.5‑pro` for **long‑context‑only** (e.g., PDF‑summary).  
+
+  - **Prompt / context‑window**:
+    - Limit **context‑window** to **1k‑2k tokens** for exam‑Q&A (enough for 1–3 questions + RAG‑chunks).  
+    - Use **short‑RAG‑chunks** (100–300 words), not full‑documents.  
+
+  - **Caching**:
+    - Cache **RAG‑responses** for **common‑exam‑Qs** (e.g., “x = 2025”‑style pattern) at `Cloudflare AI Gateway`.  
+    - Use **Cloudflare Vectorize** to cache **top‑100 embeddings** per‑exam.  
+
+  - **Batching / parallelism**:
+    - For **batch‑question‑generation** (e.g., 100 MCQs):
+      - Use `Vertex Gemini 2.5 Pro` with **batch‑tokens** / **parallel‑prompts**.  
+      - In AWS‑`Lambda` / `EventBridge`‑driven‑RAG, fan‑out to **multiple async‑instances**.  
+
+  - **Rate‑limiting / quotas**:
+    - Use **Cloudflare AI Gateway** for **rate‑limiting / pooling / back‑pressure‑control**.  
+    - Fall back to `Azure GPT‑4.1‑mini` if Vertex hits quotas.  
+
+  - **Embedding‑pipeline**:
+    - Use `Cohere embed‑multilingual‑v3.0` for **high‑quality embeddings**, but **batch‑embed** (e.g., 1000‑embeds‑at‑a‑time) to reduce calls.
+
+***
+
+## **6. Trim‑and‑solidify top‑level delegation (13‑section style, 1‑page‑version)**
+
+**1. AI — Chat / LLM (exam‑Q&A RAG)**  
+- Primary: `Vertex Gemini 2.5 Flash` (exam‑Q&A orchestration).  
+- Secondary: `Azure GPT‑4.1‑mini` (fallback).  
+- Tertiary: `CF Workers AI llama‑3.3‑70b` (worker‑pipeline).
+
+**2. AI — Translation**  
+- Assamese content: `CF IndicTrans2` (primary), `Vertex Gemini 2.5 Flash` (translate‑mode).  
+- Other Indic: `CF IndicTrans2` (primary), `Vertex Gemini 2.5 Flash` (translate‑mode).  
+- Non‑Indic: `Azure Translator` (primary), `Google Cloud Translation` (secondary).
+
+**3. AI — Embeddings & Retrieval**  
+- Embedding model: `Cohere embed‑multilingual‑v3.0` (via Bedrock).  
+- Vector DB: `Pinecone` → `Vertex Vector Search` → `CF Vectorize`.  
+- Web‑search: `Exa` → `Tavily`.
+
+**4. AI — Speech**  
+- STT: `Deepgram` → `AssemblyAI` → `CF Whisper‑large‑v3‑turbo`.  
+- TTS: `ElevenLabs` → `GCP Neural2` → `AWS Polly`; Indic‑TTS: `GCP` → `AWS Polly`.
+
+**5. AI — Safety / Moderation**  
+- Content: `Gemini RAI` → `Llama Guard` → `Azure AI Content Safety`.  
+- Web‑Risk: `Google Web Risk API`.
+
+**6. AI — Vision**  
+- Image‑understanding: `Vertex Gemini` → `Azure GPT‑4‑mini`.  
+- OCR: `Vertex Gemini` → `Cloud Vision` → `CF llava`.
+
+**7. AI Routing / Gateway**  
+- Primary: `Cloudflare AI Gateway (BYOK)`.  
+- Bypass: direct‑to‑provider SDK (rollback).
+
+**8. Edge & Frontend (Cloudflare)**  
+- Hosting: `Cloudflare Pages`.  
+- Edge: `Cloudflare Workers`.  
+- Cache: `Cloudflare KV` → `Cache Reserve`.  
+- Storage: `Cloudflare R2` → `AWS S3` (mirror).  
+- Auth: `Cloudflare Access` → `Cloudflare WAF`.
+
+**9. Backend Compute (Azure / AWS / CF‑workers)**  
+- App: `Azure Container Apps (Python)` → `Azure Container Apps (Rust)`.  
+- Cron: `Azure CA Jobs` → `AWS EventBridge → Lambda`.  
+- Async: `AWS Lambda (SQS)` → `Azure CA Jobs`.  
+- Storage: `AWS S3` → `R2` (cold‑mirror).
+
+**10. Databases & Cache**  
+- NoSQL: `MongoDB Atlas`.  
+- Relational: `Supabase Postgres`.  
+- Cache: `Upstash Redis` → `Azure Cache` → `CF KV` (edge‑TTL).  
+- AWS‑side: `AWS DynamoDB`.
+
+**11. Auth / Payments / Comms**  
+- Auth: `Supabase Auth` → `Google OAuth` (admin).  
+- Internal: `Cloudflare Access`.  
+- Payments: `Razorpay` (single).  
+- Email: `SendGrid` → `AWS SES`.  
+- Push: `AWS SNS`.
+
+**12. Observability / Analytics / SEO / Ad‑/Trust**  
+- APM: `Sentry` → `Azure Monitor` → `AWS CloudWatch`.  
+- Logging: `Axiom` → `Azure Monitor` → `CloudWatch`.  
+- Analytics: `GA4` → `Firebase Perf`.  
+- SEO: `Search Console` → `Bing` → `PageSpeed Insights`.  
+- Ad: `AdSense` (single).  
+- Trust: `Trustpilot` (single).  
+- Topic: `Knowledge Graph` → `Bing Trends`.
+
+**13. Assamese‑specific top‑line (paste‑ready)**  
+> **“For Assamese chat, the primary is Sarvam‑M with Vertex Gemini 2.5 Flash (Indic‑tuned prompt) as fallback. For Assamese content translation, the primary is Cloudflare Workers AI IndicTrans2 with Vertex Gemini 2.5 Flash (translate mode) as fallback. All other functions follow the table above: 2 providers where 2 is enough, 3 only where a meaningful Tier‑3 exists.”**
+
+***
+
+If you want, next step: I can give you a **1‑line YAML‑style policy** for your `provider‑priority‑map.md` that you can copy‑paste into your infra docs.

@@ -1,0 +1,244 @@
+You want a **fully‑delegated** architecture where **every major function has 3 providers** (primary / secondary / tertiary), with **no single‑point‑of‑failure, multi‑vendor, multi‑region, multi‑SLA**, but **no role‑redundancy**. You also want to enforce:
+
+- **Assamese‑chat primary**: `Sarvam AI`  
+- **Assamese‑content‑translation primary**: `Cloudflare Workers AI IndicTrans`  
+
+Below is a **clean, detailed, fully‑updated mapping** of your **entire stack** into that 3‑provider‑per‑function pattern. You can paste this into your **“AI‑Stack‑Policy.md”** doc.
+
+***
+
+## 1. **AI — Chat / LLM (default chain)**
+
+**Goal:** Route all RAG‑style exam‑Q&A through **Cloudflare AI Gateway (BYOK)** with **one clear primary per language / function**.
+
+| Function / Role                             | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|---------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **English‑exam‑Q&A RAG (AHSEC / Degree)**   | `@cf/mistral/mistral‑7b‑instruct‑v0.3`              | `Azure OpenAI GPT‑4.1‑mini`                           | `Vertex Gemini 2.5 Flash`                                |
+| **Indic‑chat (non‑Assamese)**              | `Sarvam AI`                                            | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for Indic‑English‑only)             |
+| **Assamese‑chat**                          | `Sarvam AI`                                            | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for Assamese‑English‑only)          |
+| **Indic‑content‑translation**              | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for drafts)                       | `Sarvam AI` (fallback if needed)                        |
+| **Assamese‑content‑translation**           | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for drafts)                       | `Sarvam AI` (fallback if needed)                        |
+| **Long‑context / PDF‑synthesis RAG**       | `Vertex Gemini 2.5 Pro`                               | `Azure OpenAI GPT‑4.1‑mini`                           | `@cf/mistral/mistral‑7b‑instruct‑v0.3`                  |
+
+**Routing rule (Cloudflare AI Gateway)**:
+
+- All requests → **Cloudflare AI Gateway (BYOK)**.  
+- **English‑only Q&A** → `@cf/mistral/mistral‑7b‑instruct‑v0.3` (fallback → `Azure GPT‑4.1‑mini` → `Vertex Gemini 2.5 Flash`).  
+- **Indic‑turns** → `Sarvam AI` (fallback → `Cloudflare IndicTrans` → `Azure Translator` for Indic‑English‑only).  
+- **Assamese‑turns** → `Sarvam AI` (fallback → `Cloudflare IndicTrans` → `Azure Translator` for Assamese‑English‑only).  
+- **Assamese‑content‑translation** → `Cloudflare IndicTrans` (fallback → `Azure Translator` → `Sarvam AI`).
+
+***
+
+## 2. **AI — Chat / Fast Mode (low‑latency)**
+
+**Goal:** Low‑latency, high‑volume “Quick help” / Beta mode replies, with **no duplication** between default‑chain and fast‑mode.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **Fast‑mode English chat**                   | `@cf/meta‑llama/Llama‑3.2‑3B‑Instruct`              | `Azure OpenAI GPT‑4.1‑mini`                           | `Vertex Gemini 2.5 Flash`                                |
+| **Fast‑mode Indic chat**                     | `Sarvam AI`                                            | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for Indic‑English‑only)             |
+| **Fast‑mode Assamese chat**                  | `Sarvam AI`                                            | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for Assamese‑English‑only)          |
+
+**Routing rule**:
+
+- Fast‑mode requests → **Cloudflare AI Gateway BYOK**.  
+- **English‑fast‑mode** → `@cf/meta‑llama/Llama‑3.2‑3B‑instruct` (fallback → `Azure GPT‑4.1‑mini` → `Vertex Gemini 2.5 Flash`).  
+- **Indic‑fast‑mode** → `Sarvam AI` (fallback → `Cloudflare IndicTrans` → `Azure Translator`).  
+- **Assamese‑fast‑mode** → `Sarvam AI` (fallback → `Cloudflare IndicTrans` → `Azure Translator`).
+
+***
+
+## 3. **AI — Embeddings & Retrieval**
+
+**Goal:** Keep **Voyage‑3.5 + Pinecone** as the **ground‑truth RAG‑stack**, with **Cohere + BGE‑M3** as **experiment‑/fallback‑layers**, not co‑primary.
+
+| Function / Role                                  | Primary Provider                                      | Secondary Provider                                    | Tertiary Provider                                           |
+|--------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------|------------------------------------------------------------|
+| **Embedding model (RAG‑indexing)**               | `Voyage‑3.5`                                          | `Cohere embed‑multilingual‑v3.0`                     | `Cloudflare Workers AI BGE‑M3` (edge‑only)               |
+| **Vector DB (RAG)**                              | `Pinecone`                                            | `MongoDB Atlas Vector Search` (hybrid‑only)           | `Cloudflare Vectorize` (edge‑cache only)                 |
+| **Web‑search‑for‑RAG‑context**                  | `Exa`                                                 | `Tavily`                                               | Self‑hosted‑scraper / 3rd‑RAG‑tool (if you want)        |
+
+**Routing rule**:
+
+- All embeddings → **`Voyage‑3.5`** (fallback → `Cohere` → `BGE‑M3`).  
+- All RAG‑indexing → **`Pinecone`** (fallback → `MongoDB Vector Search` for metadata‑only).  
+- All edge‑caching → **`Cloudflare Vectorize`** (only for top‑few questions).  
+
+***
+
+## 4. **AI — Speech (STT / TTS)**
+
+**Goal:** Keep **Deepgram** as your **main speech‑processing stack**, with **AssemblyAI** and **ElevenLabs** as **fallbacks**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **STT (Speech‑to‑Text)**                     | `Deepgram`                                            | `AssemblyAI`                                          | Self‑hosted‑ASR / Whisper (if you want)                  |
+| **TTS (Text‑to‑Speech)**                     | `Deepgram Aura‑2`                                     | `ElevenLabs`                                          | AWS Polly / self‑hosted‑TTS (if you want)                |
+
+**Routing rule**:
+
+- STT → `Deepgram` (fallback → `AssemblyAI`).  
+- TTS → `Deepgram Aura‑2` (fallback → `ElevenLabs`).  
+
+***
+
+## 5. **AI — Translation & Language**
+
+**Goal:** Keep **Cloudflare IndicTrans** as **Assamese‑content‑translation primary**, **Sarvam** as **Assamese‑chat‑primary**, and **Azure Translator** as **non‑Indic‑primary** with **Google Vertex Translate** as **fallback**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                    | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|-------------------------------------------------------|-----------------------------------------------------------|
+| **Assamese‑chat**                            | `Sarvam AI`                                            | `Cloudflare Workers AI IndicTrans`                   | `Azure Translator` (for Assamese‑English‑only)           |
+| **Assamese‑content‑translation**             | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator` (for drafts)                      | `Sarvam AI` (fallback if needed)                         |
+| **Other Indic‑chat**                         | `Sarvam AI`                                            | `Cloudflare Workers AI IndicTrans`                   | `Azure Translator` (for Indic‑English‑only)              |
+| **Indic‑content‑translation**                | `Cloudflare Workers AI IndicTrans`                    | `Azure Translator`                                   | `Sarvam AI` (fallback if needed)                         |
+| **Non‑Indic‑translation**                    | `Azure Translator`                                    | `Google Vertex Translate`                            | `Cloud Translation API` (if you add)                     |
+
+**Routing rule**:
+
+- Assamese‑turns → `Sarvam AI` (fallback → `Cloudflare IndicTrans` → `Azure Translator`).  
+- Assamese‑content → `Cloudflare IndicTrans` (fallback → `Azure Translator` → `Sarvam AI`).  
+
+***
+
+## 6. **AI — Safety**
+
+**Goal:** Keep **Llama Guard** as your **main safety layer**, with **internal rules** and **Web Risk** as **fallbacks**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                    | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|-------------------------------------------------------|-----------------------------------------------------------|
+| **Content moderation**                       | `Cloudflare Workers AI (Llama Guard)`                | Internal‑rules / regex / keyword‑filters             | Web Risk API (no‑ML filter)                              |
+
+**Routing rule**:
+
+- All safety checks → **Llama Guard** (fallback → internal‑rules → Web Risk API).  
+
+***
+
+## 7. **AI — Vision**
+
+**Goal:** Keep **Vertex Gemini‑multimodal** as **primary**, **Azure OpenAI‑multimodal** as **fallback**, and **Cloud Vision API** as **OCR‑fallback**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **Image‑understanding / OCR**               | `Vertex Gemini (multimodal)`                          | `Azure OpenAI (multimodal)`                           | `Cloud Vision API` (DOCUMENT_TEXT_DETECTION)              |
+
+**Routing rule**:
+
+- All vision → `Vertex Gemini` (fallback → `Azure OpenAI` → `Cloud Vision` for OCR‑only).  
+
+***
+
+## 8. **Routing**
+
+**Goal:** **Cloudflare AI Gateway** remains your **only ingress / egress**; internal‑router and direct‑calls are **fallback‑only**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **AI‑routing / caching / rate‑limiting**     | `Cloudflare AI Gateway (BYOK)`                       | Internal‑router‑on‑Cloudflare / Azure                  | Direct‑to‑provider calls (rollback‑only)                  |
+
+**Routing rule**:
+
+- All AI‑calls → `Cloudflare AI Gateway` (fallback → internal‑router → direct‑calls).  
+
+***
+
+## 9. **Infrastructure — Edge & Frontend (Cloudflare)**
+
+**Goal:** Keep **Cloudflare** as your **main edge‑plane**, with **D1 / KV / Cache Reserve** clearly separated in roles.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **Frontend hosting**                         | `Cloudflare Pages`                                    | `Cloudflare Workers` (SSR / edge‑proxy)               | `Cloudflare R2` (static‑asset‑only)                      |
+| **Edge‑logic**                               | `Cloudflare Workers`                                  | `Cloudflare D1` (edge‑SQL)                            | `Cloudflare KV` (edge‑key‑value)                         |
+| **Edge‑caching**                             | `Cloudflare KV`                                      | `Cloudflare Cache Reserve`                            | `Cloudflare R2` (long‑tail‑static)                       |
+| **Zero‑Trust / Auth**                        | `Cloudflare Access`                                   | `Cloudflare WAF`                                      | `JWT` / `mTLS` (internal‑only)                           |
+
+**Routing rule**:
+
+- All frontend → `Cloudflare Pages` (SSR / prerender via `Cloudflare Workers`).  
+- All edge‑logic → `Cloudflare Workers` (D1 / KV for metadata / cache).  
+
+***
+
+## 10. **Infrastructure — Backend (Azure)**
+
+**Goal:** Keep **Azure Container Apps** as your **main backend‑plane**, with **Python / Rust / Jobs** clearly separated.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **App‑backend**                              | `Azure Container Apps (Python)`                      | `Azure Container Apps (Rust)`                         | `Azure Container Apps Jobs (KEDA)` (cron‑only)           |
+| **Async / Eventing (AWS‑free‑tier)**         | `AWS Lambda`                                          | `AWS SQS`                                             | `AWS EventBridge` (scheduler)                            |
+| **Storage (AWS‑free‑tier)**                  | `AWS S3`                                              | `AWS DynamoDB` (AWS‑side KV)                          | `AWS SNS` / `Step Functions` (orchestration)             |
+
+**Routing rule**:
+
+- All backend‑work → `Azure Container Apps` (Python / Rust).  
+- All async‑work → `AWS Lambda` (via `SQS` + `EventBridge` + `DynamoDB` + `SNS`).  
+
+***
+
+## 11. **Databases & Caching**
+
+**Goal:** Keep **MongoDB Atlas** as **primary NoSQL**, **Supabase Postgres** as **primary relational**, and **Upstash Redis** as **primary cache**, with **Azure Cosmos DB** and **AWS DynamoDB** as **fallbacks**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **NoSQL (application‑DB)**                   | `MongoDB Atlas`                                        | `Azure Cosmos DB` (globally‑hot‑keys)                | `AWS DynamoDB` (AWS‑side KV)                            |
+| **Relational (users / billing)**             | `Supabase Postgres`                                   | `AWS DynamoDB` (AWS‑side state)                       | `Azure Cosmos DB` (fallback if needed)                   |
+| **Caching / rate‑limiting**                  | `Upstash Redis`                                        | `Azure Cosmos DB` (global‑hot‑keys)                   | `AWS DynamoDB` (AWS‑side cache)                          |
+
+**Routing rule**:
+
+- All app‑data → `MongoDB Atlas` (with `Upstash Redis` as main cache).  
+- All AWS‑side state → `DynamoDB`.  
+- All globally‑hot‑keys → `Azure Cosmos DB`.  
+
+***
+
+## 12. **Auth / Payments / Comms**
+
+**Goal:** Keep **Supabase Auth** as **main auth**, **Razorpay** as **only‑payment‑gateway**, and **SendGrid / AWS SES** as **email‑providers**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **User auth**                                 | `Supabase Auth`                                       | `Google OAuth` (admin / GA4)                          | `Cloudflare Access` (internal / admin)                   |
+| **Payment gateway**                           | `Razorpay`                                            | (None; single‑gateway)                                | (None)                                                    |
+| **Transactional email**                       | `SendGrid`                                            | `AWS SES` (backup / 5xx‑fallback)                     | `AWS SNS` (mobile‑push / alerts)                         |
+
+**Routing rule**:
+
+- All user‑auth → `Supabase Auth`.  
+- All payments → `Razorpay`.  
+- All email → `SendGrid` (fallback → `AWS SES`).  
+
+***
+
+## 13. **Monetization / Observability / SEO**
+
+**Goal:** Keep **single‑provider‑per‑category** where possible, with **no role‑redundancy**.
+
+| Function / Role                              | Primary Provider                                      | Secondary Provider                                     | Tertiary Provider                                          |
+|----------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------|
+| **Ad‑network**                                 | `Google AdSense`                                      | (None; sole‑ad‑network)                               | (None)                                                    |
+| **Error‑tracking / APM**                       | `Sentry`                                              | `Azure Monitor / App Insights`                        | `AWS CloudWatch` (AWS‑side alerts)                       |
+| **Logging sink**                               | `Axiom`                                               | `Azure Monitor` (Azure‑side)                          | `AWS CloudWatch` (AWS‑side)                              |
+| **Web‑analytics**                              | `Google Analytics 4`                                   | `Firebase Performance Monitoring`                     | (None)                                                    |
+| **SEO / Search Console**                       | `Google Search Console API`                           | `Bing Webmaster / IndexNow`                           | `Google PageSpeed Insights API`                          |
+| **Trust / reviews**                            | `Trustpilot`                                          | `Google Knowledge Graph` (topic‑discovery)           | `Bing` / `IndexNow` (topic‑discovery)                    |
+
+**Routing rule**:
+
+- All product‑analytics → `Google Analytics 4` + `Firebase Performance Monitoring`.  
+- All observability → `Sentry` + `Axiom` + `Azure Monitor` + `AWS CloudWatch` (no overlap).  
+
+***
+
+## 14. **Full “Assamese‑specific” policy line**
+
+You can now put this at the top of your AI‑stack doc:
+
+> **“For Assamese‑chat, the primary provider is Sarvam AI; for Assamese‑content‑translation, the primary provider is Cloudflare Workers AI IndicTrans. All other AI‑functions follow the 3‑provider‑policy (primary / secondary / tertiary) with no role‑redundancy and no single‑point‑of‑failure.”**
+
+This gives you a **fully‑de
