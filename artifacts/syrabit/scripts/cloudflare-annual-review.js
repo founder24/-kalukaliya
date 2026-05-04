@@ -367,35 +367,13 @@ async function main() {
   console.log('  ℹ  CF_ANALYTICS_TOKEN: verify via Workers dashboard → Settings → Variables');
   console.log('  ℹ    (required for /api/edge/analytics query route; set with wrangler secret put)');
 
-  // ── Phase 6: mTLS origin hardening, Zaraz, Image Resizing, Observatory ──
-  console.log('\n── Phase 6: mTLS, Zaraz GA4, Image Resizing, Observatory (Task #110) ──');
+  // ── Phase 6: Zaraz, Image Resizing, Observatory ────────────────────────
+  console.log('\n── Phase 6: Zaraz GA4, Image Resizing, Observatory (Task #110) ──');
   console.log('  Targets:');
-  console.log('    mTLS cert syrabit-railway-mtls — provisioned, non-expiring within 60 days');
   console.log('    image_resizing: on              — CF Image Resizing enabled for /cdn-cgi/image/');
   console.log('    Zaraz GA4 tool — enabled, server-side event forwarding');
   console.log('    Observatory — weekly Lighthouse for homepage + chapter page');
-
-  // 6a: mTLS certificate
-  const mtlsCerts = await cfGet(`/accounts/${ACCOUNT_ID}/mtls_certificates`);
-  if (!mtlsCerts.success) {
-    const authErr = mtlsCerts.errors?.[0]?.code === 10000;
-    console.log(`  ?  mTLS certificates${authErr
-      ? '  [token lacks SSL and Certificates: Read — add scope]'
-      : ': ' + JSON.stringify(mtlsCerts.errors)}`);
-  } else {
-    const railwayCert = (mtlsCerts.result || []).find(c => c.name === 'syrabit-railway-mtls');
-    if (railwayCert) {
-      const expiresOn  = new Date(railwayCert.expires_on);
-      const daysLeft   = Math.round((expiresOn - Date.now()) / 86400000);
-      row('syrabit-railway-mtls exists', true, true,
-        `id=${railwayCert.id} expires=${railwayCert.expires_on} (${daysLeft}d)`);
-      if (daysLeft < 60) {
-        console.log('  ✗  WARN: certificate expires in < 60 days — renew via cloudflare-phase6-apply.js');
-      }
-    } else {
-      row('syrabit-railway-mtls', 'NOT FOUND', 'EXISTS', 'run cloudflare-phase6-apply.js');
-    }
-  }
+  console.log('  ℹ  Railway-mTLS cert check removed in Task #335 (Railway decommissioned).');
 
   // 6b: Image Resizing zone setting
   const imgRes = await cfGet(`/zones/${ZONE_ID}/settings/image_resizing`);

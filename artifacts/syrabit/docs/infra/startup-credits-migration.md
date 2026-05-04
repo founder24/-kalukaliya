@@ -1,7 +1,14 @@
 # Startup Credits Migration Runbook
 
-**Last updated:** 2026-05-02  
-**Status:** In progress  
+**Last updated:** 2026-05-04  
+**Status:** Historical — superseded for the GCP-hosted resources by
+the four-cloud rebalance (Tasks #330–#335). The Cloud Run dispatch
+service, Cloud CDN backend, and Cloud Logging Pub/Sub sink described
+below were decommissioned in Task #335 along with their Terraform /
+YAML in `infra/gcp/`. Any sentence calling for a `gcloud …` step in
+the Cloud Run / Cloud CDN / Cloud Logging sections is no longer
+actionable; see [`decommission.md`](decommission.md) for what
+replaced each.  
 **Savings target:** ~$40/mo on Cloudflare paid add-ons
 
 **Task #263** — Replace paid Cloudflare add-ons (~$40–50/mo) with workloads

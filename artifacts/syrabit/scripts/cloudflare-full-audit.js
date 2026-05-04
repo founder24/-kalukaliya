@@ -519,32 +519,13 @@ async function auditItem16AeWriteRecency() {
 // ─── Phase 6 ─────────────────────────────────────────────────────────────────
 
 async function auditItem17MtlsCert() {
-  const certs = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/mtls_certificates`);
-  if (!certs) {
-    warn(17, 6, 'mTLS client certificate (syrabit-railway-mtls)', 'token lacks SSL and Certificates: Read scope');
-    return;
-  }
-  if (!certs.success) {
-    fail(17, 6, 'mTLS client certificate (syrabit-railway-mtls)', JSON.stringify(certs.errors),
-      'run cloudflare-phase6-apply.js');
-    return;
-  }
-  const cert = (certs.result || []).find(c => c.name === 'syrabit-railway-mtls');
-  if (!cert) {
-    fail(17, 6, 'mTLS client certificate (syrabit-railway-mtls)', 'NOT FOUND',
-      'run cloudflare-phase6-apply.js → Step 1');
-    return;
-  }
-  const expiresOn  = new Date(cert.expires_on);
-  const daysLeft   = Math.round((expiresOn - Date.now()) / 86400000);
-  if (daysLeft < 60) {
-    fail(17, 6, 'mTLS client certificate (syrabit-railway-mtls)',
-      `expires in ${daysLeft} days (${cert.expires_on})`,
-      'renew via cloudflare-phase6-apply.js — issue a new cert and update wrangler.toml');
-  } else {
-    pass(17, 6, 'mTLS client certificate (syrabit-railway-mtls)',
-      `id=${cert.id} expires=${cert.expires_on} (${daysLeft}d)`);
-  }
+  // Item 17 (Railway-origin mTLS certificate) was retired in Task #335
+  // when Railway was decommissioned. Emit a WARN (not a hard PASS) until
+  // the dashboard cert deletion is operator-confirmed in
+  // docs/infra/decommission.md → §8 — flipping this to pass() would hide
+  // any lingering cert drift on the account.
+  warn(17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
+    'check retired — Railway origin decommissioned in Task #335; delete the cert in the Cloudflare dashboard if it still exists');
 }
 
 async function auditItem18ImageResizing() {

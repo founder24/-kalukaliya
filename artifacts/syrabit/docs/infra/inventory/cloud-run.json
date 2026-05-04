@@ -4,7 +4,9 @@
   "project": "syrabit-prod",
   "region": "asia-south1",
   "traffic_share": 0,
-  "status": "Standby for rollback only — Task #334 flipped edge proxy ORIGIN_TARGET from cloudrun → do. Decommission in Task #335.",
+  "decommissioned_at": "2026-05-04T00:00:00Z",
+  "decommission_task": "#335",
+  "status": "decommissioned — dispatch-v2 service deleted, Cloud Run API disabled for the syrabit-prod project. Tenant dispatch logic now lives at /internal/dispatch on the DO App Platform syrabit-api service. See docs/infra/decommission.md.",
   "services": [
     {
       "name": "dispatch-v2",

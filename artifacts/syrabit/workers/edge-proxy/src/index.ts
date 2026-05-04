@@ -4,19 +4,18 @@
  * Lightweight Cloudflare Worker that fronts the API. Originally a
  * Workers-for-Platforms tenant dispatcher, simplified into a routing
  * shim when dispatch moved to GCP Cloud Run, and extended in
- * Task #331 with an `ORIGIN_TARGET` feature flag so traffic can be
+ * Task #331 with an `ORIGIN_TARGET` feature flag so traffic could be
  * flipped between the Railway, Cloud Run, and Digital Ocean origins
  * without a code deploy at cutover.
+ *
+ * Task #335 decommissioned the legacy Railway and GCP Cloud Run
+ * origins. The `ORIGIN_TARGET` variable is retained so a future
+ * provider can be wired in without changing the worker source, but
+ * only `do` resolves to a configured origin today.
  *
  * Origin selection
  * ────────────────
  *   ORIGIN_TARGET=do        → DO_APP_BACKEND_URL  (Digital Ocean App Platform)
- *   ORIGIN_TARGET=cloudrun  → DISPATCH_CLOUD_RUN_URL (legacy GCP Cloud Run)
- *   ORIGIN_TARGET=railway   → BACKEND_RAILWAY_URL (legacy Railway)
- *
- * Default is `do` after the Task #334 production cutover. The
- * `cloudrun` and `railway` values remain valid rollback targets
- * until Task #335 decommissions those origins.
  *
  * Performance boost wiring
  * ────────────────────────
@@ -28,18 +27,14 @@
  *
  * Required wrangler secrets / vars
  * ─────────────────────────────────
- *   ORIGIN_TARGET            — "do" | "cloudrun" | "railway" (default "do")
+ *   ORIGIN_TARGET            — "do" (default)
  *   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
- *   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app
- *   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app
  *   DISPATCH_SHARED_SECRET   — random 256-bit hex, matched server-side
  */
 
 export interface Env {
   ORIGIN_TARGET?: string;
   DO_APP_BACKEND_URL?: string;
-  DISPATCH_CLOUD_RUN_URL?: string;
-  BACKEND_RAILWAY_URL?: string;
   DISPATCH_SHARED_SECRET: string;
 }
 
@@ -50,15 +45,10 @@ const EARLY_HINTS_ASSETS = [
 
 function resolveOrigin(env: Env): { url: string; target: string } | null {
   const target = (env.ORIGIN_TARGET ?? 'do').toLowerCase();
-  switch (target) {
-    case 'cloudrun':
-      return env.DISPATCH_CLOUD_RUN_URL ? { url: env.DISPATCH_CLOUD_RUN_URL, target } : null;
-    case 'railway':
-      return env.BACKEND_RAILWAY_URL ? { url: env.BACKEND_RAILWAY_URL, target } : null;
-    case 'do':
-    default:
-      return env.DO_APP_BACKEND_URL ? { url: env.DO_APP_BACKEND_URL, target: 'do' } : null;
+  if (target !== 'do') {
+    console.warn('[edge-proxy] unsupported ORIGIN_TARGET — Railway and Cloud Run were decommissioned in Task #335', { target });
   }
+  return env.DO_APP_BACKEND_URL ? { url: env.DO_APP_BACKEND_URL, target: 'do' } : null;
 }
 
 export default {

@@ -9,11 +9,10 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # Non-secret vars; secrets set via: wrangler secret put <NAME> --env <env>
 NODE_ENV = "production"
-# Origin selector — "do" | "cloudrun" | "railway".
-# Task #331 added "do" as a target; Task #334 (production cutover)
-# flipped the default and both env overrides from "cloudrun" → "do".
-# The legacy "cloudrun" / "railway" values are still valid rollback
-# targets until Task #335 decommissions those origins.
+# Origin selector — "do" only after Task #335 decommissioned the
+# legacy Railway and GCP Cloud Run origins. The variable is retained
+# so a future provider can be added without changing the worker
+# source, but currently only "do" is wired.
 ORIGIN_TARGET = "do"
 
 [env.production]
@@ -23,8 +22,6 @@ routes = [
 ]
 
 [env.production.vars]
-# Cut over to Digital Ocean by Task #334 — see docs/infra/cutover.md
-# for the timeline, validation, and rollback procedure.
 ORIGIN_TARGET = "do"
 
 [env.staging]
@@ -34,18 +31,13 @@ routes = [
 ]
 
 [env.staging.vars]
-# Staging flipped first in Task #331 to exercise the DO origin
-# end-to-end before production followed in Task #334.
 ORIGIN_TARGET = "do"
 
-# ORIGIN_TARGET is a routing knob (not a credential) and lives in
-# [vars] / [env.*.vars] above. To roll back to the legacy origin
-# without redeploying the worker source, override the var inline:
-#   wrangler deploy --env production --var ORIGIN_TARGET:cloudrun
-#   wrangler deploy --env production --var ORIGIN_TARGET:railway
-#
 # Actual secrets — set with `wrangler secret put <NAME> --env <env>`:
 #   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
-#   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app  (rollback only)
-#   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app  (rollback only)
 #   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret
+#
+# Removed in Task #335 (legacy origins decommissioned):
+#   DISPATCH_CLOUD_RUN_URL, BACKEND_RAILWAY_URL — delete these
+#   secrets via `wrangler secret delete <NAME> --env <env>` once the
+#   worker has been redeployed without the rollback paths.

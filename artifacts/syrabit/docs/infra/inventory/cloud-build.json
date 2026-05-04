@@ -1,5 +1,8 @@
 {
   "captured_at": "2026-05-03T00:00:00Z",
+  "decommissioned_at": "2026-05-04T00:00:00Z",
+  "decommission_task": "#335",
+  "status": "decommissioned — all Cloud Build triggers and configs deleted; GitHub Actions under .github/workflows/ is the sole CI/CD path. See docs/infra/decommission.md.",
   "method": "Enumeration from artifacts/syrabit-backend/cloudbuild.yaml and CLOUDRUN-DEPLOY.md.",
   "project": "syrabit-prod",
   "pipelines": [

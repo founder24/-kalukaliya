@@ -1,5 +1,8 @@
 {
   "captured_at": "2026-05-03T00:00:00Z",
+  "decommissioned_at": "2026-05-04T00:00:00Z",
+  "decommission_task": "#335",
+  "status": "decommissioned — all queues deleted from GCP. Producers now call services/backend/sqs_fanout.py which writes directly to the AWS SQS targets named below. See docs/infra/decommission.md for the per-queue removal log.",
   "method": "Static enumeration of every Cloud Tasks producer in artifacts/syrabit-backend/. Wrapper at cloud_tasks_client.py looks up queues by full resource name; queue names below are the project-level convention used by routes/admin_gcp_infra.py and the producers cited.",
   "project": "syrabit-prod",
   "location": "asia-south1",

@@ -107,80 +107,19 @@ function computeCertFingerprint(pem) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 1: Issue mTLS client certificate
+// Step 1: Issue mTLS client certificate (RETIRED in Task #335)
 // ────────────────────────────────────────────────────────────────────────────
+// The Railway-origin mTLS cert ("syrabit-railway-mtls") was issued to
+// authenticate the Cloudflare worker against the Railway backend. Railway
+// was decommissioned in Task #335; this step is now a no-op so the rest
+// of the phase-6 apply script keeps working. Delete the cert in the
+// Cloudflare dashboard (SSL/TLS → Client Certificates) as part of the
+// same cleanup.
 async function stepMtlsCert() {
-  console.log('\n── Step 1: Issue mTLS client certificate ──');
-  console.log('  Target: Cloudflare-issued client certificate for api.syrabit.ai');
-
-  // Check if a certificate named "syrabit-railway-mtls" already exists.
-  const existing = await cfGet(`/accounts/${ACCOUNT_ID}/mtls_certificates`);
-  if (existing.success) {
-    const found = (existing.result || []).find(c => c.name === 'syrabit-railway-mtls');
-    if (found) {
-      ok(`mTLS certificate already exists: id=${found.id} expires=${found.expires_on}`);
-      info(`Fill this certificate_id into workers/edge-proxy/wrangler.toml [[mtls_certificates]].`);
-      let fingerprint = null;
-      if (found.certificate) {
-        fingerprint = computeCertFingerprint(found.certificate);
-        ok(`SHA-256 fingerprint: ${fingerprint}`);
-      } else {
-        info('Certificate PEM not returned by list API — fingerprint cannot be computed automatically.');
-        info('Run: openssl x509 -fingerprint -sha256 -noout -in cert.pem | sed "s/.*=//;s/://g" | tr A-F a-f');
-      }
-      return { id: found.id, fingerprint };
-    }
-  }
-
-  if (DRY_RUN) {
-    dry('POST /accounts/{id}/mtls_certificates — issue syrabit-railway-mtls');
-    info('After dry-run: fill the returned certificate_id into wrangler.toml and run wrangler deploy.');
-    return { id: null, fingerprint: null };
-  }
-
-  // Issue the certificate — Cloudflare generates the keypair server-side.
-  // The private key is returned ONCE in the response; store it immediately.
-  const body = {
-    name:             'syrabit-railway-mtls',
-    certificates:     '',          // empty = Cloudflare-generated keypair
-    validity_period:  3650,        // 10 years
-    associated_hostnames: ['api.syrabit.ai'],
-  };
-
-  const r = await cfPost(`/accounts/${ACCOUNT_ID}/mtls_certificates`, body);
-  if (!r.success) {
-    err(`mTLS certificate issuance failed: ${JSON.stringify(r.errors)}`);
-    console.log('');
-    console.log('  Possible causes:');
-    console.log('  • API token lacks "SSL and Certificates: Edit" scope.');
-    console.log('  • Account is not on a plan that supports client certificates.');
-    console.log('  • Use dash.cloudflare.com → SSL/TLS → Client Certificates → Create.');
-    return { id: null, fingerprint: null };
-  }
-
-  const cert = r.result;
-  const fingerprint = cert.certificate ? computeCertFingerprint(cert.certificate) : null;
-
-  ok(`mTLS certificate issued: id=${cert.id} expires=${cert.expires_on}`);
-  if (fingerprint) {
-    ok(`SHA-256 fingerprint:     ${fingerprint}`);
-  }
-  console.log('');
-  console.log('  ══════════════════════════════════════════════════════════════');
-  console.log('  SAVE THE PRIVATE KEY — it is shown only once:');
-  console.log('  ══════════════════════════════════════════════════════════════');
-  console.log(cert.private_key || '  (private_key not returned — use dashboard)');
-  console.log('  ══════════════════════════════════════════════════════════════');
-  console.log('');
-  info(`Certificate ID: ${cert.id}`);
-  info('Next steps:');
-  info('  1. Copy the private key above and run:');
-  info('       echo "<pem>" | wrangler secret put MTLS_PRIVATE_KEY --name syrabit-edge');
-  info(`  2. Set certificate_id = "${cert.id}" in workers/edge-proxy/wrangler.toml [[mtls_certificates]].`);
-  info('  3. Run: cd workers/edge-proxy && wrangler deploy');
-  info('  4. Configure Railway to require mTLS (see docs/CLOUDFLARE_MTLS.md).');
-
-  return { id: cert.id, fingerprint };
+  console.log('\n── Step 1: Issue mTLS client certificate (skipped) ──');
+  info('Railway origin decommissioned in Task #335 — mTLS issuance no longer required.');
+  info('Delete the legacy "syrabit-railway-mtls" cert in the Cloudflare dashboard if it still exists.');
+  return { id: null, fingerprint: null };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

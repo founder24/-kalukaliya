@@ -1,5 +1,8 @@
 {
   "captured_at": "2026-05-03T00:00:00Z",
+  "decommissioned_at": "2026-05-04T00:00:00Z",
+  "decommission_task": "#335",
+  "status": "decommissioned — all jobs deleted from GCP. Schedules now run as Azure Container Apps Jobs (target_aca_job below). See docs/infra/decommission.md for the per-job removal log.",
   "method": "Static enumeration of every Cloud Scheduler job referenced from artifacts/syrabit-backend/. Wrapper at cloud_scheduler_client.py looks up jobs by full resource name; job names below are the project-level convention used by routes/admin_gcp_infra.py and the consumer routes cited.",
   "project": "syrabit-prod",
   "location": "asia-south1",

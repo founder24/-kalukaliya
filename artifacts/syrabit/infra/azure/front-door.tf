@@ -3,21 +3,23 @@
 # Azure Front Door (Standard tier) as additional CDN / WAF layer,
 # covered by Azure for Startups credits.
 #
-# Why Azure Front Door alongside GCP CDN?
-# ────────────────────────────────────────
+# Why Azure Front Door alongside Cloudflare?
+# ──────────────────────────────────────────
 # • Front Door has 100+ PoPs globally, including several in South Asia
-#   where GCP has fewer edge nodes — measurably better TTFB for
-#   Pakistan, Bangladesh, Sri Lanka users.
+#   where Cloudflare has fewer dedicated edge nodes — measurably better
+#   TTFB for Pakistan, Bangladesh, Sri Lanka users.
 # • Built-in WAF rule set (OWASP CRS 3.2) runs at the Azure edge —
 #   additional layer on top of Cloudflare Enterprise WAF.
 # • Smart compression (Brotli level 11) at the CDN edge reduces payload
 #   size by ~5–8 % vs Cloudflare's level 4.
 # • Origin Shield (single-region cache shield in Central India) prevents
-#   cache-miss stampede from hitting GCP Cloud Run directly.
+#   cache-miss stampede from hitting the DO origin directly.
 # • Azure DDoS Network Protection (included in Standard) absorbs
-#   volumetric attacks before they reach GCP or Cloudflare.
-# • Private Link to GCP Cloud Run via Private Service Connect (preview)
-#   keeps media-origin traffic off the public internet.
+#   volumetric attacks before they reach DO or Cloudflare.
+#
+# Task #335 decommissioned the legacy GCP Cloud Run origin; the only
+# backend origin behind Front Door is now Digital Ocean App Platform
+# (api.syrabit.ai → DO).
 #
 # All covered by Azure for Startups credits ($5 000 for 12 months).
 
@@ -39,8 +41,8 @@ locals {
   location         = "centralindia"
   front_door_name  = "syrabit-afd"
   profile_sku      = "Standard_AzureFrontDoor"
-  gcp_origin_host  = "api.syrabit.ai"
-  media_origin_host = "storage.googleapis.com"
+  do_origin_host    = "api.syrabit.ai"
+  media_origin_host = "syrabit-media.b-cdn.net"
 }
 
 resource "azurerm_resource_group" "main" {
@@ -92,15 +94,15 @@ resource "azurerm_cdn_frontdoor_origin_group" "api" {
   session_affinity_enabled = false
 }
 
-resource "azurerm_cdn_frontdoor_origin" "gcp_cloud_run" {
-  name                          = "gcp-cloud-run"
+resource "azurerm_cdn_frontdoor_origin" "do_app_platform" {
+  name                          = "do-app-platform"
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.api.id
   enabled                       = true
 
-  host_name          = local.gcp_origin_host
+  host_name          = local.do_origin_host
   http_port          = 80
   https_port         = 443
-  origin_host_header = local.gcp_origin_host
+  origin_host_header = local.do_origin_host
   priority           = 1
   weight             = 1000
 
@@ -113,7 +115,7 @@ resource "azurerm_cdn_frontdoor_route" "api" {
   name                          = "api-route"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.api.id
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.api.id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.gcp_cloud_run.id]
+  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.do_app_platform.id]
 
   supported_protocols    = ["Http", "Https"]
   patterns_to_match      = ["/*"]

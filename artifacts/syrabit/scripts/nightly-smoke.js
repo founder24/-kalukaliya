@@ -410,156 +410,22 @@ async function main() {
     }
   }
 
-  // ── Phase 6: mTLS cert, Image Resizing, Zaraz GA4, Observatory ────────
+  // ── Phase 6: Image Resizing, Zaraz GA4, Observatory ───────────────────
   // These resources are provisioned by cloudflare-phase6-apply.js.
   // All checks degrade to warnings on token scope gaps (code 10000) or
   // plan-restriction errors (code 1135) so CI doesn't block on new accounts.
-  console.log('\nPhase 6 — mTLS cert, Image Resizing, Zaraz GA4, Observatory:');
-
-  // 6a: mTLS client certificate for Railway origin
   //
-  // Three-layer enforcement verification:
-  //   6a-i:  Account-level cert object exists (syrabit-railway-mtls)
-  //   6a-ii: Worker has [[mtls_certificates]] binding (MTLS_CERT name in worker bindings)
-  //   6a-iii: MTLS_REQUIRED secret = "true" in the deployed worker (fail-closed gate)
-  //
-  const mtlsCerts = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/mtls_certificates`);
-  if (!mtlsCerts) {
-    warn('mTLS client certificate',
-      'token lacks SSL and Certificates: Read — add scope to verify');
-  } else {
-    const railwayCert = (mtlsCerts.result || []).find(c => c.name === 'syrabit-railway-mtls');
-    if (!railwayCert) {
-      failures.push('mTLS certificate syrabit-railway-mtls (NOT FOUND)');
-      console.log('  ✗  mTLS certificate syrabit-railway-mtls: NOT FOUND — run cloudflare-phase6-apply.js');
-    } else {
-      const expiresOn    = new Date(railwayCert.expires_on);
-      const daysLeft     = Math.round((expiresOn - Date.now()) / 86400000);
-      const expiringSoon = daysLeft < 60;
-      const mark         = expiringSoon ? '⚠' : '✓';
-      console.log(`  ${mark}  mTLS cert syrabit-railway-mtls: id=${railwayCert.id} expires=${railwayCert.expires_on} (${daysLeft}d)`);
-      if (expiringSoon) {
-        warnings.push(`mTLS cert expires in ${daysLeft} days — renew via cloudflare-phase6-apply.js`);
-      }
-    }
-  }
-
-  // 6a-ii: Worker MTLS_CERT binding is present in the deployed worker.
-  // Uses /workers/scripts/{name}/bindings — same endpoint as Phase 5a.
-  // The inject-mtls-cert-id.js CI gate ensures the wrangler.toml [[mtls_certificates]]
-  // block is populated at deploy time; this assertion proves it reached the worker.
-  const workerBindings = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/bindings`);
-  if (!workerBindings) {
-    warn('Worker MTLS_CERT binding',
-      'token lacks Workers Scripts: Read — add scope to verify worker bindings');
-  } else {
-    const mtlsBinding = (workerBindings.result || []).find(b => b.name === 'MTLS_CERT' && b.type === 'mtls_certificate');
-    if (!mtlsBinding) {
-      failures.push('Worker MTLS_CERT binding NOT FOUND in deployed worker');
-      console.log('  ✗  Worker MTLS_CERT binding: NOT FOUND — ensure CF_MTLS_CERT_ID secret is set and re-deploy via edge-proxy-deploy.yml');
-    } else {
-      console.log(`  ✓  Worker MTLS_CERT binding: present (certificate_id=${mtlsBinding.certificate_id || 'N/A'})`);
-    }
-  }
-
-  // 6a-iii: MTLS_REQUIRED=true is set in the worker (fail-closed gate).
-  // Cloudflare's Workers API exposes secret names (not values) at
-  // /accounts/{id}/workers/scripts/{name}/secrets — we can verify the secret
-  // exists. The value "true" cannot be read back but its presence is enforced
-  // by proxyToBackend() which 503s when MTLS_CERT binding is absent; step 6a-ii
-  // above already proves the binding is present, so together they confirm the
-  // fail-closed path is active.
-  const workerSecrets = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/secrets`);
-  if (!workerSecrets) {
-    warn('Worker MTLS_REQUIRED secret',
-      'token lacks Workers Scripts: Read — add scope to verify worker secrets');
-  } else {
-    const mtlsRequiredSecret = (workerSecrets.result || []).find(s => s.name === 'MTLS_REQUIRED');
-    if (!mtlsRequiredSecret) {
-      failures.push('Worker MTLS_REQUIRED secret NOT SET in deployed worker (fail-closed gate inactive)');
-      console.log('  ✗  Worker MTLS_REQUIRED secret: NOT SET — run: wrangler secret put MTLS_REQUIRED --name syrabit-edge (value: true)');
-    } else {
-      console.log('  ✓  Worker MTLS_REQUIRED secret: present (fail-closed gate active)');
-    }
-  }
-
-  // 6a-iv: Railway origin bypass probe.
-  // Attempts a direct HTTP request to the Railway backend WITHOUT the Cloudflare
-  // worker (no BACKEND_ORIGIN_SECRET, no mTLS cert).  This verifies that Railway
-  // enforces the mTLS client certificate at the TLS level: a connection made
-  // without the CF-issued cert must fail at the TLS handshake before HTTP is
-  // reached.
-  //
-  // When Railway TLS-level mTLS is correctly configured, fetch() throws a
-  // network/TLS error before any HTTP response is received.  Any HTTP response
-  // (including 4xx/5xx from application middleware) means the connection was
-  // accepted at the TLS layer — only application-layer guards are active, which
-  // is weaker: if BACKEND_ORIGIN_SECRET ever leaks the origin is fully exposed.
-  //
-  // The backend also has MtlsClientCertMiddleware (Task #120) which rejects
-  // requests missing a valid HMAC proof that the CF Worker sent them with the
-  // cert bound.  This is a non-spoofable belt-and-suspenders layer, but it does
-  // NOT substitute for TLS-level enforcement: this probe must still see a
-  // network error (not 403) for the gold standard to be met.
-  //
-  // Acceptable outcomes:
-  //   PASS:  network/TLS error — TLS handshake rejected before HTTP (gold standard).
-  //   WARN:  connection timeout — origin not reachable (mTLS or firewall).
-  //   FAIL:  any HTTP response — origin reachable without the CF client cert.
-  //
-  // RAILWAY_ORIGIN_URL must be set in the CI environment to the bare Railway
-  // URL (e.g. https://syrabit-production.up.railway.app).
-  //   CI (process.env.CI === 'true'):   missing value is a hard failure — the
-  //     probe must run in CI so a bypass regression cannot silently go unnoticed.
-  //   Local:                            missing value is a skippable warning.
-  // Set the secret at: GitHub → Settings → Secrets → Actions → RAILWAY_ORIGIN_URL.
-  // The GitHub Actions cf-zone-settings job already passes the secret via
-  // `RAILWAY_ORIGIN_URL: ${{ secrets.RAILWAY_ORIGIN_URL }}`.
-  const RAILWAY_ORIGIN_URL = (process.env.RAILWAY_ORIGIN_URL || '').trim();
-  const IS_CI = process.env.CI === 'true';
-  if (!RAILWAY_ORIGIN_URL) {
-    if (IS_CI) {
-      // In CI the secret must be present — a silent skip would leave the bypass
-      // probe permanently inactive without any operator noticing.
-      failures.push(
-        'Railway bypass probe: RAILWAY_ORIGIN_URL not set in CI environment ' +
-        '— add it at GitHub → Settings → Secrets and variables → Actions → RAILWAY_ORIGIN_URL',
-      );
-      console.log('  ✗  Railway bypass probe: RAILWAY_ORIGIN_URL not set in CI — add GitHub secret RAILWAY_ORIGIN_URL');
-      console.log('      The secret expands to an empty string when unset; set it to the bare Railway backend URL.');
-    } else {
-      warnings.push('Railway bypass probe skipped: RAILWAY_ORIGIN_URL not set — set the CI secret to verify origin enforcement');
-      console.log('  ⚠  Railway bypass probe: SKIPPED — RAILWAY_ORIGIN_URL not set (local run; set CI secret to enforce in CI)');
-    }
-  } else {
-    try {
-      const probeResp = await fetch(`${RAILWAY_ORIGIN_URL}/api/health`, {
-        signal: AbortSignal.timeout(8000),
-      });
-      // ANY HTTP response — even 403 from MtlsClientCertMiddleware — means
-      // Railway accepted the connection at the TLS layer without requiring the
-      // client cert.  TLS-level enforcement is not active.
-      const hint = probeResp.status === 403
-        ? ' (MtlsClientCertMiddleware active, but TLS-level enforcement not configured — configure Railway mTLS for the gold standard)'
-        : '';
-      failures.push(
-        `Railway bypass probe received HTTP ${probeResp.status} — origin reachable at TLS layer without mTLS cert${hint}`,
-      );
-      console.log(`  ✗  Railway bypass probe: HTTP ${probeResp.status} received — origin accessible without client cert at TLS level`);
-      console.log('      → Configure Railway mTLS: Railway dashboard → Service → Settings → mTLS → require Cloudflare client cert');
-      console.log('      → Until TLS-level mTLS is enforced, BACKEND_ORIGIN_SECRET + HMAC are the only guards (Task #120)');
-    } catch (e) {
-      const msg = e.message || String(e);
-      if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) {
-        // Connection timed out — origin not reachable; consistent with mTLS or firewall
-        warnings.push('Railway bypass probe: connection timeout — cannot confirm TLS rejection vs unreachable host');
-        console.log('  ⚠  Railway bypass probe: connection timeout — origin not reachable (mTLS or firewall; cannot distinguish)');
-      } else {
-        // TLS handshake failure, connection refused, SSL error — TLS-level mTLS enforced
-        console.log(`  ✓  Railway bypass probe: rejected at network/TLS level — "${msg}" — mTLS enforcement confirmed`);
-      }
-    }
-  }
+  // The Railway-origin mTLS sub-checks (6a-i…6a-iv) were removed in
+  // Task #335 when Railway was decommissioned. The corresponding
+  // Cloudflare client certificate (`syrabit-railway-mtls`), worker
+  // binding (`MTLS_CERT`), worker secret (`MTLS_REQUIRED`), and the
+  // RAILWAY_ORIGIN_URL bypass probe are no longer relevant; delete the
+  // Cloudflare cert and the GitHub Actions secret as part of the same
+  // cleanup. See docs/infra/decommission.md.
+  console.log('\nPhase 6 — Image Resizing, Zaraz GA4, Observatory:');
+  /* mTLS-related Phase 6 checks (cert lookup, worker MTLS_CERT binding,
+     MTLS_REQUIRED secret, RAILWAY_ORIGIN_URL bypass probe) intentionally
+     removed in Task #335 along with the Railway origin. */
 
   // 6b: Image Resizing zone setting
   // Image Resizing is a paid Cloudflare add-on (included with Pages Pro or as

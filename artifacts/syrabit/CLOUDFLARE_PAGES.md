@@ -1,8 +1,19 @@
 # Cloudflare Pages — Syrabit Frontend Deploy
 
+> **Backend hosting note (post-Task #335).** The backend is hosted on
+> **Digital Ocean App Platform** at `api.syrabit.ai`; see
+> [`docs/infra/api-on-do.md`](docs/infra/api-on-do.md) for the
+> canonical runbook. The Railway origin and the GCP Cloud Run dispatch
+> tier referenced in some sections below were **decommissioned** in
+> Task #335 — see [`docs/infra/decommission.md`](docs/infra/decommission.md).
+> Treat any "Railway" / "Cloud Run" mention in this file as historical
+> context unless it sits inside an explicit `Historical` /
+> `CANCELLED` block. The Cloudflare Pages settings, build pipeline,
+> and `dist/` output paths are unchanged.
+
 These are the canonical Cloudflare Pages settings for the Syrabit frontend
-(`syrabit.ai`). The backend lives separately on Railway as `api.syrabit.ai`
-and is **not** deployed via Pages.
+(`syrabit.ai`). The backend lives separately at `api.syrabit.ai` (Digital
+Ocean App Platform) and is **not** deployed via Pages.
 
 ## Dashboard settings
 

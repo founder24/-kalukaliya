@@ -9,7 +9,7 @@ Task #331, which superseded Task #336.
 ```
                   Cloudflare edge proxy (Worker, free tier)
                    │           ▲
-                   │  feature flag: ORIGIN=do | railway | cloudrun
+                   │  ORIGIN_TARGET=do (only target after Task #335)
                    ▼
         ┌──────────────────────┐         ┌───────────────────┐
         │  syrabit-backend     │ gRPC   │   rust-core       │
@@ -37,12 +37,13 @@ platform LB so gRPC works without a Droplet.
    export DO_APP_ID_SYRABIT_BACKEND=<uuid>
    export DO_APP_ID_RUST_CORE=<uuid>
    ```
-4. A populated env file pulled from Railway:
-   ```sh
-   railway variables list --service syrabit-backend --format env > do-backend-vars.env
-   railway variables list --service rust-core        --format env > do-rust-vars.env
-   ```
-   Both files are gitignored.
+4. A populated env file. The original cutover (Task #331) pulled
+   these from Railway via `railway variables list`. Railway has been
+   decommissioned (Task #335); use the saved snapshots in
+   `docs/infra/decommission.md` or DO's own
+   `doctl apps spec get "$DO_APP_ID_SYRABIT_BACKEND"` as the source of
+   truth instead. Output files (`do-backend-vars.env`,
+   `do-rust-vars.env`) are gitignored.
 
 ## First-time secret import
 
@@ -167,34 +168,16 @@ SYRABIT_API_BASE=https://syrabit-backend-app.ondigitalocean.app \
   node scripts/nightly-smoke.js
 ```
 
-## Edge feature flag (cutover prep)
+## Edge proxy origin (post-cutover)
 
-The Cloudflare edge proxy resolves the upstream by reading the
-`ORIGIN_TARGET` Worker var (`do` | `cloudrun` | `railway`). It is a
-plain `[vars]` entry in `workers/edge-proxy/wrangler.toml` (not a
-secret — it's a routing knob, not a credential), so the flip is a
-one-line edit + a quick `wrangler deploy`:
-
-```sh
-cd workers/edge-proxy
-# 1. Edit wrangler.toml: set ORIGIN_TARGET = "do" under [env.production.vars]
-# 2. Deploy the worker config (no source change):
-wrangler deploy --env production
-```
-
-If you'd rather flip without touching the file, override the var
-inline for one deploy:
-
-```sh
-wrangler deploy --env production --var ORIGIN_TARGET:do
-```
-
-The flip is config-only — no source change required. The production
-cutover (Task #334) has already been performed — see
-[`cutover.md`](cutover.md) for the timeline, validation queries,
-gRPC verification, and rollback procedure. The defaults committed in
-`wrangler.toml` and `src/index.ts` now point at DO for both the
-production and staging environments.
+After Task #334 cut traffic to DO and Task #335 decommissioned the
+legacy Railway and Cloud Run origins, the Cloudflare edge proxy at
+`workers/edge-proxy/` only resolves `ORIGIN_TARGET=do`. The variable
+is retained as a future extension point but no other value maps to a
+configured origin today; an unsupported value logs a warning and
+still falls through to the DO upstream. See [`cutover.md`](cutover.md)
+for the original cutover timeline and [`decommission.md`](decommission.md)
+for the legacy-origin removal log.
 
 ## Common failure modes
 

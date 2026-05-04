@@ -1,5 +1,12 @@
 # Production Cutover — Cloudflare → Digital Ocean Origin
 
+> **Status (post-Task #335).** Cutover is complete and the legacy
+> Railway and GCP Cloud Run origins were decommissioned on
+> 2026-05-04. The rollback procedures below are kept as a historical
+> record only; the rollback paths described here will return 503
+> until a new origin is provisioned. See
+> [`decommission.md`](decommission.md) for the removal log.
+
 Runbook for **Task #334**: flipping production user-visible request
 traffic from the legacy **Railway** + **GCP Cloud Run** origins to the
 new **Digital Ocean App Platform** origins (`syrabit-backend` and
@@ -8,9 +15,9 @@ new **Digital Ocean App Platform** origins (`syrabit-backend` and
 This is the request-path slice of the four-cloud hosting plan in
 [`ADR-0001`](ADR-0001-four-way-hosting-rebalance.md). Workers/queues
 already moved to AWS and cron jobs already moved to Azure in earlier
-tasks. **Decommissioning Railway and GCP is the next task (#335)** —
-both legacy origins must remain reachable through the soak window so
-rollback stays a one-flag operation.
+tasks. **Decommissioning Railway and GCP hosting was completed in
+Task #335** — see the linked runbook for the per-resource removal
+timeline.
 
 > **Guardrail.** §9 of the hosting plan: there is exactly **one
 > canonical backend origin (DO)**. Do not introduce a second backend
