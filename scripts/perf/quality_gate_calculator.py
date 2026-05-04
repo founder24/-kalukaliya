@@ -5,13 +5,17 @@ Quality-gate calculator — Task #361 §3.3.
 Computes the statistical-not-worse check for the fast-mode 1b vs 3b
 A/B promotion gate. Two metrics are tested:
 
-  1. user_rating_delta — Welch's t-test on per-turn 1-5 ratings.
-     Promotion-allowed iff the lower bound of the 95% CI on
-     (mean_1b - mean_3b) is >= 0.
+  1. user_rating_delta — normal-approximation 95% CI on the difference
+     of means using Welch's standard-error formula
+     (sqrt(var_a/n_a + var_b/n_b)) and z=1.96. With the enforced
+     n>=10000 per arm, the t-distribution critical value collapses
+     onto z=1.96 to four decimals, so the normal approximation is
+     used for simplicity. Promotion-allowed iff the lower bound of
+     the 95% CI on (mean_1b - mean_3b) is >= 0.
 
-  2. engagement_delta — two-proportion z-test on follow-up-within-60s
-     rates. Promotion-allowed iff the lower bound of the 95% CI on
-     (p_1b - p_3b) is >= 0.
+  2. engagement_delta — two-proportion normal-approximation z-interval
+     on the follow-up-within-60s rates. Promotion-allowed iff the
+     lower bound of the 95% CI on (p_1b - p_3b) is >= 0.
 
 A third gate (cost_delta < 0) is a simple comparison and is checked
 inline.
@@ -52,7 +56,10 @@ from pathlib import Path
 def _welch_ci(mean_a: float, var_a: float, n_a: int,
               mean_b: float, var_b: float, n_b: int,
               z: float = 1.96) -> tuple[float, float]:
-    """Two-sided 95% CI on (mean_a - mean_b) via Welch's approximation."""
+    """Two-sided 95% CI on (mean_a - mean_b) using Welch's SE
+    (sqrt(var_a/n_a + var_b/n_b)) and a normal-approximation critical
+    value (z=1.96 for 95%). With n>=10000 per arm the t critical
+    value collapses onto z to four decimals."""
     se = math.sqrt(var_a / n_a + var_b / n_b)
     diff = mean_a - mean_b
     return (diff - z * se, diff + z * se)
@@ -60,7 +67,8 @@ def _welch_ci(mean_a: float, var_a: float, n_a: int,
 
 def _proportion_ci(succ_a: int, n_a: int, succ_b: int, n_b: int,
                    z: float = 1.96) -> tuple[float, float]:
-    """Two-sided 95% CI on (p_a - p_b) via two-proportion z-interval."""
+    """Two-sided 95% CI on (p_a - p_b) via two-proportion normal-
+    approximation z-interval."""
     p_a = succ_a / n_a
     p_b = succ_b / n_b
     se = math.sqrt(p_a * (1 - p_a) / n_a + p_b * (1 - p_b) / n_b)
