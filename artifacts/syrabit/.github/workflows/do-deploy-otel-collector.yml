@@ -1,0 +1,121 @@
+# .github/workflows/do-deploy-otel-collector.yml
+#
+# Task #333 — observability rewire.
+#
+# DO App Platform deploy for the in-cluster OTel Collector that
+# fan-outs Rust core spans to Application Insights + Axiom. Same
+# build/deploy pattern as do-deploy-rust-core.yml so the operator
+# muscle memory is identical.
+
+name: do-deploy-otel-collector
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "services/otel-collector/**"
+      - "infra/do/app-otel-collector.yaml"
+      - ".github/workflows/do-deploy-otel-collector.yml"
+  pull_request:
+    paths:
+      - "services/otel-collector/**"
+      - "infra/do/app-otel-collector.yaml"
+      - ".github/workflows/do-deploy-otel-collector.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: non-prod
+        type: choice
+        options: [non-prod, prod]
+
+concurrency:
+  group: do-otel-collector-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag (commit SHA)
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_API_TOKEN }}
+
+      - name: Log in to DOCR
+        run: doctl registry login --expiry-seconds 1800
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push otel-collector image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/otel-collector
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            registry.digitalocean.com/${{ vars.DO_REGISTRY_NAME || 'syrabit' }}/otel-collector:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to App Platform (${{ github.event.inputs.environment || 'non-prod' }})
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'non-prod' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_API_TOKEN }}
+
+      - name: Pin image tag in app spec
+        run: |
+          set -euo pipefail
+          tag="${{ needs.build.outputs.image_tag }}"
+          sed -i "s/tag: bootstrap/tag: ${tag}/g" infra/do/app-otel-collector.yaml
+          grep -n "tag: ${tag}" infra/do/app-otel-collector.yaml
+
+      - name: doctl apps update --wait
+        run: |
+          set -euo pipefail
+          app_id="${{ vars.DO_APP_ID_OTEL_COLLECTOR }}"
+          if [ -z "$app_id" ]; then
+            echo "::error::DO_APP_ID_OTEL_COLLECTOR repo variable is not set."
+            exit 1
+          fi
+          doctl apps update "$app_id" \
+            --spec infra/do/app-otel-collector.yaml \
+            --wait
+
+      - name: Verify collector health
+        run: |
+          set -euo pipefail
+          app_id="${{ vars.DO_APP_ID_OTEL_COLLECTOR }}"
+          # The collector is internal-only; its /health endpoint is
+          # exposed on port 13133 inside the VPC. We rely on doctl's
+          # post-update phase report rather than curling from outside.
+          doctl apps get "$app_id" --format ActiveDeployment.Phase --no-header | tee /tmp/phase.txt
+          phase="$(cat /tmp/phase.txt)"
+          if [ "$phase" != "ACTIVE" ]; then
+            echo "::error::collector deployment phase=${phase} (expected ACTIVE)"
+            exit 1
+          fi
+          echo "ok"

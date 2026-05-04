@@ -245,6 +245,20 @@ services:
         value: "PLACEHOLDER_SET_VIA_doctl"
         type: SECRET
         scope: RUN_TIME
+      # Task #333 — observability rewire. The DO backend ships spans
+      # to Application Insights (primary unified APM/trace sink) and
+      # Axiom (parallel log/trace sink) in parallel via tracing.py.
+      # `AXIOM_API_TOKEN` is the new canonical name read by
+      # `tracing.py` + `healthz.py`; the legacy `AXIOM_TOKEN` alias
+      # is kept on the same secret for any out-of-tree consumers.
+      - key: APPLICATIONINSIGHTS_CONNECTION_STRING
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+      - key: AXIOM_API_TOKEN
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
       - key: AXIOM_TOKEN
         value: "PLACEHOLDER_SET_VIA_doctl"
         type: SECRET

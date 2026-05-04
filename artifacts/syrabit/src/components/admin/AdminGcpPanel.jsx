@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import {
-  Cloud, Activity, ListTree, ShieldCheck, Search, RefreshCw,
-  CheckCircle2, AlertCircle, XCircle, Play, Pause, RotateCcw, Send,
+  Cloud, ShieldCheck, Search, RefreshCw,
+  CheckCircle2, AlertCircle, Play, Send,
   ExternalLink,
 } from 'lucide-react';
 import { API_BASE, adminHeaders } from '@/utils/api';
@@ -13,10 +13,14 @@ const adminHdr = (token) => ({
   withCredentials: true,
 });
 
+// Task #333 — observability rewire. The Scheduler + Tasks tabs were
+// retired alongside the GCP cron / async-worker tier; their live data
+// is now sourced from Azure ACA Jobs (`AdminCronJobsCard`) and AWS SQS
+// (`AdminAwsInfraCard`) under the Infrastructure tab. The remaining
+// tabs cover the inference-only Vertex / Discovery / Web Security
+// Scanner dependencies that surface in `/api/readyz` and stay on GCP.
 const TABS = [
   { id: 'overview',  label: 'Overview',         icon: Cloud      },
-  { id: 'scheduler', label: 'Cloud Scheduler',  icon: Activity   },
-  { id: 'tasks',     label: 'Cloud Tasks',      icon: ListTree   },
   { id: 'wss',       label: 'Security Scanner', icon: ShieldCheck},
   { id: 'discovery', label: 'Discovery Engine', icon: Search     },
 ];
@@ -137,121 +141,10 @@ function OverviewTab({ adminToken }) {
   );
 }
 
-// ── Cloud Scheduler tab ─────────────────────────────────────────────────
-function SchedulerTab({ adminToken }) {
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true); setErr(null);
-    try {
-      const res = await axios.get(`${API_BASE}/admin/gcp/scheduler/jobs`, adminHdr(adminToken));
-      if (res.data.status === 'ok') setJobs(res.data.jobs || []);
-      else setErr(res.data.error || res.data.status);
-    } catch (e) {
-      setErr(e.response?.data?.detail || e.message);
-    } finally { setLoading(false); }
-  }, [adminToken]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const action = async (kind, name) => {
-    try {
-      const res = await axios.post(
-        `${API_BASE}/admin/gcp/scheduler/jobs/${kind}`,
-        { name },
-        adminHdr(adminToken),
-      );
-      if (res.data.status === 'ok') toast.success(`Job ${kind}: ${name.split('/').pop()}`);
-      else toast.error(`Failed: ${res.data.error}`);
-      load();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || e.message);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <div className="text-sm text-gray-600">{jobs.length} jobs</div>
-        <Btn onClick={load} icon={RefreshCw}>Refresh</Btn>
-      </div>
-      {err && <Card className="border-amber-200 bg-amber-50 text-amber-800 text-sm">{err}</Card>}
-      {jobs.length === 0 && !loading && !err && (
-        <Card className="text-sm text-gray-500">
-          No Cloud Scheduler jobs yet. Create one with{' '}
-          <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">gcloud scheduler jobs create http</code>{' '}
-          pointing at <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">/api/internal/jobs/grounded-recall</code>.
-        </Card>
-      )}
-      {jobs.map((j) => (
-        <Card key={j.name}>
-          <div className="flex justify-between items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium font-mono text-sm">{j.name?.split('/').pop()}</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {j.schedule} · {j.time_zone} · {j.target}
-              </div>
-              {j.description && <div className="text-sm text-gray-700 mt-2">{j.description}</div>}
-              <div className="text-xs text-gray-400 mt-1">Last attempt: {j.last_attempt_time || 'never'}</div>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              <Btn variant="primary" icon={Play} onClick={() => action('run', j.name)}>Run</Btn>
-              {j.state === 'ENABLED' ? (
-                <Btn icon={Pause} onClick={() => action('pause', j.name)}>Pause</Btn>
-              ) : (
-                <Btn icon={RotateCcw} onClick={() => action('resume', j.name)}>Resume</Btn>
-              )}
-            </div>
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-// ── Cloud Tasks tab ─────────────────────────────────────────────────────
-function TasksTab({ adminToken }) {
-  const [queues, setQueues] = useState([]);
-  const [err, setErr] = useState(null);
-  const load = useCallback(async () => {
-    setErr(null);
-    try {
-      const res = await axios.get(`${API_BASE}/admin/gcp/tasks/queues`, adminHdr(adminToken));
-      if (res.data.status === 'ok') setQueues(res.data.queues || []);
-      else setErr(res.data.error || res.data.status);
-    } catch (e) { setErr(e.response?.data?.detail || e.message); }
-  }, [adminToken]);
-  useEffect(() => { load(); }, [load]);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <div className="text-sm text-gray-600">{queues.length} queues</div>
-        <Btn onClick={load} icon={RefreshCw}>Refresh</Btn>
-      </div>
-      {err && <Card className="border-amber-200 bg-amber-50 text-amber-800 text-sm">{err}</Card>}
-      {queues.length === 0 && !err && (
-        <Card className="text-sm text-gray-500">
-          No Cloud Tasks queues. Create with{' '}
-          <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">gcloud tasks queues create syrabit-jobs</code>.
-        </Card>
-      )}
-      {queues.map((q) => (
-        <Card key={q.name}>
-          <div className="font-mono text-sm">{q.name?.split('/').pop()}</div>
-          <div className="text-xs text-gray-500 mt-1">State: {q.state}</div>
-          {q.rate_limits && (
-            <div className="text-xs text-gray-500 mt-1">
-              {q.rate_limits.maxDispatchesPerSecond}/s · burst {q.rate_limits.maxBurstSize}
-            </div>
-          )}
-        </Card>
-      ))}
-    </div>
-  );
-}
+// Task #333 — SchedulerTab + TasksTab removed; cron health is now
+// rendered by `AdminCronJobsCard` (Azure ACA Jobs source) and async
+// queue health by `AdminAwsInfraCard` (AWS SQS source) inside the
+// AdminHealth Infrastructure tab.
 
 // ── Web Security Scanner tab ───────────────────────────────────────────
 function WssTab({ adminToken }) {
@@ -389,8 +282,6 @@ export default function AdminGcpPanel({ adminToken }) {
   const [tab, setTab] = useState('overview');
   const TabComponent = {
     overview:  OverviewTab,
-    scheduler: SchedulerTab,
-    tasks:     TasksTab,
     wss:       WssTab,
     discovery: DiscoveryTab,
   }[tab];

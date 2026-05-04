@@ -21,20 +21,28 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
-# Cargo.lock is checked in — required for reproducible, locked builds.
+# Cargo.lock IS checked in for reproducible, locked builds (the
+# image build runs `cargo build --release --locked` below). When
+# bumping a direct dep in Cargo.toml, regenerate the lockfile via
+# `cargo update -p <crate>` and commit the diff.
 COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
-COPY proto ./proto/
+# `proto/` is created on demand by the build script when user-defined
+# .proto files are added; copy it conditionally so the image still
+# builds in the empty-proto state.
+RUN mkdir -p proto
 
-# Cache dependencies via a dummy main.
+# Cache dependencies via a dummy main. `--locked` enforces the
+# committed Cargo.lock; the build fails fast if the lockfile and
+# the manifest are out of sync.
 RUN mkdir -p src/generated src/handlers src/services src/models src/db src/grpc \
     && echo "fn main() {}" > src/main.rs \
-    && cargo build --release \
+    && cargo build --release --locked \
     && rm -rf src/*.rs
 
 COPY src ./src/
 
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release --locked
 
 FROM debian:bookworm-slim
 

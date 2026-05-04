@@ -153,19 +153,30 @@ resource "aws_lambda_function" "sqs_consumer" {
     command = [each.value.handler]
   }
 
+  # Task #333 — observability rewire. AWS Lambda layers are NOT
+  # supported on container-image Lambdas (`package_type = "Image"`),
+  # so the ADOT collector is BAKED INTO the worker image instead —
+  # see `services/backend/sqs_consumers/Dockerfile`. The runtime
+  # picks up the OTLP env block below and ships spans to App
+  # Insights + Axiom in parallel via the in-image collector.
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       HANDLER_NAME      = each.value.handler
       LZ_PROJECT        = local.lz_project
       LZ_ENV            = local.lz_env
       OTEL_SERVICE_NAME = "${each.key}-consumer"
-      # App Insights connection string lives in SSM; consumer reads
-      # it on cold-start so a key-rotation does not require redeploy.
+      # App Insights + Axiom credentials live in SSM; the ADOT
+      # collector reads them on cold-start so key-rotation does not
+      # require a redeploy.
       APP_INSIGHTS_SSM_PARAM = "/${local.lz_project}/${local.lz_env}/app-insights-conn-string"
-    }
+      AXIOM_TOKEN_SSM_PARAM  = "/${local.lz_project}/${local.lz_env}/axiom-api-token"
+      AXIOM_DATASET          = "syrabit-aws-lambda-prod"
+    })
   }
 
   tracing_config {
+    # X-Ray retained as the AWS-Console fast-path; App Insights is
+    # the cross-cloud source of truth (Task #333).
     mode = "Active"
   }
 

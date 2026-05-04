@@ -94,6 +94,18 @@ resource "aws_iam_role_policy" "bedrock_proxy_invoke" {
 
 # ─── Lambda ───────────────────────────────────────────────────────────────────
 
+# Task #333 — explicit log group in us-east-1 so the regional OTel
+# exporter-error metric filter in `lambda-otel.tf` has a deterministic
+# target on first `terraform apply`. Must use the `aws.us_east_1`
+# provider alias so the resource lands in the same region as the
+# function (Bedrock model availability dictates us-east-1 here).
+resource "aws_cloudwatch_log_group" "bedrock_proxy" {
+  provider          = aws.us_east_1
+  name              = "/aws/lambda/${local.lz_project}-bedrock-proxy"
+  retention_in_days = 14
+  tags              = merge(local.lz_common_tags, { Name = "/aws/lambda/${local.lz_project}-bedrock-proxy" })
+}
+
 resource "aws_lambda_function" "bedrock_proxy" {
   provider      = aws.us_east_1
   function_name = "${local.project_name}-bedrock-proxy"
@@ -106,6 +118,10 @@ resource "aws_lambda_function" "bedrock_proxy" {
   timeout     = 60
   memory_size = 512
 
+  # Task #333 — image-based Lambda (`package_type = "Image"`) so the
+  # ADOT collector is baked into the bedrock-proxy image rather than
+  # attached as a layer (layers are not supported on container
+  # Lambdas). Runtime picks up the OTLP env block below.
   environment {
     variables = {
       NODE_ENV             = "production"
@@ -114,10 +130,27 @@ resource "aws_lambda_function" "bedrock_proxy" {
       GUARDRAIL_VERSION    = "DRAFT"
       CACHE_TTL_SECONDS    = "300"
       LOG_LEVEL            = "info"
+      # OTLP exporter wiring (mirror of `local.otel_env` in
+      # `lambda-otel.tf`; redeclared inline because this Lambda lives
+      # in a different region/provider alias and `local.otel_env`
+      # carries `cloud.region=ap-south-1`).
+      OTEL_RESOURCE_ATTRIBUTES        = "cloud.provider=aws,cloud.platform=aws_lambda,cloud.region=us-east-1,deployment.environment=production,service.namespace=syrabit"
+      OTEL_TRACES_EXPORTER            = "otlp"
+      OTEL_METRICS_EXPORTER           = "none"
+      OTEL_LOGS_EXPORTER              = "otlp"
+      OTEL_EXPORTER_OTLP_PROTOCOL     = "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT     = "http://localhost:4318"
+      OTEL_SERVICE_NAME               = "${local.project_name}-bedrock-proxy"
+      AWS_LAMBDA_EXEC_WRAPPER         = "/opt/otel-instrument"
+      APP_INSIGHTS_SSM_PARAM          = "/${local.project_name}/${local.env}/app-insights-conn-string"
+      AXIOM_TOKEN_SSM_PARAM           = "/${local.project_name}/${local.env}/axiom-api-token"
+      AXIOM_DATASET                   = "syrabit-aws-lambda-prod"
     }
   }
 
   tracing_config {
+    # X-Ray retained as the AWS-Console fast-path; App Insights is
+    # the cross-cloud source of truth (Task #333).
     mode = "Active"
   }
 
@@ -127,6 +160,11 @@ resource "aws_lambda_function" "bedrock_proxy" {
     managed-by    = "terraform"
     credit-source = "aws-activate"
   }
+
+  # Task #333 — explicit dependency on the us-east-1 log group so
+  # the regional OTel metric filter in `lambda-otel.tf` always finds
+  # its target on first apply.
+  depends_on = [aws_cloudwatch_log_group.bedrock_proxy]
 }
 
 resource "aws_lambda_provisioned_concurrency_config" "bedrock_proxy" {

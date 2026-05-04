@@ -105,6 +105,17 @@ services:
         value: "PLACEHOLDER_SET_VIA_doctl"
         type: SECRET
         scope: RUN_TIME
+      # Task #333 — observability rewire. The Rust core uses the
+      # collector pattern: a single OTLP/HTTP exporter ships spans
+      # to the in-cluster Azure Monitor OTel Collector sidecar (see
+      # `infra/do/app-otel-collector.yaml`), which then fans out to
+      # Application Insights + Axiom in parallel. The collector
+      # reads `APPLICATIONINSIGHTS_CONNECTION_STRING` + `AXIOM_*`
+      # from its own component spec; the Rust binary itself only
+      # needs the collector endpoint URL.
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: "http://otel-collector:4318"
+        scope: RUN_TIME
       - key: AXIOM_TOKEN
         value: "PLACEHOLDER_SET_VIA_doctl"
         type: SECRET

@@ -463,7 +463,12 @@ the script — keep the two in sync):
 - `cloudbilling.googleapis.com`, `billingbudgets.googleapis.com` — what
   `gcp_billing.py` calls today.
 - `logging.googleapis.com`, `monitoring.googleapis.com`,
-  `cloudtrace.googleapis.com` — log-storage / observability.
+  ~~`cloudtrace.googleapis.com`~~ — log-storage / observability.
+  Cloud Trace is RETIRED in Task #333; traces now land in Azure
+  Application Insights (unified APM sink) + Axiom. Cloud Logging is
+  in tear-down — Cloudflare Logpush is being repointed at the App
+  Insights data-collection endpoint declared in
+  `infra/azure/observability.tf`. See `docs/infra/observability.md`.
 - `speech.googleapis.com`, `texttospeech.googleapis.com`,
   `translate.googleapis.com`, `vision.googleapis.com` — Vertex-adjacent
   managed APIs.

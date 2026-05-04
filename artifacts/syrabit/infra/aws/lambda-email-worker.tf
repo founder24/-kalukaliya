@@ -79,6 +79,18 @@ resource "aws_iam_role_policy" "email_worker_ses" {
 
 # ─── Lambda function ──────────────────────────────────────────────────────────
 
+# Task #333 — explicit log group so the OTel exporter-error metric
+# filter in `lambda-otel.tf` has a deterministic target on first
+# `terraform apply`. CloudWatch metric filters require the log group
+# to exist before they can be created; relying on Lambda's lazy
+# auto-creation on first invocation creates a chicken-and-egg
+# bootstrap failure for fresh environments.
+resource "aws_cloudwatch_log_group" "email_worker" {
+  name              = "/aws/lambda/${local.lz_project}-email-worker"
+  retention_in_days = 14
+  tags              = merge(local.lz_common_tags, { Name = "/aws/lambda/${local.lz_project}-email-worker" })
+}
+
 resource "aws_lambda_function" "email_worker" {
   function_name = "${local.project_name}-email-worker"
   role          = aws_iam_role.email_worker.arn
@@ -91,17 +103,27 @@ resource "aws_lambda_function" "email_worker" {
   timeout      = 30
   memory_size  = 256
 
+  # Task #333 — image-based Lambda (`package_type = "Image"`) so we
+  # bake the ADOT collector into the email-worker image rather than
+  # attaching it as a layer (layers are not supported on container
+  # Lambdas). Runtime picks up the OTLP env block below.
   environment {
-    variables = {
-      NODE_ENV         = "production"
-      SES_REGION       = local.aws_region
-      SES_FROM_ADDRESS = "no-reply@syrabit.ai"
-      SES_CONFIG_SET   = aws_ses_configuration_set.main.name
-      LOG_LEVEL        = "info"
-    }
+    variables = merge(local.otel_env, {
+      NODE_ENV               = "production"
+      SES_REGION             = local.aws_region
+      SES_FROM_ADDRESS       = "no-reply@syrabit.ai"
+      SES_CONFIG_SET         = aws_ses_configuration_set.main.name
+      LOG_LEVEL              = "info"
+      OTEL_SERVICE_NAME      = "${local.lz_project}-email-worker"
+      APP_INSIGHTS_SSM_PARAM = "/${local.lz_project}/${local.lz_env}/app-insights-conn-string"
+      AXIOM_TOKEN_SSM_PARAM  = "/${local.lz_project}/${local.lz_env}/axiom-api-token"
+      AXIOM_DATASET          = "syrabit-aws-lambda-prod"
+    })
   }
 
   tracing_config {
+    # X-Ray retained as the AWS-Console fast-path; App Insights is
+    # the cross-cloud source of truth (Task #333).
     mode = "Active"
   }
 
@@ -111,6 +133,10 @@ resource "aws_lambda_function" "email_worker" {
     managed-by  = "terraform"
     credit-source = "aws-activate"
   }
+
+  # Task #333 — explicit dependency on the log group so the OTel
+  # metric filter in `lambda-otel.tf` always finds its target.
+  depends_on = [aws_cloudwatch_log_group.email_worker]
 }
 
 resource "aws_lambda_provisioned_concurrency_config" "email_worker" {

@@ -1,26 +1,37 @@
-"""Syrabit.ai — OpenTelemetry distributed tracing (Task #610).
+"""Syrabit.ai — OpenTelemetry distributed tracing.
 
-Production-only, sampled distributed tracing for the chat flow. When
-``TRACING_ENABLED`` is set (and the optional OpenTelemetry packages are
-installed), this module wires up:
+History:
+  * Task #610 — original implementation, GCP Cloud Trace primary
+    sink with OTLP fallback.
+  * Task #333 — observability rewire. GCP Cloud Trace is RETIRED
+    (GCP hosting is decommissioned alongside the four-cloud
+    rebalance — see ``docs/infra/cloud-allocation-plan.md`` and
+    ``docs/infra/observability.md``). Spans now fan out to two
+    parallel sinks via two ``BatchSpanProcessor`` instances:
 
-  * a TracerProvider with ``ParentBased(TraceIdRatioBased(ratio))`` sampler
-    so we trace ~10–20% of requests by default and zero overhead on the
-    rest,
-  * a W3C ``tracecontext`` + ``baggage`` propagator so trace IDs flow
-    edge-worker → backend → Vertex,
-  * the FastAPI / httpx auto-instrumentations,
-  * an exporter — Google Cloud Trace by default, or OTLP over gRPC/HTTP
-    when ``OTEL_EXPORTER=otlp`` is set, falling back to a no-op console
-    exporter when neither is available.
+      * **Azure Application Insights** — unified APM/trace sink
+        across DO + AWS + Azure. Wired via ``AzureMonitorTraceExporter``
+        when ``APPLICATIONINSIGHTS_CONNECTION_STRING`` is set.
+      * **Axiom** — parallel log/trace sink with long-term retention.
+        Wired via the standard ``OTLPSpanExporter`` (HTTP/protobuf)
+        pointed at Axiom's OTLP ingest URL when ``AXIOM_DATASET`` +
+        ``AXIOM_API_TOKEN`` are both set.
 
-The whole module is failure-tolerant: a missing dependency, mis-configured
-exporter, or unset GCP project never raises — ``init_tracing`` just
-returns ``False`` and the rest of the app keeps running unchanged.
+    Either sink may be missing without breaking the other. With
+    neither configured, the SDK falls back to a console exporter
+    when ``OTEL_EXPORTER=console`` is set, or stays disabled.
 
-Custom span helpers (``chat_span``, ``record_chat_attrs``,
-``record_first_token``) are no-ops until init succeeds, so call sites in
-``routes/ai_chat.py`` stay clean and pay zero cost when tracing is off.
+The public API (``init_tracing``, ``chat_span``, ``record_chat_attrs``,
+``record_first_token``, ``emit_phase_span``, ``get_current_trace_id``,
+``is_tracing_enabled``) is unchanged so all call sites in
+``routes/ai_chat.py`` keep working.
+
+Sampling, propagators (W3C tracecontext + baggage), FastAPI auto-
+instrumentation, and httpx auto-instrumentation are all preserved.
+
+Module is failure-tolerant: a missing dependency, mis-configured
+exporter, or ingest 5xx never raises — ``init_tracing`` returns
+``False`` and the rest of the app keeps running.
 """
 from __future__ import annotations
 
@@ -67,55 +78,49 @@ def is_tracing_enabled() -> bool:
     return _ENABLED
 
 
-def _load_sa_credentials_from_env_json():
-    """Parse a Google service-account JSON from `GOOGLE_APPLICATION_CREDENTIALS_JSON`.
+# ─── Exporter factories ─────────────────────────────────────────────────────
+# Each returns either a configured exporter instance or ``None`` when its
+# env contract is unmet. The caller wraps each in its own
+# ``BatchSpanProcessor`` so a single sink outage does not block the other.
 
-    Returns a `google.oauth2.service_account.Credentials` instance, or None
-    if the env var is unset, the JSON is unparseable, or google-auth is not
-    installed. Tolerant of common copy-paste mistakes (leading/trailing
-    whitespace, missing outer braces, trailing comma).
+
+def _build_app_insights_exporter():
+    """Azure Application Insights exporter — primary unified APM sink."""
+    conn = (os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING") or "").strip()
+    if not conn:
+        return None
+    try:
+        from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+        return AzureMonitorTraceExporter(connection_string=conn)
+    except Exception as exc:  # pragma: no cover — exporter is optional
+        logger.warning("[tracing] App Insights exporter unavailable: %s", exc)
+        return None
+
+
+def _build_axiom_exporter():
+    """Axiom exporter — parallel log/trace sink with long-term retention.
+
+    Axiom speaks OTLP/HTTP at ``https://api.axiom.co/v1/traces`` with
+    a bearer token + ``X-Axiom-Dataset`` header — the standard OTLP
+    HTTP exporter handles both.
     """
-    raw = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "") or "").strip()
-    if not raw:
-        return None
-    import json as _json
-    info = None
-    try:
-        info = _json.loads(raw)
-    except _json.JSONDecodeError:
-        # Tolerate: user pasted the inside of the JSON file without the
-        # outer `{` and `}` (a recurring footgun on most secret-manager UIs).
-        s = raw
-        if not s.startswith("{"):
-            s = "{" + s
-        if not s.rstrip().endswith("}"):
-            s = s.rstrip().rstrip(",") + "}"
-        try:
-            info = _json.loads(s)
-        except Exception as exc:
-            logger.warning("[tracing] GOOGLE_APPLICATION_CREDENTIALS_JSON unparseable: %s", exc)
-            return None
-    if not isinstance(info, dict):
-        logger.warning(
-            "[tracing] GOOGLE_APPLICATION_CREDENTIALS_JSON parsed as %s, expected JSON object",
-            type(info).__name__,
-        )
-        return None
-    required = ("type", "project_id", "private_key", "client_email")
-    missing = [f for f in required if not info.get(f)]
-    if missing:
-        logger.warning(
-            "[tracing] GOOGLE_APPLICATION_CREDENTIALS_JSON missing required field(s): %s — re-paste the FULL JSON file",
-            ", ".join(missing),
-        )
+    dataset = (os.environ.get("AXIOM_DATASET") or "").strip()
+    token = (os.environ.get("AXIOM_API_TOKEN") or "").strip()
+    if not dataset or not token:
         return None
     try:
-        from google.oauth2 import service_account  # type: ignore
-        return service_account.Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
         )
-    except Exception as exc:
-        logger.warning("[tracing] could not build SA credentials from env JSON: %s", exc)
+        return OTLPSpanExporter(
+            endpoint="https://api.axiom.co/v1/traces",
+            headers={
+                "Authorization":   f"Bearer {token}",
+                "X-Axiom-Dataset": dataset,
+            },
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning("[tracing] Axiom exporter unavailable: %s", exc)
         return None
 
 
@@ -123,14 +128,12 @@ def init_tracing(app: Any) -> bool:
     """Idempotent initialization. Returns True on successful wire-up.
 
     Reads:
-      TRACING_ENABLED        — master gate ("1"/"true" to enable)
-      TRACE_SAMPLE_RATIO     — float 0.0–1.0 (default 0.1)
-      OTEL_SERVICE_NAME      — defaults to "syrabit-backend"
-      OTEL_EXPORTER          — "cloud_trace" (default) | "otlp" | "console"
-      GCP_PROJECT_ID         — required for cloud_trace exporter
-                               (falls back to GOOGLE_CLOUD_PROJECT /
-                                VERTEX_PROJECT_ID)
-      OTEL_EXPORTER_OTLP_ENDPOINT — used by otlp exporter
+      TRACING_ENABLED                          — master gate ("1"/"true")
+      TRACE_SAMPLE_RATIO                       — float 0.0–1.0 (default 0.1)
+      OTEL_SERVICE_NAME                        — defaults "syrabit-backend-do"
+      APPLICATIONINSIGHTS_CONNECTION_STRING    — wires App Insights exporter
+      AXIOM_DATASET + AXIOM_API_TOKEN          — wires Axiom exporter
+      OTEL_EXPORTER=console                    — debug-only console exporter
     """
     global _INITIALIZED, _ENABLED, _TRACER
     if _INITIALIZED:
@@ -164,80 +167,55 @@ def init_tracing(app: Any) -> bool:
         return False
 
     ratio = max(0.0, min(1.0, _env_float("TRACE_SAMPLE_RATIO", 0.1)))
-    service_name = os.environ.get("OTEL_SERVICE_NAME", "syrabit-backend")
+    service_name = os.environ.get("OTEL_SERVICE_NAME", "syrabit-backend-do")
 
+    # Resource attributes pinned to "where is this running?" so App
+    # Insights queries can filter by `cloud.provider` and on-call can
+    # answer "is the slowness on DO, AWS, or Azure?" without relying
+    # on naming conventions.
     resource = Resource.create({
-        "service.name": service_name,
-        "service.version": os.environ.get("OTEL_SERVICE_VERSION", "2.0.0"),
+        "service.name":           service_name,
+        "service.namespace":      "syrabit",
+        "service.version":        os.environ.get("OTEL_SERVICE_VERSION", "2.0.0"),
+        "service.instance.id":    os.environ.get("HOSTNAME", "unknown"),
         "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "production"),
+        "cloud.provider":         "digitalocean",
+        "cloud.platform":         "digitalocean_app_platform",
+        "cloud.region":           os.environ.get("DO_REGION", "blr1"),
     })
-    # Use TraceIdRatioBased *without* ParentBased so the backend
-    # sampling decision is authoritative — a chat client that always
-    # sends a `traceparent` with the sampled flag set ("01") cannot
-    # force the backend to record 100% of requests. The trace_id from
-    # the incoming traceparent is still preserved end-to-end (it's the
-    # input to the deterministic ratio check), so cross-service
-    # correlation works whenever both ends sample the same trace_id.
     sampler = TraceIdRatioBased(ratio)
     provider = TracerProvider(resource=resource, sampler=sampler)
 
-    exporter_kind = (os.environ.get("OTEL_EXPORTER", "cloud_trace") or "").strip().lower()
-    exporter = None
-    if exporter_kind == "cloud_trace":
-        project = (
-            os.environ.get("GCP_PROJECT_ID")
-            or os.environ.get("GOOGLE_CLOUD_PROJECT")
-            or os.environ.get("VERTEX_PROJECT_ID")
-            or ""
-        ).strip()
-        if not project:
-            logger.warning(
-                "[tracing] OTEL_EXPORTER=cloud_trace but no GCP_PROJECT_ID set — falling back to console"
-            )
-            exporter = ConsoleSpanExporter()
-        else:
-            try:
-                from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
-                # On Cloud Run, the runtime service account provides
-                # Application Default Credentials automatically — just grant
-                # it `roles/cloudtrace.agent` and no JSON key is needed.
-                # Outside Cloud Run (Railway, local prod, etc.) we accept a
-                # `GOOGLE_APPLICATION_CREDENTIALS_JSON` env var carrying the
-                # full SA-key JSON content, since most of those platforms
-                # cannot mount a file for `GOOGLE_APPLICATION_CREDENTIALS`.
-                creds = _load_sa_credentials_from_env_json()
-                if creds is not None:
-                    exporter = CloudTraceSpanExporter(project_id=project, credentials=creds)
-                    logger.info(
-                        "[tracing] using Cloud Trace exporter for project=%s (SA from env JSON)",
-                        project,
-                    )
-                else:
-                    exporter = CloudTraceSpanExporter(project_id=project)
-                    logger.info(
-                        "[tracing] using Cloud Trace exporter for project=%s (ADC)",
-                        project,
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "[tracing] Cloud Trace exporter unavailable (%s) — falling back to console",
-                    exc,
-                )
-                exporter = ConsoleSpanExporter()
-    elif exporter_kind == "otlp":
-        try:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-            endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-            exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
-            logger.info("[tracing] using OTLP exporter endpoint=%s", endpoint or "(default)")
-        except Exception as exc:
-            logger.warning("[tracing] OTLP exporter unavailable (%s) — falling back to console", exc)
-            exporter = ConsoleSpanExporter()
-    else:
-        exporter = ConsoleSpanExporter()
-        logger.info("[tracing] using console exporter (debug only)")
+    processors_added = 0
+    sinks: list[str] = []
 
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+    ai_exporter = _build_app_insights_exporter()
+    if ai_exporter is not None:
+        provider.add_span_processor(BatchSpanProcessor(ai_exporter))
+        processors_added += 1
+        sinks.append("app_insights")
+
+    axiom_exporter = _build_axiom_exporter()
+    if axiom_exporter is not None:
+        provider.add_span_processor(BatchSpanProcessor(axiom_exporter))
+        processors_added += 1
+        sinks.append("axiom")
+
+    if processors_added == 0:
+        # Allow ``OTEL_EXPORTER=console`` for debugging in dev where
+        # neither cloud sink is wired. Otherwise warn-and-disable so
+        # spans aren't silently dropped on prod misconfig.
+        if (os.environ.get("OTEL_EXPORTER", "") or "").strip().lower() == "console":
+            provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+            sinks.append("console")
+        else:
+            logger.warning(
+                "[tracing] no exporters configured — set "
+                "APPLICATIONINSIGHTS_CONNECTION_STRING and/or "
+                "AXIOM_DATASET+AXIOM_API_TOKEN. Tracing disabled."
+            )
+            return False
+
     trace.set_tracer_provider(provider)
 
     set_global_textmap(CompositePropagator([
@@ -263,8 +241,8 @@ def init_tracing(app: Any) -> bool:
     _TRACER = trace.get_tracer("syrabit.chat")
     _ENABLED = True
     logger.info(
-        "[tracing] initialized service=%s sampler=ratio(%.2f) exporter=%s",
-        service_name, ratio, exporter_kind,
+        "[tracing] initialized service=%s sampler=ratio(%.2f) sinks=%s",
+        service_name, ratio, ",".join(sinks),
     )
     return True
 

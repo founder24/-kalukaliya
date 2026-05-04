@@ -1,0 +1,83 @@
+# services/otel-collector/config.yaml
+#
+# Task #333 — observability rewire.
+#
+# OpenTelemetry Collector pipeline for the DO in-cluster collector.
+# Receives OTLP/HTTP from the Rust core (and any future DO component
+# that lacks a native exporter) and fans the resulting spans out to:
+#
+#   1. Application Insights — primary unified APM/trace sink, via
+#      the `azuremonitor` exporter from the contrib distribution.
+#   2. Axiom — parallel log/trace sink, via `otlphttp`.
+#
+# Both exporters run in parallel inside a single `service::pipelines`
+# entry; a failure to one does not block the other.
+#
+# Credentials are read from environment variables that are populated
+# by the DO App Platform spec at `infra/do/app-otel-collector.yaml`.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    # Send every 5s OR every 512 spans, whichever comes first. Keeps
+    # the App Insights ingest rate predictable while still capping
+    # tail latency on a sparse traffic pattern.
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 2048
+
+  memory_limiter:
+    # Hard ceiling so a runaway exporter backlog cannot OOM the
+    # collector container (basic-xs = 1 GiB).
+    check_interval: 2s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  resource:
+    # Stamp every span with a `forwarded.by` attribute so we can
+    # tell collector-relayed spans apart from direct-export spans
+    # in App Insights queries.
+    attributes:
+      - key: forwarded.by
+        value: do-otel-collector
+        action: insert
+
+exporters:
+  azuremonitor:
+    # The exporter parses ingestion endpoint + instrumentation key
+    # out of the connection string at startup.
+    connection_string: ${env:APPLICATIONINSIGHTS_CONNECTION_STRING}
+
+  otlphttp/axiom:
+    endpoint: https://api.axiom.co
+    headers:
+      Authorization: Bearer ${env:AXIOM_API_TOKEN}
+      X-Axiom-Dataset: ${env:AXIOM_DATASET}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [azuremonitor, otlphttp/axiom]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [azuremonitor, otlphttp/axiom]

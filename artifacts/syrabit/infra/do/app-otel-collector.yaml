@@ -1,0 +1,120 @@
+# infra/do/app-otel-collector.yaml
+#
+# Task #333 — observability rewire.
+#
+# DO App Platform spec for the in-cluster OpenTelemetry Collector
+# that fan-outs OTLP/HTTP traffic from the DO components (Rust core
+# + cron jobs that don't run a native exporter) to:
+#
+#   1. Application Insights (primary unified APM/trace sink), via
+#      the `azuremonitor` exporter that ships in the contrib
+#      collector image.
+#   2. Axiom (parallel log/trace sink), via the `otlphttp` exporter
+#      pointed at https://api.axiom.co/v1/traces with the dataset +
+#      bearer token attached as headers.
+#
+# This collector is the destination of `OTEL_EXPORTER_OTLP_ENDPOINT`
+# in `app-rust-core.yaml`. It is reachable on the DO VPC private
+# network as `otel-collector-collector.private:4318` (HTTP) — the
+# Rust core's env shorthand `http://otel-collector:4318` is
+# rewritten by DO's internal DNS to the same target.
+#
+# The DO Python backend does NOT route through this collector —
+# `tracing.py` runs both exporters (Azure Monitor + Axiom) directly
+# in-process via the BatchSpanProcessor pair. That keeps backend
+# spans on the fast in-process path; the collector is reserved for
+# components (Rust core, future cron-jobs container) that lack a
+# convenient native exporter.
+#
+# Image is `otel/opentelemetry-collector-contrib` pinned by
+# digest in `.github/workflows/do-deploy-otel-collector.yml`.
+
+name: otel-collector
+region: blr1
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: CPU_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: MEM_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: RESTART_COUNT
+    value: 3
+    operator: GREATER_THAN
+    window: TEN_MINUTES
+
+services:
+  - name: collector
+    instance_size_slug: basic-xs
+    instance_count: 1
+    autoscaling:
+      min_instance_count: 1
+      max_instance_count: 3
+      metrics:
+        cpu:
+          percent: 75
+
+    # OTLP/HTTP receiver port (matches `OTEL_EXPORTER_OTLP_ENDPOINT`
+    # in app-rust-core.yaml). Exposed on the DO private VPC only —
+    # nothing public.
+    http_port: 4318
+    internal_ports:
+      - 4317   # OTLP/gRPC for any future component that prefers gRPC
+      - 13133  # collector's own /health endpoint
+
+    # Image is built from `services/otel-collector/Dockerfile`, which
+    # is a thin wrapper over `otel/opentelemetry-collector-contrib`
+    # that bakes `services/otel-collector/config.yaml` into
+    # `/etc/otel/config.yaml`. Published to DOCR by
+    # `.github/workflows/do-deploy-otel-collector.yml`, which rewrites
+    # `image.tag` to `sha-<short-sha>` on every deploy.
+    image:
+      registry_type: DOCR
+      repository: otel-collector
+      tag: bootstrap
+
+    # The collector binary reads its pipeline from the path baked
+    # into the image. We pass `--config` explicitly here so a misnamed
+    # mount (or a future move to a configmap-style provider) fails
+    # loud at startup rather than silently using a default.
+    run_command: >-
+      /otelcol-contrib --config=/etc/otel/config.yaml
+
+    health_check:
+      http_path: /
+      port: 13133
+      initial_delay_seconds: 10
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+
+    envs:
+      # ── App Insights (primary sink) ─────────────────────────────
+      # The `azuremonitor` exporter in the contrib collector reads
+      # this connection string at startup and parses out the
+      # ingestion endpoint + instrumentation key.
+      - key: APPLICATIONINSIGHTS_CONNECTION_STRING
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+
+      # ── Axiom (parallel sink) ───────────────────────────────────
+      # `AXIOM_API_TOKEN` is the new canonical name; the legacy
+      # `AXIOM_TOKEN` alias is kept on the same secret for any
+      # out-of-tree consumers.
+      - key: AXIOM_API_TOKEN
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+      - key: AXIOM_DATASET
+        value: "do-otel-collector"
+        scope: RUN_TIME
+
+ingress:
+  # The collector is internal-only; no public route declared.
+  rules: []

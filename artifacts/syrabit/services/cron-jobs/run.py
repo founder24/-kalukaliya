@@ -260,37 +260,70 @@ async def _run() -> int:
     log.info("starting cron job name=%s kind=%s", job_name, job_kind)
     started = time.time()
 
-    aborted = asyncio.Event()
-
-    def _on_sigterm(*_a):
-        log.warning("SIGTERM received — marking %s as aborted", job_name)
-        aborted.set()
-
-    loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
-
+    # Task #333 — observability rewire. Wrap the dispatch in a single
+    # OTel root span (``cron.<job_name>``) that fans out to App Insights
+    # + Axiom in parallel. Returns ``None`` when the SDK isn't
+    # installed (smoke rigs); the surrounding logic is span-agnostic.
     try:
-        fn, timeout_s, has_stagger, target, is_native = _resolve(job_name)
-    except SystemExit as e:
-        log.error("dispatch failure: %s", e)
-        await _heartbeat(job_name, status="config_error", started_at=started, error=str(e))
-        return 2
+        from observability import configure_otel as _configure_otel  # type: ignore
+        _otel_span_cm = _configure_otel(job_name)
+    except Exception as _otel_err:
+        log.warning("[otel] configure_otel failed (non-fatal): %s", _otel_err)
+        _otel_span_cm = None
+    if _otel_span_cm is not None:
+        _otel_span_cm.__enter__()
 
-    log.info(
-        "dispatching to %s (timeout=%ss, native_one_shot=%s, has_boot_stagger=%s)",
-        target, timeout_s, is_native, has_stagger,
-    )
+    # Wrap the whole body in try/finally so the OTel root span ends
+    # cleanly on every return path (config_error, error, ok). We
+    # capture exception state explicitly so the OTel context manager
+    # receives real (exc_type, exc, tb) on failure paths — App
+    # Insights then surfaces the exception as the span's error
+    # status + records the stack trace.
+    _exc_info: tuple = (None, None, None)
     try:
-        await _invoke_loop_once(fn, timeout_s, has_stagger, is_native)
-    except Exception as e:  # noqa: BLE001
-        log.exception("cron job %s raised", job_name)
-        status = "aborted" if aborted.is_set() else "error"
-        await _heartbeat(job_name, status=status, started_at=started, error=repr(e))
-        return 1
+        aborted = asyncio.Event()
 
-    await _heartbeat(job_name, status="ok", started_at=started)
-    log.info("cron job %s finished ok in %.1fs", job_name, time.time() - started)
-    return 0
+        def _on_sigterm(*_a):
+            log.warning("SIGTERM received — marking %s as aborted", job_name)
+            aborted.set()
+
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
+
+        try:
+            fn, timeout_s, has_stagger, target, is_native = _resolve(job_name)
+        except SystemExit as e:
+            log.error("dispatch failure: %s", e)
+            await _heartbeat(job_name, status="config_error", started_at=started, error=str(e))
+            return 2
+
+        log.info(
+            "dispatching to %s (timeout=%ss, native_one_shot=%s, has_boot_stagger=%s)",
+            target, timeout_s, is_native, has_stagger,
+        )
+        try:
+            await _invoke_loop_once(fn, timeout_s, has_stagger, is_native)
+        except Exception as e:  # noqa: BLE001
+            log.exception("cron job %s raised", job_name)
+            status = "aborted" if aborted.is_set() else "error"
+            await _heartbeat(job_name, status=status, started_at=started, error=repr(e))
+            _exc_info = (type(e), e, e.__traceback__)
+            return 1
+
+        await _heartbeat(job_name, status="ok", started_at=started)
+        log.info("cron job %s finished ok in %.1fs", job_name, time.time() - started)
+        return 0
+    except BaseException as _be:
+        # Ensure SystemExit / KeyboardInterrupt also propagate exception
+        # info into the OTel span before re-raising.
+        _exc_info = (type(_be), _be, _be.__traceback__)
+        raise
+    finally:
+        if _otel_span_cm is not None:
+            try:
+                _otel_span_cm.__exit__(*_exc_info)
+            except Exception:  # pragma: no cover
+                log.exception("[otel] root span end failed")
 
 
 if __name__ == "__main__":

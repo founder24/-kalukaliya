@@ -301,7 +301,7 @@ Each step is independently reversible:
 | Vertex AI (already active) | On-device RAG, embeddings for study content | existing |
 | BigQuery (Activate) | Cost attribution per feature, slow-query analysis | planned |
 | Cloud Armor (free tier) | DDoS protection + rate limiting at GCP LB | planned |
-| Cloud Trace | Distributed tracing across Cloud Run services | planned |
+| ~~Cloud Trace~~ | RETIRED in Task #333 — distributed tracing now lands in Azure Application Insights (unified APM sink) + Axiom (parallel log sink). See `docs/infra/observability.md`. | retired |
 
 ### Amazon Web Services (AWS Activate — $100 k)
 

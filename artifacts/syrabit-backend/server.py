@@ -1817,6 +1817,18 @@ try:
 except Exception as _trc_err:
     logger.warning(f"[tracing] init_tracing failed (non-fatal): {_trc_err}")
 
+# Task #333 — unified /api/health + /api/readyz endpoints. The legacy
+# /healthz/ai and /healthz/r2 routes below are kept (admin panel cards
+# still call them individually); these new aggregate routes give the
+# infra layer (DO LB readiness gate, admin "External dependencies"
+# tile) a single yes/no with per-dep latency without polling every
+# leaf endpoint. See healthz.py for the probe contract.
+try:
+    from healthz import install_health_routes as _install_health_routes
+    _install_health_routes(app)
+except Exception as _hz_err:
+    logger.warning(f"[healthz] install_health_routes failed (non-fatal): {_hz_err}")
+
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
