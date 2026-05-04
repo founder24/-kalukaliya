@@ -60,7 +60,7 @@ too, with the reason (avoiding silent re-introduction later).
 | **Cloudflare Stream** | Video isn't a current feature; can revisit if Read-Aloud → video lands. |
 | **Cloudflare Images** | R2 + native `<img>` resize via Workers covers our needs. |
 | **Cloudflare Queues** | AWS SQS is the chosen async transport (closer to Lambda consumers). |
-| **Hyperdrive** | Mongo Atlas + Upstash REST already cover DB/cache; no Postgres origin to accelerate. |
+| **Hyperdrive** | Mongo Atlas + Azure Cache for Redis already cover DB/cache; no Postgres origin to accelerate. |
 | **Pages Functions** | Edge logic lives in the Worker, not in Pages Functions, to keep one deploy unit. |
 
 ---
@@ -72,7 +72,7 @@ too, with the reason (avoiding silent re-introduction later).
 | Service | Use in Syrabit | Region / config | Cost shape |
 |---|---|---|---|
 | **App Runner — `syrabit-backend`** | **Canonical FastAPI backend origin.** Built from `artifacts/syrabit-backend/Dockerfile`. 1 vCPU / 2 GB RAM. Auto-scale 1 → 10 at 80% CPU. Health check `/api/health`. Custom domain `api.syrabit.ai` fronted by CF Worker (mTLS only). Env vars from Secrets Manager. | `us-west-2`. | ~$25–50/mo within $1k Activate credit |
-| **App Runner — `syrabit-backend-staging`** | Separate App Runner service pinned to `staging` branch. Same image; staging Mongo + Upstash creds. Min 0 instances (scale-to-zero). | `us-west-2`. | $0–10/mo |
+| **App Runner — `syrabit-backend-staging`** | Separate App Runner service pinned to `staging` branch. Same image; staging Mongo + Azure Cache for Redis creds. Min 0 instances (scale-to-zero). | `us-west-2`. | $0–10/mo |
 | **S3 — `s3://syrabit-prod-assets`** | User-uploaded PDF lecture notes, audio notes, generated content backups, embed cache (hash → vector blob), daily Mongo backup dumps. Versioning ON, lifecycle to Glacier Deep Archive at 90d for backups. Browser uploads via presigned URL — never proxy through App Runner. | `us-west-2`. Bucket policy denies non-mTLS, denies public read except on `/public/*` prefix. | ~$1–3/mo at MVP scale (5GB free year 1) |
 | **S3 — `s3://syrabit-prod-public`** | Public-readable assets that need stable HTTPS URLs (cover images, sample audio). Served via CF Cache Reserve to dodge S3 egress. | `us-west-2`. CF in front. | <$1/mo |
 | **SES** | Transactional email: signup confirm, password reset, study-streak digests, billing receipts, admin notifications. `noreply@syrabit.ai` verified. | `us-west-2`. Out of sandbox. | $0 within 62k/mo Lambda free tier; $0.10 per 1k otherwise |
@@ -232,7 +232,7 @@ When you're holding a *feature* and asking "which cloud serves this?", read this
 | **Transactional email** | CF Email Routing | Resend | AWS SES | log-only |
 | **Async queue** | AWS SQS | — | — | — |
 | **Primary DB** | Mongo Atlas (M0 → M10 with $500 credit) | — | — | — |
-| **Cache + sessions** | Upstash Redis REST | CF KV (edge) | — | — |
+| **Cache + sessions** | Azure Cache for Redis Basic C0 (within Azure credit) | Momento Cache (free 5GB/5M req) | CF KV / Durable Objects (edge, within CF credit) | Mongo `find_and_modify` (graceful degrade for atomic ops) |
 | **Vector index** | Pinecone | Vertex AI Vector Search (Matching Engine, via `retrievers/vertex.py`) | CF Vectorize | Vertex Discovery Engine |
 | **Distributed tracing / APM** | Azure App Insights | Axiom (parallel) | — | — |
 | **Logs (long-term)** | Axiom | App Insights (subset) | CloudWatch (AWS-native only) | — |

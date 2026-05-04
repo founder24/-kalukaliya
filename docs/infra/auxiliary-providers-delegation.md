@@ -10,11 +10,11 @@ which third-party providers does Syrabit lean on, what role does each
 play in the dispatcher, and at 10k DAU is each one fully covered by its
 free tier or credit?*
 
-> Scope: data layer (Mongo / Pinecone / Upstash), observability (Axiom /
-> Sentry), specialized inference (Deepgram / ElevenLabs / Sarvam / Groq /
-> Cerebras / Cartesia / Voyage / Cohere-direct), email (Resend), and
-> CI/CD (GitHub). Each is an API surface the AWS App Runner backend
-> calls; none host compute.
+> Scope: data layer (Mongo / Pinecone / Azure Cache for Redis / Momento),
+> observability (Axiom / Sentry), specialized inference (Deepgram /
+> ElevenLabs / Sarvam / Groq / Cerebras / Cartesia / Voyage / Cohere-direct),
+> email (Resend), and CI/CD (GitHub). Each is an API surface the AWS App
+> Runner backend calls; none host compute.
 
 ---
 
@@ -64,74 +64,73 @@ free tier or credit?*
 | Fallback chain (per dispatcher) | Pinecone → **Vertex Vector Search / Matching Engine** (`retrievers/vertex.py`, code-only/cold by default) → **CF Vectorize** (free credit) → **Vertex Discovery Engine** (`discovery_engine_client.py`) → graceful degrade to Pinecone retry |
 | **Status** | ✅ free tier sufficient |
 
-### 1.3 Upstash Redis (REST) — cache + sessions + rate limiting (primary)
+### 1.3 Azure Cache for Redis Basic C0 — cache + sessions + rate limiting (PRIMARY)
 
 | Item | Value |
 |---|---|
-| Role | Session store, JWT blacklist, dispatcher rate limiting, Cloudflare-AI-Gateway-style prompt cache layer for App Runner. REST API (HTTP) so callable from CF Workers + App Runner + Azure Container Apps. |
-| Tier at 10k DAU | Free 10k commands/day = 300k/mo |
-| Sizing | ~10 commands/user/day × 10k DAU = 100k commands/day = **3M/mo** ⇒ exceeds free tier |
-| Pricing past free | $0.20 per 100k commands → ~$5.40/mo |
-| Credit | None directly; eliminated by promoting one of the fallbacks below |
-| Cash exposure | ~$5–8/mo if kept primary, **$0 if demoted to fallback role** |
-| **Status** | ✅ **cash eliminated** by the fallback chain in §1.4–1.5 |
-
-### 1.4 Azure Cache for Redis Basic C0 — Redis-protocol fallback (within Azure credit)
-
-| Item | Value |
-|---|---|
-| Role | Drop-in Redis-protocol fallback when Upstash is throttled, suspended, or breaches its free tier. Same data semantics (transactional INCR for rate limits, atomic SETEX for sessions, sorted-set leaderboards). Reachable from App Runner via PrivateLink-to-Azure peering or public TLS endpoint with IP allowlist. |
-| SKU at 10k DAU | **Basic C0** — 250 MB cache, single node, no SLA. Sufficient for sessions + rate-limit hot keys. |
+| Role | **Primary** session store, JWT blacklist, dispatcher rate limiting, prompt cache layer for App Runner. Full Redis protocol (transactional INCR for rate limits, atomic SETEX for sessions, sorted-set leaderboards). Reachable from App Runner via PrivateLink-to-Azure peering or public TLS endpoint with IP allowlist. Reachable from Azure Container Apps (rust-core + workers) via private endpoint. |
+| SKU at 10k DAU | **Basic C0** — 250 MB cache, single node, no SLA. Sufficient for sessions + rate-limit hot keys + prompt-cache index. |
 | Monthly cost | ~$16.20/mo (Basic C0 list price) |
-| Credit | **Microsoft for Startups Azure pool ($2,500)** — already 37% drawn per `10k-dau-cost-audit.md` §2.3, ample headroom |
+| Credit | **Microsoft for Startups Azure pool ($2,500)** — already counted in `10k-dau-cost-audit.md` §2.3 (Azure pool was at 37% draw before this; $16/mo brings it to ~45% — still deep headroom) |
 | Cash exposure | $0 (covered by existing Azure credit pool) |
-| Coverage | $2,500 ÷ $16.20/mo ≈ **154 months alone**; in shared pool with other Azure spend ≈ ≥ 24 months runway |
-| Fallback role | Tier-2 in the cache chain (after Upstash). Promotable to primary with a one-line dispatcher flip if Upstash incident persists > 24 hr. |
-| **Status** | ✅ **on Azure credit, zero cash** |
+| Coverage | $2,500 alone ÷ $16.20/mo ≈ **154 months**; in shared pool with other Azure spend ≈ **≥ 24 months runway** |
+| Fallback chain | Azure Cache → **Momento Cache** (Tier-2, free 5GB/5M req) → **CF KV / Durable Objects** (Tier-3 last resort, within CF credit) → **Mongo `find_and_modify`** (Tier-4 graceful degrade for atomic ops only) |
+| **Status** | ✅ **PRIMARY on Azure credit, zero cash** |
 
-### 1.5 Momento Cache — serverless cache fallback (startup credit + generous free tier)
+### 1.4 Momento Cache — serverless cache fallback (startup credit + generous free tier)
 
 | Item | Value |
 |---|---|
-| Role | Serverless cache fallback below Azure Cache for Redis. HTTP/gRPC API (no long-lived connections), making it usable from CF Workers + App Runner + Lambda without connection-pool gymnastics. Good fit for prompt-cache and ephemeral session blobs; weaker semantics than Redis for atomic rate-limit counters (use Azure Redis for those). |
-| Tier at 10k DAU | Free **5 GB storage + 50 req/sec sustained + 5M req/mo** (perpetual) |
-| Sizing | At 10k DAU prompt-cache + ephemeral session blobs: ~3M req/mo, ~1 GB storage ⇒ **comfortably within free tier** |
-| Credit | **Momento Startup Program** ($500–1k typical award) — small but real; pursued only if free tier breaches |
+| Role | Tier-2 fallback below Azure Cache for Redis. Serverless HTTP/gRPC API (no long-lived connections), so it works from CF Workers + App Runner + Lambda without connection-pool gymnastics. Good fit for prompt-cache and ephemeral session blobs; weaker semantics than Redis for atomic rate-limit counters (Azure Redis primary handles those — Momento takes over the read-heavy session/cache reads if Azure Redis is degraded). |
+| Tier at 10k DAU | Free **5 GB storage + 50 req/sec sustained + 5M req/mo** (perpetual free tier) |
+| Sizing | At 10k DAU prompt-cache + ephemeral session blobs: ~3M req/mo, ~1 GB storage ⇒ **comfortably within free tier** even if promoted to primary |
+| Credit | **Momento Startup Program** ($500–1k typical award) — pursued as further safety margin if free tier breaches |
 | Cash exposure | $0 (free tier sufficient at 10k DAU) |
-| Fallback role | Tier-3 in the cache chain. Especially valuable for CF-edge-originated cache reads (HTTP API, no Redis-protocol middleware needed). |
-| **Status** | ✅ **free tier sufficient; Momento credit reserved as further safety margin** |
+| Fallback role | Tier-2 in the cache chain. Especially valuable for CF-edge-originated cache reads (HTTP API, no Redis-protocol middleware needed). |
+| **Status** | ✅ **Tier-2 fallback on free tier; Momento credit reserved as further safety margin** |
 
-### 1.6 CF KV / Durable Objects — last-resort eventually-consistent fallback
+### 1.5 CF KV / Durable Objects — last-resort eventually-consistent fallback
 
 | Item | Value |
 |---|---|
-| Role | Final fallback for read-heavy session lookups when all of Upstash + Azure Redis + Momento are unavailable. Eventually consistent (CF KV) or strongly consistent (Durable Objects). Cannot serve transactional rate-limit semantics — degrade to Mongo `find_and_modify` in that case. |
+| Role | Final fallback for read-heavy session lookups when both Azure Cache for Redis and Momento are unavailable. Eventually consistent (CF KV) or strongly consistent (Durable Objects). Cannot serve transactional rate-limit semantics — degrade to Mongo `find_and_modify` in that case. |
 | Tier at 10k DAU | CF KV: 100k reads/d free; Durable Objects: 1M req free in CF for Startups credit |
 | Sizing | Already partially used as edge cache (per CF section in `10k-dau-cost-audit.md`); promotable to fallback role |
 | Credit | Cloudflare for Startups pool ($5k, 5% drawn — vast headroom) |
 | Cash exposure | $0 |
-| Fallback role | Tier-4 (last resort). Strongly preferred to outright outage of session/cache layer. |
+| Fallback role | Tier-3 (last resort). Strongly preferred to outright outage of session/cache layer. |
 | **Status** | ✅ within CF credit |
 
-### 1.7 Cache provider chain — summary
+### 1.6 Cache provider chain — summary
 
 ```
 Cache + sessions + rate limit dispatcher chain (per artifacts/syrabit-backend/config.py):
 
-  1. Upstash Redis (REST)          ← primary, free→$5–8/mo overage if kept primary
-  2. Azure Cache for Redis Basic C0 ← Tier-2, $16/mo within Azure credit, full Redis semantics
-  3. Momento Cache                  ← Tier-3, free 5GB/5M req, HTTP API
-  4. CF KV / Durable Objects        ← Tier-4 last resort, within CF credit, eventually consistent
-  5. Mongo find_and_modify          ← Tier-5 graceful-degrade for atomic ops only
+  1. Azure Cache for Redis Basic C0  ← PRIMARY, $16/mo within Azure credit, full Redis semantics
+  2. Momento Cache                    ← Tier-2, free 5GB/5M req, HTTP API
+  3. CF KV / Durable Objects          ← Tier-3 last resort, within CF credit, eventually consistent
+  4. Mongo find_and_modify            ← Tier-4 graceful-degrade for atomic ops only
 
-Net cash at 10k DAU after promoting any of 2/3/4 to absorb Upstash overage: $0.
+Net cash at 10k DAU: $0 at every tier.
 ```
 
-> **Operational rule:** Upstash stays primary as long as monthly commands stay
-> within ~5M (under $10/mo overage). If it crosses that, the dispatcher
-> promotes Azure Cache for Redis Basic C0 to primary (within the Azure credit
-> pool) and demotes Upstash to Tier-2. **No cash is required at any tier of
-> this chain.**
+> **Why we replaced Upstash:** Upstash REST was the previous primary at
+> ~$5–8/mo cash overage past its 10k commands/day free tier. Azure Cache
+> for Redis Basic C0 ($16.20/mo) is fully covered by the existing Azure
+> startup credit (62% unused before this swap) and provides full Redis
+> protocol semantics — strictly better than Upstash's REST-only API for
+> atomic rate-limit counters and sorted-set operations. Momento as Tier-2
+> covers the HTTP-API niche with a perpetual free tier plus an active
+> startup credit program. **Net effect: zero cash at every tier of the
+> cache chain.**
+>
+> **Operational migration note:** the dispatcher code still references
+> `UPSTASH_REDIS_REST_*` env vars in `artifacts/syrabit-backend/cache.py`
+> and the Mongo+Upstash references appear in deployment docs
+> (`docs/AWS-DEPLOYMENT.md`, `docs/DEPLOYMENT.md`,
+> `docs/SYRABIT_DEVELOPER_GUIDE.md`). Cutting them over to
+> `AZURE_REDIS_*` + `MOMENTO_*` is a code task tracked separately; this
+> doc reflects the **target** strategic delegation.
 
 ---
 
@@ -316,10 +315,9 @@ Net cash at 10k DAU after promoting any of 2/3/4 to absorb Upstash overage: $0.
 |---|---|---:|---|
 | Mongo Atlas | Primary DB (M0 / M2) | $0–9 | M0 free → M2 from $500 credit |
 | Pinecone | Primary vector | $0 | free tier |
-| Upstash Redis | Cache + sessions (primary) | $0–8 | free tier OR demote to Tier-2 (see below) |
-| Azure Cache for Redis Basic C0 | Cache fallback (Tier-2) | $16 | Azure credit pool (already counted in 10k-dau audit if promoted) |
-| Momento Cache | Cache fallback (Tier-3) | $0 | free tier (5GB / 5M req/mo) |
-| CF KV / Durable Objects | Cache last resort (Tier-4) | $0 | CF credit pool |
+| Azure Cache for Redis Basic C0 | Cache + sessions + rate limit (**PRIMARY**) | $16 | Azure credit pool (Azure draw goes 37% → 45%) |
+| Momento Cache | Cache fallback (Tier-2) | $0 | free tier (5GB / 5M req/mo) + Momento Startup credit reserved |
+| CF KV / Durable Objects | Cache last resort (Tier-3) | $0 | CF credit pool |
 | Axiom | Long-term logs | $0 | free tier |
 | Sentry | Error tracking | $0 | free tier |
 | Deepgram | Primary STT | $0 today / $65 from M4 if no credit | ⚠️ **DEPENDS on $1k credit** |
@@ -333,7 +331,7 @@ Net cash at 10k DAU after promoting any of 2/3/4 to absorb Upstash overage: $0.
 | Gemini direct key | Rollback only | $0 | rollback |
 | Resend | Email fallback | $0 | free tier |
 | GitHub | CI/CD | $0 | free tier |
-| **Auxiliary subtotal (excluding Cohere already in AWS pool)** | | **$0/mo guaranteed cash + 2 credit dependencies** (Upstash overage absorbed by Azure Redis / Momento fallback chain) | |
+| **Auxiliary subtotal (excluding Cohere already in AWS pool)** | | **$0/mo guaranteed cash + 2 credit dependencies** (cache primary now Azure Cache for Redis on credit, Momento as free-tier Tier-2) | |
 
 ### Combined with the four-cloud audit
 
@@ -344,7 +342,7 @@ Net cash at 10k DAU after promoting any of 2/3/4 to absorb Upstash overage: $0.
 | Azure | ~$78 | ✅ within $208 credit headroom (37% draw) |
 | Vertex | ~$150 | ✅ within $167 credit headroom (90% draw, mitigated) |
 | Mongo + Pinecone + Axiom + Sentry + Groq/Cerebras/Cartesia/Voyage + Resend + GitHub | ~$0 | ✅ free tiers / Mongo $500 credit |
-| Upstash Redis (with Azure Redis + Momento fallback chain) | **$0** | ✅ **cash eliminated** by demoting to Tier-2 within Azure credit pool, or promoting Momento free tier |
+| Azure Cache for Redis (primary) + Momento (Tier-2) + CF KV (Tier-3) | **$0** | ✅ **cash eliminated** — Azure Cache on existing Azure credit, Momento on free tier, CF KV on CF credit |
 | Deepgram | $0 today / $65 from M4 | ⚠️ DEPENDS on $1k credit |
 | ElevenLabs | $0 today / $500+ if no credit | ⚠️ DEPENDS on $4k credit |
 | **All-up at 10k DAU (best case)** | **~$323/mo** | ✅ all under credit, **zero cash** |
@@ -359,24 +357,27 @@ Net cash at 10k DAU after promoting any of 2/3/4 to absorb Upstash overage: $0.
 |---|---|---|
 | 🔴 **ElevenLabs $4k credit doesn't land** | TTS overflow at >$24/mo on GCP TTS Standard alone | Promote GCP TTS to primary (quality drop on Indic), or self-host Coqui TTS on Azure Container Apps (~$15/mo within Azure pool) |
 | 🟠 **Deepgram $1k credit doesn't land by month 4** | Free $200 exhausted | Promote CF Workers AI Whisper to STT primary ($0/mo on CF credit), accept slight quality drop |
-| 🟢 **Upstash Redis usage triples** (auth attacks, scraper bots) | Commands/mo exceeds 5M (overage > $10/mo) | Promote **Azure Cache for Redis Basic C0** to primary ($16/mo within Azure credit pool, full Redis semantics) and demote Upstash to Tier-2. Or promote **Momento Cache** (free 5GB / 5M req/mo). See §1.4–1.7 for the full chain. **No cash at any tier.** |
+| 🟢 **Azure Cache for Redis Basic C0 saturates** (auth attacks, scraper bots fill the 250 MB cache) | Cache eviction rate spikes, hit rate drops below 80% | Bump SKU to **Basic C1** ($33/mo, 1 GB) — still within Azure credit (~50% draw); or promote **Momento** to absorb prompt-cache load (free 5GB), keeping Azure Redis for atomic rate-limit counters only. **No cash at any tier.** |
 
 ---
 
 ## 8. Final answer to the question
 
-With the cache provider chain expanded to four tiers (Upstash → Azure
-Cache for Redis → Momento → CF KV/DO), the **non-cloud auxiliary providers
-add $0 of guaranteed cash spend** at 10k DAU. The previous Upstash $5–8/mo
-exposure is now eliminated by demoting to Tier-2 inside the Azure credit
-pool (which is only 37% drawn) the moment Upstash overage exceeds $10/mo.
+With **Upstash replaced by Azure Cache for Redis Basic C0 as the cache
+primary** (and Momento + CF KV as the fallback chain), the non-cloud
+auxiliary providers add **$0 of guaranteed cash spend** at 10k DAU.
+The cache primary now sits inside the Azure credit pool (which moves
+from 37% drawn to ~45% drawn — still deep headroom for ~24 months) and
+delivers strictly better data semantics than Upstash's REST-only API.
 
 Two providers (Deepgram, ElevenLabs) still have **outstanding credit
 applications**. If both fail, documented fallback chains promote
 CF Workers AI Whisper (STT) + GCP TTS Standard (TTS) at modest quality
 cost and **zero additional cash**.
 
-> **Net at 10k DAU: ~$323/mo all-in across four clouds + auxiliary
-> chain. ~34-month combined runway. Zero guaranteed cash line items.
-> Two PENDING credit dependencies, both with cash-free graceful-degrade
-> fallbacks.**
+> **Net at 10k DAU: ~$339/mo all-in across four clouds + auxiliary
+> chain (the Upstash $0 → Azure Cache $16 swap raises the total by $16
+> but eliminates the $5–8/mo cash overage that would have appeared as
+> traffic ramps). ~32-month combined runway. Zero guaranteed cash line
+> items. Two PENDING credit dependencies, both with cash-free
+> graceful-degrade fallbacks.**

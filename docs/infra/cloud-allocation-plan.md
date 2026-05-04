@@ -32,12 +32,19 @@
 > the two tightest pools explicitly mitigated), see
 > [`docs/infra/10k-dau-cost-audit.md`](./10k-dau-cost-audit.md).
 >
-> **For the auxiliary-provider delegation** (Mongo, Pinecone, Upstash,
-> Axiom, Sentry, Deepgram, ElevenLabs, Groq, Cerebras, Cartesia, Voyage,
+> **For the auxiliary-provider delegation** (Mongo, Pinecone, **Azure
+> Cache for Redis (cache primary)**, **Momento (cache Tier-2)**, Axiom,
+> Sentry, Deepgram, ElevenLabs, Groq, Cerebras, Cartesia, Voyage,
 > Cohere-direct, Resend, GitHub, etc. — what role each plays in the
 > dispatcher and whether each is covered by free tier or credit at 10k
 > DAU), see
 > [`docs/infra/auxiliary-providers-delegation.md`](./auxiliary-providers-delegation.md).
+>
+> **Note on Upstash:** Upstash Redis was previously the cache primary.
+> It has been **replaced** in the strategic plan by Azure Cache for
+> Redis Basic C0 (within Azure credit) + Momento (free tier). Operational
+> code/env-var cutover is a separate task; deployment docs and
+> `cache.py` still reference Upstash env vars at the time of writing.
 
 ---
 
@@ -98,7 +105,7 @@
                               │                  │             │  ┌─────────────┐
                               ▼                  ▼             │  │ AWS SQS     │
                   ┌──────────────┐    ┌──────────────┐         │  │  → Lambda   │
-                  │ Mongo Atlas  │    │ Upstash      │         │  │  (heavy     │
+                  │ Mongo Atlas  │    │ Azure Redis  │         │  │  (heavy     │
                   │ (M0 + $500)  │    │ Redis REST   │         │  │   async)    │
                   │ — primary    │    │ — sessions,  │         │  └─────────────┘
                   │   store      │    │   rate-lim,  │         │
@@ -134,7 +141,7 @@
 
 **Key paths:**
 - **Static assets:** browser → CF Pages. Never touches AWS or Azure.
-- **API request:** browser → CF Worker → AWS App Runner → (Mongo / Upstash / AI providers / S3 / Azure rust-core via gRPC).
+- **API request:** browser → CF Worker → AWS App Runner → (Mongo / Azure Cache for Redis / AI providers / S3 / Azure rust-core via gRPC).
 - **Large blob upload:** browser → CF Worker → **presigned S3 URL** → S3 directly. Never proxies through App Runner (saves egress + RAM).
 - **Cron / scheduled jobs:** Azure Container Apps Job runs on schedule, calls AWS App Runner API or directly invokes AWS Lambda for memory-heavy work. App Runner never runs its own cron daemon.
 - **Heavy async:** App Runner enqueues to AWS SQS → Lambda processes (PDF→MCQ extraction, batch audio synthesis, daily Mongo→S3 backup).
@@ -171,13 +178,13 @@
 | Cohere inference (API only — not hosting) | Bedrock (`cohere.embed-multilingual-v3` + `cohere.rerank-v3-5`) | Called from App Runner via boto3. IAM role grants `bedrock:InvokeModel` on those two model ARNs only. | ~$50/mo within $1k Activate credit |
 | Runtime secrets | Secrets Manager | DB URIs, downstream API keys for App Runner + Lambda. Rotated quarterly. | ~$2/mo total |
 | Identity / deploy | IAM (account `926046660612`) | Per-feature roles + OIDC trust for GitHub Actions deploy (no static keys). IAM user `SYRABIT` for break-glass only. | $0 |
-| ~~EC2 / ECS / Fargate / EKS / RDS / DynamoDB~~ | **Not used** | App Runner is the canonical compute; Mongo Atlas is the DB; Upstash is the cache. Adding equivalents would dilute the $1k Activate credit. | — |
+| ~~EC2 / ECS / Fargate / EKS / RDS / DynamoDB / ElastiCache~~ | **Not used** | App Runner is the canonical compute; Mongo Atlas is the DB; Azure Cache for Redis is the cache (within Azure credit). Adding equivalents would dilute the $1k Activate credit. | — |
 
 ### 4.3 Azure — workers + Rust core + cron + observability + GPT
 
 | Workload | Service | Sizing / config | Cost shape |
 |---|---|---|---|
-| Background workers | Container Apps (`syrabit-workers`) | Same Docker image as the backend, entrypoint `python -m workers.queue_runner`. Polls Upstash Redis queue + SQS bridge. Min 1, max 3 replicas. | ~$15/mo within credit |
+| Background workers | Container Apps (`syrabit-workers`) | Same Docker image as the backend, entrypoint `python -m workers.queue_runner`. Polls Azure Cache for Redis queue + SQS bridge. Min 1, max 3 replicas. | ~$15/mo within credit |
 | Rust "Neural Mesh Core" service | Container Apps (`rust-core`) | Internal-only, called from AWS App Runner over public mTLS endpoint (gRPC port 50051 + HTTP 3000). Lives on Azure because App Runner does not support gRPC. | ~$10/mo within credit |
 | Scheduled jobs | Container Apps Jobs (cron) | Daily Mongo→S3 backup (invokes AWS Lambda), weekly Pinecone re-index, weekly cost-report email, hourly SEO auto-publish, IndexNow batches, dead-endpoint pruner, Trustpilot refresh, CF log pull, weekly digest. KEDA cron triggers; scale-to-zero between runs. | $0 within credit |
 | Optional secondary backend region | Container Apps (`syrabit-backend-failover`) | Standby replica of the FastAPI backend image, scale-to-zero, only spun up if AWS App Runner us-west-2 is degraded. CF Worker can fail-over by env flag. | $0 idle, ~$25/mo if active |
@@ -198,7 +205,7 @@
 | Browser ↔ Cloudflare | Unlimited | $0 |
 | Cloudflare ↔ AWS App Runner | All API requests | ~$0.09/GB out from AWS — small (text only); est. <$5/mo at MVP |
 | AWS App Runner ↔ Mongo Atlas (same region) | All DB ops | $0 (peering — Atlas in us-west-2) |
-| AWS App Runner ↔ Upstash REST | Session, rate-limit, queue | tiny, $0 effectively |
+| AWS App Runner ↔ Azure Cache for Redis | Session, rate-limit, queue | tiny, within Azure credit |
 | AWS App Runner ↔ AI providers (text) | All LLM/embed/rerank calls | <$1/mo |
 | AWS App Runner ↔ Azure rust-core (gRPC) | Per-request enrichment calls | small (text); ~$2/mo at MVP |
 | AWS App Runner ↔ S3 (same region) | Internal blob ops | $0 (intra-region) |
@@ -261,7 +268,7 @@ Add credits being chased (`credit-applications.md`): OpenRouter $5k + ElevenLabs
 - **Do not** use Azure Blob Storage, GCS, or DO Spaces — **S3 is the chosen object store**. Mixing storage backends is a footgun for SDK churn and lifecycle policy drift.
 - **Do not** use AWS Bedrock for chat (Anthropic, Nova, Mistral, Titan, Llama). Azure GPT-4.1-mini and Vertex Gemini cover those roles cheaper. Bedrock is **Cohere-only** in this architecture.
 - **Do not** use Cloudflare Workers for long-running backend logic (>10s CPU). Use AWS App Runner for that; the worker is a proxy, not the app.
-- **Do not** spend cash on a managed Postgres while Mongo Atlas + Upstash + Pinecone cover all current needs.
+- **Do not** spend cash on a managed Postgres while Mongo Atlas + Azure Cache for Redis + Pinecone cover all current needs.
 - **Do not** deploy backend code on GCP — Vertex is API-only in this plan; adding compute there would dilute the $2k Vertex credit pool that's already fully booked for Gemini inference.
 - **Do not** edit `PROVIDER_CREDITS` / `POOL_WEIGHTS` based on aspirational credit grants — gated checklist in `credit-applications.md` §"When a grant is approved" applies.
 

@@ -67,7 +67,7 @@ Columns:
 | Cold blob archive | CF R2 | $0 | same | $0 | $0 | CF (under 10GB free) |
 | Edge cache for blobs | CF R2 + Cache Reserve | $0 | same | $0 | $0 | CF |
 | Async queue | AWS SQS | $0 | same | $0 | $0 | AWS free tier |
-| Cache + sessions | Upstash Redis REST | $0 | same | $0 | $0 | Upstash free tier |
+| Cache + sessions | Azure Cache for Redis Basic C0 (primary) → Momento (Tier-2 free) → CF KV (Tier-3) | $16 | same | $16 | $0 | Azure credit pool |
 | Distributed tracing / APM | Azure App Insights | $0 | same | $0 | $0 | Azure free tier (5GB/mo) |
 | Logs (long-term) | Axiom | $0 | same | $0 | $0 | Axiom free tier |
 | Alerts → Slack/Telegram | Azure Logic Apps | $0 | same | $0 | $0 | Azure free tier |
