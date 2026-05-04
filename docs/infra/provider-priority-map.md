@@ -2,7 +2,11 @@
 
 Mirrors the attached snippet format. Excludes Cerebras + Groq.
 Sarvam scoped to Assamese chat / content / translate only — removed
-from voice / TTS / STT / vision. Delegation across the 4 strategic
+from voice / TTS / STT / vision. **Bedrock direct (Claude/Titan)
+removed from chat** — Bedrock is Cohere‑only (embed + rerank) by
+contract. Cohere + Voyage handle embeddings/rerank; Pinecone is the
+RAG vector store; MongoDB Atlas owns chat history, analytics, and all
+other application persistence. Delegation across the 4 strategic
 clouds (AWS / Azure / Cloudflare / GCP) annotated inline.
 
 ```python
@@ -13,7 +17,7 @@ PROVIDER_PRIORITY = {
         "vertex",          # Gemini 2.5 Flash (Google Cloud for Startups, $2k)
         "azure_openai",    # GPT‑4.1‑mini via Microsoft Founders Hub ($2.5k)
         "workers_ai",      # Cloudflare gpt-oss-20b / llama-3.3-70b (CF for Startups, $5k)
-        "bedrock",         # AWS Bedrock Claude Haiku — Tier‑4 reserve, default off (AWS Activate, $1k)
+        # bedrock direct (Claude/Titan) REMOVED — Bedrock is Cohere‑only (embed + rerank)
     ],
 
     # Conversational RAG chat — Assamese
@@ -67,17 +71,18 @@ PROVIDER_PRIORITY = {
     ],
 
     # Text embeddings (RAG ingestion + query)
+    # Cohere primary, Voyage secondary, both auxiliary; CF Workers AI edge fallback.
     "embed": [
-        "bedrock_cohere",  # cohere.embed-multilingual-v3 via Bedrock us‑west‑2 (AWS Activate)
-        "voyage_ai",       # voyage‑3‑multilingual (free trial, LANDED)
-        "vertex",          # text-embedding-004 (Google Cloud) — 768‑dim, requires re‑index
-        "workers_ai",      # Cloudflare bge-m3 edge (CF)
+        "bedrock_cohere",  # cohere.embed-multilingual-v3 via Bedrock us‑west‑2 (AWS Activate, $1k)
+        "voyage_ai",       # voyage‑3‑multilingual (Voyage free trial, LANDED)
+        "workers_ai",      # Cloudflare bge-m3 edge (CF for Startups, $5k)
     ],
 
     # Semantic reranking (post-retrieval scoring)
+    # Cohere primary, Voyage secondary; CF Workers AI edge fallback.
     "rerank": [
         "bedrock_cohere",  # cohere.rerank-multilingual-v3 via Bedrock (AWS Activate)
-        "voyage_ai",       # rerank‑2 multilingual (free trial)
+        "voyage_ai",       # rerank‑2 multilingual (Voyage free trial)
         "workers_ai",      # Cloudflare bge-reranker-base (CF)
         # graceful degrade: skip rerank, return Pinecone topK as-is
     ],
@@ -117,12 +122,28 @@ PROVIDER_PRIORITY = {
         "workers_ai",      # Cloudflare Browser Rendering + edge fetch (CF)
     ],
 
-    # Vector retrieval
+    # Vector retrieval (RAG store)  — Pinecone is THE RAG store of record
     "vector_retrieve": [
-        "pinecone",        # Starter free → Pinecone Startup ($5k reserved)
-        "vertex_vector",   # Vertex Vector Search / Matching Engine (Google Cloud)
-        "cf_vectorize",    # Cloudflare Vectorize edge index (CF)
-        "vertex_discovery",# Vertex Discovery Engine semantic search (Google Cloud)
+        "pinecone",        # syrabit-rag index (1024-dim cosine, aws-us-west-2). Starter free → Pinecone Startup ($5k reserved)
+        "vertex_vector",   # Vertex Vector Search / Matching Engine — Tier‑2 only (Google Cloud)
+        "cf_vectorize",    # Cloudflare Vectorize edge index — Tier‑3 only (CF)
+        # vertex_discovery is a separate semantic-search surface (search_rag), not RAG fallback
+    ],
+
+    # Chat history (every chat turn persisted here)
+    # MongoDB is canonical for chat history. No multi-store writes.
+    "chat_history": [
+        "mongo",           # MongoDB Atlas conversations collection (Atlas Startup $500 → $5k extended)
+    ],
+
+    # Analytics + miscellaneous application persistence
+    # MongoDB owns: revenue events, leaderboards (canonical, Redis is cache),
+    # streaks (canonical), notes, flashcards (canonical), CMS docs,
+    # SEO topics, internal_links, grounded_recall_results, push_tokens,
+    # reader_cache, quiz_pools, routing_config, audit logs.
+    "analytics": [
+        "mongo",           # MongoDB Atlas — single source of truth for app state (Atlas)
+        "axiom",           # Long‑term log / event analytics (free 0.5 TB/mo)
     ],
 
     # Cache (sessions, rate limit, JWT blacklist, prompt cache)
@@ -167,8 +188,8 @@ PROVIDER_PRIORITY = {
 | **GCP** (`vertex`, `vertex_vision`, `vertex_vector`, `vertex_discovery`) | Tier‑1 chat (en+as), vision, safety, grounded search; Tier‑2 TTS/STT/translate | ~$150 |
 | **Azure** (`azure_openai`, `azure_redis`, `azure_container_apps_jobs`, `azure_app_insights`) | Tier‑1 content, cache primary, cron (all jobs), APM central | ~$87 |
 | **Cloudflare** (`workers_ai`, `cf_kv`, `cf_r2`, `cf_vectorize`) | Tier‑1 translate; edge fallback for everything else | ~$31 |
-| **AWS** (`bedrock_cohere`, `s3`, `aws_sqs_lambda`, `polly`, `bedrock`) | Tier‑1 embed/rerank, blob (sole), async queue, backend host | ~$62 |
-| **Auxiliary** (`sarvam`, `elevenlabs`, `deepgram`, `assemblyai`, `cartesia`, `voyage_ai`, `pinecone`, `perplexity`, `exa_ai`, `tavily`, `momento`, `axiom`, `sentry`) | own credit pools, $0 against 4‑cloud math | $0 |
+| **AWS** (`bedrock_cohere`, `s3`, `aws_sqs_lambda`, `polly`) | Tier‑1 embed/rerank (**Cohere‑only Bedrock**), blob (sole), async queue, backend host | ~$62 |
+| **Auxiliary** (`sarvam`, `elevenlabs`, `deepgram`, `assemblyai`, `cartesia`, `voyage_ai`, `pinecone`, `mongo`, `perplexity`, `exa_ai`, `tavily`, `momento`, `axiom`, `sentry`) | own credit pools, $0 against 4‑cloud math | $0 |
 | **Total** | — | **$339 / $0 cash** |
 
 ## Excluded providers
@@ -176,3 +197,17 @@ PROVIDER_PRIORITY = {
 - `cerebras` — removed from all chat chains
 - `groq` — removed from all chat chains
 - `sarvam` in `tts`, `voice`, `stt`, `vision` — removed; Sarvam scope = Assamese chat / content / translate only
+- `bedrock` direct (Claude / Titan / Jamba) — removed from chat; **Bedrock is Cohere‑only by contract** (embed + rerank only, keyed as `bedrock_cohere`)
+
+## Storage delegation (canonical)
+
+| Concern | Provider | Notes |
+|---|---|---|
+| RAG vectors | **Pinecone** | `syrabit-rag` index (1024‑dim cosine, aws-us-west-2). THE RAG store. |
+| Embeddings (compute) | **Cohere via Bedrock** → **Voyage** fallback | Voyage uses 768‑dim and triggers re‑index of affected chunks |
+| Reranking | **Cohere via Bedrock** → **Voyage** fallback | Graceful degrade: skip rerank if both fail |
+| Chat history | **MongoDB Atlas** | `conversations` collection, single source of truth |
+| Application state (notes, flashcards, streaks, leaderboards, quizzes, CMS, SEO topics, push tokens, audit logs) | **MongoDB Atlas** | All canonical writes go to Mongo; Redis is cache only |
+| Cache (sessions, rate limit, prompt cache, leaderboard ZSET) | **Azure Cache for Redis** → Momento → CF KV → Mongo atomic | Redis + Momento + CF KV are TTL‑bounded; Mongo is the durable backstop |
+| Object blobs (PDFs, audio, backups) | **AWS S3** | Sole object store; CF R2 is cold archive only |
+| Long‑term logs / event analytics | **Axiom** + Mongo | Axiom for queryable logs; Mongo for typed analytics events |

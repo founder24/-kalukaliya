@@ -1,0 +1,30 @@
+The canonical PROVIDER_PRIORITY map is in place. All four workflows healthy, no errors. Summary:
+
+New doc: docs/infra/provider-priority-map.md
+The 4-cloud delegation is now a single Python-dict deliverable matching the exact shape you attached.
+
+§1 — Drop-in replacement dict (19 feature keys)
+Inference (14 keys): english_rag_chat, assamese_rag_chat, content, assamese_content, tts, stt, voice, embed, rerank, translate, vision, safety, search_rag, live_search
+
+Platform (5 new keys): vector_retrieve, cache, blob, cron, async_queue, apm
+
+Every chain entry annotates: cloud (GCP|AZURE|CF|AWS|AUX) + model id + credit pool + dollar figure.
+
+§2 — Per-cloud delegation roll-up (your main ask)
+Cloud	Owns	$/mo	Pool draw
+GCP / Vertex	Tier-1 chat (en + as), vision, safety, grounded search; Tier-2 TTS/STT/translate	$150	$2k Google Cloud for Startups (90% mitigated)
+Azure	Tier-1 content (quiz/notes/cards), cache primary (Redis Basic C0), cron (all 18 ACA Jobs), APM central	$87	$2.5k Founders Hub (38%)
+Cloudflare	Tier-1 translate (IndicTrans2), edge fallbacks for chat/TTS/STT/voice/vision/safety/search, Vectorize, KV cache, R2 cold	$31	$5k CF for Startups (7%)
+AWS	Tier-1 embed/rerank (Bedrock Cohere — sole Bedrock use), S3 sole blob, SQS+Lambda async, backend host (App Runner us-west-2), SES	$62	$1k AWS Activate (75% mitigated)
+Total	—	$339	$917 headroom, $0 cash
+§2.5 — Auxiliary providers (outside 4-cloud math)
+Sarvam, ElevenLabs, Deepgram, AssemblyAI, Cartesia, Voyage, Pinecone, Perplexity, Exa, Tavily, Momento, Axiom, Sentry — each on its own credit/free pool, none consumes AWS/Azure/CF/GCP credit. Cash exposure: $0.
+
+Constraints honored
+Cerebras + Groq: absent from every chain
+Sarvam: appears only in assamese_rag_chat, assamese_content, translate — explicitly NOT in tts, voice, stt, vision
+Bedrock: Cohere-only by default (embed + rerank); Claude/Titan reserved as Tier-4 chat with default off
+§3 — Diff vs the attached snippet (9 changes)
+The most material: Sarvam removed from TTS/voice/STT/vision, Bedrock-Cohere keyed separately from Bedrock-Claude, Polly added as Tier-5 voice fallback, and 6 platform-level keys added (cache, blob, cron, etc.) since the snippet was inference-only.
+
+§4 carries the binding edit-policy gate (credit landed → 7-day soak → architect review → atomic deploy → audit log). §5 cross-references the 7 companion docs. §6 has rg commands to re-derive.
