@@ -120,17 +120,22 @@ class TestSelectProviderAssamese:
             "sarvam must not appear when it is in the exclude set"
         )
 
-    def test_sarvam_and_vertex_excluded_returns_workers_ai_indic(self):
-        """When both sarvam and vertex are excluded (pool exhausted), the last-resort
-        weight-0 fallback must be workers_ai_indic."""
+    def test_sarvam_and_vertex_excluded_returns_none_strict_chain(self):
+        """Task #291 — STRICT 2-leg chain. When both sarvam and vertex are
+        excluded the assamese_rag_chat pool is exhausted and select_provider
+        MUST return None. The historical Task #270 last-resort downgrade to
+        workers_ai_indic is forbidden because IndicTrans2 is a translation
+        model (not a chat reasoning model) and llama3.1-8b would produce
+        non-Assamese output."""
         import llm
 
         p = llm.select_provider(
             "assamese_rag_chat", lang="as",
             exclude=frozenset({"sarvam", "vertex"}),
         )
-        assert p == "workers_ai_indic", (
-            f"Expected workers_ai_indic as last-resort; got {p!r}"
+        assert p in (None, ""), (
+            f"Expected None for strict-chain exhaustion; got {p!r}. "
+            f"Task #291 forbids silent downgrade to workers_ai_indic / llama."
         )
 
     def test_lang_en_excludes_sarvam_from_assamese_pool(self):
@@ -152,9 +157,10 @@ class TestDispatchLlmForFeatureIndicTrans:
     call_indic_trans and return its output unchanged."""
 
     def test_dispatch_workers_ai_indic_calls_indic_trans(self, monkeypatch):
-        """When provider='workers_ai_indic' and feature='assamese_rag_chat',
-        _dispatch_llm_for_feature extracts the last user message and calls
-        call_indic_trans with direction='en-indic'."""
+        """When provider='workers_ai_indic' for a valid translation feature
+        (e.g. assamese_content under Task #291 — was assamese_rag_chat under
+        the superseded #270 design), _dispatch_llm_for_feature extracts the
+        last user message and calls call_indic_trans with direction='en-indic'."""
         import llm
 
         calls: list[dict] = []
@@ -174,7 +180,7 @@ class TestDispatchLlmForFeatureIndicTrans:
         result = _run(
             llm._dispatch_llm_for_feature(
                 messages, "workers_ai_indic", 512,
-                feature="assamese_rag_chat",
+                feature="assamese_content",  # Task #291: chat path no longer permits IndicTrans2
             )
         )
 
@@ -188,7 +194,9 @@ class TestDispatchLlmForFeatureIndicTrans:
         assert result == _SAMPLE_ASSAMESE
 
     def test_dispatch_workers_ai_indic_picks_last_user_message(self, monkeypatch):
-        """When multiple user turns exist, the LAST user message is translated."""
+        """When multiple user turns exist, the LAST user message is translated.
+        Uses feature='assamese_content' since assamese_rag_chat no longer
+        permits workers_ai_indic under Task #291."""
         import llm
 
         captured: list[str] = []
@@ -209,7 +217,7 @@ class TestDispatchLlmForFeatureIndicTrans:
         _run(
             llm._dispatch_llm_for_feature(
                 messages, "workers_ai_indic", 256,
-                feature="assamese_rag_chat",
+                feature="assamese_content",  # Task #291: chat path no longer permits IndicTrans2
             )
         )
         assert captured == ["Second question — translate this"], (
@@ -218,7 +226,9 @@ class TestDispatchLlmForFeatureIndicTrans:
 
     def test_dispatch_workers_ai_indic_no_user_message_raises(self, monkeypatch):
         """If there is no user message in the conversation, a RuntimeError must
-        be raised so call_with_provider_fallback can route to workers_ai."""
+        be raised so call_with_provider_fallback can route to workers_ai.
+        Uses feature='assamese_content' since assamese_rag_chat no longer
+        permits workers_ai_indic under Task #291."""
         import llm
 
         fake_mod = types.ModuleType("providers.workers_indic")
@@ -230,7 +240,7 @@ class TestDispatchLlmForFeatureIndicTrans:
                 llm._dispatch_llm_for_feature(
                     [{"role": "system", "content": "system only"}],
                     "workers_ai_indic", 256,
-                    feature="assamese_rag_chat",
+                    feature="assamese_content",  # Task #291: chat path no longer permits IndicTrans2
                 )
             )
 
@@ -297,7 +307,7 @@ class TestIndicTrans2ResponseValidation:
                 llm._dispatch_llm_for_feature(
                     [{"role": "user", "content": "test input"}],
                     "workers_ai_indic", 256,
-                    feature="assamese_rag_chat",
+                    feature="assamese_content",  # Task #291: chat path no longer permits IndicTrans2
                 )
             )
             assert result, "IndicTrans2 result must be non-empty"
@@ -309,7 +319,8 @@ class TestIndicTrans2ResponseValidation:
     def test_indic_trans_empty_response_propagates_as_empty_string(self, monkeypatch):
         """If IndicTrans2 returns an empty string, _dispatch_llm_for_feature passes
         it back unchanged so the caller can detect the failure and try the next
-        provider."""
+        provider. Uses feature='assamese_content' since assamese_rag_chat no
+        longer permits workers_ai_indic under Task #291."""
         import llm
 
         async def _fake_indic_trans(text, *, direction="en-indic", **kw):
@@ -323,7 +334,7 @@ class TestIndicTrans2ResponseValidation:
             llm._dispatch_llm_for_feature(
                 [{"role": "user", "content": "test"}],
                 "workers_ai_indic", 256,
-                feature="assamese_rag_chat",
+                feature="assamese_content",  # Task #291: chat path no longer permits IndicTrans2
             )
         )
         assert result == "", "Empty IndicTrans2 response must propagate unchanged"
@@ -584,10 +595,17 @@ class TestIndicTrans2FeatureGuard:
         "safety",
         "tts",
         "stt",
+        # Task #291 — assamese_rag_chat moved into the rejected set because
+        # IndicTrans2 is a translation model, not a chat model. Allowing it
+        # on the chat path silently downgrades reasoning to a translator and
+        # produces nonsense answers. Dispatcher now fails closed here so any
+        # accidental config drift is caught at the lowest layer.
+        "assamese_rag_chat",
     ])
     def test_workers_ai_indic_rejected_for_non_assamese_features(self, feature, monkeypatch):
         """_dispatch_llm_for_feature must raise RuntimeError immediately when
-        provider='workers_ai_indic' is drawn for a non-Assamese feature pool."""
+        provider='workers_ai_indic' is drawn for a non-Assamese-translation
+        feature pool (now including the chat pool — see Task #291)."""
         import llm
 
         fake_mod = types.ModuleType("providers.workers_indic")
@@ -606,7 +624,9 @@ class TestIndicTrans2FeatureGuard:
         fake_mod.call_indic_trans.assert_not_awaited()
 
     @pytest.mark.parametrize("feature", [
-        "assamese_rag_chat",
+        # Task #291 — assamese_rag_chat REMOVED from the accepted set. The
+        # only remaining valid translation features for IndicTrans2 are
+        # assamese_content (note generation) and translate (explicit MT).
         "assamese_content",
         "translate",
     ])
@@ -765,6 +785,13 @@ class TestAssameseTranslatePipelineIndicTrans2Path:
                 f"Result {result!r} must contain Assamese Unicode (U+0980–U+09FF)"
             )
 
+    @pytest.mark.skip(reason=(
+        "Task #270 design (Gemini-as-translate-fallback) was superseded by "
+        "Task #291: IndicTrans2 is the SOLE translator and Vertex is polish-"
+        "only. IndicTrans2 failure now correctly returns '' — covered by "
+        "tests/test_assamese_translation_polish_contract.py::"
+        "test_translation_returns_empty_when_indictrans2_fails."
+    ))
     def test_gemini_fallback_fires_when_indictrans2_fails(self, monkeypatch):
         """When IndicTrans2 raises RuntimeError, the pipeline must fall through to
         Gemini (Tier B) and return its Assamese output."""
@@ -865,9 +892,16 @@ class TestCallLlmApiChatAssamese:
             f"Expected 'english_rag_chat' for lang='en'; got {dispatched_features}"
         )
 
-    def test_call_llm_api_chat_assamese_full_chain_indictrans2_fires(self, monkeypatch):
-        """Integration: when sarvam and vertex are both absent, call_llm_api_chat
-        with lang='as' must reach the workers_ai_indic path and return Assamese text."""
+    def test_call_llm_api_chat_assamese_strict_chain_raises_503(self, monkeypatch):
+        """Task #291 strict-chain integration. When both sarvam and vertex
+        fail, call_llm_api_chat(lang='as') must:
+          1. Surface a clean HTTPException 503 (no wrong-language fallback).
+          2. NEVER dispatch to workers_ai_indic, workers_ai_llama31_8b, or
+             the generic workers_ai shorthand — all three would emit non-
+             Assamese (English / Hindi / mixed) output for an Assamese
+             prompt, which is worse for UX than an honest error.
+        """
+        from fastapi import HTTPException
         import llm
 
         monkeypatch.setattr(llm, "_SARVAM_PROVIDERS", [], raising=False)
@@ -876,31 +910,45 @@ class TestCallLlmApiChatAssamese:
 
         async def _fake_dispatch(messages, provider, max_tokens, *, feature=""):
             called_providers.append(provider)
-            if provider == "sarvam":
-                raise RuntimeError("no sarvam key")
-            if provider == "vertex":
-                raise RuntimeError("no vertex key")
-            if provider == "workers_ai_indic":
-                return _SAMPLE_ASSAMESE
-            return "fallback english answer"
+            if provider in ("sarvam", "vertex"):
+                raise RuntimeError(f"no {provider} key")
+            # Forbidden under #291 — any other provider on this path is a
+            # silent contract violation. Raise a distinctive marker so the
+            # test fails loudly with a useful message rather than masking
+            # the violation with a generic exception.
+            raise AssertionError(
+                f"Forbidden provider {provider!r} reached call_llm_api_chat "
+                f"on the assamese_rag_chat strict chain (Task #291)"
+            )
 
         monkeypatch.setattr(llm, "_dispatch_llm_for_feature", _fake_dispatch,
                             raising=False)
 
-        result = _run(
-            llm.call_llm_api_chat(
-                [{"role": "user", "content": "What is photosynthesis?"}],
-                max_tokens=256,
-                lang="as",
+        with pytest.raises(HTTPException) as exc_info:
+            _run(
+                llm.call_llm_api_chat(
+                    [{"role": "user", "content": "What is photosynthesis?"}],
+                    max_tokens=256,
+                    lang="as",
+                )
             )
+        assert exc_info.value.status_code == 503, (
+            f"Strict-chain exhaustion must surface 503; got "
+            f"{exc_info.value.status_code}"
         )
 
-        assert "workers_ai_indic" in called_providers, (
-            "workers_ai_indic must be tried when sarvam and vertex are unavailable"
+        assert "workers_ai_indic" not in called_providers, (
+            "workers_ai_indic must NOT be reached on the chat path (Task #291); "
+            f"called_providers={called_providers}"
         )
-        assert result == _SAMPLE_ASSAMESE
-        assert _has_assamese_script(result), (
-            "Final result must contain Assamese Unicode characters (U+0980–U+09FF)"
+        assert "workers_ai_llama31_8b" not in called_providers, (
+            "workers_ai_llama31_8b must NOT be reached on the chat path (Task #291); "
+            f"called_providers={called_providers}"
+        )
+        assert "workers_ai" not in called_providers, (
+            "Generic workers_ai must NOT be reached on the assamese_rag_chat path "
+            f"(Task #291 — wrong-language fallback forbidden); "
+            f"called_providers={called_providers}"
         )
 
 
@@ -1010,6 +1058,13 @@ class TestLiveIndicTrans2:
             )
             # This confirms the validation logic works correctly.
 
+    @pytest.mark.skip(reason=(
+        "Task #270 live design (Gemini Tier B fallback after IndicTrans2 "
+        "raises) was superseded by Task #291. IndicTrans2 raise now returns "
+        "'' and the caller falls back to its own original-text path — there "
+        "is no in-pipeline Gemini-as-translate step. Re-enable only if a "
+        "future task reintroduces a translate fallback tier."
+    ))
     @_live_skip
     def test_live_translation_pipeline_produces_assamese_script(self):
         """I2 — PRIMARY live acceptance test (Task #270):
@@ -1149,6 +1204,12 @@ class TestLiveIndicTrans2:
             f"Routing must reach workers_ai_indic; attempted: {providers_attempted}"
         )
 
+    @pytest.mark.skip(reason=(
+        "Task #270 live design (Gemini Tier B fallback inside "
+        "_assamese_translate_gemini_main_sarvam_polish) was superseded by "
+        "Task #291: IndicTrans2 is the sole translator. Re-enable only if a "
+        "future task reintroduces a translate fallback tier."
+    ))
     @_live_skip
     def test_live_call_llm_api_chat_lang_as_produces_assamese_output(self):
         """I4 — call_llm_api_chat(lang='as') live end-to-end test.

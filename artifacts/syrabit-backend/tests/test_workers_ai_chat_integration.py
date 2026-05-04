@@ -229,6 +229,16 @@ def test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypa
     assert captured.get("feature") == "english_rag_chat"
 
 
+@pytest.mark.skip(reason=(
+    "Task #366 (workers_ai_llama31_8b + workers_ai_indic as Assamese chat "
+    "tail) was superseded by Task #291: assamese_rag_chat is a strict 2-leg "
+    "sarvam → vertex chain with no further downgrade. workers_ai_llama31_8b "
+    "produced English output for Assamese prompts and workers_ai_indic is "
+    "a translation model, not a chat model — both are now correctly excluded "
+    "from the chain. Strict exhaustion surfaces an error instead of "
+    "wrong-language output. See test_provider_priority_locked.py for the "
+    "canonical #291 contract."
+))
 def test_assamese_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypatch):
     """Task #366 — when both Sarvam and Vertex return 429 on the
     ``assamese_rag_chat`` pool, the weighted draw must land on the Workers AI
@@ -285,6 +295,15 @@ def test_english_chat_pool_actually_contains_workers_ai_tail():
     assert "workers_ai_mistral_7b" in chain
 
 
+@pytest.mark.skip(reason=(
+    "Task #347/#366 guardrail (Workers AI Indic tail in assamese_rag_chat) "
+    "was superseded by Task #291: the chain is locked to exactly "
+    "['sarvam', 'vertex']. The canonical guardrail now lives in "
+    "tests/test_provider_priority_locked.py::"
+    "test_assamese_rag_chat_locked_to_sarvam_primary which asserts the "
+    "OPPOSITE — that workers_ai_indic / workers_ai_llama31_8b must NOT be "
+    "in the pool. See config.PROVIDER_PRIORITY['assamese_rag_chat'] note."
+))
 def test_assamese_chat_pool_actually_contains_workers_ai_tail():
     """Guardrail — config.POOL_WEIGHTS['assamese_rag_chat'] must keep
     workers_ai_llama31_8b at non-zero weight so the Assamese chaos fallback

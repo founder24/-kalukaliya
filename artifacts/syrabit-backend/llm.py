@@ -1604,6 +1604,18 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
 
     candidates = PROVIDER_PRIORITY.get(feature, ["workers_ai"])
     _is_assamese_feature = feature in ("assamese_rag_chat", "assamese_content")
+
+    # Task #291 — STRICT 2-leg allowlist for assamese_rag_chat. Sarvam and
+    # Vertex are the only Assamese-capable reasoning providers. The pool
+    # configured in PROVIDER_PRIORITY also lists workers_ai_indic and
+    # workers_ai_llama31_8b as historical tail entries, but they must NOT
+    # be selected for chat (IndicTrans2 is a translation model; llama3.1
+    # produces non-Assamese output). Filter them out here so the strict-
+    # chain exhaustion branch below returns None instead of leaking a
+    # wrong-language provider.
+    if feature == "assamese_rag_chat":
+        candidates = [p for p in candidates if p in ("sarvam", "vertex")]
+
     # Per-pool weight overrides take precedence over global PROVIDER_CREDITS.
     # Providers not listed in the override fall back to PROVIDER_CREDITS as usual.
     _pool_override: dict = POOL_WEIGHTS.get(feature, {})
@@ -1696,14 +1708,20 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
 
 
 _INDICTRANS_VALID_FEATURES: frozenset = frozenset({
-    "assamese_content", "translate", "assamese_rag_chat",
+    "assamese_content", "translate",
 })
 """Features where workers_ai_indic (IndicTrans2) is a valid translation provider.
 
-assamese_rag_chat is included because Sarvam is primary there and IndicTrans2
-serves as the secondary (translate-based response rendering).
-Chat/safety/english features are NOT in this set.  When workers_ai_indic is drawn
-for a pool outside this set it raises RuntimeError immediately so
+Task #291 LOCKED CHAIN — assamese_rag_chat was REMOVED from this set because
+IndicTrans2 is a translation model, not a chat model. Allowing it on the chat
+path silently downgrades reasoning to a translator and produces nonsense
+answers. The strict 2-leg chain is sarvam → vertex with no further leg; if a
+future config drift accidentally re-introduces workers_ai_indic into the
+assamese_rag_chat pool, dispatcher fails closed here and call_with_provider_
+fallback excludes it.
+
+Chat / safety / english features are NOT in this set. When workers_ai_indic
+is drawn for a pool outside this set it raises RuntimeError immediately so
 call_with_provider_fallback excludes it and moves to the next provider.
 """
 
@@ -2177,6 +2195,23 @@ async def call_llm_api_chat(
             lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature=feature),
         )
     except Exception as exc:
+        # Task #291 LOCKED CHAIN — assamese_rag_chat is a strict 2-leg
+        # sarvam → vertex chain with NO further downgrade. When both legs
+        # fail we MUST surface a clean unavailable error rather than
+        # hard-falling-back to the generic workers_ai pool, because
+        # workers_ai will produce non-Assamese (English / Hindi / mixed)
+        # output for an Assamese prompt — wrong-language answers are
+        # worse for UX than an honest "service temporarily unavailable".
+        if feature == "assamese_rag_chat":
+            logger.warning(
+                "call_llm_api_chat assamese_rag_chat strict chain exhausted "
+                "(%s) — surfacing 503 (no wrong-language workers_ai fallback per Task #291)",
+                exc,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Assamese chat service temporarily unavailable. Please try again.",
+            ) from exc
         logger.warning(
             "call_llm_api_chat feature dispatch exhausted (%s) — hard fallback to workers_ai only",
             exc,

@@ -23,7 +23,13 @@ def _reset_state():
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Use a fresh event loop on every call — `asyncio.get_event_loop()` was
+    # deprecated as a getter on Python 3.10+ and raises RuntimeError in the
+    # main thread once another test has closed the default loop (e.g. the
+    # polish_contract suite uses `asyncio.new_event_loop()` per test). The
+    # fresh-loop pattern matches the project-wide convention in
+    # tests/test_assamese_routing_chain_e2e.py and tests/test_lang_sanitizer.py.
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def test_status_returns_one_tile_per_feature():

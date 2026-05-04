@@ -1058,13 +1058,21 @@ PROVIDER_PRIORITY: dict = {
         "azure_openai", "vertex", "sarvam",
         "workers_ai_llama32_3b", "workers_ai_mistral_7b", "workers_ai",
     ],
-    # Assamese chat: Sarvam (native Indic conversational reasoning) primary →
-    # Vertex (Gemini 2.5 Flash) → Llama 3.1 8B (CF Workers AI Indic-friendly
-    # fallback, Task #347) → workers_ai_indic (IndicTrans2 weight-zero last
-    # resort — translation model, not a chat model, used only when every chat
-    # provider is excluded as a degraded-but-online fallback rather than an
-    # error). Bedrock removed (see english_rag_chat note).
-    "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_llama31_8b", "workers_ai_indic"],
+    # Assamese chat (Task #291 LOCKED CHAIN): Sarvam (native Indic
+    # conversational reasoning) → Vertex (Gemini 2.5 Flash). NO third leg.
+    #
+    # Historically the chain ran sarvam → vertex → workers_ai_llama31_8b
+    # → workers_ai_indic (Task #347 promotion + #366 chaos guardrail), but
+    # Task #291 locked the chain down to two legs because:
+    #   * workers_ai_indic is a TRANSLATION model (IndicTrans2) — using it
+    #     as a chat fallback silently downgrades reasoning to "translate
+    #     the question word-for-word", producing nonsense answers.
+    #   * workers_ai_llama31_8b reliably emits non-Assamese (English/Hindi)
+    #     output for Assamese prompts — wrong-language output is worse for
+    #     UX than a clean "service temporarily unavailable" error.
+    # Strict-chain exhaustion now correctly surfaces an error to the user
+    # instead of leaking a wrong-language or wrong-model response.
+    "assamese_rag_chat": ["sarvam", "vertex"],
     # Long-form content / notes generation: Vertex/Gemini 2.5 Flash (primary,
     # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI variants.
     # Bedrock removed (Task #347 — provider decommissioned).
@@ -1176,12 +1184,11 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai":                 0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
     "assamese_rag_chat": {
+        # Task #291 LOCKED CHAIN — strict 2-leg sarvam → vertex. Any third
+        # leg (workers_ai_llama31_8b, workers_ai_indic) was removed because
+        # it produced wrong-language output. See PROVIDER_PRIORITY note above.
         "sarvam":                 10000,  # primary — native Assamese conversational reasoning
         "vertex":                   100,  # fallback — Gemini 2.5 Flash
-        # Task #347 — Llama 3.1 8B is a competent Indic chat fallback when
-        # both Sarvam and Vertex are saturated; weight-zero IndicTrans2
-        # remains the absolute degraded-online tail.
-        "workers_ai_llama31_8b":     10,  # tertiary — Llama 3.1 8B FP8
     },
     # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
     # at low weight strictly for formatting / structuring notes. Sarvam removed
