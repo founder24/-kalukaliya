@@ -65,58 +65,108 @@ def _http_json(url: str, api_key: str, timeout: float = 20.0) -> dict | list:
 
 
 def _fetch_messages(api_key: str, window_minutes: int,
-                    page_limit: int = 1000) -> dict[str, int]:
+                    page_limit: int = 1000,
+                    max_pages: int = 100) -> dict[str, int]:
     """
     Tally SendGrid event counters across all messages whose
     last_event_time is within the prior `window_minutes`.
 
     /v3/messages query language uses ISO-8601 `last_event_time`
-    bounds with TIMESTAMP literals.
+    bounds with TIMESTAMP literals. The endpoint caps `limit` at
+    1000; pages are walked by re-issuing the same query with a
+    tighter upper bound (the oldest `last_event_time` from the
+    previous page minus 1 second) until either max_pages is hit or
+    a page returns < limit rows. max_pages * page_limit caps the
+    total tallied messages at 100k per invocation, which is well
+    above the §3 Phase B per-checkpoint volumes (Day 30 ≈ unlimited
+    in cap but still under 100k per 24h for our traffic profile).
     """
     end = dt.datetime.now(dt.timezone.utc)
     start = end - dt.timedelta(minutes=window_minutes)
     start_iso = start.strftime("%Y-%m-%dT%H:%M:%SZ")
-    query = f'last_event_time BETWEEN TIMESTAMP "{start_iso}" AND TIMESTAMP "{end.strftime("%Y-%m-%dT%H:%M:%SZ")}"'
-    qs = urllib.parse.urlencode({"query": query, "limit": page_limit})
-    url = f"https://api.sendgrid.com/v3/messages?{qs}"
+    upper = end
 
     counters = {"processed": 0, "delivered": 0, "bounce": 0,
                 "spam_report": 0, "blocked": 0, "dropped": 0}
-    try:
-        data = _http_json(url, api_key)
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            body = ""
-            try:
-                body = e.read().decode("utf-8", errors="replace")[:200]
-            except Exception:
-                pass
+    pages = 0
+    while pages < max_pages:
+        query = (f'last_event_time BETWEEN TIMESTAMP "{start_iso}" '
+                 f'AND TIMESTAMP "{upper.strftime("%Y-%m-%dT%H:%M:%SZ")}"')
+        qs = urllib.parse.urlencode({"query": query, "limit": page_limit})
+        url = f"https://api.sendgrid.com/v3/messages?{qs}"
+
+        try:
+            data = _http_json(url, api_key)
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")[:200]
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    f"SendGrid /v3/messages returned 401. Body: {body!r}. "
+                    f"Most common cause: this account is not on a plan "
+                    f"with the Email Activity History add-on. "
+                    f"Re-run with --mode stats (day-level gates).") from e
+            raise
+
+        if not isinstance(data, dict) or "messages" not in data:
             raise RuntimeError(
-                f"SendGrid /v3/messages returned 401. Body: {body!r}. "
-                f"Most common cause: this account is not on a plan "
-                f"with the Email Activity History add-on. "
-                f"Re-run with --mode stats (day-level gates).") from e
-        raise
+                f"Unexpected /v3/messages response shape: "
+                f"{type(data).__name__}; keys "
+                f"{list(data.keys()) if isinstance(data, dict) else []}")
 
-    if not isinstance(data, dict) or "messages" not in data:
+        rows = data.get("messages") or []
+        if not rows:
+            break
+
+        oldest_in_page: dt.datetime | None = None
+        for msg in rows:
+            status = (msg.get("status") or "").lower()
+            counters["processed"] += 1
+            if status == "delivered":
+                counters["delivered"] += 1
+            elif status in ("bounce", "bounced"):
+                counters["bounce"] += 1
+            elif status in ("spam_report", "spam"):
+                counters["spam_report"] += 1
+            elif status == "blocked":
+                counters["blocked"] += 1
+            elif status in ("dropped", "drop"):
+                counters["dropped"] += 1
+            ts_str = msg.get("last_event_time") or ""
+            if ts_str:
+                try:
+                    ts = dt.datetime.strptime(
+                        ts_str.replace("Z", "+0000"),
+                        "%Y-%m-%dT%H:%M:%S%z")
+                except ValueError:
+                    ts = None
+                if ts is not None and (oldest_in_page is None
+                                       or ts < oldest_in_page):
+                    oldest_in_page = ts
+
+        pages += 1
+        if len(rows) < page_limit:
+            break
+        if oldest_in_page is None:
+            # Cannot advance the upper bound safely — bail out rather
+            # than infinite-loop on the same window.
+            raise RuntimeError(
+                "Could not parse last_event_time from /v3/messages "
+                "response — pagination cannot advance")
+        # Tighten the upper bound to one second before the oldest row
+        # we've already counted, so the next page is strictly older.
+        upper = oldest_in_page - dt.timedelta(seconds=1)
+        if upper <= start:
+            break
+    else:
         raise RuntimeError(
-            f"Unexpected /v3/messages response shape: "
-            f"{type(data).__name__}; keys "
-            f"{list(data.keys()) if isinstance(data, dict) else []}")
+            f"Pagination exceeded max_pages={max_pages} "
+            f"(>{max_pages * page_limit} messages in window); "
+            f"narrow --window-minutes or raise the cap")
 
-    for msg in (data.get("messages") or []):
-        status = (msg.get("status") or "").lower()
-        counters["processed"] += 1
-        if status == "delivered":
-            counters["delivered"] += 1
-        elif status in ("bounce", "bounced"):
-            counters["bounce"] += 1
-        elif status in ("spam_report", "spam"):
-            counters["spam_report"] += 1
-        elif status == "blocked":
-            counters["blocked"] += 1
-        elif status in ("dropped", "drop"):
-            counters["dropped"] += 1
     return counters
 
 
