@@ -26,6 +26,11 @@
 > 3-cloud + Vertex, cash leakage, credit headroom by feature), see the
 > companion analysis at
 > [`docs/infra/cost-per-feature-comparison.md`](./cost-per-feature-comparison.md).
+>
+> **For the 10k DAU per-provider audit** (each provider's monthly burn
+> sized to fit inside its own startup-credit annualized headroom, with
+> the two tightest pools explicitly mitigated), see
+> [`docs/infra/10k-dau-cost-audit.md`](./10k-dau-cost-audit.md).
 
 ---
 
