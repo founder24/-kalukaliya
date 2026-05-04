@@ -15,6 +15,15 @@
 >   `MAX_HISTORY_TURNS`, `MAX_CHUNK_TOKENS`, `LLM_TURN_TIMEOUT_S`)
 >   and the A/B promotion-decision + cache-sunset decision logs.
 >   See Task #361 §F.
+> - `infra/cloud-cutover-364.md` — Phase B SendGrid warmup
+>   (`SENDGRID_TRAFFIC_PCT` Worker var) plus the legacy-secret
+>   deletion list (OPENAI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY,
+>   BEDROCK_PROXY_AUTH_TOKEN, RESEND_API_KEY, STRIPE_SECRET_KEY,
+>   STRIPE_WEBHOOK_SECRET) and the `syrabit-bedrock-proxy` Worker
+>   deletion. Once #364 finalizes, the Resend / Stripe / Bedrock /
+>   xAI / OpenAI / Anthropic flag rows in this runbook can be
+>   archived with a "decommissioned 2026-05" banner; until then they
+>   remain authoritative for the rollback path. See Task #364.
 > - `infra/features-roadmap-362.md` — features-tier flags
 >   (`recall_intent:tier1_phrases`, `recall_intent:tier2_tokens`,
 >   `session:fallback:{id}`, `session:fallback:disabled`,
@@ -198,6 +207,8 @@ traffic during a flip).
 | `moderation:rephrase_hints` *(post-#362)* | Redis JSON object, read at process start (refreshed every 5 min) | on-call | seeded per #362 §4.4 | on-call | up to 5 min (acceptable — non-safety-critical) | `redis-cli SET moderation:rephrase_hints '<previous-json>'` |
 | `moderation:hard_floors_test_mode` *(post-#362)* | env var read at process start | infra owner | unset (= disabled) | infra owner | next deploy | redeploy without the env var |
 | `user_profile.moderation_mode` *(post-#362)* | Mongo document, read every turn from `user_profile` (cached on FastAPI request scope) | user (UI setting) / admin override | `"default"` | user / admin | next turn (no cache TTL) | revert via UI; admin override via Mongo update + audit-log entry |
+| `SENDGRID_TRAFFIC_PCT` *(post-#364)* | CF Worker secret on `syrabit-email`, read on every send | infra (manual ramp 0 → 1 → 10 → 50 → 100 over ~24 h) | `0` (= SES-only) at cutover start | infra | < 30 s (Worker re-deploy) | `wrangler secret put SENDGRID_TRAFFIC_PCT --env production` (paste prior value, then redeploy) |
+| `SENDGRID_FORCE_BYPASS` *(post-#364)* | CF Worker secret on `syrabit-email`, read on every send (test-only) | infra | unset (= disabled) | infra | < 30 s | `wrangler secret delete SENDGRID_FORCE_BYPASS --env production` |
 
 ---
 

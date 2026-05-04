@@ -11,6 +11,11 @@
 > - `infra/perf-roadmap-361.md` — perf tier (RAG/embed cache,
 >   fast-mode 1b vs 3b A/B, p99 instrumentation, ROI gate +
 >   kill-switch). See Task #361.
+> - `infra/cloud-cutover-364.md` — operator-side cutover for the
+>   provider removals shipped in Task #347 (Azure ACA revision swap,
+>   SendGrid 1→10→50→100 % traffic warmup, legacy-secret deletion
+>   across CF / Azure KV / GitHub Actions, `syrabit-bedrock-proxy`
+>   Worker deletion, SES fallback verification). See Task #364.
 > - `infra/features-roadmap-362.md` — features tier (deep recall via
 >   summary-vector embedding gated by recall-intent detector,
 >   mixed-language en↔as UX metrics, per-session sticky model

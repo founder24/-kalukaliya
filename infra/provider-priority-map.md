@@ -11,6 +11,11 @@
 >   separate batch index / Vertex chat co-primary). See Task #363 §A.
 > - `infra/perf-roadmap-361.md` — perf-tier (RAG/embed cache,
 >   fast-mode 1b vs 3b A/B, p99 instrumentation). See Task #361.
+> - `infra/cloud-cutover-364.md` — operator-side cutover for the
+>   #347 provider removals (Azure ACA swap, SendGrid warmup, legacy-
+>   secret deletion across CF / Azure KV / GitHub Actions, CF Worker
+>   deletion). The "removed" tiers in the per-feature tables below
+>   are made real cloud-side by this runbook. See Task #364.
 > - `infra/features-roadmap-362.md` — features-tier (deep recall
 >   via summary-vector embedding gated by recall-intent detector,
 >   mixed-language en↔as UX metrics, per-session sticky model
