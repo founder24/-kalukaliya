@@ -232,6 +232,58 @@ async def create_payment_order(body: PaymentOrderRequest, user: dict = Depends(g
     if not key_id or not key_secret:
         raise HTTPException(503, "Payment gateway not configured. Please contact admin@syrabit.ai.")
 
+    # Task #337 — Fraud Detector risk score on payment intent
+    # (runbook §3.9). ``block`` aborts the order with HTTP 402;
+    # ``review`` lets the order through but stamps ``risk_review=True``
+    # on the order notes so the admin payments queue can hand-verify
+    # before activation. Detector outage is treated as ``approve`` so
+    # a Fraud Detector outage cannot freeze the checkout funnel.
+    risk_review = False
+    risk_score = 0.0
+    try:
+        import os as _os, asyncio as _asyncio
+        _det_id = _os.environ.get("AWS_FRAUD_DETECTOR_PAYMENT_ID", "").strip() or _os.environ.get("AWS_FRAUD_DETECTOR_ID", "").strip()
+        _det_ver = _os.environ.get("AWS_FRAUD_DETECTOR_PAYMENT_VERSION", "").strip() or _os.environ.get("AWS_FRAUD_DETECTOR_VERSION", "").strip()
+        if _det_id and _det_ver:
+            from providers import aws_native as _awsn
+            if _awsn.is_enabled("fraud_detector") and _awsn.is_configured():
+                _verdict = await _asyncio.to_thread(
+                    _awsn.get_fraud_score,
+                    detector_id=_det_id,
+                    detector_version_id=_det_ver,
+                    event_id=f"order_{user['id']}_{int(time.time())}",
+                    event_type="payment_intent",
+                    entity_type="user",
+                    entity_id=str(user["id"]),
+                    event_variables={
+                        "user_id":     str(user["id"]),
+                        "plan":        plan,
+                        "amount_inr":  str(PLAN_PRICES_INR[plan]),
+                        "user_plan":   user_plan,
+                        "email":       (user.get("email") or "").lower(),
+                    },
+                )
+                risk_score = _verdict.score
+                if _verdict.outcome == "block":
+                    logger.warning(
+                        "Payment blocked by Fraud Detector for user %s: score=%.1f",
+                        user["id"], _verdict.score,
+                    )
+                    raise HTTPException(
+                        status_code=402,
+                        detail="Payment blocked by fraud risk policy. Please contact support@syrabit.ai.",
+                    )
+                if _verdict.outcome == "review":
+                    risk_review = True
+                    logger.info(
+                        "Payment marked for review by Fraud Detector: user=%s score=%.1f",
+                        user["id"], _verdict.score,
+                    )
+    except HTTPException:
+        raise
+    except Exception as _fd_exc:
+        logger.warning("Fraud Detector payment probe skipped: %s", str(_fd_exc)[:200])
+
     try:
         import razorpay
         client = razorpay.Client(auth=(key_id, key_secret))
@@ -240,18 +292,37 @@ async def create_payment_order(body: PaymentOrderRequest, user: dict = Depends(g
             "currency": "INR",
             "receipt":  f"s_{str(user['id'])[:8]}_{plan}_{int(time.time())}"[:40],
             "notes": {
-                "user_id": str(user["id"]),
-                "plan":    plan,
+                "user_id":     str(user["id"]),
+                "plan":        plan,
+                "risk_review": "1" if risk_review else "0",
+                "risk_score":  f"{risk_score:.1f}",
             },
         })
+        # Persist a pending-review row so the admin payments queue can
+        # hand-verify before plan activation.
+        if risk_review:
+            try:
+                await db.payment_risk_reviews.insert_one({
+                    "user_id":      str(user["id"]),
+                    "razorpay_order_id": order["id"],
+                    "plan":         plan,
+                    "score":        risk_score,
+                    "status":       "pending_review",
+                    "created_at":   datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as _persist_exc:
+                logger.warning("payment_risk_reviews persist failed: %s", str(_persist_exc)[:200])
         return {
-            "order_id":   order["id"],
-            "amount":     order["amount"],
-            "currency":   order["currency"],
-            "key_id":     key_id,
-            "plan":       plan,
-            "plan_label": plan.capitalize(),
+            "order_id":    order["id"],
+            "amount":      order["amount"],
+            "currency":    order["currency"],
+            "key_id":      key_id,
+            "plan":        plan,
+            "plan_label":  plan.capitalize(),
+            "risk_review": risk_review,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Razorpay create-order error: {e}")
         raise HTTPException(502, "Failed to create payment order. Please try again.")

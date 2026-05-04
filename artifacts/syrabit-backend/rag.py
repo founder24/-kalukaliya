@@ -918,28 +918,55 @@ async def _fetch_internal_chapters(
                 "type":       "chapter",
             })
 
-        # ── 5. Pinecone reranking (bge-reranker-v2-m3, multilingual) ──────────
-        if _pinecone_enabled and len(candidates) > 1:
+        # ── 5. Reranking — Bedrock-Cohere PRIMARY, Pinecone fallback ──────────
+        # Task #337: per cloud-allocation-plan §6 + §9, Bedrock-Cohere
+        # rerank-v3-5 is the **primary** reranker. Pinecone bge-reranker-v2-m3
+        # is the fallback when Bedrock is disabled, returns no results, or
+        # raises. Both are multilingual; the Cohere-only allow-list is
+        # enforced inside providers.aws_native.bedrock_rerank.
+        if len(candidates) > 1:
+            def _rerank_text(c: dict) -> str:
+                en_part = c["content"][:600]
+                as_part = c["content_as"][:300] if c["content_as"] else ""
+                return f"{c['title']}\n\n{en_part}" + (f"\n\n{as_part}" if as_part else "")
+
+            reranked = False
             try:
-                from providers.pinecone_ai import rerank_items as _pc_rerank
+                from config import BEDROCK_COHERE_PRIMARY as _BEDROCK_PRIMARY
+                from providers import aws_native as _awsn
+                if _BEDROCK_PRIMARY and _awsn.is_enabled("bedrock_cohere") and _awsn.is_configured():
+                    docs = [_rerank_text(c) for c in candidates]
+                    ranked = await asyncio.wait_for(
+                        asyncio.to_thread(_awsn.bedrock_rerank, query, docs, top_n=limit),
+                        timeout=3.0,
+                    )
+                    order = [r["index"] for r in ranked if r.get("index") is not None]
+                    if order:
+                        candidates = [candidates[i] for i in order if 0 <= i < len(candidates)][:limit]
+                        reranked = True
+                        logger.info(
+                            "[INTERNAL_RAG] Bedrock-Cohere PRIMARY reranked → top %d for '%s'",
+                            len(candidates), query[:50],
+                        )
+            except Exception as _bk_err:
+                logger.debug("[INTERNAL_RAG] Bedrock-Cohere primary rerank failed: %s", _bk_err)
 
-                def _rerank_text(c: dict) -> str:
-                    # Bilingual scoring: include Assamese content when available so
-                    # the multilingual reranker can match Assamese queries.
-                    en_part = c["content"][:600]
-                    as_part = c["content_as"][:300] if c["content_as"] else ""
-                    return f"{c['title']}\n\n{en_part}" + (f"\n\n{as_part}" if as_part else "")
+            if not reranked and _pinecone_enabled:
+                try:
+                    from providers.pinecone_ai import rerank_items as _pc_rerank
+                    candidates = await asyncio.wait_for(
+                        _pc_rerank(query, candidates, _rerank_text, top_k=limit, min_score=-1.0),
+                        timeout=3.0,
+                    )
+                    reranked = True
+                    logger.info(
+                        "[INTERNAL_RAG] Pinecone fallback reranked → top %d for '%s'",
+                        len(candidates), query[:50],
+                    )
+                except Exception as _rr_err:
+                    logger.debug("[INTERNAL_RAG] Pinecone fallback rerank skipped: %s", _rr_err)
 
-                candidates = await asyncio.wait_for(
-                    _pc_rerank(query, candidates, _rerank_text, top_k=limit, min_score=-1.0),
-                    timeout=3.0,
-                )
-                logger.info(
-                    "[INTERNAL_RAG] Pinecone reranked → top %d for '%s'",
-                    len(candidates), query[:50],
-                )
-            except Exception as _rr_err:
-                logger.debug("[INTERNAL_RAG] Pinecone rerank skipped: %s", _rr_err)
+            if not reranked:
                 candidates = candidates[:limit]
         else:
             candidates = candidates[:limit]

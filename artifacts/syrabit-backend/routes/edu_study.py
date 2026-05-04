@@ -2546,6 +2546,59 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
 
 # ───────────────────────── Voice (STT + status) ─────────────────────────
 
+# Task #337 — Personalize-backed home rail with deterministic fallback.
+# The endpoint mirrors the runbook §3.8 contract: try Personalize first
+# (when ``AWS_PERSONALIZE_CAMPAIGN_ARN`` + the admin toggle are both set
+# and live), and otherwise apply the popularity × recency × subject_affinity
+# deterministic ranker shipped with providers.aws_native. Either path
+# returns a list of subject/chapter ids the React home page renders.
+
+@router.get("/edu/recommendations")
+async def edu_recommendations(
+    limit: int = 12,
+    user=Depends(get_current_user_optional),
+):
+    import os as _os
+    user_id = (user or {}).get("id") or "anon"
+    campaign_arn = _os.environ.get("AWS_PERSONALIZE_CAMPAIGN_ARN", "").strip()
+
+    # 1) Live Personalize path.
+    try:
+        from providers import aws_native as _awsn
+        if campaign_arn and _awsn.is_enabled("personalize") and _awsn.is_configured():
+            ids = await asyncio.to_thread(
+                _awsn.get_recommendations,
+                campaign_arn=campaign_arn,
+                user_id=user_id,
+                num_results=limit,
+            )
+            if ids:
+                return {"source": "personalize", "items": ids}
+    except Exception as _exc:
+        logger.warning("Personalize recommendations failed, falling through: %s", _exc)
+
+    # 2) Deterministic fallback — popularity × recency × subject_affinity.
+    try:
+        _db = deps.db
+        cursor = _db["chapters"].find(
+            {}, {"id": 1, "popularity_score": 1, "recency_score": 1, "subject_affinity": 1},
+        ).limit(500)
+        candidates = []
+        async for doc in cursor:
+            candidates.append({
+                "id": doc.get("id"),
+                "popularity_score": doc.get("popularity_score", 0.0),
+                "recency_score":    doc.get("recency_score", 0.0),
+                "subject_affinity": doc.get("subject_affinity", 0.0),
+            })
+    except Exception:
+        candidates = []
+
+    from providers import aws_native as _awsn
+    ids = _awsn.deterministic_recommendations(candidates, num_results=limit)
+    return {"source": "deterministic", "items": ids}
+
+
 @router.get("/edu/voice/status")
 async def voice_status():
     return {

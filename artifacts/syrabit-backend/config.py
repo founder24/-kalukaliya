@@ -473,6 +473,14 @@ ELEVENLABS_MODEL_ID = os.environ.get('ELEVENLABS_MODEL_ID', 'eleven_multilingual
 COHERE_EMBED_MODEL   = os.environ.get('COHERE_EMBED_MODEL',   'embed-multilingual-v3.0').strip() or 'embed-multilingual-v3.0'
 COHERE_EMBED_PRIMARY = os.environ.get('COHERE_EMBED_PRIMARY', '1').strip().lower() not in ('0', 'false', 'no', 'off')
 
+# Task #337 — Bedrock-Cohere is the **primary** Cohere route per
+# cloud-allocation-plan §6 + §9. When this flag is on AND
+# providers.aws_native.is_enabled("bedrock_cohere") is True, embed_text
+# and rerank route to Bedrock-Cohere FIRST and fall back to direct
+# Cohere / Workers AI / Vertex on failure. Default is on so the
+# documented "Bedrock-Cohere primary" routing matches a fresh deploy.
+BEDROCK_COHERE_PRIMARY = os.environ.get('BEDROCK_COHERE_PRIMARY', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+
 # Voyage AI embed config — voyage-3.5 has the strongest English retrieval
 # nDCG@10 in the public benchmark (0.816 vs Cohere multilingual-v3.0 0.781),
 # so we make it the primary for English / mixed-script queries via the

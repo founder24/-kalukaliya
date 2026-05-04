@@ -93,6 +93,28 @@ async def admin_nlp_analyze(
         top = "error"
     else:
         top = "partial"
+    # Task #337 — Comprehend sampled overlay (analytics-only). Adds a
+    # second opinion on PII + sentiment alongside the primary
+    # ``nlp_client`` (Google NLP). Failures here are non-fatal — the
+    # admin tile already ships the primary verdict.
+    try:
+        from providers import aws_native as _awsn
+        if _awsn.is_enabled("comprehend") and _awsn.is_configured():
+            sample = content[:5000]
+            sent = await asyncio.to_thread(
+                _awsn.detect_sentiment, sample, language_code=(language or "en")[:2],
+            )
+            pii = await asyncio.to_thread(
+                _awsn.detect_pii, sample, language_code=(language or "en")[:2],
+            )
+            feats["comprehend"] = {
+                "status": "ok",
+                "sentiment": sent.get("sentiment"),
+                "pii_count": len(pii),
+            }
+    except Exception as _cm_exc:
+        feats["comprehend"] = {"status": "error", "error": str(_cm_exc)[:200]}
+
     return {
         "status": top,
         "ok_count": ok_count,

@@ -88,6 +88,96 @@ async def _tts_workers_ai(text: str, language: str) -> bytes:
     return await _cf_speak(text, lang=language[:2] if language else "en")
 
 
+# Task #337 — Polly is the documented third-tier TTS fallback (after
+# ElevenLabs + Google TTS). The IAM role + boto3 wiring lives in
+# providers/aws_native.py; the call is offloaded to a thread because
+# the boto3 client is sync.
+
+async def _aws_transcribe_short(audio_bytes: bytes, language: str) -> Optional[str]:
+    """Third-tier STT fallback via AWS Transcribe.
+
+    Uploads the clip to the transient bucket configured by
+    ``AWS_TRANSCRIBE_TMP_BUCKET``, starts a sync job, then polls
+    ``GetTranscriptionJob`` for up to ~6s. Returns ``None`` if the
+    bucket is not configured (so the chain advances cleanly to Workers
+    AI) or the job has not finished within the budget.
+    """
+    import os
+    bucket = os.environ.get("AWS_TRANSCRIBE_TMP_BUCKET", "").strip()
+    if not bucket:
+        return None
+
+    from providers import aws_native
+    if not aws_native.is_enabled("transcribe") or not aws_native.is_configured():
+        return None
+
+    import uuid as _uuid
+    key = f"voice-fallback/{_uuid.uuid4().hex}.wav"
+
+    def _upload_and_start() -> str:
+        s3 = aws_native._client("s3", "transcribe")
+        s3.put_object(Bucket=bucket, Key=key, Body=audio_bytes, ContentType="audio/wav")
+        return aws_native.transcribe_audio(
+            f"s3://{bucket}/{key}",
+            language_code=_aws_lang_code(language),
+        )
+
+    job_name = await asyncio.to_thread(_upload_and_start)
+
+    # Poll up to ~6 seconds for short clips. Anything longer falls through.
+    def _poll() -> Optional[str]:
+        client = aws_native._client("transcribe", "transcribe")
+        for _ in range(12):
+            import time as _t
+            _t.sleep(0.5)
+            resp = client.get_transcription_job(TranscriptionJobName=job_name)
+            job = resp.get("TranscriptionJob", {})
+            status = job.get("TranscriptionJobStatus")
+            if status == "COMPLETED":
+                uri = job.get("Transcript", {}).get("TranscriptFileUri")
+                if not uri:
+                    return None
+                import urllib.request, json as _json
+                with urllib.request.urlopen(uri) as r:
+                    payload = _json.loads(r.read().decode("utf-8"))
+                items = payload.get("results", {}).get("transcripts", [])
+                return items[0].get("transcript") if items else None
+            if status == "FAILED":
+                return None
+        return None
+
+    return await asyncio.to_thread(_poll)
+
+
+def _aws_lang_code(language: str) -> str:
+    base = (language or "en")[:2].lower()
+    return {
+        "en": "en-IN", "hi": "hi-IN", "ta": "ta-IN",
+        "bn": "en-IN",   # Transcribe lacks Bengali batch — Sarvam still primary
+        "as": "en-IN",   # Assamese unsupported — Sarvam stays primary
+    }.get(base, "en-IN")
+
+
+async def _tts_aws_polly(text: str, voice_id: Optional[str], language: str) -> bytes:
+    from providers import aws_native
+    if not aws_native.is_enabled("polly"):
+        raise RuntimeError("AWS Polly disabled by admin toggle")
+
+    # Indic coverage per runbook §3.2 — Polly does not yet ship Assamese;
+    # caller still falls through to the workers_ai last-resort for `as`.
+    voice_map = {
+        "en": ("Joanna",  "en-US"),
+        "hi": ("Kajal",   "hi-IN"),
+        "ta": ("Aditi",   "ta-IN"),
+    }
+    lang_short = (language or "en")[:2].lower()
+    voice, lang_code = voice_map.get(lang_short, ("Joanna", "en-US"))
+    if voice_id:
+        voice = voice_id
+    return await asyncio.to_thread(aws_native.synthesize_polly,
+                                   text, voice_id=voice, language_code=lang_code)
+
+
 # ── Individual provider STT callers ───────────────────────────────────────────
 
 async def _stt_deepgram(audio_bytes: bytes, language: str) -> str:
@@ -184,6 +274,16 @@ async def _synthesize_with_fallback(
             logger.warning("TTS %s failed: %s — removing from pool and retrying", provider, exc)
             exclude = exclude | {provider}
 
+    # Task #337: Polly is the documented third-tier fallback once the
+    # weighted pool is exhausted. The select_provider chain above is
+    # left unchanged to keep the existing primaries / weights stable;
+    # Polly slots in here so the runbook ordering (ElevenLabs → Google
+    # TTS → Polly → Workers AI) is honoured without rewiring weights.
+    try:
+        return await _tts_aws_polly(text, voice_id, language)
+    except Exception as exc:
+        logger.warning("TTS Polly fallback failed: %s — falling through to Workers AI", exc)
+
     # Absolute last resort: Workers AI regardless of exclusion list.
     logger.error("TTS: all providers exhausted, forcing Workers AI fallback")
     return await _tts_workers_ai(text, language)
@@ -235,6 +335,20 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
         except Exception as exc:
             logger.warning("STT %s failed: %s — removing from pool and retrying", provider, exc)
             exclude = exclude | {provider}
+
+    # Task #337: AWS Transcribe slots in as the third-tier STT fallback
+    # (after Deepgram + AssemblyAI). It runs *before* the workers_ai
+    # last-resort so the runbook ordering is honoured. Async job +
+    # short poll because Transcribe is not a streaming socket here;
+    # the extra ~2s round-trip is acceptable in the fallback path.
+    try:
+        from providers import aws_native as _awsn
+        if _awsn.is_enabled("transcribe"):
+            transcript = await _aws_transcribe_short(audio_bytes, language)
+            if transcript:
+                return transcript
+    except Exception as exc:
+        logger.warning("STT AWS Transcribe fallback failed: %s — falling through to Workers AI", exc)
 
     # Absolute last resort.
     logger.error("STT: all providers exhausted, forcing Workers AI fallback")

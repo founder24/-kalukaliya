@@ -361,15 +361,40 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
         _ek = None
         _embedding_cache = None  # type: ignore[assignment]
 
-    # Choose embedding provider based on configuration
-    from config import COHERE_EMBED_PRIMARY as _COHERE_PRIMARY
-    if _COHERE_PRIMARY:
-        vec = await _cohere_primary_embed(text, task_type)
-        if vec is None:
-            logger.debug("[embed] Cohere primary failed — falling back to Workers AI")
+    # Task #337 — Bedrock-Cohere is the **primary** Cohere route per
+    # cloud-allocation-plan §6 + §9. When the BEDROCK_COHERE_PRIMARY
+    # flag is on AND the admin has not disabled the bedrock_cohere
+    # feature, we hit Bedrock-Cohere FIRST. Same Cohere model
+    # (embed-multilingual-v3) so vectors stay in the 1024-dim space
+    # the main Vectorize index expects — no cross-space contamination.
+    # Cohere-only allow-list is enforced inside
+    # providers.aws_native.bedrock_embed itself.
+    vec = None
+    from config import (
+        BEDROCK_COHERE_PRIMARY as _BEDROCK_PRIMARY,
+        COHERE_EMBED_PRIMARY as _COHERE_PRIMARY,
+    )
+    if _BEDROCK_PRIMARY:
+        try:
+            from providers import aws_native as _awsn
+            if _awsn.is_enabled("bedrock_cohere") and _awsn.is_configured():
+                vecs = await asyncio.to_thread(_awsn.bedrock_embed, [text.strip()[:8000]])
+                if vecs:
+                    vec = vecs[0]
+                    logger.debug("[embed] Bedrock-Cohere PRIMARY hit (Task #337)")
+        except Exception as exc:
+            logger.warning("[embed] Bedrock-Cohere primary failed, falling back: %s", str(exc)[:150])
+
+    # Direct Cohere → Workers AI fallback chain when Bedrock-Cohere is
+    # disabled or returned no vector.
+    if vec is None:
+        if _COHERE_PRIMARY:
+            vec = await _cohere_primary_embed(text, task_type)
+            if vec is None:
+                logger.debug("[embed] Cohere direct failed — falling back to Workers AI")
+                vec = await _workers_ai_primary_embed(text)
+        else:
             vec = await _workers_ai_primary_embed(text)
-    else:
-        vec = await _workers_ai_primary_embed(text)
 
     # Vertex AI embed fallback (Task #247) — for long-form content or when
     # Workers AI embed is in cooldown. NOTE: Vertex text-embedding-004 is
@@ -474,6 +499,22 @@ async def translate(text: str, target_lang: str = "as", source_lang: str = "en")
             return result
     except Exception as exc:
         logger.warning("[wai] translate (indictrans2) failed, trying LLM fallback: %s", str(exc)[:150])
+
+    # Task #337 — AWS Translate slot in *before* the LLM-prompt fallback.
+    # The runbook (§3.7) lists Translate as the Sarvam/Workers-AI fallback,
+    # so we attempt it whenever the prior tiers have all returned empty.
+    try:
+        from providers import aws_native as _awsn
+        if _awsn.is_enabled("translate") and _awsn.is_configured():
+            translated = await asyncio.to_thread(
+                _awsn.translate_text, text[:5000],
+                source_lang=source_lang or "auto",
+                target_lang=target_lang,
+            )
+            if translated:
+                return translated
+    except Exception as exc:
+        logger.warning("[aws-translate] fallback failed: %s", str(exc)[:150])
 
     if not _ok():
         return None

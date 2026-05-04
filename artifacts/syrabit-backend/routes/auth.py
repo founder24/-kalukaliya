@@ -83,6 +83,42 @@ async def signup(
         "consent_dpdp_at": now if data.consent_dpdp else None,
         "created_at": now,
     }
+
+    # Task #337 — Fraud Detector risk score on signup. Outage policy
+    # per runbook §3.9: any RuntimeError is swallowed and treated as
+    # ``approve`` so a Fraud Detector outage cannot lock new signups
+    # out of the platform. ``block`` is the only verdict that aborts.
+    try:
+        import os as _os
+        _det_id = _os.environ.get("AWS_FRAUD_DETECTOR_ID", "").strip()
+        _det_ver = _os.environ.get("AWS_FRAUD_DETECTOR_VERSION", "").strip()
+        if _det_id and _det_ver:
+            from providers import aws_native as _awsn
+            if _awsn.is_enabled("fraud_detector") and _awsn.is_configured():
+                _verdict = await asyncio.to_thread(
+                    _awsn.get_fraud_score,
+                    detector_id=_det_id,
+                    detector_version_id=_det_ver,
+                    event_id=user_id,
+                    event_type="signup",
+                    entity_type="user",
+                    entity_id=user_id,
+                    event_variables={
+                        "email":      data.email.lower(),
+                        "ip_address": (request.client.host if request.client else "0.0.0.0"),
+                        "user_agent": (request.headers.get("user-agent") or "")[:500],
+                    },
+                )
+                if _verdict.outcome == "block":
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Signup blocked by fraud risk policy. Please contact support.",
+                    )
+    except HTTPException:
+        raise
+    except Exception as _fd_exc:
+        logger.warning("Fraud Detector signup probe skipped: %s", str(_fd_exc)[:200])
+
     await supa_insert_user(user)
     if data.consent_dpdp:
         try:

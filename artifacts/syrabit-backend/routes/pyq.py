@@ -158,6 +158,38 @@ async def admin_pyq_upload(
         file_url: str = ""
         storage_path  = f"{_PYQ_PREFIX}/{doc_id}/{safe_name}"
 
+        # Task #337 — Rekognition pre-upload moderation gate (runbook §3.5).
+        # Flagged images are written to the moderation_queue collection
+        # (status=pending_review) instead of returned to the user-visible
+        # surface; the admin AdminModerationQueuePanel approves or rejects.
+        # Caller surface receives 202 + queue_id so the React upload modal
+        # can render an "under review" pill instead of a hard 4xx.
+        if is_image:
+            from services import moderation_queue as _mq
+            verdict = await _mq.screen_image(
+                raw,
+                surface="pyq",
+                owner_id=str(admin.get("sub", "admin")),
+                filename=safe_name,
+                mime=mime,
+                db_handle=_db,
+                supa_handle=supa if use_supabase else None,
+                bucket=_PYQ_BUCKET,
+                extra={
+                    "exam_year": exam_year,
+                    "exam_title": exam_title,
+                    "subject_id": subject_id,
+                    "doc_id": doc_id,
+                },
+            )
+            if verdict.flagged and verdict.quarantined:
+                logger.warning(
+                    "[pyq/upload] Rekognition quarantined %s queue_id=%s max_conf=%.1f",
+                    safe_name, verdict.queue_id, verdict.max_confidence,
+                )
+                # Skip storing the public artefact — admin queue holds the bytes.
+                continue
+
         if use_supabase:
             try:
                 file_url = await asyncio.get_event_loop().run_in_executor(
@@ -178,11 +210,39 @@ async def admin_pyq_upload(
                 file_url = ""
                 logger.warning(f"PYQ PDF stored without file content (Supabase unavailable): {safe_name}")
 
+        # Task #337 — Textract structured-OCR pipeline branch (runbook §3.4).
+        # When the upload looks like a single-page printed past paper
+        # (image OR small PDF), we fan it out to Textract synchronously
+        # to extract FORMS+TABLES blocks. The structured payload is
+        # persisted on the pyq doc so downstream graders / the admin
+        # mark-sheet review screen can render answer fields without a
+        # second OCR round-trip. Failure is non-fatal (the pyq doc is
+        # still saved with `textract_status="degraded"`).
+        textract_blob: dict = {}
+        textract_status = "skipped"
+        if (is_image or is_pdf) and len(raw) <= 9 * 1024 * 1024:
+            try:
+                from providers import aws_native as _awsn
+                if _awsn.is_enabled("textract") and _awsn.is_configured():
+                    textract_blob = await asyncio.to_thread(
+                        _awsn.analyze_document_bytes, raw,
+                    )
+                    textract_status = "ok"
+                    logger.info(
+                        "[pyq/upload] Textract structured OCR: %d blocks for %s",
+                        len(textract_blob.get("Blocks", []) or []), safe_name,
+                    )
+            except Exception as _tx_exc:
+                textract_status = "degraded"
+                logger.warning("[pyq/upload] Textract failed: %s", str(_tx_exc)[:200])
+
         # ── Build MongoDB document ────────────────────────────────────────────
         doc = {
             "id":            doc_id,
             "filename":      upload.filename or "upload",
             "mime_type":     mime,
+            "textract_status": textract_status,
+            "textract_block_count": len(textract_blob.get("Blocks", []) or []) if textract_blob else 0,
             "exam_title":    exam_title or f"{paper_type.upper()} {exam_year}",
             "exam_year":     exam_year,
             "paper_type":    paper_type,

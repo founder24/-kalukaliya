@@ -507,3 +507,32 @@ this doc is signed off**:
    from the strict-primary lock to the weighted draw, and update
    `POOL_WEIGHTS` in a separate PR with §2.2 numbers (not bundled with
    the dispatcher PR).
+
+---
+
+## Powered by AWS — native advanced features
+
+**Task #337** lights up additional AWS-managed services on top of the
+landing zone defined in [`aws-landing-zone.md`](aws-landing-zone.md).
+Every entry is an *additional* path in an existing failover chain —
+nothing here replaces a primary provider. Full feature runbook lives
+in [`../features/aws-native.md`](../features/aws-native.md).
+
+| Feature                   | Provider role            | Position in chain                              | IAM role tag           |
+| ------------------------- | ------------------------ | ---------------------------------------------- | ---------------------- |
+| Bedrock — **Cohere only** | embed + rerank           | Primary (Cohere direct stays as fallback)      | `bedrock_cohere`       |
+| Polly                     | TTS                      | Tier 3 (after ElevenLabs, Google TTS)          | `polly`                |
+| Transcribe                | STT                      | Tier 3 (after Deepgram, Google Chirp)          | `transcribe`           |
+| Textract                  | OCR (structured)         | Branch (per upload-type flag)                  | `textract`             |
+| Rekognition               | Image moderation         | Required guard pre-R2                          | `rekognition`          |
+| Comprehend                | PII + sentiment (sampled)| Background analytics only                      | `comprehend`           |
+| Translate                 | Indic ↔ EN translate     | Fallback when Sarvam returns 429 / 5xx          | `translate`            |
+| Personalize               | Recs (home + continue)   | Feature-flagged with deterministic fallback   | `personalize`          |
+| Fraud Detector            | Risk score               | Signup + payment-intent guard, admin review    | `fraud_detector`       |
+
+**Out of scope (intentional):** Anthropic Claude, Meta Llama, Mistral,
+Amazon Titan, and Amazon Nova on Bedrock are excluded per §6 + §9 of
+the cloud-allocation plan. The chat-LLM role belongs to Azure OpenAI
+(GPT-4.1-mini) + Vertex Gemini 2.5 Flash. Bedrock IAM is therefore
+scoped to the two Cohere model ARNs only —
+see [`../../infra/aws/aws-native-features.tf`](../../infra/aws/aws-native-features.tf).

@@ -114,6 +114,36 @@ async def upload_avatar(
     max_size = 2 * 1024 * 1024
     if len(file_content) > max_size:
         raise HTTPException(status_code=400, detail="Image must be under 2 MB")
+
+    # Task #337 — Rekognition pre-storage moderation gate (runbook §3.5).
+    # Flagged avatars are quarantined to the admin moderation queue
+    # instead of replacing the user's current avatar; the API returns
+    # 202 with the queue id so the client can render an "under review"
+    # pill. Rekognition outage is non-blocking (availability > gating).
+    from services import moderation_queue as _mq
+    from deps import db as _db, supa as _supa
+    verdict = await _mq.screen_image(
+        file_content,
+        surface="avatar",
+        owner_id=str(user.get("id", "")),
+        filename=file.filename or "avatar",
+        mime=file.content_type,
+        db_handle=_db,
+        supa_handle=_supa,
+        extra={"email": user.get("email", "")},
+    )
+    if verdict.flagged and verdict.quarantined:
+        # Do NOT update the avatar — return queue context so the React
+        # AvatarUploader renders the under-review state.
+        return {
+            "avatar_url": user.get("avatar_url", ""),
+            "moderation": {
+                "status": "pending_review",
+                "queue_id": verdict.queue_id,
+                "max_confidence": verdict.max_confidence,
+            },
+        }
+
     b64 = base64.b64encode(file_content).decode("utf-8")
     data_url = f"data:{file.content_type};base64,{b64}"
     await supa_update_user(user["id"], {"avatar_url": data_url})

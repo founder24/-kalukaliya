@@ -1657,6 +1657,16 @@ async def lifespan(app):
             f"[trustpilot-jsonld] runs index startup failed: {_tp_runs_err}"
         )
 
+    # Task #337 — Comprehend sampled PII + sentiment background loop.
+    # Wakes once an hour, scores ~25 chapters that haven't been touched
+    # in 7 days, persists into ``content_analytics``. Fail-safe: any
+    # exception is swallowed so a Comprehend outage cannot wedge the worker.
+    try:
+        from aca_jobs import comprehend_sampler as _csmp
+        _csmp.start(db)
+    except Exception as _csmp_err:
+        logger.warning(f"[aws-native] comprehend sampler start failed: {_csmp_err}")
+
     # Task #609 — initialise the managed AI response cache. Safe no-op when
     # MEMORYSTORE_REDIS_URL is unset; the cache transparently falls back to
     # in-memory L1. LLM upstream caching is handled by Cloudflare AI Gateway.
@@ -1976,6 +1986,8 @@ from routes.admin_gcp_status import router as admin_gcp_status_router
 from routes.internal_jobs import router as internal_jobs_router
 # Task #332 — AWS workers + Azure cron admin proxies.
 from routes.admin_aws_infra import router as admin_aws_infra_router
+from routes.admin_aws_native import router as admin_aws_native_router
+from routes.admin_moderation_queue import router as admin_moderation_queue_router
 from routes.admin_azure_cron import router as admin_azure_cron_router
 # Phase 5b — Task #338. Azure-native AI features admin proxy
 # (toggle + health for Azure OpenAI, Speech, Translator, Document
@@ -2125,6 +2137,8 @@ api.include_router(admin_security_external_router)
 api.include_router(admin_discovery_router)
 api.include_router(admin_gcp_infra_router)
 api.include_router(admin_aws_infra_router)
+api.include_router(admin_aws_native_router)
+api.include_router(admin_moderation_queue_router)
 api.include_router(admin_azure_cron_router)
 api.include_router(admin_azure_ai_router)
 api.include_router(admin_gcp_status_router)
