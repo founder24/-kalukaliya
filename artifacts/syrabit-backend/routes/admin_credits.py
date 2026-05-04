@@ -11,12 +11,14 @@ GET /admin/credits/summary
   at request time (no DB required).
 
 GET /admin/credits/provider-weights
-  Returns the weighted pool for each of the 15 feature keys — useful for
-  verifying that the weighted round-robin will actually send traffic to
-  the expected providers.
+  Returns the weighted pool for every PROVIDER_PRIORITY feature key —
+  useful for verifying that the weighted round-robin will actually send
+  traffic to the expected providers. The feature count is derived from
+  ``len(PROVIDER_PRIORITY)`` so adding/removing a feature updates the
+  panel without code changes.
 
 GET /admin/credits/smoke-test
-  Iterates all 15 PROVIDER_PRIORITY feature keys. For each key, calls
+  Iterates every PROVIDER_PRIORITY feature key. For each key, calls
   select_provider() to confirm weighted selection works, then makes a
   provider-specific minimal real request through the chosen provider's CF
   AI Gateway slug. Each probe exercises BYOK auth and upstream reachability:
@@ -605,11 +607,31 @@ async def admin_credits_summary(
     }
 
 
+def _provider_priority_count() -> int:
+    """Return the current number of PROVIDER_PRIORITY feature keys.
+
+    Used by the FastAPI ``summary`` / ``description`` strings on the smoke-
+    test and provider-weights routes below. Those decorators evaluate this
+    at module-import time, so the OpenAPI metadata reflects whatever the
+    pool size was when the process started — that is sufficient for the
+    admin panel and is what replaces the historical hard-coded magic
+    number 15 (which silently went stale when ``embed_en`` and
+    ``embed_indic`` were split out of ``embed`` — see Task #368).
+
+    The runtime endpoint counts (``total_features``, ``pass_count``, etc.)
+    are computed separately inside the handler from the live
+    ``PROVIDER_PRIORITY.keys()`` and so update without a process restart.
+    """
+    from config import PROVIDER_PRIORITY  # noqa: PLC0415
+    return len(PROVIDER_PRIORITY)
+
+
 @router.get(
     "/admin/credits/provider-weights",
     summary="Weighted provider pools per feature",
     description=(
-        "Shows the weighted round-robin pool for each of the 15 feature keys. "
+        f"Shows the weighted round-robin pool for each of the "
+        f"{_provider_priority_count()} feature keys. "
         "Use this to verify that traffic will be sent to the expected providers."
     ),
 )
@@ -625,9 +647,13 @@ async def admin_credits_provider_weights(
 
 @router.get(
     "/admin/credits/smoke-test",
-    summary="CF Gateway BYOK smoke-test for all 15 feature keys",
+    summary=(
+        f"CF Gateway BYOK smoke-test for all "
+        f"{_provider_priority_count()} feature keys"
+    ),
     description=(
-        "Iterates all 15 PROVIDER_PRIORITY feature keys. For each key, calls "
+        f"Iterates all {_provider_priority_count()} PROVIDER_PRIORITY feature keys. "
+        "For each key, calls "
         "select_provider() to confirm weighted selection works, then makes a "
         "provider-specific minimal real request through the chosen provider's "
         "CF AI Gateway slug to exercise BYOK auth and upstream reachability. "

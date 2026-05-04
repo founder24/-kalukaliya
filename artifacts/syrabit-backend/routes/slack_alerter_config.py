@@ -55,9 +55,11 @@ UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK_ENV = "UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK"
 # name lives in exactly one place across the whole codebase.
 SLACK_TRUSTPILOT_WEBHOOK_ENV = "SLACK_TRUSTPILOT_WEBHOOK_URL"
 # Task #258 — CF Gateway slug smoke-test alerter
-# (``routes.admin_credits``) fires when any of the 15 feature-key
-# provider slugs returns non-200 or a connection error during the
-# /admin/credits/smoke-test probe.
+# (``routes.admin_credits``) fires when any of the PROVIDER_PRIORITY
+# feature-key provider slugs returns non-200 or a connection error
+# during the /admin/credits/smoke-test probe. The feature count is no
+# longer hard-coded here (Task #368) — see admin_credits._provider_
+# priority_count() for the dynamic source of truth.
 SMOKE_TEST_SLACK_WEBHOOK_ENV = "SMOKE_TEST_SLACK_WEBHOOK"
 
 

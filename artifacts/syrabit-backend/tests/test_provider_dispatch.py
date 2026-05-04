@@ -8,8 +8,11 @@ assertion (Bedrock has been fully decommissioned: providers/bedrock.py
 deleted, every elif branch removed, no PROVIDER_PRIORITY pool routes
 to ``bedrock``). The remaining tests cover the post-cleanup invariants:
 
-  * PROVIDER_PRIORITY structure (15 feature keys, all entries present
-    in PROVIDER_CREDITS).
+  * PROVIDER_PRIORITY structure (every feature key, all entries present
+    in PROVIDER_CREDITS). Count is derived from ``len(PROVIDER_PRIORITY)``
+    rather than a hard-coded number — see Task #368 for the rationale
+    (the historical "15" silently went stale once embed was split into
+    embed/embed_en/embed_indic).
   * Inverse Bedrock invariant — must NOT appear in any pool / weight map.
   * Workers AI promotion aliases (mistral_7b, llama32_3b, llama31_8b)
     are wired into _PROVIDER_DEFAULT_MODELS + _PROVIDER_CANONICAL so the

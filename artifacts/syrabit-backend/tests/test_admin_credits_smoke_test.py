@@ -1,4 +1,4 @@
-"""Task #258 — CF Gateway BYOK smoke-test for all 15 feature keys.
+"""Task #258 — CF Gateway BYOK smoke-test for every PROVIDER_PRIORITY feature.
 
 Tests for the ``GET /admin/credits/smoke-test`` endpoint and its supporting
 helpers in ``routes.admin_credits``:
@@ -14,8 +14,10 @@ helpers in ``routes.admin_credits``:
   CF-slugged providers with a spec; marks no-slug or no-spec providers "skip".
 * ``_post_smoke_slack_alert`` — best-effort POST to SMOKE_TEST_SLACK_WEBHOOK;
   no-op when unset; never raises on transport errors.
-* ``admin_credits_smoke_test`` — endpoint: all 15 features run concurrently;
-  overall="fail" when any feature fails; schedules Slack alert.
+* ``admin_credits_smoke_test`` — endpoint: every PROVIDER_PRIORITY feature
+  runs concurrently; overall="fail" when any feature fails; schedules Slack
+  alert. Counts are derived from ``len(PROVIDER_PRIORITY)`` (Task #368) so
+  the panel doesn't drift when features are added or removed.
 * ``SMOKE_TEST_SLACK_WEBHOOK_ENV`` — constant in slack_alerter_config.
 """
 from __future__ import annotations
@@ -771,7 +773,7 @@ def test_post_smoke_slack_alert_message_body_is_capped():
 # ── admin_credits_smoke_test (endpoint) ───────────────────────────────────────
 
 def _all_pass_results():
-    """Synthesise 15 'pass' result dicts — one per PROVIDER_PRIORITY feature."""
+    """Synthesise 'pass' result dicts — one per PROVIDER_PRIORITY feature."""
     from config import PROVIDER_PRIORITY
     return [
         {
@@ -786,7 +788,7 @@ def _all_pass_results():
 
 
 def _all_skip_results():
-    """Synthesise 15 'skip' result dicts."""
+    """Synthesise 'skip' result dicts — one per PROVIDER_PRIORITY feature."""
     from config import PROVIDER_PRIORITY
     return [
         {
@@ -803,15 +805,19 @@ def _all_skip_results():
 
 def test_smoke_test_endpoint_overall_pass_when_all_pass():
     """overall='pass' when every feature returns outcome='pass'."""
+    from config import PROVIDER_PRIORITY
+
     async def _run():
         with patch.object(mod, "_run_feature_smoke",
                           new=AsyncMock(side_effect=_all_pass_results())):
             return await mod.admin_credits_smoke_test(_admin={})
 
-    from config import PROVIDER_PRIORITY
     result = asyncio.run(_run())
     assert result["overall"] == "pass"
     assert result["fail_count"] == 0
+    # Pass count must reflect the *current* number of PROVIDER_PRIORITY feature
+    # keys — historically hard-coded to 15, drifted to 17 once embed_en/
+    # embed_indic were split out of embed (Task #368).
     assert result["pass_count"] == len(PROVIDER_PRIORITY)
 
 
@@ -835,6 +841,8 @@ def test_smoke_test_endpoint_overall_fail_when_any_fail():
 
 def test_smoke_test_endpoint_counts_skip_correctly():
     """skip_count is reported correctly when providers have no CF slug."""
+    from config import PROVIDER_PRIORITY
+
     results = _all_skip_results()
     # Flip one to pass so overall="pass" and Slack doesn't fire.
     results[0]["outcome"] = "pass"
@@ -845,16 +853,18 @@ def test_smoke_test_endpoint_counts_skip_correctly():
                           new=AsyncMock(side_effect=results)):
             return await mod.admin_credits_smoke_test(_admin={})
 
-    from config import PROVIDER_PRIORITY
     result = asyncio.run(_run())
+    # All-but-one should be skipped → skip_count is total feature count - 1.
+    # Derived from PROVIDER_PRIORITY (Task #368) so this stays correct as
+    # features are added/removed.
     assert result["skip_count"] == len(PROVIDER_PRIORITY) - 1
     assert result["pass_count"] == 1
     assert result["fail_count"] == 0
     assert result["overall"] == "pass"
 
 
-def test_smoke_test_endpoint_covers_all_15_feature_keys():
-    """The endpoint must probe every key in PROVIDER_PRIORITY (15 features)."""
+def test_smoke_test_endpoint_covers_every_feature_key():
+    """The endpoint must probe every key in PROVIDER_PRIORITY (current count)."""
     from config import PROVIDER_PRIORITY
     probed_features: list[str] = []
 
@@ -872,6 +882,9 @@ def test_smoke_test_endpoint_covers_all_15_feature_keys():
             return await mod.admin_credits_smoke_test(_admin={})
 
     asyncio.run(_run())
+    # Probe set must equal PROVIDER_PRIORITY exactly — Task #368 swapped the
+    # historical magic number 15 for the dynamic ``len(PROVIDER_PRIORITY)``
+    # so embed_en/embed_indic (and any future additions) are covered.
     assert set(probed_features) == set(PROVIDER_PRIORITY.keys())
     assert len(probed_features) == len(PROVIDER_PRIORITY)
 
@@ -925,18 +938,21 @@ def test_smoke_test_endpoint_does_not_schedule_slack_when_no_failures():
 
 def test_smoke_test_endpoint_response_shape():
     """Response must include the expected top-level keys."""
+    from config import PROVIDER_PRIORITY
+
     async def _run():
         with patch.object(mod, "_run_feature_smoke",
                           new=AsyncMock(side_effect=_all_pass_results())):
             return await mod.admin_credits_smoke_test(_admin={})
 
-    from config import PROVIDER_PRIORITY
     result = asyncio.run(_run())
     for key in ("overall", "total_features", "pass_count", "fail_count",
                 "skip_count", "cf_gateway_enabled", "slack", "run_at_epoch",
                 "results", "note"):
         assert key in result, f"missing key: {key}"
     assert isinstance(result["results"], list)
+    # total_features comes from len(PROVIDER_PRIORITY) (Task #368) — must
+    # not silently drift back to a hard-coded constant.
     assert result["total_features"] == len(PROVIDER_PRIORITY)
 
 
