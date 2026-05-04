@@ -1,27 +1,47 @@
 #!/usr/bin/env python3
 """
-SendGrid warmup gate (Task #364 §3 Phase B).
+SendGrid warmup gate (Task #364 §3 Phase B + §7 smoke row 9).
 
-Polls the SendGrid v3 stats endpoint
-(https://api.sendgrid.com/v3/stats) for the prior `--window-minutes`
-window and asserts:
+Two modes for tallying SendGrid event counters in the soak window:
+
+  --mode messages  (preferred — true minute-precision)
+      Queries the SendGrid Email Activity Feed API
+      (https://api.sendgrid.com/v3/messages) with a `last_event_time`
+      lower bound exactly --window-minutes ago, paginates, and tallies
+      `processed`, `delivered`, `bounce`, `spam_report`, `blocked`,
+      `dropped`. This is the only SendGrid endpoint that supports
+      sub-day windowing.
+      REQUIREMENT: the SendGrid plan must have the **Email Activity
+      History** add-on (Pro / Premier and above). On plans without
+      it, /v3/messages returns 401 with a `permission denied` body —
+      the script exits 2 and prints a one-line hint to fall back to
+      `--mode stats`.
+
+  --mode stats     (fallback — day-level only)
+      Queries the SendGrid Stats API (/v3/stats) with
+      `aggregated_by=day` and a date range derived from --window-days.
+      The day granularity is intrinsic to the endpoint; --window-minutes
+      is rejected in this mode to avoid the misleading-gate problem
+      flagged in #364 review (a "60-minute" gate that actually
+      summed an entire day of events). Use this only when the
+      Activity History add-on is unavailable; the soak gates in
+      §3 Phase B should use day-aligned checkpoints when running in
+      this mode.
+
+Asserts in either mode:
 
   1. bounce-rate < --bounce-max-pct
   2. spam-report-rate < --spam-max-pct
-  3. messages_sent >= --min-messages
-  4. (optional) blocked + invalid-email-rate < --block-max-pct
+  3. blocked + dropped (or invalid_emails in stats mode) < --block-max-pct
+  4. processed (or requests in stats mode) >= --min-messages
 
-If all four hold the script exits 0 — operator may ramp to the next
-SENDGRID_TRAFFIC_PCT step. If any threshold is breached it exits 1
-and the operator must hold the current step (or roll back) per §3.1.
-
-Reads `SENDGRID_API_KEY` from env. Read-only against SendGrid; never
-sends an email.
+Reads `SENDGRID_API_KEY` from env. Read-only; never sends an email.
 
 Exit codes:
-  0  all thresholds OK; safe to ramp
-  1  threshold breach; do NOT ramp
-  2  harness failure (network, bad credentials, malformed response)
+  0  all thresholds OK; safe to advance to the next checkpoint
+  1  threshold breach; do NOT advance — pause the warmup
+  2  harness failure (network, bad credentials, missing Activity
+     History add-on, malformed response)
   3  usage error
 """
 
@@ -35,14 +55,7 @@ import urllib.parse
 import urllib.request
 
 
-def _fetch_stats(api_key: str, start_date: str, end_date: str,
-                 timeout: float = 15.0) -> list[dict]:
-    qs = urllib.parse.urlencode({
-        "start_date": start_date,
-        "end_date": end_date,
-        "aggregated_by": "day",
-    })
-    url = f"https://api.sendgrid.com/v3/stats?{qs}"
+def _http_json(url: str, api_key: str, timeout: float = 20.0) -> dict | list:
     req = urllib.request.Request(
         url,
         headers={"Authorization": f"Bearer {api_key}",
@@ -51,7 +64,76 @@ def _fetch_stats(api_key: str, start_date: str, end_date: str,
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _aggregate(rows: list[dict]) -> dict[str, int]:
+def _fetch_messages(api_key: str, window_minutes: int,
+                    page_limit: int = 1000) -> dict[str, int]:
+    """
+    Tally SendGrid event counters across all messages whose
+    last_event_time is within the prior `window_minutes`.
+
+    /v3/messages query language uses ISO-8601 `last_event_time`
+    bounds with TIMESTAMP literals.
+    """
+    end = dt.datetime.now(dt.timezone.utc)
+    start = end - dt.timedelta(minutes=window_minutes)
+    start_iso = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    query = f'last_event_time BETWEEN TIMESTAMP "{start_iso}" AND TIMESTAMP "{end.strftime("%Y-%m-%dT%H:%M:%SZ")}"'
+    qs = urllib.parse.urlencode({"query": query, "limit": page_limit})
+    url = f"https://api.sendgrid.com/v3/messages?{qs}"
+
+    counters = {"processed": 0, "delivered": 0, "bounce": 0,
+                "spam_report": 0, "blocked": 0, "dropped": 0}
+    try:
+        data = _http_json(url, api_key)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"SendGrid /v3/messages returned 401. Body: {body!r}. "
+                f"Most common cause: this account is not on a plan "
+                f"with the Email Activity History add-on. "
+                f"Re-run with --mode stats (day-level gates).") from e
+        raise
+
+    if not isinstance(data, dict) or "messages" not in data:
+        raise RuntimeError(
+            f"Unexpected /v3/messages response shape: "
+            f"{type(data).__name__}; keys "
+            f"{list(data.keys()) if isinstance(data, dict) else []}")
+
+    for msg in (data.get("messages") or []):
+        status = (msg.get("status") or "").lower()
+        counters["processed"] += 1
+        if status == "delivered":
+            counters["delivered"] += 1
+        elif status in ("bounce", "bounced"):
+            counters["bounce"] += 1
+        elif status in ("spam_report", "spam"):
+            counters["spam_report"] += 1
+        elif status == "blocked":
+            counters["blocked"] += 1
+        elif status in ("dropped", "drop"):
+            counters["dropped"] += 1
+    return counters
+
+
+def _fetch_stats_day(api_key: str, window_days: int) -> dict[str, int]:
+    end = dt.datetime.now(dt.timezone.utc)
+    start = end - dt.timedelta(days=window_days)
+    qs = urllib.parse.urlencode({
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "aggregated_by": "day",
+    })
+    url = f"https://api.sendgrid.com/v3/stats?{qs}"
+    rows = _http_json(url, api_key)
+    if not isinstance(rows, list):
+        raise RuntimeError(
+            f"Unexpected /v3/stats response shape: {type(rows).__name__}")
+
     keys = ("requests", "delivered", "bounces", "spam_reports",
             "blocks", "invalid_emails")
     agg = {k: 0 for k in keys}
@@ -64,15 +146,23 @@ def _aggregate(rows: list[dict]) -> dict[str, int]:
 
 
 def _pct(numerator: int, denominator: int) -> float:
-    if denominator <= 0:
-        return 0.0
-    return (numerator / denominator) * 100.0
+    return (numerator / denominator) * 100.0 if denominator > 0 else 0.0
 
 
 def main() -> int:
     p = argparse.ArgumentParser()
+    p.add_argument("--mode", choices=("messages", "stats"),
+                   default="messages",
+                   help="Source of truth. `messages` uses /v3/messages "
+                        "for true minute-precision (requires Email "
+                        "Activity History add-on). `stats` falls back "
+                        "to /v3/stats with day-level aggregation.")
     p.add_argument("--window-minutes", type=int, default=60,
-                   help="Look-back window in minutes. Default 60.")
+                   help="messages-mode look-back window in minutes. "
+                        "Rejected in --mode stats. Default 60.")
+    p.add_argument("--window-days", type=int, default=1,
+                   help="stats-mode look-back window in days. "
+                        "Rejected in --mode messages. Default 1.")
     p.add_argument("--bounce-max-pct", type=float, default=2.0,
                    help="Bounce-rate threshold. Default 2.0%%. "
                         "SendGrid auto-suspends accounts at 5%%.")
@@ -80,14 +170,12 @@ def main() -> int:
                    help="Spam-complaint threshold. Default 0.05%%. "
                         "SendGrid auto-suspends accounts at 0.1%%.")
     p.add_argument("--block-max-pct", type=float, default=1.0,
-                   help="(blocks + invalid) / requests threshold. "
-                        "Default 1.0%%.")
+                   help="(blocked + dropped/invalid) / processed "
+                        "threshold. Default 1.0%%.")
     p.add_argument("--min-messages", type=int, default=50,
-                   help="Minimum requests in the window for a "
-                        "decision. Default 50. If fewer messages "
-                        "were sent the script returns exit 1 with a "
-                        "`hold-for-volume` reason — ramping on a tiny "
-                        "denominator is not meaningful.")
+                   help="Minimum processed in the window for a "
+                        "decision. Default 50. Smaller N returns "
+                        "exit 1 with `hold-for-volume` reason.")
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
 
@@ -97,57 +185,58 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    if args.window_minutes <= 0:
-        print("ERROR: --window-minutes must be positive", file=sys.stderr)
-        return 3
+    if args.mode == "messages":
+        if args.window_minutes <= 0:
+            print("ERROR: --window-minutes must be positive in "
+                  "--mode messages", file=sys.stderr)
+            return 3
+        try:
+            agg = _fetch_messages(api_key, args.window_minutes)
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                TimeoutError, json.JSONDecodeError, RuntimeError) as e:
+            print(f"ERROR: SendGrid /v3/messages fetch failed: {e}",
+                  file=sys.stderr)
+            return 2
+        processed = agg["processed"]
+        bounces = agg["bounce"]
+        spam = agg["spam_report"]
+        block_total = agg["blocked"] + agg["dropped"]
+        window_label = f"{args.window_minutes} min"
+    else:
+        if args.window_days <= 0:
+            print("ERROR: --window-days must be positive in "
+                  "--mode stats", file=sys.stderr)
+            return 3
+        try:
+            agg = _fetch_stats_day(api_key, args.window_days)
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                TimeoutError, json.JSONDecodeError, RuntimeError) as e:
+            print(f"ERROR: SendGrid /v3/stats fetch failed: {e}",
+                  file=sys.stderr)
+            return 2
+        processed = agg["requests"]
+        bounces = agg["bounces"]
+        spam = agg["spam_reports"]
+        block_total = agg["blocks"] + agg["invalid_emails"]
+        window_label = f"{args.window_days} day(s)"
 
-    end = dt.datetime.now(dt.timezone.utc)
-    start = end - dt.timedelta(minutes=args.window_minutes)
-    start_date = start.strftime("%Y-%m-%d")
-    end_date = end.strftime("%Y-%m-%d")
+    bounce_pct = _pct(bounces, processed)
+    spam_pct = _pct(spam, processed)
+    block_pct = _pct(block_total, processed)
 
     if not args.quiet:
-        print(f"Fetching SendGrid stats for "
-              f"{start.isoformat(timespec='minutes')} → "
-              f"{end.isoformat(timespec='minutes')} "
-              f"(window={args.window_minutes} min)")
-
-    try:
-        rows = _fetch_stats(api_key, start_date, end_date)
-    except (urllib.error.URLError, urllib.error.HTTPError,
-            TimeoutError) as e:
-        print(f"ERROR: SendGrid stats fetch failed: {e}",
-              file=sys.stderr)
-        return 2
-    except json.JSONDecodeError as e:
-        print(f"ERROR: SendGrid stats response not JSON: {e}",
-              file=sys.stderr)
-        return 2
-
-    if not isinstance(rows, list):
-        print(f"ERROR: SendGrid stats response shape unexpected: "
-              f"{type(rows).__name__}", file=sys.stderr)
-        return 2
-
-    agg = _aggregate(rows)
-    requests = agg["requests"]
-    bounce_pct = _pct(agg["bounces"], requests)
-    spam_pct = _pct(agg["spam_reports"], requests)
-    block_pct = _pct(agg["blocks"] + agg["invalid_emails"], requests)
-
-    print()
-    print(f"  requests:        {requests}")
-    print(f"  delivered:       {agg['delivered']}")
-    print(f"  bounces:         {agg['bounces']} ({bounce_pct:.3f}%)")
-    print(f"  spam_reports:    {agg['spam_reports']} ({spam_pct:.3f}%)")
-    print(f"  blocks+invalid:  {agg['blocks'] + agg['invalid_emails']} "
-          f"({block_pct:.3f}%)")
-    print()
+        print(f"  mode:            {args.mode}")
+        print(f"  window:          {window_label}")
+        print(f"  processed:       {processed}")
+        print(f"  bounces:         {bounces} ({bounce_pct:.3f}%)")
+        print(f"  spam_reports:    {spam} ({spam_pct:.3f}%)")
+        print(f"  blocked+dropped: {block_total} ({block_pct:.3f}%)")
+        print()
 
     failures: list[str] = []
-    if requests < args.min_messages:
+    if processed < args.min_messages:
         failures.append(
-            f"hold-for-volume: only {requests} messages in window "
+            f"hold-for-volume: only {processed} processed in window "
             f"(need >= {args.min_messages}); ramping on small N is "
             f"not meaningful")
     if bounce_pct >= args.bounce_max_pct:
@@ -160,15 +249,16 @@ def main() -> int:
             f"--spam-max-pct {args.spam_max_pct:.3f}%")
     if block_pct >= args.block_max_pct:
         failures.append(
-            f"block+invalid-rate {block_pct:.3f}% >= "
+            f"block+drop-rate {block_pct:.3f}% >= "
             f"--block-max-pct {args.block_max_pct:.3f}%")
 
     if not failures:
-        print("OK: all thresholds respected; safe to ramp")
+        print("OK: all thresholds respected; safe to advance")
         return 0
     for f in failures:
         print(f"FAIL: {f}")
-    print(f"\n{len(failures)} threshold breach(es) — DO NOT ramp")
+    print(f"\n{len(failures)} threshold breach(es) — pause the warmup "
+          f"in SendGrid → Settings → IP Addresses")
     return 1
 
 

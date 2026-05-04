@@ -15,8 +15,9 @@
 >   `MAX_HISTORY_TURNS`, `MAX_CHUNK_TOKENS`, `LLM_TURN_TIMEOUT_S`)
 >   and the A/B promotion-decision + cache-sunset decision logs.
 >   See Task #361 §F.
-> - `infra/cloud-cutover-364.md` — Phase B SendGrid warmup
->   (`SENDGRID_TRAFFIC_PCT` Worker var) plus the legacy-secret
+> - `infra/cloud-cutover-364.md` — Phase B SendGrid IP Warmup
+>   (SendGrid Settings → IP Addresses → Warmup; SendGrid throttles
+>   itself, no application-code traffic split) plus the legacy-secret
 >   deletion list (OPENAI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY,
 >   BEDROCK_PROXY_AUTH_TOKEN, RESEND_API_KEY, STRIPE_SECRET_KEY,
 >   STRIPE_WEBHOOK_SECRET) and the `syrabit-bedrock-proxy` Worker
@@ -207,8 +208,8 @@ traffic during a flip).
 | `moderation:rephrase_hints` *(post-#362)* | Redis JSON object, read at process start (refreshed every 5 min) | on-call | seeded per #362 §4.4 | on-call | up to 5 min (acceptable — non-safety-critical) | `redis-cli SET moderation:rephrase_hints '<previous-json>'` |
 | `moderation:hard_floors_test_mode` *(post-#362)* | env var read at process start | infra owner | unset (= disabled) | infra owner | next deploy | redeploy without the env var |
 | `user_profile.moderation_mode` *(post-#362)* | Mongo document, read every turn from `user_profile` (cached on FastAPI request scope) | user (UI setting) / admin override | `"default"` | user / admin | next turn (no cache TTL) | revert via UI; admin override via Mongo update + audit-log entry |
-| `SENDGRID_TRAFFIC_PCT` *(post-#364)* | CF Worker secret on `syrabit-email`, read on every send | infra (manual ramp 0 → 1 → 10 → 50 → 100 over ~24 h) | `0` (= SES-only) at cutover start | infra | < 30 s (Worker re-deploy) | `wrangler secret put SENDGRID_TRAFFIC_PCT --env production` (paste prior value, then redeploy) |
-| `SENDGRID_FORCE_BYPASS` *(post-#364)* | CF Worker secret on `syrabit-email`, read on every send (test-only) | infra | unset (= disabled) | infra | < 30 s | `wrangler secret delete SENDGRID_FORCE_BYPASS --env production` |
+| SendGrid IP Warmup *(post-#364)* | SendGrid dashboard → Settings → IP Addresses → Warmup toggle (per dedicated IP) | infra (one-time enable; SendGrid throttles outbound itself per the 30-day RFC-aligned schedule) | Off (= no warmup ramp; full volume) | infra | < 30 s (toggle takes effect on the next send; in-flight sends already routed are unaffected) | toggle Warmup → Off in the SendGrid dashboard; for hard break, also toggle **Sender Reputation → Pause Sending** so every send 4xx's into the SES tier within ~30 s |
+| SendGrid Sender Reputation Pause *(post-#364)* | SendGrid dashboard → Sender Reputation → Pause Sending | infra (emergency only — used for §6 SES verification + §3 hard rollback) | Off (= sending) | infra | < 30 s | un-toggle in the SendGrid dashboard |
 
 ---
 

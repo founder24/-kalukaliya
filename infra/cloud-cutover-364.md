@@ -40,7 +40,7 @@ ticket.
 | 5 | Razorpay live keys present in Azure Key Vault (`RAZORPAY-KEY-ID`, `RAZORPAY-KEY-SECRET`) | `az keyvault secret list --vault-name syrabit-prod-kv -o tsv \| rg RAZORPAY` | both rows present |
 | 6 | DO origin still serves `api.syrabit.ai` traffic (rollback floor for the first 14 days, per `aca-cutover.md` §2) | `curl -sI https://api.syrabit.ai/api/health \| rg -i 'origin'` | DO origin tag |
 | 7 | Two operators on call: one driver, one observer (Sentry + Axiom + Cloudflare Analytics) | Slack #infra-deploys | "cutover on" pinned |
-| 8 | `scripts/infra/check_email_dns_alignment.py --domain em.syrabit.ai` exits 0 | `python3 scripts/infra/check_email_dns_alignment.py --domain em.syrabit.ai` | exit 0 + all 4 rows OK |
+| 8 | `check_email_dns_alignment.py` exits 0 (operator must supply the link-branding CNAME prefix shown in SendGrid → Sender Authentication for this account; without it the script WARNs but does not fail) | `python3 scripts/infra/check_email_dns_alignment.py --domain em.syrabit.ai --link-branding-cname em1234.em.syrabit.ai` (replace `em1234` with the actual prefix) | exit 0 + SPF/DKIM/DMARC/link-branding all OK |
 
 If any gate fails, **stop**. Fix the gate, re-run all gates. Do not skip.
 
@@ -125,13 +125,7 @@ revision swap is in flight or rolled back.
 
 ---
 
-## §3 — Phase B: SendGrid traffic warmup (1 % → 10 % → 50 % → 100 %)
-
-The CF Email Worker (`workers/email-worker`) is the first hop for every
-transactional email; it picks SendGrid vs the Resend-shaped legacy path
-by reading the Worker var `SENDGRID_TRAFFIC_PCT` (0–100). Backend
-`email_templates.py` reads the same value via the
-`EMAIL_WORKER_URL`-routed Worker so both hops obey the same percentage.
+## §3 — Phase B: SendGrid IP warmup (1 % → 10 % → 50 % → 100 %)
 
 > **Why warm up at all?** Even though `em.syrabit.ai` was already SES-
 > validated for the legacy SES path, this is SendGrid's first time
@@ -140,61 +134,93 @@ by reading the Worker var `SENDGRID_TRAFFIC_PCT` (0–100). Backend
 > keeps bounces below the **5 %** threshold and complaints below
 > **0.1 %**, the two SendGrid auto-suspension floors.
 
-| T+ | Worker var | Min soak | Gate before next step |
-|---|---|---|---|
-| 0 h | `SENDGRID_TRAFFIC_PCT=1` | 4 h | bounce rate < 2 %, spam rate < 0.05 %, zero `permission_denied` from SendGrid |
-| 4 h | `SENDGRID_TRAFFIC_PCT=10` | 6 h | same thresholds; ≥ 50 messages sent in the soak window |
-| 10 h | `SENDGRID_TRAFFIC_PCT=50` | 8 h | same thresholds; ≥ 200 messages sent |
-| 18 h | `SENDGRID_TRAFFIC_PCT=100` | 6 h | thresholds hold; SES fallback path served < 1 % |
-| 24 h | finalize: delete Resend secrets per §4 | n/a | post-finalize smoke (§5) green |
+> **Mechanism — use SendGrid's built-in IP Warmup, not a custom
+> traffic-split.** The earlier draft of this runbook proposed a
+> `SENDGRID_TRAFFIC_PCT` Worker var to split traffic between SendGrid
+> and the SES fallback; that was rejected during review because it
+> requires runtime code in `workers/email-worker/src/index.ts` (and a
+> matching `email_templates.py` change) that doesn't exist on `main`
+> and would have to be invented in this task. SendGrid ships an IP
+> Warmup feature (Settings → IP Addresses → Warmup) that throttles
+> outbound itself per the same 30-day RFC-aligned schedule we'd
+> otherwise have to reimplement; it is the canonical mechanism and
+> requires zero application-code changes. Use it.
 
-Operator commands:
+### B.1 Enable SendGrid IP Warmup
 
-```bash
-# Step the Worker var (repeat at each T+ row)
-cd workers/email-worker
-wrangler secret put SENDGRID_TRAFFIC_PCT --env production
-# (paste the integer, e.g. 1, then 10, then 50, then 100)
+Operator (one-time per dedicated IP):
 
-# Backend reads the same value via the Email Worker; no separate
-# backend deploy is required because email_templates.py defers the
-# routing decision to the Worker on every request.
+1. SendGrid dashboard → **Settings → IP Addresses**.
+2. For the dedicated IP assigned to the SendGrid account, toggle
+   **Warmup → On**.
+3. Confirm the warmup schedule shown is the standard 30-day ramp
+   (day 1 cap = 50 messages; day 7 = 1 600; day 14 = 12 000; day 30 =
+   unlimited). If a shorter schedule is offered, **decline** and
+   stick with the 30-day default — the shorter schedules trade
+   reputation risk for time and we have no business reason to.
+4. SendGrid will return HTTP 421 ("try later") for any send that
+   exceeds the day's cap; `email_templates.py` already retries 421
+   into the SES tier via the existing `email-fallback` SQS queue, so
+   no application change is needed.
 
-# Verify the Worker picked up the value:
-wrangler tail syrabit-email --env production --format pretty \
-  | rg "SENDGRID_TRAFFIC_PCT"
-```
+### B.2 Per-day soak gates
 
-Run the SendGrid warmup monitor at each soak window:
+Run the warmup monitor at each soak checkpoint to confirm the
+SendGrid-served traffic is healthy. The script is read-only against
+SendGrid; it never sends an email.
+
+| Day | Min soak before checkpoint | Threshold gates |
+|---|---|---|
+| Day 1  | 24 h | bounce rate < 2 %, spam rate < 0.05 %, ≥ 25 messages sent, zero `permission_denied` from SendGrid |
+| Day 3  | 48 h | same thresholds; ≥ 75 messages |
+| Day 7  | 96 h | same thresholds; ≥ 200 messages |
+| Day 14 | 168 h | same thresholds; ≥ 500 messages |
+| Day 30 | 360 h | thresholds hold; SES fallback share < 1 %  |
+
+Per-checkpoint command (the `--mode messages` path uses the SendGrid
+Activity Feed API for true minute-precision filtering; the
+`--mode stats` fallback queries `/v3/stats` for accounts without the
+Email Activity History add-on, with day-level granularity):
 
 ```bash
 SENDGRID_API_KEY=$(az keyvault secret show \
   --vault-name syrabit-prod-kv --name SENDGRID-API-KEY \
   --query value -o tsv) \
 python3 scripts/infra/sendgrid_warmup_monitor.py \
-  --window-minutes 60 \
+  --mode messages \
+  --window-minutes 1440 \
   --bounce-max-pct 2.0 \
   --spam-max-pct 0.05 \
-  --min-messages 50
+  --min-messages 25
 ```
 
-Exit codes: `0` = OK, ramp to next step; `1` = threshold breach, **do
-not ramp** — investigate; `2` = harness failure (network / credentials).
+Exit codes: `0` = OK, advance to the next checkpoint; `1` = threshold
+breach, **pause the warmup** (toggle **Settings → IP Addresses →
+Warmup → Off** so SendGrid stops adding daily quota until the
+breach is investigated); `2` = harness failure (network /
+credentials / Activity History add-on missing — re-run with
+`--mode stats`).
 
-### B.1 Rollback within Phase B
+### B.3 Rollback within Phase B
 
-Setting `SENDGRID_TRAFFIC_PCT=0` and redeploying the Worker reverts
-**all** new email sends to the SES-only fallback path within ~30 s.
-Do this immediately if either threshold is exceeded for two
-consecutive 5-minute windows.
+Pausing the warmup (Settings → IP Addresses → Warmup → Off) freezes
+the daily cap at the current day's number; new sends in excess of
+that cap continue to 421 → SES, so deliverability stays whole. If a
+hard break is needed, set the SendGrid account's **Sender Reputation
+→ Pause Sending** flag — every subsequent SendGrid call returns 401
+"account paused", which `email_templates.py` already retries into
+SES via the existing 5xx-tier path (it treats 4xx auth failures as
+retry-eligible into the SES fallback by virtue of the
+`_SENDGRID_NO_KEY` branch when the worker proxies an upstream auth
+failure back to the backend).
 
 ---
 
 ## §4 — Phase C: Legacy secret deletion (only after §3 finalizes)
 
-> Pre-condition: §3 row "T+18 h → SENDGRID_TRAFFIC_PCT=100" has held
-> green for 6 h **and** `scripts/infra/check_email_dns_alignment.py`
-> still exits 0.
+> Pre-condition: §3 Day-30 checkpoint has held green (warmup
+> complete; SES fallback share < 1 % over the prior 24 h) **and**
+> `scripts/infra/check_email_dns_alignment.py` still exits 0.
 
 The seven secrets to delete:
 
@@ -299,28 +325,64 @@ The repo-side `workers/bedrock-proxy/` directory was already removed in
 
 The SES tier (Lambda + `email-fallback` SQS queue) is **kept** as the
 final-tier 5xx-only fallback per §3 of `providers-task-347-
-decommission.md`. Confirm it still works after the SendGrid cutover:
+decommission.md`. Confirm it still works after the SendGrid cutover
+using **only controls that already exist** — no new backend or worker
+code is shipped by this task.
+
+The verification leverages the existing 5xx-fallback path:
+`email_templates.py` retries to its SES tier when the CF Email Worker
+returns any 5xx, and the worker returns 500 if `SENDGRID_API_KEY` is
+unset (see `workers/email-worker/src/index.ts` line ~165). So:
 
 ```bash
-# Force the Worker to bypass SendGrid so SES handles a single test
-# message; then revert.
-wrangler secret put SENDGRID_FORCE_BYPASS --env production   # → "1"
+# 1. Snapshot the current SendGrid key (so we can put it back exactly).
+#    Read it from Azure Key Vault, NOT from `wrangler secret get`
+#    (which doesn't exist; CF only allows put/delete on secrets).
+SG_KEY=$(az keyvault secret show \
+  --vault-name syrabit-prod-kv --name SENDGRID-API-KEY \
+  --query value -o tsv)
+test -n "$SG_KEY" || { echo "FAIL: empty key from KV"; exit 1; }
+
+# 2. Delete the worker's SENDGRID_API_KEY. The worker will now throw
+#    "SENDGRID_API_KEY secret not set" on every send, which surfaces
+#    as a 500 to the backend.
+wrangler secret delete SENDGRID_API_KEY \
+  --name syrabit-email --env production
+
+# 3. Send one test transactional email through the normal API path.
+#    Backend sees the worker 500 and falls through to its SES tier.
 curl -fsS -X POST https://api.syrabit.ai/api/admin/email/test \
   -H "Authorization: Bearer $ADMIN_JWT" \
   -d '{"to":"infra-test@syrabit.ai","template":"smoke_ses"}' | jq .
 # Expect: {"status":"queued", "transport":"ses_fallback", ...}
 
-# Confirm Lambda + SES delivery from CloudWatch
+# 4. Confirm Lambda + SES actually delivered.
 aws logs tail /aws/lambda/syrabit-email-worker --since 5m \
   | rg -i "ses_send_ok"
 
-# Revert
-wrangler secret delete SENDGRID_FORCE_BYPASS --env production
+# 5. Restore the worker's SendGrid key IMMEDIATELY. Do not leave the
+#    worker keyless; user-visible transactional email will fail-open
+#    to SES for as long as the key is missing, which is fine for the
+#    ~60 s test window but not as a steady state.
+printf '%s' "$SG_KEY" | wrangler secret put SENDGRID_API_KEY \
+  --name syrabit-email --env production
+unset SG_KEY
+
+# 6. Confirm normal SendGrid path is back.
+curl -fsS -X POST https://api.syrabit.ai/api/admin/email/test \
+  -H "Authorization: Bearer $ADMIN_JWT" \
+  -d '{"to":"infra-test@syrabit.ai","template":"smoke_sendgrid"}' | jq .
+# Expect: {"status":"sent", "transport":"sendgrid", ...}
 ```
 
-If the test fails, **stop the cutover and re-investigate** — losing
-the SES floor at the same time SendGrid is the primary leaves no
-deliverability fallback at all.
+If step 4 fails, **stop the cutover and re-investigate** — losing the
+SES floor at the same time SendGrid is the primary leaves no
+deliverability fallback at all. Do not proceed to §4 secret deletion
+until step 4 is confirmed green; specifically, **do not delete
+RESEND_API_KEY from any surface** while the SES floor is unverified
+(the lint-guardian-allowlisted admin alert path on Resend is the
+de-facto secondary deliverability floor for ops-critical mail
+during this verification window).
 
 ---
 
@@ -334,12 +396,12 @@ the cutover ticket.
 | 1 | `curl -fsS https://api.syrabit.ai/api/health \| jq .git_sha` | matches the new ACA revision sha (§2) |
 | 2 | Send a real password-reset email to a known mailbox | arrives via SendGrid (check `X-SG-EID` header in source) |
 | 3 | `python3 scripts/infra/check_legacy_secrets_purged.py …` | exit 0 |
-| 4 | `python3 scripts/infra/check_email_dns_alignment.py --domain em.syrabit.ai` | exit 0 |
+| 4 | `python3 scripts/infra/check_email_dns_alignment.py --domain em.syrabit.ai --link-branding-cname em1234.em.syrabit.ai` (use the operator's actual prefix) | exit 0 |
 | 5 | `curl -sI https://api.cloudflare.com/.../workers/scripts/syrabit-bedrock-proxy -H "Authorization: Bearer $CF_API_TOKEN"` | HTTP 404 |
 | 6 | Stripe webhook probe: `curl -X POST https://api.syrabit.ai/webhooks/stripe -d '{}'` | HTTP 410 Gone |
 | 7 | xAI probe: `curl -X POST https://api.syrabit.ai/api/ai/chat -H 'X-Force-Provider: grok'` | HTTP 400 with `unknown_provider` body |
 | 8 | Workers AI fallback hit-rate over the prior hour > 0 (proves the chain still serves traffic from the replacement tier) | Cloudflare AI Gateway logs |
-| 9 | `python3 scripts/infra/sendgrid_warmup_monitor.py --window-minutes 360 --bounce-max-pct 2.0 --spam-max-pct 0.05 --min-messages 200` | exit 0 |
+| 9 | `python3 scripts/infra/sendgrid_warmup_monitor.py --mode messages --window-minutes 360 --bounce-max-pct 2.0 --spam-max-pct 0.05 --min-messages 200` (or `--mode stats` if the SendGrid plan lacks the Email Activity History add-on, with `--window-days 1`) | exit 0 |
 | 10 | DO rollback floor still serves `/api/health` (kept for 14 days post-cutover, per `aca-cutover.md` §99) | `curl -fsS https://syrabit-backend-app.ondigitalocean.app/api/health` returns 200 |
 
 ---
@@ -349,7 +411,7 @@ the cutover ticket.
 | Phase | Rollback |
 |---|---|
 | §2 ACA swap | `aca-cutover.md` §2 (`az containerapp ingress traffic set --revision-weight <prev>=100`); restore the prior `SENDGRID-API-KEY` value from 1Password if it was overwritten. |
-| §3 SendGrid warmup | Set `SENDGRID_TRAFFIC_PCT=0` and redeploy the Worker; verify SES tier handles 100 % of new sends; do not proceed until thresholds are re-investigated. |
+| §3 SendGrid warmup | Toggle **Settings → IP Addresses → Warmup → Off** in the SendGrid dashboard so the daily cap stops growing; for a hard break, also toggle **Sender Reputation → Pause Sending** so every send 4xx's into the SES tier within ~30 s. |
 | §4 Secret deletion | Restore from 1Password `syrabit/cloud-cutover-2026-05`; `wrangler secret put` / `az keyvault secret recover` (within the 90-day soft-delete window) / `gh secret set`. |
 | §5 Worker deletion | `wrangler deploy` from the prior commit of `workers/bedrock-proxy/`; restore `BEDROCK_PROXY_AUTH_TOKEN` first. **Note:** repo deleted the directory in #347, so this requires a `git checkout` of a pre-#347 sha. |
 | §6 SES verification | Same as §3 rollback. |
@@ -361,10 +423,12 @@ the cutover ticket.
 | Date | Phase | Action | Operator | Outcome |
 |---|---|---|---|---|
 |  | A | ACA revision swap | | |
-|  | B | SENDGRID_TRAFFIC_PCT 0 → 1 | | |
-|  | B | SENDGRID_TRAFFIC_PCT 1 → 10 | | |
-|  | B | SENDGRID_TRAFFIC_PCT 10 → 50 | | |
-|  | B | SENDGRID_TRAFFIC_PCT 50 → 100 | | |
+|  | B | Enable SendGrid IP Warmup (30-day default) | | |
+|  | B | Day 1 checkpoint (24 h soak) | | |
+|  | B | Day 3 checkpoint (48 h soak) | | |
+|  | B | Day 7 checkpoint (96 h soak) | | |
+|  | B | Day 14 checkpoint (168 h soak) | | |
+|  | B | Day 30 checkpoint (warmup complete) | | |
 |  | C | Secret deletion (CF / Azure KV / GitHub) | | |
 |  | D | `syrabit-bedrock-proxy` Worker deletion | | |
 |  | E | SES fallback verification | | |
