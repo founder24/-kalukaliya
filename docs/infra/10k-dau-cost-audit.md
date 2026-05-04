@@ -1,3 +1,17 @@
+> **Authority sync (2026-05-04):** `docs/infra/provider-priority-map.md`
+> is the canonical PROVIDER_PRIORITY map. Binding constraints carried
+> across every plan in this folder:
+> 1. **Cerebras + Groq** — absent from every chain.
+> 2. **Sarvam** — only in `assamese_rag_chat`, `assamese_content`, `translate` (not in tts/voice/stt/vision).
+> 3. **Bedrock direct (Claude / Titan / Jamba)** — removed from chat; **Bedrock is Cohere‑only** (embed + rerank, keyed `bedrock_cohere`).
+> 4. **`embed`** — Cohere via Bedrock → Voyage → CF Workers AI bge-m3 (Vertex `text-embedding-004` removed).
+> 5. **`rerank`** — Cohere via Bedrock → Voyage → CF bge-reranker-base.
+> 6. **Pinecone** — THE RAG vector store of record (`syrabit-rag`, 1024-dim cosine, aws-us-west-2). Vertex Vector / CF Vectorize are Tier-2/3 fallback only.
+> 7. **MongoDB Atlas** — canonical chat history (`conversations` collection) + canonical analytics + all application state (notes, flashcards, streaks, leaderboards, quizzes, CMS, SEO topics, push tokens, audit logs). Redis/Momento/CF KV are TTL cache only.
+> 8. **AWS S3** — sole object store. CF R2 is cold archive only.
+> 9. **Cron** — Azure Container Apps Jobs canonical (Founders Hub credit). DO cron used for backend-resident jobs after Task #333 observability rewire — see `feature-deep-dive.md` §7.3 drift register.
+> 10. **APM** — Azure App Insights canonical sink; Axiom parallel for long-retention logs; CloudWatch for AWS-native alarms only.
+
 # Syrabit — 10k DAU Cost Audit (Four-Cloud Delegation)
 
 **Companion to:** `docs/infra/cloud-allocation-plan.md` (the canonical plan)

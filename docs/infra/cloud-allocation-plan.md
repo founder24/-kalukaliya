@@ -1,3 +1,17 @@
+> **Authority sync (2026-05-04):** `docs/infra/provider-priority-map.md`
+> is the canonical PROVIDER_PRIORITY map. Binding constraints carried
+> across every plan in this folder:
+> 1. **Cerebras + Groq** — absent from every chain.
+> 2. **Sarvam** — only in `assamese_rag_chat`, `assamese_content`, `translate` (not in tts/voice/stt/vision).
+> 3. **Bedrock direct (Claude / Titan / Jamba)** — removed from chat; **Bedrock is Cohere‑only** (embed + rerank, keyed `bedrock_cohere`).
+> 4. **`embed`** — Cohere via Bedrock → Voyage → CF Workers AI bge-m3 (Vertex `text-embedding-004` removed).
+> 5. **`rerank`** — Cohere via Bedrock → Voyage → CF bge-reranker-base.
+> 6. **Pinecone** — THE RAG vector store of record (`syrabit-rag`, 1024-dim cosine, aws-us-west-2). Vertex Vector / CF Vectorize are Tier-2/3 fallback only.
+> 7. **MongoDB Atlas** — canonical chat history (`conversations` collection) + canonical analytics + all application state (notes, flashcards, streaks, leaderboards, quizzes, CMS, SEO topics, push tokens, audit logs). Redis/Momento/CF KV are TTL cache only.
+> 8. **AWS S3** — sole object store. CF R2 is cold archive only.
+> 9. **Cron** — Azure Container Apps Jobs canonical (Founders Hub credit). DO cron used for backend-resident jobs after Task #333 observability rewire — see `feature-deep-dive.md` §7.3 drift register.
+> 10. **APM** — Azure App Insights canonical sink; Axiom parallel for long-retention logs; CloudWatch for AWS-native alarms only.
+
 # Syrabit — Three-Cloud Hosting & Infra Delegation Plan
 
 **Last updated:** 2026-05-04
@@ -226,7 +240,7 @@ This is a **hosting** plan. AI inference is a separate concern owned by the disp
 | Cloudflare | ✅ frontend + edge + R2 + KV + D1 + Vectorize | ✅ Workers AI (bge-m3 embed, IndicTrans2 translate, gpt-oss-20b last-resort chat, Whisper STT fallback) |
 | AWS | ✅ backend canonical origin (App Runner) + S3 + SES + Lambda + SQS + CloudWatch | ✅ Bedrock (Cohere embed + rerank only — **never** Anthropic/Nova/Titan/Mistral/Llama) |
 | Azure | ✅ Container Apps workers + rust-core + cron + Logic Apps + AppInsights + Key Vault | ✅ Azure OpenAI (GPT-4.1-mini for english chat + content fallback) |
-| GCP / Vertex | ❌ not used for hosting | ✅ Four API surfaces (all called from the AWS App Runner backend): **(A)** Vertex AI Platform — Vector Search / Matching Engine (`retrievers/vertex.py`), `text-embedding-004` (`providers/vertex_embed.py`, 768-dim long-form fallback), Gemini streaming chat direct-SA path (`vertex_chat.py`, rollback only); **(B)** Discovery Engine API (`discovery_engine_client.py`); **(C)** Generative Language / Gemini via **Cloudflare AI Gateway BYOK → google-ai-studio** as the prod default for `vertex_services.py` (embeddings, translation, MCQ/flashcards, content enhancement, SEO meta, gap analysis, long-doc reader); **(D)** Cloud Vision API for OCR. Auth priority: `VERTEX_SERVICE_ACCOUNT` → `GEMINI_API_KEY` (legacy) → `CF_AI_GATEWAY_*` (prod default). Plus retained Cloud STT/TTS/Web Risk free-tier APIs. |
+| GCP / Vertex | ❌ not used for hosting | ✅ Four API surfaces (all called from the backend): **(A)** Vertex AI Platform — Vector Search / Matching Engine (`retrievers/vertex.py`, Tier-2 only — Pinecone is the RAG store of record), Gemini streaming chat direct-SA path (`vertex_chat.py`, rollback only). `providers/vertex_embed.py` is **NOT** in the embed chain (rollback-only); embed is Cohere → Voyage → CF; **(B)** Discovery Engine API (`discovery_engine_client.py`); **(C)** Generative Language / Gemini via **Cloudflare AI Gateway BYOK → google-ai-studio** as the prod default for `vertex_services.py` (translation, MCQ/flashcards, content enhancement, SEO meta, gap analysis, long-doc reader); **(D)** Cloud Vision API for OCR. Auth priority: `VERTEX_SERVICE_ACCOUNT` → `GEMINI_API_KEY` (legacy) → `CF_AI_GATEWAY_*` (prod default). Plus retained Cloud STT/TTS/Web Risk free-tier APIs. |
 
 **Why call this out:** the previous plan blurred the two and treated Vertex like a hosting cloud. It isn't — it's only an API endpoint we hit. Same for the inference-side use of AWS Bedrock and Azure OpenAI: they're API services on otherwise-hosting-focused clouds, called by the AWS App Runner backend.
 

@@ -1,3 +1,17 @@
+> **Authority sync (2026-05-04):** `docs/infra/provider-priority-map.md`
+> is the canonical PROVIDER_PRIORITY map. Binding constraints carried
+> across every plan in this folder:
+> 1. **Cerebras + Groq** — absent from every chain.
+> 2. **Sarvam** — only in `assamese_rag_chat`, `assamese_content`, `translate` (not in tts/voice/stt/vision).
+> 3. **Bedrock direct (Claude / Titan / Jamba)** — removed from chat; **Bedrock is Cohere‑only** (embed + rerank, keyed `bedrock_cohere`).
+> 4. **`embed`** — Cohere via Bedrock → Voyage → CF Workers AI bge-m3 (Vertex `text-embedding-004` removed).
+> 5. **`rerank`** — Cohere via Bedrock → Voyage → CF bge-reranker-base.
+> 6. **Pinecone** — THE RAG vector store of record (`syrabit-rag`, 1024-dim cosine, aws-us-west-2). Vertex Vector / CF Vectorize are Tier-2/3 fallback only.
+> 7. **MongoDB Atlas** — canonical chat history (`conversations` collection) + canonical analytics + all application state (notes, flashcards, streaks, leaderboards, quizzes, CMS, SEO topics, push tokens, audit logs). Redis/Momento/CF KV are TTL cache only.
+> 8. **AWS S3** — sole object store. CF R2 is cold archive only.
+> 9. **Cron** — Azure Container Apps Jobs canonical (Founders Hub credit). DO cron used for backend-resident jobs after Task #333 observability rewire — see `feature-deep-dive.md` §7.3 drift register.
+> 10. **APM** — Azure App Insights canonical sink; Axiom parallel for long-retention logs; CloudWatch for AWS-native alarms only.
+
 # Detailed Feature → Provider Mapping
 
 **Date:** 2026-05-04
@@ -91,7 +105,7 @@ Each feature row carries:
 | Tier-1 (PRIMARY: PDF parse) | **AWS Lambda** (`syrabit-pdf-parse` ARM64) — region `us-west-2`, 1024 MB / 30s timeout |
 | Tier-1 (PRIMARY: embed) | **Cohere `embed-multilingual-v3` via AWS Bedrock** — region `us-west-2`, batch size 100 chunks |
 | Tier-1 (PRIMARY: vector store) | **Pinecone Starter** index `syrabit-rag` (1024-dim, cosine) — region `aws-us-west-2` |
-| Tier-2 (embed) | **Vertex `text-embedding-004`** (768-dim alt) — `asia-south1` |
+| Tier-2 (embed) | **Voyage `voyage-3-multilingual`** (free trial credit) |
 | Tier-3 (embed) | **CF Workers AI bge-m3** (`@cf/baai/bge-m3`) |
 | Fallback triggers | Bedrock 5xx / 429 / >15s; Pinecone upsert 5xx → retry 3× then queue to SQS for manual replay |
 | Credit pool draw | 300 PDFs × 60k tok = 18M tok/mo embed. **AWS Bedrock ~$2/mo + Lambda $0 (within free) + Pinecone $0.** |

@@ -1,3 +1,17 @@
+> **Authority sync (2026-05-04):** `docs/infra/provider-priority-map.md`
+> is the canonical PROVIDER_PRIORITY map. Binding constraints carried
+> across every plan in this folder:
+> 1. **Cerebras + Groq** — absent from every chain.
+> 2. **Sarvam** — only in `assamese_rag_chat`, `assamese_content`, `translate` (not in tts/voice/stt/vision).
+> 3. **Bedrock direct (Claude / Titan / Jamba)** — removed from chat; **Bedrock is Cohere‑only** (embed + rerank, keyed `bedrock_cohere`).
+> 4. **`embed`** — Cohere via Bedrock → Voyage → CF Workers AI bge-m3 (Vertex `text-embedding-004` removed).
+> 5. **`rerank`** — Cohere via Bedrock → Voyage → CF bge-reranker-base.
+> 6. **Pinecone** — THE RAG vector store of record (`syrabit-rag`, 1024-dim cosine, aws-us-west-2). Vertex Vector / CF Vectorize are Tier-2/3 fallback only.
+> 7. **MongoDB Atlas** — canonical chat history (`conversations` collection) + canonical analytics + all application state (notes, flashcards, streaks, leaderboards, quizzes, CMS, SEO topics, push tokens, audit logs). Redis/Momento/CF KV are TTL cache only.
+> 8. **AWS S3** — sole object store. CF R2 is cold archive only.
+> 9. **Cron** — Azure Container Apps Jobs canonical (Founders Hub credit). DO cron used for backend-resident jobs after Task #333 observability rewire — see `feature-deep-dive.md` §7.3 drift register.
+> 10. **APM** — Azure App Insights canonical sink; Axiom parallel for long-retention logs; CloudWatch for AWS-native alarms only.
+
 # Syrabit — Auxiliary Provider Delegation (Beyond the Four Clouds)
 
 **Companion to:** `docs/infra/cloud-allocation-plan.md`,
@@ -57,7 +71,7 @@ free tier or credit?*
 |---|---|
 | Role | Primary RAG retriever. Course content embeddings, lecture transcripts, MCQ similarity search. |
 | Tier at 10k DAU | Free **Starter pod** (1 project, 100k vectors, 1 index) |
-| Sizing | ~50k content vectors (one per AHSEC/SEBA chapter + worked-example), 1024-dim from Cohere or 768-dim from Vertex `text-embedding-004` |
+| Sizing | ~50k content vectors (one per AHSEC/SEBA chapter + worked-example), 1024-dim from Cohere via Bedrock (primary) or Voyage `voyage-3-multilingual` (fallback). Vertex `text-embedding-004` is no longer in the embed chain. |
 | Credit | None (free tier perpetual) |
 | Coverage | 100k vector ceiling reached at ~30k DAU; upgrade then |
 | Cash exposure | $0 at 10k DAU |

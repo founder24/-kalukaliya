@@ -1,3 +1,17 @@
+> **Authority sync (2026-05-04):** `docs/infra/provider-priority-map.md`
+> is the canonical PROVIDER_PRIORITY map. Binding constraints carried
+> across every plan in this folder:
+> 1. **Cerebras + Groq** — absent from every chain.
+> 2. **Sarvam** — only in `assamese_rag_chat`, `assamese_content`, `translate` (not in tts/voice/stt/vision).
+> 3. **Bedrock direct (Claude / Titan / Jamba)** — removed from chat; **Bedrock is Cohere‑only** (embed + rerank, keyed `bedrock_cohere`).
+> 4. **`embed`** — Cohere via Bedrock → Voyage → CF Workers AI bge-m3 (Vertex `text-embedding-004` removed).
+> 5. **`rerank`** — Cohere via Bedrock → Voyage → CF bge-reranker-base.
+> 6. **Pinecone** — THE RAG vector store of record (`syrabit-rag`, 1024-dim cosine, aws-us-west-2). Vertex Vector / CF Vectorize are Tier-2/3 fallback only.
+> 7. **MongoDB Atlas** — canonical chat history (`conversations` collection) + canonical analytics + all application state (notes, flashcards, streaks, leaderboards, quizzes, CMS, SEO topics, push tokens, audit logs). Redis/Momento/CF KV are TTL cache only.
+> 8. **AWS S3** — sole object store. CF R2 is cold archive only.
+> 9. **Cron** — Azure Container Apps Jobs canonical (Founders Hub credit). DO cron used for backend-resident jobs after Task #333 observability rewire — see `feature-deep-dive.md` §7.3 drift register.
+> 10. **APM** — Azure App Insights canonical sink; Axiom parallel for long-retention logs; CloudWatch for AWS-native alarms only.
+
 # Syrabit — Per-Cloud Service & Feature Breakdown
 
 **Companion to:** `docs/infra/cloud-allocation-plan.md` (the strategic plan).
@@ -163,7 +177,7 @@ calls go direct (no AI Gateway).
 | Service | Caller in repo | Use in Syrabit | Region | Cost shape |
 |---|---|---|---|---|
 | **Vertex AI — Vector Search (Matching Engine)** | `retrievers/vertex.py` | `findNeighbors`, `upsertDatapoints`, `removeDatapoints`, `readIndexDatapoints` against the deployed Index / IndexEndpoint. Active retriever surface (not just a Pinecone fallback). | `us-central1` | ~$15–30/mo within $2k credit at MVP scale |
-| **Vertex AI — Text Embeddings (`text-embedding-004`, 768-dim)** | `providers/vertex_embed.py` | Long-form embed fallback via `…:predict` when Workers AI bge-m3 and Bedrock Cohere are throttled or out of band for context length. | `us-central1` | $0–5/mo (rarely hit) |
+| ~~**Vertex AI — Text Embeddings (`text-embedding-004`, 768-dim)**~~ | ~~`providers/vertex_embed.py`~~ | **REMOVED from embed chain** per provider-priority-map.md. `embed` is now strictly **Cohere via Bedrock → Voyage → CF Workers AI bge-m3**. `vertex_embed.py` is rollback-only and not dispatcher-routed. | — | $0 |
 | **Vertex AI — Gemini streaming chat (direct SA path)** | `vertex_chat.py` | The **only** generative path that still hits Vertex AI directly with a service account (rather than going through CF AI Gateway). Kept as a rollback when AI Gateway is degraded. | `us-central1` | $0–10/mo (rollback only) |
 
 #### Surface B — Discovery Engine API (`discoveryengine.googleapis.com`)
@@ -237,7 +251,7 @@ When you're holding a *feature* and asking "which cloud serves this?", read this
 | **Distributed tracing / APM** | Azure App Insights | Axiom (parallel) | — | — |
 | **Logs (long-term)** | Axiom | App Insights (subset) | CloudWatch (AWS-native only) | — |
 | **Alerts → Slack/Telegram** | Azure Logic Apps | Sentry direct | — | — |
-| **Embed (Indic + EN)** | CF Workers AI bge-m3 | AWS Bedrock Cohere `embed-multilingual-v3` (1024-dim) | Vertex `text-embedding-004` (768-dim, via `providers/vertex_embed.py`) | — |
+| **Embed (Indic + EN)** | AWS Bedrock Cohere `embed-multilingual-v3` (1024-dim) | Voyage `voyage-3-multilingual` | CF Workers AI bge-m3 (edge fallback) | — |
 | **Rerank** | AWS Bedrock Cohere `rerank-v3-5` | (none — graceful degrade) | — | — |
 | **Chat — `english_rag_chat` / `content`** | Azure OpenAI GPT-4.1-mini | Vertex Gemini 2.5 Flash | CF Workers AI gpt-oss-20b | CF Workers AI Llama-3 |
 | **Chat — `assamese_rag_chat`** | Vertex Gemini 2.5 Flash | Sarvam-M (Indic-tuned, only used in Assamese chat) | Azure OpenAI GPT-4.1-mini | CF Workers AI gpt-oss-20b |
