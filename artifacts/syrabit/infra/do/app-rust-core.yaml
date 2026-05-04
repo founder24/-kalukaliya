@@ -1,0 +1,70 @@
+# infra/do/app-rust-core.yaml
+#
+# Phase 1d — Digital Ocean App Platform shell (Task #330).
+#
+# Empty App Platform spec for the Rust core service that will be ported
+# off Railway in the next task. Exposes both an HTTP port (3000) for
+# health + REST surfaces and a gRPC port (50051) for service-to-service
+# RPC from the Python backend.
+#
+# DO App Platform supports HTTP/2 end-to-end on the same listener, so
+# the gRPC port is declared as a second `internal_ports` entry rather
+# than requiring a separate Droplet + load balancer.
+#
+# Image is a stub; CI (`.github/workflows/do-deploy-rust-core.yml`)
+# rewrites `image.tag` to the commit SHA on every deploy.
+
+name: rust-core
+region: blr1
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+  - rule: CPU_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: MEM_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+
+services:
+  - name: core
+    instance_size_slug: basic-xs
+    instance_count: 1
+    # Public HTTP port (REST + health). gRPC is exposed on a second
+    # internal port so other DO apps can dial it on the VPC network
+    # without leaving the data center.
+    http_port: 3000
+    internal_ports:
+      - 50051
+    image:
+      registry_type: DOCR
+      repository: rust-core
+      tag: bootstrap
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 5
+      period_seconds: 10
+      timeout_seconds: 3
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: HTTP_PORT
+        value: "3000"
+      - key: GRPC_PORT
+        value: "50051"
+      - key: ENV
+        value: "non-prod"
+        scope: RUN_TIME
+      - key: RUST_LOG
+        value: "info"
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: core

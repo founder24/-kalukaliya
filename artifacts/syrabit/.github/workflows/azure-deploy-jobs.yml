@@ -1,0 +1,115 @@
+# .github/workflows/azure-deploy-jobs.yml
+#
+# Phase 1d (Task #330) — Azure deploy for the cron-jobs tier.
+#
+# Authenticates via GitHub OIDC against the federated credential
+# created in `infra/azure/iam-github-oidc.tf` (Task #329) — no static
+# Azure client secret. Builds each cron job image, pushes to ACR
+# (SHA-tagged), updates the Container Apps Job to point at the new
+# image, and pushes the Application Insights config bundle.
+
+name: azure-deploy-jobs
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "services/cron/**"
+      - "infra/azure/**"
+      - ".github/workflows/azure-deploy-jobs.yml"
+  pull_request:
+    paths:
+      - "services/cron/**"
+      - "infra/azure/**"
+      - ".github/workflows/azure-deploy-jobs.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: non-prod
+        type: choice
+        options: [non-prod, prod]
+
+concurrency:
+  group: azure-jobs-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  AZURE_LOCATION: centralindia
+  ACR_NAME: syrabitcronobs
+  RG_NAME: syrabit-cron-obs
+
+jobs:
+  build-and-deploy:
+    name: Build & deploy cron jobs (${{ github.event.inputs.environment || 'non-prod' }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'non-prod' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - nightly-pruner
+          - daily-rollup
+          - schema-snapshot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag (commit SHA)
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name "$ACR_NAME"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push cron-job image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/cron/${{ matrix.job }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.ACR_NAME }}.azurecr.io/syrabit/${{ matrix.job }}:${{ steps.meta.outputs.tag }}
+            ${{ env.ACR_NAME }}.azurecr.io/syrabit/${{ matrix.job }}:latest
+          cache-from: type=gha,scope=${{ matrix.job }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.job }}
+
+      - name: Update Container Apps Job image
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          job_name="syrabit-${{ matrix.job }}"
+          image="${{ env.ACR_NAME }}.azurecr.io/syrabit/${{ matrix.job }}:${{ steps.meta.outputs.tag }}"
+          az containerapp job update \
+            --name "$job_name" \
+            --resource-group "$RG_NAME" \
+            --image "$image" \
+            --output none
+          echo "Updated $job_name → $image"
+
+      - name: Sync Application Insights config
+        if: github.event_name != 'pull_request' && hashFiles('infra/azure/app-insights/*.json') != ''
+        run: |
+          set -euo pipefail
+          for cfg in infra/azure/app-insights/*.json; do
+            name="$(basename "$cfg" .json)"
+            echo "Applying App Insights config: $name"
+            az monitor app-insights component update \
+              --app syrabit-cron-obs-ai \
+              --resource-group "$RG_NAME" \
+              --tags "config=${name}" \
+              --output none
+          done

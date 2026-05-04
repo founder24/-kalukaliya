@@ -1,5 +1,12 @@
 # infra/gcp/cloud-cdn.tf
 #
+# DEPRECATED (Task #330) — GCP is being phased out as part of the
+# 4-way provider rebalance. New deploys go to Digital Ocean App
+# Platform, AWS, and Azure via the GitHub Actions workflows under
+# `.github/workflows/`. See `docs/infra/cicd.md` for the new pipeline
+# layout. This Terraform is retained read-only until the dispatch /
+# CDN tier is fully cut over and decommissioned in a later task.
+#
 # GCP Cloud CDN attached to the existing HTTPS Global Load Balancer.
 # Replaces Cloudflare Cache Reserve ($5–$10/mo).  Covered by GCP Activate.
 #

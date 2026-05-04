@@ -1,0 +1,70 @@
+# infra/do/app-syrabit-backend.yaml
+#
+# Phase 1d — Digital Ocean App Platform shell (Task #330).
+#
+# Empty App Platform spec for the Python FastAPI backend that will be
+# ported off Railway in the next task. The image reference is a stub
+# (`registry.digitalocean.com/syrabit/syrabit-backend:bootstrap`) — the
+# CI workflow `.github/workflows/do-deploy-backend.yml` rewrites the
+# `image.tag` to the commit SHA on every deploy via `doctl apps update`.
+#
+# Why App Platform (not Droplet):
+#   • Native HTTP/2 + WebSocket termination at the platform load balancer.
+#   • Zero-config TLS via the *.ondigitalocean.app domain plus a custom
+#     domain for syrabit.ai routes.
+#   • Built-in autoscale + zero-downtime deploys; Hatch + trial credits
+#     ($200) cover the basic-xxs instance for the bootstrap period.
+#
+# Region: blr1 (Bangalore) — closest DO region to the primary user base
+# in IN, matching the asia-south1 / ap-south-1 selections in GCP & AWS.
+
+name: syrabit-backend
+region: blr1
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+  - rule: CPU_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: MEM_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+
+services:
+  - name: api
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    http_port: 8080
+    # CI rewrites image.tag on every deploy via `doctl apps update --spec`.
+    image:
+      registry_type: DOCR
+      repository: syrabit-backend
+      tag: bootstrap
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 10
+      period_seconds: 10
+      timeout_seconds: 3
+      success_threshold: 1
+      failure_threshold: 3
+    # Phase 1d only commits the shell — the backend port task fills in
+    # the real env vars (DB URLs, secret references, etc).
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: ENV
+        value: "non-prod"
+        scope: RUN_TIME
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: api

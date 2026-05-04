@@ -1,5 +1,11 @@
 # infra/gcp/cloud-logging-axiom.tf
 #
+# DEPRECATED (Task #330) — GCP is being phased out as part of the
+# 4-way provider rebalance. New deploys go to Digital Ocean App
+# Platform, AWS, and Azure via the GitHub Actions workflows under
+# `.github/workflows/`. See `docs/infra/cicd.md`. Logging will move
+# to Axiom + Application Insights in the cron/observability port.
+#
 # Replaces Cloudflare Log Explorer (usage charges, ~$5–$10/mo).
 # Routes Cloudflare Logpush → GCP Cloud Logging (HTTP sink) → Axiom.
 #
