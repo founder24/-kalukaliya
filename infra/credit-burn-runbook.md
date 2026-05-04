@@ -15,6 +15,12 @@
 >   `MAX_HISTORY_TURNS`, `MAX_CHUNK_TOKENS`, `LLM_TURN_TIMEOUT_S`)
 >   and the A/B promotion-decision + cache-sunset decision logs.
 >   See Task #361 §F.
+> - `infra/features-roadmap-362.md` — features-tier flags
+>   (`recall_intent:tier1_phrases`, `recall_intent:tier2_tokens`,
+>   `session:fallback:{id}`, `session:fallback:disabled`,
+>   `session:ttfb:{id}`, `moderation:rephrase_hints`,
+>   `moderation:hard_floors_test_mode`) plus the moderation-mode
+>   threshold matrix and non-negotiable safety floors. See Task #362 §F.
 
 **Status:** locked v3 — 2026-05-04
 **On-call channel:** `#syrabit-oncall` (Slack)
@@ -184,6 +190,14 @@ traffic during a flip).
 | `MAX_HISTORY_TURNS` *(post-#361)* | env var read at process start (overridable via Redis) | on-call | `12` | on-call | next deploy or sub-ms via Redis | `redis-cli SET chat:max_history_turns 12` |
 | `MAX_CHUNK_TOKENS` *(post-#361)* | env var read at process start (overridable via Redis) | on-call | `512` | on-call | next deploy or sub-ms via Redis | `redis-cli SET rag:max_chunk_tokens 512` |
 | `LLM_TURN_TIMEOUT_S` *(post-#361)* | env var read at process start (overridable via Redis) | on-call | `15` | on-call | next deploy or sub-ms via Redis | `redis-cli SET chat:llm_turn_timeout_s 15` |
+| `recall_intent:tier1_phrases` *(post-#362)* | Redis JSON list, read at process start + on every turn | on-call (manual edit via `redis-cli SET`) | seed list per #362 §1.2 | on-call | < 5 ms | `redis-cli SET recall_intent:tier1_phrases '<previous-json>'` |
+| `recall_intent:tier2_tokens` *(post-#362)* | Redis JSON list, read at process start + on every turn | on-call | seed list per #362 §1.2 | on-call | < 5 ms | `redis-cli SET recall_intent:tier2_tokens '<previous-json>'` |
+| `session:fallback:{id}` *(post-#362)* | Redis string, read every turn (per-session, before global `chat:fallback`) | dispatcher (auto on K=3 consecutive turns > 2.4s TTFB) | unset (= use global chain) | dispatcher / on-call | < 5 ms | `redis-cli DEL session:fallback:{id}` |
+| `session:fallback:disabled` *(post-#362)* | Redis string, read every turn | anti-thundering-herd job (auto on > 5%/5min trip rate) | `0` | background job / on-call | < 5 ms | `redis-cli DEL session:fallback:disabled` |
+| `session:ttfb:{id}` *(post-#362)* | Redis hash, read+write every turn (per-session) | dispatcher | unset on session start | dispatcher | < 5 ms | `redis-cli DEL session:ttfb:{id}` |
+| `moderation:rephrase_hints` *(post-#362)* | Redis JSON object, read at process start (refreshed every 5 min) | on-call | seeded per #362 §4.4 | on-call | up to 5 min (acceptable — non-safety-critical) | `redis-cli SET moderation:rephrase_hints '<previous-json>'` |
+| `moderation:hard_floors_test_mode` *(post-#362)* | env var read at process start | infra owner | unset (= disabled) | infra owner | next deploy | redeploy without the env var |
+| `user_profile.moderation_mode` *(post-#362)* | Mongo document, read every turn from `user_profile` (cached on FastAPI request scope) | user (UI setting) / admin override | `"default"` | user / admin | next turn (no cache TTL) | revert via UI; admin override via Mongo update + audit-log entry |
 
 ---
 

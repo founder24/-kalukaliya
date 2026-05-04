@@ -11,6 +11,12 @@
 >   separate batch index / Vertex chat co-primary). See Task #363 §A.
 > - `infra/perf-roadmap-361.md` — perf-tier (RAG/embed cache,
 >   fast-mode 1b vs 3b A/B, p99 instrumentation). See Task #361.
+> - `infra/features-roadmap-362.md` — features-tier (deep recall
+>   via summary-vector embedding gated by recall-intent detector,
+>   mixed-language en↔as UX metrics, per-session sticky model
+>   fallback with anti-thundering-herd guard, friendlier moderation
+>   UX with safe/default/challenge modes + non-negotiable safety
+>   floors). See Task #362.
 
 **Status:** locked v3 — 2026-05-04
 

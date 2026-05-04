@@ -11,6 +11,12 @@
 > - `infra/perf-roadmap-361.md` — perf tier (RAG/embed cache,
 >   fast-mode 1b vs 3b A/B, p99 instrumentation, ROI gate +
 >   kill-switch). See Task #361.
+> - `infra/features-roadmap-362.md` — features tier (deep recall via
+>   summary-vector embedding gated by recall-intent detector,
+>   mixed-language en↔as UX metrics, per-session sticky model
+>   fallback with anti-thundering-herd guard, friendlier moderation
+>   UX with safe/default/challenge modes + non-negotiable safety
+>   floors). See Task #362.
 >
 > **Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5,
 > Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.**
@@ -573,6 +579,22 @@ restored for 7 consecutive days, resume.
     pipeline they short-circuit on hit. Cache served only after the
     #361 §6.2 promotion gate clears; default `cache:rag_enabled=0`.
     See `infra/perf-roadmap-361.md` for the full spec.
+
+14. **Recall-intent gate is mandatory before any summary-vector
+    Pinecone query (post-#362).** The summary-embedding lookup adds
+    ~30–60 ms; running it on every turn would add that to the p50
+    envelope. The two-tier detector (Tier 1 phrase / `@recall`
+    prefix; Tier 2 anaphoric-token trigger plus a 1-token
+    Llama-3.2-3B classifier) keeps the unconditional-cost addition
+    at zero on the ~90% of turns that don't pass either tier,
+    ~50 ms on the ~5–10% of turns that hit Tier 2's classifier
+    (without then querying Pinecone), and the full ~30–60 ms only
+    on turns where recall-intent is actually detected. Per-turn
+    synchronous summary-vector queries on every chat turn are
+    forbidden. The phrase + token lists live in Redis
+    (`recall_intent:tier1_phrases`, `recall_intent:tier2_tokens`)
+    so on-call can edit them without a code deploy. See
+    `infra/features-roadmap-362.md` §1 for the full spec.
 
 ---
 
