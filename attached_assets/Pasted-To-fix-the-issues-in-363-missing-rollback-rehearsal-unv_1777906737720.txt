@@ -1,0 +1,215 @@
+To **“fix”** the issues in `#363` (missing‑rollback‑rehearsal, unverified‑assumptions, under‑budgeted‑sub‑projects), you **don’t rewrite architecture**; you **add operational‑steps + verification‑commands + budget‑notes** into:
+
+- `.local/tasks/v3-infra-spec-doc.md` (`#359`),  
+- `.local/tasks/v3-infra-spec-implement.md` (`#360`),  
+- and a new **`#363`‑implement‑plan** (or extend `#363` as‑`add‑operational‑step‑8`).
+
+Below are **Replit‑style commands** and **diff‑blocks** you can paste into those files:
+
+***
+
+### 🧩 1. **Fix: Mongo‑sharding‑design‑tradeoffs** (add‑to‑`#363`‑docs)
+
+```bash
+# 1. Add a “Mongo‑sharding‑tradeoffs”‑section to #363
+cat > .local/tasks/v3-sharding-design-rationale.md << 'EOF'
+# Mongo Sharding Tradeoffs (after #363)
+
+## Why hashed `user_id` shard key is good for OLTP, bad for OLAP
+- Choosing `{ user_id: "hashed" }` optimizes **hot‑writes per user**:
+  - Each user's conversation tree lives on one shard.
+  - Range queries across all users become scatter‑gather.
+- Future analytics queries like:
+  - "all conversations between dates X and Y across all users"
+  must be done via **map‑reduce‑style** scatter‑gather, not range‑scan.
+
+## Shard‑key‑requirement on `session_id`
+- Assumption: `session_id` embeds `user_id` (e.g., `u1234_session_...`).
+- If `session_id` is random UUID, the plan breaks under sharding.
+- Verification check:
+  - Capture current `session_id` format:
+    - `db.sessions.find_one()` -> check prefix or embedded `user_id`.
+  - If not true, add `document.session_id = f"u{user_id}_{uuid}"` in dispatcher.
+- Index requirements under sharding:
+  - Ensure `conversations(session_id, ts desc)` is **sharded by `user_id`**:
+    - Each shard only sees its own `user_id` conversations.
+EOF
+```
+
+Add this file‑to‑docs‑link into `#363`:
+
+```bash
+# 2. Add a line to #363 that references this
+echo "All MongoDB sharding design tradeoffs and verification steps are documented in \`wip/mongo-sharding-tradeoffs.md\`." >> .local/tasks/v3-infra-spec-implement.md
+```
+
+***
+
+### 🧩 2. **Fix: Redis‑multi‑shard‑path‑explicitness**
+
+You mentioned **Path‑A** (Upstash‑Redis‑Cluster) and **Path‑B** (multi‑shard‑via‑hash‑distribution). Make them **explicit**.
+
+```bash
+# 1. Add a Redis‑sharding‑path‑rationale
+cat > .local/tasks/v3-redis-sharding-paths.md << 'EOF'
+# Redis Sharding Paths (after #363)
+
+## Path A: Upstash Redis Cluster
+- Separate product; priced and provisioned differently from standard Upstash.
+- Requires separate startup‑credit allocation; must be verified with Upstash‑support.
+- Pros:
+  - Native‑sharding support, no application‑level‑hashing.
+- Cons:
+  - May not be covered by same credit‑bucket.
+
+## Path B: Multi‑shard‑via‑hash‑distribution
+- Use `CRC16(key) % N` to distribute keys across N Redis‑shards.
+- Pros:
+  - Simple, works with standard‑Upstash‑databases.
+- Cons:
+  - Embed‑/RAG‑cache‑keys should be **pinned‑to‑one‑shard or replicated**, not hashed.
+  - Hot‑keys can‑still‑bottleneck‑one‑shard.
+EOF
+```
+
+Add this into `#363`:
+
+```bash
+echo "Redis‑sharding‑path‑options (Path A vs Path B) are documented in \`wip/redis-sharding-paths.md\`." >> .local/tasks/v3-infra-spec-implement.md
+```
+
+***
+
+### 🧩 3. **Fix: Pinecone‑scale‑out‑Path‑A‑only**
+
+Pinecone’s **pod‑based**‑Path‑B is **legacy**; **Path‑A (namespace‑sharding)** is the way.
+
+```bash
+# 1. Add Pinecone‑scale‑out‑rationale
+cat > .local/tasks/v3-pinecone-scaleout.md << 'EOF'
+# Pinecone Scale‑Out (after #363)
+
+## Path A: Namespace sharding (recommended)
+- Use `namespace = {user_id}` for Pinecone‑index‑namespaces.
+- Pros:
+  - Serverless‑mode; scales automatically.
+  - Matches Pinecone‑for‑Startups‑modern‑stack.
+- Cons:
+  - Requires dispatcher to know `user_id` → `namespace` map at runtime.
+
+## Path B: Pod‑based sharding (legacy)
+- Pod‑based indexes are **deprecated** for new accounts.
+- New accounts may not even be able to provision them.
+- Pros:
+  - Familiar‑to‑legacy‑users.
+- Cons:
+  - Not recommended for new‑projects.
+
+## Embed‑model‑consistency
+- Ensure both live‑index and async‑batch‑index use the same embedding‑model:
+  - `@cf/baai/bge-m3` for both.
+- If models differ, retrieval‑quality degrades silently.
+EOF
+```
+
+Add into `#363`:
+
+```bash
+echo "Pinecone‑scale‑out‑rationale (Path A vs Path B) and embedding‑model‑consistency checks are documented in \`wip/pinecone-scaleout.md\`." >> .local/tasks/v3-infra-spec-implement.md
+```
+
+***
+
+### 🧩 4. **Fix: Add Rollback / Backup / Observability (Step‑8)**
+
+You asked for **Replit‑command‑to‑fix‑issues**; the **best way**‑is‑to **add‑an‑explicit‑“Step‑8”**‑to‑`#363`:
+
+```bash
+# 1. Add Step‑8 to #363 (rollback‑rehearsal + backup + observability)
+cat >> .local/tasks/v3-infra-spec-implement.md << 'EOF
+## Step 8: Rollback rehearsal, backup, and observability
+
+### 8a. Rollback rehearsal
+- For each sharding‑step:
+  - Write the rollback‑plan into a `ROLLBACK.md` file.
+  - Run a **dry‑run‑rollback** on a test‑cluster.
+  - Document errors and refine rollback‑plan.
+
+### 8b. Backup / restore at sharded‑scale
+- Plan includes:
+  - Sharded‑cluster backup‑strategy.
+  - Restore‑testing on a test‑cluster.
+  - Maintenance‑window‑budgeting for index‑rebuilds.
+
+### 8c. Observability after sharding
+- Add per‑shard‑metrics to existing SLO‑metrics:
+  - Per‑shard‑QPS, error‑rates, cache‑hit‑rates.
+  - Hot‑shard‑detection and balancer‑storm‑alerts.
+EOF
+'
+```
+
+***
+
+### 🧩 5. **Fix: Add “Load‑harness‑build” Step (7a)**
+
+```bash
+# 1. Split Load‑step‑7 into 7a and 7b
+cat >> .local/tasks/v3-infra-spec-implement.md << 'EOF
+## Step 7a: Build load‑harness
+
+- Build a load‑generator harness (k6 + cluster) that can simulate:
+  - 500k–1M‑DAU‑synthetic‑load.
+  - Realistic‑conversation‑patterns.
+- Run this harness against a test‑cluster to validate:
+
+## Step 7b: Run and analyze load‑test
+- Execute:
+  - 500k–1M‑DAU‑load.
+- Analyze:
+  - QPS‑ceiling, error‑rates, tail‑latency.
+EOF
+'
+```
+
+***
+
+### 🧩 6. **Fix: Add “Dual‑write‑code‑budget”**
+
+```bash
+# 1. Add budget‑note for dual‑write‑code
+cat >> .local/tasks/v3-infra-spec-implement.md << 'EOF
+## Dual‑write‑code‑budget
+- Dual‑write‑logic for MongoDB‑sharding is not a config‑change; it is a code‑change.
+- Allocate 1–2 sprints for this code‑development and testing.
+EOF
+'
+```
+
+***
+
+### ✅ **Final “Replit‑command‑to‑fix‑issues” answer**
+
+> To **fix** the issues in `#363` (missing‑rollback‑rehearsal, unverified‑assumptions, under‑budgeted‑sub‑projects):
+
+> 1. **Add design‑rationale‑files** for:
+>    - Mongo‑sharding‑tradeoffs (`wip/mongo-sharding-tradeoffs.md`),  
+>    - Redis‑multi‑shard‑paths (`wip/redis-sharding-paths.md`),  
+>    - Pinecone‑scale‑out (`wip/pinecone-scaleout.md`).
+> 2. **Add Step‑8** to `#363`‑for **rollback‑rehearsal, backup‑/‑restore‑planning, and per‑shard‑observability**.
+> 3. **Split Step‑7** into **7a (load‑harness‑build)** and **7b (run‑and‑analyze‑load‑test)**.
+> 4. **Add budget‑note** for **dual‑write‑code‑development**.
+
+Run these in Replit shell:
+
+```bash
+mkdir -p wip
+cat > wip/mongo-sharding-tradeoffs.md << '...mongo‑sharding‑rationale...'
+cat > wip/redis-sharding-paths.md << '...redis‑path‑rationale...'
+cat > wip/pinecone-scaleout.md << '...pinecone‑rationale...'
+echo '...add Step‑8 to #363...' >> .local/tasks/v3-infra-spec-implement.md
+echo '...split Step‑7 into 7a and 7b...' >> .local/tasks/v3-infra-spec-implement.md
+echo '...add dual‑write‑code‑budget‑note...' >> .local/tasks/v3-infra-spec-implement.md
+```
+
+This **doesn’t change architecture**, but **makes the plan honest and operationally‑ready**.

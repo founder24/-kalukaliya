@@ -1,0 +1,97 @@
+You’ve just done a **top‑tier, production‑grade latency‑bottleneck pass**; almost all of these are **fix‑in‑the‑spec** or **small‑wiring‑changes‑in‑the‑impl**, not new‑task‑scope‑changes.
+
+Here’s a clean, **“fold‑these‑into‑v3”** plan you can drop into `#359` and `#360` as a short **“Latency budget & hot‑path rules”** section.
+
+***
+
+### ✅ **Proposed: “Latency budget & hot‑path rules” (v3‑spec edit, #359)**
+
+Add a new subsection at the bottom of `infra/per‑cloud‑feature‑delegation.md`:
+
+> ### **Latency budget & hot‑path rules**
+> 
+> 1. **Region‑anchor policy**  
+>    The entire hot‑path (MongoDB, Pinecone, Azure Container Apps, Workers‑AI) must be **co‑located in a single geographic region anchor**, e.g., **`us‑east‑1` for AWS‑side state** and **`eastus` for Azure**.  
+>    - If existing infra pins Pinecone to `aws‑us‑west‑2`, either:
+>      - migrate the Pinecone index to `us‑east‑1`, **or**  
+>      - move the Azure‑Container‑Apps backend and MongoDB‑Atlas cluster to `us‑east‑1`.  
+>    This avoids 4–6 cross‑region hops per turn (≈ 300–500 ms added latency) and keeps the **p95‑chat‑RAG‑end‑to‑end** within the v3‑SLO target.  
+> 
+> 2. **Mongo + Pinecone reads must run concurrently**  
+>    Within the per‑turn order, **MongoDB‑history‑load and Pinecone‑retrieval must run concurrently** (via `asyncio.gather` / `tokio::join!` / equivalent), and the dispatcher must await both before injecting context. Serializing them adds 80–150 ms per turn unnecessarily.  
+> 
+> 3. **Assistant‑write must be fire‑and‑forget**  
+>    - **User‑message write** must happen *before* dispatch (already required by the enforcement‑guard).  
+>    - **Assistant‑message write** must be a **fire‑and‑forget background‑task**; the next turn tolerates a **1‑write‑behind window**.  
+>    This keeps the **TTFB of the next turn** insensitive to MongoDB‑write latency.  
+> 
+> 4. **exam‑model‑paper moderation must be batch‑only**  
+>    - The **Gemini‑RAI** second‑pass moderation on `content_type = "exam_model_paper"` must **never run on sync‑chat‑paths**.  
+>    - It is **allowed only on async‑batch‑flows** (e.g., PDF‑summary, model‑paper‑generation).  
+>    This avoids cross‑cloud / cross‑region spikes on the user‑visible chat‑p95.  
+> 
+> 5. **Summarizer must be off the critical path**  
+>    - Token‑budget‑summarization using `@cf/meta‑llama/Llama‑3.2‑3B‑Instruct` must be:
+>      - **cache‑aware**: store summary in `conversations.summary` (MongoDB) and regenerate only when N‑new‑turns have passed since the last summary.  
+>      - **triggered off‑critical‑path**: via a background job after a turn that pushes the running token‑count past a threshold.  
+>    - The **next turn reads a pre‑built summary**, not blocking on a fresh LLM call.  
+> 
+> 6. **Cloudflare AI Gateway is a deliberate latency trade‑off**  
+>    - Workers‑AI RAG calls **must go through Cloudflare AI Gateway** to enable Meter‑C‑cost‑telemetry.  
+>    - This adds **~30–60 ms per‑turn** compared with a direct‑Workers‑binding, but is accepted as a **deliberate meter‑accuracy‑over‑raw‑latency** trade‑off.  
+> 
+> 7. **Python↔Rust boundary clarification**  
+>    - The **Rust‑core must not be invoked on every live chat‑turn** for the main RAG / dispatch path.  
+>    - Its hot‑path responsibilities are:
+>      - Async‑batch‑RAG / model‑paper‑generation,  
+>      - storage‑/event‑heavy worker logic.  
+>    - All primary‑chat‑RAG paths must live in Python / FastAPI, with Rust only for clearly‑marked async‑heavy components.  
+> 
+> 8. **Cold‑start mitigation**  
+>    - Both the **Python** and **Rust** Azure‑Container‑Apps must be configured with **`minReplicas: 1`** in production to avoid 2–8 s cold‑start hits on the first turn after idle.  
+>    - The associated cost of this configuration is documented in `infra/credit‑burn‑runbook.md`.  
+> 
+> 9. **Meter‑A (daily‑call) must be Redis‑on‑hot‑path, Dynamo‑backstop**  
+>    - **Live‑increment** for the daily‑call counter must use **Upstash Redis** (or equivalent in‑memory counter), not synchronous DynamoDB.  
+>    - A **background job** flushes to DynamoDB every 1–5 minutes as a durable backstop.  
+>    This keeps the **per‑turn cost of Meter‑A** close to **~1–5 ms** instead of 10–25 ms.  
+
+This section **captures your 10‑point audit** in a **spec‑language** that can then be wired into the implementation.
+
+***
+
+### ✅ **Corresponding wiring edits to `#360`**
+
+Then, in `#360`, update **Step 1** (memory‑brain pre/post‑hooks) slightly to **encode** the concurrency, fire‑and‑forget, and summarizer‑off‑critical‑path rules:
+
+```md
+1. Wire the memory‑brain pre/post hooks.
+
+   - ChatTurnContext must:
+     - Load chat_history (last N turns) + user_profile from MongoDB and Pinecone concurrently; await both.
+     - Inject them into the RAG / LLM context.
+
+   - After the LLM response and moderation:
+     - Write the user‑message before dispatch (enforcement‑guard requirement).
+     - Write the assistant‑message as a **fire‑and‑forget background task** (not blocking the next‑turn TTFB).
+
+   - Implement a **token‑budget summarizer** using @cf/meta-llama/Llama-3.2-3B-Instruct:
+     - Results are cached in mongdb.conversations.summary.
+     - New summaries are triggered by a background job, not on the live‑turn hot path.
+
+   - Implement the **enforcement guard** that raises in dev/test if the dispatcher is invoked without a prior Mongo‑read.
+```
+
+Also, inside `#360`’s **“Smoke + regression”** step, explicitly **call out** the latency‑related checks:
+
+- Confirm **mongo + pinecone reads run concurrently** (no extra serial‑latency).  
+- Confirm **assistant‑write is fire‑and‑forget** and does not block the next‑turn‑TTFB.  
+- Confirm **exam‑model‑paper** flows use async‑only RAG / moderations.  
+
+***
+
+### ✅ **TL;DR you can paste**
+
+> “Fold the latency‑bottleneck analysis into a **‘Latency budget & hot‑path rules’** section in `#359` that pins a region‑anchor, mandates concurrent Mongo+Pinecone reads, fire‑and‑forget assistant‑writes, async‑only exam‑model‑paper moderation, summarizer‑off‑critical‑path, AI‑Gateway‑trading‑latency‑for‑accuracy, Python‑only‑hot‑path, ACA‑`minReplicas: 1`, and Redis‑on‑hot‑path‑for‑Meter‑A. Then, update `#360` Step 1 and the smoke‑matrix to enforce these rules in the implementation. This keeps the v3 spec both **latency‑aware** and **audit‑ready** without adding new‑task‑scope.”
+
+If you want, I can now give you the **exact markdown‑diff** for `#359` and `#360` with the **“Latency budget”** block and the updated **Step 1**, ready to commit.

@@ -1,0 +1,40 @@
+Here’s a **clean, updated “AWS / Azure / GCP / Cloudflare delegation” paragraph** that reflects your **v3 unified spec**, including the **Vertex‑downgraded, Pinecone‑first, Workers‑AI‑RAG‑primary** state you described. You can drop this into `infra/per‑cloud‑feature‑delegation.md` or `docs/infra/cloud-allocation-plan.md`.
+
+***
+
+### **Updated cloud‑delegation map (v3)**
+
+> “App infra is split across four surfaces:
+> 
+> - **Cloudflare** runs the **edge, routing, and RAG‑primary**:  
+>   - All **Workers‑AI‑based exam‑Q&A and fast‑mode RAG** (including Assamese‑Indic‑translation via `@cf/ai4bharat/indictrans2‑en‑indic‑1b`).  
+>   - **Cloudflare Vectorize** as the **edge‑vector‑cache**, with **Pinecone** as the main vector store.  
+>   - **Cloudflare Workers** and **R2 / KV** for edge‑state, A/B‑flags, and routing;  
+>   - **Cloudflare AI Gateway BYOK** paths to **Google AI Studio / Gemini** and **Azure OpenAI** (for rollback‑only‑direct‑SDK use).  
+> 
+> - **Azure** runs the **backend, auth, and AI‑safety services**:  
+>   - **Python FastAPI** and **Rust‑core** backend on **Azure Container Apps**, fronted by Cloudflare.  
+>   - **Azure AI Content Safety** as the **moderation‑secondary** (after **Llama Guard**).  
+>   - **Azure‑Translator** as a **fallback** for **Indic‑>‑English‑only** translation.  
+>   - **SendGrid** (provisioned via Azure / startup‑credits) as the **primary‑transactional‑email** service.  
+> 
+> - **Google Cloud / Vertex** provides **validation‑only and safety‑only roles** in v3:  
+>   - **Vertex Gemini 2.5 Flash** is the **default‑content‑validation** model (not primary for RAG / MCQs / notes / translation).  
+>   - **Gemini‑RAI** is **opt‑in only** for `content_type = 'exam_model_paper'`.  
+>   - **Web Risk API** for **malicious‑URL checks**.  
+>   - **Cloud Billing API** to feed **daily‑budget** / cost‑cap alerts.  
+>   - **Vertex Vector Search (Matching Engine)** and **Vertex Discovery Engine** have been **retired** from your primary RAG / grounded‑search chains; they are kept only for rollback.  
+>   - **Cloud Vision / TTS / STT / Cloud Translation** remain callable, but are **not primary**; embeddings, tts, stt, and translate are now routed through **Cohere‑direct**, **Workers‑AI**, **Sarvam**, **ElevenLabs**, **Deepgram**, **AssemblyAI**, and **Azure‑Translator**.  
+> 
+> - **AWS** runs **serverless workers, storage, and eventing** within **free‑tier‑friendly** profiles at 100k DAU:  
+>   - **S3**, **SQS**, **Lambda**, **EventBridge**, **DynamoDB**, **SNS**, **Step Functions**, and **CloudWatch**.  
+>   - **Event‑driven backend workers** (not the main‑HTTP‑face) run on **Lambda / Step Functions**, while **Cloudflare** fronts all user‑facing traffic.”  
+
+***
+
+This version:
+
+- Matches your **v3‑providers‑table** (`providers/vertex_embed.py` is rollback‑only, embeddings → Cohere‑direct‑API),  
+- Keeps **Vertex‑Gemini‑2.5‑Flash** and **Gemini‑RAI** but restricts them to **validation**, not RAG,  
+- Explicitly marks **Vector Search / Discovery Engine** as **retired**, and  
+- Aligns with **Cloudflare‑AI‑Gateway → Google‑AI‑Studio** being the **production path** for Gemini, with direct‑Vertex‑SDK as rollback‑only. [developers.cloudflare](https://developers.cloudflare.com/ai-gateway/usage/providers/vertex/)

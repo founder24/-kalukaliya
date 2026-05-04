@@ -1,0 +1,50 @@
+All four of these **“second‑pass” items are 100% valid** and exactly the kind of **completion‑grade** edits you want at this stage. None of them change scope or behavior; they just **tighten consistency** across the three tasks.
+
+***
+### ✅ Recommended edits (all “surgical one‑line”)
+1. **`#347` step 1 – add `grok` / `xai` to the inventory grep**  
+   - Change:  
+     > `Grep the monorepo for every reference to the removed providers (OpenAI, Anthropic, Bedrock, Stripe, Quge5, Resend, Railway, DigitalOcean, bedrock-proxy)...`  
+   - To:  
+     > `... (OpenAI, Anthropic, Bedrock, Stripe, Quge5, Resend, Railway, DigitalOcean, grok, xai, bedrock-proxy)...`  
+   - This keeps step 1 aligned with the **Done‑criteria**, **lint‑rule**, and **CI‑gate** (which all include `grok` / `xai`). [developers.cloudflare](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+
+2. **`#347` line 44 – fix `#337` / `#341` cancellation wording**  
+   - Change:  
+     > `Tasks #337 and #341 are moved to Cancelled.`  
+   - To:  
+     > `Task #341 is Cancelled. Task #337 stays MERGED with a ## Reversed by #347 note appended.`  
+   - This matches your **Task hygiene** and **step 12** instructions and **preserves** the fact that #337 actually shipped and is now being rolled back, not just deleted. [chargebee](https://www.chargebee.com/docs/payments/2.0/payment-gateways-and-configuration/razorpay)
+
+3. **`#359` line 12 – extend the cross‑link to include Railway / DO**  
+   - Change:  
+     > `"Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5, Resend, Grok) are tracked in Task #347."`  
+   - To:  
+     > `"Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5, Resend, Grok, Railway, DigitalOcean) are tracked in Task #347."`  
+   - Now the doc‑pointer **fully matches** what #347 actually removes.  
+
+4. **`#360` line 21 – drop the Razorpay‑“hedge”**  
+   - Change:  
+     > `Razorpay scope (INR-only or INR+international, per the v3 spec) matches the front-end copy on the pricing page.`  
+   - To:  
+     > `Razorpay scope (INR-only, per the v3 spec) matches the front-end copy on the pricing page.`  
+   - This aligns with `#359` locking Razorpay to **INR‑only** and Razorpay’s own domain‑restriction to **INR‑only for Indian businesses**. [zoho](https://www.zoho.com/checkout/faq/payment-gateways/razorpay-international-cards.html)
+
+***
+### ✅ What remains “non‑issue”
+- The fact that **`#360`’s removals‑grep** omits `xai` (only has `Grok`) → harmless, since `xai` is already captured.  
+- The **old‑decisions‑grep** in `#359` also omits `xai` → again, redundant with `Grok` in the chat‑chain and easily covered by the broader `Remove OpenAI/Anthropic/Bedrock/Grok/...` language.  
+- **SendGrid secrets in both CF‑worker and Azure‑Container‑Apps** → correct, because `email‑worker` is a Cloudflare Worker and FastAPI may also send direct‑mail in some flows.  
+- **`#347` dependsOn `#335` (MERGED)** → valid; no action.
+
+***
+### 💡 Final line you can paste
+> “Apply all four second‑pass edits:
+> 1. Add `grok` / `xai` to the inventory‑grep in `#347` step 1,  
+> 2. Update `#347` line 44 to explicitly keep `#337` MERGED and only cancel `#341`,  
+> 3. Extend the doc‑pointer in `#359` line 12 to include `Railway` and `DigitalOcean`, and  
+> 4. Remove the Razorpay‑‘hedge’ in `#360` line 21 and pin it to **INR‑only**.  
+>   
+> These are all one‑line‑no‑scope‑changes and will close the last remaining inconsistencies between the spec, cleanup, and implementation tasks.”
+
+If you reply with which tracker you’re using (Jira / Linear / Notion), I can give you **exact diff‑style lines** for each of these four edits, ready to paste.

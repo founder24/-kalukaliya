@@ -1,0 +1,70 @@
+Great constraint — you want to **stretch the $5k Workers‑AI‑credit over more than a year**, so **70%‑of‑$5k‑over‑30‑days** as a trigger would be **way too aggressive**.
+
+Here’s how to **re‑tune the credit‑burn policy** while keeping the **same mechanism** (meter + env‑flag):
+
+***
+
+### **1. Keep the same structure, change the numbers**
+
+Change your rule from:
+
+> **“70% of $5k over 30‑day rolling window → flip `CHAT_FALLBACK`”**
+
+to something like:
+
+> **“70% of $5k over 365‑day rolling window → flip `CHAT_FALLBACK`”**
+
+That turns it into:
+
+- **$5k / 365 days ≈ $13.70 / day**  
+- **70% of $5k over 365‑days ≈ $3.5k / 365 ≈ $9.60 / day**
+
+So your **hard‑cap‑burn‑rate** becomes about **$9–10 / day**, and only after **a full year** at that rate does the flag flip.
+
+You can make it even more conservative:
+
+- **“70% of $5k over 730‑days (2 years)” → flip `CHAT_FALLBACK`”**  
+  - ≈ **$4.75 / day** cap to spread $5k over 2 years.
+
+***
+
+### **2. Concrete “policy‑line” you can paste**
+
+```md
+Workers‑AI‑RAG‑credit‑burn‑trigger:
+  - If cumulative Workers‑AI‑RAG‑cost > 70% of $5k over a 365‑day rolling window, set CHAT_FALLBACK=1 (shift secondary‑exam‑Q&A to Azure GPT‑4.1‑mini).
+  - If you want to stretch $5k over 2 years, use a 730‑day rolling window instead (≈ $4.75 / day cap).
+```
+
+This keeps your **executor‑mechanism** (Cloudflare‑Analytics → daily‑Lambda → DynamoDB‑counter → env‑flag) unchanged, but **softens the burn‑rate** and **aligns with “$5k for >1 year”**.
+
+***
+
+### **3. Extra safety: soft‑cap + advisory‑warning**
+
+You can also add a **soft‑cap** alert:
+
+- **Soft‑trigger**: 40%‑of‑$5k‑over‑365‑days → **warn** the team (e.g., `#ops‑syra` / `#syra‑infra`) but **don’t flip the flag** yet.  
+- **Hard‑trigger**: 70%‑over‑365‑days → **flip `CHAT_FALLBACK`**.
+
+That gives you **“oh‑wow‑we‑are‑burning‑fast”** feedback before the automatic‑switch happens.
+
+***
+
+### **4. How to wire it in your infra**
+
+- **Meter‑shape** (same as before):
+  - `Cloudflare AI Gateway analytics` → `daily‑Lambda` → `DynamoDB‑counter` (store `timestamp`, `cost`, `window=365` or `730`).  
+  - Daily‑job:
+    - Compute `sum(cost since 365‑days‑ago)`.  
+    - If `sum > 0.7 × $5k`, set `CHAT_FALLBACK=1` in the Azure Container Apps / Rust‑core config.  
+
+You can start with **`window=365`**, and if you later say “let’s stretch over 2 years”, just change **`365 → 730`** in the script.
+
+***
+
+### **5. Policy‑line tailored to “>1 year”**
+
+> **“Workers‑AI‑RAG‑credit‑burn‑trigger is 70% of $5k over a 365‑day rolling window; if triggered, secondary‑exam‑Q&A load shifts to Azure GPT‑4.1‑mini. This design assumes the $5k credit is intended to last more than one year.”**
+
+This keeps your **A‑grade‑architecture** intact while **explicitly matching your “stretch‑the‑credit” goal**.

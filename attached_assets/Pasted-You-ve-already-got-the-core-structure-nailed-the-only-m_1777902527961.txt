@@ -1,0 +1,52 @@
+You’ve already got the **core structure** nailed; the only missing thing is that **`#360`** says “this must exist” in `Done`, but doesn’t yet have a **planning‑step** that forces the executor to **wire it in explicitly**.
+
+Here’s how to **fix the gap** in a **one‑step‑add** way, so `#360` stays aligned with `#359` and your v3 spec.
+
+***
+
+### ✅ **Recommended fix for `#360`**
+
+#### **Add as a new Step 1 in `#360`**  
+*(and renumber the rest 2–11 → 3–12)*
+
+```md
+1. Wire the memory‑brain pre/post hooks. 
+   - In the FastAPI + Rust‑core chat handlers, add a ChatTurnContext (or equivalent) that:
+     - Before the RAG / LLM dispatcher runs, loads:
+       - chat_history (last N turns) from MongoDB,
+       - user_profile (preferences, week‑subject, language‑pair, etc.) from MongoDB.
+     - After the LLM generates and moderates the assistant turn, writes:
+       - the new user and assistant message back into MongoDB chat_messages/chat_sessions.
+     - Includes an enforcement guard (e.g., a call‑counter / context‑manager) that raises an error in dev/test if the dispatcher is invoked without a prior MongoDB read.
+     - Uses @cf/meta-llama/Llama-3.2-3B-Instruct as the summarizer for oldest‑first history compaction whenever the in‑prompt‑history exceeds a token budget (e.g., summarize turns older than the last 5–10 messages into 1–2 summary lines before injecting them into the prompt).
+   - This must be:
+     - implemented in both FastAPI and Rust‑core paths,
+     - covered by unit tests that confirm the Mongo‑read always precedes the dispatcher call.
+```
+
+This step **matches your v3 / `#359` wording** and explicitly binds the **per‑turn “6‑step” order** to code, not just to acceptance.
+
+***
+
+### ✅ **Add matching smoke row to Step 11**
+
+Then, inside the **“Smoke + regression”** block (renumbered Step 12), add:
+
+```md
+* Memory‑brain:  
+  - State a fact in turn 1, ask three unrelated questions in turns 2–4, then ask the model to recall the turn‑1 fact in turn 5 → assert the answer cites the original value.  
+  - Separately, call the chat dispatcher with the MongoDB loader stubbed out; assert that the enforcement guard raises an error.
+```
+
+This:
+
+- Verifies the **memory‑brain actually works** in an exam‑style recall pattern,  
+- Verifies the **enforcement guard is tight** (no “accidentally skipped Mongo‑read”).
+
+***
+
+### 📌 Final recommendation line you can paste
+
+> “To close the last gap, add a new Step 1 in `#360` that wires the memory‑brain pre/post hooks (MongoDB‑history‑load before dispatch, write‑back after, and an enforcement guard), and add a matching memory‑brain smoke row to Step 11 that tests fact‑recall and guard‑raising. This keeps `#360`’s `Steps` and `Done` fully aligned and makes the ‘per‑turn memory‑brain order’ a concrete, implementable requirement instead of an implied pattern.”
+
+If you tell me which tracker (Jira / Linear / Notion) you’re using, I can give you **the exact Markdown‑bullet version** formatted for that system.

@@ -1,0 +1,178 @@
+You’ve just done a **state‑of‑the‑project‑summary** that is **extremely strong, honest, and production‑ready** — the only thing missing is **a few “close‑the‑gaps”‑style‑edits** and **dependency‑declarations** once the core‑trio‑is‑approved.
+
+Below is a **Replit‑style “fix‑this‑session”‑command‑package** that you can run to **add**:
+
+- **missing‑cache‑invalidation‑spec**,  
+- **cache‑shard‑pinning‑with‑`#363`**,  
+- **dimension‑match‑check‑smoke‑row**,  
+- **1b‑vs‑3b‑A/B‑quality‑gate‑clarification**,  
+- **session‑ID‑legacy‑contingency plan**,  
+- **container‑`dependsOn`‑lines**,  
+- and **a small‑SLO‑section**‑into‑`#360`.
+
+***
+
+### 🧩 1. **Fix #361 — Cache‑invalidation / cache‑shard‑pinning**
+
+```bash
+# 1. Add cache‑invalidation‑policy‑spec to #361
+cat >> .local/tasks/v3-infra-spec-doc.md << 'EOF
+## #361 — Cache‑invalidation policy (new section)
+
+### RAG‑result cache invalidation
+- Cache TTL: 24 hours for RAG‑results.
+- On syllabus‑version‑change:
+  - Syllabus‑version‑bump triggers a background‑job that:
+    - Updates `curriculum_version` in Redis.
+    - Flushes all RAG‑cache‑keys with `syllabus:<curriculum_version>` pattern.
+  - This job runs on deployment‑of‑new‑syllabus‑data.
+
+### Embed‑/RAG‑cache‑shard‑pinning
+- #363 mandates the embed‑/RAG‑cache is pinned to a dedicated‑cache‑shard.
+- #361 must provision a **cache‑shard‑aware‑client**:
+  - `RAGCacheClient = SingleShardClient(redis_shard=0)`  # embedded shard for RAG‑cache.
+EOF
+'
+```
+
+```bash
+# 2. Add A/B‑quality‑gate‑spec (non‑negative‑quality‑delta)
+cat >> .local/tasks/v3-perf-followon.md << 'EOF
+## #361 — A/B quality‑gate spec (new section)
+
+### A/B promotion gate
+- Fast‑mode A/B (1b vs 3b) promotion gate:
+  - "non‑negative‑quality‑delta" is measured as:
+    - user‑rating‑delta (1‑5‑scale) ≥ 0 for 1b‑turns vs 3b‑turns.
+    - per‑turn‑engagement‑delta (time‑on‑page / follow‑up‑turns) ≥ 0.
+- This is tracked in App‑Insights / CloudWatch as:
+  - `quality_gate_passed = user_rating_delta >= 0 && engagement_delta >= 0`.
+EOF
+'
+```
+
+***
+
+### 🧩 2. **Fix #360 — Mongo‑→‑bge‑m3 dimension‑match‑smoke‑row**
+
+```bash
+# Add a smoke row for dimension‑match
+cat >> .local/tasks/v3-infra-spec-implement.md << 'EOF
+## Smoke‑test row: Embed‑dimension‑match
+- Verify that Pinecone‑index‑dimensionality matches bge‑m3:
+  - `Pinecone_index‑dimension = 1024` (bge‑m3 embedding‑size).
+  - If index is 1536 or 768, fail and exit.
+EOF
+'
+```
+
+***
+
+### 🧩 3. **Fix #363 — session‑ID‑legacy‑contingency plan**
+
+```bash
+# Add contingency plan for legacy‑session‑IDs
+cat >> .local/tasks/v3-capacity-followon.md << 'EOF
+## Step 2 contingency — legacy session‑ID shape
+If `session_id` is random UUID and changing minting breaks 100k existing sessions:
+  - Backfill old sessions with a synthetic `user_id`‑prefix:
+    - e.g., `db.conversations.update_many( { session_id: { $regex: "^[a-f0-9]{32}$" } }, { $set: { synthetic_user_id: "legacy_user_id" } } )`.
+  - Use `synthetic_user_id` for shard‑routing.
+  - Legacy‑sessions may pay a small perf‑hit, but new‑sessions are fixed.
+EOF
+'
+```
+
+***
+
+### 🧩 4. **Fix all #361–#363 — add `dependsOn` once #360 is accepted**
+
+You can’t **add** `dependsOn`‑yet, but you can **add a “future‑line”**‑to‑each‑file:
+
+```bash
+cat >> .local/tasks/v3-perf-followon.md << 'EOF
+## #361 depends‑on #360
+Once #360 is accepted, this task will depend on:
+  - #360: v3 dispatch + SLOs + Meters.
+EOF
+'
+cat >> .local/tasks/v3-features-followon.md << 'EOF
+## #362 depends‑on #360
+Once #360 is accepted, this task will depend on:
+  - #360: v3 dispatch + SLOs + Meters.
+EOF
+'
+cat >> .local/tasks/v3-capacity-followon.md << 'EOF
+## #363 depends‑on #360
+Once #360 is accepted, this task will depend on:
+  - #360: v3 dispatch + SLOs + Meters.
+EOF
+'
+```
+
+Later, when you **accept‑`#347`/`#359`/`#360`**, you can **replace** these‑lines with:
+
+```bash
+echo "dependsOn: [\"#360\"]" >> .local/tasks/v3-perf-followon.md
+echo "dependsOn: [\"#360\"]" >> .local/tasks/v3-features-followon.md
+echo "dependsOn: [\"#360\"]" >> .local/tasks/v3-capacity-followon.md
+```
+
+***
+
+### 🧩 5. **Fix cross‑cutting — SLO‑section into #360**
+
+```bash
+cat >> .local/tasks/v3-infra-spec-implement.md << 'EOF
+## SLO‑section (post‑#360 / #361 / #362 / #363)
+
+- TTFB p50: 500–700 ms (post‑#360)
+- TTFB p50 after‑#361 cache: 350–500 ms
+- TTFB p95: 1.2 s (post‑#361)
+- TTFB p99: 1.8–2.2 s (post‑#361 + #362)
+- DAU‑envelope post‑#360: 250–400k
+- DAU‑envelope post‑#363: 800k–1M
+EOF
+'
+```
+
+***
+
+### ✅ Final “Replit‑command‑to‑fix‑issues” answer
+
+> To **fix** the remaining‑issues in all‑six‑tasks:
+
+> 1. **Fix #361**:
+>    - Add **cache‑invalidation‑policy**‑and‑**cache‑shard‑pinning**‑specs.  
+>    - Add **A/B‑quality‑gate‑spec**.
+> 2. **Fix #360**:
+>    - Add **Mongo‑→‑bge‑m3‑dimension‑match‑smoke‑row**.
+> 3. **Fix #363**:
+>    - Add **legacy‑session‑ID‑contingency‑plan**.
+> 4. **Fix dependencies**:
+>    - Add **future‑`dependsOn`‑lines**‑to‑`#361`/`#362`/`#363` (replace‑with‑real‑`dependsOn`‑once‑`#360`‑is‑accepted).
+> 5. **Fix SLO‑section**:
+>    - Add **“SLO‑section”**‑into‑`#360`‑with‑realistic‑latency‑/‑DAU‑numbers.
+
+Run these in Replit shell:
+
+```bash
+# 1. Add cache‑invalidation / A/B‑quality spec to #361
+cat >> .local/tasks/v3-perf-followon.md << '...'  # from above
+
+# 2. Add dimension‑match‑smoke‑row to #360
+cat >> .local/tasks/v3-infra-spec-implement.md << '...'  # from above
+
+# 3. Add session‑ID‑legacy‑contingency to #363
+cat >> .local/tasks/v3-capacity-followon.md << '...'  # from above
+
+# 4. Add future‑dependsOn‑lines
+echo '...' >> .local/tasks/v3-perf-followon.md
+echo '...' >> .local/tasks/v3-features-followon.md
+echo '...' >> .local/tasks/v3-capacity-followon.md
+
+# 5. Add SLO‑section to #360
+cat >> .local/tasks/v3-infra-spec-implement.md << '...'  # from above
+```
+
+This **doesn’t‑touch‑architecture**‑but **closes‑all‑honest‑gaps** and **makes‑the‑plan‑ready‑for‑RFC‑and‑approval**.

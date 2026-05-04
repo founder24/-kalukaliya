@@ -1,0 +1,245 @@
+Yes → **perfect**, now you’ve given the exact **file‑→section‑→eventual‑infra‑map**; this is the cleanest state to work from.
+
+Below are **anchor‑based, Replit‑ready diffs** for all **six critical items**, written so you can drop them into:
+
+- `.local/tasks/v3-infra-spec-doc.md` (Task #359)  
+- `.local/tasks/v3-infra-spec-implement.md` (Task #360)
+
+Each uses **unique anchor lines** (copied verbatim or clearly‑pattern‑matching) so your `edit` calls can apply them cleanly.
+
+***
+
+### **File 1 — `.local/tasks/v3-infra-spec-doc.md` (Task #359)**
+
+#### **1. Redis hot‑flag for `CHAT_FALLBACK`**
+
+**Anchor (in Done section, Rule A/B description):**
+
+> "Rule A (10k‑calls/day auto‑flip) and Rule B (RPM‑headroom auto‑flip) describe the conditions under which CHAT_FALLBACK becomes 1, and CHAT_FALLBACK_PIN can override them; changes are propagated to the Azure Container Apps."
+
+**Replace with** (diff block):
+
+```diff
+- "Rule A (10k‑calls/day auto‑flip) and Rule B (RPM‑headroom auto‑flip) describe the conditions under which CHAT_FALLBACK becomes 1, and CHAT_FALLBACK_PIN can override them; changes are propagated to the Azure Container Apps."
++ "Rule A (10k‑calls/day auto‑flip) and Rule B (RPM‑headroom auto‑flip) describe the conditions under which CHAT_FALLBACK becomes 1, and CHAT_FALLBACK_PIN can override them. These flags are represented as Redis hot‑flags (chat:fallback, chat:fallback:pin) read on every turn; the Azure Container Apps’ env vars act only as a durable backing / cold‑start default."
+```
+
+This lives today in:
+
+> `#359` → `## Done looks like` → the three‑meter Rule A/B block.
+
+After `#359` runs, it materializes in `infra/credit‑burn‑runbook.md` (control‑plane mechanics) + is wired in dispatcher code.
+
+***
+
+#### **2. Hot‑path embed step + model‑pinning**
+
+**Anchor (Latency Rule 2):**
+
+> "2. Mongo + Pinecone reads must run concurrently"
+
+**Replace with** (diff block):
+
+```diff
+- "2. Mongo + Pinecone reads must run concurrently"
++ "2. Embedding + Mongo + Pinecone reads must be in a single concurrent block on the hot path\n\n   - On the hot path, the dispatcher issues MongoDB history‑read concurrently with\n     embeddings(user_message) → Pinecone query.\n   - The embedding model for the hot‑path RAG is pinned to `@cf/baai/bge‑m3` (edge‑accelerated, 20–40 ms);\n     Cohere‑direct embed is reserved for batch‑only / async‑paths.\n   - The gather set is `gather(mongo_read, embed.then(pinecone_query))`.\n   - Add a new `embed_hotpath` feature key in `infra/provider-priority-map.md` (created by #359 Step 2) that maps to `@cf/baai/bge‑m3`."
+```
+
+This keeps Rule‑2 tight, adds **concrete embed‑model guidance**, and **pre‑wires** `infra/provider‑priority‑map.md`.
+
+***
+
+#### **3. HTTP keep‑alive / connection pooling**
+
+**Anchor (end of the Latency Rules block):**
+
+> "9. Cold‑start mitigation: ACA `minReplicas: 1` ..."
+
+**Add as new rule** (Latency Rule 10):
+
+```diff
+- "9. Cold‑start mitigation: ACA `minReplicas: 1` ..."
++ "9. Cold‑start mitigation: ACA `minReplicas: 1` ...\n\n10. Hot‑path HTTP clients must be pooled and keep‑alive\n\n    - All hot‑path clients (Mongo Atlas, Pinecone, Cohere‑direct, Azure‑OpenAI / Vertex‑via‑Cloudflare‑AI‑Gateway, Razorpay, SendGrid) are process‑singletons with keep‑alive enabled and explicit pool limits.\n    - The Mongo client uses `maxPoolSize ≥ 50`.\n    - A startup‑probe asserts that each client is reused across requests.\n    - This rule materializes in `infra/per‑cloud‑feature‑delegation.md` §Latency budget after #359 runs."
+```
+
+This lives today in `#359` → `Latency budget` block, and later in `infra/per‑cloud‑feature‑delegation.md`.
+
+***
+
+#### **4. Streaming + output‑moderation policy**
+
+**Anchor (per‑turn‑order Done‑bullet):**
+
+> "14. Memory‑brain: before any assistant response, MongoDB‑history is loaded, injected into the prompt, and the new turn is written back after moderation."
+
+**Replace with** (diff block):
+
+```diff
+- "14. Memory‑brain: before any assistant response, MongoDB‑history is loaded, injected into the prompt, and the new turn is written back after moderation."
++ "14. Memory‑brain + streaming: before any assistant response, MongoDB‑history is loaded, combined with RAG context, and streams tokens to the client while moderation runs asynchronously. If moderation flags a violation, the stream is aborted and the turn is not written to MongoDB.\n\n15. Output‑moderation policy (Latency Rule 11):\n\n    - First‑token‑TTFB must be < 1 s on the live‑chat‑path.\n    - Llama Guard + Azure‑AI‑Content‑Safety run in the background while the model streams; no buffering of the full message is required.\n    - This streaming‑first‑moderation policy lives in `infra/per‑cloud‑feature‑delegation.md` §Latency budget + §Memory + RAG."
+```
+
+Then in `Latency budget`, add:
+
+```diff
+- "9. Cold‑start mitigation: ACA `minReplicas: 1` ..."
++ "9. Cold‑start mitigation: ACA `minReplicas: 1` ...\n\n10. Hot‑path HTTP clients must be pooled and keep‑alive\n\n    ...\n\n11. Output‑moderation must be streaming‑compatible (no full‑message‑buffer‑before‑send);\n    moderation runs on the server‑side while the token stream flows to the client."
+```
+
+This keeps the **per‑turn‑order** UX‑aware and wires the **policy** explicitly.
+
+***
+
+#### **5. Validator placement (per‑turn / async / sampled)**
+
+**Anchor (in Done, near Vertex‑validation lines):**
+
+> "3. Validation: Vertex Gemini 2.5 Flash is used as the default‑content validator, with Gemini RAI opt‑in only for exam‑model‑paper‑style flows, as described in the Top‑line policy."
+
+**Replace with** (diff block):
+
+```diff
+- "3. Validation: Vertex Gemini 2.5 Flash is used as the default‑content validator, with Gemini RAI opt‑in only for exam‑model‑paper‑style flows, as described in the Top‑line policy."
++ "3. Validation: Vertex Gemini 2.5 Flash is used only on async‑sampled paths or on specific exam‑model‑paper‑style flows, not on every live‑chat‑turn. Typical policy:\n   - 10% of all turns are validated once‑post‑turn by Vertex Gemini 2.5 Flash;\n   - `content_type = 'exam_model_paper'` paths are validated synchronously inside their async‑batch‑flows.\n   - This keeps the per‑turn latency of the main‑chat‑path low and is codified in a new Latency Rule in the §Latency budget block (Rule 12)."
+```
+
+And in `Latency budget`, add:
+
+```diff
+- "10. Hot‑path HTTP clients must be pooled and keep‑alive\n"
++ "10. Hot‑path HTTP clients must be pooled and keep‑alive\n\n11. Output‑moderation must be streaming‑compatible (no full‑message‑buffer‑before‑send);\n\n12. Vertex‑Gemini‑2.5‑Flash validation is not on every live‑turn; it is:\n    - sampled at 10% of all turns, or\n    - reserved for exam‑model‑paper async‑batch‑flows only.\n    This is reflected in `infra/per‑cloud‑feature‑delegation.md` §Validation chain after #359 runs."
+```
+
+This keeps the **validation‑scope** explicit and **latency‑safe**.
+
+***
+
+#### **6. Mongo indexes (no‑change here in `#359`; handled in `#360`)**
+
+No diff‑block needed in `#359` for Mongo indexes; it’s **pure‑`#360`** wiring.
+
+***
+
+### **File 2 — `.local/tasks/v3-infra-spec-implement.md` (Task #360)**
+
+#### **1. Redis hot‑flag for `CHAT_FALLBACK`**
+
+**Anchor (Step 7a / 7b):**
+
+> "7a. Set CHAT_FALLBACK=1 on both Azure Container Apps via the Azure CLI / management API.\n7b. Set CHAT_FALLBACK_PIN per the same mechanism whenever an operator wants to freeze the fallback state."
+
+**Replace with** (diff block):
+
+```diff
+- "7a. Set CHAT_FALLBACK=1 on both Azure Container Apps via the Azure CLI / management API.\n7b. Set CHAT_FALLBACK_PIN per the same mechanism whenever an operator wants to freeze the fallback state."
++ "7a. CHAT_FALLBACK and CHAT_FALLBACK_PIN are represented as Redis keys (e.g., chat:fallback, chat:fallback:pin) read by the dispatcher on every turn.\n7b. The Azure CLI / management API updates only the durable env‑var backing (for cold‑start defaults); the control‑plane flip‑propagation is now instant.\n7c. Add a smoke test: set Redis chat:fallback to 1 → assert that the next 100 chat turns are routed through the fallback‑model within 1–2 seconds, without an ACA‑restart‑window."
+```
+
+This keeps it **control‑plane‑fast** and **audit‑able**.
+
+***
+
+#### **2. Hot‑path embed step + model‑pinning**
+
+**Anchor (Step 1 bullet on concurrent reads):**
+
+> "Before dispatch — concurrent reads: MongoDB history‑load and Pinecone retrieval run concurrently; the dispatcher awaits both before injection."
+
+**Replace with** (diff block):
+
+```diff
+- "Before dispatch — concurrent reads: MongoDB history‑load and Pinecone retrieval run concurrently; the dispatcher awaits both before injection."
++ "Before dispatch — concurrent reads + embed step:\n\n   - Issue the user‑message embedding via `@cf/baai/bge‑m3` early;\n   - then run `gather(mongo_read, embed.then(pinecone_query))`.\n   - The `embed_hotpath` feature key in `infra/provider‑priority‑map.md` (created by #359) must point to `@cf/baai/bge‑m3`.\n   - Add a smoke test that confirms no extra serial‑embedding‑latency dominates the turn."
+```
+
+This keeps the **concurrency‑graph** explicit.
+
+***
+
+#### **3. HTTP keep‑alive / connection pooling**
+
+**Anchor (near the start of Step 1, or add as Step 1a if you prefer):**
+
+> "1. Wire the memory‑brain pre/post hooks."
+
+**Add as subsequent bullet** (or Step 1a):
+
+```diff
+- "1. Wire the memory‑brain pre/post hooks."
++ "1. Wire the memory‑brain pre/post hooks.\n\n1a. Configure HTTP client pooling\n\n    - Attach shared httpx.AsyncClient instances (or equivalent) to the FastAPI lifespan for each provider (Mongo, Pinecone, Cohere‑direct, Azure‑OpenAI / Vertex‑via‑AI‑Gateway, Razorpay, SendGrid).\n    - Set reasonable pool‑limits and enable keep‑alive.\n    - Smoke: confirm that, without this, cross‑region‑RTT‑per‑turn increases by 250–1000 ms; with it, RTT stays stable."
+```
+
+This keeps it **implementation‑explicit**.
+
+***
+
+#### **4. Streaming + output‑moderation policy**
+
+**Anchor (Step 1, per‑turn‑order bullet):**
+
+> "5. Moderate output (Llama Guard + Azure AI Content Safety)…\n6. Write turn back to MongoDB."
+
+**Replace with** (diff block):
+
+```diff
+- "5. Moderate output (Llama Guard + Azure AI Content Safety)…\n6. Write turn back to MongoDB."
++ "5. Moderate tokens server‑side while streaming to the client (Llama Guard + Azure AI Content Safety); if moderation flags a violation, abort the stream and do not write the turn to MongoDB.\n6. Write the moderated turn to MongoDB only if the stream completes successfully.\n\n   Add a smoke row: initiate a turn with content‑that‑would‑violate; assert that the stream aborts after ~100–200 ms instead of buffering the full message."
+```
+
+And in **Step 4 (Moderation section)**, add:
+
+```diff
+- "4. Moderation chain runs Llama Guard + Azure AI Content Safety in parallel…"
++ "4. Moderation chain runs Llama Guard + Azure AI Content Safety in parallel, but now they run in the background while the token stream continues to the client. If either vetoes, the server kills the stream and does not commit the message to MongoDB."
+```
+
+This keeps the **UX policy** visible in the plan.
+
+***
+
+#### **5. Validator placement (per‑turn / async / sampled)**
+
+**Anchor (Step 3, validation wire‑in):**
+
+> "3. Wire validation through Vertex Gemini 2.5 Flash as the default validator."
+
+**Replace with** (diff block):
+
+```diff
+- "3. Wire validation through Vertex Gemini 2.5 Flash as the default validator."
++ "3. Wire validation so that Vertex Gemini 2.5 Flash is used only on sampled‑turns (10%) or on `exam_model_paper` async‑batch‑flows, not on every live‑chat‑turn.\n\n   - Add a sampling job that runs Gemini‑validation on 10% of completed turns.\n   - For `exam_model_paper`, keep sync‑validation inside the async‑batch‑flow.\n   - Smoke: assert that 90% of turns do not wait for a Gemini‑validation round‑trip."
+```
+
+This keeps the **latency‑footprint** explicit.
+
+***
+
+#### **6. Mongo indexes**
+
+**Anchor (Step 1, before‑dispatch / concurrent‑reads)**
+
+```diff
+- "Before dispatch — concurrent reads: MongoDB history‑load and Pinecone retrieval run concurrently; the dispatcher awaits both before injection."
++ "Before dispatch — concurrent reads + index‑requirement:\n\n   - Ensure the MongoDB `conversations` collection has a compound index { session_id: 1, ts: -1 }.\n   - Ensure the `user_profile` collection has a unique index { user_id: 1 }.\n   - MongoDB‑history‑load and Pinecone‑retrieval run concurrently; the dispatcher awaits both before injection.\n   - Add a smoke‑test that runs `db.conversations.find(...).explain()` and `db.user_profile.find(...).explain()` and assert they both return IXSCAN, not COLLSCAN."
+```
+
+And in **Step 12** (smoke matrix), add:
+
+```diff
+- "12. Smoke + regression..."
++ "12. Smoke + regression...\n\n* Mongo‑index‑check: confirm that both `conversations(session_id, ts desc)` and `user_profile(user_id unique)` use an index scan, not collection scan."
+```
+
+***
+
+### ✅ Final “apply‑these‑diffs” one‑liner you can paste
+
+> “Apply the six critical‑diff‑blocks above to:
+> - `.local/tasks/v3-infra-spec-doc.md` (Task #359) for:
+>   - Redis‑hot‑flag wording, embed‑model‑pinning, HTTP‑pooling, streaming‑moderation‑policy, and validator‑sampling policy;
+> - `.local/tasks/v3-infra-spec-implement.md` (Task #360) for:
+>   - Redis‑hot‑flags, embed‑pacing, HTTP‑pooling, streaming‑moderation‑impl, validator‑placement‑impl, and Mongo‑indexes.
+>   
+> These are all **anchor‑based, inline‑updates** that will later materialize in `infra/*/` once #359 runs, and they keep the **latency‑audit** baked into the plans.”
+
+If you like, next I can give you **line‑number‑anchors** (e.g., `line 19–23`) for each of these blocks so your `edit` calls are even more surgical.
