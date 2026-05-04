@@ -199,15 +199,15 @@
       "provider": "bedrock",
       "programme": "AWS Activate (Bedrock)",
       "url": "https://aws.amazon.com/activate/",
-      "eligibility": "Enrolled on a fresh AWS account (2026-05); Bedrock model access granted in us-west-2.",
+      "eligibility": "n/a — already enrolled but Bedrock daily token quota exhausted account-wide.",
       "tier_usd": 1000,
-      "status": "approved",
+      "status": "disabled",
       "approved_usd": 1000,
       "expires_on": null,
       "tied_email": "founder@syrabit.ai",
-      "submitted_on": "2026-05-04",
+      "submitted_on": null,
       "reference_id": null,
-      "notes": "Wired — used ONLY for Cohere Embed Multilingual v3 + Cohere Rerank 3.5 via CF AI Gateway BYOK (aws-bedrock slug, us-west-2). Direct Cohere connection retired the same day. Anthropic/Nova/Titan/Mistral routes intentionally not wired (Azure GPT-4.1-nano + Vertex Gemini cover those). Verification 2026-05-04 morning: embed HTTP 200, rerank HTTP 429 (new-account RPM throttle). Verification 2026-05-04 afternoon: HTTP 403 INVALID_PAYMENT_INSTRUMENT — AWS Marketplace requires a valid payment method on the account before Cohere subscriptions activate. ACTION REQUIRED: add a card in AWS Console → Billing → Payment preferences, then re-verify; the code path is already correct and fully unit-tested."
+      "notes": "Disabled — AWS quota exhausted. Re-enable by raising Service Quotas; tracked separately."
     }
   ]
 }

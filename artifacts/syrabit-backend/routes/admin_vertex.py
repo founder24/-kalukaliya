@@ -204,13 +204,7 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
                              "enabled": _gemini_or_vertex_configured()},
         "azure_openai":     {"label": "Azure OpenAI",                "env": ["AZURE_OPENAI_KEY_1", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY_2", "AZURE_OPENAI_ENDPOINT"],
                              "enabled": _flag("providers.azure_openai")},
-        # AWS Bedrock — used as the transport for Cohere models (Embed
-        # Multilingual v3 + Rerank 3.5) via the CF AI Gateway aws-bedrock
-        # slug. Other Bedrock-native models (Anthropic/Nova/Titan/Mistral)
-        # are intentionally not wired (replaced by Azure GPT-4.1-nano +
-        # Vertex Gemini). Therefore Bedrock readiness == Cohere-pool readiness.
-        "bedrock":          {"label": "AWS Bedrock (Cohere transport)",
-                             "env": ["AWS_REGION", "CF_AI_GATEWAY_BASE_URL"],
+        "bedrock":          {"label": "AWS Bedrock",                 "env": ["CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_ID", "BEDROCK_PROXY_AUTH_TOKEN"],
                              "enabled": _flag("providers.bedrock")},
         "sarvam":           {"label": "Sarvam (Indic LLM)",          "env": ["SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"],
                              "enabled": any(os.environ.get(k, "").strip() for k in ("SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"))},
@@ -220,11 +214,7 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
                              "enabled": _flag("providers.assemblyai")},
         "deepgram":         {"label": "Deepgram",                    "env": ["DEEPGRAM_API_KEY"],
                              "enabled": _flag("providers.deepgram")},
-        # Cohere — Embed Multilingual v3 + Rerank 3.5, served via AWS Bedrock
-        # (CF AI Gateway aws-bedrock BYOK). Direct api.cohere.com retired
-        # 2026-05-04 (Task #340); COHERE_API_KEY no longer consulted.
-        "cohere":           {"label": "Cohere (via AWS Bedrock)",
-                             "env": ["AWS_REGION", "CF_AI_GATEWAY_BASE_URL"],
+        "cohere":           {"label": "Cohere Embeddings",           "env": ["COHERE_API_KEY"],
                              "enabled": _flag("providers.cohere")},
         "voyage_ai":        {"label": "Voyage AI",                   "env": ["VOYAGE_AI_API_KEY", "VOYAGE_API_KEY"],
                              "enabled": bool(os.environ.get("VOYAGE_AI_API_KEY", "").strip()
@@ -342,17 +332,10 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
         })
 
     # Task #323 — surface tracker rows for providers that aren't in any
-    # routing pool (Cloudflare/MongoDB infra-only) so the badge isn't
-    # silently dropped. Pool membership wins; only providers never
-    # referenced by any feature land here.
-    # Bedrock special case (Task #340): Bedrock is the *transport* for
-    # the `cohere` provider rather than appearing under its own name in
-    # any pool, so it would otherwise be misclassified as orphaned infra
-    # credit. We treat Bedrock as in-use whenever `cohere` is in any pool
-    # so the admin UI doesn't show it twice.
+    # routing pool (Bedrock disabled, Cloudflare/MongoDB infra-only) so
+    # the badge isn't silently dropped. Pool membership wins; only providers
+    # never referenced by any feature land here.
     pool_providers = {p for providers in PROVIDER_PRIORITY.values() for p in providers}
-    if "cohere" in pool_providers:
-        pool_providers.add("bedrock")
     infra_credits = [
         {"provider": prov, **info}
         for prov, info in app_status.items()

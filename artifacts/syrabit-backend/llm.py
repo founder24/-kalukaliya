@@ -3509,11 +3509,12 @@ async def call_rerank_with_dispatch(
     """Rerank *docs* via the weighted provider selected for 'rerank'.
 
     Priority (PROVIDER_PRIORITY['rerank']):
-      pinecone_ai(10000) → cohere(100) → workers_ai(0)
+      pinecone_ai(500) → cohere(1000, skip) → azure_openai(1, skip) → workers_ai(0)
 
     pinecone_ai: providers.pinecone_ai.rerank (bge-reranker-v2-m3, multilingual) — fully wired.
-    cohere:      providers.cohere.rerank — Cohere Rerank 3.5 via AWS Bedrock BYOK (Task #340).
-    workers_ai:  no rerank endpoint — excluded gracefully.
+    cohere: /rerank endpoint not accessible through CF gateway slug (Task #257) — excluded gracefully.
+    azure_openai: rerank not wired (Task #257) — excluded gracefully.
+    workers_ai: no rerank endpoint — excluded gracefully.
 
     Each doc should be a string or a dict with a 'text' key.
     Returns the docs list reordered by relevance (most relevant first),
@@ -3536,17 +3537,9 @@ async def call_rerank_with_dispatch(
                 ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
                 return [d for _, d in ranked]
             elif provider == "cohere":
-                # Cohere Rerank 3.5 via AWS Bedrock BYOK (Task #340 — direct
-                # cohere.com connection retired 2026-05-04).
-                from providers import cohere as _cohere_prov
-                doc_texts = [d if isinstance(d, str) else d.get("text", str(d)) for d in docs]
-                if not doc_texts:
-                    return docs
-                scores = await _cohere_prov.rerank(query, doc_texts)
-                if not scores:
-                    raise RuntimeError("cohere rerank: empty scores from Bedrock")
-                ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
-                return [d for _, d in ranked]
+                # Cohere /rerank endpoint not accessible through the current CF gateway
+                # slug — wiring deferred to Task #257. Excluded gracefully.
+                raise RuntimeError("cohere rerank: endpoint not wired via CF gateway (Task #257)")
             elif provider == "azure_openai":
                 # Azure OpenAI rerank not wired (Task #257); excluded gracefully.
                 raise RuntimeError("azure_openai rerank not wired (Task #257)")

@@ -103,10 +103,25 @@ _CREDITS_LOW_THRESHOLD = 0.20   # < 20% of original = "credits_low"
 # Providers without a CF slug (vertex, workers_ai, pinecone_ai, exa_ai, tavily,
 # mongodb_atlas) are not listed here — they are marked "skip" in the probe loop.
 _PROVIDER_PROBE_SPECS: dict[str, dict] = {
-    # NOTE: Cohere is intentionally absent from this probe map (Task #340,
-    # 2026-05-04). Cohere models (Embed Multilingual v3, Rerank 3.5) are now
-    # served via the aws-bedrock slug; the dedicated "bedrock" probe below
-    # exercises the same BYOK auth chain CF uses for those Cohere models.
+    # Cohere embed/v1 — POST /embed with one word.
+    # "embed" exercises the BYOK auth chain on the cohere/v1 slug and verifies
+    # that the Cohere key stored in the CF dashboard is valid.
+    "cohere": {
+        "method": "POST",
+        "path": "/embed",
+        "body": {
+            "model": "embed-multilingual-v3.0",
+            "texts": ["smoke"],
+            "input_type": "search_query",
+            "embedding_types": ["float"],
+        },
+        "extra_headers": {
+            "Content-Type": "application/json",
+            # BYOK: empty Authorization → CF substitutes "Bearer <COHERE_API_KEY>"
+            "Authorization": "",
+        },
+        "description": "1-word embed → validates BYOK cohere key",
+    },
     # AssemblyAI STT — GET /v2/transcript.
     # Lists recent transcript jobs (may be empty list); validates API key, no cost.
     "assemblyai": {

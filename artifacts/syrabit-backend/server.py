@@ -102,12 +102,11 @@ def _validate_env():
     # (GOOGLE_APPLICATION_CREDENTIALS_JSON). The env var is no longer read by
     # the backend — operators should delete it from Railway. The dead-provider
     # guard continues to block any new `os.environ.get('GEMINI_API_KEY')`.
-    # COHERE_API_KEY removed (Task #340, 2026-05-04): Cohere models now served
-    # via AWS Bedrock (aws-bedrock slug); no direct cohere/v1 key consulted.
     _BYOK_PRIMARY = {
         "SARVAM_API_KEY":     "custom-sarvam",
         "XAI_API_KEY":        "grok/v1",
         "OPENAI_API_KEY":     "openai/v1",
+        "COHERE_API_KEY":     "cohere/v1",
     }
 
     # ── Category 2: Secondary/tertiary AI keys — always redundant with BYOK ──

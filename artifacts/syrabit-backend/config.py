@@ -301,9 +301,8 @@ _CF_PROVIDER_SLUGS = {
     # /v1/chat/completions, /translate, /text-to-speech, etc.
     # CF custom provider forwards {base}/custom-sarvam/<path> → https://api.sarvam.ai/<path>
     "sarvam":      "custom-sarvam",
-    # New providers routed through CF AI Gateway.
-    # NOTE: Cohere is intentionally absent — Cohere models (Embed Multilingual v3,
-    # Rerank 3.5) are now served via the aws-bedrock slug. See providers/cohere.py.
+    # New providers routed through CF AI Gateway
+    "cohere":      "cohere/v1",      # Embeddings/RAG — embed-multilingual-v3.0 (1024-dim)
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
     "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
@@ -324,9 +323,8 @@ _DIRECT_PROVIDER_URLS = {
     # Sarvam direct URL has NO /v1 — callers already supply /v1/chat/completions
     # and non-LLM endpoints like /translate, /text-to-speech live at root.
     "sarvam":      "https://api.sarvam.ai",
-    # Fallback direct URLs (used when CF gateway is down).
-    # NOTE: "cohere" intentionally absent — Cohere now reaches us only through
-    # the aws-bedrock CF gateway slug; there is no direct api.cohere.com path.
+    # Fallback direct URLs (used when CF gateway is down)
+    "cohere":      "https://api.cohere.com/v1",
     "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
     "voyage_ai":   "https://api.voyageai.com/v1",  # Voyage AI embeddings direct fallback
     # Bedrock direct: region-scoped; Azure direct: tenant endpoint (requires env var)
@@ -1050,21 +1048,20 @@ PLAN_PRICES = {
 PROVIDER_PRIORITY: dict = {
     # English chat + RAG: Azure GPT-4.1-mini (primary) → Vertex/Gemini 2.5
     # Flash → Sarvam (Indic-aware fallback) → Workers AI (last-resort).
-    # Bedrock-native chat models intentionally NOT wired: Task #340 keeps
-    # Bedrock scoped strictly to Cohere transport (Embed v3 + Rerank 3.5);
-    # Anthropic/Nova/Titan/Mistral routes are replaced by Azure GPT-4.1-nano
-    # and Vertex Gemini per user instruction.
+    # Bedrock removed (account-wide daily token quota exhausted across every
+    # on-demand model in every region — see providers/bedrock.py for the
+    # actionable error). Re-add only after AWS Service Quotas are raised.
     "english_rag_chat":  ["azure_openai", "vertex", "sarvam", "workers_ai"],
     # Assamese chat: Sarvam (native Indic conversational reasoning) primary
     # → Vertex (Gemini 2.5 Flash) → workers_ai_indic (IndicTrans2 last-resort,
     # weight 0). IndicTrans2 is a translation model not a chat model, so it's
     # intentionally weight-zero — only fires when both Sarvam AND Vertex are
     # excluded, as a degraded-but-online fallback rather than serving an
-    # error. Bedrock-native chat not wired (see english_rag_chat note).
+    # error. Bedrock removed (see english_rag_chat note).
     "assamese_rag_chat": ["sarvam", "vertex", "workers_ai_indic"],
     # Long-form content / notes generation: Vertex/Gemini 2.5 Flash (primary,
     # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI (last-resort).
-    # Bedrock-native chat not wired (see english_rag_chat note).
+    # Bedrock removed (see english_rag_chat note).
     "content":           ["vertex", "azure_openai", "sarvam", "workers_ai"],
     # Assamese content generation (Task #281): IndicTrans2 dominant primary
     # (purpose-built Indic neural MT), Gemini reserved at low weight strictly
@@ -1079,20 +1076,19 @@ PROVIDER_PRIORITY: dict = {
     "stt":               ["deepgram", "assemblyai", "vertex", "workers_ai"],
     # Combined voice pipeline: Deepgram → ElevenLabs → Vertex → Workers AI.
     "voice":             ["deepgram", "elevenlabs", "vertex", "workers_ai"],
-    # Embeddings: Cohere (primary) → Voyage AI → Workers AI.
-    "embed":             ["cohere", "voyage_ai", "workers_ai"],
-    # Language-routed embed sub-pools (hybrid). call_embed_with_dispatch
-    # picks "embed_en" when the query is English / mostly Latin script and
-    # "embed_indic" when Bengali/Assamese/Devanagari script is detected (or
-    # when the caller passes lang in the Indic set). Each sub-pool keeps the
-    # other provider as a 1024-dim fallback so a Voyage outage on an English
-    # query degrades cleanly to Cohere (and vice versa) without any vector-
-    # space mismatch in the Pinecone index. workers_ai (bge-m3, 1024-dim) is
-    # the last-resort weight-0 fallback in both pools.
-    "embed_en":          ["voyage_ai", "cohere", "workers_ai"],
-    "embed_indic":       ["cohere", "voyage_ai", "workers_ai"],
-    # Reranking: Pinecone AI (primary) → Cohere Rerank 3.5 via Bedrock (fallback) → Workers AI.
-    "rerank":            ["pinecone_ai", "cohere", "workers_ai"],
+    # Embeddings: Workers AI (@cf/baai/bge-m3, 1024-dim) only.
+    # Direct Cohere and Voyage AI providers were removed per user
+    # instruction (2026-05-04 rollback) — both required externally-hosted
+    # API keys and we're standardising on Cloudflare-native inference for
+    # the embed path. The hybrid language-routed sub-pools below are kept
+    # as named entries so call_embed_with_dispatch's script detection
+    # continues to work; both currently resolve to the same single-provider
+    # Workers AI chain.
+    "embed":             ["workers_ai"],
+    "embed_en":          ["workers_ai"],
+    "embed_indic":       ["workers_ai"],
+    # Reranking: Pinecone AI (primary) → Workers AI (last resort).
+    "rerank":            ["pinecone_ai", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
     # Translation (English→Assamese):
@@ -1100,11 +1096,10 @@ PROVIDER_PRIORITY: dict = {
     #   POOL_WEIGHTS gives workers_ai_indic=3000, vertex=100.
     "translate":         ["workers_ai_indic", "vertex"],
     # Vision / OCR: Vertex (Gemini 2.5 Flash multimodal) → Azure OpenAI →
-    # Workers AI. Bedrock-native vision (Nova Lite) not wired — Task #340
-    # scopes Bedrock strictly to Cohere transport.
+    # Workers AI. Bedrock removed.
     "vision":            ["vertex", "azure_openai", "workers_ai"],
     # Safety checks: Vertex (Gemini safety classifier) → Workers AI.
-    # Bedrock-native safety classifiers not wired (see vision note).
+    # Bedrock removed.
     "safety":            ["vertex", "workers_ai"],
     # RAG search with external web results: Exa neural search → Workers AI.
     "search_rag":        ["exa_ai", "workers_ai"],
@@ -1120,7 +1115,7 @@ PROVIDER_CREDITS: dict = {
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
     "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback
-    "cohere":           1000,   # Cohere via AWS Bedrock — billed against AWS Activate ($1k); primary embed
+    "cohere":           1000,   # Cohere startup credits — $1k; primary embed
     "voyage_ai":         500,   # Voyage AI startup credits — $500; secondary embed
     "pinecone_ai":       500,   # Pinecone startup credits — $500; primary rerank
     "exa_ai":           1000,   # Exa startup credits — $1k
@@ -1175,31 +1170,19 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "vertex":            100,   # fallback — Gemini handles any edge cases
     },
     # embed/tts/stt explicit overrides so the established primaries
-    # (Cohere/ElevenLabs/Deepgram) keep deterministic priority over generic
-    # fallbacks. Bedrock-native embed (Titan v2) not wired — the `cohere`
-    # entry below already routes through Bedrock for Cohere Embed v3.
+    # (ElevenLabs/Deepgram) keep deterministic priority over generic
+    # fallbacks. Cohere and Voyage AI removed from embed pools
+    # (2026-05-04 rollback per user instruction); Workers AI is the
+    # sole embed provider — non-zero weight so select_provider treats
+    # it as the active primary rather than a weight-0 last-resort.
     "embed": {
-        "cohere":     1000,   # primary — embed-multilingual-v3.0 (generic / fallback path)
-        "voyage_ai":   500,   # secondary — voyage-3.5
-        "workers_ai":    0,   # last-resort — @cf/baai/bge-m3
+        "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
     },
-    # Hybrid language-routed embed (Task — Voyage/Cohere split).
-    # Per-query script detection in call_embed_with_dispatch picks the right
-    # sub-pool, so the *aggregate* traffic split reflects user-language mix
-    # (≈60% English → Voyage, ≈40% Assamese/code-mixed → Cohere) without
-    # diluting either query class with a weighted average. The 100x lock
-    # ratio engages select_provider's STRICT-primary short-circuit so the
-    # picked primary wins every healthy draw and the secondary only kicks in
-    # when the primary is excluded (already-failed-this-request).
     "embed_en": {
-        "voyage_ai":  10000,  # primary — voyage-3.5, English nDCG@10 = 0.816
-        "cohere":       100,  # fallback — embed-multilingual-v3.0 (1024-dim parity)
-        "workers_ai":     0,  # last-resort — @cf/baai/bge-m3
+        "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
     },
     "embed_indic": {
-        "cohere":     10000,  # primary — embed-multilingual-v3.0, strong Indic retrieval
-        "voyage_ai":    100,  # fallback — voyage-3.5 (1024-dim parity)
-        "workers_ai":     0,  # last-resort — @cf/baai/bge-m3
+        "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
     },
     "tts": {
         "elevenlabs": 500,   # primary — eleven_multilingual_v2
@@ -1228,13 +1211,6 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "vector_search": {
         "pinecone_ai": 3000,   # primary — curated Syrabit chapter index
         "vertex":       500,   # fallback — Atlas $vectorSearch with Vertex embeddings
-    },
-    # rerank: Pinecone bge-reranker-v2-m3 primary; Cohere Rerank 3.5 via Bedrock
-    # as a true working fallback (was previously stubbed pre-Task #340).
-    "rerank": {
-        "pinecone_ai": 10000,  # primary — bge-reranker-v2-m3 (multilingual, fast)
-        "cohere":        100,  # fallback — Cohere Rerank 3.5 via aws-bedrock BYOK
-        "workers_ai":      0,  # last-resort no-op
     },
 }
 
