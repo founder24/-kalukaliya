@@ -1,8 +1,9 @@
-# Digital Ocean App Platform — bootstrap
+# Digital Ocean App Platform
 
-Phase 1d (Task #330) sets up the empty App Platform shells for the
-Python backend and the Rust core. Application code lands in the next
-two tasks.
+Phase 1d (Task #330) set up the empty App Platform shells; **Task #331**
+filled them with the production specs (full env vars, autoscaling,
+rolling deploys, gRPC for the Rust core) and the day-to-day helper
+script + runbook. Day-two ops live in `docs/infra/api-on-do.md`.
 
 ## Account prerequisites
 

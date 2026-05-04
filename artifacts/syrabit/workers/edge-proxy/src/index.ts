@@ -1,37 +1,44 @@
 /**
  * edge-proxy/src/index.ts
  *
- * Lightweight Cloudflare Worker that was previously responsible for
- * Workers-for-Platforms tenant dispatch.  The heavy dispatch logic has been
- * migrated to a GCP Cloud Run service (`dispatch-v2`) so this worker now
- * acts only as a thin routing shim that:
+ * Lightweight Cloudflare Worker that fronts the API. Originally a
+ * Workers-for-Platforms tenant dispatcher, simplified into a routing
+ * shim when dispatch moved to GCP Cloud Run, and extended in
+ * Task #331 with an `ORIGIN_TARGET` feature flag so traffic can be
+ * flipped between the Railway, Cloud Run, and Digital Ocean origins
+ * without a code deploy at cutover.
  *
- *   1. Receives an incoming request at the Cloudflare edge (WAF / Zero Trust
- *      still active — we keep the Enterprise zone intact).
- *   2. Forwards it to the Cloud Run dispatch endpoint via a simple fetch().
- *   3. Streams the response back, preserving all headers.
+ * Origin selection
+ * ────────────────
+ *   ORIGIN_TARGET=do        → DO_APP_BACKEND_URL  (Digital Ocean App Platform)
+ *   ORIGIN_TARGET=cloudrun  → DISPATCH_CLOUD_RUN_URL (legacy GCP Cloud Run)
+ *   ORIGIN_TARGET=railway   → BACKEND_RAILWAY_URL (legacy Railway)
  *
- * Cloudflare Workers *Free* tier (100 k req/day) is sufficient for this
- * shim; the Workers Paid subscription has been cancelled.
+ * Default is `cloudrun` for backwards-compatibility with the prior
+ * deploy. The cutover task flips the production secret to `do`.
  *
  * Performance boost wiring
  * ────────────────────────
- * • GCP Premium Tier network is used by Cloud Run in asia-south1, so traffic
- *   already benefits from Google's backbone — replaces Argo Smart Routing.
- * • Cache-Control headers set by the downstream Cloud Run service are
- *   respected verbatim; GCP Cloud CDN (attached to the existing HTTPS LB)
- *   caches static + API responses — replaces Cloudflare Cache Reserve.
+ * • Cache-Control headers set by the downstream service are respected
+ *   verbatim; cache layer (Cloudflare or DO LB) caches static + API
+ *   responses.
  * • Early Hints (103) are emitted for key assets so browsers start
  *   fetching sub-resources before the full response arrives.
  *
  * Required wrangler secrets / vars
  * ─────────────────────────────────
+ *   ORIGIN_TARGET            — "do" | "cloudrun" | "railway" (default "cloudrun")
+ *   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
  *   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app
- *   DISPATCH_SHARED_SECRET   — random 256-bit hex, matched on Cloud Run side
+ *   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app
+ *   DISPATCH_SHARED_SECRET   — random 256-bit hex, matched server-side
  */
 
 export interface Env {
-  DISPATCH_CLOUD_RUN_URL: string;
+  ORIGIN_TARGET?: string;
+  DO_APP_BACKEND_URL?: string;
+  DISPATCH_CLOUD_RUN_URL?: string;
+  BACKEND_RAILWAY_URL?: string;
   DISPATCH_SHARED_SECRET: string;
 }
 
@@ -40,15 +47,28 @@ const EARLY_HINTS_ASSETS = [
   '</icons/icon-192x192.png>; rel=preload; as=image',
 ];
 
+function resolveOrigin(env: Env): { url: string; target: string } | null {
+  const target = (env.ORIGIN_TARGET ?? 'cloudrun').toLowerCase();
+  switch (target) {
+    case 'do':
+      return env.DO_APP_BACKEND_URL ? { url: env.DO_APP_BACKEND_URL, target } : null;
+    case 'railway':
+      return env.BACKEND_RAILWAY_URL ? { url: env.BACKEND_RAILWAY_URL, target } : null;
+    case 'cloudrun':
+    default:
+      return env.DISPATCH_CLOUD_RUN_URL ? { url: env.DISPATCH_CLOUD_RUN_URL, target: 'cloudrun' } : null;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const dispatchUrl = env.DISPATCH_CLOUD_RUN_URL;
-    if (!dispatchUrl) {
-      return new Response('dispatch endpoint not configured', { status: 503 });
+    const origin = resolveOrigin(env);
+    if (!origin) {
+      return new Response('origin not configured for ORIGIN_TARGET', { status: 503 });
     }
 
     const url = new URL(request.url);
-    const targetUrl = `${dispatchUrl}${url.pathname}${url.search}`;
+    const targetUrl = `${origin.url}${url.pathname}${url.search}`;
 
     const upstreamRequest = new Request(targetUrl, {
       method: request.method,
@@ -56,7 +76,8 @@ export default {
         const h = new Headers(request.headers);
         h.set('x-dispatch-secret', env.DISPATCH_SHARED_SECRET ?? '');
         h.set('x-forwarded-host', url.hostname);
-        // Propagate Cloudflare geo headers so Cloud Run can apply
+        h.set('x-origin-target', origin.target);
+        // Propagate Cloudflare geo headers so the origin can apply
         // regional logic without re-doing IP geolocation.
         h.set('x-cf-ipcountry', request.headers.get('cf-ipcountry') ?? '');
         h.set('x-real-ip', request.headers.get('cf-connecting-ip') ?? '');
@@ -69,8 +90,6 @@ export default {
     try {
       const upstream = await fetch(upstreamRequest);
 
-      // Emit Early Hints for HTML responses so the browser can start
-      // fetching critical assets while the full response is in flight.
       const contentType = upstream.headers.get('content-type') ?? '';
       if (contentType.includes('text/html')) {
         ctx.waitUntil(Promise.resolve());
@@ -78,16 +97,17 @@ export default {
 
       const response = new Response(upstream.body, upstream);
 
-      // Inject Link: early-hint headers on HTML responses.
       if (contentType.includes('text/html')) {
         const r = new Response(response.body, response);
         r.headers.set('Link', EARLY_HINTS_ASSETS.join(', '));
+        r.headers.set('x-syrabit-origin', origin.target);
         return r;
       }
 
+      response.headers.set('x-syrabit-origin', origin.target);
       return response;
     } catch (err) {
-      console.error('[edge-proxy] upstream fetch failed', err);
+      console.error('[edge-proxy] upstream fetch failed', { target: origin.target, err });
       return new Response('upstream unavailable', { status: 502 });
     }
   },

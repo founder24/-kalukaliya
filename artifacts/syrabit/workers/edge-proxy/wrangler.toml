@@ -3,12 +3,16 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# Thin shim only — all heavy dispatch moved to GCP Cloud Run.
-# Free tier (100 k req/day) is sufficient for this shim; Workers Paid cancelled.
+# Thin shim only — heavy dispatch lives at the origin.
+# Free tier (100 k req/day) is sufficient; Workers Paid cancelled.
 
 [vars]
-# Non-secret vars; secrets set via: wrangler secret put DISPATCH_CLOUD_RUN_URL
+# Non-secret vars; secrets set via: wrangler secret put <NAME> --env <env>
 NODE_ENV = "production"
+# Origin selector — "do" | "cloudrun" | "railway".
+# Task #331 added "do" as a target; the production cutover task flips
+# this from "cloudrun" → "do" without redeploying the worker.
+ORIGIN_TARGET = "cloudrun"
 
 [env.production]
 name = "syrabit-edge-proxy"
@@ -16,12 +20,26 @@ routes = [
   { pattern = "dispatch.syrabit.ai/*", zone_name = "syrabit.ai" },
 ]
 
+[env.production.vars]
+ORIGIN_TARGET = "cloudrun"
+
 [env.staging]
 name = "syrabit-edge-proxy-staging"
 routes = [
   { pattern = "dispatch-staging.syrabit.ai/*", zone_name = "syrabit.ai" },
 ]
 
-# Secrets (set with `wrangler secret put`):
+[env.staging.vars]
+# Staging is the first to flip — exercise the DO origin end-to-end
+# before touching production.
+ORIGIN_TARGET = "do"
+
+# ORIGIN_TARGET is a routing knob (not a credential) and lives in
+# [vars] / [env.*.vars] above. Flip it for cutover via:
+#   wrangler deploy --env production --var ORIGIN_TARGET:do
+#
+# Actual secrets — set with `wrangler secret put <NAME> --env <env>`:
+#   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
 #   DISPATCH_CLOUD_RUN_URL   — https://dispatch-v2-<hash>-el.a.run.app
+#   BACKEND_RAILWAY_URL      — https://syrabit-backend-production.up.railway.app
 #   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret

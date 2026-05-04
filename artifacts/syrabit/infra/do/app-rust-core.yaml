@@ -1,18 +1,15 @@
 # infra/do/app-rust-core.yaml
 #
-# Phase 1d — Digital Ocean App Platform shell (Task #330).
+# Task #331 — DO App Platform spec for the Rust core (ported off
+# Railway). Supersedes the Phase 1d shell from Task #330.
 #
-# Empty App Platform spec for the Rust core service that will be ported
-# off Railway in the next task. Exposes both an HTTP port (3000) for
-# health + REST surfaces and a gRPC port (50051) for service-to-service
-# RPC from the Python backend.
+# DO App Platform supports HTTP/2 + gRPC end-to-end since 2024, so the
+# gRPC port is declared as a second `internal_ports` entry rather than
+# requiring a separate Droplet + load balancer. Other DO apps in the
+# same project dial it on the private VPC via `rust-core-core.private`.
 #
-# DO App Platform supports HTTP/2 end-to-end on the same listener, so
-# the gRPC port is declared as a second `internal_ports` entry rather
-# than requiring a separate Droplet + load balancer.
-#
-# Image is a stub; CI (`.github/workflows/do-deploy-rust-core.yml`)
-# rewrites `image.tag` to the commit SHA on every deploy.
+# Image is published by `.github/workflows/do-deploy-rust-core.yml`,
+# which rewrites `image.tag` to `sha-<short-sha>` on every deploy.
 
 name: rust-core
 region: blr1
@@ -28,14 +25,24 @@ alerts:
     value: 80
     operator: GREATER_THAN
     window: FIVE_MINUTES
+  - rule: RESTART_COUNT
+    value: 3
+    operator: GREATER_THAN
+    window: TEN_MINUTES
 
 services:
   - name: core
     instance_size_slug: basic-xs
     instance_count: 1
-    # Public HTTP port (REST + health). gRPC is exposed on a second
-    # internal port so other DO apps can dial it on the VPC network
-    # without leaving the data center.
+    autoscaling:
+      min_instance_count: 1
+      max_instance_count: 3
+      metrics:
+        cpu:
+          percent: 75
+    # Public HTTP port (REST + /health). gRPC is exposed on a second
+    # internal port so the Python backend can dial it on the VPC
+    # network without leaving the data center.
     http_port: 3000
     internal_ports:
       - 50051
@@ -43,23 +50,68 @@ services:
       registry_type: DOCR
       repository: rust-core
       tag: bootstrap
+      deploy_on_push:
+        enabled: false
     health_check:
-      http_path: /healthz
+      http_path: /health
       initial_delay_seconds: 5
       period_seconds: 10
       timeout_seconds: 3
       success_threshold: 1
       failure_threshold: 3
+    deployment_strategy:
+      type: ROLLING
+      max_surge: 1
+      max_unavailable: 0
     envs:
+      # ── Runtime knobs ───────────────────────────────────────────
       - key: HTTP_PORT
         value: "3000"
+        scope: RUN_AND_BUILD_TIME
       - key: GRPC_PORT
         value: "50051"
-      - key: ENV
+        scope: RUN_AND_BUILD_TIME
+      - key: ENVIRONMENT
         value: "non-prod"
         scope: RUN_TIME
       - key: RUST_LOG
         value: "info"
+        scope: RUN_TIME
+
+      # ── Postgres (Supabase pooler) ──────────────────────────────
+      - key: DATABASE_URL
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+
+      # ── JWT (shared with Python backend) ────────────────────────
+      - key: JWT_SECRET
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+
+      # ── Upstash Redis (shared cache + rate-limits) ──────────────
+      - key: UPSTASH_REDIS_REST_URL
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+      - key: UPSTASH_REDIS_REST_TOKEN
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+
+      # ── Observability ───────────────────────────────────────────
+      - key: SENTRY_DSN
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+      - key: AXIOM_TOKEN
+        value: "PLACEHOLDER_SET_VIA_doctl"
+        type: SECRET
+        scope: RUN_TIME
+      - key: AXIOM_DATASET
+        value: "rust-core-do"
+        scope: RUN_TIME
 
 ingress:
   rules:
