@@ -52,6 +52,42 @@ _in_chat_turn: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _async_batch_path: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "syrabit_async_batch_path", default=False,
 )
+# Task #362 §3 — expose the active session_id to the dispatcher so the
+# per-session sticky-fallback module (session_fallback.py) can read it
+# without changing call_with_provider_fallback's signature.
+_current_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "syrabit_chat_turn_session_id", default="",
+)
+
+
+def get_current_session_id() -> str:
+    """Return the session_id of the currently-open chat turn, or '' outside one."""
+    return _current_session_id.get()
+
+
+# Task #362 §4 — moderation mode (safe / default / challenge) read from
+# the user profile at the start of a turn and exposed to the moderation
+# guardrails via a contextvar (no signature changes required).
+_current_moderation_mode: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "syrabit_chat_turn_moderation_mode", default="default",
+)
+
+
+def get_current_moderation_mode() -> str:
+    """Return the moderation mode for the active chat turn ('default' outside one)."""
+    return _current_moderation_mode.get() or "default"
+
+
+def set_current_moderation_mode(mode: str) -> None:
+    """Set the moderation mode for the active chat turn.
+
+    Should be called once after the user_profile read at the top of the turn.
+    Unknown values silently fall back to 'default'.
+    """
+    if mode in ("safe", "default", "challenge"):
+        _current_moderation_mode.set(mode)
+    else:
+        _current_moderation_mode.set("default")
 
 
 class MemoryBrainEnforcementError(RuntimeError):
@@ -163,11 +199,13 @@ def chat_turn(*, session_id: str = "", user_id: str = "") -> Iterator["ChatTurn"
     """
     in_tok = _in_chat_turn.set(True)
     read_tok = _mongo_read_done.set(False)
+    sid_tok = _current_session_id.set(session_id or "")
     try:
         yield ChatTurn(session_id=session_id, user_id=user_id)
     finally:
         _in_chat_turn.reset(in_tok)
         _mongo_read_done.reset(read_tok)
+        _current_session_id.reset(sid_tok)
 
 
 @contextmanager
@@ -209,7 +247,10 @@ __all__ = [
     "assert_mongo_read_or_raise",
     "async_batch_scope",
     "chat_turn",
+    "get_current_moderation_mode",
+    "get_current_session_id",
     "mark_mongo_read",
+    "set_current_moderation_mode",
 ]
 
 

@@ -129,6 +129,15 @@ jobs:
         run: |
           pytest tests/test_cf_access.py -v --no-header
 
+      # Task #363 — Embed-model consistency check.
+      # Fails CI if Cohere/Voyage/bge-m3 model identifiers in config.py
+      # drift from the canonical 1024-dim trio that the Pinecone index
+      # was built against. This is the cheap mechanical complement to
+      # the deferred shard-rebalance work.
+      - name: Embed-model consistency check
+        run: |
+          python scripts/ci/embed_model_consistency_check.py
+
       - name: Run pytest with coverage gate
         id: pytest
         env:

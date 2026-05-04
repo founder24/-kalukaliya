@@ -1962,10 +1962,51 @@ async def call_with_provider_fallback(
             sorted(_PAID_FOR_FALLBACK), feature,
         )
 
+    # Task #362 §3 — per-session sticky swap. If this session was previously
+    # marked stuck (K consecutive slow turns), force-route every turn for
+    # the rest of the session lifetime to the swap provider. This is
+    # distinct from the global chat:fallback flag above and only affects
+    # one user. Soft-fail: any error in the lookup falls through to the
+    # normal weighted dispatch.
+    _session_swap_provider: str = ""
+    _session_id_for_ttfb: str = ""
+    try:
+        from chat_turn_context import get_current_session_id
+        from session_fallback import get_session_swap as _get_swap
+        _session_id_for_ttfb = get_current_session_id() or ""
+        if _session_id_for_ttfb:
+            _session_swap_provider = _get_swap(_session_id_for_ttfb) or ""
+    except Exception:
+        _session_swap_provider = ""
+
+    _t_start = time.time()
+
     for attempt in range(max_attempts):
-        provider = select_provider(feature, lang=lang, exclude=exclude)
+        if _session_swap_provider and _session_swap_provider not in exclude:
+            provider = _session_swap_provider
+            logger.info(
+                "call_with_provider_fallback: per-session swap sid=%s → %s "
+                "(feature=%s, attempt=%d)",
+                _session_id_for_ttfb, provider, feature, attempt,
+            )
+            # Only honor the swap on the first attempt; if it fails, fall
+            # through to the normal weighted pool so we don't pin a
+            # broken provider for the whole retry chain.
+            _session_swap_provider = ""
+        else:
+            provider = select_provider(feature, lang=lang, exclude=exclude)
         try:
-            return await attempt_fn(provider)
+            _result = await attempt_fn(provider)
+            # Record per-turn TTFB for the per-session stuck-detection
+            # heuristic. Soft-fail: any error here must NOT take down a
+            # successful chat turn.
+            try:
+                if _session_id_for_ttfb:
+                    from session_fallback import record_turn_ttfb as _rec_ttfb
+                    _rec_ttfb(_session_id_for_ttfb, (time.time() - _t_start) * 1000.0)
+            except Exception:
+                pass
+            return _result
         except _httpx.HTTPStatusError as exc:
             if exc.response.status_code in (429, 502, 503, 504):
                 logger.warning(
@@ -3287,6 +3328,20 @@ async def call_embed_with_dispatch(
     """
     from config import PROVIDER_PRIORITY as _PP
     feature = _embed_feature_for(text, lang)
+
+    # Task #361 §2 — embedding cache lookup. Vectors are deterministic
+    # for the same (text, task_type, lang); a cache hit can be served
+    # immediately. Soft-fail: any cache error falls through to the
+    # normal weighted dispatch.
+    try:
+        from embed_cache import get_cached_embedding as _embed_cache_get, set_cached_embedding as _embed_cache_set
+        _cached_vec = _embed_cache_get(text, task_type=task_type, lang=lang)
+    except Exception:
+        _cached_vec = None
+        _embed_cache_set = None  # type: ignore[assignment]
+    if _cached_vec:
+        return _cached_vec
+
     exclude: frozenset = frozenset()
     # Total attempts allowed = the union of providers across the chosen
     # sub-pool plus the generic embed pool's last-resort entry, +1 so we
@@ -3294,6 +3349,14 @@ async def call_embed_with_dispatch(
     # providers are excluded.
     pool = _PP.get(feature) or _PP.get("embed", [])
     max_attempts = len(pool) + 1
+
+    def _persist(_vec):
+        if _embed_cache_set is None or not _vec:
+            return
+        try:
+            _embed_cache_set(text, _vec, task_type=task_type, lang=lang)
+        except Exception:
+            pass
 
     for _ in range(max_attempts):
         provider = select_provider(feature, lang=lang, exclude=exclude)
@@ -3303,10 +3366,13 @@ async def call_embed_with_dispatch(
                 result = await vertex_services.embed_text(text, task_type=task_type)
                 if result is None:
                     raise RuntimeError("vertex embed_text returned None")
+                _persist(result)
                 return result
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
-                return await _cf_embed(text)
+                _vec_wai = await _cf_embed(text)
+                _persist(_vec_wai)
+                return _vec_wai
             # Task #347: bedrock embed branch removed (providers/bedrock.py deleted).
             elif provider == "cohere":
                 from providers.cohere import embed_query as _cohere_embed_q, ENABLED as _cohere_enabled
@@ -3315,6 +3381,7 @@ async def call_embed_with_dispatch(
                 _cohere_vec = await _cohere_embed_q(text)
                 if not _cohere_vec:
                     raise RuntimeError("cohere embed: embed_query returned empty vector")
+                _persist(_cohere_vec)
                 return _cohere_vec
             elif provider == "voyage_ai":
                 from providers.voyage_ai import embed_query as _voyage_embed_q, ENABLED as _voyage_enabled
@@ -3323,11 +3390,14 @@ async def call_embed_with_dispatch(
                 _voyage_vec = await _voyage_embed_q(text)
                 if not _voyage_vec:
                     raise RuntimeError("voyage_ai embed: embed_query returned empty vector")
+                _persist(_voyage_vec)
                 return _voyage_vec
             elif provider == "azure_openai":
                 # Azure OpenAI text-embedding-3-large via CF BYOK (Task #256).
                 from providers.azure_openai import call_embed as _az_embed
-                return await _az_embed(text)
+                _az_vec = await _az_embed(text)
+                _persist(_az_vec)
+                return _az_vec
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
