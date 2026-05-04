@@ -1,0 +1,6 @@
+# Local DO env exports — pulled from Railway via `railway variables list`
+# and imported into App Platform via `scripts/do.sh import-env`.
+# Never commit plaintext secrets; the encrypted values live in App
+# Platform and the encrypted GitHub environment secrets.
+do-backend-vars.env
+do-rust-vars.env
