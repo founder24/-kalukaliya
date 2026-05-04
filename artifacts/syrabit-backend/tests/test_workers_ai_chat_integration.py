@@ -207,7 +207,6 @@ def test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypa
     # sarvam 50, llama32 20, mistral 10) and 6 attempts per call, a few dozen
     # iterations is more than enough.
     seen_named_tail: set = set()
-    paid_seen_then_excluded: set = set()
     for _ in range(40):
         captured.clear()
         answer = asyncio.run(
