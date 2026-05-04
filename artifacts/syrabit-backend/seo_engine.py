@@ -2235,14 +2235,23 @@ async def update_page_status(page_id: str, status: str = "published", _admin: di
         raise HTTPException(status_code=404, detail="Page not found")
 
     if status == "published":
+        # Task #332 — durable fan-out. `notify_indexnow_for_page`
+        # routes through `sqs_fanout.enqueue("indexnow-page", ...)`
+        # under WORKERS_BACKEND=aws, so the work IS persisted in SQS
+        # before this request returns. Awaiting it (rather than
+        # `asyncio.create_task`) is what gives the durability
+        # guarantee the cutover requires — a process crash between
+        # status flip and IndexNow ping can no longer drop the work.
+        # The enqueue is sub-50ms and never raises (the producer
+        # swallows transient SQS errors), so awaiting does not add
+        # meaningful tail latency to the publish path.
         try:
-            import asyncio
             page = await _db.seo_pages.find_one({"id": page_id}, {"_id": 0, "board_slug": 1, "class_slug": 1, "subject_slug": 1, "topic_slug": 1, "page_type": 1})
             if page:
                 from routes.bot_discovery import notify_indexnow_for_page
-                asyncio.create_task(notify_indexnow_for_page(page))
-        except Exception:
-            pass
+                await notify_indexnow_for_page(page)
+        except Exception as _ix_err:
+            logger.warning(f"[indexnow] publish enqueue failed for {page_id}: {_ix_err}")
         try:
             import asyncio
             from d1_sync import sync_tables as _d1_sync_tables, is_d1_configured as _d1_ok

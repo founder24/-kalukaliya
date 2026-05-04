@@ -23,6 +23,7 @@ is missing, so the dashboard renders gracefully without crashing.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -106,10 +107,35 @@ async def admin_tasks_enqueue(
     payload: dict = Body(...),
     admin: dict = Depends(get_admin_user),
 ):
+    """Producer endpoint — dual-target during the AWS cutover.
+
+    Task #332: when ``WORKERS_BACKEND=aws`` (the cutover flag) we
+    publish to the matching SQS queue via ``sqs_fanout.enqueue``
+    instead of Cloud Tasks. The legacy ``queue`` param doubles as
+    the cloud-tasks.json key (e.g. ``seo-indexnow``) so producer
+    payload shape is unchanged. Rolling back is "unset env, restart
+    API" — no producer-side code change.
+    """
     queue = (payload.get("queue") or "").strip()
     url = (payload.get("url") or "").strip()
-    if not queue or not url:
-        return {"status": "error", "error": "queue + url required"}
+    if not queue:
+        return {"status": "error", "error": "queue required"}
+
+    backend = (os.environ.get("WORKERS_BACKEND") or "gcp").strip().lower()
+    if backend == "aws":
+        try:
+            from sqs_fanout import enqueue as _sqs_enqueue  # type: ignore
+        except ImportError:
+            return {"status": "error", "error": "sqs_fanout not deployed"}
+        body = payload.get("payload") if payload.get("payload") is not None else {}
+        try:
+            msg_id = await _sqs_enqueue(queue, body)
+            return {"status": "ok", "backend": "aws", "queue": queue, "message_id": msg_id}
+        except Exception as e:
+            return {"status": "error", "backend": "aws", "queue": queue, "error": f"{type(e).__name__}: {e}"}
+
+    if not url:
+        return {"status": "error", "error": "url required for gcp backend"}
     return await cloud_tasks_client.enqueue_http_task(
         queue,
         url=url,

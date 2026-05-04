@@ -49,6 +49,31 @@ class BingSubmitResult:
         }
 
 
+# ─── Task #332 — SQS consumer entrypoint ─────────────────────────────────────
+#
+# `services/backend/sqs_consumers/bing_submit.py` invokes this on each
+# `bing-submit` SQS message (one URL per message). Thin wrapper around
+# `submit_url_batch` so the consumer body stays declarative; raises on
+# any operational failure so SQS retries + DLQ work.
+async def submit_url(url: str, *, site_url: str | None = None) -> dict:
+    """Submit a single URL to Bing's SubmitUrlBatch endpoint."""
+    import os as _os
+    if not url:
+        raise ValueError("submit_url: empty url")
+    api_key = _os.environ.get("BING_WEBMASTER_API_KEY", "").strip()
+    if not api_key:
+        # Treat missing API key as a benign skip — retrying won't help.
+        return {"submitted": 0, "skipped": "missing-api-key", "url": url}
+    site = (site_url or _os.environ.get("BING_SITE_URL", "https://syrabit.ai")).strip()
+    result = await submit_url_batch(api_key, site, [url])
+    if result.failed and not result.succeeded:
+        raise RuntimeError(
+            f"bing-submit failed for {url!r}: "
+            + (result.errors[0] if result.errors else "unknown error")
+        )
+    return result.to_dict()
+
+
 async def submit_url_batch(
     api_key: str,
     site_url: str,

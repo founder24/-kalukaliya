@@ -859,6 +859,18 @@ async def lifespan(app):
 
     try:
         if _is_leader:
+            # Task #332 — cron heartbeat collection (TTL + lookup
+            # index) used by routes/admin_azure_cron.py when ARM is
+            # degraded and as the source of truth once cron has
+            # migrated to Azure Container Apps Jobs. ensure_indexes
+            # is idempotent so leaders can call it on every boot.
+            try:
+                from cron_heartbeats import ensure_indexes as _cron_hb_ensure
+                await _cron_hb_ensure()
+            except Exception as _hb_err:  # noqa: BLE001
+                logging.getLogger("syrabit.startup").warning(
+                    "cron_heartbeats.ensure_indexes failed (non-blocking): %s", _hb_err,
+                )
             await ensure_seeded()
             await db.chapters.create_index("subject_id")
             await db.chapters.create_index("order_index")
@@ -1173,9 +1185,15 @@ async def lifespan(app):
         await load_endpoint_health_from_db()
     except Exception as _eh_err:
         logger.warning("IndexNow endpoint health load skipped: %s", _eh_err)
-    _deps_mod._rate_cleanup_task = asyncio.create_task(_rate_limiter_cleanup())
-    asyncio.create_task(_bg_health_loop())
-    asyncio.create_task(_prewarm_library_cache())
+    # Task #332 — these three are PERIODIC loops; gated by the
+    # aca-jobs takeover so the API container stops running them once
+    # the corresponding aca-job-* (rate-limiter-cleanup, bg-health,
+    # library-prewarm) is the source of truth. The shared
+    # `_aca_create_task` returns None under takeover and closes the
+    # coroutine cleanly.
+    _deps_mod._rate_cleanup_task = _aca_create_task(_rate_limiter_cleanup(), key="rate-limiter-cleanup")
+    _aca_create_task(_bg_health_loop(), key="bg-health")
+    _aca_create_task(_prewarm_library_cache(), key="library-prewarm")
     try:
         from neural_mesh import warm_all as _nm_warm_all
         asyncio.create_task(_nm_warm_all())
@@ -1190,7 +1208,7 @@ async def lifespan(app):
     if db is not None:
         _syllabus_embedder = SyllabusEmbedder(db)
         if _is_leader:
-            asyncio.create_task(_seed_syllabus_embeddings())
+            _aca_create_task(_seed_syllabus_embeddings(), key="seed-syllabus-embeddings")
     asyncio.create_task(_load_ga4_from_db())
     from routes.admin_notifications import (
         _exam_reminder_loop,
@@ -1198,22 +1216,29 @@ async def lifespan(app):
         _synthetic_alert_cleanup_loop,
         _push_prune_loop,
     )
-    asyncio.create_task(_exam_reminder_loop())
+    # Task #332 — gated by RUN_LEGACY_LOOPS so Azure Container Apps
+    # Jobs (`aca-job-exam-reminder`, etc.) can take over without a
+    # code change. See `_aca_create_task` doc and
+    # `docs/infra/cron-on-azure.md` cutover checklist.
+    _aca_create_task(_exam_reminder_loop(), key="exam-reminder")
     # Task #435: auto-prune browser push subscriptions that hit a long
     # streak of non-recoverable failures so the per-channel push
     # health signal (Task #427) reflects live subscribers only. Loop
     # is leader-gated so we don't double-write across replicas.
     if _is_leader:
-        asyncio.create_task(_push_prune_loop())
+        _aca_create_task(_push_prune_loop(), key="push-prune")
     # Task #433: TTL index + periodic sweep so synthetic test alerts
     # (from the "Test alert delivery" admin button) auto-expire after
     # ~7d instead of accumulating in db.alerts forever. Index creation
     # is leader-gated to avoid duplicate-key races; the sweep is per-
     # worker so the safety-net runs even if the leader is unhealthy.
     if _is_leader:
-        asyncio.create_task(ensure_synthetic_alerts_ttl_index())
-    asyncio.create_task(_synthetic_alert_cleanup_loop())
-    asyncio.create_task(_alerting_loop())
+        _aca_create_task(ensure_synthetic_alerts_ttl_index(), key="ensure-synthetic-alerts-ttl")
+    _aca_create_task(_synthetic_alert_cleanup_loop(), key="synthetic-alert-cleanup")
+    # Task #332 — `aca-job-alerting` (Container Apps Job) replaces
+    # this in-process loop on the */2min cron. `_aca_create_task`
+    # honours the takeover flag so this is a no-op in production.
+    _aca_create_task(_alerting_loop(), key="alerting")
     # Task #707 — silent-lockout watcher. Snapshot the current CF Access
     # env fingerprint *before* starting the loop so a same-restart change
     # already gets a fresh ``changed_at`` anchor. The loop itself is
@@ -1232,15 +1257,15 @@ async def lifespan(app):
             logger.warning(
                 f"cf_access silent-lockout init skipped: {_cf_lock_init_err}"
             )
-        asyncio.create_task(_cf_access_silent_lockout_loop())
-    asyncio.create_task(_endpoint_health_alert_loop())
+        _aca_create_task(_cf_access_silent_lockout_loop(), key="cf-access-silent-lockout")
+    _aca_create_task(_endpoint_health_alert_loop(), key="endpoint-health-alert")
     # Task #412 — periodically check hydrate_telemetry and fire admin
     # alerts (email + webhook + persisted) when stale-build failures
     # spike or auto-reload recovery rate falls. Leader-gated so we don't
     # double-fire across replicas.
     if _is_leader:
         from routes.analytics import _hydrate_alert_loop
-        asyncio.create_task(_hydrate_alert_loop())
+        _aca_create_task(_hydrate_alert_loop(), key="hydrate-alert")
     # Task #656 — periodically check review_prompt_events and fire admin
     # alerts (email + webhook + persisted) when the 7-day click-through
     # rate collapses below the configured floor (UI regression /
@@ -1248,29 +1273,29 @@ async def lifespan(app):
     # across replicas.
     if _is_leader:
         from routes.admin_review_prompts import _review_prompt_alert_loop
-        asyncio.create_task(_review_prompt_alert_loop())
+        _aca_create_task(_review_prompt_alert_loop(), key="review-prompt-alert")
     # Task #655 — weekly review-prompt summary email (Monday ~09:00 IST).
     # Leader-gated so multiple replicas don't double-fire; the loop also
     # holds an atomic per-ISO-week lock as a belt-and-braces guard.
     if _is_leader:
         from routes.admin_review_prompts import _review_prompt_weekly_digest_loop
-        asyncio.create_task(_review_prompt_weekly_digest_loop())
+        _aca_create_task(_review_prompt_weekly_digest_loop(), key="review-prompt-weekly-digest")
     if _is_leader:
         from routes.bot_discovery import _sitemap_indexnow_diff_loop
-        asyncio.create_task(_sitemap_indexnow_diff_loop())
+        _aca_create_task(_sitemap_indexnow_diff_loop(), key="sitemap-indexnow-diff")
     if _is_leader:
         # Phase E (Plan 11): daily Bing URL Submission API push so Bingbot
         # learns about our 1k+ syllabus URLs without waiting for organic
         # discovery (current crawl pace 0.05 req/hr is too slow). Leader-
         # gated so we don't spend our 10k/day quota N× across replicas.
         from routes.bot_discovery import _bing_submit_daily_loop
-        asyncio.create_task(_bing_submit_daily_loop())
+        _aca_create_task(_bing_submit_daily_loop(), key="bing-submit-daily")
         # Task #333: monthly Bing keyword refresh — leader-elected so we
         # only spend the free Keyword Research quota on one replica.
         from routes.bot_discovery import _bing_keyword_refresh_loop
-        asyncio.create_task(_bing_keyword_refresh_loop())
-    asyncio.create_task(_seo_health_alert_loop())
-    asyncio.create_task(_seo_weekly_digest_loop())
+        _aca_create_task(_bing_keyword_refresh_loop(), key="bing-keyword-refresh")
+    _aca_create_task(_seo_health_alert_loop(), key="seo-health-alert")
+    _aca_create_task(_seo_weekly_digest_loop(), key="seo-weekly-digest")
     # Task #940: weekly entity-SEO health worker (Wikidata, Wikipedia,
     # Crunchbase, sameAs, Google KG).
     # Task #950: dedup is now via Mongo lease inside the loop
@@ -1278,13 +1303,13 @@ async def lifespan(app):
     # lock — Railway runs N replicas and each had its own file lock,
     # so all of them previously fired the weekly Wikidata/KG probe.
     # Followers stand down on each tick.
-    asyncio.create_task(_entity_seo_loop())
+    _aca_create_task(_entity_seo_loop(), key="entity-seo")
     # Task #937: nightly autonomous topic-discovery agent. Leader-gated
     # so only one replica fires the per-day run; the loop also holds an
     # atomic per-yyyy-mm-dd lock as a belt-and-braces guard.
     if _is_leader:
         from topic_discovery_service import _topic_discovery_loop
-        asyncio.create_task(_topic_discovery_loop())
+        _aca_create_task(_topic_discovery_loop(), key="topic-discovery")
     # Task #938: closed-loop content remediation worker.
     # Leader-gated so only one replica processes signals — the
     # alerter on every replica enqueues into the durable Mongo
@@ -1293,9 +1318,14 @@ async def lifespan(app):
     # pending signal. Cross-replica safe: producers can fire from
     # any worker, the consumer drains them one at a time without
     # double-processing.
+    # Task #332 — `aca-job-seo-remediation` runs the same coroutine
+    # on the */5min cron; `_aca_create_task` no-ops when takeover is
+    # on. The legacy `GCP_SCHEDULER_TAKEOVER=1` path is still honoured
+    # so an operator can disable the in-process loop without flipping
+    # the global aca-jobs takeover.
     if _is_leader and not _gcp_scheduler_takeover():
         from seo_remediation_service import _seo_remediation_loop
-        asyncio.create_task(_seo_remediation_loop(db))
+        _aca_create_task(_seo_remediation_loop(db), key="seo-remediation")
     elif _is_leader:
         logger.info("seo-remediation in-process loop SKIPPED (GCP_SCHEDULER_TAKEOVER=1)")
     # Task #939: agentic internal-linker nightly maintenance loop.
@@ -1308,7 +1338,7 @@ async def lifespan(app):
     # guarded.
     if not _gcp_scheduler_takeover():
         from seo_internal_linker import _internal_linker_loop
-        asyncio.create_task(_internal_linker_loop(db))
+        _aca_create_task(_internal_linker_loop(db), key="internal-linker")
     else:
         logger.info("internal-linker in-process loop SKIPPED (GCP_SCHEDULER_TAKEOVER=1)")
     # Task #587 — nightly live grounded-recall benchmark + alerting.
@@ -1324,7 +1354,7 @@ async def lifespan(app):
     else:
         try:
             from bench.grounded_recall import _grounded_recall_nightly_loop
-            asyncio.create_task(_grounded_recall_nightly_loop())
+            _aca_create_task(_grounded_recall_nightly_loop(), key="grounded-recall-nightly")
         except Exception as _gr_err:
             logger.warning(f"grounded-recall nightly loop not started: {_gr_err}")
     # Tasks #599 / #618 — per-language live-retriever nightly subsets.
@@ -1345,7 +1375,9 @@ async def lifespan(app):
         # baseline_<code>.json) is a one-line change in grounded_recall.py
         # — no risk of the server.py wiring drifting out of sync.
         for _lang, _loop in per_language_nightly_loops().items():
-            asyncio.create_task(_loop())
+            # Task #332 — gated per language so each maps 1:1 to
+            # `aca-job-grounded-recall-{as|hi|bn}`.
+            _aca_create_task(_loop(), key=f"grounded-recall-{_lang}")
         logger.info(
             "grounded-recall per-language nightly loops started: %s",
             ",".join(PER_LANGUAGE_NIGHTLY_SUBSETS),
@@ -1358,7 +1390,7 @@ async def lifespan(app):
     # need a leader gate. No-op when SEO_AUTO_PUBLISH_ENABLED=false.
     try:
         from seo_engine import _seo_auto_publish_loop
-        asyncio.create_task(_seo_auto_publish_loop())
+        _aca_create_task(_seo_auto_publish_loop(), key="seo-auto-publish")
     except Exception as _sap_err:
         logger.warning(f"seo auto-publish loop not started: {_sap_err}")
     # Task #471 — proactive staleness monitor for the auto-publish job.
@@ -1368,7 +1400,7 @@ async def lifespan(app):
     # one recovery notification when the job runs again.
     try:
         from seo_engine import _seo_auto_publish_staleness_loop
-        asyncio.create_task(_seo_auto_publish_staleness_loop())
+        _aca_create_task(_seo_auto_publish_staleness_loop(), key="seo-auto-publish-staleness")
     except Exception as _sap_stale_err:
         logger.warning(
             f"seo auto-publish staleness loop not started: {_sap_stale_err}")
@@ -1383,7 +1415,7 @@ async def lifespan(app):
     # as defense-in-depth against fail-over mid-iteration.
     try:
         from seo_engine import _seo_staleness_heartbeat_loop
-        asyncio.create_task(_seo_staleness_heartbeat_loop())
+        _aca_create_task(_seo_staleness_heartbeat_loop(), key="seo-staleness-heartbeat")
     except Exception as _sap_hb_err:
         logger.warning(
             f"seo staleness heartbeat loop not started: {_sap_hb_err}")
@@ -1400,7 +1432,7 @@ async def lifespan(app):
     # is unset (e.g. local dev).
     try:
         from routes.admin_ci_alerts import _ci_alert_loop
-        asyncio.create_task(_ci_alert_loop())
+        _aca_create_task(_ci_alert_loop(), key="ci-alert")
     except Exception as _ci_alert_err:
         logger.warning(
             f"ci alert loop not started: {_ci_alert_err}")
@@ -1421,7 +1453,7 @@ async def lifespan(app):
         from routes.admin_trustpilot_alerts import (
             _trustpilot_feed_alert_loop,
         )
-        asyncio.create_task(_trustpilot_feed_alert_loop())
+        _aca_create_task(_trustpilot_feed_alert_loop(), key="trustpilot-feed-alert")
     except Exception as _tp_alert_err:
         logger.warning(
             f"trustpilot feed alert loop not started: {_tp_alert_err}")
@@ -1439,7 +1471,7 @@ async def lifespan(app):
         from routes.admin_trustpilot_cron_alerts import (
             _trustpilot_refresh_cron_alert_loop,
         )
-        asyncio.create_task(_trustpilot_refresh_cron_alert_loop())
+        _aca_create_task(_trustpilot_refresh_cron_alert_loop(), key="trustpilot-refresh-cron-alert")
     except Exception as _tp_cron_alert_err:
         logger.warning(
             "trustpilot refresh-cron alert loop not started: "
@@ -1459,7 +1491,7 @@ async def lifespan(app):
         from routes.admin_cf_waf_drift_cron_alerts import (
             _cf_waf_drift_cron_alert_loop,
         )
-        asyncio.create_task(_cf_waf_drift_cron_alert_loop())
+        _aca_create_task(_cf_waf_drift_cron_alert_loop(), key="cf-waf-drift-cron-alert")
     except Exception as _cfw_cron_alert_err:
         logger.warning(
             "cf-waf-drift cron alert loop not started: "
@@ -1481,7 +1513,7 @@ async def lifespan(app):
         from routes.admin_logs_cf_pull_silence_alerts import (
             _cf_pull_silence_alert_loop,
         )
-        asyncio.create_task(_cf_pull_silence_alert_loop())
+        _aca_create_task(_cf_pull_silence_alert_loop(), key="cf-pull-silence-alert")
     except Exception as _ulogs_silence_err:
         logger.warning(
             "unified-logs cf-pull silence alert loop not started: "
@@ -1502,7 +1534,7 @@ async def lifespan(app):
         from routes.admin_edge_proxy_deploy_cron_alerts import (
             _edge_proxy_deploy_cron_alert_loop,
         )
-        asyncio.create_task(_edge_proxy_deploy_cron_alert_loop())
+        _aca_create_task(_edge_proxy_deploy_cron_alert_loop(), key="edge-proxy-deploy-cron-alert")
     except Exception as _epd_cron_alert_err:
         logger.warning(
             "edge-proxy-deploy cron alert loop not started: "
@@ -1523,7 +1555,7 @@ async def lifespan(app):
         from routes.admin_slack_webhook_missing_alerts import (
             _slack_webhook_missing_alert_loop,
         )
-        asyncio.create_task(_slack_webhook_missing_alert_loop())
+        _aca_create_task(_slack_webhook_missing_alert_loop(), key="slack-webhook-missing-alert")
     except Exception as _swm_alert_err:
         logger.warning(
             "slack-webhook-missing alert loop not started: "
@@ -1534,7 +1566,7 @@ async def lifespan(app):
     # file lock — Railway runs N replicas and each had its own file
     # lock, so all of them previously polled the CF GraphQL API every
     # 5 min, multiplying the analytics quota cost.
-    asyncio.create_task(_cf_bot_report_loop())
+    _aca_create_task(_cf_bot_report_loop(), key="cf-bot-report")
     # Task #387 — nightly Cloudflare Pages deploy hook so the
     # prerendered subject/chapter HTML stays current even when no
     # admin edits trigger a debounced refresh. No-ops if
@@ -1546,24 +1578,24 @@ async def lifespan(app):
     # builds per night.
     try:
         import pages_deploy as _pages_deploy
-        asyncio.create_task(_pages_deploy.nightly_loop())
+        _aca_create_task(_pages_deploy.nightly_loop(), key="pages-deploy-nightly")
     except Exception as _pd_err:
         logger.warning(f"pages_deploy nightly loop not started: {_pd_err}")
 
     # Task #314 uses atomic Mongo CAS via db.job_locks for dedup across
     # replicas, so it does not need a leader gate.
-    asyncio.create_task(_bot_traffic_report_loop())
+    _aca_create_task(_bot_traffic_report_loop(), key="bot-traffic-report")
     from middleware import _init_blocked_ip_cache
     asyncio.create_task(_init_blocked_ip_cache())
     from routes.admin_advanced import _collection_size_snapshot_loop, _cache_warm_loop
-    asyncio.create_task(_collection_size_snapshot_loop())
+    _aca_create_task(_collection_size_snapshot_loop(), key="collection-size-snapshot")
     # Auto pre-warm AI response cache for the most common queries (Task #282 T004)
     # Task #950: dedup is now via Mongo lease inside the loop
     # (``cache_warm_lease``), not the per-machine ``_is_leader`` file
     # lock — Railway runs N replicas and each had its own file lock,
     # so the warm cycle was burning N× the LLM budget every 6h.
     # Followers stand down each tick.
-    asyncio.create_task(_cache_warm_loop())
+    _aca_create_task(_cache_warm_loop(), key="cache-warm")
 
     # Task #310 — rehydrate chat speed-up metrics from Redis and start the
     # periodic flush so the per-day counters and warm-run history survive
@@ -1576,7 +1608,14 @@ async def lifespan(app):
         await asyncio.to_thread(_speedup.load_from_store)
     except Exception as _sp_load_err:
         logger.warning(f"chat_speedup_metrics startup load failed: {_sp_load_err}")
-    _speedup_flush_task = asyncio.create_task(_speedup.periodic_flush_loop())
+    # Task #332 — `aca-job-chat-speedup-flush` (Container Apps Job)
+    # runs `chat_speedup_metrics.periodic_flush_loop` on a */1min
+    # cron. _aca_create_task returns None when the takeover is on,
+    # which downstream code that tries to `.cancel()` this task can
+    # tolerate.
+    _speedup_flush_task = _aca_create_task(
+        _speedup.periodic_flush_loop(), key="chat-speedup-flush"
+    )
 
     # Task #422: re-apply persisted Assamese-purity admin override (if
     # any) so behaviour/threshold survive api restarts without needing
@@ -1593,7 +1632,9 @@ async def lifespan(app):
         # Per-worker refresher so a PATCH/DELETE done on one gunicorn
         # worker propagates to all sibling workers within ~15s without
         # needing pub/sub infra.
-        asyncio.create_task(_assamese_purity_refresh_loop())
+        # Task #332 — periodic refresher; aca-job replacement
+        # `aca-job-assamese-purity-refresh` runs the same coroutine.
+        _aca_create_task(_assamese_purity_refresh_loop(), key="assamese-purity-refresh")
         # Task #423: TTL index on the per-run stats collection so old
         # docs auto-expire after 14 days and the dashboard stays cheap.
         asyncio.create_task(ensure_assamese_runs_index())
@@ -1630,7 +1671,7 @@ async def lifespan(app):
     # accepting requests, but a broken credential or gateway misconfig
     # surfaces in the deploy logs as a single ERROR line within seconds —
     # before any user-facing 502.
-    asyncio.create_task(_vertex_startup_probe())
+    _aca_create_task(_vertex_startup_probe(), key="vertex-startup-probe")
 
     # Task #677 — periodic Gemini health probe. The startup probe only
     # catches misconfig at boot; this loop reruns health_check() every
@@ -1638,7 +1679,7 @@ async def lifespan(app):
     # the same email/Slack pipeline as _seo_health_alert_loop on >=2
     # consecutive failures, so mid-day Vertex outages page on-call
     # instead of waiting for users to hit 502s.
-    asyncio.create_task(_vertex_periodic_probe_loop())
+    _aca_create_task(_vertex_periodic_probe_loop(), key="vertex-periodic-probe")
 
     # Task #944 — Unified Log Explorer.
     #   * Ensure TTL + secondary indexes on the unified_logs collection
@@ -1682,7 +1723,7 @@ async def lifespan(app):
             )
         await _hydrate_pause_state_from_db()
         await _ulogs_dao.get_backend_shipper().start(db)
-        _unified_logs_cf_task = asyncio.create_task(_unified_logs_cf_pull_loop())
+        _unified_logs_cf_task = _aca_create_task(_unified_logs_cf_pull_loop(), key="unified-logs-cf-pull")
     except Exception as _ulogs_boot_err:
         logger.warning(f"[unified_logs] startup wiring failed: {_ulogs_boot_err}")
 
@@ -1692,12 +1733,17 @@ async def lifespan(app):
     yield
     # Task #310 — final flush of speed-up metrics before shutting down so the
     # most recent counters survive the restart.
+    # Task #332 — `_speedup_flush_task` is None under the aca-jobs
+    # takeover (the periodic flush runs in `aca-job-chat-speedup-flush`
+    # instead). Skip the cancel/await but ALWAYS run the final flush
+    # so a graceful API shutdown still drains the in-memory delta.
     try:
-        _speedup_flush_task.cancel()
-        try:
-            await _speedup_flush_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        if _speedup_flush_task is not None:
+            _speedup_flush_task.cancel()
+            try:
+                await _speedup_flush_task
+            except (asyncio.CancelledError, Exception):
+                pass
         await asyncio.to_thread(_speedup.flush_to_store)
     except Exception as _sp_shutdown_err:
         logger.warning(f"chat_speedup_metrics shutdown flush failed: {_sp_shutdown_err}")
@@ -1706,7 +1752,9 @@ async def lifespan(app):
         await _ai_cache_close.close_async_client()
     except Exception:
         pass
-    if _deps_mod._rate_cleanup_task:
+    # Null-safe under aca-jobs takeover (Task #332): _aca_create_task
+    # returns None when the loop has been migrated to a Container Apps Job.
+    if _deps_mod._rate_cleanup_task is not None:
         _deps_mod._rate_cleanup_task.cancel()
     # Task #944 — drain the in-process unified-log shipper so the
     # tail of records buffered between the last flush tick and the
@@ -1914,6 +1962,9 @@ from routes.admin_discovery import router as admin_discovery_router
 from routes.admin_gcp_infra import router as admin_gcp_infra_router
 from routes.admin_gcp_status import router as admin_gcp_status_router
 from routes.internal_jobs import router as internal_jobs_router
+# Task #332 — AWS workers + Azure cron admin proxies.
+from routes.admin_aws_infra import router as admin_aws_infra_router
+from routes.admin_azure_cron import router as admin_azure_cron_router
 
 
 def _gcp_scheduler_takeover() -> bool:
@@ -1923,6 +1974,70 @@ def _gcp_scheduler_takeover() -> bool:
     /api/internal/jobs/* endpoints. Read at startup; flipping requires a
     workflow restart so the disabling is unambiguous."""
     return (os.environ.get("GCP_SCHEDULER_TAKEOVER") or "").strip() in {"1", "true", "yes"}
+
+
+def _aca_jobs_takeover() -> bool:
+    """Task #332 — Phase 4 cutover gate.
+
+    When True, the 38 in-process asyncio loops marked ``landing=aca-job``
+    in ``docs/infra/inventory/asyncio-loops.md`` are NOT started at boot.
+    Azure Container Apps Jobs (defined in
+    ``infra/azure/container-apps-jobs.tf``) drive the same coroutines via
+    ``services/cron-jobs/run.py`` instead.
+
+    DEFAULT: ON. The acceptance bar for this task is that the API
+    container stops running migrated cron loops once this code ships,
+    on every host (DigitalOcean App Platform, Replit deploy, container,
+    etc.) — making the default depend on a host-specific env var meant
+    a forgotten env caused legacy loops to keep firing. The cutover is
+    therefore unconditional and contributors who want the in-process
+    loops back during local dev set ``RUN_LEGACY_LOOPS=1``.
+    """
+    raw = (os.environ.get("RUN_LEGACY_LOOPS") or "").strip().lower()
+    if raw in {"1", "true", "yes"}:
+        return False  # explicit opt-out (keep loops on, e.g. for local dev)
+    return True
+
+
+# Task #332 reviewer rev #17 — boot-only safety checks (one-shot self-tests
+# that fire ONCE on API process start, not periodic loops) must keep
+# running on every API boot regardless of takeover. Their ACA-job
+# counterparts are scheduled rarely (the vertex-startup-probe job is
+# annual `0 0 1 1 *`) precisely because the per-API-boot trigger lives
+# inside the API container and the ACA job is just a manual trigger
+# surface for re-running the probe out-of-band. Keys listed here are
+# never closed by `_aca_create_task` — they are scheduled normally.
+_ACA_BOOT_LOCAL_KEYS: frozenset[str] = frozenset({
+    "vertex-startup-probe",
+    "library-prewarm",
+})
+
+
+def _aca_create_task(coro, *, key: str):
+    """Wrapper around ``asyncio.create_task`` for the aca-job loops.
+
+    Skips the loop when ``_aca_jobs_takeover()`` is True so a single env
+    flip switches the cron tier from "in-process loop" to "Container Apps
+    Job" with zero per-loop edits at rollback. Accepts a coroutine
+    object (same signature as ``asyncio.create_task``) so call sites are
+    a one-token replacement; the coroutine is closed cleanly under
+    takeover so the event loop never sees an un-awaited warning.
+
+    Carve-out: keys in ``_ACA_BOOT_LOCAL_KEYS`` are boot-only safety
+    checks (e.g. the vertex startup self-check) and ALWAYS run in the
+    API container — takeover does not apply to one-shot probes that
+    have no equivalent boot trigger on the ACA-job side.
+    """
+    if key in globals().get("_ACA_BOOT_LOCAL_KEYS", frozenset()):
+        return asyncio.create_task(coro)
+    if _aca_jobs_takeover():
+        try:
+            coro.close()
+        except Exception:
+            pass
+        logger.info("[aca-takeover] skipping legacy loop %s — driven by aca-job-%s", key, key)
+        return None
+    return asyncio.create_task(coro)
 
 
 # Production hint: warn if internal jobs are mounted but no audience pin.
@@ -1992,6 +2107,8 @@ api.include_router(admin_content_quality_router)
 api.include_router(admin_security_external_router)
 api.include_router(admin_discovery_router)
 api.include_router(admin_gcp_infra_router)
+api.include_router(admin_aws_infra_router)
+api.include_router(admin_azure_cron_router)
 api.include_router(admin_gcp_status_router)
 api.include_router(internal_jobs_router)
 

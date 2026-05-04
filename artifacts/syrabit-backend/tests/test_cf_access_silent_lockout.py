@@ -337,9 +337,14 @@ def test_loop_re_arms_state_when_missing():
 
 def test_lifespan_schedules_silent_lockout_loop():
     src = _server_source()
-    assert "asyncio.create_task(_cf_access_silent_lockout_loop())" in src, (
-        "lifespan must register the silent-lockout watcher"
-    )
+    # Task #332 — accept either the legacy `asyncio.create_task` form
+    # or the takeover-aware `_aca_create_task(..., key="cf-access-silent-lockout")`
+    # wrapper that gates the loop on `_aca_jobs_takeover()`.
+    assert (
+        "asyncio.create_task(_cf_access_silent_lockout_loop())" in src
+        or '_aca_create_task(_cf_access_silent_lockout_loop(), key="cf-access-silent-lockout")' in src
+        or "_aca_create_task(_cf_access_silent_lockout_loop(), key='cf-access-silent-lockout')" in src
+    ), "lifespan must register the silent-lockout watcher"
 
 
 def test_lifespan_calls_record_cf_access_config_change():

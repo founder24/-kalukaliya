@@ -5026,11 +5026,17 @@ async def admin_studio_publish(body: StudioPublishRequest, admin: dict = Depends
             page_doc,
         )
 
+    # Task #332 — durable fan-out. Await the enqueue so the SQS
+    # message is persisted before we return; under WORKERS_BACKEND=aws
+    # this is `sqs_fanout.enqueue("indexnow-page", …)` which is
+    # ~tens-of-ms and the producer never raises. Drops the previous
+    # `asyncio.create_task` wrapper which could lose work on a
+    # process crash between status flip and the IndexNow ping.
     try:
         from routes.bot_discovery import notify_indexnow_for_page
-        asyncio.create_task(notify_indexnow_for_page(page_doc))
-    except Exception:
-        pass
+        await notify_indexnow_for_page(page_doc)
+    except Exception as _ix_err:
+        logger.warning(f"[indexnow] notes publish enqueue failed: {_ix_err}")
 
     # ── 4b. Embed page for vector search ─────────────────────────────────────
     # Run fire-and-forget so publish response is never delayed by embedding

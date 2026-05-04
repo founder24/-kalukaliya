@@ -87,9 +87,52 @@ locals {
     "cf-logpush-shared-secret"  = "Shared secret for CF Logpush → Log Analytics ingestion."
     "vertex-service-account"    = "GCP Vertex service-account JSON (vertex-startup-probe job)."
     "bing-webmaster-api-key"    = "Bing Webmaster API key (bing-keyword-refresh job)."
-    "indexnow-key"              = "IndexNow shared key (seo-publish-indexnow job)."
+
+    # Task #332 — Phase 4 runtime secret bundle. These names line up
+    # with the `kv_secret_name` field in `local.cron_runtime_secrets`
+    # (container-apps-jobs.tf) so each Container Apps Job can mount
+    # them as env vars via the user-assigned managed identity. The
+    # `syrabit-` prefix matches the GCP Secret Manager IDs the API
+    # tier reads today, so the mirror script
+    # (`scripts/mirror-secrets-from-gcp.sh`) round-trips without a
+    # per-secret name map.
+    "syrabit-mongo-url"               = "MongoDB connection string consumed by every backend module."
+    "syrabit-mongo-db-name"           = "Mongo database name (DB_NAME env var)."
+    "syrabit-openai-api-key"          = "OpenAI API key for cron jobs that call OpenAI."
+    "syrabit-gemini-api-key"          = "Google Gemini API key for grounded-recall + topic-discovery."
+    "syrabit-resend-api-key"          = "Resend API key for digest/alert emails."
+    "syrabit-slack-webhook-url"       = "Slack incoming webhook for ops alert paging."
+    "syrabit-cf-api-token"            = "Cloudflare API token (zone scope) for the CF cron jobs."
+    "syrabit-cf-account-id"           = "Cloudflare account ID."
+    "syrabit-cf-zone-id"              = "Cloudflare zone ID."
+    "syrabit-bing-api-key"            = "Bing Webmaster API key (bing-submit + keyword refresh)."
+    "syrabit-indexnow-key"            = "IndexNow shared key for sitemap-indexnow-diff."
+    "syrabit-trustpilot-api-key"      = "Trustpilot API key for the trustpilot cron jobs."
+    "syrabit-vertex-project"          = "GCP project hosting Vertex AI for grounded-recall."
+    "syrabit-vertex-location"         = "Vertex AI region."
+    "syrabit-gcp-sa-json"             = "GCP service account JSON (Vertex + GCS access)."
+    "syrabit-upstash-redis-url"       = "Upstash Redis REST URL (chat speedup metrics, rate limiter)."
+    "syrabit-upstash-redis-token"     = "Upstash Redis REST token."
+    # NB: deliberate omission of long-lived AWS access keys — the
+    # cron jobs cross-cloud-auth via Azure Workload Identity
+    # Federation → AWS STS AssumeRoleWithWebIdentity instead. See
+    # the comment above `cron_runtime_secrets` in
+    # `container-apps-jobs.tf` and the federation trust in
+    # `infra/aws/iam-azure-federation.tf`.
+    "syrabit-aws-region"              = "AWS region the SQS queues live in (e.g. ap-south-1)."
+    # Task #332 reviewer rev #13 — required by server.py:_validate_env()
+    # at module-import time. Without these the server-backed cron
+    # jobs (vertex probes, seed_syllabus_embeddings, etc.) crash
+    # before reaching the dispatched coroutine.
+    "syrabit-jwt-secret"              = "JWT signing secret consumed by server.py at import-time. Required by every server-backed ACA Job."
+    "syrabit-admin-jwt-secret"        = "Admin JWT signing secret. Same import-time requirement as JWT_SECRET."
   }
 }
+
+# NB: the runtime managed identity already has Key Vault Secrets User
+# on this vault, granted in iam-github-oidc.tf alongside the rest of
+# the cron-jobs IAM. Container Apps Jobs' `secret { key_vault_secret_id
+# = ... identity = ... }` blocks resolve through that grant.
 
 resource "azurerm_key_vault_secret" "cron" {
   for_each = local.lz_cron_secrets

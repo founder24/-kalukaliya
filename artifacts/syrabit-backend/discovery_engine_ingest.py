@@ -126,3 +126,40 @@ async def upsert_topic(topic: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:
         return {"status": "error", "imported": 0, "error": repr(exc)}
     return await upsert_documents([doc])
+
+
+# ─── Task #332 — SQS consumer entrypoint ─────────────────────────────────────
+#
+# `services/backend/sqs_consumers/discovery_engine.py` invokes this when a
+# `discovery-engine-ingest` SQS message lands. The message body carries
+# `{target: "topic"|"page"|"documents", payload: {...}}`. We dispatch to
+# the existing per-target upsert helpers so the consumer call site stays
+# a one-liner.
+async def ingest(*, target: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Dispatch a Discovery-Engine ingest message to the right helper.
+
+    Supported `target` values:
+      * "topic"      → `upsert_topic(payload)`
+      * "page"       → `upsert_topic(payload)` (alias — pages are
+                       represented as topic documents in the index)
+      * "documents"  → `upsert_documents(payload["documents"])`
+    """
+    # Task #332 — RAISE on operational failures so the SQS Lambda
+    # consumer reports failure to the runtime; SQS will retry and
+    # eventually move the message to the DLQ. Returning an error
+    # dict would have the consumer ack the message and silently
+    # drop the work.
+    if target in ("topic", "page"):
+        result = await upsert_topic(payload)
+        if isinstance(result, dict) and result.get("status") == "error":
+            raise RuntimeError(f"discovery-engine upsert failed: {result.get('error')}")
+        return result
+    if target == "documents":
+        docs = payload.get("documents") or []
+        if not isinstance(docs, list):
+            raise ValueError("documents payload must be a list")
+        result = await upsert_documents(docs)
+        if isinstance(result, dict) and result.get("status") == "error":
+            raise RuntimeError(f"discovery-engine upsert failed: {result.get('error')}")
+        return result
+    raise ValueError(f"unknown discovery-engine target {target!r}")

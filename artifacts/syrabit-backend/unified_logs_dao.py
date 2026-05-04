@@ -758,3 +758,31 @@ def _reset_backend_shipper_for_tests() -> None:
     global _BACKEND_SHIPPER, _RUNTIME_PAUSED
     _BACKEND_SHIPPER = None
     _RUNTIME_PAUSED = None
+
+
+# ─── Task #332 — SQS consumer entrypoint ─────────────────────────────────────
+#
+# `services/backend/sqs_consumers/unified_logs_pull.py` invokes this on each
+# `unified-logs-cf-pull` SQS tick. Body carries `{since, until}` ISO-8601
+# strings. We delegate to the existing `routes.admin_logs._cf_pull_window`
+# which owns the GraphQL → normalize → `insert_logs` pipeline.
+async def pull_cf_window(*, since: str, until: str) -> dict:
+    """Pull a [since, until] window of Cloudflare logs and store them.
+
+    Task #332 — raises on operational failure so the SQS Lambda
+    consumer surfaces the error to AWS for retry + DLQ routing.
+    Successful pulls return the underlying result dict.
+    """
+    from routes.admin_logs import _cf_pull_window  # type: ignore — import errors must propagate
+    try:
+        result = await _cf_pull_window(since=since, until=until)
+    except TypeError:
+        # Legacy positional signature.
+        result = await _cf_pull_window(since, until)  # type: ignore[misc]
+    if isinstance(result, dict):
+        if result.get("status") == "error":
+            raise RuntimeError(f"cf-pull failed: {result.get('error')}")
+        result.setdefault("since", since)
+        result.setdefault("until", until)
+        return result
+    return {"status": "ok", "since": since, "until": until, "raw": result}

@@ -775,6 +775,24 @@ async def notify_indexnow_for_page(page_doc: dict):
     url = _page_doc_to_url(page_doc)
     if not url:
         return
+    # Task #332 — producer cutover. When WORKERS_BACKEND=aws the API
+    # process must NOT call IndexNow inline; it enqueues onto SQS so a
+    # Lambda consumer (sqs_consumers.seo_indexnow) does the push out
+    # of band. There is NO inline fallback on enqueue failure — the
+    # API tier is enqueue-only by contract; if SQS is degraded the
+    # message lands in the SQS-side DLQ via the consumer's normal
+    # retry policy, and on-call gets paged via the
+    # syrabit-workers-degraded composite alarm. Falling back to inline
+    # would silently re-introduce in-process work and mask the
+    # outage.
+    import os as _os
+    if (_os.environ.get("WORKERS_BACKEND") or "").strip().lower() == "aws":
+        from sqs_fanout import enqueue as _sqs_enqueue  # type: ignore
+        await _sqs_enqueue("seo-indexnow", {
+            "url": url,
+            "page_id": page_doc.get("id") or page_doc.get("_id"),
+        })
+        return
     try:
         await push_indexnow([url])
     except Exception as e:

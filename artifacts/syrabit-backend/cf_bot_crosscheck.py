@@ -425,3 +425,45 @@ def build_crosscheck_section(cf_data: dict, iso_week: str,
         "externals": ext,
         "schema_issues": issues,
     }
+
+
+# ─── Task #332 — SQS consumer entrypoint ─────────────────────────────────────
+#
+# `services/backend/sqs_consumers/cf_bot_crosscheck.py` invokes this on each
+# `cf-bot-crosscheck` SQS message. The message carries a single suspect
+# (ip, ua) tuple from the bot-discovery middleware. We resolve the
+# verifier inside `routes.bot_discovery` (where the per-IP rDNS+ASN logic
+# already lives) and route the result through the existing
+# `cf_bot_reports` collection update path so this consumer has parity
+# with the in-process implementation.
+async def crosscheck(*, ip: str, ua: str = "") -> dict:
+    """Cross-check a single (ip, ua) against Cloudflare's verified-bot
+    list and authoritative reverse-DNS for the major search engines.
+
+    Returns: {"ip", "ua", "verified": bool, "vendor": str|None,
+              "method": "cf"|"rdns"|"asn"|"none"}.
+    """
+    from routes import bot_discovery as _bd  # type: ignore
+
+    # `bot_discovery._verify_bot` is the same per-request verifier the
+    # middleware uses; surfacing it via this consumer keeps the SQS
+    # path 1:1 with the legacy in-process call site.
+    # Task #332 — RAISE on operational failure so SQS Lambda surfaces
+    # the error to AWS (retry + DLQ). Verifier-unavailable is a
+    # deploy-time misconfiguration we want loud, not silent.
+    verifier = getattr(_bd, "_verify_bot", None) or getattr(_bd, "verify_bot", None)
+    if verifier is None:
+        raise RuntimeError(
+            "cf-bot-crosscheck verifier unavailable — routes.bot_discovery "
+            "must export `_verify_bot` (or `verify_bot`)."
+        )
+    try:
+        result = await verifier(ip=ip, ua=ua)  # type: ignore[misc]
+    except TypeError:
+        # Older signature accepted a single positional dict.
+        result = await verifier({"ip": ip, "ua": ua})  # type: ignore[misc]
+    if isinstance(result, dict):
+        result.setdefault("ip", ip)
+        result.setdefault("ua", ua)
+        return result
+    return {"ip": ip, "ua": ua, "verified": bool(result), "vendor": None, "method": "rdns"}

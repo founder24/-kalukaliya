@@ -6,6 +6,13 @@ import TrustpilotRefreshCronPill from './TrustpilotRefreshCronPill';
 import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
 import CfAuditCard from './CfAuditCard';
+// Phase 4 — Task #332. SQS+Lambda worker tier health (replaces the
+// GCP Cloud Tasks tile inside AdminGcpPanel) and the Azure Container
+// Apps Jobs cron health table (replaces the Cloud Scheduler source
+// previously consumed by CronHealthPill). Both cards live under the
+// Infrastructure tab so the on-call has a single pane of glass.
+import AdminAwsInfraCard from './AdminAwsInfraCard';
+import AdminCronJobsCard from './AdminCronJobsCard';
 import { toast } from 'sonner';
 import AdminQuickLinks from './AdminQuickLinks';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, LineChart, Line } from 'recharts';
@@ -2770,6 +2777,20 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         )}
 
         {healthTab === 'infra' && (<>
+        {/*
+          Phase 4 — Task #332. AWS workers + Azure cron tiles render
+          first inside the Infrastructure tab so any in-progress
+          incident on the migrated tiers is visible above the older
+          (GCP-era) panels without scrolling.
+        */}
+        <SectionErrorBoundary name="AWS Infra (SQS + Lambda workers)">
+          <AdminAwsInfraCard adminToken={adminToken} />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="Cron (Azure Container Apps Jobs)">
+          <AdminCronJobsCard adminToken={adminToken} />
+        </SectionErrorBoundary>
+
         <SectionErrorBoundary name="Provider Latency Bench">
         <ProviderLatencyBench
           benchLatest={benchLatest}

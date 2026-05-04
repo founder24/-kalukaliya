@@ -24,6 +24,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import os
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -320,3 +321,60 @@ async def fetch_top_keywords(
         "fetched_at": now.isoformat(),
         "source": "api",
     }
+
+
+# ─── Task #332 — SQS consumer entrypoint ─────────────────────────────────────
+#
+# `services/backend/sqs_consumers/bing_keyword.py` invokes this when an
+# `bing-keyword-refresh` SQS message lands. It is a thin batching wrapper
+# around `fetch_top_keywords` so the consumer body stays declarative.
+async def refresh_keywords(*, site: str | None = None,
+                           keywords: list[str] | None = None,
+                           db: Any = None) -> dict:
+    """Refresh the cached related-keywords doc for each seed.
+
+    Args:
+      site: optional site identifier (logged only — Bing's Keyword
+        Research API operates per-seed, not per-site).
+      keywords: list of seed keywords whose cache rows to refresh.
+      db: optional Mongo handle. If None, the module-level default
+        (resolved at runtime via `deps.db`) is used.
+
+    Returns: dict with per-seed status + counts.
+    """
+    seeds = [s for s in (keywords or []) if isinstance(s, str) and s.strip()]
+    if not seeds:
+        return {"site": site, "refreshed": 0, "skipped": "no-seeds"}
+    if db is None:
+        try:
+            from deps import db as _db_handle  # type: ignore
+            db = _db_handle
+        except Exception:
+            db = None
+    api_key = os.environ.get("BING_KEYWORD_API_KEY", "").strip()
+    if not api_key:
+        return {"site": site, "refreshed": 0, "skipped": "missing-api-key"}
+    # Task #332 — collect errors and RAISE at the end if any seed
+    # failed, so the SQS Lambda consumer surfaces the failure to
+    # AWS for retry + DLQ. Returning a partial-result dict would
+    # ack the message and silently drop the failed seeds.
+    out: dict = {"site": site, "refreshed": 0, "results": []}
+    failures: list[tuple[str, str]] = []
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for seed in seeds:
+            try:
+                row = await fetch_top_keywords(
+                    api_key, seed, db=db, client=client, force=True,
+                )
+                out["refreshed"] += 1
+                out["results"].append({"seed": seed, "source": row.get("source")})
+            except Exception as exc:
+                err = repr(exc)[:200]
+                out["results"].append({"seed": seed, "error": err})
+                failures.append((seed, err))
+    if failures:
+        raise RuntimeError(
+            f"bing-keyword-refresh: {len(failures)}/{len(seeds)} seeds failed: "
+            + "; ".join(f"{s}={e}" for s, e in failures[:5])
+        )
+    return out

@@ -63,9 +63,17 @@ def test_lifespan_schedules_vertex_periodic_probe_loop():
     tree = _server_module_ast()
     lifespan = _find_function(tree, "lifespan")
     src = ast.unparse(lifespan)
-    assert "asyncio.create_task(_vertex_periodic_probe_loop())" in src, (
-        "Expected lifespan() to schedule _vertex_periodic_probe_loop; "
-        "without it Gemini outages after boot stay silent."
+    # Task #332 — registration moved from raw `asyncio.create_task` to
+    # the takeover-aware `_aca_create_task(..., key="vertex-periodic-probe")`
+    # wrapper so a single env flip switches between in-process and
+    # ACA Job execution. Either form satisfies the contract.
+    assert (
+        "asyncio.create_task(_vertex_periodic_probe_loop())" in src
+        or "_aca_create_task(_vertex_periodic_probe_loop(), key='vertex-periodic-probe')" in src
+    ), (
+        "Expected lifespan() to schedule _vertex_periodic_probe_loop "
+        "(via asyncio.create_task or _aca_create_task); without it "
+        "Gemini outages after boot stay silent."
     )
 
 

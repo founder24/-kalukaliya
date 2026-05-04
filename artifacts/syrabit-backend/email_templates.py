@@ -61,7 +61,8 @@ def _button(label: str, url: str) -> str:
 def _send_via_cf_worker(to: str, subject: str, html: str) -> bool:
     """
     Send email via the Cloudflare Email Worker.
-    Returns True on success, False on any failure (caller should fallback to Resend).
+    Returns True on success, False on any failure (caller should fallback to
+    Resend, then SES via the `email-fallback` SQS queue — see `_send`).
     Requires:
       - EMAIL_WORKER_URL to be set (e.g. https://syrabit-email.axomxplain.workers.dev)
       - CF Email Routing MX records pointing to Cloudflare (not Hostinger)
@@ -87,29 +88,76 @@ def _send_via_cf_worker(to: str, subject: str, html: str) -> bool:
         return False
 
 
-def _send_sync(to: str, subject: str, html: str):
+def _send_sync(to: str, subject: str, html: str) -> str:
     """
-    Send email — tries CF Email Worker first (zero-cost), falls back to Resend.
+    Tier-1 + Tier-2 of the email-send chain.
+
+    Returns:
+      "cf"      — sent via Cloudflare Email Worker (Tier-1, zero-cost)
+      "resend"  — sent via Resend (Tier-2)
+      "fallback"— both prior tiers failed; caller must enqueue to the
+                  ``email-fallback`` SQS queue so the email-worker
+                  Lambda can retry via Amazon SES (Tier-3).
+      "skip"    — no provider configured AND fallback not viable.
+
     Fire-and-forget: never raises.
     """
     if _send_via_cf_worker(to, subject, html):
-        return
+        return "cf"
     key = os.environ.get("RESEND_API_KEY", "").strip()
     if not key:
-        logger.info(f"[Email] No provider configured — skipping email to {to}: {subject}")
-        return
+        # No Resend key but we still want SES to take a shot.
+        logger.info(f"[Email] Resend not configured — handing off to SES fallback for {to}: {subject}")
+        return "fallback"
     try:
         import resend as _resend
         _resend.api_key = key
         frm = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
         _resend.Emails.send({"from": frm, "to": [to], "subject": subject, "html": html})
         logger.info(f"[Email/Resend] Sent '{subject}' → {to}")
+        return "resend"
     except Exception as e:
-        logger.warning(f"[Email] Send failed to {to}: {e}")
+        # Tier-2 failed — Tier-3 (SES via SQS) will retry. Don't log
+        # warning yet; the SQS consumer logs success/final failure.
+        logger.info(f"[Email/Resend] failed for {to}, falling back to SES: {e}")
+        return "fallback"
 
 
 async def _send(to: str, subject: str, html: str):
-    await asyncio.to_thread(_send_sync, to, subject, html)
+    """Tier-1 → Tier-2 → Tier-3 send chain (Task #332).
+
+    Tiers 1 and 2 run in-process (CF Email Worker, then Resend). On
+    failure of both, the message is enqueued to the ``email-fallback``
+    SQS queue so the ``syrabit-email-worker`` Lambda can deliver via
+    Amazon SES with full DLQ + alarm coverage. The chain is:
+
+        CF Email Worker → Resend → SES (via email-fallback SQS) → log warn
+
+    See `routes/admin_aws_infra.py:_QUEUE_INVENTORY["email-fallback"]`
+    and `infra/aws/lambda-workers.tf` for the consumer wiring.
+    """
+    outcome = await asyncio.to_thread(_send_sync, to, subject, html)
+    if outcome != "fallback":
+        return
+    # Tier-3 — enqueue for SES delivery via Lambda. We import lazily
+    # so unit tests of this module don't have to stub boto3.
+    try:
+        from sqs_fanout import enqueue as _sqs_enqueue
+        await _sqs_enqueue(
+            "email-fallback",
+            {
+                "to": to,
+                "subject": subject,
+                "html": html,
+                "from": os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip(),
+                "source": "email_templates._send",
+            },
+        )
+        logger.info(f"[Email/SES-fallback] enqueued '{subject}' → {to}")
+    except Exception as e:
+        # Tier-3 enqueue failed — final tier is the warn log so on-call
+        # has a breadcrumb the email never went out.
+        logger.warning(f"[Email] All tiers failed for {to} (CF→Resend→SES enqueue: {e})")
 
 
 async def send_plan_activation(email: str, name: str, plan: str, credits: int, amount_paise: int):

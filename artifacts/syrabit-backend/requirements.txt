@@ -22,6 +22,10 @@ google-api-core==2.30.0
 
 httpx==0.28.1
 aiohttp==3.13.5
+
+# Task #332 — AWS SQS producer + Azure ARM cron-health proxy.
+boto3>=1.35.0  # Used by sqs_fanout.py + routes/admin_aws_infra.py
+azure-identity>=1.17.0  # Used by routes/admin_azure_cron.py for ARM token
 h2==4.3.0
 httptools==0.7.1
 uvloop==0.22.1

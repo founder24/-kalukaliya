@@ -97,9 +97,17 @@ def test_lifespan_schedules_vertex_startup_probe():
     tree = _server_module_ast()
     lifespan = _find_function(tree, "lifespan")
     src = ast.unparse(lifespan)
-    assert "asyncio.create_task(_vertex_startup_probe())" in src, (
+    # Task #332 — the boot self-check now schedules through the
+    # takeover-aware `_aca_create_task(..., key="vertex-startup-probe")`
+    # wrapper so it can be served by `aca-job-vertex-startup-probe`
+    # instead of the API container under takeover. Either form OK.
+    assert (
+        "asyncio.create_task(_vertex_startup_probe())" in src
+        or "_aca_create_task(_vertex_startup_probe(), key='vertex-startup-probe')" in src
+    ), (
         "Expected lifespan() to schedule _vertex_startup_probe as a "
-        "background task; without it the boot self-check never runs."
+        "background task (via asyncio.create_task or _aca_create_task); "
+        "without it the boot self-check never runs."
     )
 
 
@@ -118,6 +126,19 @@ def _run(coro):
 
 
 def test_probe_logs_error_when_embeddings_fail(monkeypatch):
+    # Task #332: the gateway-fallback HTTP probe inside
+    # `_vertex_startup_probe` will short-circuit to a WARNING / "degraded
+    # but passing" health record when the *direct* api.cloudflare.com
+    # path returns 200. In a developer environment that has real
+    # CF_AI_GATEWAY_ACCOUNT_ID + CLOUDFLARE_API_TOKEN exported, the
+    # fallback probe really does fire a network call and really does
+    # come back 200 — which masks the ERROR-log path under test.
+    # Strip those env vars so we exercise the failure branch
+    # deterministically regardless of host environment.
+    for _k in ("CF_AI_GATEWAY_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN",
+               "CF_AI_GATEWAY_TOKEN", "CF_AI_GATEWAY_ID"):
+        monkeypatch.delenv(_k, raising=False)
+
     probe, captured, ns = _extract_probe_callable()
 
     class _StubVertex:
