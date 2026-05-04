@@ -1,4 +1,13 @@
 # Cloudflare Deployment Wiring Guide
+
+> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
+> [`infra/per-cloud-feature-delegation.md`](infra/per-cloud-feature-delegation.md)
+> + [`infra/provider-priority-map.md`](infra/provider-priority-map.md)
+> + [`infra/credit-burn-runbook.md`](infra/credit-burn-runbook.md).
+> Provider removals (OpenAI, Anthropic, Bedrock-direct, Stripe, Quge5,
+> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347. If
+> anything below disagrees with v3, the v3 docs win.
+
 ## Pydantic-Settings Configuration Integration
 
 > ⚠️ **HISTORICAL — Railway-era wiring.** Task #336 migrated the backend

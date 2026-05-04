@@ -22,7 +22,7 @@ Indic prompt: short factual sentence about photosynthesis.
 | 2 | `@cf/openai/gpt-oss-120b` | 923 | 792 | **858** | 32 | ~37 | ✅ |
 | 3 | `@cf/meta/llama-3.1-8b-instruct` | 786 | 1042 | **914** | 54 | ~59 | ✅ |
 | 4 | `@cf/openai/gpt-oss-20b` | 947 | 1038 | **992** | 40 | ~40 | ✅ |
-| 5 | `@cf/meta/llama-3.2-3b-instruct` | 993 | 1077 | **1035** | 75 | ~71 | ✅ |
+| 5 | `@cf/meta-llama/Llama-3.2-3B-Instruct` | 993 | 1077 | **1035** | 75 | ~71 | ✅ |
 | 6 | `@cf/meta/llama-4-scout-17b-16e-instruct` | 1322 | 1286 | **1304** | 52 | ~40 | ✅ |
 | 7 | `@cf/mistralai/mistral-small-3.1-24b-instruct` | 1460 | 1606 | **1533** | 57 | ~37 | ✅ |
 | 8 | `@cf/microsoft/phi-2` | 2154 | 1189 | **1672** | 38 | ~23 | ✅ |
@@ -74,7 +74,7 @@ Indic prompt: short factual sentence about photosynthesis.
 1. **`@cf/openai/gpt-oss-120b`** (~860 ms, large model with strong quality) — surprisingly fastest among >20B models
 2. **`@cf/openai/gpt-oss-20b`** (~990 ms) — current choice in `provider-priority-map.md`, validated
 3. **`@cf/meta/llama-4-scout-17b-16e-instruct`** (~1300 ms) — solid quality, mid latency
-4. Fast small fallback: **`@cf/meta/llama-3.2-3b-instruct`** (~1000 ms, 71 tok/s)
+4. Fast small fallback: **`@cf/meta-llama/Llama-3.2-3B-Instruct`** (~1000 ms, 71 tok/s)
 
 > The current map's choice of `@cf/openai/gpt-oss-20b` → `@cf/meta/llama-3.3-70b-instruct-fp8-fast` is **valid**, but `gpt-oss-120b` is empirically faster than the 70B-fp8-fast variant (~860 ms vs ~2200 ms) — consider promoting it.
 

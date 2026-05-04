@@ -1,5 +1,13 @@
 # Workspace — Syrabit.ai
 
+> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
+> [`infra/per-cloud-feature-delegation.md`](infra/per-cloud-feature-delegation.md)
+> + [`infra/provider-priority-map.md`](infra/provider-priority-map.md)
+> + [`infra/credit-burn-runbook.md`](infra/credit-burn-runbook.md).
+> Provider removals (OpenAI, Anthropic, Bedrock-direct, Stripe, Quge5,
+> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.
+> If anything below disagrees with v3, the v3 docs win.
+
 ## Overview
 
 Syrabit.ai is an AI-powered educational platform designed for students in Assam, India, focusing on AHSEC Class 11/12 and Degree curricula. The platform provides localized learning resources across 55 subjects, leveraging AI for content generation, syllabus management, and SEO optimization. Its core purpose is to deliver personalized, accessible, and high-quality educational content through chapter-level RAG chunks and a comprehensive admin panel, aiming to be an affordable, AI-first learning experience with significant market potential.

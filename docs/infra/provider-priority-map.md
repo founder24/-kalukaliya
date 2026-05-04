@@ -1,3 +1,12 @@
+> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
+> [`infra/per-cloud-feature-delegation.md`](../../infra/per-cloud-feature-delegation.md)
+> + [`infra/provider-priority-map.md`](../../infra/provider-priority-map.md)
+> + [`infra/credit-burn-runbook.md`](../../infra/credit-burn-runbook.md).
+> This older same-named doc is retained for historical context.
+> Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5, Resend,
+> Grok, Railway, DigitalOcean) are tracked in Task #347. If anything
+> below disagrees with v3, the v3 docs win.
+
 # PROVIDER_PRIORITY (canonical)
 
 Mirrors the attached snippet format. Excludes Cerebras + Groq.

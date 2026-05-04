@@ -1,3 +1,29 @@
+> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec now lives at
+> [`infra/per-cloud-feature-delegation.md`](../../infra/per-cloud-feature-delegation.md)
+> with [`infra/provider-priority-map.md`](../../infra/provider-priority-map.md)
+> and [`infra/credit-burn-runbook.md`](../../infra/credit-burn-runbook.md).
+> v3 four-cloud delegation in summary:
+>
+> - **Cloudflare** — edge, routing, RAG-primary (Workers-AI exam-Q&A +
+>   fast-mode + IndicTrans2; Vectorize edge cache; AI Gateway BYOK to
+>   Google AI Studio + Azure OpenAI).
+> - **Azure** — Python FastAPI + Rust core on two ACAs; Azure AI
+>   Content Safety as moderation-secondary; Azure Translator
+>   Indic→English-only fallback; SendGrid (Pro 100k via Marketplace).
+> - **Google Cloud / Vertex** — validation-only and safety-only
+>   (Gemini 2.5 Flash on a 10% sample post-response; RAI sync only for
+>   `exam_model_paper`). **Vertex Vector / Discovery Engine retired**
+>   from primary chains (rollback only).
+> - **AWS** — serverless workers, S3 / SQS / Lambda / EventBridge /
+>   DynamoDB / SNS / Step Functions / CloudWatch (free-tier-friendly at
+>   100k DAU). Cloudflare fronts all user-facing traffic.
+>
+> Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5, Resend,
+> Grok, Railway, DigitalOcean) are tracked in Task #347. If anything
+> below disagrees with the v3 spec, the v3 docs win.
+>
+> ---
+>
 > **Authority sync (2026-05-04):** `docs/infra/provider-priority-map.md`
 > is the canonical PROVIDER_PRIORITY map. Binding constraints carried
 > across every plan in this folder:

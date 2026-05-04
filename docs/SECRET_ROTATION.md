@@ -1,5 +1,13 @@
 # Secret Rotation Runbook
 
+> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
+> [`infra/per-cloud-feature-delegation.md`](../infra/per-cloud-feature-delegation.md)
+> + [`infra/provider-priority-map.md`](../infra/provider-priority-map.md)
+> + [`infra/credit-burn-runbook.md`](../infra/credit-burn-runbook.md).
+> Provider removals (OpenAI, Anthropic, Bedrock-direct, Stripe, Quge5,
+> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347 — any
+> rotation entries for those providers are historical/no-op.
+
 > **Audience:** anyone rotating a shared secret in this project.
 > **Goal:** rotate any secret end-to-end without rediscovering where it
 > needs to land.

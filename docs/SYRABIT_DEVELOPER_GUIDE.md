@@ -1,5 +1,14 @@
 # Syrabit.ai — Complete Developer Handoff Document
 
+> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
+> [`infra/per-cloud-feature-delegation.md`](../infra/per-cloud-feature-delegation.md)
+> + [`infra/provider-priority-map.md`](../infra/provider-priority-map.md)
+> + [`infra/credit-burn-runbook.md`](../infra/credit-burn-runbook.md).
+> Provider removals (OpenAI, Anthropic, Bedrock-direct, Stripe, Quge5,
+> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347 — any
+> references below to Resend, Stripe Checkout, xAI/Grok, Railway, etc.
+> are historical. If anything below disagrees with v3, the v3 docs win.
+
 > **Last Updated:** April 2026
 > **Purpose:** Complete blueprint for rebuilding the Syrabit.ai application from scratch. Covers every feature, workflow, design decision, database schema, and integration.
 
