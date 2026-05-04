@@ -578,7 +578,77 @@ async def ocr_chat_image(
 
 @router.post("/ai/chat")
 async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depends(rate_limit_chat_optional)):
+    # Task #360 — open the per-turn ChatTurnContext so the dispatcher's
+    # memory-brain enforcement guard can verify a Mongo history read
+    # happened before LLM dispatch. The context manager is a no-op for
+    # any code paths that don't opt into the guard.
+    from chat_turn_context import chat_turn as _chat_turn_ctx
+    _turn_cm = _chat_turn_ctx(
+        session_id=msg.conversation_id or "",
+        user_id=(user or {}).get("id", "") if user else "",
+    )
+    _turn_cm.__enter__()
+    try:
+        _result = await _chat_impl(msg, request, user)
+    finally:
+        _turn_cm.__exit__(None, None, None)
+
+    # Task #360 round-6 — Latency Rule 12: 10% post-response Vertex
+    # validation sampling. Pure-fn `should_validate()` is called AFTER
+    # the user-visible response is computed; the actual Vertex job is
+    # fire-and-forget so it cannot add critical-path latency. Redis
+    # override at `validation:sample_rate` propagates without redeploy.
+    try:
+        from validation_sampler import should_validate as _should_validate
+        try:
+            from deps import redis_client as _vs_redis
+        except Exception:
+            _vs_redis = None
+        if _should_validate(redis=_vs_redis):
+            try:
+                from chat_validation_runner import enqueue_validation as _vs_enqueue
+                _ans = _result.get("answer") if isinstance(_result, dict) else None
+                _vs_enqueue(
+                    user_message=msg.message,
+                    answer_text=str(_ans) if _ans is not None else "",
+                    conversation_id=msg.conversation_id or "",
+                    user_id=(user or {}).get("id", "") if user else "",
+                )
+            except Exception as _vs_err:
+                logger.debug("[validation-sampler] enqueue failed: %s", _vs_err)
+    except Exception:
+        pass
+
+    return _result
+
+
+async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = Depends(rate_limit_chat_optional)):
     _chat_t0 = _time_mod.time()
+
+    # Task #360 — operational meter integration. Increment Meter A
+    # (daily call counter) and record Meter B (RPM-headroom sliding
+    # window) on EVERY chat request. Read the shared `chat:fallback`
+    # hot-flag they drive so the handler can short-circuit dispatch to
+    # the cheap-only chain when either meter has tripped.
+    try:
+        from credit_burn_meter_runtime import (
+            increment_chat_request as _meter_tick,
+            is_fallback_active as _meter_is_fallback_active,
+        )
+        _meter_tick()
+        _fallback_active = _meter_is_fallback_active()
+    except Exception:
+        _fallback_active = False
+    # Round-8: do NOT mutate os.environ per request — it's a process
+    # global and races across concurrent workers. Tag the request
+    # state only; downstream `call_with_provider_fallback` reads
+    # `credit_burn_meter_runtime.is_fallback_active()` directly.
+    if _fallback_active:
+        try:
+            request.state.syrabit_fallback_active = True  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
     is_anon = user is None
 
     plan = user.get("plan", "free") if user else "free"
@@ -654,7 +724,25 @@ async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depend
         if not conv_id:
             return None
         if user_id:
-            return await supa_get_conversation(conv_id, user_id)
+            # Task #360 round-4 — mark the turn's Mongo-read on the
+            # READ ATTEMPT, not on a truthy result. The dispatcher's
+            # contract is "this turn consulted the memory brain", which
+            # is satisfied by a successful Mongo round-trip even when
+            # the conversation has no rows yet (first-turn / new
+            # conversation). Marking only on truthy results would
+            # incorrectly fail valid first-turn paths.
+            try:
+                _conv = await supa_get_conversation(conv_id, user_id)
+            except Exception:
+                return None
+            try:
+                from chat_turn_context import (
+                    mark_mongo_read as _mark_mongo_read,
+                )
+                _mark_mongo_read()
+            except Exception:
+                pass
+            return _conv
         return None
 
     _t_phase0 = _time_mod.time()
@@ -825,6 +913,14 @@ async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depend
         _ns_fetch_web(),
         return_exceptions=True,
     )
+    # Task #360 round-8 — `mark_mongo_read()` is intentionally NOT
+    # called here. The phase-2 history fetcher (`_ns_fetch_history`)
+    # can short-circuit and return `[]` without ever hitting Mongo
+    # (no conv_id, anon flow, fast-return). Marking on the gather
+    # result shape would defeat the dispatcher's enforcement guard.
+    # The mark fires inside `_ns_prefetch_history()` (above) which
+    # is the ONLY function that actually performs the Mongo round-trip
+    # via `await supa_get_conversation(...)`.
     history_messages = _ns_phase2[0] if not isinstance(_ns_phase2[0], BaseException) else []
     syllabus = _ns_phase2[1] if not isinstance(_ns_phase2[1], BaseException) else None
     web_results = _ns_phase2[2] if not isinstance(_ns_phase2[2], BaseException) else []
@@ -1228,8 +1324,74 @@ async def _persist_chat_turn(
 
 @router.post("/ai/chat/stream")
 async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] = Depends(rate_limit_chat_optional)):
+    # Task #360 round-9 — open per-turn ChatTurnContext for SSE chat
+    # and KEEP IT OPEN until the StreamingResponse body iterator drains.
+    # The original code (rounds 1-8) entered+exited the context around
+    # `await _chat_stream_impl(...)` only, but the actual LLM dispatch
+    # in stream mode happens inside the `event_stream()` async generator
+    # AFTER `_chat_stream_impl` returns. Closing the context before
+    # iteration meant `assert_mongo_read_or_raise` and the
+    # `gpt-oss-120b` live-chat guard were both bypassed for SSE turns.
+    # The fix wraps the response's body_iterator so the contextvar
+    # stays bound for every yielded chunk until the stream completes.
+    from chat_turn_context import chat_turn as _chat_turn_ctx
+    _stream_turn_cm = _chat_turn_ctx(
+        session_id=msg.conversation_id or "",
+        user_id=(user or {}).get("id", "") if user else "",
+    )
+    _stream_turn_cm.__enter__()
+    try:
+        sse_resp = await _chat_stream_impl(msg, request, user)
+    except Exception:
+        _stream_turn_cm.__exit__(None, None, None)
+        raise
+
+    # Wrap the body iterator so the chat_turn context remains active
+    # for the full duration of the SSE stream. Closes the context on
+    # generator exhaustion AND on client disconnect / generator close.
+    _inner_iter = getattr(sse_resp, "body_iterator", None)
+    if _inner_iter is None:
+        _stream_turn_cm.__exit__(None, None, None)
+        return sse_resp
+
+    async def _guarded_body_iter():
+        try:
+            async for _chunk in _inner_iter:
+                yield _chunk
+        finally:
+            try:
+                _stream_turn_cm.__exit__(None, None, None)
+            except Exception:
+                pass
+
+    sse_resp.body_iterator = _guarded_body_iter()
+    return sse_resp
+
+
+async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[dict] = Depends(rate_limit_chat_optional)):
     _stream_t0 = _time_mod.time()
     _speedup.record_chat_started()
+
+    # Task #360 — operational meter integration on the streaming path
+    # too. Increment Meter A and record Meter B on every SSE chat
+    # request, then read the shared `chat:fallback` hot-flag.
+    try:
+        from credit_burn_meter_runtime import (
+            increment_chat_request as _meter_tick,
+            is_fallback_active as _meter_is_fallback_active,
+        )
+        _meter_tick()
+        _stream_fallback_active = _meter_is_fallback_active()
+    except Exception:
+        _stream_fallback_active = False
+    # Round-8: tag request state only — no os.environ mutation (race-
+    # prone across concurrent workers). Dispatcher reads
+    # `credit_burn_meter_runtime.is_fallback_active()` directly.
+    if _stream_fallback_active:
+        try:
+            request.state.syrabit_fallback_active = True  # type: ignore[attr-defined]
+        except Exception:
+            pass
     is_anon = user is None
     user_id = user["id"] if user else None
     anon_id = None
@@ -1393,6 +1555,11 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             pass
         try:
             record_first_token(_instant_ms, source="instant")
+            try:
+                from slo_emitter import emit as _slo_emit
+                _slo_emit("chat_ttfb_ms", _instant_ms, source="instant")
+            except Exception:
+                pass
             record_chat_attrs(**{
                 "syrabit.chat.path": "instant",
                 "syrabit.chat.total_ms": _instant_ms,
@@ -1504,6 +1671,11 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                 pass
             try:
                 record_first_token(_ttfb_early_ms, source="early-cache")
+                try:
+                    from slo_emitter import emit as _slo_emit
+                    _slo_emit("chat_ttfb_ms", _ttfb_early_ms, source="early-cache")
+                except Exception:
+                    pass
                 record_chat_attrs(**{
                     "syrabit.chat.path": "early-cache",
                     "syrabit.chat.retrieval_ms": _ttfb_early_ms,
@@ -1653,7 +1825,19 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
             if not msg.conversation_id:
                 return None
             if user_id:
-                return await supa_get_conversation(msg.conversation_id, user_id)
+                # Task #360 round-4 — mark the turn's Mongo-read on the
+                # READ ATTEMPT, not on a truthy result (see the
+                # non-stream branch for the full rationale). A missing
+                # conversation row is still an authoritative read.
+                _conv = await supa_get_conversation(msg.conversation_id, user_id)
+                try:
+                    from chat_turn_context import (
+                        mark_mongo_read as _mark_mongo_read,
+                    )
+                    _mark_mongo_read()
+                except Exception:
+                    pass
+                return _conv
             if anon_id:
                 from cache import redis_get_anon_conversation
                 return redis_get_anon_conversation(anon_id, msg.conversation_id)
@@ -2324,6 +2508,11 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                     pass
                 try:
                     record_first_token(_ttfb_cache_ms, source="cache")
+                    try:
+                        from slo_emitter import emit as _slo_emit
+                        _slo_emit("chat_ttfb_ms", _ttfb_cache_ms, source="cache")
+                    except Exception:
+                        pass
                     # Cache-hit short-circuit: retrieval == cache-lookup
                     # window. Set retrieval_ms here so the attribute is
                     # present on all 4 SSE paths (instant / early-cache
@@ -2470,6 +2659,11 @@ async def chat_stream(msg: ChatMessage, request: Request, user: Optional[dict] =
                             try:
                                 # Task #610 — chat span: first-token milestone
                                 record_first_token(_ttfb_llm_ms, source="llm")
+                                try:
+                                    from slo_emitter import emit as _slo_emit
+                                    _slo_emit("chat_ttfb_ms", _ttfb_llm_ms, source="llm")
+                                except Exception:
+                                    pass
                                 record_chat_attrs(**{"syrabit.chat.provider": _stream_provider or "unknown"})
                             except Exception:
                                 pass

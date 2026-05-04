@@ -86,6 +86,37 @@ jobs:
       # in the CI log. That makes any rename/regression of e.g.
       # `break_glass_force_disabled` immediately visible in PR review,
       # matching the frontend gate added in Task #722.
+      # Task #360 — provider-priority grep gate. Catches drift between
+      # `infra/provider-priority-map.md` and the live runtime selectors
+      # before tests run, plus enforces the dead-provider blocklist
+      # (anthropic / openai-direct / together / huggingface / ollama).
+      # The gate is a fast pure-grep check — runs in <2 s — so we put it
+      # before pytest to fail fast when someone re-imports a forbidden
+      # provider SDK on the live chat path.
+      - name: Provider-priority grep gate (#360)
+        id: grep_gate
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash scripts/ci_grep_gate.sh
+
+      # Task #360 — surface the new credit-burn meter / SLO emitter /
+      # validation sampler / chat-turn context test files explicitly
+      # in the CI log so any rename/regression of e.g.
+      # `test_shared_flag_meter_a_release_does_not_clear_while_meter_b_active`
+      # is immediately visible in PR review.
+      - name: Credit-burn meters + SLO emitter tests (visible gate, #360)
+        id: credit_burn_gate
+        env:
+          MONGODB_URL: "mongodb://localhost:27017/test"
+          DB_NAME: "syrabit_test"
+          JWT_SECRET: "ci-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-aaaaaa"
+          ADMIN_JWT_SECRET: "ci-admin-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-bbbbbb"
+        run: |
+          pytest \
+            tests/test_credit_burn_meters.py \
+            tests/test_slo_emitter.py \
+            -v --no-header
+
       - name: cf_access break-glass tests (visible gate)
         id: cf_access
         env:

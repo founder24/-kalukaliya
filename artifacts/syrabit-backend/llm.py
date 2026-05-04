@@ -1,6 +1,6 @@
 """Syrabit.ai — LLM infrastructure: batching, smart key pool, streaming."""
 import os, re, json, asyncio, uuid, time, logging, httpx, hashlib
-import openai as _oai
+import openai as _oai  # noqa: legacy — Task #347 transport reuse: AsyncOpenAI SDK is the HTTP transport for Azure OpenAI / Workers AI / CF AI Gateway only; no api.openai.com traffic. Removed-provider audit (#360 ci_grep_gate) excludes this line via the noqa marker.
 
 _INDIC_LANG_CODES = frozenset({"as", "hi", "bn", "hi-in", "bn-in", "as-in"})
 
@@ -1708,6 +1708,17 @@ call_with_provider_fallback excludes it and moves to the next provider.
 """
 
 
+# Task #360 — features that always run inside an async-batch entrypoint
+# (PDF summarizer, model-paper generator, content/notes/MCQ batches).
+# These are allowed to dispatch to forbidden live-chat models like
+# `@cf/openai/gpt-oss-120b` because the dispatch happens off the live
+# user-facing chat hot path.
+_ASYNC_BATCH_FEATURES: frozenset = frozenset({
+    "content", "assamese_content", "notes", "mcq", "synthesis",
+    "pyq_solve", "exam_model_paper", "rag_answer", "reasoning",
+})
+
+
 async def _dispatch_llm_for_feature(
     messages: list,
     provider: str,
@@ -1730,8 +1741,61 @@ async def _dispatch_llm_for_feature(
 
     Falls back to the Workers AI SmartKeyPool batcher for ``workers_ai`` and
     any unrecognised provider name.
+
+    Task #360 — wraps the underlying call with the async-only guard for
+    ``@cf/openai/gpt-oss-120b`` (and friends) and the per-turn memory-
+    brain enforcement check. Both are no-ops outside a chat turn.
     """
     import time as _dp_t
+
+    # Task #360 — async-only / memory-brain enforcement.
+    try:
+        from chat_turn_context import (
+            assert_live_chat_model_allowed as _assert_model_ok,
+            assert_mongo_read_or_raise as _assert_mongo_ok,
+            async_batch_scope as _async_batch_scope,
+        )
+    except Exception:
+        _assert_model_ok = None  # type: ignore[assignment]
+        _assert_mongo_ok = None  # type: ignore[assignment]
+        _async_batch_scope = None  # type: ignore[assignment]
+
+    if _assert_mongo_ok is not None:
+        # No-op outside a ChatTurnContext; raises in dev/test if the
+        # chat handler skipped the Mongo history+profile load.
+        try:
+            _assert_mongo_ok(dispatcher_name="_dispatch_llm_for_feature")
+        except Exception:
+            raise
+
+    # Resolve the model that will actually be called so the guard sees
+    # the real model id, not just the provider slug. If we can't tell
+    # yet (provider == "workers_ai"), the guard inside the model-level
+    # call wins; this branch covers the common explicit cases.
+    _resolved_model = None
+    if provider == "vertex":
+        _resolved_model = "gemini-2.5-flash"
+    elif provider == "azure_openai":
+        try:
+            from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL_PEEK
+            _resolved_model = _AZ_DEPL_PEEK
+        except Exception:
+            _resolved_model = "gpt-4.1-mini"
+
+    # For workers_ai we resolve the concrete model id via _TASK_ROUTE so
+    # the guard can catch a chat-feature dispatch to gpt-oss-120b
+    # *before* the SmartKeyPool batch is created.
+    if _resolved_model is None and provider in ("workers_ai", "workers-ai", ""):
+        _wa_route = _TASK_ROUTE.get(feature)
+        if _wa_route:
+            _resolved_model = _wa_route[1]
+
+    if _assert_model_ok is not None and _resolved_model:
+        if feature in _ASYNC_BATCH_FEATURES and _async_batch_scope is not None:
+            with _async_batch_scope():
+                _assert_model_ok(_resolved_model)
+        else:
+            _assert_model_ok(_resolved_model)
 
     if provider == "vertex":
         if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip():
@@ -1868,6 +1932,35 @@ async def call_with_provider_fallback(
     import httpx as _httpx
     exclude: frozenset = frozenset()
     last_exc: Exception = RuntimeError(f"No providers available for feature={feature}")
+
+    # Task #360 round-7 — CONSUME the credit-burn fallback flag with
+    # the CORRECT v3 semantics. The shared `chat:fallback` flag is
+    # written by both Meter A (cost ceiling) and Meter B (Workers AI
+    # RPM headroom). When set, live-chat dispatch must move OFF the
+    # most-expensive paid providers (vertex/gemini/sarvam) AND off
+    # constrained Workers AI, BUT MUST PRESERVE Azure GPT-4.1-mini —
+    # Azure is explicitly the v3 fallback target for Meter B (RPM
+    # relief) and a much cheaper paid path for Meter A than
+    # vertex/sarvam. Excluding Azure here would defeat the meter's
+    # purpose. See `infra/credit-burn-runbook.md` §4.2.
+    _PAID_FOR_FALLBACK: frozenset = frozenset({
+        "vertex", "gemini", "sarvam", "anthropic", "openai",
+    })
+    # Round-8: removed os.environ fallback path — the chat handler no
+    # longer mutates process-global env per request (race-prone). The
+    # runtime singleton is the single source of truth.
+    try:
+        from credit_burn_meter_runtime import is_fallback_active as _fb_active
+        _is_in_fallback = bool(_fb_active())
+    except Exception:
+        _is_in_fallback = False
+    if _is_in_fallback:
+        exclude = exclude | _PAID_FOR_FALLBACK
+        logger.warning(
+            "call_with_provider_fallback: chat:fallback ACTIVE — "
+            "excluding paid providers (%s) for feature=%s",
+            sorted(_PAID_FOR_FALLBACK), feature,
+        )
 
     for attempt in range(max_attempts):
         provider = select_provider(feature, lang=lang, exclude=exclude)

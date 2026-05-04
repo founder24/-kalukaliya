@@ -832,6 +832,36 @@ async def lifespan(app):
     import deps as _deps_mod
     await _init_pg_pool()
 
+    # Task #360 round-6 — register the SLO sink so that
+    # `slo_emitter.emit("chat_ttfb_ms", ...)` calls in routes/ai_chat.py
+    # are no longer no-ops. Sink writes (name, value_ms, labels) to the
+    # CloudWatch metric namespace via the existing chat_speedup_metrics
+    # bridge (or a structured log line when CloudWatch isn't reachable).
+    try:
+        from slo_emitter import set_slo_sink
+        try:
+            from chat_speedup_metrics import emit_slo_observation as _slo_bridge
+        except Exception:
+            _slo_bridge = None
+        _slo_log = logging.getLogger("syrabit.slo")
+        def _sink(name: str, value_ms: float, labels: dict) -> None:
+            if _slo_bridge is not None:
+                try:
+                    _slo_bridge(name, value_ms, labels)
+                    return
+                except Exception:
+                    pass
+            _slo_log.info(
+                "[slo] name=%s value_ms=%.2f labels=%s",
+                name, value_ms, labels,
+            )
+        set_slo_sink(_sink)
+    except Exception as _slo_init_err:
+        logging.getLogger("syrabit.startup").warning(
+            "slo_emitter sink registration failed (non-blocking): %s",
+            _slo_init_err,
+        )
+
     _is_leader = False
     _lock_fd = None
     try:
