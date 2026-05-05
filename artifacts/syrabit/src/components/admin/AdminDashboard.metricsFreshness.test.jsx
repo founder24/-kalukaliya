@@ -27,26 +27,21 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect } from 'vitest';
+import { computeHeavyFreshness } from '@/utils/metricsFreshness';
 
 /**
- * Mirrors the freshness badge from AdminDashboard.jsx.  Same
- * formatter, same stale boundary, same testids — a divergence in
- * production triggers a test failure here.  ``nowMs`` is a parameter
- * so each test can pin a deterministic age without mocking Date.
+ * Mirrors the freshness badge from AdminDashboard.jsx.  Imports
+ * the same `computeHeavyFreshness` helper as production so the
+ * mirror cannot drift from the real component — if the wording
+ * or stale boundary in `metricsFreshness.js` ever changes, both
+ * the badge and this mirror move together.  ``nowMs`` is a
+ * parameter so each test can pin a deterministic age without
+ * mocking the global Date.
  */
 function MetricsFreshnessBadge({ meta, nowMs }) {
   if (!meta) return null;
-  const fmtAgo = (s) => {
-    const n = Math.max(0, Math.floor(s));
-    if (n < 1) return 'live';
-    if (n < 60) return `${n}s ago`;
-    if (n < 3600) return `${Math.floor(n / 60)}m ago`;
-    return `${Math.floor(n / 3600)}h ago`;
-  };
   const heavyAt = Number(meta.heavy_cached_at);
-  const heavyAgeS = Number.isFinite(heavyAt) ? nowMs / 1000 - heavyAt : NaN;
-  const heavyLabel = Number.isFinite(heavyAgeS) ? fmtAgo(heavyAgeS) : '—';
-  const stale = Number.isFinite(heavyAgeS) && heavyAgeS > 5;
+  const { label: heavyLabel, stale } = computeHeavyFreshness(heavyAt, nowMs);
   return (
     <p
       className={`text-[11px] mt-2 px-1 ${stale ? 'text-amber-600 font-medium' : 'text-gray-400'}`}

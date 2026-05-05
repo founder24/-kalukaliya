@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import AdminQuickLinks from './AdminQuickLinks';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, LineChart, Line } from 'recharts';
 import axios from 'axios';
+import { computeHeavyFreshness, computeThrottleFreshness } from '@/utils/metricsFreshness';
 import { llmCosts, API_BASE } from '@/utils/api';
 import { buildHighlightedSegments } from '@/utils/highlightSegments';
 
@@ -2574,26 +2575,15 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                   a deploy. Sits directly above the burst tiles below so the
                   "live" label is visually adjacent to the data it describes. */}
               {metricsMeta && (() => {
-                const fmtAgo = (s) => {
-                  const n = Math.max(0, Math.floor(s));
-                  if (n < 1) return 'live';
-                  if (n < 60) return `${n}s ago`;
-                  if (n < 3600) return `${Math.floor(n / 60)}m ago`;
-                  return `${Math.floor(n / 3600)}h ago`;
-                };
-                const nowS = Date.now() / 1000;
+                // Shared formatter + thresholds — see
+                // src/utils/metricsFreshness.js. Centralised so the
+                // AdminDashboard badge (Task #398) renders the exact
+                // same wording for the same `heavy_cached_at` value;
+                // a tuning change here updates both panels in lockstep.
                 const heavyAt = Number(metricsMeta.heavy_cached_at);
                 const throttleAt = Number(metricsMeta.throttle_fresh_at);
-                const heavyAgeS = Number.isFinite(heavyAt) ? nowS - heavyAt : NaN;
-                const throttleAgeS = Number.isFinite(throttleAt) ? nowS - throttleAt : NaN;
-                const heavyLabel = Number.isFinite(heavyAgeS) ? fmtAgo(heavyAgeS) : '—';
-                // Throttle tiles bypass the cache (Task #388), so on a normal
-                // poll the age is well under a second — collapse anything
-                // <2s to "live" so the label doesn't flicker between "0s
-                // ago" / "1s ago" / "live" on every render tick.
-                const throttleLabel = Number.isFinite(throttleAgeS) && throttleAgeS < 2
-                  ? 'live'
-                  : Number.isFinite(throttleAgeS) ? fmtAgo(throttleAgeS) : '—';
+                const { label: heavyLabel } = computeHeavyFreshness(heavyAt);
+                const { label: throttleLabel } = computeThrottleFreshness(throttleAt);
                 // The four heavy sections (users, revenue, SEO, deps) all
                 // share a single `heavy_cached_at` because they're computed
                 // and cached together as one block (see admin_dashboard_metrics

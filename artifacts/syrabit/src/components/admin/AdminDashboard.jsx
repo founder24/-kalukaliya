@@ -7,6 +7,7 @@ import AlertReasonsRow from './AlertReasonsRow';
 import BotCachePanel from './BotCachePanel';
 import R2ColdStoragePanel from './R2ColdStoragePanel';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
+import { computeHeavyFreshness } from '@/utils/metricsFreshness';
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 const safeObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
@@ -1241,20 +1242,14 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
             sections share one ``heavy_cached_at`` timestamp because they
             are computed and cached as a single block server-side. */}
         {metrics?._meta && (() => {
-          // Wording matches AdminHealth.jsx (Task #396) for UX parity:
-          // sub-second age renders as "live" so the same data, viewed
-          // on either panel, never produces conflicting language.
-          const fmtAgo = (s) => {
-            const n = Math.max(0, Math.floor(s));
-            if (n < 1) return 'live';
-            if (n < 60) return `${n}s ago`;
-            if (n < 3600) return `${Math.floor(n / 60)}m ago`;
-            return `${Math.floor(n / 3600)}h ago`;
-          };
+          // Shared formatter + stale boundary — see
+          // src/utils/metricsFreshness.js. Centralising here means
+          // the AdminHealth strip (Task #396) and this badge always
+          // render the same wording for the same `heavy_cached_at`,
+          // and a future change to `_METRICS_CACHE_TTL` (Task #395)
+          // updates both panels in lockstep instead of drifting.
           const heavyAt = Number(metrics._meta.heavy_cached_at);
-          const heavyAgeS = Number.isFinite(heavyAt) ? Date.now() / 1000 - heavyAt : NaN;
-          const heavyLabel = Number.isFinite(heavyAgeS) ? fmtAgo(heavyAgeS) : '—';
-          const stale = Number.isFinite(heavyAgeS) && heavyAgeS > 5;
+          const { label: heavyLabel, stale } = computeHeavyFreshness(heavyAt);
           return (
             <p
               className={`text-[11px] mt-2 px-1 ${stale ? 'text-amber-600 font-medium' : 'text-gray-400'}`}
