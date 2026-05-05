@@ -2497,7 +2497,7 @@ async def _alerting_loop():
                         # webhook, persisted, push) carries the recovery.
                         await _dispatch_alert(
                             "assamese_unavailable_recovered",
-                            "Assamese chat — recovered from \"both rails red\" incident",
+                            "✅ Assamese chat recovered — both rails green again",
                             f"The Assamese-unavailable burst counter has "
                             f"cleared back to 0 within the last "
                             f"{_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s window "

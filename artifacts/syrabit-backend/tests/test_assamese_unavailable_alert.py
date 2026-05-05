@@ -351,7 +351,7 @@ async def _run_check_13_recovery(
             ):
                 await metrics_mod._dispatch_alert(
                     "assamese_unavailable_recovered",
-                    "Assamese chat — recovered from \"both rails red\" incident",
+                    "✅ Assamese chat recovered — both rails green again",
                     f"Burst cleared back to 0 within "
                     f"{_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s "
                     f"(threshold: {_as_threshold}). Confirm via the admin "
@@ -475,13 +475,19 @@ class TestRecoveryAlert:
     def test_recovery_alert_title_signals_recovery(self):
         """Title must clearly signal recovery so on-call sees it's good news,
         not a re-fire of the same incident. Mirrors the burst-alert
-        title-content assertion in ``TestAlertCheckFires``."""
+        title-content assertion in ``TestAlertCheckFires``. Includes the
+        ✅ green indicator that's already conventional for recovery
+        alerts in this codebase (see ``_format_seo_health_recovered_message``
+        in metrics.py)."""
         dispatch, _ = _run(
             _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
         )
         title = dispatch.await_args.args[1]
         assert "recovered" in title.lower()
         assert "assamese" in title.lower()
+        # Green visual cue so operators can distinguish all-clear pages
+        # from incident pages at a glance across email/Slack/push.
+        assert "✅" in title
 
     def test_recovery_alert_body_links_to_dashboard(self):
         """Body must reference the admin health dashboard so on-call has a
