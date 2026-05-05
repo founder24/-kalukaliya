@@ -2594,6 +2594,16 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                 const throttleLabel = Number.isFinite(throttleAgeS) && throttleAgeS < 2
                   ? 'live'
                   : Number.isFinite(throttleAgeS) ? fmtAgo(throttleAgeS) : '—';
+                // The four heavy sections (users, revenue, SEO, deps) all
+                // share a single `heavy_cached_at` because they're computed
+                // and cached together as one block (see admin_dashboard_metrics
+                // cache-miss path in cms_sarvam_health.py). We still list
+                // them individually here — matching the task spec example
+                // "Throttle: live • Users: 14s ago • Deps: 14s ago" — so
+                // each tile on AdminDashboard / AdminHealth has a clearly
+                // attributed freshness label, and a future split into
+                // per-collection TTLs can wire each label to its own
+                // timestamp without changing the visual layout.
                 return (
                   <div
                     className="text-[10px] text-gray-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1"
@@ -2601,18 +2611,27 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                     title={`heavy_cached_at=${heavyAt} · throttle_fresh_at=${throttleAt}`}
                   >
                     <span>
-                      Throttle tiles:{' '}
+                      Throttle:{' '}
                       <span className="text-gray-600 font-medium" data-testid="metrics-freshness-throttle">
                         {throttleLabel}
                       </span>
                     </span>
-                    <span aria-hidden="true">•</span>
-                    <span>
-                      Heavy fields (users / revenue / SEO / deps):{' '}
-                      <span className="text-gray-600 font-medium" data-testid="metrics-freshness-heavy">
-                        {heavyLabel}
-                      </span>
-                    </span>
+                    {[
+                      { label: 'Users',   testid: 'metrics-freshness-users' },
+                      { label: 'Revenue', testid: 'metrics-freshness-revenue' },
+                      { label: 'SEO',     testid: 'metrics-freshness-seo' },
+                      { label: 'Deps',    testid: 'metrics-freshness-deps' },
+                    ].map(({ label, testid }) => (
+                      <React.Fragment key={label}>
+                        <span aria-hidden="true">•</span>
+                        <span>
+                          {label}:{' '}
+                          <span className="text-gray-600 font-medium" data-testid={testid}>
+                            {heavyLabel}
+                          </span>
+                        </span>
+                      </React.Fragment>
+                    ))}
                   </div>
                 );
               })()}
