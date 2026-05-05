@@ -183,6 +183,13 @@ jobs:
               exit 1
             fi
             echo "::notice::Deploying $image → $app_name"
+            # Ensure the Container App uses its system-assigned managed
+            # identity to pull from ACR (idempotent — safe to re-apply).
+            az containerapp registry set \
+              --name "$app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --server "$AZURE_ACR_NAME.azurecr.io" \
+              --identity system
             az containerapp update \
               --name "$app_name" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
