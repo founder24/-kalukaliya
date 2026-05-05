@@ -29,9 +29,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import logging
-logging.disable(logging.CRITICAL)
 
-from config import PROVIDER_PRIORITY, PROVIDER_CREDITS
+# Suppress noisy import-time logging from config/llm without leaking the
+# global ``logging.disable`` state into other test modules. Task #402:
+# leaving ``logging.disable(logging.CRITICAL)`` set at module scope made
+# tests/test_vertex_startup_probe.py fail 5/12 cases when run after this
+# file (the probe asserts on captured ERROR records, which a non-NOTSET
+# disable level silently swallows). Save the previous level, suppress
+# only across the import that needs it, then restore.
+_PREV_LOGGING_DISABLE_LEVEL = logging.root.manager.disable
+logging.disable(logging.CRITICAL)
+try:
+    from config import PROVIDER_PRIORITY, PROVIDER_CREDITS
+finally:
+    logging.disable(_PREV_LOGGING_DISABLE_LEVEL)
 
 
 # ── PROVIDER_PRIORITY structure ───────────────────────────────────────────────

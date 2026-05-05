@@ -32,10 +32,21 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import logging
-logging.disable(logging.CRITICAL)
 
-import routes.admin_credits as mod
-from routes.slack_alerter_config import SMOKE_TEST_SLACK_WEBHOOK_ENV
+# Suppress noisy import-time logging from routes.admin_credits without
+# leaking the global ``logging.disable`` state into other test modules.
+# Task #402: leaving ``logging.disable(logging.CRITICAL)`` set at module
+# scope made tests/test_vertex_startup_probe.py fail when run after this
+# file (the probe asserts on captured ERROR records, which a non-NOTSET
+# disable level silently swallows). Save the previous level, suppress
+# only across the imports that need it, then restore.
+_PREV_LOGGING_DISABLE_LEVEL = logging.root.manager.disable
+logging.disable(logging.CRITICAL)
+try:
+    import routes.admin_credits as mod
+    from routes.slack_alerter_config import SMOKE_TEST_SLACK_WEBHOOK_ENV
+finally:
+    logging.disable(_PREV_LOGGING_DISABLE_LEVEL)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

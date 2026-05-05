@@ -22,7 +22,26 @@ import unittest.mock as mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
-logging.disable(logging.CRITICAL)
+
+import pytest
+
+
+# Suppress noisy logging from the routes modules imported inside tests
+# without leaking the global ``logging.disable`` state into other test
+# modules. Task #402: leaving ``logging.disable(logging.CRITICAL)`` set
+# at module scope made tests/test_vertex_startup_probe.py fail when run
+# after this file (the probe asserts on captured ERROR records, which a
+# non-NOTSET disable level silently swallows). A module-scoped autouse
+# fixture lets us keep tests quiet while restoring the prior level on
+# teardown so downstream files see a clean logger.
+@pytest.fixture(autouse=True, scope="module")
+def _suppress_module_logging():
+    prev = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(prev)
 
 
 def test_detect_assamese_script_recognises_assamese_and_rejects_english():
