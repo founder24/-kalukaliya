@@ -139,6 +139,7 @@ _LLM_ROUTING_HISTORY_MAX_ENTRIES = 100_000
 _PROVIDER_429_BURST_WINDOW_S = 180   # shared lookback / Redis TTL for all providers
 _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps]
     "workers-ai":   [],
+    "groq":         [],
     "gemini":       [],
     "azure_openai": [],
     # bedrock removed in Task #347
@@ -146,6 +147,7 @@ _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps
 }
 _PROVIDER_429_REDIS_KEYS: dict = {
     "workers-ai":   "wai_429_burst",
+    "groq":         "groq_429_burst",
     "gemini":       "gemini_429_burst",
     "azure_openai": "azure_429_burst",
     # bedrock removed in Task #347

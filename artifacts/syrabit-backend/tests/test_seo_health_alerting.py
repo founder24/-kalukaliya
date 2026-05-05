@@ -42,7 +42,7 @@ def _critical_report():
 # -------- _record_seo_health_snapshot --------
 
 def test_record_snapshot_returns_compact_doc_no_db():
-    with patch.object(bot_discovery, "seo_health_check", AsyncMock(return_value=_ok_report())):
+    with patch.object(bot_discovery, "_run_seo_health_check_inner", AsyncMock(return_value=_ok_report())):
         snap = asyncio.run(bot_discovery._record_seo_health_snapshot())
     assert snap["status"] == "ok"
     assert snap["d1_status"] == "synced"
@@ -54,7 +54,7 @@ def test_record_snapshot_returns_compact_doc_no_db():
 def test_record_snapshot_handles_inner_exception_as_critical():
     with patch.object(
         bot_discovery,
-        "seo_health_check",
+        "_run_seo_health_check_inner",
         AsyncMock(side_effect=RuntimeError("network down")),
     ):
         snap = asyncio.run(bot_discovery._record_seo_health_snapshot())
@@ -68,7 +68,7 @@ def test_record_snapshot_persists_when_mongo_available():
     fake_db.seo_health_history.delete_many = AsyncMock(return_value=MagicMock(deleted_count=0))
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check", AsyncMock(return_value=_ok_report())):
+         patch.object(bot_discovery, "_run_seo_health_check_inner", AsyncMock(return_value=_ok_report())):
         snap = asyncio.run(bot_discovery._record_seo_health_snapshot())
     assert snap["status"] == "ok"
     fake_db.seo_health_history.insert_one.assert_awaited_once()
@@ -300,7 +300,7 @@ def test_alert_fires_on_two_consecutive_critical_snapshots():
 
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check", AsyncMock(return_value=_critical_report())):
+         patch.object(bot_discovery, "_run_seo_health_check_inner", AsyncMock(return_value=_critical_report())):
         asyncio.run(_run_once())
 
     fake_metrics._dispatch_alert.assert_awaited_once()
@@ -339,7 +339,7 @@ def test_no_alert_when_only_one_critical_snapshot():
 
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check", AsyncMock(return_value=_critical_report())):
+         patch.object(bot_discovery, "_run_seo_health_check_inner", AsyncMock(return_value=_critical_report())):
         asyncio.run(_run_once())
 
     fake_metrics._dispatch_alert.assert_not_called()
@@ -375,7 +375,7 @@ def _spiky_report(success_rate=50.0, sitemap_breakdown=None):
 def test_snapshot_includes_per_sitemap_breakdown():
     """Task #295: snapshot must capture per-sitemap pass/fail so the alert
     email can show which page-type is broken."""
-    with patch.object(bot_discovery, "seo_health_check",
+    with patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=_spiky_report())):
         snap = asyncio.run(bot_discovery._record_seo_health_snapshot())
     assert "by_sitemap" in snap
@@ -406,7 +406,7 @@ def test_format_by_sitemap_html_highlights_bad_rows():
 def test_snapshot_captures_failing_urls_per_sitemap():
     """The snapshot must record the first 10 failing URLs (with status code)
     per sitemap so admins don't need to re-run /api/seo/health."""
-    with patch.object(bot_discovery, "seo_health_check",
+    with patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=_spiky_report())):
         snap = asyncio.run(bot_discovery._record_seo_health_snapshot())
 
@@ -432,7 +432,7 @@ def test_snapshot_caps_failing_urls_at_ten():
              for i in range(50)
          ]},
     ])
-    with patch.object(bot_discovery, "seo_health_check",
+    with patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=rep)):
         snap = asyncio.run(bot_discovery._record_seo_health_snapshot())
     failing = snap["by_sitemap"][0]["failing_urls"]
@@ -549,7 +549,7 @@ def test_url_spike_alert_fires_on_two_consecutive_low_rates():
 
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check",
+         patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=_spiky_report(success_rate=50.0))):
         asyncio.run(_run_once())
 
@@ -601,7 +601,7 @@ def test_url_spike_no_alert_when_only_one_low_rate():
 
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check",
+         patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=_spiky_report(success_rate=50.0))):
         asyncio.run(_run_once())
 
@@ -725,9 +725,14 @@ class _RetryFakeClient:
 
 
 def _run_seo_health_with_client(fake_client):
+    # Bypass the response cache (Task #347) so back-to-back tests in this
+    # module always exercise a fresh probe rather than seeing the previous
+    # test's cached snapshot. Drive the inner probe directly — that's the
+    # function `seo_health_check` itself dispatches to on a cache miss.
+    bot_discovery._seo_health_response_cache.clear()
     with patch("httpx.AsyncClient", lambda *a, **kw: fake_client), \
          patch.object(bot_discovery, "_SEO_HEALTH_RETRY_DELAY_S", 0):
-        return asyncio.run(bot_discovery.seo_health_check(request=None, deep_scan=None))
+        return asyncio.run(bot_discovery._run_seo_health_check_inner())
 
 
 def test_url_check_recovers_on_retry_and_excluded_from_failing_urls():
@@ -1113,7 +1118,7 @@ def test_url_spike_alert_triggers_deep_scan_for_fully_failing_sitemap():
 
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check",
+         patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=_fully_failing_report())), \
          patch.object(bot_discovery, "_deep_scan_sitemap", _fake_deep_scan):
         asyncio.run(_run_loop_body_once())
@@ -1172,7 +1177,7 @@ def test_url_spike_alert_skips_deep_scan_when_no_fully_failing_sitemap():
     # and sitemap-notes.xml at 10/10 — so no deep scan should fire.
     with patch("deps.db", fake_db), \
          patch("deps.is_mongo_available", AsyncMock(return_value=True)), \
-         patch.object(bot_discovery, "seo_health_check",
+         patch.object(bot_discovery, "_run_seo_health_check_inner",
                       AsyncMock(return_value=_spiky_report(success_rate=50.0))), \
          patch.object(bot_discovery, "_deep_scan_sitemap", _fake_deep_scan):
         asyncio.run(_run_loop_body_once())

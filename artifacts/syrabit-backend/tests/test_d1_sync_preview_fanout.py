@@ -60,11 +60,28 @@ class _FakeHttp:
         self.calls = []  # list of dicts: {url, secret, payload}
         self._responses = responses or {}
 
-    async def post(self, url, json=None, headers=None, timeout=None):
+    async def post(self, url, json=None, content=None, data=None, headers=None, timeout=None):
         secret = ""
         if headers and "Authorization" in headers:
             secret = headers["Authorization"].replace("Bearer ", "", 1)
-        self.calls.append({"url": url, "secret": secret, "payload": json})
+        # Production code now serializes the payload itself with a custom
+        # DateTimeEncoder and passes it via `content=` (raw bytes/str) to
+        # have full control over JSON encoding. Decode it back so the
+        # tests' assertions about `payload` keep working unchanged.
+        raw = json
+        if raw is None and content is not None:
+            try:
+                import json as _json
+                raw = _json.loads(content)
+            except Exception:
+                raw = content
+        if raw is None and data is not None:
+            try:
+                import json as _json
+                raw = _json.loads(data)
+            except Exception:
+                raw = data
+        self.calls.append({"url": url, "secret": secret, "payload": raw})
         # Match by URL prefix (strip "/api/edge/d1-sync") so the test can
         # configure responses per target hostname rather than per full URL.
         for prefix, resp in self._responses.items():
@@ -130,15 +147,19 @@ def test_preview_failure_does_not_demote_prod_success(monkeypatch, payload):
     )
     fake = _FakeHttp(responses={
         "https://syrabit-edge-preview.example.workers.dev": _FakeResponse(
-            status_code=500, text="boom"
+            # 4xx is non-retryable so the test stays fast and counts cleanly;
+            # the contract under verification is "preview failure does not
+            # demote prod success", regardless of which HTTP status the
+            # preview returned.
+            status_code=400, text="boom"
         ),
     })
     _install_fake_http(mod, fake)
 
     ok = asyncio.run(mod.trigger_d1_sync(payload))
 
-    # Preview is best-effort — a 500 there must NOT block prod CRUD paths
-    # that depend on the boolean return.
+    # Preview is best-effort — a non-2xx there must NOT block prod CRUD
+    # paths that depend on the boolean return.
     assert ok is True
     assert len(fake.calls) == 2
 

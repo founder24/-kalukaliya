@@ -18,7 +18,15 @@ from providers import aws_native
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Use a fresh event loop per call — `asyncio.get_event_loop()` is
+    # deprecated as a creator in Python 3.10+ and outright raises
+    # `RuntimeError: There is no current event loop` on 3.11+ when no
+    # loop is running, which is the case under pytest's sync wrappers.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @pytest.fixture(autouse=True)
