@@ -190,11 +190,85 @@ jobs:
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --server "$AZURE_ACR_NAME.azurecr.io" \
               --identity system
+
+            # Sync the KV-backed secret refs declared in
+            # infra/azure/aca-syrabit-backend.bicep. Idempotent —
+            # `az containerapp secret set` overwrites existing entries.
+            # The Container App's system identity already has
+            # `Key Vault Secrets User` on syrabit-prod-kv (granted out
+            # of band, see runbook section 0a step 7).
+            if [ "$app_name" = "syrabit-backend" ]; then
+              KV_BASE="https://syrabit-prod-kv.vault.azure.net/secrets"
+              az containerapp secret set \
+                --name "$app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --secrets \
+                  "sendgrid-api-key=keyvaultref:${KV_BASE}/SENDGRID-API-KEY,identityref:system" \
+                  "azure-openai-api-key=keyvaultref:${KV_BASE}/AZURE-OPENAI-API-KEY,identityref:system" \
+                  "mongo-uri=keyvaultref:${KV_BASE}/MONGO-URI,identityref:system" \
+                  "jwt-secret=keyvaultref:${KV_BASE}/JWT-SECRET,identityref:system" \
+                  "razorpay-key-secret=keyvaultref:${KV_BASE}/RAZORPAY-KEY-SECRET,identityref:system" \
+                  "workers-embed-secret=keyvaultref:${KV_BASE}/WORKERS-EMBED-SECRET,identityref:system"
+            fi
+
+            # Build the env-var spec. Plain values + secretrefs in a
+            # single --set-env-vars call so the new revision sees the
+            # complete environment on first boot.
+            ENV_ARGS=()
+            if [ "$app_name" = "syrabit-backend" ]; then
+              ENV_ARGS=(
+                "SENDGRID_API_KEY=secretref:sendgrid-api-key"
+                "AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key"
+                # config.py reads MONGO_URL (with MONGODB_URI fallback);
+                # the bicep mistakenly used MONGO_URI, fixed here.
+                "MONGO_URL=secretref:mongo-uri"
+                "JWT_SECRET=secretref:jwt-secret"
+                "RAZORPAY_KEY_SECRET=secretref:razorpay-key-secret"
+                "WORKERS_EMBED_SECRET=secretref:workers-embed-secret"
+                "EMAIL_FROM=Syrabit.ai <noreply@syrabit.ai>"
+                "ENV=production"
+                "PORT=8000"
+                "WORKERS_EMBED_URL=https://embed.syrabit.ai"
+                "EMBED_PROVIDER_PRIMARY=workers_ai_custom"
+              )
+            fi
+
+            # Two-call approach (separate `secret set` + `containerapp
+            # update`) — proven to work in run #6. The single-PATCH
+            # alternative was rejected by ARM with
+            # `ContainerAppSecretRefNotFound` because env-secretRef
+            # validation ran against the merged-but-not-yet-committed
+            # secrets array. Cost: this triggers two revisions in
+            # single-revision mode (the second from the probe REST
+            # PATCH below). Acceptable — the post-deploy probe waits
+            # long enough for the second revision to become active.
             az containerapp update \
               --name "$app_name" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --image "$image" \
-              --revision-suffix "ci-$(date -u +%Y%m%d-%H%M%S)"
+              --revision-suffix "ci-$(date -u +%Y%m%d-%H%M%S)" \
+              ${ENV_ARGS:+--set-env-vars "${ENV_ARGS[@]}"}
+
+            # Patch only the probes (path /health → /api/health). Uses
+            # ARM merge-patch on properties.template.containers[0].
+            # initialDelay=60s + failureThreshold=10 gives FastAPI
+            # ~210s to finish heavy imports before the revision is
+            # marked Unhealthy.
+            if [ "$app_name" = "syrabit-backend" ]; then
+              SUB_ID="$(az account show --query id -o tsv)"
+              ACA_URL="https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${app_name}?api-version=2024-03-01"
+              az rest --method get --url "$ACA_URL" --query 'properties.template' -o json > /tmp/aca-template.json
+              jq '.containers[0].probes = [{"type":"Liveness","httpGet":{"path":"/api/health","port":8000},"initialDelaySeconds":60,"periodSeconds":15,"failureThreshold":10},{"type":"Readiness","httpGet":{"path":"/api/health","port":8000},"initialDelaySeconds":30,"periodSeconds":10,"failureThreshold":6}] | {properties: {template: .}}' /tmp/aca-template.json > /tmp/aca-patch.json
+              az rest --method patch --url "$ACA_URL" --body @/tmp/aca-patch.json --headers "Content-Type=application/json" > /dev/null
+              echo "::notice::Patched probes to /api/health on $app_name"
+            fi
+
+            # Diagnostic: show all revisions so failures are visible.
+            az containerapp revision list \
+              --name "$app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[].{rev:name, healthState:properties.healthState, runningState:properties.runningState, active:properties.active, replicas:properties.replicas, image:properties.template.containers[0].image}" \
+              -o table || true
           }
 
           if [ "$APP" = "both" ]; then
@@ -212,15 +286,65 @@ jobs:
           if [ -z "$URL" ]; then
             URL="https://api.syrabit.ai/health"
           fi
-          echo "Probing $URL"
-          for i in 1 2 3 4 5; do
-            code=$(curl -sS -o /tmp/h -w "%{http_code}" "$URL" || echo 000)
+          echo "Probing $URL (up to 8 min — covers ACA cold start + KV resolve + FastAPI imports)"
+          for i in $(seq 1 32); do
+            code=$(curl -sS -o /tmp/h -w "%{http_code}" --max-time 8 "$URL" || echo 000)
             if [ "$code" = "200" ]; then
-              echo "::notice::$URL returned 200"
+              echo "::notice::$URL returned 200 on attempt $i"
+              head -c 400 /tmp/h
               exit 0
             fi
             echo "Attempt $i: HTTP $code — sleeping 15s"
             sleep 15
           done
-          echo "::error::$URL never returned 200"
+          echo "::error::$URL never returned 200 after 8 min"
+          exit 1
+
+      - name: On-failure diagnostics (revision state + console logs + KV)
+        if: failure()
+        run: |
+          set +e
+          APP="${{ inputs.app }}"
+          [ "$APP" = "both" ] && APP="syrabit-backend"
+          echo "::group::All revisions"
+          az containerapp revision list --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[].{rev:name, healthState:properties.healthState, runningState:properties.runningState, active:properties.active, replicas:properties.replicas, created:properties.createdTime, image:properties.template.containers[0].image}" \
+            -o table
+          echo "::endgroup::"
+
+          # Latest revision = the one we just patched in (highest createdTime).
+          LATEST_REV=$(az containerapp revision list --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "sort_by([], &properties.createdTime)[-1].name" -o tsv)
+          echo "Latest revision: $LATEST_REV"
+
+          echo "::group::Revision detail (provisioningError if any)"
+          az containerapp revision show --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$LATEST_REV" \
+            --query "{healthState:properties.healthState, runningState:properties.runningState, provisioningError:properties.provisioningError, replicas:properties.replicas}" \
+            -o yaml
+          echo "::endgroup::"
+
+          echo "::group::Container console logs (latest revision, 200 lines)"
+          az containerapp logs show --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$LATEST_REV" --type console --tail 200 || true
+          echo "::endgroup::"
+
+          echo "::group::Container system logs (latest revision, 100 lines)"
+          az containerapp logs show --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$LATEST_REV" --type system --tail 100 || true
+          echo "::endgroup::"
+
+          echo "::group::Key Vault syrabit-prod-kv — required secret presence"
+          for s in SENDGRID-API-KEY AZURE-OPENAI-API-KEY MONGO-URI JWT-SECRET RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET; do
+            if az keyvault secret show --vault-name syrabit-prod-kv --name "$s" --query id -o tsv 2>/dev/null; then
+              echo "  ✓ $s present"
+            else
+              echo "  ✗ $s MISSING in syrabit-prod-kv (KV ref will fail to resolve)"
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::Container App secrets currently configured"
+          az containerapp secret list --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" -o table
+          echo "::endgroup::"
           exit 1
