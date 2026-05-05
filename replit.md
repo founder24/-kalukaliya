@@ -1,68 +1,79 @@
 # Workspace — Syrabit.ai
 
-> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
-> [`infra/per-cloud-feature-delegation.md`](infra/per-cloud-feature-delegation.md)
-> + [`infra/provider-priority-map.md`](infra/provider-priority-map.md)
-> + [`infra/credit-burn-runbook.md`](infra/credit-burn-runbook.md).
-> Provider removals (OpenAI, Anthropic, Bedrock-direct, Stripe, Quge5,
-> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.
-> If anything below disagrees with v3, the v3 docs win.
+> **V4 LOCKED (2026-05-05):** the canonical infra spec is
+> [`infra/v4-locked-architecture.md`](infra/v4-locked-architecture.md).
+> v3 docs (`per-cloud-feature-delegation.md`, `provider-priority-map.md`,
+> `credit-burn-runbook.md`) are superseded and carry V4 back-pointers.
+> If anything below disagrees with V4, **V4 wins**.
 
-## Overview
+## Run & Operate
 
-Syrabit.ai is an AI-powered educational platform designed for students in Assam, India, focusing on AHSEC Class 11/12 and Degree curricula. The platform provides localized learning resources across 55 subjects, leveraging AI for content generation, syllabus management, and SEO optimization. Its core purpose is to deliver personalized, accessible, and high-quality educational content through chapter-level RAG chunks and a comprehensive admin panel, aiming to be an affordable, AI-first learning experience with significant market potential.
+- **Frontend dev:** `cd artifacts/syrabit && PORT=5000 pnpm dev`
+- **Backend dev:** `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
+- **Mockup sandbox:** `pnpm --filter @workspace/mockup-sandbox run dev`
+- **Production health:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
+- **Required env vars (ACA, sourced from Azure KV):** `MONGO_URL`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `AZURE_OPENAI_API_KEY`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_PROVIDER=sendgrid`, `EMAIL_FALLBACK=ses`, `EMBED_PROVIDER_PRIMARY=workers_ai_custom`, `WORKERS_EMBED_URL=https://embed.syrabit.ai`.
 
-## User Preferences
+## Stack
 
-I prefer iterative development with clear communication on major changes. I value detailed explanations for complex features and architectural decisions. Please ensure that the development process prioritizes modularity and maintainability.
+- **Frontend:** React 18 + Vite + React Router + Tailwind CSS + Drizzle ORM (where used).
+- **Backend:** Python 3.11 + FastAPI + Gunicorn (Uvicorn workers).
+- **Rust core:** async-batch worker on a separate ACA app.
+- **Validation/codegen:** Zod + Orval.
+- **Build:** pnpm monorepo + esbuild + Docker.
 
-## System Architecture
+## Where things live
 
-The project is structured as a pnpm workspace monorepo, combining a React + Vite frontend with a FastAPI Python backend.
+- **Frontend:** `artifacts/syrabit/`
+- **Backend:** `artifacts/syrabit-backend/`
+- **Embed worker (Cloudflare):** `artifacts/syrabit/workers/embed-worker/`
+- **Edge proxy (Cloudflare):** `workers/edge-proxy/`
+- **Bicep + ACA deploy:** `infra/azure/aca-syrabit-backend.bicep`, `.github/workflows/azure-container-apps-deploy.yml`
+- **Threat model:** `threat_model.md`
+- **V4 architecture (source of truth):** `infra/v4-locked-architecture.md`
 
-**Frontend Architecture:**
-- **UI/UX:** Built with React, Vite, React Router, and Tailwind CSS, following a mobile-first, light-only theme design.
-- **Admin Panel:** A robust Content Management System (CMS) for managing content, blogs, SEO, QA, and system intelligence.
-- **SEO & Bot Management:** Features bot-aware pre-rendering, manages `robots.txt`, `sitemap.xml`, and integrates with IndexNow. It includes AI plugin discovery and RSS feeds for bot discovery.
-- **PWA:** Offers offline capabilities through a multi-cache service worker.
-- **Content & Localization:** Supports bilingual content (English and Assamese) via UI toggles, with a library page featuring subject cards, lesson pages, reading progress, and sticky Table of Contents.
-- **Analytics:** Implements multi-source analytics for Core Web Vitals, including Cloudflare, GA4, and server-side tracking.
+## Architecture decisions (V4 highlights)
 
-**Backend Architecture:**
-- **Modular Design:** Utilizes an app factory pattern with shared and route modules.
-- **AI Integration:** All AI calls are routed through Cloudflare Workers AI via a CF AI Gateway, using models for embeddings, vision/OCR, translation, and content generation. **Embedding stack (Task #382):** the embed path is owned by a custom Cloudflare Worker (`artifacts/syrabit/workers/embed-worker/`) that runs Gemma-300M + Qwen3-0.6B and mean-pools their hidden states into a 1024-dim vector matching the existing Pinecone index; backend client at `providers/workers_embed.py`, primary when `EMBED_PROVIDER_PRIMARY=workers_ai_custom`. Reranking is Pinecone-only (`RERANK_PROVIDER=pinecone_only` short-circuits the dispatcher in `llm.call_rerank_with_dispatch` to `providers.pinecone_ai.rerank`). Voyage AI is repurposed to power only the new MongoDB `memory_brain` collection (`providers/memory_brain.py`, voyage-3.5, 1024-dim, Atlas `$vectorSearch` index `memory_brain_vector_index` filtered by `user_id`+`kind`); the legacy `chunks` collection is left untouched. Old providers (Cohere, Vertex embed, Voyage on chunks, `@cf/baai/bge-m3` workers_ai fallback) stay in the repo at weight 0 behind the same flags so a rollback is one env-var flip away. Combined embed/rerank/memory-brain health is at `GET /admin/health/embed-stack`. The `vertex_chat` slug specifically resolves to Workers AI `llama-3.3-70b-instruct-fp8-fast`. **Chat pools (2026-05-05 user instruction — strict primary/fallback):** `english_rag_chat` is Azure OpenAI primary (weight 10000) backed by Workers AI variants `workers_ai_llama32_3b` / `workers_ai_mistral_7b` / generic `workers_ai` (all weight 0, reachable only via `call_with_provider_fallback`'s exclusion-redraw after Azure 429s/exhausts). `assamese_rag_chat` is Sarvam primary (weight 10000) backed by Workers AI IndicTrans2 (`workers_ai_indic`, weight 0). Vertex was REMOVED from both chat chains entirely — it stays reserved for content stage-2 polish and other non-chat features (vision/safety/vector_search/etc.). Strict 2-leg exhaustion on the Assamese path still surfaces 503 (no silent downgrade to wrong-language `workers_ai_llama31_8b` / generic `workers_ai`).
-- **Content Pipeline:** Supports parallel generation of notes, MCQs, and flashcards with detailed prompts, including auto-detection of thin chapters and quality gates for content healing. The English/Assamese content path runs as a 3-stage pipeline: **Stage 1 (GENERATE)** — Workers AI variants emit raw notes (English: `workers_ai_mistral_7b` + `workers_ai_llama32_3b` weight 10000 each; Assamese: `workers_ai_indic` weight 10000); **Stage 2 (POLISH)** — `llm.polish_notes_with_vertex` re-formats raw notes into NotebookLM-style markdown using Vertex / Gemini 2.5 Flash (graceful fallback to raw text on Vertex failure); **Stage 3 (POOL)** — fire-and-forget `_polish_stage_quiz_pregen` schedules `pregenerate_chapter_quiz(prefer_vertex=True)` so Vertex Gemini also writes the 3-language (en/as/hi) `chapter_quizzes` pool that powers the "Quiz Me" button. Stage 3 is bounded by `_quiz_pregen_sem` (default cap = 2, env `PIPELINE_QUIZ_PREGEN_CONCURRENCY`) so the bulk wave can't pile up unbounded Vertex jobs. Vertex sits at weight 0 in the `content` and `assamese_content` pools because it is reserved for the polish/pool stage — a non-zero weight would hijack stage 1. Other configured Vertex services (`vertex_embed` text-embedding-004 at position 2 of the embed fallback chain, `google_tts`, `google_stt`, `google_vision`) are intentionally NOT pinned in this pipeline: `vertex_embed` is dimension-incompatible (768 vs bge-m3 1024) with the existing Pinecone index and would corrupt vector search if forced; the others require separate feature surfaces (TTS audio summaries, OCR) outside the scope of the formatting pipeline.
-- **Admin Analytics:** Provides a dashboard for RAG telemetry, chat latency, user counts, content heatmaps, and a historical alert log.
-- **Educational Features:** Processes PYQ PDFs via Gemini Vision OCR for SEO-optimized HTML and includes a Syllabus Embedder for generating chapter/topic embeddings stored in Cloudflare Vectorize. An in-app educational browser with grounded AI chat and content filtering is also supported.
-- **Monetization:** Implements a credit-based usage model supporting free, starter, and pro plans.
-- **Security & Privacy:** Features ASGI-native security headers, prompt safety measures, bot UA monitoring, automated IP blocking, and DPDP Act consent tracking.
-- **Performance:** Optimizations include bounded content caching, efficient JWT decoding, thread pooling, MongoDB compound indexes, hierarchy caching, AsyncOpenAI client pooling, and parallelized chat pre-processing.
-- **Unified Log Explorer:** Centralizes logs from frontend, edge-proxy, and backend into a single MongoDB collection for comprehensive monitoring and tracing.
-- **Supply-Chain Hardening:** Employs GitHub Actions best practices for security, including SHA-pinned actions and workflow-security linting.
-- **LLM Provider Benchmarking:** Includes a script for benchmarking LLM providers based on various metrics like TTFT, total latency, and tokens per second across different prompt suites.
+- **Cost split locked:** 40 % Cloudflare / 30 % Azure / 20 % AWS / 10 % GCP. Single integers, no ranges.
+- **Embedding primary:** EmbeddingGemma-300M + Qwen3-0.6B on Cloudflare Workers AI, mean-pooled to 1024-dim, written to Pinecone (`aws-ap-south-1`, namespace `cached_gemma_today`).
+- **Embed-failover:** Vertex multilingual embedding writes to a **separate** Pinecone namespace (`fallback_vertex_pending_reembed`); an AWS SQS-backed Lambda re-embeds back to the primary namespace when Cloudflare returns. **Zero index-mix corruption.**
+- **Chat dispatch:** token-length + risk-score router. Short/low-risk → Workers-AI Qwen3-0.6B. Long/high-risk → Vertex Gemini 2.5 Flash (co-primary) → Azure OpenAI gpt-4.1-mini → Workers-AI Mistral-7B/Llama-3.2-3B. Assamese path = Sarvam primary → IndicTrans2 fallback.
+- **Moderation:** Llama-Guard-2 self-hosted on ACA (primary) → Azure AI Content Safety (secondary). Gemini RAI is batch-only for `exam_model_paper`, never blocks chat.
+- **Vectorless RAG (new in V4):** three-tier router in `artifacts/syrabit-backend/rag.py` — tree-walk over D1 syllabus map, then BM25 on Mongo `$text`, then vector pass. Results fused with RRF before Pinecone rerank. Target: ≥25 % of chat turns served without an embed call.
+- **Secrets:** Azure Key Vault is source of truth; AWS Secrets Manager + Cloudflare Secrets are read-only replicas synced daily via Terraform-CI with SHA-256 hash validation.
+- **Observability:** Sentry Performance is the end-to-end trace owner; `traceparent`/`baggage` propagate CF Worker → Azure ACA → Lambda → Vertex/Pinecone/Mongo. OTEL → GCP Cloud Trace as the long-retention backstop.
+- **DR:** RTO = 4 h, RPO = 15 min, quarterly restore drill. **Azure `eastus2` is an explicit accepted SPOF** — manual `westus3` re-deploy from Bicep on regional outage.
+- **Latency:** p95 chat turn budget = 2.5 s. Pinecone in `ap-south-1` keeps the RAG hop <50 ms inside India.
+- **Hosting:** Azure Container Apps `syrabit-backend` (`eastus2`) is the live HTTP face as of 2026-05-05. DigitalOcean App Platform specs (`.do/app.yaml`) are kept on disk for 14-day rollback only. Railway hosting is fully decommissioned (Task #336).
+- **Storage roles:** D1 = SEO meta + audit logs + syllabus map. Mongo Atlas = conversations + profiles + chunk **metadata** (Pinecone IDs only — never re-embedded from Mongo). Pinecone = embeddings. Vectorize = edge cache. R2 = canonical assets + final backups. S3 = temp dumps.
+- **Removed providers (Task #347):** OpenAI, Anthropic, AWS Bedrock direct, Stripe, Quge5, Resend, xAI/Grok, Railway, DigitalOcean. See `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`.
 
-## External Dependencies
+## Product
 
-- **Databases:** MongoDB, PostgreSQL, Cloudflare D1, Cloudflare Vectorize.
-- **Authentication:** Supabase Auth for email/password and Google OAuth, issuing custom httpOnly session cookies and JWTs.
-- **Caching:** Cloudflare AI Gateway (LLM cache) and Cloudflare edge worker KV bindings. Neural Mesh provides multi-tier caching and inflight deduplication.
+Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degree students in Assam. Bilingual (English + Assamese) localized learning across 55 subjects: chapter-level RAG notes, MCQs, flashcards, PYQ OCR pipeline, in-app educational browser with grounded chat, admin CMS for content/SEO/QA, credit-based monetization (Razorpay INR-only), DPDP-compliant.
 
-## Hosting
+## User preferences
 
-The FastAPI backend (`artifacts/syrabit-backend`) and the Rust core (`backend/rust-core`) are mid-cutover from **Digital Ocean App Platform** (`blr1`, Task #336) to **Azure Container Apps** (`eastus2`, Task #347). The Azure target is co-located with the Azure OpenAI deployment so the chat hot-path no longer pays the cross-cloud egress it pays from `blr1`. The Bicep template lives at `infra/azure/aca-syrabit-backend.bicep`; the deploy workflow at `.github/workflows/azure-container-apps-deploy.yml`; the cutover runbook at `artifacts/syrabit/docs/infra/aca-cutover.md`. The DO specs (`.do/app.yaml`, `.do/app-rust-core.yaml`) and the `digitalocean-deploy.yml` workflow remain intact for the first 14 days post-cutover as the immediate rollback floor. The Cloudflare edge worker (`workers/edge-proxy`) reads `BACKEND_URL=https://api.syrabit.ai`, which is flipped from the DO origin to the ACA FQDN as part of the cutover. The legacy Railway hosting was decommissioned by Task #336.
-- **LLM Providers:** Azure OpenAI (primary for English chat) → Vertex/Gemini → Sarvam (Indic) → Workers AI variants (`llama-3.2-3b`, `mistral-7b`, `llama-3.1-8b`, IndicTrans2). OpenAI / Anthropic / xAI-Grok / AWS Bedrock were removed by Task #347 — see `artifacts/syrabit/docs/infra/providers-task-347-decommission.md` for the rationale and the named Workers AI promotions. Pinecone is used for inference (embeddings and reranking).
-- **Translation:** Sarvam `translate:v1` (primary for Indic languages), with Gemini as fallback, and an Assamese translation cache in Upstash Redis.
-- **Payment Gateways:** Razorpay (INR) — sole supported gateway. Stripe was fully removed by Task #347 (routes deleted; clients hitting `/payments/stripe/*` or `/webhooks/stripe` get FastAPI's standard 404).
-- **Email Service:** Cloudflare Email Worker → SendGrid v3 (primary) → Amazon SES via SQS (5xx-only fallback). Resend was removed by Task #347; the new `email_templates.send_admin_email` helper handles the admin / digest / alert send paths previously routed through Resend.
-- **UI/UX Frameworks:** React, Vite, React Router, Tailwind CSS.
-- **ORM:** Drizzle ORM.
-- **API Framework:** FastAPI.
-- **Schema Validation:** Zod.
-- **API Codegen:** Orval.
-- **Build Tools:** esbuild, pnpm, Docker.
-- **Production Deployment:** A hybrid architecture leveraging FastAPI on Railway, Cloudflare Worker edge proxy, and frontend on Cloudflare Pages.
-- **Cloudflare Services (Enterprise):** Cache Purge API, Worker Cache API, IndexNow, Vectorize, D1, KV namespaces, Smart Placement, Workers Observability, Workers Logpush, Enterprise WAF. Analytics Engine for request metrics and RateLimiter Durable Object for robust rate limiting.
-- **Observability:** Firebase Performance Monitoring for RUM and Core Web Vitals, OpenTelemetry for distributed tracing to Cloud Trace.
-- **GCP Services:**
-    - **API-Key Only:** Knowledge Graph Search, PageSpeed Insights, Fact Check Tools, Cloud Natural Language, Web Risk, Books API.
-    - **SA-Gated (via `GOOGLE_APPLICATION_CREDENTIALS_JSON`):** Cloud Scheduler, Cloud Tasks, Web Security Scanner, Discovery Engine. These are integrated with OIDC authentication and Slack notifications for operational workflows.
+- Iterative development with clear communication on major changes.
+- Detailed explanations for complex features and architectural decisions.
+- Prioritize modularity and maintainability.
+- Treat vectorless RAG and vector RAG as **complementary layers** — vector for semantic/paraphrased exam-Q search, vectorless (BM25 + tree-walk) for exact-term/formula/navigation queries.
+- **No silent fallbacks** — fail loud, document trade-offs explicitly (V4 §12).
+
+## Gotchas
+
+- Always run `python -c "import server"` from `artifacts/syrabit-backend/` before pushing — silent missing-file drift between local FS and `main` has broken the live deploy 5 times. Pre-deploy import smoke gate is tracked in follow-up Task #439.
+- The deploy workflow's single ARM PATCH **must** include `properties.configuration.ingress.traffic = [{latestRevision: true, weight: 100}]` and `targetPort: 8000`. Removing either strands traffic on the helloworld fallback revision.
+- Bicep template (`infra/azure/aca-syrabit-backend.bicep`) must mirror the runtime contract enforced by the workflow (probe path `/api/health`, `ADMIN_JWT_SECRET` wired). A drift here regresses the running revision on next `az deployment group create`.
+- Pinecone embedding dimension is **1024**. Vertex `text-embedding-004` (768-dim) is dimension-incompatible — never force it into the primary chain. The fallback path uses Vertex multilingual embedding **into a separate namespace** to avoid corruption.
+- Multi-revision mode + healthy old revisions = traffic-split drift hazard. Follow-up Task #440 will deactivate non-latest active revisions or flip to single-revision mode.
+
+## Pointers
+
+- **V4 spec:** `infra/v4-locked-architecture.md`
+- **v3 (historical):** `infra/per-cloud-feature-delegation.md`, `infra/provider-priority-map.md`, `infra/credit-burn-runbook.md`
+- **Azure landing zone:** `artifacts/syrabit/docs/infra/azure-landing-zone.md`
+- **AWS landing zone:** `artifacts/syrabit/docs/infra/aws-landing-zone.md`
+- **ACA cutover runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md`
+- **Provider decommission rationale (#347):** `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`
+- **Skills index:** `.local/skills/` (deployment, environment-secrets, integrations, workflows, validation, code_review, follow-up-tasks)

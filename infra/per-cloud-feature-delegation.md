@@ -1,4 +1,20 @@
-# Per-Cloud Feature Delegation — v3 Canonical Spec
+# Per-Cloud Feature Delegation — v3 (SUPERSEDED by V4)
+
+> ⚠️ **SUPERSEDED — 2026-05-05.** The locked source of truth is now
+> [`infra/v4-locked-architecture.md`](v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This v3 doc is retained
+> for diff/blame history only. Do NOT cite it in new PRs.
+>
+> Key V4 deltas vs this doc:
+> - Cost-shares locked to 40/30/20/10 (CF/Azure/AWS/GCP), single integers.
+> - Pinecone moved from us-east-1 → `aws-ap-south-1` (India-adjacent).
+> - Embedding failover writes to a separate Pinecone namespace + SQS re-embed queue (no silent index corruption).
+> - Azure Key Vault is the explicit source of truth; AWS SM + CF Secrets are read-only replicas synced via Terraform-CI with hash validation.
+> - Sentry Performance is the end-to-end trace owner (`traceparent`/`baggage` propagated CF → Azure → Lambda → Vertex/Pinecone/Mongo).
+> - RTO relaxed to 4 h; Azure `eastus2` declared as explicit SPOF.
+> - Vectorless RAG layer (tree-walk + BM25) added as complementary tier; vector-RAG remains primary for semantic queries.
+
+# Per-Cloud Feature Delegation — v3 Canonical Spec (HISTORICAL)
 
 > **This is the single source of truth.** All later infra changes must
 > point at this doc instead of negotiating between competing markdowns.

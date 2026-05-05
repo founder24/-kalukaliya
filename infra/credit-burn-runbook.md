@@ -1,4 +1,14 @@
-# Credit-Burn Runbook — v3 Canonical
+# Credit-Burn Runbook — v3 (SUPERSEDED by V4)
+
+> ⚠️ **SUPERSEDED — 2026-05-05.** The locked source of truth is now
+> [`infra/v4-locked-architecture.md`](v4-locked-architecture.md).
+> The three-rule fallback mechanic (Rules A/B auto-flip, Rule C
+> notify-only) is preserved verbatim in V4 §10. The meter shape
+> (Redis hot counter + Dynamo durable backstop + AI Gateway cost
+> headers) below remains binding. Do NOT cite this doc in new PRs
+> without also citing V4.
+
+# Credit-Burn Runbook — v3 Canonical (HISTORICAL)
 
 > **Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5,
 > Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.**

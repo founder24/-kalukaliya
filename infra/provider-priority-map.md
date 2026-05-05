@@ -1,4 +1,13 @@
-# Provider Priority Map — v3 Canonical (machine-friendly)
+# Provider Priority Map — v3 (SUPERSEDED by V4)
+
+> ⚠️ **SUPERSEDED — 2026-05-05.** The locked source of truth is now
+> [`infra/v4-locked-architecture.md`](v4-locked-architecture.md).
+> The per-feature tables below remain operationally valid (the
+> dispatcher's resolver still reads them) but the **regions, namespaces,
+> and failover semantics in V4 §3 / §9 override anything implied here**.
+> Do NOT cite this doc in new PRs without also citing V4.
+
+# Provider Priority Map — v3 Canonical (machine-friendly, HISTORICAL)
 
 > **Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5,
 > Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.**
