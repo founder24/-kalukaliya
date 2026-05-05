@@ -990,6 +990,12 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   // surfaced by /admin/dashboard/metrics; not rendered as a card after Task #297.
   const [groqThrottle, setGroqThrottle] = useState(null);
   const [geminiThrottle, setGeminiThrottle] = useState(null);
+  // Task #374 — Assamese chat "both rails red" indicator.  Same shape as
+  // the *Throttle gauges so the existing burst-tile component renders it.
+  // ``throttled === true`` means both the strict Sarvam → Vertex/Gemini
+  // chain (Task #291) AND the Workers-AI Phase-2 fallback have failed
+  // enough times within the alerting window to suggest a real outage.
+  const [assameseUnavailable, setAssameseUnavailable] = useState(null);
   // Task #297 — locked provider chain surfacing (deepgram, workers_ai_indic,
   // mongodb_atlas) sourced from GET /admin/routing-config.
   const [routingConfig, setRoutingConfig] = useState(null);
@@ -1037,10 +1043,13 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         setWaiThrottle(md?.workers_ai_throttle ?? null);
         setGroqThrottle(md?.groq_throttle ?? null);
         setGeminiThrottle(md?.gemini_throttle ?? null);
+        // Task #374 — "both rails red" indicator for Assamese chat.
+        setAssameseUnavailable(md?.assamese_chat_unavailable ?? null);
       } else {
         setWaiThrottle(null);
         setGroqThrottle(null);
         setGeminiThrottle(null);
+        setAssameseUnavailable(null);
       }
       if (poolRes.status === 'fulfilled')
         setEmbedBurst({
@@ -2507,11 +2516,15 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                 )}
               </div>
 
-              {/* Tasks #85/#90 — reusable burst gauge for any provider */}
+              {/* Tasks #85/#90/#374 — reusable burst gauge for any provider.
+                  ``assamese-chat`` reuses the same shape but counts
+                  ``assamese_unavailable`` events (both rails red) instead of
+                  429s — see backend ``record_assamese_unavailable``. */}
               {[
-                { key: 'workers-ai', label: 'Workers AI', thr: waiThrottle },
-                { key: 'gemini',     label: 'Gemini',     thr: geminiThrottle },
-              ].map(({ key, label, thr: _thr }) => (
+                { key: 'workers-ai',    label: 'Workers AI',                thr: waiThrottle,         unit: '429s' },
+                { key: 'gemini',        label: 'Gemini',                    thr: geminiThrottle,      unit: '429s' },
+                { key: 'assamese-chat', label: 'Assamese Chat (both rails)', thr: assameseUnavailable, unit: 'outage events' },
+              ].map(({ key, label, thr: _thr, unit }) => (
                 <div key={key}>
                   {(() => {
                     const thr = _thr;
@@ -2530,13 +2543,19 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                           <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-red-100 border border-red-200">
                             <AlertTriangle size={14} className="text-red-600 shrink-0" />
                             <span className="text-xs font-semibold text-red-700">
-                              {label} is throttled — {burst60} 429s in the last 60 s (threshold: {limit})
+                              {key === 'assamese-chat'
+                                ? `${label} — both rails red: ${burst180} ${unit} in the last 180 s (threshold: ${limit})`
+                                : `${label} is throttled — ${burst60} ${unit} in the last 60 s (threshold: ${limit})`}
                             </span>
                           </div>
                         )}
                         <div className="flex items-center gap-2">
                           <Zap size={14} className={isLoading ? 'text-gray-300' : throttled ? 'text-red-500' : approaching ? 'text-amber-500' : 'text-gray-400'} />
-                          <span className="text-xs font-semibold text-gray-700">{label} — 429 Burst Pressure</span>
+                          <span className="text-xs font-semibold text-gray-700">
+                            {key === 'assamese-chat'
+                              ? `${label} — Outage Burst Pressure`
+                              : `${label} — 429 Burst Pressure`}
+                          </span>
                           <span className={`flex items-center gap-1 text-[11px] font-semibold ${statusText}`}>
                             <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
                             {statusLabel}
@@ -2552,7 +2571,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                             </div>
                             <div className="rounded-lg p-2.5 bg-white/70 border border-gray-100">
                               <div className="text-[10px] uppercase text-gray-400 font-semibold mb-0.5">180 s (all workers)</div>
-                              <div className="text-base font-bold tabular-nums text-gray-700">{burst180}</div>
+                              <div className={`text-base font-bold tabular-nums ${key === 'assamese-chat' && burst180 >= limit ? 'text-red-600' : 'text-gray-700'}`}>{burst180}</div>
                             </div>
                             <div className="rounded-lg p-2.5 bg-white/70 border border-gray-100">
                               <div className="text-[10px] uppercase text-gray-400 font-semibold mb-0.5">Alert threshold</div>

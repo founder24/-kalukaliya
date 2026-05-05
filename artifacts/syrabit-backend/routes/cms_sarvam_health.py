@@ -4806,6 +4806,30 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
         except Exception:
             pass
 
+        # Task #374 — Assamese-chat "both rails red" burst gauge.  Same
+        # shape as the *_throttle dicts above so the AdminHealth tile can
+        # render via the existing burst-tile component.  ``burst_60s`` is
+        # the in-process count for this worker (used to drive the
+        # ``throttled`` UI flag locally), ``burst_180s`` is the
+        # cross-worker Redis counter.
+        _as_burst_60 = 0
+        _as_burst_180 = 0
+        _as_threshold = 3
+        try:
+            from llm import (
+                get_assamese_unavailable_burst,
+                get_assamese_unavailable_burst_inprocess,
+            )
+            _as_burst_60 = get_assamese_unavailable_burst_inprocess(60)
+            _as_burst_180 = get_assamese_unavailable_burst(180)
+        except Exception:
+            pass
+        try:
+            from metrics import _ALERT_THRESHOLDS as _at2
+            _as_threshold = int(_at2.get("assamese_unavailable_burst_threshold", 3))
+        except Exception:
+            pass
+
         result = {
             "dependencies": deps_status,
             "response_time_ms": elapsed,
@@ -4831,6 +4855,18 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
                 "burst_180s": _gemini_burst_180,
                 "alert_threshold": _gemini_threshold,
                 "throttled": _gemini_burst_60 >= _gemini_threshold,
+            },
+            # Task #374 — "both rails red" indicator for the Assamese
+            # chat path. ``throttled`` is wired off the cross-worker
+            # 180s counter (not the per-worker 60s window) because each
+            # event is a P0 outage and the threshold is intentionally
+            # low (3 by default), so a single tick of all-workers
+            # traffic is enough to flag the rail.
+            "assamese_chat_unavailable": {
+                "burst_60s": _as_burst_60,
+                "burst_180s": _as_burst_180,
+                "alert_threshold": _as_threshold,
+                "throttled": _as_burst_180 >= _as_threshold,
             },
         }
         _metrics_cache["data"] = result

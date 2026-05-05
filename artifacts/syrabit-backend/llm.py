@@ -211,6 +211,83 @@ def _reset_provider_429(provider: str) -> None:
 # no bedrock outcomes to record.
 
 
+# ── Assamese chat "both rails red" burst tracking (Task #374) ───────────────
+# When the strict Assamese chain (Sarvam → Vertex/Gemini, Task #291) and the
+# Workers-AI Phase-2 fallback are BOTH exhausted we surface either:
+#   • SSE chunk with ``error_kind: 'assamese_unavailable'`` (streaming path), or
+#   • HTTPException(503) with detail starting with "Assamese chat" (non-stream).
+# Either event represents a P0 user-visible Assamese outage. We record it on
+# a 180s rolling window so ``metrics._alerting_loop`` can fire a targeted
+# ``assamese_unavailable_burst`` alert that pages on-call instead of waiting
+# for a user complaint. Mirrors the Workers-AI / Groq / Gemini 429 burst
+# lifecycle (in-memory list + Redis TTL counter) so the admin health panel
+# and the alerting loop can read the same value cross-worker.
+_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S = 180
+_ASSAMESE_UNAVAILABLE_WINDOW: list = []   # list[float] epoch timestamps
+_ASSAMESE_UNAVAILABLE_REDIS_KEY = "assamese_unavailable_burst"
+
+
+def record_assamese_unavailable() -> None:
+    """Record one "both Assamese rails red" event (in-memory + Redis).
+
+    Called from the three error sites in this module that surface an
+    ``assamese_unavailable`` outage to the user:
+      • non-stream ``call_llm_api_chat`` 503 (strict chain exhausted)
+      • streaming Phase-2 unavailable (Workers AI not configured)
+      • streaming Phase-2 failed before first token
+
+    The Redis key uses TTL-INCR semantics identical to the per-provider
+    429 counters so the alerting loop and the dashboard tile read a
+    cross-worker value. In-memory list survives Redis outages.
+    """
+    _ASSAMESE_UNAVAILABLE_WINDOW.append(time.time())
+    # Trim eagerly so the in-memory list never grows unbounded in long runs.
+    cutoff = time.time() - _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S * 2
+    while _ASSAMESE_UNAVAILABLE_WINDOW and _ASSAMESE_UNAVAILABLE_WINDOW[0] < cutoff:
+        _ASSAMESE_UNAVAILABLE_WINDOW.pop(0)
+    try:
+        from deps import redis_client as _rc
+        if _rc:
+            _rc.incr(_ASSAMESE_UNAVAILABLE_REDIS_KEY)
+            _rc.expire(_ASSAMESE_UNAVAILABLE_REDIS_KEY,
+                       _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S)
+    except Exception:
+        pass
+
+
+def get_assamese_unavailable_burst_inprocess(window_seconds: int = 60) -> int:
+    """Return the number of assamese_unavailable events in the last
+    ``window_seconds`` from the in-process timestamp list.
+    """
+    cutoff = time.time() - window_seconds
+    return sum(1 for t in _ASSAMESE_UNAVAILABLE_WINDOW if t > cutoff)
+
+
+def get_assamese_unavailable_burst(
+    window_seconds: int = _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
+) -> int:
+    """Return the number of assamese_unavailable events in the last
+    ``window_seconds``.
+
+    Redis is the primary source (cross-worker, TTL-backed). Falls back to
+    the in-process sliding window when Redis is unavailable.
+
+    NOTE: when Redis is available the ``window_seconds`` parameter is
+    ignored — Redis stores a cumulative counter with a fixed TTL. Use
+    ``get_assamese_unavailable_burst_inprocess()`` for an accurate short
+    window.
+    """
+    try:
+        from deps import redis_client as _rc
+        if _rc:
+            val = _rc.get(_ASSAMESE_UNAVAILABLE_REDIS_KEY)
+            if val is not None:
+                return int(val)
+    except Exception:
+        pass
+    return get_assamese_unavailable_burst_inprocess(window_seconds)
+
+
 def get_provider_429_burst(provider: str,
                            window_seconds: int = _PROVIDER_429_BURST_WINDOW_S) -> int:
     """Return the number of 429s for *provider* in the last *window_seconds*.
@@ -2348,6 +2425,12 @@ async def call_llm_api_chat(
                 "(%s) — surfacing 503 (no wrong-language workers_ai fallback per Task #291)",
                 exc,
             )
+            # Task #374: page on-call when both Assamese rails are red. The
+            # alerting loop reads this counter; counter resets via TTL.
+            try:
+                record_assamese_unavailable()
+            except Exception:
+                pass
             raise HTTPException(
                 status_code=503,
                 detail="Assamese chat service temporarily unavailable. Please try again.",
@@ -3332,6 +3415,11 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             }
             if _is_as:
                 _err_payload['error_kind'] = 'assamese_unavailable'
+                # Task #374: page on-call when both Assamese rails are red.
+                try:
+                    record_assamese_unavailable()
+                except Exception:
+                    pass
             yield f"data: {json.dumps(_err_payload)}\n\n"
             return
 
@@ -3395,6 +3483,11 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             }
             if _is_as2:
                 _err_payload2['error_kind'] = 'assamese_unavailable'
+                # Task #374: page on-call when both Assamese rails are red.
+                try:
+                    record_assamese_unavailable()
+                except Exception:
+                    pass
             yield f"data: {json.dumps(_err_payload2)}\n\n"
             return
 

@@ -1324,6 +1324,19 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # sustained burst means voice features are degrading even when chat
     # completions look healthy — well worth a page.  Set to 0 to disable.
     "deepgram_429_burst_threshold": 5,
+    # Task #374: Assamese-chat "both rails red" burst alert.  Fires when
+    # the strict Assamese chain (Sarvam → Vertex/Gemini, Task #291) AND
+    # the Workers-AI Phase-2 fallback both fail >= this many times within
+    # the 180s counting window.  Each failure is recorded by
+    # ``llm.record_assamese_unavailable`` from the three error sites that
+    # surface ``error_kind: 'assamese_unavailable'`` (or the equivalent
+    # 503 in the non-stream path).  Threshold is intentionally low (3)
+    # because every event is a P0 user-visible Assamese outage — there is
+    # no graceful-degradation fallback after these emit, so even a small
+    # burst means real Assamese students are currently being told the
+    # service is unavailable.  Redis key: assamese_unavailable_burst.
+    # Set to 0 to disable.
+    "assamese_unavailable_burst_threshold": 3,
 }
 _ALERT_EXPIRATION_DEFAULT = {
     "enabled": False,
@@ -2397,6 +2410,57 @@ async def _alerting_loop():
                                 "value": _az_threshold,
                                 "actual": _az_burst,
                                 "window_seconds": _PROVIDER_429_BURST_WINDOW_S,
+                            },
+                        )
+            except Exception:
+                pass
+
+            # ── 13. Assamese-chat "both rails red" burst (Task #374) ─────
+            # NOTE: this check is numbered #13 but appears before #12 in
+            # source order — the order has no functional meaning, the loop
+            # just runs them sequentially each tick.
+            # Fires when both legs of the strict Assamese chain
+            # (Sarvam → Vertex/Gemini, Task #291) AND the Workers-AI
+            # Phase-2 fallback fail enough times within the 180s window
+            # to suggest a real outage rather than a transient blip.
+            # Counter is recorded by ``llm.record_assamese_unavailable``
+            # from the three sites that emit ``error_kind:
+            # 'assamese_unavailable'`` (the two SSE sites and the
+            # non-stream 503).  Set the threshold to 0 to disable.
+            try:
+                _as_raw = _ALERT_THRESHOLDS.get("assamese_unavailable_burst_threshold")
+                try:
+                    _as_threshold = int(_as_raw) if _as_raw is not None else 3
+                except (TypeError, ValueError):
+                    _as_threshold = 3
+                if _as_threshold > 0:
+                    from llm import (
+                        get_assamese_unavailable_burst,
+                        _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
+                    )
+                    _as_burst = get_assamese_unavailable_burst(
+                        _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S
+                    )
+                    if _as_burst >= _as_threshold:
+                        await _dispatch_alert(
+                            "assamese_unavailable_burst",
+                            "Assamese chat — both rails red",
+                            f"{_as_burst} Assamese-unavailable events recorded "
+                            f"in the last {_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s "
+                            f"(threshold: {_as_threshold}). Both the strict "
+                            f"Sarvam → Vertex/Gemini chain (Task #291) and the "
+                            f"Workers-AI Phase-2 fallback are failing — Assamese "
+                            f"students are currently seeing the localized "
+                            f"\"service unavailable\" card.  Check Sarvam and "
+                            f"Vertex/Gemini provider health and the Cloudflare "
+                            f"Workers-AI account before users escalate.  "
+                            f"The counter auto-expires {_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s "
+                            f"after the last event.",
+                            threshold_snapshot={
+                                "metric": "assamese_unavailable_burst_threshold",
+                                "value": _as_threshold,
+                                "actual": _as_burst,
+                                "window_seconds": _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
                             },
                         )
             except Exception:
