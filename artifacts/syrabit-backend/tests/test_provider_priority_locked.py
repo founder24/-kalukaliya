@@ -99,7 +99,7 @@ def test_content_workers_ai_primary():
 
     weights = POOL_WEIGHTS["content"]
     primaries = {"workers_ai_mistral_7b", "workers_ai_llama32_3b"}
-    fallbacks = {"vertex", "azure_openai", "sarvam"}
+    fallbacks = {"vertex"}
 
     for p in primaries:
         assert weights[p] == 10000, (
@@ -111,6 +111,14 @@ def test_content_workers_ai_primary():
         )
     assert weights.get("workers_ai", 0) == 0, (
         "content: generic workers_ai must remain weight-0 (last-resort safety net)"
+    )
+    assert "sarvam" not in weights, (
+        "content: sarvam must NOT be in the English content pool — it is "
+        "reserved for the Assamese conversational chain only"
+    )
+    assert "azure_openai" not in weights, (
+        "content: azure_openai must NOT be in the English content pool — "
+        "content generation is Cloudflare-native + Vertex overflow only"
     )
 
     # Smoke-check the live dispatcher: across 600 draws workers-AI primaries
@@ -174,7 +182,7 @@ def test_priority_lists_contain_every_active_member():
     expectations = {
         "english_rag_chat":  {"azure_openai", "vertex",
                               "workers_ai_llama32_3b", "workers_ai_mistral_7b"},
-        "content":           {"vertex", "azure_openai", "sarvam",
+        "content":           {"vertex",
                               "workers_ai_mistral_7b", "workers_ai_llama32_3b"},
         "assamese_rag_chat": {"sarvam", "workers_ai_indic", "vertex"},
         "translate":         {"workers_ai_indic", "vertex"},

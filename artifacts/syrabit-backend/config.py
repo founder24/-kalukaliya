@@ -1069,15 +1069,15 @@ PROVIDER_PRIORITY: dict = {
     # paying for Gemini. Strict-chain exhaustion still surfaces 503 (no
     # silent downgrade to generic workers_ai for Assamese prompts).
     "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
-    # Long-form content / notes generation: Workers AI variants are the
-    # PRIMARY pool (per 2026-05-05 user instruction — Cloudflare-native
-    # inference for cost + latency), with Vertex / Azure / Sarvam kept as
-    # low-weight fallbacks for capacity overflow. POOL_WEIGHTS encodes the
-    # primary-vs-fallback split (workers_ai_* = 10000, paid = 100).
+    # English long-form content / notes generation (2026-05-05 user
+    # instruction): Workers AI variants (PRIMARY) + Vertex / Gemini
+    # (FALLBACK). Sarvam removed — it stays on the Assamese conversational
+    # path (`assamese_rag_chat`) only. Azure OpenAI removed — content
+    # generation is fully Cloudflare-native + Vertex overflow.
     # Bedrock removed (Task #347 — provider decommissioned).
     "content":           [
         "workers_ai_mistral_7b", "workers_ai_llama32_3b",
-        "vertex", "azure_openai", "sarvam",
+        "vertex",
         "workers_ai",
     ],
     # Assamese content generation (Task #281): IndicTrans2 dominant primary
@@ -1179,17 +1179,15 @@ PROVIDER_MAX_CONCURRENT: dict[str, int] = {
 # wired) — they only fire when every active provider is exhausted.
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "content": {
-        # Workers AI variants are the PRIMARY pool for content (2026-05-05
-        # user instruction). Each Cloudflare-native model gets 10000;
-        # paid providers (Vertex / Azure / Sarvam) stay in the pool at 100
-        # so they only fire when every Workers AI primary is saturated /
-        # excluded. workers_ai (gpt-oss-20b) remains the weight-0
-        # last-resort safety net.
+        # English content generation (2026-05-05 user instruction):
+        # Workers AI variants PRIMARY (each weight 10000), Vertex/Gemini
+        # FALLBACK (weight 100) for capacity overflow. Sarvam + Azure
+        # removed — Sarvam stays on the Assamese conversational path
+        # (`assamese_rag_chat`) only. workers_ai (gpt-oss-20b) remains
+        # the weight-0 last-resort safety net.
         "workers_ai_mistral_7b":  10000,
         "workers_ai_llama32_3b":  10000,
         "vertex":                   100,
-        "azure_openai":             100,
-        "sarvam":                   100,
         "workers_ai":                 0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
     },
     "english_rag_chat": {
