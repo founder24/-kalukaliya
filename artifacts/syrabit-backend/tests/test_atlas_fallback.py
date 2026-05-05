@@ -703,3 +703,414 @@ class TestFetchChunksSemanticFallback:
         )
         # Atlas was attempted exactly once before being excluded
         assert len(aggregate_calls) == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. _fetch_chunks_semantic — STRICT Assamese namespace lock (Task #291)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestFetchChunksSemanticAssameseLock:
+    """Task #291 — STRICT Assamese vector-search lock.
+
+    The ``_is_as`` branch in ``_fetch_chunks_semantic`` deliberately bypasses
+    the weighted ``vector_search`` pool entirely: it queries ONLY Pinecone
+    Inference against ``namespace="as"`` (the only embedding space that
+    contains the Assamese corpus written by ``embed_assamese_corpus.py``).
+    A miss or error must return ``[]`` — it must NEVER fall back to
+    Vertex / Atlas, which are English-only Cohere indexes and would silently
+    surface English chapters as "Assamese context", breaking the spec's
+    Assamese-first guarantee.
+
+    These tests pin the strict-lock contract so a regression that re-enables
+    cross-corpus fallback in this branch is caught immediately:
+
+      1. ``lang="as"`` → ``_try_vector_provider("pinecone_ai", …)`` is called
+         exactly once, and the inner Pinecone retriever query uses
+         ``namespace="as"``.
+      2. Pinecone leg raises → returns ``[]`` and never invokes
+         ``llm.select_provider`` / Atlas ``$vectorSearch`` / Vertex embed.
+      3. Pinecone leg returns ``[]`` (strict miss) → returns ``[]`` and
+         never invokes ``llm.select_provider`` / Atlas / Vertex (no
+         cross-corpus retry).
+      4. Pinecone hit → chapter docs are resolved via ``db.chapters.find``
+         (filtered to ``status="published"`` and projecting ``content_as``)
+         and returned in match order with dedup.
+    """
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _stub_no_hyde(self, monkeypatch):
+        async def _no_hyde(_q):
+            return None
+        monkeypatch.setattr("rag._generate_hyde_passage", _no_hyde)
+
+    def _stub_select_provider_recording(self, monkeypatch):
+        """Patch ``llm.select_provider`` with a recorder. The strict Assamese
+        branch must NEVER reach the weighted pool, so any call recorded here
+        is a regression. We raise inside the mock so that, if a regression
+        DOES dispatch through the pool, the loop in ``_fetch_chunks_semantic``
+        breaks immediately on the first redraw rather than continuing to
+        run side effects — but the recorded call is still observable for the
+        assertion."""
+        calls: list[dict] = []
+
+        def _mock_select(feature, lang="", exclude=frozenset()):
+            calls.append({
+                "feature": feature,
+                "lang": lang,
+                "exclude": frozenset(exclude),
+            })
+            raise RuntimeError(
+                "select_provider must NOT be called in strict Assamese branch"
+            )
+
+        import llm as _llm
+        monkeypatch.setattr(_llm, "select_provider", _mock_select)
+        return calls
+
+    def _stub_pinecone_embed(self, monkeypatch, *, vec=None):
+        import providers.pinecone_ai as _pa
+        monkeypatch.setattr(_pa, "ENABLED", True, raising=False)
+
+        async def _embed_one(_text, *, input_type="query"):
+            return vec if vec is not None else _FAKE_QVEC
+        monkeypatch.setattr(_pa, "embed_one", _embed_one, raising=False)
+
+    def _stub_pinecone_retriever(self, monkeypatch, *, raises=False, results=None):
+        query_calls: list[dict] = []
+
+        class _FakePc:
+            def is_configured(self):
+                return True
+
+            async def query(self, vec, top_k=10, metadata_filter=None,
+                            return_metadata=True, namespace=None):
+                query_calls.append({
+                    "top_k": top_k,
+                    "namespace": namespace,
+                    "metadata_filter": metadata_filter,
+                })
+                if raises:
+                    raise RuntimeError("Pinecone unavailable in test")
+                return results or []
+
+        monkeypatch.setattr(
+            "retrievers.pinecone_vector.PineconeVectorRetriever",
+            _FakePc,
+        )
+        return query_calls
+
+    def _stub_cohere_embed_tracking(self, monkeypatch):
+        """Stub Cohere embed and record every call. The Atlas leg embeds via
+        Cohere, so a recorded call here proves cross-corpus fallback ran."""
+        calls: list[str] = []
+        import providers.cohere as _co
+        monkeypatch.setattr(_co, "ENABLED", True, raising=False)
+
+        async def _embed_query(_text):
+            calls.append(_text)
+            return _FAKE_QVEC
+        monkeypatch.setattr(_co, "embed_query", _embed_query, raising=False)
+        return calls
+
+    def _stub_vertex_embed_tracking(self, monkeypatch):
+        """Stub Vertex embed and record every call. The Vertex leg of the
+        weighted pool embeds via this function, so a recorded call here
+        proves cross-corpus fallback ran."""
+        calls: list[str] = []
+        mod = sys.modules.get("vertex_services")
+        if mod is None:
+            mod = types.ModuleType("vertex_services")
+            sys.modules["vertex_services"] = mod
+
+        async def _embed_text(_text, *, task_type="RETRIEVAL_QUERY"):
+            calls.append(_text)
+            return _FAKE_QVEC
+        monkeypatch.setattr(mod, "embed_text", _embed_text, raising=False)
+        return calls
+
+    def _make_db(self, monkeypatch, *, chapters=None):
+        """Install a mock ``rag.db`` with ``chunks.aggregate`` (Atlas) and
+        ``chapters.find`` recorders. ``aggregate_calls`` should remain empty
+        in every Assamese-lock test — Atlas $vectorSearch must never run."""
+        import rag as _rag
+
+        aggregate_calls: list = []
+        find_calls: list[dict] = []
+        chapters = list(chapters or [])
+
+        def _aggregate(pipeline):
+            aggregate_calls.append(pipeline)
+            return _AggregateCursor(result=[])
+
+        class _FakeFindCursor:
+            async def to_list(self, length=None):
+                return chapters
+
+        def _find(*a, **kw):
+            find_calls.append({"args": a, "kwargs": kw})
+            return _FakeFindCursor()
+
+        mock_chunks = MagicMock()
+        mock_chunks.aggregate = _aggregate
+
+        mock_chapters = MagicMock()
+        mock_chapters.find = _find
+
+        mock_db = MagicMock()
+        mock_db.chunks = mock_chunks
+        mock_db.chapters = mock_chapters
+
+        monkeypatch.setattr(_rag, "db", mock_db)
+        return mock_db, aggregate_calls, find_calls
+
+    # ── tests ─────────────────────────────────────────────────────────────────
+
+    def test_assamese_calls_pinecone_once_with_namespace_as(self, monkeypatch):
+        """``lang="as"`` must call ``_try_vector_provider("pinecone_ai", …)``
+        exactly once, and the underlying Pinecone retriever query must use
+        ``namespace="as"``. The weighted-pool dispatch (``select_provider``)
+        and English-only backends (Atlas, Vertex, Cohere embed) must NOT be
+        touched."""
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        select_calls = self._stub_select_provider_recording(monkeypatch)
+        self._stub_pinecone_embed(monkeypatch)
+        pc_calls = self._stub_pinecone_retriever(monkeypatch, results=[
+            {"score": 0.9, "metadata": {
+                "chapter_id": "ch-as-1",
+                "chapter_title": "অধ্যায় ১",
+                "subject_id": "bio-11",
+            }},
+        ])
+        cohere_calls = self._stub_cohere_embed_tracking(monkeypatch)
+        vertex_calls = self._stub_vertex_embed_tracking(monkeypatch)
+
+        chapter_doc = {
+            "id": "ch-as-1",
+            "title": "অধ্যায় ১",
+            "content": "English fallback content (must not be returned alone)",
+            "content_as": "অসমীয়া পাঠ্যবিষয়",
+            "slug": "ch-1",
+            "subject_id": "bio-11",
+        }
+        _, aggregate_calls, find_calls = self._make_db(
+            monkeypatch, chapters=[chapter_doc],
+        )
+
+        result = _run(_rag._fetch_chunks_semantic("সালোক সংশ্লেষণ", lang="as"))
+
+        # 1. Pinecone retriever invoked exactly once with namespace="as"
+        assert len(pc_calls) == 1, (
+            f"Expected Pinecone retriever to be queried exactly once, "
+            f"got {len(pc_calls)}"
+        )
+        assert pc_calls[0]["namespace"] == "as", (
+            f"Expected namespace='as' (Assamese namespace lock), "
+            f"got {pc_calls[0]['namespace']!r}"
+        )
+
+        # 2. Strict lock: NO weighted-pool dispatch / cross-corpus backends
+        assert select_calls == [], (
+            "llm.select_provider must NOT be called in strict Assamese branch"
+        )
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called in strict Assamese branch"
+        )
+        assert vertex_calls == [], (
+            "Vertex embed_text must NOT be called in strict Assamese branch"
+        )
+        assert cohere_calls == [], (
+            "Cohere embed_query must NOT be called in strict Assamese branch"
+        )
+
+        # 3. Chapter resolved & returned with the published-only filter and
+        #    a projection that includes content_as (so the answer layer can
+        #    surface Assamese text, not English).
+        assert len(result) == 1
+        assert result[0]["id"] == "ch-as-1"
+        assert len(find_calls) == 1
+        find_filter = find_calls[0]["args"][0]
+        find_projection = find_calls[0]["args"][1]
+        assert find_filter.get("status") == "published", (
+            f"Chapter lookup must restrict to status='published'; "
+            f"got {find_filter!r}"
+        )
+        assert find_projection.get("content_as") == 1, (
+            f"Chapter projection must request content_as for Assamese "
+            f"answers; got {find_projection!r}"
+        )
+
+    def test_assamese_pinecone_failure_returns_empty_no_cross_corpus_fallback(
+        self, monkeypatch,
+    ):
+        """When the Assamese Pinecone leg raises, ``_fetch_chunks_semantic``
+        must return ``[]`` and must NOT dispatch through the weighted pool
+        or touch Atlas/Vertex — otherwise English chapters would silently
+        leak into Assamese answers."""
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        select_calls = self._stub_select_provider_recording(monkeypatch)
+        self._stub_pinecone_embed(monkeypatch)
+        pc_calls = self._stub_pinecone_retriever(monkeypatch, raises=True)
+        cohere_calls = self._stub_cohere_embed_tracking(monkeypatch)
+        vertex_calls = self._stub_vertex_embed_tracking(monkeypatch)
+        _, aggregate_calls, find_calls = self._make_db(monkeypatch, chapters=[])
+
+        result = _run(_rag._fetch_chunks_semantic("কোষ বিভাজন", lang="as"))
+
+        assert result == [], (
+            f"Expected [] on Assamese Pinecone failure (strict lock), "
+            f"got {result!r}"
+        )
+        # Pinecone leg attempted exactly once with namespace="as"
+        assert len(pc_calls) == 1
+        assert pc_calls[0]["namespace"] == "as"
+
+        # Strict lock: NO cross-corpus fallback after the failure
+        assert select_calls == [], (
+            "llm.select_provider must NOT be called after Assamese "
+            "Pinecone failure — that would re-enable cross-corpus fallback"
+        )
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called after Assamese "
+            "Pinecone failure"
+        )
+        assert vertex_calls == [], (
+            "Vertex embed_text must NOT be called after Assamese "
+            "Pinecone failure"
+        )
+        assert cohere_calls == [], (
+            "Cohere embed_query must NOT be called after Assamese "
+            "Pinecone failure"
+        )
+        # No chapter_ids to resolve — chapters.find must not be called
+        assert find_calls == [], (
+            "db.chapters.find must NOT be queried when the Assamese leg "
+            "fails (no chapter_ids)"
+        )
+
+    def test_assamese_pinecone_zero_matches_returns_empty_no_cross_corpus_retry(
+        self, monkeypatch,
+    ):
+        """When the Assamese Pinecone leg returns ``[]`` (strict miss), the
+        function must return ``[]`` without falling back to English-only
+        Atlas/Vertex backends."""
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        select_calls = self._stub_select_provider_recording(monkeypatch)
+        self._stub_pinecone_embed(monkeypatch)
+        pc_calls = self._stub_pinecone_retriever(monkeypatch, results=[])
+        cohere_calls = self._stub_cohere_embed_tracking(monkeypatch)
+        vertex_calls = self._stub_vertex_embed_tracking(monkeypatch)
+        _, aggregate_calls, find_calls = self._make_db(monkeypatch, chapters=[])
+
+        result = _run(_rag._fetch_chunks_semantic("নিউক্লিয়াস", lang="as"))
+
+        assert result == [], (
+            f"Expected [] on Assamese Pinecone strict miss, got {result!r}"
+        )
+        # Pinecone leg attempted exactly once with namespace="as"
+        assert len(pc_calls) == 1
+        assert pc_calls[0]["namespace"] == "as"
+
+        # Strict lock: NO cross-corpus retry on miss
+        assert select_calls == [], (
+            "llm.select_provider must NOT be called on Assamese miss"
+        )
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called on Assamese miss"
+        )
+        assert vertex_calls == [], (
+            "Vertex embed_text must NOT be called on Assamese miss"
+        )
+        assert cohere_calls == [], (
+            "Cohere embed_query must NOT be called on Assamese miss"
+        )
+        assert find_calls == [], (
+            "db.chapters.find must NOT be queried on Assamese miss "
+            "(no chapter_ids)"
+        )
+
+    def test_assamese_pinecone_hit_resolves_and_dedupes_chapters(
+        self, monkeypatch,
+    ):
+        """A Pinecone hit returning multiple matches (including a duplicate
+        chapter_id) must:
+
+          - Look up referenced chapters via ``db.chapters.find`` exactly once
+            with a ``status="published"`` filter and the multi-id ``$in`` set.
+          - Return chapters in match order, deduplicated by ``chapter_id``.
+          - Never dispatch through the weighted pool or touch Atlas/Vertex.
+        """
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        select_calls = self._stub_select_provider_recording(monkeypatch)
+        self._stub_pinecone_embed(monkeypatch)
+        pc_calls = self._stub_pinecone_retriever(monkeypatch, results=[
+            {"score": 0.95, "metadata": {
+                "chapter_id": "ch-as-2",
+                "chapter_title": "অধ্যায় ২",
+                "subject_id": "bio-11",
+            }},
+            {"score": 0.91, "metadata": {
+                "chapter_id": "ch-as-1",
+                "chapter_title": "অধ্যায় ১",
+                "subject_id": "bio-11",
+            }},
+            # Duplicate chapter_id — must be deduped in the output
+            {"score": 0.88, "metadata": {
+                "chapter_id": "ch-as-2",
+                "chapter_title": "অধ্যায় ২",
+                "subject_id": "bio-11",
+            }},
+        ])
+        cohere_calls = self._stub_cohere_embed_tracking(monkeypatch)
+        vertex_calls = self._stub_vertex_embed_tracking(monkeypatch)
+
+        chapter_docs = [
+            {"id": "ch-as-1", "title": "অধ্যায় ১", "content": "en-1",
+             "content_as": "অসমীয়া ১", "slug": "ch-1", "subject_id": "bio-11"},
+            {"id": "ch-as-2", "title": "অধ্যায় ২", "content": "en-2",
+             "content_as": "অসমীয়া ২", "slug": "ch-2", "subject_id": "bio-11"},
+        ]
+        _, aggregate_calls, find_calls = self._make_db(
+            monkeypatch, chapters=chapter_docs,
+        )
+
+        result = _run(_rag._fetch_chunks_semantic("জীৱবিজ্ঞান", lang="as"))
+
+        # Strict lock contract: single Pinecone call, no cross-corpus dispatch
+        assert len(pc_calls) == 1
+        assert pc_calls[0]["namespace"] == "as"
+        assert select_calls == [], (
+            "llm.select_provider must NOT be called even on a Pinecone hit"
+        )
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called even on a Pinecone hit"
+        )
+        assert vertex_calls == []
+        assert cohere_calls == []
+
+        # Two unique chapters returned, in Pinecone match order (ch-as-2 first)
+        assert [c["id"] for c in result] == ["ch-as-2", "ch-as-1"], (
+            f"Expected dedup + match-order ['ch-as-2','ch-as-1'], "
+            f"got {[c['id'] for c in result]}"
+        )
+
+        # Chapters were looked up exactly once with both ids and the
+        # published-only filter
+        assert len(find_calls) == 1
+        find_filter = find_calls[0]["args"][0]
+        assert set(find_filter.get("id", {}).get("$in", [])) == {
+            "ch-as-1", "ch-as-2",
+        }
+        assert find_filter.get("status") == "published", (
+            f"Chapter filter must restrict to status='published'; "
+            f"got {find_filter!r}"
+        )
