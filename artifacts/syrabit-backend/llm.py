@@ -1607,16 +1607,13 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
     candidates = PROVIDER_PRIORITY.get(feature, ["workers_ai"])
     _is_assamese_feature = feature in ("assamese_rag_chat", "assamese_content")
 
-    # Task #291 — STRICT 2-leg allowlist for assamese_rag_chat. Sarvam and
-    # Vertex are the only Assamese-capable reasoning providers. The pool
-    # configured in PROVIDER_PRIORITY also lists workers_ai_indic and
-    # workers_ai_llama31_8b as historical tail entries, but they must NOT
-    # be selected for chat (IndicTrans2 is a translation model; llama3.1
-    # produces non-Assamese output). Filter them out here so the strict-
-    # chain exhaustion branch below returns None instead of leaking a
-    # wrong-language provider.
+    # 3-leg allowlist for assamese_rag_chat (re-widened 2026-05-05 per user
+    # instruction): sarvam → workers_ai_indic → vertex. workers_ai_llama31_8b
+    # is still excluded because it produces non-Assamese (English/Hindi)
+    # output for Assamese prompts; only the IndicTrans2 neural-MT path is
+    # whitelisted as a third leg.
     if feature == "assamese_rag_chat":
-        candidates = [p for p in candidates if p in ("sarvam", "vertex")]
+        candidates = [p for p in candidates if p in ("sarvam", "workers_ai_indic", "vertex")]
 
     # Per-pool weight overrides take precedence over global PROVIDER_CREDITS.
     # Providers not listed in the override fall back to PROVIDER_CREDITS as usual.
@@ -1710,17 +1707,18 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
 
 
 _INDICTRANS_VALID_FEATURES: frozenset = frozenset({
-    "assamese_content", "translate",
+    "assamese_content", "translate", "assamese_rag_chat",
 })
-"""Features where workers_ai_indic (IndicTrans2) is a valid translation provider.
+"""Features where workers_ai_indic (IndicTrans2) is a valid provider.
 
-Task #291 LOCKED CHAIN — assamese_rag_chat was REMOVED from this set because
-IndicTrans2 is a translation model, not a chat model. Allowing it on the chat
-path silently downgrades reasoning to a translator and produces nonsense
-answers. The strict 2-leg chain is sarvam → vertex with no further leg; if a
-future config drift accidentally re-introduces workers_ai_indic into the
-assamese_rag_chat pool, dispatcher fails closed here and call_with_provider_
-fallback excludes it.
+`assamese_rag_chat` was re-added 2026-05-05 per user instruction — IndicTrans2
+sits between Sarvam and Vertex in the 3-leg Assamese chat chain so a Sarvam
+outage hands off to the in-house Cloudflare neural MT before paying for
+Gemini. Note: IndicTrans2 is a translation model (en-indic), not a chat
+model, so when it dispatches for `assamese_rag_chat` it returns a translated
+form of the user's prompt rather than a true conversational answer; this is
+an explicit operator trade-off (cheaper than Vertex, slower-quality than
+Sarvam) chosen by the user.
 
 Chat / safety / english features are NOT in this set. When workers_ai_indic
 is drawn for a pool outside this set it raises RuntimeError immediately so
@@ -2015,6 +2013,23 @@ async def call_with_provider_fallback(
             _session_swap_provider = ""
         else:
             provider = select_provider(feature, lang=lang, exclude=exclude)
+        # Strict-chain guard: select_provider returns None for locked
+        # features (e.g. assamese_rag_chat) once every leg is excluded.
+        # Without this guard attempt_fn(None) would fall through to the
+        # generic workers_ai branch in _dispatch_llm_for_feature and emit
+        # wrong-language output. Surface exhaustion immediately so the
+        # caller raises a clean 503.
+        if provider in (None, ""):
+            logger.warning(
+                "call_with_provider_fallback: feature=%s strict-chain exhausted "
+                "(select_provider returned %r) — surfacing exhaustion instead of "
+                "falling through to workers_ai default",
+                feature, provider,
+            )
+            raise RuntimeError(
+                f"All providers exhausted for feature={feature}: strict chain "
+                f"returned no provider"
+            ) from last_exc
         try:
             _result = await attempt_fn(provider)
             # Record per-turn TTFB for the per-session stuck-detection

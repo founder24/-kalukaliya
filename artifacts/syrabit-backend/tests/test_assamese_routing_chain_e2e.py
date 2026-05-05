@@ -11,7 +11,7 @@ Tests cover:
   A. select_provider routing for assamese_rag_chat with lang="as"
   B. _dispatch_llm_for_feature: workers_ai_indic path calls call_indic_trans
   C. IndicTrans2 response validated: non-empty + Assamese Unicode U+0980–U+09FF
-  D. call_with_provider_fallback fallback chain: 429 on sarvam → vertex → indic
+  D. call_with_provider_fallback fallback chain: sarvam → workers_ai_indic → vertex (2026-05-05)
      All order-sensitive tests use a forced deterministic select_provider to
      avoid flakiness from equal-weight random draw.
   E. English chain: 429 on azure_openai/vertex triggers next provider
@@ -101,8 +101,10 @@ class TestSelectProviderAssamese:
             f"must not be drawn; got {providers_seen}"
         )
 
-    def test_sarvam_excluded_draws_vertex(self):
-        """When sarvam is excluded the next weighted draw must be vertex."""
+    def test_sarvam_excluded_draws_workers_ai_indic(self):
+        """3-leg chain (2026-05-05): when sarvam is excluded the next
+        deterministic STRICT pick must be workers_ai_indic (weight 1000 vs
+        vertex 100 — 10x ratio fires the strict-primary short-circuit)."""
         import llm
 
         providers_seen: set = set()
@@ -113,29 +115,29 @@ class TestSelectProviderAssamese:
             )
             providers_seen.add(p)
 
-        assert "vertex" in providers_seen, (
-            "vertex must be selected when sarvam is excluded from assamese_rag_chat"
+        assert providers_seen == {"workers_ai_indic"}, (
+            f"Expected only workers_ai_indic when sarvam is excluded "
+            f"(STRICT 10x primary handoff); got {providers_seen}"
         )
         assert "sarvam" not in providers_seen, (
             "sarvam must not appear when it is in the exclude set"
         )
 
-    def test_sarvam_and_vertex_excluded_returns_none_strict_chain(self):
-        """Task #291 — STRICT 2-leg chain. When both sarvam and vertex are
-        excluded the assamese_rag_chat pool is exhausted and select_provider
-        MUST return None. The historical Task #270 last-resort downgrade to
-        workers_ai_indic is forbidden because IndicTrans2 is a translation
-        model (not a chat reasoning model) and llama3.1-8b would produce
-        non-Assamese output."""
+    def test_all_three_legs_excluded_returns_none_strict_chain(self):
+        """3-leg chain (2026-05-05): sarvam → workers_ai_indic → vertex.
+        When all three legs are excluded the pool is exhausted and
+        select_provider MUST return None. The last-resort downgrade to
+        workers_ai_llama31_8b / generic workers_ai is forbidden because
+        they emit non-Assamese (English / Hindi / mixed) output."""
         import llm
 
         p = llm.select_provider(
             "assamese_rag_chat", lang="as",
-            exclude=frozenset({"sarvam", "vertex"}),
+            exclude=frozenset({"sarvam", "workers_ai_indic", "vertex"}),
         )
         assert p in (None, ""), (
             f"Expected None for strict-chain exhaustion; got {p!r}. "
-            f"Task #291 forbids silent downgrade to workers_ai_indic / llama."
+            f"workers_ai_llama31_8b / generic workers_ai forbidden on Assamese path."
         )
 
     def test_lang_en_excludes_sarvam_from_assamese_pool(self):
@@ -350,16 +352,17 @@ class TestCallWithProviderFallbackAssamese:
     draw sequence, avoiding flakiness from weighted-random selection.
     """
 
-    def test_sarvam_failure_falls_through_to_vertex(self):
-        """RuntimeError from sarvam must cause fallback to vertex.
+    def test_sarvam_failure_falls_through_to_workers_ai_indic(self):
+        """RuntimeError from sarvam must cause fallback to workers_ai_indic
+        (2nd leg of the 3-leg chain re-introduced 2026-05-05).
 
-        select_provider is forced to return sarvam first, vertex second, so the
-        test is deterministic regardless of the 3000:100 weight ratio.
+        select_provider is forced to return sarvam first, workers_ai_indic
+        second, so the test is deterministic regardless of weight ratios.
         """
         import llm
 
         call_order: list[str] = []
-        original, _ = _force_select_provider(llm, ["sarvam", "vertex", "workers_ai_indic"])
+        original, _ = _force_select_provider(llm, ["sarvam", "workers_ai_indic", "vertex"])
         try:
             async def _attempt(provider: str) -> str:
                 call_order.append(provider)
@@ -376,28 +379,30 @@ class TestCallWithProviderFallbackAssamese:
             llm.select_provider = original
 
         assert call_order[0] == "sarvam", "sarvam must be tried first (forced sequence)"
-        assert call_order[1] == "vertex", "vertex must be the fallback after sarvam fails"
-        assert result == "response-from-vertex"
+        assert call_order[1] == "workers_ai_indic", (
+            "workers_ai_indic must be the 2nd-leg fallback after sarvam fails"
+        )
+        assert result == "response-from-workers_ai_indic"
 
-    def test_sarvam_and_vertex_failure_falls_through_to_workers_ai_indic(self):
-        """When sarvam and vertex both raise RuntimeError, the fallback must
-        eventually reach workers_ai_indic (the weight-0 last-resort).
+    def test_sarvam_and_workers_ai_indic_failure_falls_through_to_vertex(self):
+        """When sarvam and workers_ai_indic both raise RuntimeError, the
+        fallback must eventually reach vertex (3rd / last leg).
 
-        select_provider is forced to emit sarvam → vertex → workers_ai_indic
+        select_provider is forced to emit sarvam → workers_ai_indic → vertex
         in that order so the test does not depend on random weights.
         """
         import llm
 
         call_order: list[str] = []
         original, _ = _force_select_provider(
-            llm, ["sarvam", "vertex", "workers_ai_indic"]
+            llm, ["sarvam", "workers_ai_indic", "vertex"]
         )
         try:
             async def _attempt(provider: str) -> str:
                 call_order.append(provider)
-                if provider in ("sarvam", "vertex"):
+                if provider in ("sarvam", "workers_ai_indic"):
                     raise RuntimeError(f"{provider} simulated failure")
-                return f"indic-response-from-{provider}"
+                return f"vertex-response-from-{provider}"
 
             result = _run(
                 llm.call_with_provider_fallback(
@@ -407,10 +412,10 @@ class TestCallWithProviderFallbackAssamese:
         finally:
             llm.select_provider = original
 
-        assert call_order == ["sarvam", "vertex", "workers_ai_indic"], (
-            f"Expected deterministic draw sarvam→vertex→workers_ai_indic; got {call_order}"
+        assert call_order == ["sarvam", "workers_ai_indic", "vertex"], (
+            f"Expected deterministic draw sarvam→workers_ai_indic→vertex; got {call_order}"
         )
-        assert result == "indic-response-from-workers_ai_indic"
+        assert result == "vertex-response-from-vertex"
 
     def test_all_providers_fail_raises_runtime_error(self):
         """When all providers fail, call_with_provider_fallback must raise
@@ -451,13 +456,14 @@ class TestCallWithProviderFallbackAssamese:
     def test_failed_provider_excluded_from_subsequent_draws(self):
         """A provider that raises must not be drawn again in the same request.
 
-        We force sarvam first, then vertex. After sarvam raises RuntimeError,
-        vertex must succeed without sarvam being re-drawn.
+        We force sarvam first, then workers_ai_indic. After sarvam raises
+        RuntimeError, workers_ai_indic must succeed without sarvam being
+        re-drawn.
         """
         import llm
 
         call_order: list[str] = []
-        original, _ = _force_select_provider(llm, ["sarvam", "vertex"])
+        original, _ = _force_select_provider(llm, ["sarvam", "workers_ai_indic"])
         try:
             async def _attempt(provider: str) -> str:
                 call_order.append(provider)
@@ -595,17 +601,14 @@ class TestIndicTrans2FeatureGuard:
         "safety",
         "tts",
         "stt",
-        # Task #291 — assamese_rag_chat moved into the rejected set because
-        # IndicTrans2 is a translation model, not a chat model. Allowing it
-        # on the chat path silently downgrades reasoning to a translator and
-        # produces nonsense answers. Dispatcher now fails closed here so any
-        # accidental config drift is caught at the lowest layer.
-        "assamese_rag_chat",
+        # assamese_rag_chat REMOVED from the rejected set 2026-05-05 —
+        # workers_ai_indic is now a permitted 2nd-leg fallback in the
+        # 3-leg Assamese chat chain (sarvam → workers_ai_indic → vertex).
     ])
     def test_workers_ai_indic_rejected_for_non_assamese_features(self, feature, monkeypatch):
         """_dispatch_llm_for_feature must raise RuntimeError immediately when
-        provider='workers_ai_indic' is drawn for a non-Assamese-translation
-        feature pool (now including the chat pool — see Task #291)."""
+        provider='workers_ai_indic' is drawn for a feature outside
+        _INDICTRANS_VALID_FEATURES."""
         import llm
 
         fake_mod = types.ModuleType("providers.workers_indic")
@@ -624,11 +627,13 @@ class TestIndicTrans2FeatureGuard:
         fake_mod.call_indic_trans.assert_not_awaited()
 
     @pytest.mark.parametrize("feature", [
-        # Task #291 — assamese_rag_chat REMOVED from the accepted set. The
-        # only remaining valid translation features for IndicTrans2 are
-        # assamese_content (note generation) and translate (explicit MT).
+        # 2026-05-05 — assamese_rag_chat re-added to the accepted set as
+        # the 2nd leg of the 3-leg chain (sarvam → workers_ai_indic →
+        # vertex). assamese_content (note generation) and translate
+        # (explicit MT) remain in the accepted set as before.
         "assamese_content",
         "translate",
+        "assamese_rag_chat",
     ])
     def test_workers_ai_indic_accepted_for_valid_assamese_features(self, feature, monkeypatch):
         """_dispatch_llm_for_feature must NOT raise for valid Assamese features."""
@@ -893,13 +898,14 @@ class TestCallLlmApiChatAssamese:
         )
 
     def test_call_llm_api_chat_assamese_strict_chain_raises_503(self, monkeypatch):
-        """Task #291 strict-chain integration. When both sarvam and vertex
-        fail, call_llm_api_chat(lang='as') must:
+        """3-leg strict-chain integration (2026-05-05). When all three legs
+        (sarvam, workers_ai_indic, vertex) fail, call_llm_api_chat(lang='as')
+        must:
           1. Surface a clean HTTPException 503 (no wrong-language fallback).
-          2. NEVER dispatch to workers_ai_indic, workers_ai_llama31_8b, or
-             the generic workers_ai shorthand — all three would emit non-
-             Assamese (English / Hindi / mixed) output for an Assamese
-             prompt, which is worse for UX than an honest error.
+          2. NEVER dispatch to workers_ai_llama31_8b or the generic
+             workers_ai shorthand — both would emit non-Assamese
+             (English / Hindi / mixed) output for an Assamese prompt,
+             which is worse for UX than an honest error.
         """
         from fastapi import HTTPException
         import llm
@@ -910,15 +916,15 @@ class TestCallLlmApiChatAssamese:
 
         async def _fake_dispatch(messages, provider, max_tokens, *, feature=""):
             called_providers.append(provider)
-            if provider in ("sarvam", "vertex"):
+            if provider in ("sarvam", "workers_ai_indic", "vertex"):
                 raise RuntimeError(f"no {provider} key")
-            # Forbidden under #291 — any other provider on this path is a
-            # silent contract violation. Raise a distinctive marker so the
-            # test fails loudly with a useful message rather than masking
-            # the violation with a generic exception.
+            # Forbidden — any other provider on this path is a silent
+            # contract violation (workers_ai_llama31_8b / generic
+            # workers_ai both emit wrong-language output). Raise a
+            # distinctive marker so the test fails loudly.
             raise AssertionError(
                 f"Forbidden provider {provider!r} reached call_llm_api_chat "
-                f"on the assamese_rag_chat strict chain (Task #291)"
+                f"on the assamese_rag_chat strict chain"
             )
 
         monkeypatch.setattr(llm, "_dispatch_llm_for_feature", _fake_dispatch,
@@ -937,12 +943,13 @@ class TestCallLlmApiChatAssamese:
             f"{exc_info.value.status_code}"
         )
 
-        assert "workers_ai_indic" not in called_providers, (
-            "workers_ai_indic must NOT be reached on the chat path (Task #291); "
+        # workers_ai_indic IS now permitted on the chat path as the 2nd leg.
+        assert "workers_ai_indic" in called_providers, (
+            "workers_ai_indic must be reached on the chat path (3-leg chain); "
             f"called_providers={called_providers}"
         )
         assert "workers_ai_llama31_8b" not in called_providers, (
-            "workers_ai_llama31_8b must NOT be reached on the chat path (Task #291); "
+            "workers_ai_llama31_8b must NOT be reached on the chat path; "
             f"called_providers={called_providers}"
         )
         assert "workers_ai" not in called_providers, (
@@ -1148,13 +1155,14 @@ class TestLiveIndicTrans2:
 
     @_live_skip
     def test_live_workers_ai_indic_routing_confirmed(self):
-        """I3 — routing diagnostic: when sarvam+vertex are excluded, the fallback
-        chain correctly routes to workers_ai_indic (routing wiring is correct).
+        """I3 — routing diagnostic: when sarvam is excluded, the 3-leg
+        chain (2026-05-05) correctly routes to workers_ai_indic as the
+        2nd leg (routing wiring is correct).
 
         Because the script-validation fix causes workers_ai_indic to raise
         RuntimeError when CF returns Devanagari, this test verifies the routing
         reaches workers_ai_indic (either successfully or via the known wrong-
-        script error).  Provider selection is forced deterministically.
+        script error). Provider selection is forced deterministically.
         """
         _reset_indic_client()
         import asyncio
@@ -1164,11 +1172,16 @@ class TestLiveIndicTrans2:
         errors_seen: list[str] = []
 
         original, _ = _force_select_provider(
-            llm, ["sarvam", "vertex", "workers_ai_indic"]
+            llm, ["sarvam", "workers_ai_indic", "vertex"]
         )
         try:
             async def _attempt(provider: str) -> str:
                 providers_attempted.append(provider)
+                # Exclude both sarvam and vertex from the routing test so the
+                # only "real" call goes to workers_ai_indic. Without the
+                # vertex exclusion, the 3-leg chain (2026-05-05) would let
+                # vertex answer the English prompt with English text and
+                # the Assamese-script assertion would fail.
                 if provider in ("sarvam", "vertex"):
                     raise RuntimeError(f"{provider} excluded for routing test")
                 return await llm._dispatch_llm_for_feature(

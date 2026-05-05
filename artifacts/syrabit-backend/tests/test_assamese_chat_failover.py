@@ -28,32 +28,41 @@ import unittest.mock as mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def test_assamese_rag_chat_falls_over_from_sarvam_to_vertex():
-    """sarvam raise → vertex must produce the Assamese answer.
+def test_assamese_rag_chat_falls_over_from_sarvam_to_indic_to_vertex():
+    """3-leg chain (2026-05-05): sarvam → workers_ai_indic → vertex.
 
-    Task #291 — the chain is strictly sarvam → vertex with NO further
-    downgrade. If both fail, ``select_provider`` returns ``None`` so the
-    caller errors out cleanly rather than silently routing to a wrong-model
-    last resort (e.g. IndicTrans2, which is a translation model).
+    Strict-chain exhaustion still surfaces None when ALL three legs are
+    excluded so the caller errors out cleanly rather than silently routing
+    to a wrong-language last-resort (workers_ai_llama31_8b / generic
+    workers_ai).
     """
     from llm import select_provider
 
-    # Force the primary to fail by excluding it; verify the next pick is vertex.
+    # Sarvam excluded → next deterministic draw must be workers_ai_indic
+    # (priority 500, vertex is 100).
     chosen = select_provider("assamese_rag_chat", lang="as",
                              exclude=frozenset({"sarvam"}))
-    assert chosen == "vertex", (
-        f"Expected fallback to 'vertex' after excluding sarvam, got {chosen!r}. "
-        f"This breaks the locked sarvam→vertex chain."
+    assert chosen == "workers_ai_indic", (
+        f"Expected fallback to 'workers_ai_indic' after excluding sarvam, "
+        f"got {chosen!r}. This breaks the sarvam→workers_ai_indic→vertex chain."
     )
 
-    # Both excluded — pool is exhausted, must NOT degrade to workers_ai_indic.
+    # Sarvam + workers_ai_indic excluded → next pick must be vertex.
     chosen = select_provider("assamese_rag_chat", lang="as",
-                             exclude=frozenset({"sarvam", "vertex"}))
-    assert chosen in (None, ""), (
-        f"Expected None when sarvam+vertex both excluded (strict 2-leg chain); "
-        f"got {chosen!r}. workers_ai_indic must NEVER be selected for chat."
+                             exclude=frozenset({"sarvam", "workers_ai_indic"}))
+    assert chosen == "vertex", (
+        f"Expected 'vertex' when sarvam+workers_ai_indic excluded, got {chosen!r}."
     )
-    print("  PASS: assamese_rag_chat sarvam→vertex strict cascade verified (no downgrade)")
+
+    # All three legs excluded — pool exhausted, must NOT degrade to
+    # workers_ai_llama31_8b or generic workers_ai (wrong-language outputs).
+    chosen = select_provider("assamese_rag_chat", lang="as",
+                             exclude=frozenset({"sarvam", "workers_ai_indic", "vertex"}))
+    assert chosen in (None, ""), (
+        f"Expected None when all 3 legs excluded (strict-chain); got {chosen!r}. "
+        f"workers_ai_llama31_8b / generic workers_ai must NEVER be selected for chat."
+    )
+    print("  PASS: assamese_rag_chat sarvam→workers_ai_indic→vertex cascade verified (no wrong-language downgrade)")
 
 
 def test_assamese_rag_chat_logs_locked_chain_order_on_fallback():
@@ -81,12 +90,13 @@ def test_assamese_rag_chat_logs_locked_chain_order_on_fallback():
         llm.logger.removeHandler(h)
 
     msgs = [r.getMessage() for r in handler_records]
-    # Must mention vertex and the assamese feature in some informational record.
-    assert any("vertex" in m and "assamese_rag_chat" in m for m in msgs), (
-        f"Expected select_provider to log fallback to vertex for "
+    # Must mention workers_ai_indic (the new 2nd leg as of 2026-05-05)
+    # and the assamese feature in some informational record.
+    assert any("workers_ai_indic" in m and "assamese_rag_chat" in m for m in msgs), (
+        f"Expected select_provider to log fallback to workers_ai_indic for "
         f"assamese_rag_chat; captured records were: {msgs!r}"
     )
-    print("  PASS: select_provider logs assamese_rag_chat → vertex fallback")
+    print("  PASS: select_provider logs assamese_rag_chat → workers_ai_indic fallback")
 
 
 def test_english_question_in_assamese_mode_triggers_cross_lang_translation():
@@ -144,7 +154,7 @@ def test_assamese_question_skips_translation_noop():
 
 
 if __name__ == "__main__":
-    test_assamese_rag_chat_falls_over_from_sarvam_to_vertex()
+    test_assamese_rag_chat_falls_over_from_sarvam_to_indic_to_vertex()
     test_assamese_rag_chat_logs_locked_chain_order_on_fallback()
     test_english_question_in_assamese_mode_triggers_cross_lang_translation()
     test_assamese_question_skips_translation_noop()

@@ -5,7 +5,7 @@ the four pools the spec locks down:
 
   english_rag_chat    azure_openai → vertex → workers_ai
   content             vertex       → azure_openai → workers_ai
-  assamese_rag_chat   sarvam       → vertex                       (no further downgrade)
+  assamese_rag_chat   sarvam       → workers_ai_indic → vertex    (3-leg, 2026-05-05)
   translate           workers_ai_indic → vertex
 
 Run::
@@ -55,21 +55,25 @@ def test_content_locked_to_vertex_primary():
 
 def test_assamese_rag_chat_locked_to_sarvam_primary():
     weights = POOL_WEIGHTS["assamese_rag_chat"]
-    assert weights["sarvam"] >= 100 * weights.get("vertex", 1), \
-        "assamese_rag_chat: sarvam must dominate vertex by >=100x"
-    # Task #291 — workers_ai_indic must NOT be present in the chat pool.
-    # IndicTrans2 is a translation model; using it as a chat fallback would
-    # silently downgrade reasoning to a translator, producing nonsense
-    # answers. The chain is strictly sarvam → vertex with no further leg.
-    assert "workers_ai_indic" not in weights, (
-        "workers_ai_indic must NOT be in assamese_rag_chat POOL_WEIGHTS — "
-        "it is a translation model, not a chat model"
+    assert weights["sarvam"] >= 10 * weights.get("workers_ai_indic", 1), \
+        "assamese_rag_chat: sarvam must dominate workers_ai_indic by >=10x"
+    assert weights.get("workers_ai_indic", 0) > weights.get("vertex", 0), (
+        "assamese_rag_chat: workers_ai_indic must outweigh vertex (it sits "
+        "between sarvam and vertex in the 3-leg chain, 2026-05-05)"
     )
-    assert "workers_ai_indic" not in PROVIDER_PRIORITY["assamese_rag_chat"], (
-        "workers_ai_indic must NOT be in PROVIDER_PRIORITY['assamese_rag_chat']"
+    # workers_ai_indic IS now permitted in the chat pool (re-introduced
+    # 2026-05-05 per user instruction). It sits between Sarvam and Vertex
+    # so a Sarvam outage hands off to the in-house Cloudflare neural MT
+    # before paying for Gemini.
+    assert "workers_ai_indic" in weights, (
+        "workers_ai_indic must be in assamese_rag_chat POOL_WEIGHTS — "
+        "3-leg chain re-introduced 2026-05-05"
+    )
+    assert "workers_ai_indic" in PROVIDER_PRIORITY["assamese_rag_chat"], (
+        "workers_ai_indic must be in PROVIDER_PRIORITY['assamese_rag_chat']"
     )
     _expect_primary("assamese_rag_chat", "sarvam", lang="as")
-    print("  PASS: assamese_rag_chat locked to sarvam → vertex (no downgrade)")
+    print("  PASS: assamese_rag_chat locked to sarvam → workers_ai_indic → vertex")
 
 
 def test_translate_locked_to_indictrans2_primary():
@@ -106,10 +110,13 @@ def test_priority_lists_match_locked_chain_order():
         assert order[0] == primary, (
             f"{feature}: PROVIDER_PRIORITY[0] must be {primary}, got {order}"
         )
-    # assamese_rag_chat must contain ONLY [sarvam, vertex] — no third leg.
-    assert PROVIDER_PRIORITY["assamese_rag_chat"] == ["sarvam", "vertex"], (
-        f"assamese_rag_chat must be exactly ['sarvam', 'vertex']; got "
-        f"{PROVIDER_PRIORITY['assamese_rag_chat']}"
+    # assamese_rag_chat is the 3-leg chain (re-introduced 2026-05-05):
+    # sarvam → workers_ai_indic → vertex. workers_ai_llama31_8b and the
+    # generic workers_ai shorthand remain forbidden because they emit
+    # non-Assamese output.
+    assert PROVIDER_PRIORITY["assamese_rag_chat"] == ["sarvam", "workers_ai_indic", "vertex"], (
+        f"assamese_rag_chat must be exactly ['sarvam', 'workers_ai_indic', 'vertex']; "
+        f"got {PROVIDER_PRIORITY['assamese_rag_chat']}"
     )
     print("  PASS: PROVIDER_PRIORITY ordering matches locked chains")
 

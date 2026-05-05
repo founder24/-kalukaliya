@@ -1050,29 +1050,25 @@ PLAN_PRICES = {
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
     # English chat + RAG: Azure GPT-4.1-mini (primary) → Vertex/Gemini 2.5
-    # Flash → Sarvam (Indic-aware fallback) → Workers AI fast-mode (Llama 3.2
-    # 3B) → balanced Mistral 7B → generic Workers AI (last-resort gpt-oss-20b).
-    # Bedrock + OpenAI/xAI removed in Task #347 — Azure is the sole managed
-    # English LLM, with native Workers AI variants picking up tail traffic.
+    # Flash → Workers AI fast-mode (Llama 3.2 3B) → balanced Mistral 7B →
+    # generic Workers AI (last-resort gpt-oss-20b). Sarvam removed per
+    # 2026-05-05 user instruction — Sarvam is now reserved exclusively for
+    # the Indic conversational path (assamese_rag_chat) where its native
+    # Assamese reasoning quality matters most. Bedrock + OpenAI/xAI
+    # removed in Task #347 — Azure is the sole managed English LLM, with
+    # native Workers AI variants picking up tail traffic.
     "english_rag_chat":  [
-        "azure_openai", "vertex", "sarvam",
+        "azure_openai", "vertex",
         "workers_ai_llama32_3b", "workers_ai_mistral_7b", "workers_ai",
     ],
-    # Assamese chat (Task #291 LOCKED CHAIN): Sarvam (native Indic
-    # conversational reasoning) → Vertex (Gemini 2.5 Flash). NO third leg.
-    #
-    # Historically the chain ran sarvam → vertex → workers_ai_llama31_8b
-    # → workers_ai_indic (Task #347 promotion + #366 chaos guardrail), but
-    # Task #291 locked the chain down to two legs because:
-    #   * workers_ai_indic is a TRANSLATION model (IndicTrans2) — using it
-    #     as a chat fallback silently downgrades reasoning to "translate
-    #     the question word-for-word", producing nonsense answers.
-    #   * workers_ai_llama31_8b reliably emits non-Assamese (English/Hindi)
-    #     output for Assamese prompts — wrong-language output is worse for
-    #     UX than a clean "service temporarily unavailable" error.
-    # Strict-chain exhaustion now correctly surfaces an error to the user
-    # instead of leaking a wrong-language or wrong-model response.
-    "assamese_rag_chat": ["sarvam", "vertex"],
+    # Assamese chat: Sarvam (native Indic conversational reasoning) →
+    # Workers AI IndicTrans2 (en-indic neural MT, Task #267 promotion) →
+    # Vertex (Gemini 2.5 Flash). 3-leg chain re-introduced per 2026-05-05
+    # user instruction — IndicTrans2 sits between Sarvam and Vertex so a
+    # Sarvam outage hands off to the in-house Cloudflare neural MT before
+    # paying for Gemini. Strict-chain exhaustion still surfaces 503 (no
+    # silent downgrade to generic workers_ai for Assamese prompts).
+    "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
     # Long-form content / notes generation: Vertex/Gemini 2.5 Flash (primary,
     # 1M-token context) → Azure GPT-4.1-mini → Sarvam → Workers AI variants.
     # Bedrock removed (Task #347 — provider decommissioned).
@@ -1161,7 +1157,7 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     # Chains:
     #   content              vertex(10000) → azure_openai(100) → workers_ai(0, gpt-oss-20b)
     #   english_rag_chat     azure_openai(10000) → vertex(100) → workers_ai(0, gpt-oss-20b)
-    #   assamese_rag_chat    sarvam(10000) → vertex(100)              [no workers fallback]
+    #   assamese_rag_chat    sarvam(10000) → workers_ai_indic(1000) → vertex(100)
     #   translate            workers_ai_indic(10000) → vertex(100)
     "content": {
         "vertex":                 10000,  # primary — Gemini 2.5 Flash, 1M-token context
@@ -1175,7 +1171,8 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "english_rag_chat": {
         "azure_openai":           10000,  # primary — GPT-4.1-mini (Azure)
         "vertex":                   100,  # fallback — Gemini 2.5 Flash
-        "sarvam":                    50,  # tertiary — Sarvam-M
+        # Sarvam removed 2026-05-05 per user instruction — reserved for
+        # the Assamese conversational chain only.
         # Workers AI promotions (Task #347) — fast-mode 3B picks up first
         # because it has the lowest TTFT; mistral-7b is the second swing
         # for slightly more capable answers when 3B is overloaded.
@@ -1184,11 +1181,18 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai":                 0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
     },
     "assamese_rag_chat": {
-        # Task #291 LOCKED CHAIN — strict 2-leg sarvam → vertex. Any third
-        # leg (workers_ai_llama31_8b, workers_ai_indic) was removed because
-        # it produced wrong-language output. See PROVIDER_PRIORITY note above.
+        # 3-leg chain (re-introduced 2026-05-05): sarvam → workers_ai_indic → vertex.
+        # IndicTrans2 sits between Sarvam and Vertex so a Sarvam outage
+        # hands off to the in-house Cloudflare neural MT before paying
+        # for Gemini. Strict-chain exhaustion still surfaces 503 (no silent
+        # downgrade to generic workers_ai for Assamese prompts).
+        # Weights are 10x-spaced so select_provider's STRICT primary
+        # short-circuit (max_w >= 10x second) fires at every leg, giving
+        # a fully deterministic sarvam → workers_ai_indic → vertex ladder
+        # rather than a probabilistic draw between legs 2 and 3.
         "sarvam":                 10000,  # primary — native Assamese conversational reasoning
-        "vertex":                   100,  # fallback — Gemini 2.5 Flash
+        "workers_ai_indic":        1000,  # fallback — IndicTrans2 (en-indic neural MT)
+        "vertex":                   100,  # tertiary — Gemini 2.5 Flash
     },
     # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
     # at low weight strictly for formatting / structuring notes. Sarvam removed

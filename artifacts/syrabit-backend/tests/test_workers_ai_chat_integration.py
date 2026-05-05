@@ -230,26 +230,25 @@ def test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypa
 
 
 @pytest.mark.skip(reason=(
-    "Task #366 (workers_ai_llama31_8b + workers_ai_indic as Assamese chat "
-    "tail) was superseded by Task #291: assamese_rag_chat is a strict 2-leg "
-    "sarvam → vertex chain with no further downgrade. workers_ai_llama31_8b "
-    "produced English output for Assamese prompts and workers_ai_indic is "
-    "a translation model, not a chat model — both are now correctly excluded "
-    "from the chain. Strict exhaustion surfaces an error instead of "
-    "wrong-language output. See test_provider_priority_locked.py for the "
-    "canonical #291 contract."
+    "Task #366 (workers_ai_llama31_8b as Assamese chat tail) is no longer "
+    "applicable. As of 2026-05-05 assamese_rag_chat is the 3-leg chain "
+    "sarvam → workers_ai_indic → vertex. workers_ai_indic IS now in the "
+    "chain (per user instruction) but workers_ai_llama31_8b remains "
+    "excluded because it produces English output for Assamese prompts. "
+    "Strict exhaustion of all 3 legs surfaces an error instead of falling "
+    "through to wrong-language output. See test_provider_priority_locked.py "
+    "for the canonical contract."
 ))
 def test_assamese_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypatch):
-    """Task #366 — when both Sarvam and Vertex return 429 on the
-    ``assamese_rag_chat`` pool, the weighted draw must land on the Workers AI
-    Assamese tail (``workers_ai_llama31_8b`` or the IndicTrans2-backed
-    ``workers_ai_indic`` last-resort) and return a non-empty answer."""
+    """LEGACY (skipped) — when both Sarvam and Vertex returned 429 on the
+    ``assamese_rag_chat`` pool the weighted draw used to land on the
+    Workers AI Assamese tail. Now superseded by the 3-leg chain
+    sarvam → workers_ai_indic → vertex."""
     _disable_credit_burn_fallback(monkeypatch)
 
-    paid = frozenset({"sarvam", "vertex"})
+    paid = frozenset({"sarvam", "workers_ai_indic", "vertex"})
     workers_tail = frozenset({
         "workers_ai_llama31_8b",
-        "workers_ai_indic",
     })
     captured: dict = {}
     monkeypatch.setattr(
@@ -297,12 +296,12 @@ def test_english_chat_pool_actually_contains_workers_ai_tail():
 
 @pytest.mark.skip(reason=(
     "Task #347/#366 guardrail (Workers AI Indic tail in assamese_rag_chat) "
-    "was superseded by Task #291: the chain is locked to exactly "
-    "['sarvam', 'vertex']. The canonical guardrail now lives in "
-    "tests/test_provider_priority_locked.py::"
-    "test_assamese_rag_chat_locked_to_sarvam_primary which asserts the "
-    "OPPOSITE — that workers_ai_indic / workers_ai_llama31_8b must NOT be "
-    "in the pool. See config.PROVIDER_PRIORITY['assamese_rag_chat'] note."
+    "is partially superseded. As of 2026-05-05 the chain is the 3-leg lock "
+    "['sarvam', 'workers_ai_indic', 'vertex']. workers_ai_indic IS in the "
+    "pool (asserted by test_provider_priority_locked.py::"
+    "test_assamese_rag_chat_locked_to_sarvam_primary) but workers_ai_llama31_8b "
+    "is still excluded (English output for Assamese prompts). This legacy test "
+    "asserted both indic+llama31_8b together, so it remains skipped."
 ))
 def test_assamese_chat_pool_actually_contains_workers_ai_tail():
     """Guardrail — config.POOL_WEIGHTS['assamese_rag_chat'] must keep
