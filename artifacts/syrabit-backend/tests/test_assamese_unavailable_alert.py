@@ -61,8 +61,12 @@ def _reset_metrics_cooldowns():
     metrics_mod._notification_channels = dict(
         metrics_mod._NOTIFICATION_CHANNELS_DEFAULT
     )
+    # Task #380: also reset the firing-state latch so recovery-alert
+    # tests start from a clean slate.
+    metrics_mod._assamese_unavailable_was_firing = False
     yield
     metrics_mod._alert_last_fired.clear()
+    metrics_mod._assamese_unavailable_was_firing = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -282,6 +286,252 @@ class TestAlertCheckSilent:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# B2. Recovery alert (Task #380) — fires once on firing→cleared transition
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _run_check_13_recovery(
+    burst: int,
+    threshold: int,
+    was_firing: bool,
+):
+    """Run check #13 in isolation with the firing-state latch set to
+    ``was_firing``, and return ``(dispatch_mock, final_was_firing)``.
+
+    Mirrors the production state-machine in metrics._alerting_loop:
+      * burst >= threshold        → fire ``assamese_unavailable_burst``,
+                                    latch was_firing=True.
+      * burst == 0 AND was_firing → fire ``assamese_unavailable_recovered``,
+                                    clear was_firing=False.
+      * otherwise                 → no dispatch, no state change.
+    """
+    dispatch_mock = AsyncMock()
+    metrics_mod._assamese_unavailable_was_firing = was_firing
+    with (
+        patch.object(metrics_mod, "_dispatch_alert", dispatch_mock),
+        patch.object(
+            metrics_mod, "_ALERT_THRESHOLDS",
+            {"assamese_unavailable_burst_threshold": threshold},
+        ),
+        patch("llm.get_assamese_unavailable_burst", return_value=burst),
+        patch("llm._ASSAMESE_UNAVAILABLE_BURST_WINDOW_S", 180),
+    ):
+        _raw = metrics_mod._ALERT_THRESHOLDS.get(
+            "assamese_unavailable_burst_threshold"
+        )
+        try:
+            _as_threshold = int(_raw) if _raw is not None else 3
+        except (TypeError, ValueError):
+            _as_threshold = 3
+        if _as_threshold <= 0:
+            metrics_mod._assamese_unavailable_was_firing = False
+        if _as_threshold > 0:
+            from llm import (
+                get_assamese_unavailable_burst,
+                _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
+            )
+            _as_burst = get_assamese_unavailable_burst(
+                _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S
+            )
+            if _as_burst >= _as_threshold:
+                await metrics_mod._dispatch_alert(
+                    "assamese_unavailable_burst",
+                    "Assamese chat — both rails red",
+                    f"{_as_burst} events in {_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s",
+                    threshold_snapshot={
+                        "metric": "assamese_unavailable_burst_threshold",
+                        "value": _as_threshold,
+                        "actual": _as_burst,
+                        "window_seconds": _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
+                    },
+                )
+                metrics_mod._assamese_unavailable_was_firing = True
+            elif (
+                _as_burst == 0
+                and metrics_mod._assamese_unavailable_was_firing
+            ):
+                await metrics_mod._dispatch_alert(
+                    "assamese_unavailable_recovered",
+                    "Assamese chat — recovered from \"both rails red\" incident",
+                    f"Burst cleared back to 0 within "
+                    f"{_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s "
+                    f"(threshold: {_as_threshold}). Confirm via the admin "
+                    f"dashboard health tile.",
+                    threshold_snapshot={
+                        "metric": "assamese_unavailable_burst_threshold",
+                        "value": _as_threshold,
+                        "actual": 0,
+                        "window_seconds": _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
+                    },
+                )
+                metrics_mod._assamese_unavailable_was_firing = False
+    return dispatch_mock, metrics_mod._assamese_unavailable_was_firing
+
+
+class TestRecoveryAlert:
+    """Task #380 — auto-page on-call when the Assamese chat 'both rails red'
+    incident recovers. Mirrors the SEO-health recovery-alert pattern in
+    ``test_seo_health_alerting.py`` (firing→cleared transition fires once,
+    sustained-clear stays silent, and the recovery alert reuses the same
+    ``_dispatch_alert`` path with a distinct alert_type)."""
+
+    def test_recovery_fires_on_firing_to_cleared_transition(self):
+        """Burst=0 and was_firing=True → exactly one recovery dispatch."""
+        dispatch, final_state = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
+        )
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.args[0] == "assamese_unavailable_recovered"
+        assert final_state is False
+
+    def test_recovery_does_not_fire_when_never_was_firing(self):
+        """Burst=0 and was_firing=False → no dispatch (no incident to recover)."""
+        dispatch, final_state = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=False)
+        )
+        dispatch.assert_not_awaited()
+        assert final_state is False
+
+    def test_recovery_does_not_re_fire_while_still_cleared(self):
+        """After a recovery, subsequent burst=0 ticks must stay silent until
+        the burst alert fires again. Mirrors the SEO recovery-alert pattern
+        (recovery is a one-shot per incident)."""
+        # Tick 1: firing → cleared, dispatches recovery.
+        dispatch1, state1 = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
+        )
+        dispatch1.assert_awaited_once()
+        assert state1 is False
+        # Tick 2: still cleared — must NOT re-fire.
+        dispatch2, state2 = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=state1)
+        )
+        dispatch2.assert_not_awaited()
+        assert state2 is False
+
+    def test_recovery_does_not_fire_while_still_firing(self):
+        """Burst still over threshold → fires the burst alert, NOT recovery,
+        and latches was_firing=True for the next tick."""
+        dispatch, final_state = _run(
+            _run_check_13_recovery(burst=5, threshold=3, was_firing=True)
+        )
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.args[0] == "assamese_unavailable_burst"
+        assert final_state is True
+
+    def test_recovery_does_not_fire_while_burst_decaying_but_nonzero(self):
+        """Burst < threshold but > 0 (counter still draining within the 180s
+        window) is NOT a full recovery — must stay silent and keep the
+        was_firing latch set so the next tick still has a chance to recover."""
+        dispatch, final_state = _run(
+            _run_check_13_recovery(burst=1, threshold=3, was_firing=True)
+        )
+        dispatch.assert_not_awaited()
+        assert final_state is True
+
+    def test_burst_to_recovery_full_lifecycle(self):
+        """End-to-end: burst over threshold (latches firing) → burst clears
+        (fires recovery, clears latch) → still cleared (silent). Mirrors
+        ``test_e2e_critical_then_critical_then_ok_dedupes_and_recovers``
+        in ``test_seo_health_alerting.py``."""
+        dispatched_types: list[str] = []
+
+        async def _scenario():
+            # Tick 1: burst crosses threshold → fire burst alert, latch on.
+            d1, s1 = await _run_check_13_recovery(
+                burst=5, threshold=3, was_firing=False,
+            )
+            for c in d1.await_args_list:
+                dispatched_types.append(c.args[0])
+            # Tick 2: still over threshold → re-fire burst alert (cooldown
+            # would suppress it in the real ``_dispatch_alert``, but our
+            # mock just records the attempt). Latch stays on.
+            d2, s2 = await _run_check_13_recovery(
+                burst=4, threshold=3, was_firing=s1,
+            )
+            for c in d2.await_args_list:
+                dispatched_types.append(c.args[0])
+            # Tick 3: burst clears → fire recovery alert, latch off.
+            d3, s3 = await _run_check_13_recovery(
+                burst=0, threshold=3, was_firing=s2,
+            )
+            for c in d3.await_args_list:
+                dispatched_types.append(c.args[0])
+            # Tick 4: still clear → silent.
+            d4, s4 = await _run_check_13_recovery(
+                burst=0, threshold=3, was_firing=s3,
+            )
+            for c in d4.await_args_list:
+                dispatched_types.append(c.args[0])
+            return s4
+
+        final_state = _run(_scenario())
+        assert dispatched_types == [
+            "assamese_unavailable_burst",
+            "assamese_unavailable_burst",
+            "assamese_unavailable_recovered",
+        ], f"got {dispatched_types}"
+        assert final_state is False
+
+    def test_recovery_alert_title_signals_recovery(self):
+        """Title must clearly signal recovery so on-call sees it's good news,
+        not a re-fire of the same incident. Mirrors the burst-alert
+        title-content assertion in ``TestAlertCheckFires``."""
+        dispatch, _ = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
+        )
+        title = dispatch.await_args.args[1]
+        assert "recovered" in title.lower()
+        assert "assamese" in title.lower()
+
+    def test_recovery_alert_body_links_to_dashboard(self):
+        """Body must reference the admin health dashboard so on-call has a
+        one-click confirm path before standing down."""
+        dispatch, _ = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
+        )
+        body = dispatch.await_args.args[2]
+        assert "admin" in body.lower() and "dashboard" in body.lower()
+
+    def test_recovery_threshold_snapshot_actual_is_zero(self):
+        """Snapshot.actual must be 0 (the cleared value) so the alert sink
+        can render the recovered metric in the dashboard. Mirrors the
+        snapshot-shape assertion in ``test_threshold_snapshot_carries_correct_fields``."""
+        dispatch, _ = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
+        )
+        snap = (dispatch.await_args.kwargs.get("threshold_snapshot")
+                or dispatch.await_args.args[3])
+        assert snap["metric"] == "assamese_unavailable_burst_threshold"
+        assert snap["value"] == 3
+        assert snap["actual"] == 0
+        assert snap["window_seconds"] == 180
+
+    def test_recovery_alert_uses_distinct_alert_type(self):
+        """The recovery alert must use a distinct ``alert_type`` so dedup
+        and cooldown bookkeeping don't collapse it with the burst alert."""
+        dispatch, _ = _run(
+            _run_check_13_recovery(burst=0, threshold=3, was_firing=True)
+        )
+        assert dispatch.await_args.args[0] == "assamese_unavailable_recovered"
+        assert dispatch.await_args.args[0] != "assamese_unavailable_burst"
+
+    def test_threshold_disabled_clears_latch(self):
+        """If the admin disables the alert (threshold=0) while the latch
+        is set, the latch must be cleared so re-enabling the alert later
+        doesn't fire a stale recovery for an incident on-call was never
+        paged about. Regression guard for the disabled-while-firing
+        edge case flagged in Task #380's code review."""
+        dispatch, final_state = _run(
+            _run_check_13_recovery(burst=100, threshold=0, was_firing=True)
+        )
+        # Threshold disabled → no burst dispatch and no recovery dispatch.
+        dispatch.assert_not_awaited()
+        # Latch must be cleared so a subsequent re-enable + clear doesn't
+        # auto-page a phantom recovery.
+        assert final_state is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # C. Source-level contract — pure import assertions
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -328,6 +578,25 @@ class TestSourceContract:
         assert "get_assamese_unavailable_burst" in src
         assert '"assamese_unavailable_burst"' in src
         assert '"assamese_unavailable_burst_threshold"' in src
+
+    def test_metrics_exports_recovery_state_latch(self):
+        """Task #380: the firing-state latch must live at module scope so
+        it survives across ``_alerting_loop`` ticks and so tests can
+        reset it the same way ``_alert_last_fired`` is reset."""
+        assert hasattr(metrics_mod, "_assamese_unavailable_was_firing")
+        # Must be a plain bool (not a dict / Lock / etc.) so the
+        # state-machine logic in check #13 stays trivially auditable.
+        assert isinstance(
+            metrics_mod._assamese_unavailable_was_firing, bool
+        )
+
+    def test_metrics_alerting_loop_dispatches_recovery_alert(self):
+        """The alerting loop source must reference the recovery alert
+        type so a future refactor can't silently drop the auto-page
+        recovery path that pairs with the burst alert."""
+        src = _METRICS_PY.read_text(encoding="utf-8")
+        assert '"assamese_unavailable_recovered"' in src
+        assert "_assamese_unavailable_was_firing" in src
 
     def test_llm_error_sites_record_unavailable(self):
         """All three error sites in llm.py must call record_assamese_unavailable

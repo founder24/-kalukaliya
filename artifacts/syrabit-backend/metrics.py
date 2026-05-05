@@ -1212,6 +1212,14 @@ async def _bg_health_loop():
 _ALERT_COOLDOWN_S = 1800   # 30 min between same alert type
 _alert_last_fired: dict = {}   # { "alert_key": timestamp }
 
+# Task #380: track whether ``assamese_unavailable_burst`` was firing on the
+# previous ``_alerting_loop`` tick so we can auto-page on-call with an
+# ``assamese_unavailable_recovered`` alert when the burst counter clears
+# back to zero. Module-level (not loop-local) so tests can inject /
+# inspect the prior-tick state the same way they do with
+# ``_alert_last_fired`` cooldown bookkeeping above.
+_assamese_unavailable_was_firing: bool = False
+
 # Cross-worker / cross-restart dedup window. The in-memory ``_alert_last_fired``
 # above resets every time a gunicorn worker recycles (max_requests=5000) and
 # isn't shared between workers, so the same alert can fire 3-N× per real
@@ -2433,6 +2441,13 @@ async def _alerting_loop():
                     _as_threshold = int(_as_raw) if _as_raw is not None else 3
                 except (TypeError, ValueError):
                     _as_threshold = 3
+                global _assamese_unavailable_was_firing
+                if _as_threshold <= 0:
+                    # Alert disabled (admin set threshold=0). Clear the
+                    # firing-state latch so re-enabling the alert later
+                    # doesn't fire a stale ``assamese_unavailable_recovered``
+                    # for an incident on-call was never paged about.
+                    _assamese_unavailable_was_firing = False
                 if _as_threshold > 0:
                     from llm import (
                         get_assamese_unavailable_burst,
@@ -2463,6 +2478,45 @@ async def _alerting_loop():
                                 "window_seconds": _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
                             },
                         )
+                        # Latch firing-state AFTER the dispatch await so a
+                        # transient dispatch failure doesn't fool the next
+                        # tick into firing a recovery alert when on-call was
+                        # never actually paged.
+                        _assamese_unavailable_was_firing = True
+                    elif (
+                        _as_burst == 0
+                        and _assamese_unavailable_was_firing
+                    ):
+                        # Task #380: the burst was firing on the previous
+                        # tick and has now cleared back to zero — page
+                        # on-call with a recovery alert so they know the
+                        # incident is over without waiting on the dashboard.
+                        # Distinct ``alert_type`` so dedup/cooldown doesn't
+                        # collapse with the burst alert. Reuses the same
+                        # ``_dispatch_alert`` path so every channel (email,
+                        # webhook, persisted, push) carries the recovery.
+                        await _dispatch_alert(
+                            "assamese_unavailable_recovered",
+                            "Assamese chat — recovered from \"both rails red\" incident",
+                            f"The Assamese-unavailable burst counter has "
+                            f"cleared back to 0 within the last "
+                            f"{_ASSAMESE_UNAVAILABLE_BURST_WINDOW_S}s window "
+                            f"(threshold: {_as_threshold}). Both the strict "
+                            f"Sarvam → Vertex/Gemini chain (Task #291) and "
+                            f"the Workers-AI Phase-2 fallback have recovered "
+                            f"— Assamese students are no longer seeing the "
+                            f"localized \"service unavailable\" card. Stand "
+                            f"down on this incident and confirm via the "
+                            f"admin dashboard health tile "
+                            f"(/admin → Health → Assamese chat).",
+                            threshold_snapshot={
+                                "metric": "assamese_unavailable_burst_threshold",
+                                "value": _as_threshold,
+                                "actual": 0,
+                                "window_seconds": _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
+                            },
+                        )
+                        _assamese_unavailable_was_firing = False
             except Exception:
                 pass
 
