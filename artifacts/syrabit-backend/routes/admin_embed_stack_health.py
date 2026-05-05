@@ -23,9 +23,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from auth_deps import get_admin_user
+import deps
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -76,6 +77,22 @@ async def admin_embed_stack_health(
     memory_health["flag"] = {"name": "MEMORY_BRAIN_PROVIDER", "value": MEMORY_BRAIN_PROVIDER}
     memory_health["collection"] = MEMORY_BRAIN_COLLECTION
 
+    # ── Backfill progress (Task #411) ──────────────────────────────────────
+    # Surface how many legacy chunks are still on the old embed stack so the
+    # admin dashboard can render a "X / Y chunks re-embedded" line right
+    # next to the green/red embed pill.
+    backfill: dict[str, Any]
+    try:
+        from aca_jobs import embed_backfill as _bf
+        db = getattr(deps, "db", None)
+        if db is None:
+            backfill = {"ok": False, "reason": "db unavailable"}
+        else:
+            backfill = await _bf.get_progress(db)
+            backfill["ok"] = True
+    except Exception as exc:
+        backfill = {"ok": False, "reason": str(exc)[:200]}
+
     return {
         "ok": all([
             embed_health.get("ok"),
@@ -85,6 +102,7 @@ async def admin_embed_stack_health(
         "embed":  embed_health,
         "rerank": rerank_health,
         "memory": memory_health,
+        "backfill": backfill,
         "flags": {
             "EMBED_PROVIDER_PRIMARY":  EMBED_PROVIDER_PRIMARY,
             "RERANK_PROVIDER":         RERANK_PROVIDER,
@@ -102,3 +120,53 @@ async def admin_embed_stack_health(
             {"provider": "workers_ai",   "reason": "@cf/baai/bge-m3 demoted to weight-0 fallback (Task #382)"},
         ],
     }
+
+
+@router.get("/admin/embed/backfill/progress")
+async def admin_embed_backfill_progress(
+    admin: dict = Depends(get_admin_user),
+) -> dict[str, Any]:
+    """Task #411 — current state of the legacy → workers_ai_custom backfill."""
+    from aca_jobs import embed_backfill as _bf
+    db = getattr(deps, "db", None)
+    if db is None:
+        return {"ok": False, "reason": "db unavailable"}
+    progress = await _bf.get_progress(db)
+    progress["ok"] = True
+    return progress
+
+
+@router.post("/admin/embed/backfill/run")
+async def admin_embed_backfill_run(
+    max_chunks: int = Query(
+        default=5000, ge=1, le=200_000,
+        description="Per-call processing budget; the job resumes from the "
+                    "last_processed_id stored in embed_backfill_state.",
+    ),
+    batch_size: int = Query(
+        default=32, ge=1, le=32,
+        description="Texts per /embed call. Hard-capped at the worker's "
+                    "32-input limit.",
+    ),
+    admin: dict = Depends(get_admin_user),
+) -> dict[str, Any]:
+    """Task #411 — kick off (or resume) one backfill pass.
+
+    Returns immediately if a run is already in progress. The pass itself
+    runs in the background so the admin UI doesn't block on a multi-minute
+    HTTP request; poll ``/admin/embed/backfill/progress`` for live state.
+    """
+    import asyncio as _asyncio
+    from aca_jobs import embed_backfill as _bf
+    db = getattr(deps, "db", None)
+    if db is None:
+        return {"ok": False, "reason": "db unavailable"}
+    progress = await _bf.get_progress(db)
+    if progress.get("running"):
+        return {"ok": True, "started": False, "reason": "already_running",
+                "progress": progress}
+    _asyncio.create_task(
+        _bf.run_backfill(db, max_chunks=max_chunks, batch_size=batch_size)
+    )
+    return {"ok": True, "started": True, "max_chunks": max_chunks,
+            "batch_size": batch_size, "progress": progress}

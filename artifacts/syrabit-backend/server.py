@@ -1716,6 +1716,15 @@ async def lifespan(app):
     except Exception as _csmp_err:
         logger.warning(f"[aws-native] comprehend sampler start failed: {_csmp_err}")
 
+    # Task #411 — legacy → workers_ai_custom embedding backfill.
+    # Dormant by default (admin endpoint kicks it off); set
+    # EMBED_BACKFILL_AUTOSTART=1 to run the periodic loop continuously.
+    try:
+        from aca_jobs import embed_backfill as _ebf
+        _ebf.start(db)
+    except Exception as _ebf_err:
+        logger.warning(f"[embed-backfill] start failed: {_ebf_err}")
+
     # Task #609 — initialise the managed AI response cache. Safe no-op when
     # MEMORYSTORE_REDIS_URL is unset; the cache transparently falls back to
     # in-memory L1. LLM upstream caching is handled by Cloudflare AI Gateway.
