@@ -88,27 +88,35 @@ def test_english_rag_chat_round_robin():
 
 
 def test_content_workers_ai_primary():
-    """content pool (2026-05-05 user instruction): Workers AI variants are
-    the PRIMARY pool — workers_ai_mistral_7b + workers_ai_llama32_3b each
-    carry weight 10000. Vertex / Azure / Sarvam stay in the pool at
-    weight 100 as low-share fallbacks for capacity overflow. workers_ai
-    (gpt-oss-20b) remains the weight-0 last-resort safety net.
+    """content + assamese_content pools (2026-05-05 user instruction):
+    Stage-1 GENERATE is owned by Workers AI exclusively. Vertex sits at
+    weight 0 in BOTH pools because it is reserved for the Stage-2 polish
+    helper (`llm.polish_notes_with_vertex` — NotebookLM-style formatting).
+    The weight-0 Vertex slot is kept as an emergency last-resort so a
+    total Workers-AI outage can still serve content.
+
+    English `content` pool:
+      workers_ai_mistral_7b (10000), workers_ai_llama32_3b (10000),
+      vertex (0 — polish-reserved), workers_ai (0 — emergency safety net).
+
+    Assamese `assamese_content` pool:
+      workers_ai_indic (10000), vertex (0 — polish-reserved).
     """
-    from llm import select_provider
+    from llm import select_provider, polish_notes_with_vertex
     from collections import Counter
 
+    # ---- English content pool ------------------------------------------
     weights = POOL_WEIGHTS["content"]
     primaries = {"workers_ai_mistral_7b", "workers_ai_llama32_3b"}
-    fallbacks = {"vertex"}
 
     for p in primaries:
         assert weights[p] == 10000, (
             f"content: workers-AI primary {p} must carry weight 10000, got {weights[p]}"
         )
-    for p in fallbacks:
-        assert weights[p] == 100, (
-            f"content: paid fallback {p} must carry weight 100, got {weights[p]}"
-        )
+    assert weights.get("vertex", 0) == 0, (
+        "content: vertex must be weight-0 (reserved for stage-2 polish via "
+        "polish_notes_with_vertex), got " + str(weights.get("vertex"))
+    )
     assert weights.get("workers_ai", 0) == 0, (
         "content: generic workers_ai must remain weight-0 (last-resort safety net)"
     )
@@ -118,27 +126,55 @@ def test_content_workers_ai_primary():
     )
     assert "azure_openai" not in weights, (
         "content: azure_openai must NOT be in the English content pool — "
-        "content generation is Cloudflare-native + Vertex overflow only"
+        "content generation is Cloudflare-native (Workers AI) only"
     )
 
-    # Smoke-check the live dispatcher: across 600 draws workers-AI primaries
-    # should win the overwhelming majority (>=80%) and paid fallbacks should
-    # *occasionally* be drawn (>=1 each) so the safety valve is exercised.
+    # Across 600 draws every selection must be a workers-AI primary —
+    # Vertex (weight 0) must never be drawn except via the emergency
+    # exhaustion path which a healthy pool never enters.
     draws = 600
     counts = Counter(select_provider("content", lang="en") for _ in range(draws))
     primary_share = sum(counts[p] for p in primaries) / draws
-    assert primary_share >= 0.80, (
-        f"content: workers-AI primaries must take ≥80% of draws, got "
-        f"{primary_share:.0%}; counts={dict(counts)}"
+    assert primary_share == 1.0, (
+        f"content: stage-1 generate must route 100% to Workers AI primaries; "
+        f"counts={dict(counts)}"
     )
-    for p in fallbacks:
-        assert counts[p] >= 1, (
-            f"content: paid fallback {p} must be drawn at least once across "
-            f"{draws} draws (it is still in the pool); counts={dict(counts)}"
-        )
+    assert counts.get("vertex", 0) == 0, (
+        f"content: vertex must NOT be drawn for stage-1 generate (it is "
+        f"polish-reserved); counts={dict(counts)}"
+    )
+
+    # ---- Assamese content pool -----------------------------------------
+    as_weights = POOL_WEIGHTS["assamese_content"]
+    assert as_weights["workers_ai_indic"] == 10000, (
+        f"assamese_content: workers_ai_indic must carry weight 10000, got "
+        f"{as_weights['workers_ai_indic']}"
+    )
+    assert as_weights.get("vertex", 0) == 0, (
+        "assamese_content: vertex must be weight-0 (reserved for stage-2 "
+        "polish via polish_notes_with_vertex), got "
+        + str(as_weights.get("vertex"))
+    )
+
+    as_counts = Counter(select_provider("assamese_content", lang="as") for _ in range(draws))
+    assert as_counts.get("workers_ai_indic", 0) == draws, (
+        f"assamese_content: stage-1 generate must route 100% to "
+        f"workers_ai_indic (IndicTrans2); counts={dict(as_counts)}"
+    )
+    assert as_counts.get("vertex", 0) == 0, (
+        f"assamese_content: vertex must NOT be drawn for stage-1 generate "
+        f"(it is polish-reserved); counts={dict(as_counts)}"
+    )
+
+    # ---- Stage-2 polish helper exists and is callable -----------------
+    assert callable(polish_notes_with_vertex), (
+        "llm.polish_notes_with_vertex must exist as a callable — it is the "
+        "Stage-2 NotebookLM-style polish helper pinned to Vertex / Gemini"
+    )
+
     print(
-        f"  PASS: content workers-AI-primary "
-        f"(primaries {primary_share:.0%}, fallbacks present)"
+        "  PASS: content + assamese_content stage-1 generate is workers-only; "
+        "vertex is polish-reserved (weight 0); polish_notes_with_vertex callable"
     )
 
 
@@ -182,6 +218,8 @@ def test_priority_lists_contain_every_active_member():
     expectations = {
         "english_rag_chat":  {"azure_openai", "vertex",
                               "workers_ai_llama32_3b", "workers_ai_mistral_7b"},
+        # Vertex is in PROVIDER_PRIORITY["content"] for stage-2 polish
+        # routing (POOL_WEIGHTS sets it to 0 for stage-1 generate).
         "content":           {"vertex",
                               "workers_ai_mistral_7b", "workers_ai_llama32_3b"},
         "assamese_rag_chat": {"sarvam", "workers_ai_indic", "vertex"},

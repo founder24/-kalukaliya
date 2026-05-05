@@ -1179,15 +1179,16 @@ PROVIDER_MAX_CONCURRENT: dict[str, int] = {
 # wired) — they only fire when every active provider is exhausted.
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "content": {
-        # English content generation (2026-05-05 user instruction):
-        # Workers AI variants PRIMARY (each weight 10000), Vertex/Gemini
-        # FALLBACK (weight 100) for capacity overflow. Sarvam + Azure
-        # removed — Sarvam stays on the Assamese conversational path
-        # (`assamese_rag_chat`) only. workers_ai (gpt-oss-20b) remains
-        # the weight-0 last-resort safety net.
+        # English content generation — STAGE 1 (GENERATE) (2026-05-05).
+        # Worker AI variants generate raw notes (each weight 10000);
+        # Vertex/Gemini is RESERVED for STAGE 2 polish (NotebookLM-style
+        # formatting via `polish_notes_with_vertex`) and therefore
+        # stays in this pool only as a weight-0 emergency last-resort
+        # so a total Workers-AI outage can still serve content.
+        # Sarvam + Azure are not in this pool.
         "workers_ai_mistral_7b":  10000,
         "workers_ai_llama32_3b":  10000,
-        "vertex":                   100,
+        "vertex":                     0,  # reserved for stage-2 polish; emergency-only here
         "workers_ai":                 0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
     },
     "english_rag_chat": {
@@ -1208,8 +1209,14 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "vertex":                 1000,
     },
     "assamese_content": {
-        "workers_ai_indic": 1000,
-        "vertex":           1000,
+        # Assamese content generation — STAGE 1 (GENERATE) (2026-05-05).
+        # workers_ai_indic (IndicTrans2) generates the raw Assamese
+        # output. Vertex/Gemini is RESERVED for STAGE 2 polish
+        # (NotebookLM-style formatting via `polish_notes_with_vertex`)
+        # and stays in this pool only as a weight-0 emergency last-
+        # resort so an IndicTrans2 outage can still serve content.
+        "workers_ai_indic": 10000,
+        "vertex":               0,  # reserved for stage-2 polish; emergency-only here
     },
     "translate": {
         "workers_ai_indic": 1000,

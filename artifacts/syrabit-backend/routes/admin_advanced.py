@@ -20,7 +20,7 @@ from auth_deps import (
     get_admin_user,
 )
 from db_ops import supa_list_users
-from llm import call_llm_api_content, _call_llm_raw
+from llm import call_llm_api_content, _call_llm_raw, polish_notes_with_vertex
 from seo_engine import _normalize_headings
 from rag import (
     _embed_and_store_chapter,
@@ -2101,11 +2101,31 @@ Write **exam-focused, topic-wise summary notes** for the chapter below. These ar
 6. Write as though every word costs marks — no filler, no repetition.
 """
     try:
+        # Stage 1 (GENERATE): Workers AI variants emit the raw notes via
+        # POOL_WEIGHTS["content"] (workers_ai_mistral_7b / llama32_3b at
+        # weight 10000; Vertex stays at weight 0 here, reserved for the
+        # polish stage below).
         result = await call_llm_api_content([{"role": "user", "content": prompt}], max_tokens=2048)
         text = result.strip() if result and len(result.strip()) > 50 else ""
-        if text:
-            text = _normalize_headings(text)
-            _redis_set("pipeline_notes", cache_key, text, 3600)
+        if not text:
+            return ""
+
+        # Stage 2 (POLISH): Vertex / Gemini 2.5 Flash re-formats into
+        # NotebookLM-style notes. Failure is non-fatal — the helper
+        # returns raw notes unchanged on Vertex error / safety block.
+        try:
+            text = await polish_notes_with_vertex(
+                text,
+                title=title,
+                subject_name=subject_name or "",
+                lang="en",
+                max_tokens=4000,
+            )
+        except Exception:
+            pass  # polish_notes_with_vertex already logs + degrades gracefully
+
+        text = _normalize_headings(text)
+        _redis_set("pipeline_notes", cache_key, text, 3600)
         return text
     except Exception:
         return ""

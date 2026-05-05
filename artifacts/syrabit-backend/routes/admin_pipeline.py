@@ -18,7 +18,13 @@ from cache import _invalidate_content_cache
 from auth_deps import (
     get_admin_user,
 )
-from llm import call_llm_api_content, call_llm_api_content_with_retry, call_translate_with_dispatch, call_embed_with_dispatch
+from llm import (
+    call_llm_api_content,
+    call_llm_api_content_with_retry,
+    call_translate_with_dispatch,
+    call_embed_with_dispatch,
+    polish_notes_with_vertex,
+)
 from rag import (
     auto_chunk_content,
     backfill_chunk_embeddings,
@@ -99,52 +105,31 @@ def _trim_long_intro(content: str, max_intro_lines: int = 4) -> str:
 
 
 async def _polish_notes_with_sarvam(raw_notes: str, title: str, subject_name: str) -> str:
-    polish_prompt = f"""You are a senior academic editor. Polish the following study notes.
+    """Stage-2 NotebookLM-style polish — pinned to Vertex / Gemini.
 
-**Chapter:** {title}
-**Subject:** {subject_name}
+    Despite the legacy ``_with_sarvam`` name (kept so existing callers don't
+    break), this helper now routes through ``llm.polish_notes_with_vertex``
+    per the 2026-05-05 user instruction:
 
-**Raw Notes:**
-{raw_notes}
+      * Stage 1 (GENERATE): Workers AI variants produce the raw notes.
+      * Stage 2 (POLISH):   Vertex / Gemini 2.5 Flash re-formats the raw
+                            notes into NotebookLM-style study notes.
 
----
-
-**YOUR TASK — improve the notes by:**
-1. Fix any grammar, spelling, or formatting errors
-2. Improve clarity and precision of explanations
-3. Ensure all key definitions are in **bold**
-4. Tighten bullet points — remove redundancy
-5. Ensure markdown formatting is clean (##, ###, **, -, etc.)
-6. Keep the same structure and headings — do NOT add or remove topics
-7. Do NOT add introductions, summaries, exam tips, extra examples, or cross-references
-8. Do NOT expand content beyond what exists — only improve quality and clarity
-9. Preserve the lean, topic-only format: each section should have a definition, explanation, and key facts only
-10. If there is any introduction text before the first ## heading longer than 3-4 lines, trim it down or remove it entirely. The content should start with the first ## topic heading.
-
-Return ONLY the polished notes in markdown. NO preamble, NO commentary."""
-
-    input_tokens_est = len(polish_prompt.split()) * 2
-    sarvam_ctx = 7192
-    polish_max = min(4000, sarvam_ctx - input_tokens_est - 100)
-    if polish_max < 1000:
-        logger.warning(f"[POLISH] Input too large for Sarvam ({input_tokens_est} est tokens), skipping polish")
-        return raw_notes
-
+    The previous Sarvam pin was broken — ``call_llm_api_content`` ignores
+    the ``model=`` parameter and routes via the ``content`` POOL_WEIGHTS
+    pool, which no longer contains Sarvam at all.
+    """
     try:
         async with _pipeline_sem:
-            polished = await call_llm_api_content(
-                [{"role": "user", "content": polish_prompt}],
-                max_tokens=polish_max,
-                model="sarvam-m"
+            return await polish_notes_with_vertex(
+                raw_notes,
+                title=title,
+                subject_name=subject_name,
+                lang="en",
+                max_tokens=4000,
             )
-        if polished and len(polished.split()) >= len(raw_notes.split()) * 0.7:
-            logger.info(f"[POLISH] Sarvam polished notes for '{title}': {len(raw_notes.split())}→{len(polished.split())} words")
-            return polished.strip()
-        else:
-            logger.warning(f"[POLISH] Sarvam output too short for '{title}', keeping raw notes")
-            return raw_notes
     except Exception as e:
-        logger.warning(f"[POLISH] Sarvam polish failed for '{title}': {e} — keeping raw notes")
+        logger.warning(f"[POLISH] Vertex polish failed for '{title}': {e} — keeping raw notes")
         return raw_notes
 
 
