@@ -87,12 +87,51 @@ def test_english_rag_chat_round_robin():
           "azure_openai / vertex / workers_ai_llama32_3b / workers_ai_mistral_7b")
 
 
-def test_content_round_robin():
-    expected = {"vertex", "azure_openai", "sarvam", "workers_ai_mistral_7b"}
-    _assert_equal_weights("content", expected)
-    assert POOL_WEIGHTS["content"].get("workers_ai", 0) == 0
-    _expect_round_robin("content", expected, lang="en")
-    print("  PASS: content round-robin across vertex / azure_openai / sarvam / workers_ai_mistral_7b")
+def test_content_workers_ai_primary():
+    """content pool (2026-05-05 user instruction): Workers AI variants are
+    the PRIMARY pool — workers_ai_mistral_7b + workers_ai_llama32_3b each
+    carry weight 10000. Vertex / Azure / Sarvam stay in the pool at
+    weight 100 as low-share fallbacks for capacity overflow. workers_ai
+    (gpt-oss-20b) remains the weight-0 last-resort safety net.
+    """
+    from llm import select_provider
+    from collections import Counter
+
+    weights = POOL_WEIGHTS["content"]
+    primaries = {"workers_ai_mistral_7b", "workers_ai_llama32_3b"}
+    fallbacks = {"vertex", "azure_openai", "sarvam"}
+
+    for p in primaries:
+        assert weights[p] == 10000, (
+            f"content: workers-AI primary {p} must carry weight 10000, got {weights[p]}"
+        )
+    for p in fallbacks:
+        assert weights[p] == 100, (
+            f"content: paid fallback {p} must carry weight 100, got {weights[p]}"
+        )
+    assert weights.get("workers_ai", 0) == 0, (
+        "content: generic workers_ai must remain weight-0 (last-resort safety net)"
+    )
+
+    # Smoke-check the live dispatcher: across 600 draws workers-AI primaries
+    # should win the overwhelming majority (>=80%) and paid fallbacks should
+    # *occasionally* be drawn (>=1 each) so the safety valve is exercised.
+    draws = 600
+    counts = Counter(select_provider("content", lang="en") for _ in range(draws))
+    primary_share = sum(counts[p] for p in primaries) / draws
+    assert primary_share >= 0.80, (
+        f"content: workers-AI primaries must take ≥80% of draws, got "
+        f"{primary_share:.0%}; counts={dict(counts)}"
+    )
+    for p in fallbacks:
+        assert counts[p] >= 1, (
+            f"content: paid fallback {p} must be drawn at least once across "
+            f"{draws} draws (it is still in the pool); counts={dict(counts)}"
+        )
+    print(
+        f"  PASS: content workers-AI-primary "
+        f"(primaries {primary_share:.0%}, fallbacks present)"
+    )
 
 
 def test_assamese_rag_chat_round_robin():
@@ -135,7 +174,8 @@ def test_priority_lists_contain_every_active_member():
     expectations = {
         "english_rag_chat":  {"azure_openai", "vertex",
                               "workers_ai_llama32_3b", "workers_ai_mistral_7b"},
-        "content":           {"vertex", "azure_openai", "sarvam", "workers_ai_mistral_7b"},
+        "content":           {"vertex", "azure_openai", "sarvam",
+                              "workers_ai_mistral_7b", "workers_ai_llama32_3b"},
         "assamese_rag_chat": {"sarvam", "workers_ai_indic", "vertex"},
         "translate":         {"workers_ai_indic", "vertex"},
     }
@@ -156,7 +196,7 @@ def test_priority_lists_contain_every_active_member():
 
 if __name__ == "__main__":
     test_english_rag_chat_round_robin()
-    test_content_round_robin()
+    test_content_workers_ai_primary()
     test_assamese_rag_chat_round_robin()
     test_translate_round_robin()
     test_workers_ai_fallback_uses_gpt_oss_20b()
