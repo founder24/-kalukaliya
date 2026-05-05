@@ -1345,6 +1345,22 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # service is unavailable.  Redis key: assamese_unavailable_burst.
     # Set to 0 to disable.
     "assamese_unavailable_burst_threshold": 3,
+    # Task #412: embed-stack health watchdog.  The new custom embed worker
+    # at https://embed.syrabit.ai is now the primary embedding path for
+    # the whole RAG pipeline (chat / search / related-content), with
+    # Pinecone-only rerank and the Voyage-backed Mongo memory_brain as
+    # the two sibling legs surfaced by /admin/health/embed-stack.  When
+    # any leg flips unhealthy, the dispatcher soft-fails and either
+    # routes to a degraded fallback or returns empty results — both
+    # invisible to users as anything but "search just got worse".
+    # The alerting loop polls each leg once per tick (every 120 s) and
+    # increments a per-leg in-memory consecutive-failure counter.  When
+    # the counter reaches this threshold the loop pages on-call with
+    # the failing leg, the latency_ms of the failing probe and the last
+    # error string the worker returned.  The counter resets to 0 on the
+    # first successful probe so a single transient blip never pages.
+    # Default 3 (≈6 min of sustained failure) — set to 0 to disable.
+    "embed_stack_consecutive_failures_threshold": 3,
 }
 _ALERT_EXPIRATION_DEFAULT = {
     "enabled": False,
@@ -2113,6 +2129,148 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
     return outcomes
 
 
+# ── Task #412: embed-stack consecutive-failure counters ────────────────────
+# Per-leg in-memory counters driven by ``_check_embed_stack_health_once``.
+# A successful probe resets the leg's counter to 0; a failure increments it.
+# When a counter reaches the
+# ``embed_stack_consecutive_failures_threshold`` value above, the alerting
+# loop pages on-call.  ``_was_firing`` latches so we don't re-page every
+# 120 s tick during an ongoing outage and so we can emit a recovery alert
+# the first time the leg returns healthy after firing.
+_EMBED_STACK_LEGS = ("embed", "rerank", "memory_brain")
+_embed_stack_consecutive_failures: dict[str, int] = {leg: 0 for leg in _EMBED_STACK_LEGS}
+_embed_stack_was_firing: dict[str, bool] = {leg: False for leg in _EMBED_STACK_LEGS}
+_embed_stack_last_error: dict[str, str | None] = {leg: None for leg in _EMBED_STACK_LEGS}
+_embed_stack_last_latency_ms: dict[str, int | None] = {leg: None for leg in _EMBED_STACK_LEGS}
+
+
+async def _probe_embed_stack_leg(leg: str) -> dict:
+    """Probe a single embed-stack leg and return its health dict.
+
+    Each provider's ``health_check`` already returns
+    ``{ok, latency_ms, error/reason}`` and never raises, but we wrap it
+    defensively so a programmer error in one leg can't take the whole
+    alerting loop down for the others.
+    """
+    try:
+        if leg == "embed":
+            from providers import workers_embed as _we
+            return await _we.health_check()
+        if leg == "rerank":
+            from providers import pinecone_ai as _pc
+            return await _pc.rerank_health_check()
+        if leg == "memory_brain":
+            from providers import memory_brain as _mb
+            return await _mb.health_check()
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)[:200]}
+    return {"ok": False, "reason": f"unknown leg: {leg}"}
+
+
+async def _check_embed_stack_health_once(threshold: int | None = None) -> dict:
+    """One tick of the Task #412 embed-stack watchdog.
+
+    Probes each of the three legs (embed / rerank / memory_brain) once,
+    updates the per-leg consecutive-failure counter, and dispatches an
+    alert when a leg crosses ``threshold``.  Recovery alerts fire the
+    first time a leg returns healthy after having paged.
+
+    Returns a snapshot dict (per-leg counter + ok flag) so callers / tests
+    can introspect what happened on this tick.
+    """
+    if threshold is None:
+        _raw = _ALERT_THRESHOLDS.get("embed_stack_consecutive_failures_threshold")
+        try:
+            threshold = int(_raw) if _raw is not None else 3
+        except (TypeError, ValueError):
+            threshold = 3
+    snapshot: dict[str, dict] = {}
+    if threshold <= 0:
+        # Watchdog disabled — clear all latches so re-enabling later
+        # doesn't surface a stale recovery alert.
+        for leg in _EMBED_STACK_LEGS:
+            _embed_stack_consecutive_failures[leg] = 0
+            _embed_stack_was_firing[leg] = False
+            snapshot[leg] = {"ok": True, "consecutive_failures": 0, "disabled": True}
+        return snapshot
+
+    for leg in _EMBED_STACK_LEGS:
+        info = await _probe_embed_stack_leg(leg)
+        ok = bool(info.get("ok"))
+        latency_ms = info.get("latency_ms")
+        last_error = info.get("reason") or info.get("error")
+        if ok:
+            prev = _embed_stack_consecutive_failures[leg]
+            _embed_stack_consecutive_failures[leg] = 0
+            _embed_stack_last_error[leg] = None
+            _embed_stack_last_latency_ms[leg] = (
+                int(latency_ms) if isinstance(latency_ms, (int, float)) else None
+            )
+            if _embed_stack_was_firing[leg]:
+                # First green tick after a paging incident — page on-call
+                # so they know the leg is back.  Distinct alert_type so
+                # cooldown/dedup doesn't collapse with the unhealthy alert.
+                await _dispatch_alert(
+                    f"embed_stack_{leg}_recovered",
+                    f"✅ Embed stack recovered — {leg} leg is healthy again",
+                    f"The embed-stack `{leg}` leg has returned a successful "
+                    f"health probe after paging on {prev} consecutive failures. "
+                    f"RAG (chat / search / related-content) should be back to "
+                    f"full quality on this leg.  Confirm via "
+                    f"`/admin/health/embed-stack`.",
+                    threshold_snapshot={
+                        "metric": "embed_stack_consecutive_failures_threshold",
+                        "value": threshold,
+                        "actual": 0,
+                        "leg": leg,
+                        "previous_consecutive_failures": prev,
+                    },
+                )
+                _embed_stack_was_firing[leg] = False
+        else:
+            _embed_stack_consecutive_failures[leg] += 1
+            _embed_stack_last_error[leg] = (
+                str(last_error)[:200] if last_error else "unknown"
+            )
+            _embed_stack_last_latency_ms[leg] = (
+                int(latency_ms) if isinstance(latency_ms, (int, float)) else None
+            )
+            count = _embed_stack_consecutive_failures[leg]
+            if count >= threshold and not _embed_stack_was_firing[leg]:
+                await _dispatch_alert(
+                    f"embed_stack_{leg}_unhealthy",
+                    f"Embed stack — {leg} leg unhealthy ({count} consecutive failures)",
+                    f"The embed-stack `{leg}` leg has failed its "
+                    f"health probe {count} times in a row "
+                    f"(threshold: {threshold}).  RAG is silently degrading: "
+                    f"the dispatcher in `llm.py` will either fall back to "
+                    f"a downgraded provider or return empty embeddings, "
+                    f"which looks like \"search just got worse\" to users. "
+                    f"Last error: {_embed_stack_last_error[leg]} "
+                    f"(latency_ms="
+                    f"{_embed_stack_last_latency_ms[leg]}). "
+                    f"Inspect `/admin/health/embed-stack` and the worker "
+                    f"logs at https://embed.syrabit.ai to triage.",
+                    threshold_snapshot={
+                        "metric": "embed_stack_consecutive_failures_threshold",
+                        "value": threshold,
+                        "actual": count,
+                        "leg": leg,
+                        "latency_ms": _embed_stack_last_latency_ms[leg],
+                        "last_error": _embed_stack_last_error[leg],
+                    },
+                )
+                _embed_stack_was_firing[leg] = True
+        snapshot[leg] = {
+            "ok": ok,
+            "consecutive_failures": _embed_stack_consecutive_failures[leg],
+            "latency_ms": _embed_stack_last_latency_ms[leg],
+            "last_error": _embed_stack_last_error[leg],
+            "firing": _embed_stack_was_firing[leg],
+        }
+    return snapshot
+
+
 async def _alerting_loop():
     """Background loop: checks metrics every 2 minutes for alert conditions."""
     await asyncio.sleep(60)   # let startup + first metrics settle
@@ -2550,6 +2708,18 @@ async def _alerting_loop():
                                 "window_seconds": _PROVIDER_429_BURST_WINDOW_S,
                             },
                         )
+            except Exception:
+                pass
+
+            # ── 14. Embed-stack health watchdog (Task #412) ──────────────
+            # Probes the three legs of the new embed stack
+            # (embed / rerank / memory_brain) surfaced by
+            # /admin/health/embed-stack and pages on-call after N
+            # consecutive failures so RAG can't silently degrade. The
+            # per-leg counter resets on the first successful probe so a
+            # single transient blip never pages.
+            try:
+                await _check_embed_stack_health_once()
             except Exception:
                 pass
 
