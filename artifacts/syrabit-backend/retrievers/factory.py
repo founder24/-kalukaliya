@@ -58,7 +58,14 @@ def list_available_retrievers() -> list[str]:
 def get_retriever_by_name(name: str) -> Retriever:
     """Return a memoised retriever by exact name. Raises `ValueError`
     if the name is not registered. Exposed so the benchmark + ingestion
-    scripts can pin a specific backend regardless of the active toggle."""
+    scripts can pin a specific backend regardless of the active toggle.
+
+    Task #383 — when ``VECTORIZE_SHADOW_ON`` is true and the resolved
+    primary backend is not vectorize, the returned instance is wrapped
+    in a ``ShadowRetriever`` so writes/queries are mirrored to
+    Cloudflare Vectorize for parity verification (results from the
+    primary remain authoritative).
+    """
     key = (name or "").strip().lower()
     if key not in _KNOWN:
         raise ValueError(
@@ -67,6 +74,11 @@ def get_retriever_by_name(name: str) -> Retriever:
     inst = _instances.get(key)
     if inst is None:
         inst = _KNOWN[key]()
+        try:
+            from vectorize_shadow import maybe_wrap_with_shadow
+            inst = maybe_wrap_with_shadow(inst)
+        except Exception as exc:
+            logger.debug("vectorize shadow wrap skipped: %s", exc)
         _instances[key] = inst
     return inst
 

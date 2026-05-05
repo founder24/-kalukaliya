@@ -755,6 +755,22 @@ async def get_chapters(subject_id: str, response: Response = None):
     if cached:
         if response: response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=7200"
         return cached
+    # Task #383 — KV+CacheReserve cross-pod mirror. The in-process LRU
+    # above missed; consult the CF KV namespace via the async path so
+    # a cold pod (or sibling pod that just restarted) can serve from
+    # the warm KV value another pod populated, without re-hitting
+    # Mongo. ``await cache.get(...)`` does the LRU check internally
+    # too, so this is a single round-trip on the worst case.
+    kv_key = f"chapters/{subject_id}"
+    try:
+        from kv_cache import default_cache as _kv
+        kv_hit = await _kv().get(kv_key)
+        if kv_hit is not None:
+            _set_content_cache(ck, kv_hit)
+            if response: response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=7200"
+            return kv_hit
+    except Exception:
+        pass
     try:
         if not await is_mongo_available():
             return []
@@ -763,10 +779,39 @@ async def get_chapters(subject_id: str, response: Response = None):
             if not ch.get("slug") and ch.get("title"):
                 ch["slug"] = slugify_title(ch["title"])
         _set_content_cache(ck, chapters)
+        # Mirror to KV so a sibling pod (or a cold restart) can serve
+        # without touching Mongo. 5-minute TTL keeps staleness bounded;
+        # admin chapter writes invalidate explicitly via
+        # ``_invalidate_chapters_kv()`` below.
+        try:
+            from kv_cache import default_cache as _kv
+            await _kv().set(kv_key, chapters, ttl_s=300)
+        except Exception:
+            pass
         if response: response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=7200"
         return chapters
     except Exception:
         return []
+
+
+async def invalidate_chapters_kv(subject_id: str) -> None:
+    """Task #383 — purge the chapter-index entry for ``subject_id``
+    from the local LRU and the CF KV mirror so admin writes
+    (chapter add / rename / reorder) become visible on every pod
+    immediately. Safe to call from sync or async contexts; never
+    raises.
+    """
+    ck = f"chapters:{subject_id}"
+    try:
+        from routes.content import _content_cache  # type: ignore
+        _content_cache.pop(ck, None)
+    except Exception:
+        pass
+    try:
+        from kv_cache import default_cache as _kv
+        await _kv().invalidate(f"chapters/{subject_id}")
+    except Exception:
+        pass
 
 _slug_hierarchy_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=512, ttl=1800)
 

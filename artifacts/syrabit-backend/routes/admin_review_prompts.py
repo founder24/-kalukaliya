@@ -33,6 +33,12 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 
 from auth_deps import get_admin_user
 from deps import db, is_mongo_available
+# Task #383 — Turnstile gate for the public review-prompt analytics
+# ingest. The endpoint is a fire-and-forget telemetry POST today and
+# any unauthenticated client can spam it; gating it on Turnstile
+# prevents a basic abuse vector without breaking the existing flow
+# (the dependency is dormant when TURNSTILE_ON is false).
+from turnstile import require_turnstile
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,7 +74,8 @@ async def _ensure_review_prompt_indexes() -> None:
 # ─────────────────────────────────────────────
 # Public ingest
 # ─────────────────────────────────────────────
-@router.post("/analytics/review-prompt-event")
+@router.post("/analytics/review-prompt-event",
+             dependencies=[Depends(require_turnstile)])
 async def track_review_prompt_event(
     request: Request,
     event: str = Body(...),

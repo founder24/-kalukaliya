@@ -3,8 +3,18 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, Query
 from auth_deps import get_admin_user
 from deps import db, is_mongo_available
+# Task #383 — wire syllabus reads through the KvCache so a hot board/class
+# pair only hits Mongo once per TTL. The cache is always-on (in-process
+# LRU); the CF KV mirror activates when CF_EDGE_CACHE_ON + edge worker
+# secret are configured.
+from kv_cache import default_cache
 
 logger = logging.getLogger(__name__)
+
+# 5-minute TTL: syllabi are admin-edited a handful of times per week, so
+# 5 minutes of staleness is acceptable in exchange for ~99% Mongo offload
+# on the public read paths. Admin write endpoints invalidate explicitly.
+_SYLLABUS_TTL_S = 5 * 60
 
 def _get_syllabus_embedder():
     import server as _s
@@ -13,8 +23,18 @@ def _get_syllabus_embedder():
 router = APIRouter()
 
 
+def _syllabus_cache_key(board_id: str, class_id: str,
+                        stream_id: str = "", subject_id: str = "") -> str:
+    return f"syllabus/{board_id}/{class_id}/{stream_id or '_'}/{subject_id or '_'}"
+
+
 @router.get("/syllabi/{board_id}/{class_id}")
 async def get_syllabus(board_id: str, class_id: str):
+    cache = default_cache()
+    cache_key = _syllabus_cache_key(board_id, class_id)
+    cached = cache.get_local(cache_key)
+    if cached is not None:
+        return cached
     try:
         if not await is_mongo_available():
             return {"board_id": board_id, "class_id": class_id, "content": "", "chapters": [], "topics": [], "found": False}
@@ -22,8 +42,13 @@ async def get_syllabus(board_id: str, class_id: str):
         if not syllabus:
             syllabus = await db.syllabi.find_one({"board_id": board_id, "class_id": class_id}, {"_id": 0})
         if syllabus:
+            await cache.set(cache_key, syllabus, ttl_s=_SYLLABUS_TTL_S)
             return syllabus
-        return {"board_id": board_id, "class_id": class_id, "content": "", "chapters": [], "topics": [], "found": False}
+        miss_doc = {"board_id": board_id, "class_id": class_id, "content": "", "chapters": [], "topics": [], "found": False}
+        # Cache misses too, but with a shorter TTL so a freshly-seeded
+        # syllabus shows up within a minute instead of waiting 5.
+        await cache.set(cache_key, miss_doc, ttl_s=60)
+        return miss_doc
     except Exception as e:
         logger.error(f"Get syllabus error: {e}")
         return {"board_id": board_id, "class_id": class_id, "content": "", "chapters": [], "topics": [], "found": False}
@@ -82,6 +107,12 @@ async def admin_seed_syllabus_embeddings(
     emb = _get_syllabus_embedder()
     if emb is None:
         raise HTTPException(status_code=503, detail="SyllabusEmbedder not initialised")
+    # Task #383 — reseed touches every syllabus; drop the read-cache so
+    # downstream public reads don't serve a stale chapter list.
+    try:
+        default_cache().reset()
+    except Exception:
+        pass
     if full:
         return await emb.full_reseed()
     return await emb.reseed()

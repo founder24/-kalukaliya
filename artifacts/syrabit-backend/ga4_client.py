@@ -53,13 +53,40 @@ def _cfg():
     }
 
 
+def _ga4_enabled() -> bool:
+    """Task #383 — gate GA4 traffic behind ``GA4_ENABLED``.
+
+    The flag defaults OFF when CF Web Analytics is on (see ``config.py``)
+    so the analytics team can flip the entire GA4 path dormant in one
+    place once the CF beacon is verified — without having to delete the
+    refresh token. We re-read the env var on every call (rather than
+    caching the import-time value) so an operator can flip it via
+    ``Configurator.set_runtime_env`` without a restart, mirroring how
+    every other GA4 credential is read here.
+    """
+    raw = Configurator.get("GA4_ENABLED", "")
+    if raw:
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    # No explicit value at runtime — fall back to the boolean computed
+    # at config import time (which already factors in CF_WEB_ANALYTICS_ON).
+    try:
+        from config import GA4_ENABLED as _flag_default
+        return bool(_flag_default)
+    except Exception:
+        return True  # safest fallback — preserves legacy behaviour
+
+
 def _is_configured() -> bool:
+    if not _ga4_enabled():
+        return False
     c = _cfg()
     return bool(c["property_id"] and c["client_secret"] and c["refresh_token"])
 
 
 async def _ensure_configured() -> bool:
     """Check config; if refresh_token missing, try loading from DB."""
+    if not _ga4_enabled():
+        return False
     if _is_configured():
         return True
     await _load_db_refresh_token()

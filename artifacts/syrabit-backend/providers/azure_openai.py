@@ -310,6 +310,15 @@ async def call_chat(
         url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version={_API_VERSION}"
         try:
             resp = await client.post(url, headers=headers, json=body)
+            # Task #383 — record CF AI Gateway response headers (cf-aig-*)
+            # whenever the request actually went through the gateway. Pure
+            # observation — never raises, never blocks the chat response.
+            if label == "cf_byok":
+                try:
+                    from ai_gateway_observability import record_aig_response
+                    record_aig_response(resp.headers, provider="azure_openai")
+                except Exception:
+                    pass
             if resp.status_code in _RETRYABLE_STATUS:
                 last_err = RuntimeError(
                     f"azure_openai[{label}]: HTTP {resp.status_code} — {resp.text[:200]}"
@@ -372,6 +381,15 @@ async def stream_chat(
                 "POST", url, headers=headers, json=body,
                 timeout=httpx.Timeout(timeout_s),
             ) as resp:
+                # Task #383 — capture cf-aig-* response headers for the
+                # streaming path too. Headers are available the moment
+                # the response object exists, before any tokens flow.
+                if label == "cf_byok":
+                    try:
+                        from ai_gateway_observability import record_aig_response
+                        record_aig_response(resp.headers, provider="azure_openai_stream")
+                    except Exception:
+                        pass
                 if resp.status_code in _RETRYABLE_STATUS:
                     body_bytes = await resp.aread()
                     last_err = RuntimeError(

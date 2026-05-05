@@ -355,3 +355,125 @@ get `role="staff"` correctly (lines 262-266 of `routes/auth.py`).
 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` in the environment are
 **only** for the GA4 Data API client (`ga4_client.py`). They are not used for
 Google sign-in. Set them separately from the Supabase provider credentials.
+
+---
+
+## Cloudflare wins program — feature flags (Task #383)
+
+Five Cloudflare workstreams were activated under one task, each gated by an
+independent flag so on-call can flip / roll back any one piece without
+touching the others. All flags are read at module-import time from the
+process environment; flip them in Replit Secrets (or your prod env: Railway,
+Cloud Run, DO App Platform) and restart the app.
+
+| Flag                   | Default | What it gates                                                                 |
+|------------------------|---------|-------------------------------------------------------------------------------|
+| `CF_AIGW_OBS_ON`       | `1`     | `ai_gateway_observability` parses `cf-aig-*` headers + tallies counters.      |
+| `VECTORIZE_SHADOW_ON`  | `0`     | Pinecone (or whichever primary) writes/queries are mirrored into Vectorize.   |
+| `R2_PRIMARY_ON`        | `0`     | Chapter PDFs / audio / exports / backups served from R2 first (else origin).  |
+| `CF_EDGE_CACHE_ON`     | `0`     | `kv_cache.KvCache` mirrors hot reads into the CF KV namespace via the worker. |
+| `TURNSTILE_ON`         | `0`     | Public POST routes wrapped in `Depends(require_turnstile)` enforce the token. |
+| `CF_WEB_ANALYTICS_ON`  | `0`     | SSR shell renders the CF beacon snippet; `GA4_ENABLED` defaults to OFF.       |
+| `CF_TUNNEL_ONLY_ON`    | `0`     | Origin advertises that only Cloudflare CIDRs are accepted (informational).    |
+| `GA4_ENABLED`          | `1`*    | When `0`, every GA4 call returns `None` immediately — keeps token in DB.       |
+
+\* `GA4_ENABLED` defaults to `not CF_WEB_ANALYTICS_ON` so flipping the CF
+beacon on auto-disables GA4. Set `GA4_ENABLED=1` to keep both running in
+parallel during the comparison window.
+
+### Required secondary env vars
+
+* `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` — Cloudflare → Turnstile.
+* `CF_WEB_ANALYTICS_TOKEN` — Cloudflare → Analytics & Logs → Web Analytics →
+  Site → JS snippet (the `data-cf-beacon` token).
+* `CF_ANALYTICS_API_TOKEN` + `CF_WEB_ANALYTICS_SITE_TAG` — only needed if you
+  want the `/admin/cf-health` panel to show "pageviews in the last hour"
+  via the GraphQL Analytics API. Token needs `Account Analytics:Read`.
+* `CF_TUNNEL_ALLOWED_IPS` — comma-separated CIDRs to allow when
+  `CF_TUNNEL_ONLY_ON=1`. Defaults to the canonical Cloudflare IPv4 ranges
+  from <https://www.cloudflare.com/ips/>.
+
+### Unified health route
+
+Hit `GET /api/admin/cf-health` (admin-gated) for one JSON aggregate of every
+workstream's flag state, counters, and last-N samples:
+
+```bash
+curl -s "$ORIGIN/api/admin/cf-health" -H "Cookie: admin_session=…" | jq
+```
+
+Each block carries `{enabled, configured, ...}` so the admin UI can render
+status pills regardless of which flags are on. A workstream that fails to
+import or snapshot returns `{"error": "..."}` — the rest of the panel keeps
+rendering.
+
+### Rollback values
+
+Set everything to its pre-task-383 state:
+
+```env
+CF_AIGW_OBS_ON=0
+VECTORIZE_SHADOW_ON=0
+R2_PRIMARY_ON=0
+CF_EDGE_CACHE_ON=0
+TURNSTILE_ON=0
+CF_WEB_ANALYTICS_ON=0
+CF_TUNNEL_ONLY_ON=0
+GA4_ENABLED=1
+```
+
+### Cloudflare dashboard configuration that lives outside this repo
+
+These pieces require the operator to log into Cloudflare — they are gated
+behind the same flags but the activation step is a dashboard click, not a
+code change:
+
+1. **AI Gateway → Logs / Cache / Guardrails.** Enable in Cloudflare →
+   AI → AI Gateway → `<gateway>` → Settings. Headers parsed by
+   `ai_gateway_observability` only appear once Cache + Logs are on.
+2. **Vectorize index.** Create in Cloudflare → Workers AI → Vectorize.
+   Set `VECTORIZE_INDEX_NAME` to match `vectorize_client.VECTORIZE_INDEX`.
+3. **R2 lifecycle / Cache Reserve.** Cache Reserve is a paid add-on
+   enabled per-zone in Caching → Cache Reserve. R2 lifecycle rules
+   (Standard → Infrequent Access at 30 days) live in R2 → Bucket → Settings.
+4. **KV namespace.** `wrangler kv:namespace create CF_EDGE_CACHE` and add
+   the binding to `workers/edge-proxy/wrangler.toml`. The
+   `/api/edge/kv-cache/{key}` endpoints expected by `kv_cache.py` are stubs
+   on the worker side until that task lands.
+5. **Cloudflare Tunnel.** Install `cloudflared` next to the origin,
+   `cloudflared tunnel create syrabit-origin`, then add the tunnel to the
+   Zero Trust dashboard. Flip `CF_TUNNEL_ONLY_ON=1` once the origin
+   firewall is restricted to the published CIDRs.
+
+### Wiring map — where each flag actually changes runtime behaviour
+
+The flags above don't do anything until they're consumed by a request
+path. After Task #383's review remediation pass, the wiring is:
+
+| Flag                  | Wired into                                            | Behavioural change |
+|-----------------------|-------------------------------------------------------|--------------------|
+| `CF_AIGW_OBS_ON`      | `providers/azure_openai.py` `call_chat` + `stream_chat` | Parses `cf-aig-*` headers from every gateway response into the `/admin/cf-health` counters. |
+| `VECTORIZE_SHADOW_ON` | `retrievers/factory.py` via `vectorize_shadow.maybe_wrap_with_shadow`; ops endpoints `/admin/vectorize-shadow{,/reset}`; `scripts/vectorize_parity_nightly.py` | Default mirror rate is **1.0** (every query/upsert shadowed) for parity-grade recall@k. Override via `VECTORIZE_SHADOW_SAMPLE_RATE` if Vectorize bandwidth becomes the bottleneck. |
+| `R2_PRIMARY_ON`       | `r2_storage.r2_primary_read_url(key, s3_fallback_url=...)` is the canonical read-URL emitter, called from both upload-success branches in `routes/admin_content.py::upload_content_image` (R2 + Supabase fallback) and `upload_content_file` (PDF). Toggle flips the URL the API hands back without a redeploy. `/admin/r2-storage-health` reports backend state. | When the flag is on **and** the same key exists in R2, every upload-success response (and any chapter PDF / image URL) is served via the R2 public URL; otherwise the helper returns the original Supabase URL. This means a key backfilled into R2 starts being served from R2 immediately on flag flip — no caller change needed. |
+| `CF_EDGE_CACHE_ON`    | `routes/syllabus.py::get_syllabus` (await `cache.get`) and `routes/content.py::get_chapters` (await `cache.get` cross-pod hot path; falls back to Mongo on miss; mirrors result back into KV with a 5-min TTL). Admin chapter writes (`add_chapter`, `update_chapter`, `_cascade_delete_subject_assets`) call `routes.content.invalidate_chapters_kv(subject_id)` so renames/reorders are visible across pods immediately. `edu_allowlist.invalidate_cache()` covers the allowlist mirror on the admin write path. | Hot syllabus + chapter-index reads served from in-process LRU + KV mirror; cold/sibling pods served from KV mirror via the **async** path (so a Cloud Run cold start hydrates without touching Mongo). Admin writes purge both the LRU and the KV mirror, so staleness is bounded by the operator's intent, not the 5-min TTL. |
+| `TURNSTILE_ON`        | `routes/auth.py` POST `/auth/signup` and `/auth/reset-request`; `routes/edu_browser.py` POST `/edu/request-site` and `/edu/educator/submit-site`; `routes/admin_review_prompts.py` POST `/analytics/review-prompt-event` | Public POSTs require a verified Turnstile token; 403 `turnstile_required` on miss. Dependency is dormant when the flag is off so the gate can ship before the secret is provisioned. |
+| `CF_WEB_ANALYTICS_ON` | `artifacts/syrabit/index.html` runtime injector hits `/api/cf-web-analytics/config` | Frontend appends the CF beacon `<script>` when the origin reports the flag is on; rotating the token requires no SPA rebuild. |
+| `CF_TUNNEL_ONLY_ON`   | `cf_tunnel_only.CfTunnelOnlyMiddleware` (registered in `server.py` after `MtlsClientCertMiddleware`) + `/admin/cf-health.tunnel` | When `CF_TUNNEL_ALLOWED_IPS` is non-empty, requests whose **immediate TCP peer** (`scope['client']`) falls outside the CIDR set are rejected 403 `cf_tunnel_only`. The middleware deliberately does **not** consult `cf-connecting-ip` / `x-forwarded-for` — those are user-controlled headers, so a direct caller could otherwise forge them and bypass the gate. Two valid deployment shapes: (1) `cloudflared` sidecar on the same host, in which case the peer is loopback (`CF_TUNNEL_ALLOWED_IPS=127.0.0.0/8,::1/128`); (2) Cloudflare edge → managed origin (Cloud Run / Railway), in which case the peer is a CF edge egress IP (`CF_TUNNEL_ALLOWED_IPS` ← public list at `https://www.cloudflare.com/ips/`). The shipped default covers **both** IPv4 and IPv6 CF prefixes so dual-stack origins (Cloud Run / Railway IPv6-by-default) don't 403 valid traffic on flag flip. Open paths: `/api/healthz`, `/api/readyz`, `/api/ready`, `/health`, `/api/admin/cf-health` (avoids chicken-and-egg lockout if the rule misfires). Empty CIDR list with the flag on defaults to **passthrough + warning** so an empty env var cannot black-hole the origin; set `CF_TUNNEL_FAIL_CLOSED_ON_EMPTY=1` to flip that to **reject-all** (open paths still pass) for environments that prioritise lockdown over availability during misconfiguration. |
+| `GA4_ENABLED`         | `routes/admin_ga4.py` measurement-protocol gate     | Server-side GA4 events fire only when the flag is on. |
+
+### AI Gateway guardrail blocks — log signal
+
+`ai_gateway_observability.record_aig_response()` now emits a structured
+`logger.warning("[ai-gateway] guardrail block …")` line on every block
+(and `logger.info` on every rewrite) so on-call sees the event in the
+logging pipeline immediately, instead of waiting for someone to refresh
+`/admin/cf-health`. Fields included: `provider`, `model`, `category`,
+`log_id`, `event_id` — all of which are CF-side identifiers that paste
+directly into the AI Gateway log search UI.
+
+### Nightly parity job
+
+`scripts/vectorize_parity_nightly.py` runs the bench/grounded_recall
+fixtures through `ShadowRetriever(..., shadow_sample_rate=1.0)` so the
+admin panel surfaces a stable recall@10 number even when chat traffic
+is light. Schedule under cron and alert on exit code != 0.

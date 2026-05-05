@@ -1999,6 +1999,9 @@ from routes.synthetic_probe_secret_alert import router as synthetic_probe_secret
 # pages on-call via the dashboard they already watch, instead of
 # relying on someone noticing a red badge in the GitHub Actions UI.
 from routes.admin_health import router as admin_health_router
+from routes.admin_cf_health import router as admin_cf_health_router  # Task #383
+from routes.admin_vectorize_shadow import router as admin_vectorize_shadow_router  # Task #383
+from routes.cf_web_analytics_config import router as cf_web_analytics_config_router  # Task #383
 # Task #382 — embed/rerank/memory-brain combined health pill.
 from routes.admin_embed_stack_health import router as admin_embed_stack_health_router
 from routes.admin_ads import router as admin_ads_router
@@ -2155,6 +2158,9 @@ api.include_router(admin_logs_cf_pull_saturation_alerts_router)
 api.include_router(admin_slack_webhook_missing_alerts_router)
 api.include_router(synthetic_probe_secret_alert_router)
 api.include_router(admin_health_router)
+api.include_router(admin_cf_health_router)  # Task #383 — unified CF wins panel
+api.include_router(admin_vectorize_shadow_router)  # Task #383 — Vectorize parity ops
+api.include_router(cf_web_analytics_config_router)  # Task #383 — public CF beacon config
 api.include_router(admin_embed_stack_health_router)
 api.include_router(admin_ads_router)
 api.include_router(admin_review_prompts_router)
@@ -2773,6 +2779,12 @@ app.add_middleware(OriginSharedSecretMiddleware)
 # ORIGIN_SHARED_SECRET.  Active when ENFORCE_MTLS=true is set in the
 # Railway service environment AND ORIGIN_SHARED_SECRET is configured.
 app.add_middleware(MtlsClientCertMiddleware)
+# Task #383 — Cloudflare Tunnel-only enforcement. When CF_TUNNEL_ONLY_ON
+# is true and CF_TUNNEL_ALLOWED_IPS is non-empty, requests whose
+# cf-connecting-ip falls outside the allowlist are rejected with 403.
+# Dormant when the flag is off, so this is safe to ship pre-cutover.
+from cf_tunnel_only import CfTunnelOnlyMiddleware
+app.add_middleware(CfTunnelOnlyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=_CORS_ALLOW_CREDENTIALS,

@@ -1,6 +1,9 @@
 """Syrabit.ai — Admin content CRUD & thumbnails"""
 import re, json, asyncio, uuid, logging, base64
-from r2_storage import r2_upload, r2_public_url, make_key, content_type_for
+from r2_storage import (
+    r2_upload, r2_public_url, r2_primary_read_url, make_key,
+    content_type_for,
+)
 from config import R2_ENABLED
 
 _PRERENDER_LOG = logging.getLogger("syrabit.prerender_refresh")
@@ -181,6 +184,12 @@ async def _cascade_delete_subject_assets(subject_id: str):
     except Exception as exc:
         logger.warning(f"Vectorize cleanup failed for subject {subject_id}: {exc}")
     await db.chapters.delete_many({"subject_id": subject_id})
+    # Task #383 — purge cross-pod KV mirror after a bulk chapter wipe.
+    try:
+        from routes.content import invalidate_chapters_kv
+        await invalidate_chapters_kv(subject_id)
+    except Exception as _kv_exc:
+        logger.debug(f"chapters KV invalidate (delete) failed: {_kv_exc}")
     for coll_name in ["ai_pyq_collections", "flashcard_collections", "seo_topics", "chunks", "seo_pages", "cms_posts"]:
         try:
             await getattr(db, coll_name).delete_many({"subject_id": subject_id})
@@ -1596,7 +1605,15 @@ async def admin_create_chapter(data: ChapterCreate, admin: dict = Depends(get_ad
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.chapters.insert_one(chap)
-    
+    # Task #383 — purge cross-pod KV mirror so the new chapter is
+    # visible on every pod's /content/chapters/{subject_id} response
+    # immediately, not only after the 5-minute TTL expires.
+    try:
+        from routes.content import invalidate_chapters_kv
+        await invalidate_chapters_kv(data.subject_id)
+    except Exception as _kv_exc:
+        logger.debug(f"chapters KV invalidate (insert) failed: {_kv_exc}")
+
     await db.subjects.update_one(
         {"id": data.subject_id}, 
         {"$inc": {"chapter_count": 1}, "$set": {"has_document": True}}
@@ -1737,7 +1754,15 @@ async def upload_content_image(
     # Priority 1: Cloudflare R2 (cheap, fast CDN)
     if R2_ENABLED:
         try:
-            url = await r2_upload(r2_key, raw, content_type=mime)
+            r2_url = await r2_upload(r2_key, raw, content_type=mime)
+            # Task #383 — route the emitted URL through the R2-primary
+            # helper. When R2_PRIMARY_ON is on this is identity (R2
+            # was the canonical store and we just wrote to it); when
+            # the flag is off we still emit the R2 URL because R2 was
+            # the actual write backend. Centralising here means a
+            # future "always serve via R2 even after Supabase write"
+            # rollout flips one helper.
+            url = r2_primary_read_url(r2_key, s3_fallback_url=r2_url)
             return {"url": url, "storage": "r2"}
         except Exception as exc:
             logger.warning(f"R2 image upload failed, falling back to Supabase: {exc}")
@@ -1745,10 +1770,17 @@ async def upload_content_image(
     # Priority 2: Supabase Storage
     if supa:
         try:
-            url = await asyncio.get_event_loop().run_in_executor(
+            sb_url = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _content_img_supabase_upload(raw, supa_path, mime),
             )
+            # Task #383 — when R2_PRIMARY_ON is on AND the same key
+            # also lives in R2 (e.g. backfilled later), we want the
+            # public URL we hand back to be the R2 one so the chapter
+            # asset starts being served from R2 without a redeploy.
+            # The helper falls back to the Supabase URL when R2 isn't
+            # configured, so this is safe today and active tomorrow.
+            url = r2_primary_read_url(r2_key, s3_fallback_url=sb_url)
             return {"url": url, "storage": "supabase"}
         except Exception as exc:
             logger.warning(f"Supabase image upload failed, using base64 fallback: {exc}")
@@ -1786,8 +1818,12 @@ async def upload_content_file(
         # Priority 1: R2
         if R2_ENABLED:
             try:
-                file_url = await r2_upload(r2_key, file_content, content_type=mime,
-                                           cache_control="private, max-age=3600")
+                r2_url = await r2_upload(r2_key, file_content, content_type=mime,
+                                         cache_control="private, max-age=3600")
+                # Task #383 — emitted URL goes through the R2-primary
+                # helper so a future S3-fallback rewrite is one helper
+                # change instead of touching every chapter PDF caller.
+                file_url = r2_primary_read_url(r2_key, s3_fallback_url=r2_url)
                 storage_backend = "r2"
             except Exception as exc:
                 logger.warning(f"R2 PDF upload failed: {exc}")
@@ -2191,6 +2227,16 @@ async def admin_update_chapter(chapter_id: str, data: dict, admin: dict = Depend
     result = await db.chapters.update_one({"id": chapter_id}, {"$set": allowed})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Chapter not found")
+    # Task #383 — purge cross-pod KV mirror for this subject's chapter
+    # index so renames/reorders/topic edits propagate immediately.
+    try:
+        _existing_chapter = await db.chapters.find_one({"id": chapter_id}, {"subject_id": 1})
+        _subj_id = (_existing_chapter or {}).get("subject_id")
+        if _subj_id:
+            from routes.content import invalidate_chapters_kv
+            await invalidate_chapters_kv(_subj_id)
+    except Exception as _kv_exc:
+        logger.debug(f"chapters KV invalidate (update) failed: {_kv_exc}")
     
     chunks_info = {}
     if content_updated:

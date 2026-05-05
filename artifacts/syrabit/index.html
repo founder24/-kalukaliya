@@ -275,6 +275,29 @@
     <!-- modulepreload hints for vendor/router chunks injected at build time by vite-plugins/modulepreload-inject.js (Task #535) -->
 
     <style>#emergent-badge,a[href*="emergent.sh"],[id*="emergent"],[class*="emergent"]{display:none!important;visibility:hidden!important;width:0!important;height:0!important;opacity:0!important;pointer-events:none!important;position:fixed!important;z-index:-99999!important}</style>
+
+    <!-- Task #383 — Cloudflare Web Analytics beacon injector. Fetches the
+         live token from the origin so ops can flip CF_WEB_ANALYTICS_ON
+         (and rotate the token) without a SPA rebuild. Fails closed and
+         silent when the flag is off or the request errors. -->
+    <script>
+      (function(){
+        try {
+          fetch('/api/cf-web-analytics/config', { credentials: 'omit' })
+            .then(function(r){ return r.ok ? r.json() : null; })
+            .then(function(cfg){
+              if (!cfg || !cfg.enabled || !cfg.beacon_url || !cfg.token) return;
+              if (document.querySelector('script[data-cf-beacon]')) return;
+              var s = document.createElement('script');
+              s.defer = true;
+              s.src = cfg.beacon_url;
+              s.setAttribute('data-cf-beacon', JSON.stringify({ token: cfg.token }));
+              document.head.appendChild(s);
+            })
+            .catch(function(){ /* swallow — analytics must never break the app */ });
+        } catch (e) { /* noop */ }
+      })();
+    </script>
   </head>
   <body>
     <!-- Skip link for keyboard users (WCAG 2.1) -->

@@ -198,6 +198,37 @@ async def r2_presign(key: str, expires: int = 3600, bucket: Optional[str] = None
     return await loop.run_in_executor(None, _presign_sync, key, _bucket, expires)
 
 
+# ── primary read URL helper ───────────────────────────────────────────────────
+
+def r2_primary_read_url(key: str, *, s3_fallback_url: str = "",
+                        bucket: Optional[str] = None) -> str:
+    """Task #383 — return the canonical read URL for ``key`` honouring
+    the ``R2_PRIMARY_ON`` flag.
+
+    When R2 is the primary store, callers should serve assets from R2
+    directly so we stop paying S3 egress. The function is dependency-
+    injected for tests via ``s3_fallback_url`` so we don't have to
+    rewrite every existing chapter-PDF / audio caller in one shot:
+
+      * If R2 is configured **and** ``R2_PRIMARY_ON`` is on → R2 URL.
+      * Otherwise → ``s3_fallback_url`` (typically the existing
+        ``s3_public_url(...)`` value), or empty string when no
+        fallback was supplied.
+
+    Centralising the choice here means a future swap (R2 → another
+    store) only changes one helper instead of every call site.
+    """
+    try:
+        from config import R2_PRIMARY_ON as _R2_PRIMARY_ON
+    except Exception:
+        _R2_PRIMARY_ON = False
+    if _R2_PRIMARY_ON and _is_r2_ready():
+        return r2_public_url(key, bucket=bucket)
+    if s3_fallback_url:
+        return s3_fallback_url
+    return r2_public_url(key, bucket=bucket) if _is_r2_ready() else ""
+
+
 # ── public URL helper ─────────────────────────────────────────────────────────
 
 def r2_public_url(key: str, bucket: Optional[str] = None) -> str:

@@ -24,6 +24,9 @@ from auth_deps import (
     get_current_user, create_access_token, create_refresh_token,
     get_user_credits, get_current_user_optional,
 )
+# Task #383 — Turnstile dependency. Dormant when TURNSTILE_ON is false
+# so the dependency can ship in production ahead of flipping the flag.
+from turnstile import require_turnstile
 from db_ops import (
     supa_create_password_reset,
     supa_delete_password_reset,
@@ -41,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.post("/auth/signup")
+@router.post("/auth/signup", dependencies=[Depends(require_turnstile)])
 async def signup(
     data: UserCreate,
     request: Request,
@@ -346,7 +349,7 @@ async def _send_password_reset_email(email: str, token: str):
     reset_url = f"{FRONTEND_URL}/reset-password"
     await email_templates.send_password_reset(email=email, token=token, reset_url=reset_url)
 
-@router.post("/auth/reset-request")
+@router.post("/auth/reset-request", dependencies=[Depends(require_turnstile)])
 async def reset_request(data: PasswordResetReq, request: Request):
     user = await supa_get_user_for_reset(data.email.lower())
     if user:

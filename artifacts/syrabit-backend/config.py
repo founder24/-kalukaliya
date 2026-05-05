@@ -263,6 +263,68 @@ R2_ENDPOINT_URL = (
 )
 R2_ENABLED = bool(R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL)
 
+# ── Task #383: Cloudflare wins program — per-workstream feature flags ────────
+# Each of the five Cloudflare wins (AI Gateway observability, Vectorize
+# shadow, R2 primary, KV+Cache Reserve, Turnstile / Web Analytics /
+# Tunnel) gets its own boolean flag so it can be flipped on/off without
+# a redeploy. Defaults are conservative — observability + shadow are
+# safe to enable by default; primary swaps and origin lockdown stay
+# off until the operator has verified each piece in the dashboard.
+def _flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, '')
+    if not raw:
+        return default
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+CF_AIGW_OBS_ON      = _flag('CF_AIGW_OBS_ON', True)   # AI Gateway header parsing + counters
+VECTORIZE_SHADOW_ON = _flag('VECTORIZE_SHADOW_ON', False)  # mirror Pinecone writes/queries
+R2_PRIMARY_ON       = _flag('R2_PRIMARY_ON', False)   # serve assets from R2 first
+CF_EDGE_CACHE_ON    = _flag('CF_EDGE_CACHE_ON', False)     # KV write-through cache
+TURNSTILE_ON        = _flag('TURNSTILE_ON', False)         # require Turnstile on public forms
+CF_WEB_ANALYTICS_ON = _flag('CF_WEB_ANALYTICS_ON', False)  # render CF Web Analytics beacon
+CF_TUNNEL_ONLY_ON   = _flag('CF_TUNNEL_ONLY_ON', False)    # origin only accepts CF traffic
+# GA4 default flips OFF when CF Web Analytics is on so GA4 calls go dormant
+# automatically once the analytics team has confirmed the CF beacon. Override
+# explicitly with GA4_ENABLED=1 to keep GA4 running in parallel.
+GA4_ENABLED         = _flag('GA4_ENABLED', not CF_WEB_ANALYTICS_ON)
+
+# Turnstile credentials (Cloudflare → Turnstile → Site → Settings).
+# When TURNSTILE_ON is true these MUST be set or every form will reject.
+TURNSTILE_SITE_KEY   = os.environ.get('TURNSTILE_SITE_KEY', '').strip()
+TURNSTILE_SECRET_KEY = os.environ.get('TURNSTILE_SECRET_KEY', '').strip()
+
+# Cloudflare Web Analytics beacon token (Cloudflare → Analytics & Logs →
+# Web Analytics → Site → JS snippet). Surfaced to the frontend via the
+# /api/cf-web-analytics/config admin route so the Pages site can render
+# `<script defer src="...beacon.min.js" data-cf-beacon='{"token":"..."}'>`.
+CF_WEB_ANALYTICS_TOKEN = os.environ.get('CF_WEB_ANALYTICS_TOKEN', '').strip()
+
+# Comma-separated CIDRs the origin should accept when CF_TUNNEL_ONLY_ON is
+# true. Cloudflare publishes the canonical list at
+# https://www.cloudflare.com/ips/ — we ship a sane default that covers
+# both the documented IPv4 *and* IPv6 ranges so dual-stack origins (Cloud
+# Run, Railway IPv6-on-by-default) don't 403 valid traffic. Override via
+# env when CF rotates ranges.
+CF_TUNNEL_ALLOWED_IPS = os.environ.get(
+    'CF_TUNNEL_ALLOWED_IPS',
+    # IPv4 — https://www.cloudflare.com/ips-v4
+    '173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,'
+    '141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,'
+    '197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,'
+    '104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,'
+    # IPv6 — https://www.cloudflare.com/ips-v6
+    '2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,'
+    '2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32'
+).strip()
+
+# Optional strict mode for tunnel-only enforcement. When 1, an empty
+# CF_TUNNEL_ALLOWED_IPS while CF_TUNNEL_ONLY_ON=1 fail-closes (rejects
+# every non-open request) instead of fail-opening with a warning. Use
+# this in environments that prioritise lock-down over availability
+# during misconfiguration. Default 0 preserves the safer-for-uptime
+# behaviour for the rest of the fleet.
+CF_TUNNEL_FAIL_CLOSED_ON_EMPTY = _flag('CF_TUNNEL_FAIL_CLOSED_ON_EMPTY', False)
+
 # ── Chat Enhancement Feature Flag ────────────────────────────────────────────
 # Controls whether cognitive anchors, engagement hooks, and trend signals are
 # injected into AI chat responses.  Defaults ON; set CHAT_ENHANCE_ENABLED=0

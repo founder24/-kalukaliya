@@ -161,6 +161,22 @@ def invalidate_cache() -> None:
     """Force the next lookup to re-read MongoDB. Called by admin writes."""
     global _OVERRIDES_CACHE_TS
     _OVERRIDES_CACHE_TS = 0.0
+    # Task #383 — also invalidate the KV+CacheReserve mirror so a
+    # sibling pod doesn't keep serving the stale allowlist after an
+    # admin add/remove. Best-effort; never raise.
+    try:
+        from kv_cache import default_cache as _kv
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_kv().invalidate("edu_allowlist/overrides"))
+            else:
+                loop.run_until_complete(_kv().invalidate("edu_allowlist/overrides"))
+        except RuntimeError:
+            pass
+    except Exception:
+        pass
 
 
 async def is_allowed_url(url: str) -> tuple[bool, str]:

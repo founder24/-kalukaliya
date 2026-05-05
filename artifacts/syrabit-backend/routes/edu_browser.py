@@ -40,6 +40,10 @@ from edu_reader import fetch_and_extract, get_reader_stats, probe_site_safety
 from grounded_answer import stream_grounded_answer, get_grounded_pipeline_stats
 from cache import _redis_hit_count, _redis_miss_count
 from deps import db, is_mongo_available
+# Task #383 — Turnstile gate for the public domain-submission paths.
+# Dormant when TURNSTILE_ON is false, so we can wire it now without
+# disrupting the existing rate-limit fallback.
+from turnstile import require_turnstile
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -282,7 +286,8 @@ async def public_check_url(payload: dict):
     return {"ok": True, "allowed": allowed, "reason": reason}
 
 
-@router.post("/edu/request-site")
+@router.post("/edu/request-site",
+             dependencies=[Depends(require_turnstile)])
 async def request_site(req: RequestSiteReq, request: Request, user=Depends(get_current_user_optional)):
     ip = _client_ip(request)
     if not check_rate_limit(f"edu_req_site:{ip}", max_requests=10, window_seconds=300):
@@ -314,7 +319,8 @@ async def request_site(req: RequestSiteReq, request: Request, user=Depends(get_c
 _RATE_EDUCATOR_SUBMIT_PER_USER = 12  # req / hour
 
 
-@router.post("/edu/educator/submit-site")
+@router.post("/edu/educator/submit-site",
+             dependencies=[Depends(require_turnstile)])
 async def educator_submit_site(
     req: EducatorSubmitReq, request: Request, educator=Depends(get_educator_user),
 ):
