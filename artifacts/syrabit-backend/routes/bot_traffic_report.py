@@ -445,12 +445,11 @@ async def _send_bot_traffic_report_email(
     except Exception:
         admin_email = (to or os.environ.get("ALERT_EMAIL", "")).strip()
 
-    # Task #347 — Resend removed; SendGrid is the sole admin transport.
-    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    # Task #400 — provider gating moved into email_templates.send_admin_email
+    # (EMAIL_PROVIDER=ses|sendgrid). Pre-checking SENDGRID_API_KEY here would
+    # falsely skip sends under SES-default deploys.
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
-    if not sendgrid_key:
-        return {"sent": False, "to": admin_email, "reason": "no_sendgrid_key"}
 
     try:
         from email_templates import EMAIL_FROM  # type: ignore

@@ -6250,10 +6250,9 @@ async def _send_seo_daily_summary_email(stats: dict, recipients: list) -> dict:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_stats"}
     if not recipients:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_recipients"}
-    import os as _os
-    sendgrid_key = _os.environ.get("SENDGRID_API_KEY", "").strip()
-    if not sendgrid_key:
-        return {"sent": 0, "failed": 0, "total": len(recipients), "reason": "no_sendgrid_key"}
+    # Task #400 — provider gating happens inside email_templates.send_admin_email
+    # (EMAIL_PROVIDER=ses|sendgrid). Pre-checking SENDGRID_API_KEY here would
+    # falsely skip sends under SES-default deploys.
     try:
         from email_templates import EMAIL_FROM, send_admin_email as _send_admin_email
     except Exception as exc:

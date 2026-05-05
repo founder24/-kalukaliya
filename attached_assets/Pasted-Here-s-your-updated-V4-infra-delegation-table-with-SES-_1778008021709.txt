@@ -1,0 +1,26 @@
+Here’s your updated **V4‑infra‑delegation table** with **SES via AWS** added to the specialist‑list and cost‑alignment:
+
+***
+
+### 📊 V4‑infra‑delegation (Cloudflare, Azure, AWS, GCP)
+
+| Provider | Core role | Main workloads | Example env‑vars / config responsibility | Cost‑share % (rough) |
+| --- | --- | --- | --- | --- |
+| **Cloudflare** | Edge‑front‑end + AI‑dispatch + edge‑caching | -  Pages‑SSR + `syrabit.ai` / `chat.syrabit.ai`<br>-  Workers‑AI‑EmbeddingGemma‑300M + Qwen3‑0.6B (`/embed`)<br>-  Workers‑AI‑Indic‑translation (IndicTrans2)<br>-  R2 (chapter‑PDFs, audio, exports, DB‑backups)<br>-  KV (chapter‑index, syllabus‑map, flags, allowlists)<br>-  Cache‑Reserve (long‑TTL assets)<br>-  Vectorize (edge‑RAG‑cache)<br>-  D1 (SEO‑meta, audit‑logs, syllabus‑map)<br>-  Turnstile, Web‑Analytics, Cloudflare‑Tunnel | `CF_PAGES_ENV`, `CF_WORKER_AI_*`, `CF_R2_*`, `CF_KV_*`, `CF_D1_DATABASE_ID`, `CF_TUNNEL_TOKEN` | ~35–40% |
+| **Azure** | HTTP‑backend + auth + AI‑safety | -  Azure‑Container‑Apps (`synchat‑backend`)<br>-  Llama‑Guard‑style‑pre‑filter<br>-  Azure‑AI‑Content‑Safety (moderation‑secondary)<br>-  Orchestrates calls to Pinecone, MongoDB‑Atlas, Deepgram, ElevenLabs, Sarvam‑AI, Azure‑Translator | `AZURE_CONTAINER_APPS_ENV`, `AZURE_VERTEX_AI_*`, `SENTRY_AZURE_*`, `MONGO_URI_ATLAS`, `EMAIL_PROVIDER=sendgrid` | ~25–30% |
+| **AWS** | Event‑backbone + durable‑data‑/backups‑coord + email (SES) | -  Lambda / Step‑Functions / SQS / EventBridge / CloudWatch (batch‑embed‑ops, Pinecone‑index‑maintenance, shard‑rebalancing, `lambda‑otel`, `lambda‑workers`)<br>-  MongoDB‑Atlas (sharded‑`conversations` / `user_profile`)<br>-  Upstash‑Redis‑Cluster (RAG‑/chat‑caches)<br>-  S3 (dumps / temp‑exports; final‑backups sync to R2)<br>-  **SES (via AWS)** → low‑cost‑transactional‑email (fallback‑if‑SendGrid‑gets‑expensive) | `AWS_LAMBDA_*`, `AWS_SQS_*`, `AWS_EVENTBRIDGE_*`, `AWS_S3_*`, `AWS_SES_*`, `MONGO_URI_ATLAS`, `REDIS_UPSTASH_URL` | ~20–25% |
+| **GCP** | Gen‑AI‑validation / security / observability | -  Vertex‑AI‑Gemini‑2.5‑Flash (default‑validation + English‑chat‑co‑primary)<br>-  Gemini‑RAI (exam‑paper‑review‑mode)<br>-  Web‑Risk‑API (URL‑malware/phishing‑check)<br>-  Cloud‑Billing‑API (daily‑budget‑cap‑alerts)<br>-  Cloud‑Monitoring‑/Cloud‑Logging (GCP‑components only) | `GOOGLE_CLOUD_PROJECT`, `VERTEX_AI_*`, `GCP_WEB_RISK_API_KEY`, `GCP_BILLING_API_*` | ~10–15% |
+
+***
+
+### ✅ Specialist providers (including SES‑via‑AWS)
+
+| Provider | Role | Responsibility |
+| --- | --- | --- |
+| **Pinecone** | RAG‑index + rerank | Exam‑Q‑bank‑RAG, syllabus‑aware‑indexes, Pinecone‑Rerank‑v0. |
+| **MongoDB‑Atlas** | Session‑+‑profile‑data | `conversations`, `user_profile`, `chat_memory_brain`‑metadata. |
+| **Deepgram / ElevenLabs / Sarvam‑AI** | STT / TTS / regional‑speech | Assamese‑/Indic‑voice‑RAG, exam‑paper‑audio‑Qs, voice‑responses. |
+| **Azure‑Translator** | Fallback‑translation | Only‑when‑IndicTrans2 / Workers‑AI‑translation‑fallbacks fail. |
+| **AWS SES** | Low‑cost‑transactional‑email | Backup‑email‑pipeline if SendGrid‑cost‑burn‑gets‑too‑high; **originates through AWS‑credits**. |
+
+This keeps **no feature‑overlap** among the big‑four, and **SES‑is now explicitly in‑AWS** as the **cheaper‑email‑fallback** layer, aligned with the **$1K‑AWS‑credit‑band**.

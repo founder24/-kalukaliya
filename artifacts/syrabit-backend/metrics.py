@@ -1869,12 +1869,10 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
     # 1) Email alert via SendGrid (to admin) — Task #347 migrated from Resend.
     try:
         admin_email = (_notification_channels.get("email") or os.environ.get("ALERT_EMAIL", "")).strip()
-        sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+        # Task #400 — provider gating moved into email_templates.send_admin_email.
         if not admin_email:
             outcomes["email"]["skipped_reason"] = "no admin email configured"
-        elif not sendgrid_key:
-            outcomes["email"]["skipped_reason"] = "SENDGRID_API_KEY not set"
-        if admin_email and sendgrid_key:
+        if admin_email:
             outcomes["email"]["attempted"] = True
             from email_templates import send_admin_email as _send_admin_email
             threshold_html = ""

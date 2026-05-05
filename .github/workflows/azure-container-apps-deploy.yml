@@ -203,7 +203,8 @@ jobs:
                 --name "$app_name" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --secrets \
-                  "sendgrid-api-key=keyvaultref:${KV_BASE}/SENDGRID-API-KEY,identityref:system" \
+                  "aws-access-key-id=keyvaultref:${KV_BASE}/AWS-ACCESS-KEY-ID,identityref:system" \
+                  "aws-secret-access-key=keyvaultref:${KV_BASE}/AWS-SECRET-ACCESS-KEY,identityref:system" \
                   "azure-openai-api-key=keyvaultref:${KV_BASE}/AZURE-OPENAI-API-KEY,identityref:system" \
                   "mongo-uri=keyvaultref:${KV_BASE}/MONGO-URI,identityref:system" \
                   "jwt-secret=keyvaultref:${KV_BASE}/JWT-SECRET,identityref:system" \
@@ -217,7 +218,14 @@ jobs:
             ENV_ARGS=()
             if [ "$app_name" = "syrabit-backend" ]; then
               ENV_ARGS=(
-                "SENDGRID_API_KEY=secretref:sendgrid-api-key"
+                # Task #400 — Tier-2 email migrated SendGrid → Amazon SES.
+                # EMAIL_PROVIDER=ses selects the boto3 path in
+                # email_templates._send_sync / send_admin_email; flip to
+                # `sendgrid` to roll back without redeploying code.
+                "AWS_ACCESS_KEY_ID=secretref:aws-access-key-id"
+                "AWS_SECRET_ACCESS_KEY=secretref:aws-secret-access-key"
+                "AWS_SES_REGION=us-east-1"
+                "EMAIL_PROVIDER=ses"
                 "AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key"
                 # config.py reads MONGO_URL (with MONGODB_URI fallback);
                 # the bicep mistakenly used MONGO_URI, fixed here.
@@ -335,7 +343,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Key Vault syrabit-prod-kv — required secret presence"
-          for s in SENDGRID-API-KEY AZURE-OPENAI-API-KEY MONGO-URI JWT-SECRET RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET; do
+          for s in AWS-ACCESS-KEY-ID AWS-SECRET-ACCESS-KEY AZURE-OPENAI-API-KEY MONGO-URI JWT-SECRET RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET; do
             if az keyvault secret show --vault-name syrabit-prod-kv --name "$s" --query id -o tsv 2>/dev/null; then
               echo "  ✓ $s present"
             else

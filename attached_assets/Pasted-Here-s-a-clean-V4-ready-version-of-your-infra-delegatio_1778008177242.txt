@@ -1,0 +1,64 @@
+Here’s a **clean, V4‑ready version** of your infra‑delegation that fixes **all inconsistencies, fills gaps, and reduces risk** while keeping your audit‑feedback in mind.
+
+***
+
+### 📊 **Updated V4 infra delegation (cleaned, gap‑filled, cost‑shares summed)**
+
+| Provider | Core role | Main workloads | Example env‑vars / config responsibility | Cost‑share % |
+| --- | --- | --- | --- | --- |
+| **Cloudflare** | Edge‑front‑end + AI‑dispatch + edge‑caching + WAF | -  Pages‑SSR + `syrabit.ai` / `chat.syrabit.ai`<br>-  Workers‑AI‑EmbeddingGemma‑300M + Qwen3‑0.6B (`/embed`; **no‑re‑embedding‑Mongo‑chunks**)<br>-  Workers‑AI‑Indic‑translation (IndicTrans2)<br>-  R2 (chapter‑PDFs, audio, exports, backups)<br>-  KV (chapter‑index, syllabus‑map, flags, allowlists)<br>-  Cache‑Reserve (long‑TTL assets)<br>-  Vectorize (edge‑RAG‑cache)<br>-  D1 (SEO‑meta, audit‑logs, syllabus‑map)<br>-  Turnstile + DNS + WAF + rate‑limiting rules | `CF_PAGES_ENV`, `CF_WORKER_AI_*`, `CF_R2_*`, `CF_KV_*`, `CF_D1_DATABASE_ID`, `CF_WAF_RULES`, `CF_RATE_LIMIT_*` | **40%** |
+| **Azure** | HTTP‑backend + auth + AI‑safety + primary‑email | -  Azure‑Container‑Apps (`synchat‑backend` in `eastus`)<br>-  **Llama‑Guard‑2‑self‑hosted** (pre‑filter on‑Container‑App‑compute)<br>-  Azure‑AI‑Content‑Safety (moderation‑secondary)<br>-  **SendGrid‑primary‑email** (`EMAIL_PROVIDER=sendgrid` / `EMAIL_PROVIDER_PRIMARY=sendgrid`)<br>-  Orchestrates Pinecone, MongoDB‑Atlas, Deepgram, ElevenLabs, Sarvam‑AI, Azure‑Translator | `AZURE_CONTAINER_APPS_ENV`, `AZURE_SENTRY_DSN`, `AZURE_AI_CONTENT_SAFETY_*`, `EMAIL_PROVIDER=sendgrid` | **30%** |
+| **AWS** | Event‑backbone + durable‑data‑/backups‑coord + fallback‑email | -  Lambda / Step‑Functions / SQS / EventBridge / CloudWatch (batch‑embed‑ops, Pinecone‑index‑maintenance, shard‑rebalancing, `lambda‑otel`, `lambda‑workers`)<br>-  **Atlas‑peered‑VPC‑connectivity** (Mongo‑Atlas runs in `ap‑south‑1`)<br>-  **S3** (dumps / temp‑exports; final‑backups sync to R2)<br>-  **SES‑fallback‑email** (`EMAIL_PROVIDER_FALLBACK=ses` when SendGrid‑burn‑threshold‑exceeded)<br>-  **Cross‑AWS‑logs** via CloudWatch | `AWS_LAMBDA_*`, `AWS_SQS_*`, `AWS_EVENTBRIDGE_*`, `AWS_S3_*`, `AWS_SES_*`, `MONGO_URI_ATLAS_PEERING`, `R2_INGEST_TOKEN` | **20%** |
+| **GCP** | Gen‑AI‑validation / security / observability | -  **Vertex‑AI‑Gemini‑2.5‑Flash** = **default‑content‑validation** + **co‑primary‑English‑chat‑hot‑path** (decided by **token‑length‑threshold**; short‑turns → Workers‑AI‑Qwen3‑0.6B, long‑/‑high‑risk‑turns → Gemini‑validation‑+‑co‑primary)<br>-  **Gemini‑RAI‑(Red‑Teaming / Review)** → `exam_model_paper`‑review‑mode<br>-  **Web‑Risk‑API** → URL‑malware/phishing‑checks<br>-  **Cloud‑Billing‑API** → daily‑budget‑cap‑alerts into `Meter‑A/B/C`<br>-  **Cloud‑Monitoring / Cloud‑Logging** → GCP‑components only | `GOOGLE_CLOUD_PROJECT`, `GCP_VERTEX_AI_*`, `GCP_WEB_RISK_API_KEY`, `GCP_BILLING_API_*` | **10%** |
+
+***
+
+### ✅ **Specialist providers (outside big‑four)**
+
+| Provider | Role | Responsibility | Notes |
+| --- | --- | --- | --- |
+| **Pinecone** | RAG‑index + rerank | Exam‑Q‑bank‑RAG, syllabus‑aware‑indexes, Pinecone‑Rerank‑v0. | Indexed in `us‑east‑1`‑like‑region; **Vectorize‑only‑edge‑cache**, no‑direct‑RAG‑here. |
+| **MongoDB‑Atlas** | Session‑+‑profile‑data | `conversations`, `user_profile`, `chat_memory_brain`‑metadata. | Runs in `ap‑south‑1`‑AWS‑peered‑VPC; **data‑residency‑region‑compliant** for India. |
+| **Deepgram / ElevenLabs / Sarvam‑AI** | STT / TTS / regional‑speech | Assamese‑/Indic‑voice‑RAG, exam‑paper‑audio‑Qs, voice‑responses. | No‑re‑host‑on‑Azure‑/‑AWS‑Speech‑Services. |
+| **Azure‑Translator** | Fallback‑translation | Only‑when‑IndicTrans2 / Workers‑AI‑translation‑fallbacks fail. | Quota‑limited‑fallback, not‑default. |
+| **AWS‑SES** | Low‑cost‑fallback‑email | Activated when `SendGrid‑burn‑threshold`‑exceeded; `EMAIL_PROVIDER_FALLBACK=ses`. | **DNS‑ownership** is `syrabit.ai` on **Cloudflare‑DNS**. |
+
+***
+
+### ✅ **Gaps fixed**
+
+- **Email‑routing**: `EMAIL_PROVIDER_PRIMARY=sendgrid`, `EMAIL_PROVIDER_FALLBACK=ses` (cost‑threshold‑based‑switch in‑`synchat‑backend`).  
+- **Vertex‑AI‑vars**: `GCP_VERTEX_AI_*` (GCP‑service‑account, not‑Azure‑secret).  
+- **Chat‑routing‑rule**:  
+  - Short‑/‑low‑risk‑turns → **Workers‑AI‑Qwen3‑0.6B‑on‑Cloudflare** (cheaper‑neurons).  
+  - Long‑/‑high‑risk‑/exam‑paper‑turns → **GCP‑Gemini‑2.5‑Flash‑validation‑+‑co‑primary**.  
+- **DNS‑/‑certs‑ownership**:  
+  - **Cloudflare‑DNS** = authoritative‑for `*.syrabit.ai`; certs managed via Cloudflare‑SSL‑or‑Custom‑TLS‑origin‑certs.  
+- **Secrets‑management**:  
+  - Secrets for `MONGO_URI_ATLAS`, `GCP_WEB_RISK_API_KEY`, `AWS_SES_*`, `CF_WORKER_AI_*` live in **Azure‑Key‑Vault‑(primary)** + **AWS‑Secrets‑Manager‑+‑CF‑Secrets** (replica‑for‑multi‑cloud‑access).  
+- **End‑to‑end‑observability**:  
+  - **Sentry‑(Azure‑Container‑Apps)** → correlates **CF‑trace‑ids** → **Pinecone‑/Mongo‑/AWS‑logs**; used as **single‑end‑to‑end‑trace‑owner**.  
+- **Rate‑limit‑/‑WAF‑owner**: **Cloudflare‑WAF‑+‑rate‑limiting** (global‑rules).  
+- **RTO/RPO‑+‑backups**:  
+  - **RTO** ~1‑hour (via Azure‑Container‑Apps‑+‑Cloudflare‑Workers‑restore‑pipeline).  
+  - **RPO** ~15‑min (Mongo‑Atlas‑oplog‑+‑S3‑dumps‑sync‑to‑R2).  
+- **Data‑residency‑+‑latency**:  
+  - Pinecone‑/Mongo‑/AWS‑runs in `ap‑south‑1`‑/‑`us‑east‑1`‑like‑India‑/US‑regions, matching **exam‑audio‑in‑S3‑`ap‑south‑1`**.  
+- **Llama‑Guard‑implementation**: **Llama‑Guard‑2‑self‑hosted‑on‑Azure‑Container‑Apps‑compute**, called once before Content‑Safety.  
+- **Workers‑AI‑`/embed`‑fallback‑path**:  
+  - If `/embed`‑worker‑is‑down, fallback to **Vertex‑AI‑embeddings‑(GCP‑Vertex‑Embed‑multilingual‑model)**, with **config‑toggle‑`RAG_FALLBACK_EMBEDDINGS=vertex`**.  
+
+***
+
+### ✅ **Risk‑flags mitigated**
+
+- **CF‑blast‑radius**:  
+  - KV‑/D1‑/R2‑/Vectorize‑/KV‑are **cross‑cloud‑replica‑faithful‑OR‑accept‑SPOF**; hot‑RAG‑/‑auth‑/‑user‑data remain in **Azure‑+‑AWS‑+‑Mongo‑Atlas**.  
+- **Azure‑regional‑outage**:  
+  - Primary‑region `eastus`; warm‑standby‑not‑planned‑yet, but **RAG‑/Mongo‑/S3‑/R2‑data‑are‑region‑independent‑and‑can‑be‑re‑deployed‑to‑`westus`‑within‑RTO‑window**.  
+- **Vendor‑lock‑via‑credits**:  
+  - Add a **post‑credit‑review‑date** in your V4‑plan: **“Re‑evaluate‑all‑GCP‑/AWS‑/Azure‑cost‑allocation‑on‑2026‑Q4”;** before‑credits‑expire.  
+
+***
+
+This version is **strictly‑aligned** with your V4‑vision, **sums‑to‑100%‑cost‑shares**, **nails‑ownership‑/‑routing‑rules**, and **avoids‑mislabeling‑Vertex‑AI‑/‑SES‑/‑Mongo‑Atlas‑/‑Upstash‑Redis**.

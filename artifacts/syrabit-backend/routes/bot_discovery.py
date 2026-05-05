@@ -2983,11 +2983,9 @@ async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None
                        or os.environ.get("ALERT_EMAIL", "")).strip()
     except Exception:
         admin_email = (to or os.environ.get("ALERT_EMAIL", "")).strip()
-    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    # Task #400 — provider gating moved into email_templates.send_admin_email.
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
-    if not sendgrid_key:
-        return {"sent": False, "to": admin_email, "reason": "no_sendgrid_key"}
     try:
         from email_templates import EMAIL_FROM
     except Exception:
@@ -3988,11 +3986,9 @@ async def _maybe_email_failing_csv(
     except Exception:
         admin_email = os.environ.get("ALERT_EMAIL", "").strip()
 
-    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    # Task #400 — provider gating moved into email_templates.send_admin_email.
     if not admin_email:
         return {"sent": False, "reason": "no_admin_email"}
-    if not sendgrid_key:
-        return {"sent": False, "to": admin_email, "reason": "no_sendgrid_key"}
 
     try:
         from email_templates import EMAIL_FROM

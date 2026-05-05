@@ -1712,20 +1712,14 @@ async def _send_review_prompt_weekly_digest_email(
     except Exception:
         pass
     recipients = _resolve_review_prompt_digest_recipients(to)
-    # Task #347 — Resend removed; SendGrid is now the sole admin-email
-    # transport. The env-var name kept for backward-compat with the
-    # `no_sendgrid_key` short-circuit.
-    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    # Task #400 — provider gating moved into email_templates.send_admin_email
+    # (EMAIL_PROVIDER=ses|sendgrid). Pre-checking SENDGRID_API_KEY here would
+    # falsely skip sends under SES-default deploys.
     if not recipients:
         return {"sent": False, "to": "", "recipients": [], "reason": "no_admin_email"}
     # Preserve legacy single-string ``to`` field for callers / tests that
     # only inspected the first recipient (the digest used to be 1:1).
     primary = recipients[0]
-    if not sendgrid_key:
-        return {
-            "sent": False, "to": primary, "recipients": recipients,
-            "reason": "no_sendgrid_key",
-        }
     try:
         from email_templates import EMAIL_FROM as _from
     except Exception:
