@@ -71,6 +71,28 @@ from followup_context import detect_followup, build_followup_context, merge_foll
 from pipeline import should_use_pipeline, stage1_resolve_topic, apply_stage1_to_intent, build_enhanced_query, get_instant_response, get_instant_assamese_response
 import wai_chapter_index as _wai_idx
 
+
+# Task #409 — when the chat payload carries `card_context` (a summary
+# scraped from the originating Syrabit library page — SubjectCard,
+# ChapterPage, PersonalizedCmsPage etc.), `resolve_rag_context()`
+# returns `source="document"` because the dispatcher hands the
+# scraped text through the same `document_text` slot that uploaded
+# study PDFs use. The "document" branch in `build_rag_system_prompt`
+# tells the LLM to "quote directly when possible" — wording that
+# fits a PDF the student is reading from but NOT a syllabus or
+# study-plan summary, where there's nothing to quote and the
+# Active-chapter / PERSONALIZED-STUDY-PLAN priority markers we
+# emit need to be acknowledged. We must therefore relabel the
+# source as "library" BEFORE `build_rag_system_prompt` runs so the
+# library branch (with the strengthened "PRIMARY CONTEXT — answer
+# from this first" wording) actually fires. The remap is a no-op
+# when card_context isn't in play, and is also a no-op when an
+# upstream path has already labelled the source non-document
+# (e.g. "internal" RAG hits keep their label).
+def _remap_card_context_source_to_library(rag_ctx: dict, is_card_context: bool) -> None:
+    if is_card_context and rag_ctx.get("source") == "document":
+        rag_ctx["source"] = "library"
+
 # Chat Enhancement Layer
 try:
     from chat_enhancement_layer import chat_enhancement_layer
@@ -929,6 +951,11 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
             logger.warning(f"[NON-STREAM] Phase 2 task {_pi} failed: {_pr}")
 
     # ── Build system prompt with web search context ───────────────────────────
+    # Task #409 — relabel card-context payloads from "document" → "library"
+    # AFTER the `_has_internal` web-search gate above (which still keys off
+    # "document") and BEFORE `build_rag_system_prompt` so the library
+    # branch's strengthened priority wording is what reaches the LLM.
+    _remap_card_context_source_to_library(rag_ctx, _is_card_context)
     system_prompt = build_rag_system_prompt(
         {
             "board_name":  ctx_board_name,
@@ -2178,6 +2205,13 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
     _wai_match: Optional[dict] = None
 
     # ── Build prompt ───────────────────────────────────────────────────────────
+    # Task #409 — relabel card-context payloads from "document" → "library"
+    # AFTER the `_has_internal_stream` web-search gate above (which still
+    # keys off "document") and BEFORE `build_rag_system_prompt` so the
+    # library branch's strengthened priority wording is what reaches the
+    # LLM. Previously this remap lived AFTER prompt construction (was
+    # rag_source_saved adjustment), which meant the wrong branch fired.
+    _remap_card_context_source_to_library(rag_ctx, _is_card_context)
     system_prompt = build_rag_system_prompt(
         {
             "board_name":  ctx_board_name,
@@ -2297,10 +2331,13 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
     messages_payload = [{"role": "system", "content": system_prompt}] + history_messages + [{"role": "user", "content": msg.message}]
 
     user_msg_saved   = msg.message
+    # Task #409 — the card-context "document"→"library" remap now happens
+    # earlier (right before build_rag_system_prompt) so the library branch
+    # actually fires. By the time we get here, rag_ctx["source"] is already
+    # "library" for card-context turns, so reading it produces the correct
+    # label for downstream telemetry / conversation metadata without a
+    # second guarded remap.
     rag_source_saved = rag_ctx.get("source",  "none")
-    if _is_card_context and rag_source_saved == "document":
-        rag_source_saved = "library"
-        rag_ctx["source"] = "library"
     rag_quality_saved = rag_ctx.get("quality", "none")
     rag_chunks_count = len(rag_ctx.get("chunks",   []))
     rag_subjects_count = len(rag_ctx.get("subjects", []))

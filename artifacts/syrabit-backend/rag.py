@@ -1268,12 +1268,32 @@ def build_rag_system_prompt(
         document_text = rag_context.get("document_text", "")
         if document_text:
             lib_budget = max(2000, 8000 - len(grounding))
+            # Task #409 — the student arrived at /chat from a specific
+            # parent page (subject card, chapter page, or a personalised
+            # study-plan page) and the page already gave us its content
+            # via card_context. Treat that content as the AUTHORITATIVE
+            # source for this turn — the previous wording ("use this for
+            # accurate, curriculum-aligned answers") was too gentle and
+            # let the model pivot to generic curriculum coverage when
+            # the parent page had a narrower focus (e.g. a single chapter
+            # or a personalised plan), which made the Ask-AI deep-link
+            # feel ungrounded.
             grounding += (
                 "\n\n---\n"
-                "**GROUNDING CONTEXT (Subject Library Context):**\n"
-                "The student opened AI chat from a specific subject in the Syrabit library. "
-                "Use this syllabus and chapter context to give accurate, curriculum-aligned answers.\n\n"
-                "**Subject & syllabus:**\n"
+                "**PRIMARY CONTEXT — answer from this first (parent page / content card):**\n"
+                "The student opened this chat from a specific page in the Syrabit "
+                "library — a subject card, a chapter page, or a personalised "
+                "study-plan page. The material below is the page's own content "
+                "and is the AUTHORITATIVE source for this turn:\n"
+                "  • If the question is about this subject/chapter/plan, answer "
+                "DIRECTLY from this context — do not pivot to a different subject.\n"
+                "  • If a line marked 'Active chapter (priority context):' or "
+                "'PERSONALIZED STUDY PLAN (priority context):' appears below, "
+                "that block outranks the rest of the syllabus.\n"
+                "  • Only fall back to general curriculum knowledge when the "
+                "context genuinely lacks the answer; if you do, say so explicitly "
+                "so the student knows it isn't from the page they opened.\n\n"
+                "**Page content (priority context):**\n"
                 f"{document_text[:lib_budget]}\n\n"
                 "---\n"
             )

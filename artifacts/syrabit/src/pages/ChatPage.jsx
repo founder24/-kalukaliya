@@ -5,7 +5,8 @@
  * credit progress bar, sync indicator, source badge.
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { buildCardContext } from '@/utils/cardContext';
 import { AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
@@ -40,10 +41,24 @@ export default function ChatPage() {
   const { user, authChecked } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const convId     = searchParams.get('id');
   const subjectId  = searchParams.get('subject');
   const documentId = searchParams.get('document_id');
   const chapterId  = searchParams.get('chapter');
+
+  // Seed card_context from the originating page's react-router
+  // Link state (Task #409). Currently PersonalizedCmsPage uses this
+  // to send the plan summary; any future page with rich card content
+  // can do the same. Captured once on mount so navigating to a
+  // different conversation via ?id=… inside this same ChatPage
+  // mount doesn't keep re-injecting the originating page's seed
+  // into every subsequent message.
+  const [seedCardContext] = useState(
+    () => (typeof location.state?.seedCardContext === 'string'
+      ? location.state.seedCardContext
+      : '')
+  );
 
   const [messages, setMessages]           = useState([]);
   const [input, setInput]                 = useState('');
@@ -234,46 +249,16 @@ export default function ChatPage() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const cardContext = useMemo(() => {
-    if (!subjectId || !subject) return null;
-    const lines = [];
-    lines.push(`Subject: ${subject.name}`);
-    if (subject.description) lines.push(`Description: ${subject.description}`);
-    if (Array.isArray(subject.tags) && subject.tags.length)
-      lines.push(`Topics covered: ${subject.tags.join(', ')}`);
-    const rawBoard = (user?.board_name || '').trim();
-    const boardLabel = rawBoard ? `${rawBoard}` : null;
-    const parts = [boardLabel, user?.class_name, user?.stream_name].filter(Boolean);
-    if (parts.length) lines.push(`Board/Class: ${parts.join(' | ')}`);
-
-    // When a specific chapter is active, surface its full content first so
-    // the LLM and vector retrieval both weight it highest.
-    if (activeChapter) {
-      lines.push('');
-      lines.push(`Active chapter (priority context): ${activeChapter.title}`);
-      if (activeChapter.description) lines.push(`Description: ${activeChapter.description}`);
-      if (activeChapter.content) lines.push(activeChapter.content.slice(0, 1200));
-      lines.push('');
-      lines.push('Other chapters in this subject:');
-    } else if (scopedChapters.length) {
-      lines.push('');
-      lines.push('Syllabus chapters:');
-    }
-
-    scopedChapters
-      .slice()
-      .sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0))
-      .forEach((ch, i) => {
-        if (activeChapter && ch.id === activeChapter.id) return;
-        const num = ch.chapter_number ?? ch.order_index ?? i + 1;
-        let entry = `Chapter ${num} — ${ch.title}`;
-        if (ch.description) entry += `: ${ch.description}`;
-        if (ch.content) entry += `\n${ch.content.slice(0, 400)}`;
-        lines.push(entry);
-      });
-
-    return lines.join('\n').slice(0, 4000);
-  }, [subjectId, subject, scopedChapters, activeChapter, user]);
+  const cardContext = useMemo(
+    () => buildCardContext({
+      subject: subjectId ? subject : null,
+      scopedChapters,
+      activeChapter,
+      user,
+      seedContext: seedCardContext,
+    }),
+    [subjectId, subject, scopedChapters, activeChapter, user, seedCardContext],
+  );
 
   const effectiveLimit = credits.limit ?? user?.credits_limit ?? null;
   const remaining    = effectiveLimit !== null ? Math.max(0, effectiveLimit - credits.used) : null;

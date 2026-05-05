@@ -9,6 +9,7 @@ import {
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
 import { apiClient } from '@/utils/api';
+import { buildPlanSeedContext } from '@/utils/cardContext';
 
 export default function PersonalizedCmsPage() {
   const { userId, slug } = useParams();
@@ -205,7 +206,22 @@ export default function PersonalizedCmsPage() {
           <Link to="/profile" className="text-xs text-white/35 hover:text-white/60 flex items-center gap-1.5 transition-colors">
             <ArrowLeft size={12} /> All My Plans
           </Link>
-          <Link to="/chat"
+          {/* Task #409 — Ask AI about this plan must arrive at /chat
+              with the plan content already in card_context so the
+              backend's library-branch grounding (rag.py
+              build_rag_system_prompt) can prioritise it over generic
+              curriculum knowledge. The plan summary is passed via
+              react-router Link state (not a query param) so a 2k+
+              character plan body doesn't blow the URL length cap or
+              leak into browser history; ChatPage reads it once on
+              mount via useLocation().state.seedCardContext. The
+              ?subject= param is kept so the existing subject pill
+              and chapter syllabus loader still fire when the plan
+              is tied to a real subject. */}
+          <Link
+            to={doc.subject_id ? `/chat?subject=${encodeURIComponent(doc.subject_id)}` : '/chat'}
+            state={{ seedCardContext: buildPlanSeedContext(doc) }}
+            data-testid="cms-ask-ai-link"
             className="flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-semibold text-white hover:opacity-90 transition-all"
             style={{ background: 'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
             <Sparkles size={13} /> Ask AI about this plan

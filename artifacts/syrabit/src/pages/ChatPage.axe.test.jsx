@@ -17,6 +17,12 @@ const mockSearchParams = vi.fn(() => [new URLSearchParams(), vi.fn()]);
 vi.mock('react-router-dom', () => ({
   useNavigate:     () => vi.fn(),
   useSearchParams: (...args) => mockSearchParams(...args),
+  // Task #409 — ChatPage now reads location.state.seedCardContext
+  // (from PersonalizedCmsPage's "Ask AI about this plan" Link state)
+  // to seed card_context. The axe test mounts <ChatPage /> bare, so
+  // an empty-state location is sufficient — the consumer reads the
+  // optional `state` field defensively.
+  useLocation:     () => ({ pathname: '/chat', search: '', hash: '', state: null, key: 'test' }),
 }));
 
 const mockUseAuth = vi.fn(() => ({ user: null, authChecked: true }));
