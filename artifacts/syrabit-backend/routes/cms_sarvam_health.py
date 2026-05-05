@@ -4722,16 +4722,171 @@ _metrics_cache: dict = {"data": None, "ts": 0}
 _metrics_lock = asyncio.Lock()
 _METRICS_CACHE_TTL = 60
 
+# Task #388: throttle-tile keys that MUST bypass the 60s response cache.
+# Each entry is a top-level key in the metrics response that holds a
+# burst counter dict. The values come from in-process / Redis counters
+# that reset within seconds of recovery, so caching them for a full
+# minute would leave the AdminHealth panel showing red "Throttled"
+# banners up to 60s after a real 429 storm has cleared. Keep the heavy
+# queries (users / payments / SEO / deps health) cached at 60s; refresh
+# only these tiles on every poll so the dashboard reflects recovery
+# within the next admin-side poll (~30s by default).
+_THROTTLE_TILE_KEYS = (
+    "workers_ai_throttle",
+    "groq_throttle",
+    "gemini_throttle",
+    "azure_openai_throttle",
+    "deepgram_throttle",
+    "assamese_chat_unavailable",
+)
+
+
+def _build_throttle_tiles() -> dict:
+    """Compute the throttle-tile dicts in isolation.
+
+    Called both on cache miss (to populate the full response) and on
+    cache hit (to overwrite the stale tiles in the cached payload), so
+    a successful provider call that resets a 429 counter is reflected
+    on the dashboard within ~5 s instead of the full 60 s cache TTL.
+
+    Returns a dict with exactly the keys in ``_THROTTLE_TILE_KEYS``.
+    Each value matches the shape the AdminHealth burst-tile component
+    expects: ``{burst_60s, burst_180s, alert_threshold, throttled}``
+    (the Assamese tile additionally carries ``recent`` from Task #379).
+
+    Defensive: every external call (llm imports, Redis, recent-outage
+    fetch) is wrapped so a transient failure leaves the tile at a safe
+    zero state instead of breaking the whole metrics endpoint — same
+    contract as the inline block this helper replaces.
+    """
+    _wai_burst_60 = 0
+    _wai_burst_180 = 0
+    _wai_threshold = 5
+    _groq_burst_60 = 0
+    _groq_burst_180 = 0
+    _groq_threshold = 5
+    _gemini_burst_60 = 0
+    _gemini_burst_180 = 0
+    _gemini_threshold = 5
+    _azure_burst_60 = 0
+    _azure_burst_180 = 0
+    _azure_threshold = 5
+    _deepgram_burst_60 = 0
+    _deepgram_burst_180 = 0
+    _deepgram_threshold = 5
+    try:
+        from llm import get_workers_ai_429_burst as _get_wai_burst
+        from llm import get_workers_ai_429_burst_inprocess as _get_wai_burst_ip
+        from llm import get_provider_429_burst as _get_p_burst
+        from llm import get_provider_429_burst_inprocess as _get_p_burst_ip
+        _wai_burst_60 = _get_wai_burst_ip(60)
+        _wai_burst_180 = _get_wai_burst(180)
+        _groq_burst_60 = _get_p_burst_ip("groq", 60)
+        _groq_burst_180 = _get_p_burst("groq", 180)
+        _gemini_burst_60 = _get_p_burst_ip("gemini", 60)
+        _gemini_burst_180 = _get_p_burst("gemini", 180)
+        _azure_burst_60 = _get_p_burst_ip("azure_openai", 60)
+        _azure_burst_180 = _get_p_burst("azure_openai", 180)
+        _deepgram_burst_60 = _get_p_burst_ip("deepgram", 60)
+        _deepgram_burst_180 = _get_p_burst("deepgram", 180)
+    except Exception:
+        pass
+    try:
+        from metrics import _ALERT_THRESHOLDS as _at
+        _wai_threshold = int(_at.get("workers_ai_429_burst_threshold", 5))
+        _groq_threshold = int(_at.get("groq_429_burst_threshold", 5))
+        _gemini_threshold = int(_at.get("gemini_429_burst_threshold", 5))
+        _azure_threshold = int(_at.get("azure_openai_429_burst_threshold", 5))
+        _deepgram_threshold = int(_at.get("deepgram_429_burst_threshold", 5))
+    except Exception:
+        pass
+
+    _as_burst_60 = 0
+    _as_burst_180 = 0
+    _as_threshold = 3
+    _as_recent: list = []
+    try:
+        from llm import (
+            get_assamese_unavailable_burst,
+            get_assamese_unavailable_burst_inprocess,
+            get_assamese_recent_outages,
+        )
+        _as_burst_60 = get_assamese_unavailable_burst_inprocess(60)
+        _as_burst_180 = get_assamese_unavailable_burst(180)
+        try:
+            _as_recent = get_assamese_recent_outages(limit=5) or []
+        except Exception:
+            _as_recent = []
+    except Exception:
+        pass
+    try:
+        from metrics import _ALERT_THRESHOLDS as _at2
+        _as_threshold = int(_at2.get("assamese_unavailable_burst_threshold", 3))
+    except Exception:
+        pass
+
+    return {
+        "workers_ai_throttle": {
+            "burst_60s": _wai_burst_60,
+            "burst_180s": _wai_burst_180,
+            "alert_threshold": _wai_threshold,
+            "throttled": _wai_burst_60 >= _wai_threshold,
+        },
+        "groq_throttle": {
+            "burst_60s": _groq_burst_60,
+            "burst_180s": _groq_burst_180,
+            "alert_threshold": _groq_threshold,
+            "throttled": _groq_burst_60 >= _groq_threshold,
+        },
+        "gemini_throttle": {
+            "burst_60s": _gemini_burst_60,
+            "burst_180s": _gemini_burst_180,
+            "alert_threshold": _gemini_threshold,
+            "throttled": _gemini_burst_60 >= _gemini_threshold,
+        },
+        "azure_openai_throttle": {
+            "burst_60s": _azure_burst_60,
+            "burst_180s": _azure_burst_180,
+            "alert_threshold": _azure_threshold,
+            "throttled": _azure_burst_60 >= _azure_threshold,
+        },
+        "deepgram_throttle": {
+            "burst_60s": _deepgram_burst_60,
+            "burst_180s": _deepgram_burst_180,
+            "alert_threshold": _deepgram_threshold,
+            "throttled": _deepgram_burst_60 >= _deepgram_threshold,
+        },
+        "assamese_chat_unavailable": {
+            "burst_60s": _as_burst_60,
+            "burst_180s": _as_burst_180,
+            "alert_threshold": _as_threshold,
+            "throttled": _as_burst_180 >= _as_threshold,
+            "recent": _as_recent,
+        },
+    }
+
+
 @router.get("/admin/dashboard/metrics")
 async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
     now_ts = time.time()
     if _metrics_cache["data"] and (now_ts - _metrics_cache["ts"]) < _METRICS_CACHE_TTL:
-        return _metrics_cache["data"]
+        # Task #388: cache HIT — serve the heavy queries (users, payments,
+        # SEO counts, deps health) from cache but recompute the throttle
+        # tiles every poll so admins see recovery within ~5 s instead of
+        # waiting up to 60 s for the cache to expire. We mutate a SHALLOW
+        # COPY of the cached dict so the cache itself stays internally
+        # consistent for the next caller and nothing else in-process can
+        # observe a half-updated payload.
+        cached = dict(_metrics_cache["data"])
+        cached.update(_build_throttle_tiles())
+        return cached
 
     async with _metrics_lock:
         now_ts = time.time()
         if _metrics_cache["data"] and (now_ts - _metrics_cache["ts"]) < _METRICS_CACHE_TTL:
-            return _metrics_cache["data"]
+            cached = dict(_metrics_cache["data"])
+            cached.update(_build_throttle_tiles())
+            return cached
 
         start = time.time()
         health_data = {}
@@ -4773,94 +4928,6 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
 
         elapsed = round((time.time() - start) * 1000, 1)
 
-        # Workers AI / Groq / Gemini / Azure OpenAI / Deepgram 429 burst —
-        # cross-worker via Redis, in-process fallback.  Azure OpenAI and
-        # Deepgram added per Task #378: their 429-burst alerts have been
-        # wired into the alerting pipeline since Task #373, but the admin
-        # health panel surfaced only Workers AI / Groq / Gemini, so admins
-        # could not spot a building Azure / Deepgram throttle burst until
-        # an alert actually fired.
-        _wai_burst_60 = 0
-        _wai_burst_180 = 0
-        _wai_threshold = 5
-        _groq_burst_60 = 0
-        _groq_burst_180 = 0
-        _groq_threshold = 5
-        _gemini_burst_60 = 0
-        _gemini_burst_180 = 0
-        _gemini_threshold = 5
-        _azure_burst_60 = 0
-        _azure_burst_180 = 0
-        _azure_threshold = 5
-        _deepgram_burst_60 = 0
-        _deepgram_burst_180 = 0
-        _deepgram_threshold = 5
-        try:
-            from llm import get_workers_ai_429_burst as _get_wai_burst
-            from llm import get_workers_ai_429_burst_inprocess as _get_wai_burst_ip
-            from llm import get_provider_429_burst as _get_p_burst
-            from llm import get_provider_429_burst_inprocess as _get_p_burst_ip
-            # burst_60s: in-process timestamps (exact 60s, single-worker)
-            # burst_180s: Redis counter (cross-worker, 180s TTL) with in-process fallback
-            _wai_burst_60 = _get_wai_burst_ip(60)
-            _wai_burst_180 = _get_wai_burst(180)
-            _groq_burst_60 = _get_p_burst_ip("groq", 60)
-            _groq_burst_180 = _get_p_burst("groq", 180)
-            _gemini_burst_60 = _get_p_burst_ip("gemini", 60)
-            _gemini_burst_180 = _get_p_burst("gemini", 180)
-            # Task #378 — Azure OpenAI + Deepgram tiles.  Provider keys
-            # match _PROVIDER_429_WINDOWS / _PROVIDER_429_REDIS_KEYS in
-            # llm.py: "azure_openai" → Redis key "azure_429_burst",
-            # "deepgram" → Redis key "deepgram_429_burst".
-            _azure_burst_60 = _get_p_burst_ip("azure_openai", 60)
-            _azure_burst_180 = _get_p_burst("azure_openai", 180)
-            _deepgram_burst_60 = _get_p_burst_ip("deepgram", 60)
-            _deepgram_burst_180 = _get_p_burst("deepgram", 180)
-        except Exception:
-            pass
-        try:
-            from metrics import _ALERT_THRESHOLDS as _at
-            _wai_threshold = int(_at.get("workers_ai_429_burst_threshold", 5))
-            _groq_threshold = int(_at.get("groq_429_burst_threshold", 5))
-            _gemini_threshold = int(_at.get("gemini_429_burst_threshold", 5))
-            _azure_threshold = int(_at.get("azure_openai_429_burst_threshold", 5))
-            _deepgram_threshold = int(_at.get("deepgram_429_burst_threshold", 5))
-        except Exception:
-            pass
-
-        # Task #374 — Assamese-chat "both rails red" burst gauge.  Same
-        # shape as the *_throttle dicts above so the AdminHealth tile can
-        # render via the existing burst-tile component.  ``burst_60s`` is
-        # the in-process count for this worker (used to drive the
-        # ``throttled`` UI flag locally), ``burst_180s`` is the
-        # cross-worker Redis counter.
-        _as_burst_60 = 0
-        _as_burst_180 = 0
-        _as_threshold = 3
-        _as_recent: list = []
-        try:
-            from llm import (
-                get_assamese_unavailable_burst,
-                get_assamese_unavailable_burst_inprocess,
-                get_assamese_recent_outages,
-            )
-            _as_burst_60 = get_assamese_unavailable_burst_inprocess(60)
-            _as_burst_180 = get_assamese_unavailable_burst(180)
-            # Task #379 — last 5 outage events for the AdminHealth tile.
-            # Best-effort: a Redis hiccup must not break the whole metrics
-            # endpoint, so wrap in its own try/except.
-            try:
-                _as_recent = get_assamese_recent_outages(limit=5) or []
-            except Exception:
-                _as_recent = []
-        except Exception:
-            pass
-        try:
-            from metrics import _ALERT_THRESHOLDS as _at2
-            _as_threshold = int(_at2.get("assamese_unavailable_burst_threshold", 3))
-        except Exception:
-            pass
-
         result = {
             "dependencies": deps_status,
             "response_time_ms": elapsed,
@@ -4869,60 +4936,15 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
             "seo": {"topics": seo_count, "published_pages": seo_published},
             "payments_count": len(payments),
             "bot_render": await get_bot_render_metrics_async(),
-            "workers_ai_throttle": {
-                "burst_60s": _wai_burst_60,
-                "burst_180s": _wai_burst_180,
-                "alert_threshold": _wai_threshold,
-                "throttled": _wai_burst_60 >= _wai_threshold,
-            },
-            "groq_throttle": {
-                "burst_60s": _groq_burst_60,
-                "burst_180s": _groq_burst_180,
-                "alert_threshold": _groq_threshold,
-                "throttled": _groq_burst_60 >= _groq_threshold,
-            },
-            "gemini_throttle": {
-                "burst_60s": _gemini_burst_60,
-                "burst_180s": _gemini_burst_180,
-                "alert_threshold": _gemini_threshold,
-                "throttled": _gemini_burst_60 >= _gemini_threshold,
-            },
-            # Task #378 — Azure OpenAI 429 burst tile.  Same shape as the
-            # other *_throttle dicts so the AdminHealth burst-tile
-            # component renders it without changes (it just iterates
-            # over a config array of {key, label, thr, unit}).
-            "azure_openai_throttle": {
-                "burst_60s": _azure_burst_60,
-                "burst_180s": _azure_burst_180,
-                "alert_threshold": _azure_threshold,
-                "throttled": _azure_burst_60 >= _azure_threshold,
-            },
-            # Task #378 — Deepgram (STT/TTS) 429 burst tile.  Same shape.
-            "deepgram_throttle": {
-                "burst_60s": _deepgram_burst_60,
-                "burst_180s": _deepgram_burst_180,
-                "alert_threshold": _deepgram_threshold,
-                "throttled": _deepgram_burst_60 >= _deepgram_threshold,
-            },
-            # Task #374 — "both rails red" indicator for the Assamese
-            # chat path. ``throttled`` is wired off the cross-worker
-            # 180s counter (not the per-worker 60s window) because each
-            # event is a P0 outage and the threshold is intentionally
-            # low (3 by default), so a single tick of all-workers
-            # traffic is enough to flag the rail.
-            "assamese_chat_unavailable": {
-                "burst_60s": _as_burst_60,
-                "burst_180s": _as_burst_180,
-                "alert_threshold": _as_threshold,
-                "throttled": _as_burst_180 >= _as_threshold,
-                # Task #379 — last ~5 outage events so the AdminHealth tile
-                # can show timestamps + which leg failed + a short error
-                # excerpt. Each entry: {ts, failing_leg, error_summary,
-                # conversation_id_hash}. Empty list when there are no
-                # recent events (Redis cleared via TTL after 180 s of calm).
-                "recent": _as_recent,
-            },
         }
+        # Task #388: throttle tiles (Workers AI / Groq / Gemini / Azure
+        # OpenAI / Deepgram / assamese_chat_unavailable) are computed via
+        # a dedicated helper so the cache-hit branch above can refresh
+        # JUST these keys on every poll without re-running the heavy
+        # users / payments / SEO / deps queries. The helper preserves
+        # every prior contract (Task #374 Assamese tile shape, Task #378
+        # Azure/Deepgram tiles, Task #379 ``recent`` outages list).
+        result.update(_build_throttle_tiles())
         _metrics_cache["data"] = result
         _metrics_cache["ts"] = now_ts
         return result

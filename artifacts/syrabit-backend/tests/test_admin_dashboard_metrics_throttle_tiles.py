@@ -262,6 +262,107 @@ async def test_successful_call_resets_throttle_counter(
 
 
 @pytest.mark.asyncio
+async def test_throttle_dict_is_fresh_even_when_rest_of_response_is_cached(
+    stub_admin_dependencies, monkeypatch,
+):
+    """Task #388: when /admin/dashboard/metrics serves a cached payload
+    (the heavy users / payments / SEO / deps queries are kept on the
+    60s cache to protect Mongo + Redis), the throttle-tile dicts MUST
+    still be recomputed on every call so a 429 storm that has cleared
+    is reflected on the dashboard within ~5 s instead of waiting up to
+    60 s for the cache to expire.
+
+    Pins:
+      1. After a cache HIT, the cached non-throttle fields are reused
+         verbatim (proves the cache is doing its job — the heavy
+         queries did NOT re-run).
+      2. The 6 throttle-tile keys are recomputed against the live
+         underlying counters (proves recovery shows up immediately).
+      3. The original cached entry is left in place (no premature
+         eviction; subsequent callers within the TTL also see the
+         heavy fields cached + fresh throttle).
+    """
+    cms = stub_admin_dependencies
+    fake_db = type("D", (), {"payments": _FakeCollection(), "seo_topics": _FakeCollection(),
+                              "seo_pages": _FakeCollection()})()
+    monkeypatch.setattr(cms, "db", fake_db, raising=False)
+    import deps
+    monkeypatch.setattr(deps, "redis_client", None, raising=False)
+    _reset_429_windows()
+
+    import llm
+    import time as _time
+    now = _time.time()
+    # Seed an active throttle storm: 6 azure_openai 429s and 6 deepgram
+    # 429s in the last 60s (threshold is 5 → both throttled).
+    for _ in range(6):
+        llm._PROVIDER_429_WINDOWS["azure_openai"].append(now)
+    for _ in range(6):
+        llm._PROVIDER_429_WINDOWS["deepgram"].append(now)
+
+    # First call → cache MISS, populates the cache with throttled=True
+    # for both providers and a (real but stubbed) ``users`` block.
+    first = await cms.admin_dashboard_metrics(admin={"username": "test"})
+    assert first["azure_openai_throttle"]["burst_60s"] == 6
+    assert first["azure_openai_throttle"]["throttled"] is True
+    assert first["deepgram_throttle"]["burst_60s"] == 6
+    assert first["deepgram_throttle"]["throttled"] is True
+    cached_users_block = first["users"]
+    cached_response_time = first["response_time_ms"]
+
+    # Storm clears: provider counters reset to 0.  Critically we do NOT
+    # touch ``cms._metrics_cache`` here — the cache is still fresh
+    # (well within the 60s TTL), so the second call must hit the
+    # cache-HIT branch.
+    llm._reset_provider_429("azure_openai")
+    llm._reset_provider_429("deepgram")
+
+    # Second call within the cache TTL.
+    second = await cms.admin_dashboard_metrics(admin={"username": "test"})
+
+    # Throttle tiles MUST be fresh: counters now zero, throttled false.
+    assert second["azure_openai_throttle"]["burst_60s"] == 0, (
+        "Task #388: throttle dict MUST bypass the metrics cache so "
+        "recovery shows on the AdminHealth panel within seconds"
+    )
+    assert second["azure_openai_throttle"]["throttled"] is False
+    assert second["deepgram_throttle"]["burst_60s"] == 0, (
+        "Task #388: throttle dict MUST bypass the metrics cache so "
+        "recovery shows on the AdminHealth panel within seconds"
+    )
+    assert second["deepgram_throttle"]["throttled"] is False
+    # All six throttle-tile keys must be present and live (not just
+    # the two we mutated) — proves the helper rebuilds the full set.
+    for key in (
+        "workers_ai_throttle", "groq_throttle", "gemini_throttle",
+        "azure_openai_throttle", "deepgram_throttle",
+        "assamese_chat_unavailable",
+    ):
+        assert key in second, f"throttle tile {key} dropped on cache hit"
+
+    # Heavy fields MUST be served from cache (proves we didn't blow up
+    # the cache to get fresh throttle data — that's the whole point).
+    assert second["users"] is cached_users_block, (
+        "Task #388: heavy users block must come from cache (identity "
+        "preserved) — only the throttle tiles bypass the cache"
+    )
+    assert second["response_time_ms"] == cached_response_time, (
+        "Task #388: cached response_time_ms must NOT be recomputed on "
+        "a cache hit (otherwise the heavy queries ran again)"
+    )
+
+    # The cache entry itself must still hold the original throttled=True
+    # snapshot — the cache-hit branch returns a SHALLOW COPY with the
+    # throttle tiles overwritten, but does not mutate the cached dict.
+    cached_dict = cms._metrics_cache["data"]
+    assert cached_dict["azure_openai_throttle"]["burst_60s"] == 6, (
+        "Task #388: cache-hit refresh must NOT mutate the cached dict; "
+        "the next caller still gets a consistent view of the original "
+        "snapshot (with throttle tiles overlayed fresh on read)"
+    )
+
+
+@pytest.mark.asyncio
 async def test_dashboard_still_succeeds_when_llm_imports_fail(
     stub_admin_dependencies, monkeypatch,
 ):
