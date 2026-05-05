@@ -175,14 +175,21 @@ def _disable_credit_burn_fallback(monkeypatch):
 
 
 def test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypatch):
-    """Task #366 — when Azure OpenAI, Vertex, AND Sarvam all return 429 on
-    the ``english_rag_chat`` pool, the weighted draw must land on one of the
-    Workers AI tail promotions (``workers_ai_llama32_3b`` or
-    ``workers_ai_mistral_7b``) and the chat handler must return a non-empty
-    answer.
+    """2026-05-05 user instruction — when Azure OpenAI returns 429 on the
+    ``english_rag_chat`` pool, the dispatcher's exclusion-redraw must land
+    on one of the Workers AI tail fallbacks (``workers_ai_llama32_3b``,
+    ``workers_ai_mistral_7b`` or generic ``workers_ai``) and the chat
+    handler must return a non-empty answer.
+
+    Vertex was removed from english_rag_chat entirely (2026-05-05) so it
+    no longer appears in the paid set. The chaos still excludes it for
+    safety in case a future re-add slips into the pool.
     """
     _disable_credit_burn_fallback(monkeypatch)
 
+    # azure_openai is the sole non-zero-weight primary; vertex/sarvam are
+    # kept in the exclusion set as a safety net in case a future config
+    # edit adds them back.
     paid = frozenset({"azure_openai", "vertex", "sarvam"})
     # Strict tail expectation — only the two NAMED Task #347 promotions are
     # acceptable winners. We deliberately exclude generic ``workers_ai`` from
@@ -201,13 +208,12 @@ def test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypa
         _build_chaos_dispatch(paid, workers_tail, captured),
     )
 
-    # Drain the random draw enough times that we are statistically guaranteed
-    # to have observed every paid provider being excluded AND a NAMED tail
-    # variant winning at least once. Round-robin pool (2026-05-05): every
-    # active provider in english_rag_chat (azure_openai, vertex,
-    # workers_ai_llama32_3b, workers_ai_mistral_7b) carries weight 1000, so
-    # each gets ~25% of draws; with 6 attempts per call and 40 iterations a
-    # NAMED tail variant winning at least once is virtually guaranteed.
+    # 2026-05-05 strict primary/fallback pool: azure_openai is the sole
+    # non-zero-weight primary; workers_ai_llama32_3b / workers_ai_mistral_7b
+    # / generic workers_ai sit at weight 0 as pure fallbacks reachable only
+    # via call_with_provider_fallback's exclusion-redraw loop after Azure
+    # 429s. Across 40 chaos iterations the NAMED tail variants must win at
+    # least once (otherwise the fallback chain is broken).
     seen_named_tail: set = set()
     for _ in range(40):
         captured.clear()
@@ -272,20 +278,27 @@ def test_assamese_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeyp
 
 
 def test_english_chat_pool_actually_contains_workers_ai_tail():
-    """Guardrail — config.POOL_WEIGHTS['english_rag_chat'] must keep the three
-    Workers AI tail variants at non-zero weight so the chaos fallback above
-    has something to draw. If a future config edit zeros them out the chaos
-    test would still pass via the gpt-oss-20b last resort, masking the
-    regression — this assert catches it directly at the config layer."""
+    """Guardrail (2026-05-05) — config.POOL_WEIGHTS['english_rag_chat'] must
+    keep the three Workers AI tail variants present in the pool (weight may
+    be 0 — they are pure fallbacks reachable only through
+    call_with_provider_fallback's exclusion-redraw after the Azure primary
+    exhausts). If a future config edit drops them entirely, the chaos test
+    above would silently land on the deepest fallback and the regression
+    would be invisible — this assert catches it at the config layer."""
     from config import POOL_WEIGHTS
     pool = POOL_WEIGHTS["english_rag_chat"]
-    assert pool.get("workers_ai_llama32_3b", 0) > 0, (
-        "Task #347 promoted workers_ai_llama32_3b into english_rag_chat — "
-        "must remain > 0 so the tail can be drawn under chaos"
+    assert "workers_ai_llama32_3b" in pool, (
+        "workers_ai_llama32_3b must be present in english_rag_chat (as a "
+        "pure fallback reachable via exclusion-redraw after Azure exhausts)"
     )
-    assert pool.get("workers_ai_mistral_7b", 0) > 0, (
-        "Task #347 promoted workers_ai_mistral_7b into english_rag_chat — "
-        "must remain > 0 so the tail can be drawn under chaos"
+    assert "workers_ai_mistral_7b" in pool, (
+        "workers_ai_mistral_7b must be present in english_rag_chat (as a "
+        "pure fallback reachable via exclusion-redraw after Azure exhausts)"
+    )
+    # Vertex must NOT be in the chat pool — removed entirely 2026-05-05.
+    assert "vertex" not in pool, (
+        "vertex must NOT appear in english_rag_chat (2026-05-05 — removed "
+        "from chat pools entirely; reserved for content polish + non-chat features)"
     )
     # PROVIDER_PRIORITY also has to list these — POOL_WEIGHTS alone is not
     # enough; select_provider iterates the priority list to seed the weighted
@@ -294,6 +307,10 @@ def test_english_chat_pool_actually_contains_workers_ai_tail():
     chain = PROVIDER_PRIORITY["english_rag_chat"]
     assert "workers_ai_llama32_3b" in chain
     assert "workers_ai_mistral_7b" in chain
+    assert "vertex" not in chain, (
+        "vertex must NOT appear in PROVIDER_PRIORITY['english_rag_chat'] "
+        "(2026-05-05 — removed from chat pools entirely)"
+    )
 
 
 @pytest.mark.skip(reason=(

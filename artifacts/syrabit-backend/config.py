@@ -1049,26 +1049,27 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG: Azure GPT-4.1-mini (primary) → Vertex/Gemini 2.5
-    # Flash → Workers AI fast-mode (Llama 3.2 3B) → balanced Mistral 7B →
-    # generic Workers AI (last-resort gpt-oss-20b). Sarvam removed per
-    # 2026-05-05 user instruction — Sarvam is now reserved exclusively for
-    # the Indic conversational path (assamese_rag_chat) where its native
-    # Assamese reasoning quality matters most. Bedrock + OpenAI/xAI
-    # removed in Task #347 — Azure is the sole managed English LLM, with
-    # native Workers AI variants picking up tail traffic.
+    # English chat + RAG (2026-05-05 user instruction — strict
+    # primary/fallback): Azure GPT-4.1-mini is the SOLE primary; Workers AI
+    # variants are pure fallbacks (weight 0 — only reached when Azure is
+    # exhausted/throttled). Vertex REMOVED from the chat pool entirely
+    # (Vertex stays reserved for the content polish stage and other
+    # non-chat features). Sarvam reserved for the Indic conversational
+    # path (assamese_rag_chat). Bedrock + OpenAI/xAI removed in Task #347.
+    # Workers AI tail order: workers_ai_llama32_3b → workers_ai_mistral_7b
+    # → generic workers_ai (last-resort gpt-oss-20b).
     "english_rag_chat":  [
-        "azure_openai", "vertex",
+        "azure_openai",
         "workers_ai_llama32_3b", "workers_ai_mistral_7b", "workers_ai",
     ],
-    # Assamese chat: Sarvam (native Indic conversational reasoning) →
-    # Workers AI IndicTrans2 (en-indic neural MT, Task #267 promotion) →
-    # Vertex (Gemini 2.5 Flash). 3-leg chain re-introduced per 2026-05-05
-    # user instruction — IndicTrans2 sits between Sarvam and Vertex so a
-    # Sarvam outage hands off to the in-house Cloudflare neural MT before
-    # paying for Gemini. Strict-chain exhaustion still surfaces 503 (no
-    # silent downgrade to generic workers_ai for Assamese prompts).
-    "assamese_rag_chat": ["sarvam", "workers_ai_indic", "vertex"],
+    # Assamese chat (2026-05-05 user instruction — strict primary/fallback):
+    # Sarvam is the SOLE primary; Workers AI IndicTrans2 (en-indic neural
+    # MT) is the pure fallback (weight 0 — only reached when Sarvam is
+    # exhausted/throttled). Vertex REMOVED from the Assamese chat chain
+    # entirely. Strict-chain exhaustion still surfaces 503 (no silent
+    # downgrade to generic workers_ai / workers_ai_llama31_8b for Assamese
+    # prompts — both emit wrong-language output).
+    "assamese_rag_chat": ["sarvam", "workers_ai_indic"],
     # English long-form content / notes generation (2026-05-05 user
     # instruction): Workers AI variants (PRIMARY) + Vertex / Gemini
     # (FALLBACK). Sarvam removed — it stays on the Assamese conversational
@@ -1192,21 +1193,28 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai":                 0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
     },
     "english_rag_chat": {
-        "azure_openai":           1000,
-        "vertex":                 1000,
-        # Sarvam reserved for the Assamese conversational chain only.
-        "workers_ai_llama32_3b":  1000,
-        "workers_ai_mistral_7b":  1000,
-        "workers_ai":                0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
+        # Strict primary/fallback (2026-05-05 user instruction): Azure
+        # OpenAI is the SOLE primary at weight 10000, Workers AI tail
+        # variants sit at weight 0 as pure fallbacks reachable only
+        # through call_with_provider_fallback's exclusion-redraw loop
+        # after Azure exhausts/throttles. Vertex REMOVED from the chat
+        # pool entirely — it stays reserved for content polish + other
+        # non-chat features.
+        "azure_openai":           10000,
+        "workers_ai_llama32_3b":      0,  # fallback (azure-exhausted only)
+        "workers_ai_mistral_7b":      0,  # fallback (azure-exhausted only)
+        "workers_ai":                 0,  # deepest fallback — gpt-oss-20b
     },
     "assamese_rag_chat": {
-        # 3-leg pool (sarvam, workers_ai_indic, vertex) load-balanced
-        # equally per 2026-05-05 user instruction. Strict-chain
-        # exhaustion still surfaces 503 (no silent downgrade to generic
-        # workers_ai / workers_ai_llama31_8b for Assamese prompts).
-        "sarvam":                 1000,
-        "workers_ai_indic":       1000,
-        "vertex":                 1000,
+        # Strict primary/fallback (2026-05-05 user instruction): Sarvam
+        # is the SOLE primary at weight 10000, Workers AI IndicTrans2
+        # sits at weight 0 as the pure fallback reached only when
+        # Sarvam exhausts. Vertex REMOVED entirely from the Assamese
+        # chat chain. Strict 2-leg exhaustion still surfaces 503 (no
+        # silent downgrade to generic workers_ai / workers_ai_llama31_8b
+        # for Assamese prompts — both emit wrong-language output).
+        "sarvam":                 10000,
+        "workers_ai_indic":           0,  # fallback (sarvam-exhausted only)
     },
     "assamese_content": {
         # Assamese content generation — STAGE 1 (GENERATE) (2026-05-05).
