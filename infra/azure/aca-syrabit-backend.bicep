@@ -7,7 +7,7 @@
 // the image tag on an already-provisioned revision; structural changes
 // (scale rules, env vars, ingress) flow through this template.
 //
-// Region: eastus2 — same region as the Azure OpenAI deployment so the
+// Region: eastus — same region as the Azure OpenAI deployment (`syrabit-openai`) so the
 // chat hot-path stays intra-region (zero cross-region egress).
 //
 // Cutover runbook: artifacts/syrabit/docs/infra/aca-cutover.md
@@ -28,7 +28,7 @@ param acrName string
 param image string
 
 @description('Region — must match the Azure OpenAI deployment to keep the chat hot-path intra-region.')
-param location string = 'eastus2'
+param location string = 'eastus'
 
 @description('Azure Key Vault name that holds the runtime secrets (SENDGRID_API_KEY, AZURE_OPENAI_API_KEY, MONGO_URI, …).')
 param keyVaultName string = 'syrabit-prod-kv'
@@ -78,6 +78,10 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         { name: 'mongo-uri',            keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/MONGO-URI',            identity: 'system' }
         { name: 'jwt-secret',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/JWT-SECRET',           identity: 'system' }
         { name: 'razorpay-key-secret',  keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/RAZORPAY-KEY-SECRET',  identity: 'system' }
+        // Task #400 — shared secret the backend sends as `X-Embed-Secret` to the
+        // Cloudflare embed worker (`embed.syrabit.ai`). Same value as the worker's
+        // `EMBED_SHARED_SECRET` binding; keep them in lock-step on rotation.
+        { name: 'workers-embed-secret', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/WORKERS-EMBED-SECRET', identity: 'system' }
       ]
     }
     template: {
@@ -97,6 +101,13 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'RAZORPAY_KEY_SECRET',  secretRef: 'razorpay-key-secret' }
             { name: 'EMAIL_FROM',           value: 'Syrabit.ai <noreply@syrabit.ai>' }
             { name: 'ENV',                  value: 'production' }
+            // Task #400 — route embeddings through the new Cloudflare worker
+            // (Gemma-300M + Qwen3-0.6B fused → 1024-dim) instead of Cohere.
+            // The provider is selected by `EMBED_PROVIDER_PRIMARY`; rolling
+            // back is a single env-var revert to `cohere`.
+            { name: 'WORKERS_EMBED_URL',     value: 'https://embed.syrabit.ai' }
+            { name: 'WORKERS_EMBED_SECRET',  secretRef: 'workers-embed-secret' }
+            { name: 'EMBED_PROVIDER_PRIMARY', value: 'workers_ai_custom' }
           ]
           probes: [
             {

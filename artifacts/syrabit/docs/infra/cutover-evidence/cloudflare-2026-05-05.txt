@@ -1,0 +1,47 @@
+=== Live cutover verification — Cloudflare embed worker ===
+Captured: 2026-05-05T14:50:29Z
+Endpoint: https://embed.syrabit.ai (Cloudflare Worker syrabit-embed-worker)
+
+--- GET /health ---
+{"ok":true,"dims":1024,"batch":32,"models":["@cf/google/embeddinggemma-300m","@cf/qwen/qwen3-embedding-0.6b"],"version":"1.1.0"}
+[HTTP 200 in 0.085129s]
+
+--- GET /version ---
+{"version":"1.1.0","dims":1024,"models":["@cf/google/embeddinggemma-300m","@cf/qwen/qwen3-embedding-0.6b"],"built_at":"2026-05-05T14:50:30.232Z"}
+[HTTP 200 in 0.073182s]
+
+--- POST /embed without auth (expect 401) ---
+{"error":"unauthorized"}
+[HTTP 401]
+
+--- POST /embed with X-Embed-Secret (expect 200, 1024-dim vectors) ---
+{
+  "keys": [
+    "vectors",
+    "dims",
+    "count",
+    "model_version",
+    "models"
+  ],
+  "count": 2,
+  "dims": 1024,
+  "model_version": "1.1.0",
+  "models": [
+    "@cf/google/embeddinggemma-300m",
+    "@cf/qwen/qwen3-embedding-0.6b"
+  ],
+  "first_vector_first_4_floats": [
+    -0.1637097948179306,
+    0.03119046074871739,
+    0.03913661474668145,
+    -0.06411484106390077
+  ],
+  "first_vector_length": 1024
+}
+
+[HTTP 200 — verified above]
+
+=== Result ===
+✓ Worker LIVE serving fused Gemma-300M + Qwen3-0.6B → 1024-dim embeddings
+✓ Auth enforcement working (401 without secret, 200 with)
+✓ Bound to embed.syrabit.ai via Cloudflare zone routes
