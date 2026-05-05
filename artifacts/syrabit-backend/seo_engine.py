@@ -2292,6 +2292,18 @@ async def d1_sync_full(_admin: dict = Depends(_require_admin)):
     """Push the full content catalog (boards, subjects, chapters, topics, seo_pages) to D1."""
     from d1_sync import sync_full
     result = await sync_full(_db)
+    # Task #406 — also fire the extended D1 mirror (seo_meta +
+    # audit_log + syllabus_map) right after sync_full so a scheduler
+    # that hits this endpoint keeps Pages SSR metadata fresh. Wrapped
+    # so the extended mirror never aborts the primary result.
+    try:
+        import d1_mirror as _d1_mirror
+        ext_result = await _d1_mirror.sync_extended(_db)
+        if isinstance(result, dict):
+            result["extended_mirror"] = ext_result
+    except Exception as _ext_exc:
+        if isinstance(result, dict):
+            result["extended_mirror"] = {"success": False, "reason": f"{type(_ext_exc).__name__}: {_ext_exc}"}
     if result.get("success"):
         try:
             await _db.sync_meta.update_one(

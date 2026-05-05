@@ -356,6 +356,17 @@ async def admin_trigger_d1_sync(admin: dict = Depends(get_admin_user), tables: O
         result = await sync_tables(db, table_list)
     else:
         result = await sync_full(db)
+        # Task #406 — fire the extended D1 mirror sync (seo_meta +
+        # audit_log + syllabus_map) immediately after the primary
+        # sync_full so the nightly scheduler that hits this endpoint
+        # keeps the Pages SSR layer fresh. Wrapped so a failure of
+        # the extended mirror never aborts the primary sync result.
+        try:
+            import d1_mirror as _d1_mirror
+            ext_result = await _d1_mirror.sync_extended(db)
+            logger.info(f"d1_mirror.sync_extended result: {ext_result}")
+        except Exception as _ext_exc:
+            logger.warning(f"d1_mirror.sync_extended failed (non-blocking): {_ext_exc}")
     # Task #795: after MongoDB → D1 sync the worker's edge cache may still
     # serve responses backed by stale D1 reads until each key's TTL
     # expires. Force a worker-cache purge_all so the next read repopulates
