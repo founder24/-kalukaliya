@@ -1241,9 +1241,12 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
             sections share one ``heavy_cached_at`` timestamp because they
             are computed and cached as a single block server-side. */}
         {metrics?._meta && (() => {
+          // Wording matches AdminHealth.jsx (Task #396) for UX parity:
+          // sub-second age renders as "live" so the same data, viewed
+          // on either panel, never produces conflicting language.
           const fmtAgo = (s) => {
             const n = Math.max(0, Math.floor(s));
-            if (n < 1) return 'just now';
+            if (n < 1) return 'live';
             if (n < 60) return `${n}s ago`;
             if (n < 3600) return `${Math.floor(n / 60)}m ago`;
             return `${Math.floor(n / 3600)}h ago`;
