@@ -2312,6 +2312,31 @@ async def review_flashcard(req: CardReviewReq, request: Request,
                     "WHERE actor_kind=$2 AND actor=$3",
                     today, kind, actor,
                 )
+    # Task #401 — for *successful* recalls (SM-2 quality 4 / 5) of a
+    # logged-in user, persist the card's front/back into the memory_brain
+    # as a `fact` memory so the next chat turn can ground on what the
+    # student has confirmably learned. Only fires for `actor_kind == "user"`
+    # to avoid spamming the brain with anonymous device IDs that have no
+    # cross-session continuity, and only on quality >= 4 to skip cards
+    # the student is still struggling with. Fully best-effort:
+    # `write_flashcard_recall_memory` swallows all provider errors.
+    if kind == "user" and actor and req.quality is not None and req.quality >= 4:
+        try:
+            from memory_brain_chat import (
+                write_flashcard_recall_memory as _mb_write_flashcard,
+            )
+            asyncio.create_task(_mb_write_flashcard(
+                actor,
+                front=updated["front"] or "",
+                back=updated["back"] or "",
+                quality=int(req.quality),
+                note_id=updated["note_id"] or None,
+                card_id=str(req.card_id),
+                interval_days=int(updated["interval_days"]),
+                repetitions=int(updated["repetitions"]),
+            ))
+        except Exception as _mb_err:
+            logger.debug("memory_brain flashcard write skipped (non-fatal): %s", _mb_err)
     return {"ok": True, "card": _flashcard_row_to_dict(updated), "streak": streak}
 
 

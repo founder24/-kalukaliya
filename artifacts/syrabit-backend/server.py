@@ -959,6 +959,24 @@ async def lifespan(app):
             except Exception as _pc_err:
                 logger.warning("Pinecone index ensure failed (non-blocking): %s", _pc_err)
 
+            # Task #401 — memory_brain Atlas $vectorSearch index. Voyage-3.5
+            # 1024-dim, collection `memory_brain`, index name
+            # `memory_brain_vector_index`. Idempotent: ensure_index() checks
+            # for an existing index by name and only issues create_search_index
+            # if missing. Gated on MEMORY_BRAIN_ENSURE_INDEX so dev / CI
+            # without Atlas Search can opt out without touching code.
+            _mb_ensure_flag = (os.environ.get("MEMORY_BRAIN_ENSURE_INDEX", "1") or "").strip().lower()
+            if _mb_ensure_flag not in ("0", "false", "no", "off", ""):
+                try:
+                    from providers.memory_brain import ensure_index as _ensure_mb
+                    _mb_result = await _ensure_mb()
+                    logger.info("memory_brain index check: %s", _mb_result)
+                except Exception as _mb_err:
+                    logger.warning(
+                        "memory_brain ensure_index failed (non-blocking): %s",
+                        _mb_err,
+                    )
+
             await db.analytics.create_index([("event_type", 1), ("timestamp", -1)])
             await db.analytics.create_index([("subject_id", 1), ("event_type", 1)])
             await db.analytics.create_index("user_id")

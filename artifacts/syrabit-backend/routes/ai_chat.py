@@ -50,6 +50,10 @@ from db_ops import (
     supa_upsert_conversation,
 )
 from llm import call_llm_api_chat, call_llm_api_stream
+from memory_brain_chat import (
+    query_user_memories as _mb_query_user_memories,
+    write_chat_turn_memory as _mb_write_chat_turn_memory,
+)
 from rag import (
     _fetch_internal_chapters,
     _record_chat_latency,
@@ -790,6 +794,11 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         _ns_fetch_followup(),
         _ns_prefetch_history(),
         _fetch_internal_chapters(msg.message, subject_id=msg.subject_id, subject_name=msg.subject_name) if (msg.subject_id or msg.subject_name) else asyncio.sleep(0),
+        # Task #401 — pull personalised memory_brain matches in parallel
+        # with the rest of Phase 0 so the read latency hides behind
+        # subject / chapter / followup resolution. Bounded internally
+        # by a short asyncio.wait_for inside _mb_query_user_memories.
+        _mb_query_user_memories(user_id, msg.message) if user_id else asyncio.sleep(0),
         return_exceptions=True,
     )
     _subj_ctx_result = _phase0_results[0] if not isinstance(_phase0_results[0], BaseException) else {}
@@ -799,6 +808,11 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
     _followup_info = _phase0_results[4] if not isinstance(_phase0_results[4], BaseException) else None
     _prefetched_conv = _phase0_results[5] if not isinstance(_phase0_results[5], BaseException) else None
     _prefetched_chapters = _phase0_results[6] if not isinstance(_phase0_results[6], BaseException) else []
+    _user_memories_ns = _phase0_results[7] if (
+        len(_phase0_results) > 7 and not isinstance(_phase0_results[7], BaseException)
+    ) else []
+    if not isinstance(_user_memories_ns, list):
+        _user_memories_ns = []
     for _i, _r in enumerate(_phase0_results):
         if isinstance(_r, BaseException):
             logger.warning(f"[NON-STREAM] Phase 0 task {_i} failed (degrading gracefully): {_r}")
@@ -992,6 +1006,7 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         web_results=web_results or None,
         resolved_intent=_detected_intent,
         response_lang=_ns_resp_lang,
+        user_memories=_user_memories_ns,
     )
     if not conv_id and user_id:
         conv_id = str(uuid.uuid4())
@@ -1168,6 +1183,24 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
                 board_name=ctx_board_name,
                 class_name=ctx_class_name,
                 conversation_id=conv_id,
+            ))
+            # Task #401 — write the Q&A turn into the memory_brain so a
+            # later /ai/chat from the same student can recall this
+            # question / answer via vector search. Use the *original*
+            # user utterance (`_original_message`, captured at L837
+            # before `merge_followup_into_query` rewrites it) so the
+            # stored memory matches how the student actually phrased
+            # the question, not the rewritten search query. Best-effort:
+            # errors inside the helper are logged but never raised.
+            tasks.append(_mb_write_chat_turn_memory(
+                user_id,
+                _original_message,
+                answer,
+                subject_id=msg.subject_id,
+                subject_name=msg.subject_name,
+                chapter_name=msg.chapter_name,
+                conversation_id=conv_id,
+                rag_source=rag_ctx.get("source", "none"),
             ))
             # Mirror latest turn into the ChatSession DO (in-process fallback).
             try:
@@ -1382,6 +1415,24 @@ async def _persist_chat_turn(
             await supa_update_conversation(conv_id, user_id, _persist_payload)
         if deduct_credit:
             await atomic_deduct_credit(user_id, credits_used_before, 999999)
+        # Task #401 — write the Q&A turn into the memory_brain so a
+        # later /ai/chat/stream from the same student can recall this
+        # exchange via vector search. Best-effort: the helper logs and
+        # swallows any provider / Voyage / Mongo errors so a backend
+        # outage cannot turn a successful chat into a failed persist.
+        try:
+            await _mb_write_chat_turn_memory(
+                user_id,
+                user_msg,
+                answer,
+                subject_id=rag_subject_id,
+                subject_name=rag_subject_name,
+                chapter_name=rag_chapter_name,
+                conversation_id=conv_id,
+                rag_source=rag_source,
+            )
+        except Exception as _mb_e:
+            logger.debug("memory_brain write skipped (non-fatal): %s", _mb_e)
     except Exception as e:
         logger.warning(f"_persist_chat_turn failed: {e}")
 
@@ -2013,6 +2064,25 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
         _defaults_pre = []
         _pre_results = []
         _subj_ctx_result, _sem_class_result, document_text, _stream_followup_info, _prefetched_conv, _s_prefetched_chapters = None, None, None, None, None, []
+        # Task #401 — even on the casual fast-path (which intentionally
+        # skips the heavier Phase 0 context fetches) we still want
+        # personalised memory recall, otherwise a first-turn "hi"
+        # / casual chat from a returning logged-in student gets a
+        # generic response with no continuity. We use a TIGHTER timeout
+        # here (300ms vs the default 600ms) because the casual fast-path
+        # has the strictest TTFT budget — a slow Voyage call should be
+        # skipped rather than allowed to delay first token.
+        if user_id:
+            try:
+                _user_memories_st = await _mb_query_user_memories(
+                    user_id, msg.message, timeout_s=0.3,
+                )
+                if not isinstance(_user_memories_st, list):
+                    _user_memories_st = []
+            except Exception:
+                _user_memories_st = []
+        else:
+            _user_memories_st = []
         _done_pre, _pending_pre = set(), set()
         logger.info("[STREAM] Casual fast-path: skipping Phase 0 entirely")
     else:
@@ -2024,8 +2094,14 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             asyncio.create_task(_fetch_followup_info()),
             asyncio.create_task(_prefetch_history()),
             asyncio.create_task(_check_warm_redis() if (msg.subject_id or msg.subject_name) else asyncio.sleep(0)),
+            # Task #401 — fetch personalised memory_brain matches in
+            # parallel with the rest of Phase 0+1 so the read latency
+            # is hidden inside the existing pre-LLM budget. The helper
+            # has its own short asyncio.wait_for, so a slow Voyage /
+            # Mongo call cannot exceed the budget.
+            asyncio.create_task(_mb_query_user_memories(user_id, msg.message) if user_id else asyncio.sleep(0)),
         ]
-        _defaults_pre = [None, None, None, None, None, []]
+        _defaults_pre = [None, None, None, None, None, [], []]
 
         _done_pre, _pending_pre = await asyncio.wait(_tasks_pre, timeout=_PRE_LLM_BUDGET, return_when=asyncio.ALL_COMPLETED)
     if _pending_pre:
@@ -2044,7 +2120,9 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             _pre_results.append(_defaults_pre[_i])
 
     if _pre_results:
-        _subj_ctx_result, _sem_class_result, document_text, _stream_followup_info, _prefetched_conv, _s_prefetched_chapters = _pre_results
+        _subj_ctx_result, _sem_class_result, document_text, _stream_followup_info, _prefetched_conv, _s_prefetched_chapters, _user_memories_st = _pre_results
+        if not isinstance(_user_memories_st, list):
+            _user_memories_st = []
 
     _s_topic_meta = None
     if _stage1_task:
@@ -2270,6 +2348,7 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
         web_results=web_results or None,
         resolved_intent=_stream_intent,
         response_lang=_resp_lang,
+        user_memories=_user_memories_st,
     )
 
     conv_id = msg.conversation_id
@@ -2366,7 +2445,13 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
 
     messages_payload = [{"role": "system", "content": system_prompt}] + history_messages + [{"role": "user", "content": msg.message}]
 
-    user_msg_saved   = msg.message
+    # Task #401 — preserve the *original* user utterance (captured at
+    # L2131 as `_s_original_message`, before `merge_followup_into_query`
+    # rewrites it) so memory_brain stores how the student actually
+    # phrased the question, not the rewritten retrieval query. Falls
+    # back to the current msg.message when an original wasn't captured
+    # (defensive — `_s_original_message` is unconditionally set above).
+    user_msg_saved   = _s_original_message if _s_original_message else msg.message
     # Task #409 — the card-context "document"→"library" remap now happens
     # earlier (right before build_rag_system_prompt) so the library branch
     # actually fires. By the time we get here, rag_ctx["source"] is already
