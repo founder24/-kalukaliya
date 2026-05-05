@@ -1004,6 +1004,26 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   // chain (Task #291) AND the Workers-AI Phase-2 fallback have failed
   // enough times within the alerting window to suggest a real outage.
   const [assameseUnavailable, setAssameseUnavailable] = useState(null);
+  // Task #396 — freshness indicator for /admin/dashboard/metrics.
+  // Backend piggybacks `_meta: {heavy_cached_at, throttle_fresh_at}`
+  // (unix seconds) on every response. Throttle tiles are recomputed
+  // every poll (Task #388), heavy fields are cached for ~5s (Task
+  // #395), so admins can't tell from the numbers alone which half is
+  // live vs cached. We render a tiny "Throttle: live • Heavy: Xs ago"
+  // strip above the burst tiles using these timestamps. The 1s tick
+  // below keeps the "Xs ago" label updating between the 30s polls so
+  // the cache age advances visibly while the panel sits idle — without
+  // it the label would stay frozen and admins would still mistake a
+  // 25s-old number for "just refreshed".
+  const [metricsMeta, setMetricsMeta] = useState(null);
+  const [, setMetricsMetaTick] = useState(0);
+  useEffect(() => {
+    if (!metricsMeta) return undefined;
+    const id = setInterval(() => {
+      setMetricsMetaTick((t) => (t + 1) % 1_000_000);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [metricsMeta]);
   // Task #379 — expand/collapse state for the Assamese tile's recent-events
   // list. Auto-expands while the rail is throttled so on-call sees the
   // failing leg + error excerpt without an extra click; operators can
@@ -1067,6 +1087,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         setDeepgramThrottle(md?.deepgram_throttle ?? null);
         // Task #374 — "both rails red" indicator for Assamese chat.
         setAssameseUnavailable(md?.assamese_chat_unavailable ?? null);
+        // Task #396 — freshness indicator (heavy_cached_at, throttle_fresh_at).
+        setMetricsMeta(md?._meta ?? null);
       } else {
         setWaiThrottle(null);
         setGroqThrottle(null);
@@ -1074,6 +1096,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         setAzureOpenaiThrottle(null);
         setDeepgramThrottle(null);
         setAssameseUnavailable(null);
+        setMetricsMeta(null);
       }
       if (poolRes.status === 'fulfilled')
         setEmbedBurst({
@@ -2539,6 +2562,60 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                   <p className="mt-2 text-[11px] text-red-600">Failed to load routing config — check admin token / api workflow.</p>
                 )}
               </div>
+
+              {/* Task #396 — freshness indicator. Backend (cms_sarvam_health.py
+                  admin_dashboard_metrics) piggybacks `_meta` on every response
+                  so admins can tell which numbers below are seconds-fresh
+                  (throttle tiles, recomputed every poll per Task #388) vs
+                  cached (heavy users / revenue / SEO / deps block, cached for
+                  ~5s per Task #395). Without this strip, recovery from a
+                  burst feels indistinguishable from a stale "still throttled"
+                  view, and a stale heavy-block could mislead an admin during
+                  a deploy. Sits directly above the burst tiles below so the
+                  "live" label is visually adjacent to the data it describes. */}
+              {metricsMeta && (() => {
+                const fmtAgo = (s) => {
+                  const n = Math.max(0, Math.floor(s));
+                  if (n < 1) return 'live';
+                  if (n < 60) return `${n}s ago`;
+                  if (n < 3600) return `${Math.floor(n / 60)}m ago`;
+                  return `${Math.floor(n / 3600)}h ago`;
+                };
+                const nowS = Date.now() / 1000;
+                const heavyAt = Number(metricsMeta.heavy_cached_at);
+                const throttleAt = Number(metricsMeta.throttle_fresh_at);
+                const heavyAgeS = Number.isFinite(heavyAt) ? nowS - heavyAt : NaN;
+                const throttleAgeS = Number.isFinite(throttleAt) ? nowS - throttleAt : NaN;
+                const heavyLabel = Number.isFinite(heavyAgeS) ? fmtAgo(heavyAgeS) : '—';
+                // Throttle tiles bypass the cache (Task #388), so on a normal
+                // poll the age is well under a second — collapse anything
+                // <2s to "live" so the label doesn't flicker between "0s
+                // ago" / "1s ago" / "live" on every render tick.
+                const throttleLabel = Number.isFinite(throttleAgeS) && throttleAgeS < 2
+                  ? 'live'
+                  : Number.isFinite(throttleAgeS) ? fmtAgo(throttleAgeS) : '—';
+                return (
+                  <div
+                    className="text-[10px] text-gray-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1"
+                    data-testid="metrics-freshness"
+                    title={`heavy_cached_at=${heavyAt} · throttle_fresh_at=${throttleAt}`}
+                  >
+                    <span>
+                      Throttle tiles:{' '}
+                      <span className="text-gray-600 font-medium" data-testid="metrics-freshness-throttle">
+                        {throttleLabel}
+                      </span>
+                    </span>
+                    <span aria-hidden="true">•</span>
+                    <span>
+                      Heavy fields (users / revenue / SEO / deps):{' '}
+                      <span className="text-gray-600 font-medium" data-testid="metrics-freshness-heavy">
+                        {heavyLabel}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
 
               {/* Tasks #85/#90/#374/#378 — reusable burst gauge for any provider.
                   ``assamese-chat`` reuses the same shape but counts

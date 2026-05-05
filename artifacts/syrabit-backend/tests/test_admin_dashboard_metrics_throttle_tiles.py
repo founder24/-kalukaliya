@@ -539,3 +539,124 @@ async def test_heavy_query_cache_expires_after_ttl(
         "object the caller saw — Task #388's cache-hit overlay returns a "
         "shallow copy on read, so write-back identity must be checked here"
     )
+
+
+@pytest.mark.asyncio
+async def test_meta_freshness_indicator_shape_and_cache_semantics(
+    stub_admin_dependencies, monkeypatch,
+):
+    """Task #396: /admin/dashboard/metrics MUST piggyback a `_meta` dict
+    that lets the AdminHealth panel render a "Throttle: live • Heavy:
+    Xs ago" freshness indicator. Now that throttle tiles refresh every
+    poll (Task #388) but heavy fields are cached for ~5s (Task #395),
+    admins have no way to tell from the numbers alone which half is
+    live vs cached.
+
+    Pin the contract in one flow:
+      1. SHAPE: every response has `_meta` with exactly two unix-second
+         floats — `heavy_cached_at` and `throttle_fresh_at`.
+      2. CACHE MISS: both timestamps equal `now` (both halves are live).
+      3. CACHE HIT: `heavy_cached_at` is identity-equal to the cached
+         `_metrics_cache["ts"]` (proves it really reflects the cached
+         snapshot, not the request time), while `throttle_fresh_at`
+         strictly advances past the first call's value (proves the
+         throttle half is recomputed on every poll, matching the
+         Task #388 bypass).
+      4. The cache-hit overlay does NOT mutate the cached dict's `_meta`
+         (mirrors the throttle-tile shallow-copy contract from Task #388).
+    """
+    cms = stub_admin_dependencies
+    fake_db = type("D", (), {
+        "payments": _FakeCollection(),
+        "seo_topics": _FakeCollection(),
+        "seo_pages": _FakeCollection(),
+    })()
+    monkeypatch.setattr(cms, "db", fake_db, raising=False)
+    import deps
+    monkeypatch.setattr(deps, "redis_client", None, raising=False)
+    _reset_429_windows()
+
+    # ── First call: cache MISS — both halves are live ──
+    first = await cms.admin_dashboard_metrics(admin={"username": "test"})
+    assert "_meta" in first, (
+        "Task #396: response MUST include _meta so AdminHealth can render "
+        "the per-section freshness indicator"
+    )
+    meta1 = first["_meta"]
+    assert set(meta1.keys()) == {"heavy_cached_at", "throttle_fresh_at"}, (
+        f"Task #396: _meta shape drift: {set(meta1.keys())} — "
+        "AdminHealth.jsx reads exactly these two keys"
+    )
+    assert isinstance(meta1["heavy_cached_at"], (int, float))
+    assert isinstance(meta1["throttle_fresh_at"], (int, float))
+    assert meta1["heavy_cached_at"] == meta1["throttle_fresh_at"], (
+        "Task #396: on a cache MISS both halves are computed at `now`, "
+        "so the two timestamps MUST be equal — divergence here would "
+        "mislead admins into thinking the heavy block is stale on the "
+        "very first poll after a deploy"
+    )
+    cached_ts_after_first = cms._metrics_cache["ts"]
+    assert meta1["heavy_cached_at"] == cached_ts_after_first, (
+        "Task #396: heavy_cached_at MUST equal the cache write-back ts "
+        "so the next cache-HIT call can advertise the same value"
+    )
+
+    # ── Rewind the cached ts so the next call still hits the cache
+    #    (still well within ``_METRICS_CACHE_TTL``) but the heavy
+    #    snapshot looks measurably older. We deliberately can't rely
+    #    on real wall-clock advance here — back-to-back awaits land
+    #    within microseconds — so a fixed-second `time.sleep()` would
+    #    bloat the suite and still be flaky. Rewinding the cache ts
+    #    is the same trick the existing #394 test uses, and it makes
+    #    the heavy/throttle DIVERGENCE on the cache-HIT branch
+    #    deterministic and large enough to assert against. ──
+    nudge = 0.5
+    cms._metrics_cache["ts"] -= nudge
+    rewound_heavy_ts = cms._metrics_cache["ts"]
+
+    # ── Second call: cache HIT — heavy stays put, throttle is fresh ──
+    second = await cms.admin_dashboard_metrics(admin={"username": "test"})
+    assert "_meta" in second
+    meta2 = second["_meta"]
+    assert set(meta2.keys()) == {"heavy_cached_at", "throttle_fresh_at"}
+
+    assert meta2["heavy_cached_at"] == rewound_heavy_ts, (
+        "Task #396: on a cache HIT, heavy_cached_at MUST track the "
+        "cached snapshot ts (proves the indicator shows when the heavy "
+        "block was actually computed, not when the request arrived). "
+        "If this drifts, admins will see the heavy 'Xs ago' counter "
+        "reset to 0 on every poll and never know the data is cached."
+    )
+    # Monotonicity: time only moves forward across two awaits.
+    assert meta2["throttle_fresh_at"] >= meta1["throttle_fresh_at"], (
+        "Task #396: throttle_fresh_at MUST be monotonic across calls "
+        f"(got {meta2['throttle_fresh_at']} < first call "
+        f"{meta1['throttle_fresh_at']})"
+    )
+    # Divergence: this is the whole reason the indicator exists.
+    # After the 0.5s rewind, heavy_cached_at is at least `nudge` seconds
+    # behind throttle_fresh_at, so any AdminHealth render of the
+    # response would show "Throttle: live • Heavy: ≥1s ago".
+    divergence = meta2["throttle_fresh_at"] - meta2["heavy_cached_at"]
+    assert divergence >= nudge - 0.01, (
+        "Task #396: on a cache HIT the two halves MUST DIVERGE — "
+        "throttle_fresh_at must be at least the rewound nudge "
+        f"({nudge}s) ahead of heavy_cached_at, otherwise the indicator "
+        "in AdminHealth.jsx ('Throttle: live • Heavy: Xs ago') is "
+        f"indistinguishable from a cache-miss state. Got divergence "
+        f"= {divergence}s."
+    )
+
+    # ── Cached dict's `_meta` must reflect the original miss values ──
+    # The cache-HIT branch returns a shallow copy with an overwritten
+    # `_meta`; it must NOT mutate the cached entry, otherwise a
+    # subsequent caller within the TTL would see the previous caller's
+    # `throttle_fresh_at` (which would be wrong by the time they read
+    # it). Same shallow-copy contract as the throttle tiles in #388.
+    cached_dict = cms._metrics_cache["data"]
+    assert cached_dict["_meta"]["heavy_cached_at"] == cached_dict["_meta"]["throttle_fresh_at"], (
+        "Task #396: cache-hit overlay MUST NOT mutate the cached `_meta` "
+        "— the cached entry should still reflect its miss-time state "
+        "(both timestamps equal). Mirrors Task #388's shallow-copy "
+        "contract for the throttle tiles."
+    )

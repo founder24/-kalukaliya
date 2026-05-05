@@ -4893,6 +4893,20 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
         # half-updated payload.
         cached = dict(_metrics_cache["data"])
         cached.update(_build_throttle_tiles())
+        # Task #396: freshness indicator. ``heavy_cached_at`` reflects the
+        # moment the heavy block was last recomputed (i.e. the cache TS,
+        # which only advances on a cache MISS); ``throttle_fresh_at`` is
+        # ``now`` because the throttle tiles were just rebuilt by
+        # ``_build_throttle_tiles()`` above. AdminHealth uses these to
+        # show "Throttle: live • Heavy: Xs ago" so admins can tell at a
+        # glance which numbers are seconds-fresh vs cached for up to
+        # ``_METRICS_CACHE_TTL``. Always overwrite (don't trust whatever
+        # ``_meta`` happened to be on the cached dict) so a mid-flight
+        # cache write can't leak a stale ``throttle_fresh_at`` to readers.
+        cached["_meta"] = {
+            "heavy_cached_at": _metrics_cache["ts"],
+            "throttle_fresh_at": now_ts,
+        }
         return cached
 
     async with _metrics_lock:
@@ -4900,6 +4914,11 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
         if _metrics_cache["data"] and (now_ts - _metrics_cache["ts"]) < _METRICS_CACHE_TTL:
             cached = dict(_metrics_cache["data"])
             cached.update(_build_throttle_tiles())
+            # Task #396: see comment on the pre-lock branch above.
+            cached["_meta"] = {
+                "heavy_cached_at": _metrics_cache["ts"],
+                "throttle_fresh_at": now_ts,
+            }
             return cached
 
         start = time.time()
@@ -4961,6 +4980,15 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
         result.update(_build_throttle_tiles())
         _metrics_cache["data"] = result
         _metrics_cache["ts"] = now_ts
+        # Task #396: freshness indicator. On a cache MISS both halves
+        # are live, so ``heavy_cached_at`` and ``throttle_fresh_at``
+        # are equal — the cache-HIT branch is where they diverge (heavy
+        # ages, throttle stays at ``now``). See the cache-hit comment
+        # above for the full rationale.
+        result["_meta"] = {
+            "heavy_cached_at": now_ts,
+            "throttle_fresh_at": now_ts,
+        }
         return result
 
 
