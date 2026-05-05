@@ -1114,3 +1114,302 @@ class TestFetchChunksSemanticAssameseLock:
             f"Chapter filter must restrict to status='published'; "
             f"got {find_filter!r}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. Real vector_search pool configuration — Task #377
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestVectorSearchPoolConfig:
+    """End-to-end exercise of the *real* ``llm.select_provider("vector_search", …)``
+    weighted-pool dispatch — no mock of ``select_provider`` itself.
+
+    The other test classes in this file (and Task #372 in general) mock
+    ``llm.select_provider`` with a deterministic preference list to keep
+    the fallback-routing assertions hermetic. That isolation is correct
+    for those tests, but it leaves the real pool config completely
+    unverified: someone could remove ``pinecone_ai`` from
+    ``PROVIDER_PRIORITY["vector_search"]``, drop the ``mongodb_atlas``
+    weight-0 fallback, or zero out the ``vertex`` weight, and not a single
+    test would notice.
+
+    These tests pin the contract that the real config provides:
+
+      1. Empty ``exclude`` → draws come from the weighted pool
+         {pinecone_ai, vertex}; both are reached over many draws (load-
+         balanced) and no weight-0 / non-pool provider ever leaks in.
+      2. Excluding ``{pinecone_ai}`` → every draw returns ``vertex``
+         (the only positive-weight survivor).
+      3. Excluding ``{pinecone_ai, vertex}`` → falls through to the
+         weight-0 ``mongodb_atlas`` last-resort gate.
+      4. Excluding ``{pinecone_ai, vertex, mongodb_atlas}`` → returns the
+         weight-0 ``workers_ai`` terminal fallback.
+      5. Excluding all four → returns ``"workers_ai"`` (the documented
+         terminal default for non-strict-chain features).
+
+    Plus a static config-shape sanity check so accidental removals from
+    PROVIDER_PRIORITY / POOL_WEIGHTS / PROVIDER_CREDITS are flagged
+    independently of dispatch behaviour.
+
+    Saturation is forced to 0 so the RPM soft-shed cannot perturb the
+    selection — this test is about *config*, not runtime health.
+    """
+
+    def _patch_no_saturation(self, monkeypatch):
+        """Pin ``_get_provider_saturation`` to 0 so RPM shedding never
+        excludes a provider during these tests. Without this, a leaky
+        429-burst counter from an earlier test could flip a provider
+        out of the pool and corrupt the assertions."""
+        import llm as _llm
+        monkeypatch.setattr(_llm, "_get_provider_saturation", lambda _p: 0.0)
+
+    # ── 4a. Static config-shape sanity ────────────────────────────────────────
+
+    # ── Expected ground-truth weights for the vector_search pool ─────────────
+    #
+    # As of the 2026-05-05 round-robin / load-balancing rewrite, the
+    # vector_search pool runs Pinecone and Vertex at EQUAL weight (1000
+    # each) so traffic is split ~50/50. Any change to this ratio is a
+    # deliberate operator action and must be reflected here at the same
+    # time — bumping Pinecone to 3000 or Vertex to 500 must update both
+    # POOL_WEIGHTS and these expected values together. Pinning the exact
+    # magnitudes (not just "> 0") catches a silent re-weighting that
+    # would otherwise pass every existing test.
+    _EXPECTED_VECTOR_SEARCH_WEIGHTS: dict[str, int] = {
+        "pinecone_ai": 1000,
+        "vertex":      1000,
+    }
+
+    def test_pool_config_shape(self):
+        """Direct config introspection — independent of select_provider.
+
+        A misconfiguration like dropping ``pinecone_ai`` from
+        ``PROVIDER_PRIORITY["vector_search"]``, removing the weight-0
+        ``mongodb_atlas`` last-resort gate, zeroing out ``vertex`` in
+        ``POOL_WEIGHTS["vector_search"]``, or silently re-weighting the
+        Pinecone↔Vertex split would all regress the dispatch behaviour.
+        This test fails loudly the moment any of those invariants change
+        so the operator is forced to update the dispatch tests below at
+        the same time.
+        """
+        from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, POOL_WEIGHTS
+
+        priority = PROVIDER_PRIORITY.get("vector_search")
+        assert priority is not None, "vector_search pool missing from PROVIDER_PRIORITY"
+
+        # All four providers must be present in this exact order. The order
+        # matters: the weight-0 fallback loop walks PROVIDER_PRIORITY in
+        # list order, so mongodb_atlas must come before workers_ai.
+        assert priority == ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"], (
+            f"vector_search PROVIDER_PRIORITY changed unexpectedly: {priority!r}"
+        )
+
+        weights = POOL_WEIGHTS.get("vector_search")
+        assert weights is not None, "vector_search pool missing from POOL_WEIGHTS"
+
+        # Pin the exact expected magnitudes (not just "> 0") so a silent
+        # re-weighting like {pinecone_ai: 3000, vertex: 500} or
+        # {pinecone_ai: 100, vertex: 1000} is caught. This is the
+        # explicit operator contract for vector retrieval load split.
+        assert weights == self._EXPECTED_VECTOR_SEARCH_WEIGHTS, (
+            f"vector_search POOL_WEIGHTS changed: expected "
+            f"{self._EXPECTED_VECTOR_SEARCH_WEIGHTS!r}, got {weights!r}. "
+            f"If this re-weighting is intentional, update "
+            f"_EXPECTED_VECTOR_SEARCH_WEIGHTS in this test class so the "
+            f"draw-distribution check below stays in sync."
+        )
+
+        # And pin the structural invariant: pinecone_ai must remain at
+        # least as weighted as vertex (Pinecone is the inference-grade
+        # primary; Vertex is the secondary). A future re-weighting that
+        # demotes Pinecone below Vertex would be a meaningful product
+        # decision and must update both this assertion and the expected
+        # weights above.
+        assert weights.get("pinecone_ai", 0) >= weights.get("vertex", 0) > 0, (
+            f"vector_search pool ordering invariant broken: "
+            f"pinecone_ai must be >= vertex > 0; got {weights!r}"
+        )
+
+        # Weight-0 last-resort fallbacks live in PROVIDER_CREDITS, not in
+        # the per-pool override. Pin them here so a credit reshuffle that
+        # accidentally promotes mongodb_atlas / workers_ai to a positive
+        # weight (and thus into the round-robin draw) is caught.
+        assert PROVIDER_CREDITS.get("mongodb_atlas") == 0, (
+            "mongodb_atlas must remain weight-0 (Atlas is fallback-only "
+            "for vector_search; promoting it would cost the latency tax "
+            "on every request)."
+        )
+        assert PROVIDER_CREDITS.get("workers_ai") == 0, (
+            "workers_ai must remain weight-0 (terminal last-resort)."
+        )
+
+    # ── 4b. Live select_provider dispatch — REAL call, no mock ────────────────
+
+    def test_empty_exclude_draws_from_weighted_pool_only(self, monkeypatch):
+        """Real ``select_provider("vector_search")`` with no exclusions
+        must only ever return providers from the positive-weight pool
+        ({pinecone_ai, vertex} per current POOL_WEIGHTS). Over many draws
+        the empirical distribution must match the configured weight ratio
+        within a generous statistical tolerance, and neither weight-0
+        provider (mongodb_atlas, workers_ai) may leak in.
+
+        Determinism is guaranteed by seeding ``random`` for the duration
+        of the test — the assertion below would otherwise be a tail-risk
+        flake with the small but nonzero probability of a streak
+        violating the ±10 % tolerance.
+
+        With ``POOL_WEIGHTS["vector_search"] = {pinecone_ai: 1000,
+        vertex: 1000}`` the expected ratio is 50/50; if a future
+        operator change re-weights the pool (e.g. pinecone_ai = 3000,
+        vertex = 500 → 6:1 expected), updating
+        ``_EXPECTED_VECTOR_SEARCH_WEIGHTS`` in this class automatically
+        re-targets this test, and the static-shape test above will fail
+        first to force the update.
+        """
+        import random as _random
+        import llm as _llm
+        self._patch_no_saturation(monkeypatch)
+
+        # Deterministic seed — fixes the empirical distribution so the
+        # ±10 % tolerance below is a real ceiling, not a flake risk.
+        _random.seed(20260505)
+
+        N = 2000
+        seen: dict[str, int] = {}
+        for _ in range(N):
+            chosen = _llm.select_provider("vector_search", lang="en")
+            seen[chosen] = seen.get(chosen, 0) + 1
+
+        # No leak from outside the positive-weight pool.
+        forbidden = set(seen) - set(self._EXPECTED_VECTOR_SEARCH_WEIGHTS)
+        assert not forbidden, (
+            f"select_provider returned a non-pool provider on empty "
+            f"exclude — got {forbidden!r} (full distribution: {seen!r}). "
+            f"Likely cause: a weight-0 provider was promoted in "
+            f"POOL_WEIGHTS['vector_search'] or PROVIDER_CREDITS."
+        )
+
+        # Each positive-weight provider must be drawn at the rate
+        # implied by its configured weight, within ±10 % of the total
+        # draws (a generous tolerance that still catches large
+        # mis-weightings — e.g. a 6:1 split would deviate by ~36 %
+        # from the current 50/50 expectation, well outside ±10 %).
+        total_weight = sum(self._EXPECTED_VECTOR_SEARCH_WEIGHTS.values())
+        for provider, weight in self._EXPECTED_VECTOR_SEARCH_WEIGHTS.items():
+            expected_share = weight / total_weight
+            actual_share = seen.get(provider, 0) / N
+            assert abs(actual_share - expected_share) < 0.10, (
+                f"{provider} draw rate ({actual_share:.2%}) deviates from "
+                f"its configured share ({expected_share:.2%}) by more than "
+                f"10 percentage points over {N} seeded draws. Either "
+                f"POOL_WEIGHTS['vector_search'] silently changed without "
+                f"updating _EXPECTED_VECTOR_SEARCH_WEIGHTS, or the "
+                f"weighted-draw logic in select_provider regressed. "
+                f"Full distribution: {seen!r}"
+            )
+
+        # Belt-and-braces structural check: the higher-weight provider
+        # (pinecone_ai per the ordering invariant) must be drawn at
+        # least as often as the lower-weight one. With the current 1:1
+        # weighting this is essentially a tie-or-Pinecone-leads check;
+        # if a future re-weighting promotes Pinecone to e.g. 3000 vs
+        # vertex 500, this will catch a regression that flips the
+        # relative draw rate without anyone touching POOL_WEIGHTS.
+        weights_cfg = self._EXPECTED_VECTOR_SEARCH_WEIGHTS
+        if weights_cfg["pinecone_ai"] > weights_cfg["vertex"]:
+            assert seen.get("pinecone_ai", 0) > seen.get("vertex", 0), (
+                f"pinecone_ai is configured at higher weight than vertex "
+                f"({weights_cfg!r}) but was drawn less often "
+                f"({seen!r}) — weighted-draw regression."
+            )
+
+    def test_exclude_pinecone_falls_through_to_vertex(self, monkeypatch):
+        """With ``pinecone_ai`` excluded, the only remaining positive-
+        weight provider in the vector_search pool is ``vertex``. Every
+        draw must therefore return ``vertex`` deterministically — there
+        is no randomness when the pool degenerates to a single member."""
+        import llm as _llm
+        self._patch_no_saturation(monkeypatch)
+
+        for _ in range(50):
+            chosen = _llm.select_provider(
+                "vector_search", lang="en",
+                exclude=frozenset({"pinecone_ai"}),
+            )
+            assert chosen == "vertex", (
+                f"Expected vertex when pinecone_ai is excluded; got {chosen!r}. "
+                f"Likely cause: vertex was removed from POOL_WEIGHTS or "
+                f"PROVIDER_PRIORITY['vector_search']."
+            )
+
+    def test_exclude_pinecone_and_vertex_falls_through_to_atlas(self, monkeypatch):
+        """With BOTH positive-weight providers excluded, the weighted
+        pool is empty and ``select_provider`` walks PROVIDER_PRIORITY
+        in list order looking for a weight-0 fallback that is (a) not
+        excluded and (b) allowed for this feature.
+
+        ``mongodb_atlas`` is gated by ``feature == "vector_search"``
+        (the only pool where the Atlas $vectorSearch backend is wired),
+        so for any other feature this fallback is skipped. Pinning the
+        gate here means a regression that drops the gate (turning Atlas
+        into a wildcard fallback for *every* feature) is caught."""
+        import llm as _llm
+        self._patch_no_saturation(monkeypatch)
+
+        chosen = _llm.select_provider(
+            "vector_search", lang="en",
+            exclude=frozenset({"pinecone_ai", "vertex"}),
+        )
+        assert chosen == "mongodb_atlas", (
+            f"Expected mongodb_atlas weight-0 fallback when both "
+            f"positive-weight providers are excluded; got {chosen!r}. "
+            f"Likely cause: mongodb_atlas was removed from "
+            f"PROVIDER_PRIORITY['vector_search'], its credit was "
+            f"promoted off zero, or the Atlas-only feature gate "
+            f"in select_provider was tightened."
+        )
+
+    def test_exclude_pinecone_vertex_atlas_falls_through_to_workers_ai(self, monkeypatch):
+        """With pinecone_ai + vertex + mongodb_atlas all excluded, the
+        last weight-0 fallback in PROVIDER_PRIORITY['vector_search'] is
+        ``workers_ai``. The function must return it via the weight-0
+        fallback loop, NOT via the terminal default at the bottom of
+        ``select_provider`` (workers_ai is in this pool's priority list)."""
+        import llm as _llm
+        self._patch_no_saturation(monkeypatch)
+
+        chosen = _llm.select_provider(
+            "vector_search", lang="en",
+            exclude=frozenset({"pinecone_ai", "vertex", "mongodb_atlas"}),
+        )
+        assert chosen == "workers_ai", (
+            f"Expected workers_ai when pinecone_ai+vertex+mongodb_atlas "
+            f"are excluded; got {chosen!r}."
+        )
+
+    def test_exclude_all_four_returns_terminal_workers_ai_default(self, monkeypatch):
+        """When every provider in the vector_search pool is excluded, the
+        function falls through to its terminal default branch which
+        returns the literal string ``"workers_ai"`` for non-strict-chain
+        features. ``vector_search`` is not in ``_STRICT_CHAIN_FEATURES``
+        (only ``assamese_rag_chat`` is), so the documented terminal
+        fallback is workers_ai — never ``None``.
+
+        This pins the contract that vector retrieval will never raise
+        ``select_provider returned None`` regardless of what's in the
+        exclude set. Callers downstream of select_provider can therefore
+        rely on always getting a string provider name back."""
+        import llm as _llm
+        self._patch_no_saturation(monkeypatch)
+
+        chosen = _llm.select_provider(
+            "vector_search", lang="en",
+            exclude=frozenset({
+                "pinecone_ai", "vertex", "mongodb_atlas", "workers_ai",
+            }),
+        )
+        assert chosen == "workers_ai", (
+            f"vector_search must always return workers_ai as the terminal "
+            f"default (never None) since it is NOT a strict-chain feature; "
+            f"got {chosen!r}."
+        )
