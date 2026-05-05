@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Loader2, User, CheckCircle, AlertCircle, BookOpen, Zap, GraduationCap } from 'lucide-react';
 import { usePublicStats } from '@/hooks/usePublicStats';
@@ -9,6 +9,7 @@ import { formatAuthError } from '@/lib/authErrors';
 import { toast } from 'sonner';
 import { LogoFull } from '@/components/Logo';
 import GoogleSignInButton from '@/components/GoogleSignInButton';
+import TurnstileWidget from '@/components/TurnstileWidget';
 
 
 const getPasswordStrength = (password) => {
@@ -48,6 +49,7 @@ export default function SignupPage() {
   const [emailError, setEmailError] = useState('');
   const { signup } = useAuth();
   const navigate = useNavigate();
+  const turnstileRef = useRef(null);
 
   const strength = getPasswordStrength(password);
   const passwordsMatch = confirmPassword && password === confirmPassword;
@@ -94,8 +96,12 @@ export default function SignupPage() {
       return;
     }
     setLoading(true);
+    // Task #404 — collect Turnstile token (empty when the widget is
+    // disabled / not rendered; backend dependency is dormant in that
+    // case so the request still succeeds).
+    const turnstileToken = turnstileRef.current?.getToken?.() || '';
     try {
-      const user = await signup(name, email, password, consentDpdp);
+      const user = await signup(name, email, password, consentDpdp, turnstileToken);
       toast.success('Account created! Welcome to Syrabit.ai!');
       const role = user?.role || '';
       if (role === 'staff' || role === 'admin') {
@@ -106,6 +112,8 @@ export default function SignupPage() {
     } catch (err) {
       setError(formatAuthError(err, 'Signup failed. Please try again.'));
     } finally {
+      // Tokens are one-shot per the Turnstile contract.
+      turnstileRef.current?.reset?.();
       setLoading(false);
     }
   };
@@ -424,6 +432,8 @@ export default function SignupPage() {
                   {' '}under the DPDP Act, 2023
                 </span>
               </div>
+
+              <TurnstileWidget ref={turnstileRef} action="signup" />
 
               <button
                 type="submit"

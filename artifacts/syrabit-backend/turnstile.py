@@ -102,6 +102,33 @@ def reset_for_tests() -> None:
             _STATE[k] = 0
 
 
+def frontend_config() -> dict:
+    """Tiny JSON the SPA reads on bootstrap so it can render the
+    Turnstile widget without baking the site key into the build.
+
+    Mirrors :func:`cf_web_analytics.frontend_config` so the frontend
+    can ``GET /api/turnstile/config`` and decide whether to mount the
+    widget at all (``enabled=False`` → render nothing, do not load the
+    challenges.cloudflare.com script). The ``site_key`` is always safe
+    to expose (it is the public half of the Turnstile keypair) but we
+    still gate it behind the flag so a half-configured rollout cannot
+    leak the namespace early.
+
+    Returns ``{enabled, site_key}`` — empty/None values when the flag
+    is off or the site key is unset, matching the behaviour the
+    ``require_turnstile`` dependency uses on the server side.
+    """
+    # Re-read at call time so a test that flips the env via
+    # ``importlib.reload(config)`` sees the new value without having to
+    # also re-import this module.
+    from config import TURNSTILE_ON as _ON, TURNSTILE_SITE_KEY as _KEY
+    enabled = bool(_ON and _KEY)
+    return {
+        "enabled": enabled,
+        "site_key": _KEY if enabled else None,
+    }
+
+
 # ── Pure verifier ────────────────────────────────────────────────────────────
 async def verify_turnstile_token(
     token: str, remote_ip: str = "",
@@ -221,5 +248,5 @@ async def require_turnstile(request: Request) -> VerifyResult:
 
 __all__ = [
     "VerifyResult", "verify_turnstile_token", "require_turnstile",
-    "snapshot", "reset_for_tests",
+    "snapshot", "reset_for_tests", "frontend_config",
 ]

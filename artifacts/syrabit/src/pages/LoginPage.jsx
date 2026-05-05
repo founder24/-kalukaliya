@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Loader2, MessageSquare, BarChart3, AlertCircle, Sparkles } from 'lucide-react';
 import { usePublicStats } from '@/hooks/usePublicStats';
@@ -9,6 +9,7 @@ import { formatAuthError } from '@/lib/authErrors';
 import { toast } from 'sonner';
 import { LogoFull } from '@/components/Logo';
 import GoogleSignInButton from '@/components/GoogleSignInButton';
+import TurnstileWidget from '@/components/TurnstileWidget';
 
 
 const BENEFITS = [
@@ -48,6 +49,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
+  const turnstileRef = useRef(null);
 
   const handleInputFocus = useCallback((e) => {
     setTimeout(() => {
@@ -59,8 +61,12 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    // Task #404 — collect Turnstile token (empty when the widget is
+    // disabled / not rendered, in which case the backend dependency
+    // is dormant too so the request still succeeds).
+    const turnstileToken = turnstileRef.current?.getToken?.() || '';
     try {
-      const user = await login(email, password);
+      const user = await login(email, password, turnstileToken);
       toast.success('Welcome back!');
       setTimeout(() => {
         const role = user.role || '';
@@ -75,6 +81,9 @@ export default function LoginPage() {
     } catch (err) {
       setError(formatAuthError(err, 'Login failed. Please check your credentials.'));
     } finally {
+      // Tokens are one-shot per the Turnstile contract — reset so the
+      // next attempt mints a fresh one.
+      turnstileRef.current?.reset?.();
       setLoading(false);
     }
   };
@@ -275,6 +284,8 @@ export default function LoginPage() {
                   Forgot password?
                 </Link>
               </div>
+
+              <TurnstileWidget ref={turnstileRef} action="login" />
 
               <button
                 type="submit"

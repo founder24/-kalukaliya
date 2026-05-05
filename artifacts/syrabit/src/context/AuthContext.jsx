@@ -211,11 +211,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const _exchangeSupabaseSession = async (supabaseToken, name, consent_dpdp) => {
+  // Task #404 — forward Cloudflare Turnstile token (collected by
+  // <TurnstileWidget /> on the public auth forms) via the canonical
+  // ``x-turnstile-token`` header. The backend ``require_turnstile``
+  // dependency reads this header and (when ``TURNSTILE_ON`` is on)
+  // calls Cloudflare ``siteverify``. When the flag is off the header
+  // is harmlessly ignored, so this is safe to ship before the flip.
+  const _exchangeSupabaseSession = async (
+    supabaseToken, name, consent_dpdp, turnstileToken,
+  ) => {
     const body = { supabase_token: supabaseToken };
     if (name) body.name = name;
     if (consent_dpdp) body.consent_dpdp = consent_dpdp;
-    const res = await axios.post(`${API_BASE}/auth/supabase-session`, body, { withCredentials: true });
+    const headers = {};
+    if (turnstileToken) headers['x-turnstile-token'] = turnstileToken;
+    const res = await axios.post(
+      `${API_BASE}/auth/supabase-session`,
+      body,
+      { withCredentials: true, headers },
+    );
     const { user: userData, access_token } = res.data;
     if (access_token) _storeToken(access_token);
     justAuthenticated.current = true;
@@ -224,7 +238,7 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  const login = async (email, password) => {
+  const login = async (email, password, turnstileToken) => {
     if (!supabase) throw new Error('Authentication is not configured.');
     const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password });
     if (sbError) {
@@ -235,12 +249,14 @@ export const AuthProvider = ({ children }) => {
     if (!sbData?.session?.access_token) {
       throw new Error('No session returned from Supabase');
     }
-    const userData = await _exchangeSupabaseSession(sbData.session.access_token);
+    const userData = await _exchangeSupabaseSession(
+      sbData.session.access_token, null, false, turnstileToken,
+    );
     try { Analytics.login(userData.id, userData.email); } catch {}
     return userData;
   };
 
-  const signup = async (name, email, password, consent_dpdp = false) => {
+  const signup = async (name, email, password, consent_dpdp = false, turnstileToken) => {
     if (!supabase) throw new Error('Authentication is not configured.');
     const { data: sbData, error: sbError } = await supabase.auth.signUp({
       email,
@@ -255,7 +271,9 @@ export const AuthProvider = ({ children }) => {
     if (!sbData?.session?.access_token) {
       throw new Error('Please check your email to confirm your account before signing in.');
     }
-    const userData = await _exchangeSupabaseSession(sbData.session.access_token, name, consent_dpdp);
+    const userData = await _exchangeSupabaseSession(
+      sbData.session.access_token, name, consent_dpdp, turnstileToken,
+    );
     try { Analytics.signup(userData.email, userData.plan); } catch {}
     return userData;
   };
