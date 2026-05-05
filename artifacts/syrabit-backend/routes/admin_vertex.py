@@ -380,10 +380,36 @@ async def vertex_translate(
     source_lang: str = Body("en"),
     admin: dict = Depends(get_admin_user),
 ):
-    """Translate educational content to Assamese or other regional languages."""
+    """Translate educational content to Assamese or other regional languages.
+
+    Task #386 — when ``TRANSLATE_PROVIDER=workers_indic`` we route the
+    request directly through Workers-AI IndicTrans2 (skipping
+    ``vertex_services.translate``, which would otherwise refuse with
+    a hard error because the Vertex/Gemini polish step is gated off).
+    """
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
-    result = await vertex_services.translate(text, target_lang=target_lang, source_lang=source_lang)
+    try:
+        from config import TRANSLATE_PROVIDER as _TP
+    except Exception:
+        _TP = "auto"
+    if (_TP or "").strip().lower() == "workers_indic":
+        try:
+            from providers.workers_indic import call_indic_trans as _indic_trans
+            result = await _indic_trans(
+                text, source_lang=source_lang, target_lang=target_lang,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Workers-AI IndicTrans2 translation failed: "
+                    f"{type(exc).__name__}: {exc}. "
+                    "TRANSLATE_PROVIDER=workers_indic is the active gate."
+                ),
+            )
+    else:
+        result = await vertex_services.translate(text, target_lang=target_lang, source_lang=source_lang)
     if result is None:
         raise HTTPException(
             status_code=503,

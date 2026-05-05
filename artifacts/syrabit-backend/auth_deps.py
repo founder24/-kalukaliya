@@ -467,6 +467,34 @@ async def rate_limit_chat_optional(
         plan = user.get("plan", "free")
         plan_cfg = PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
         limit = plan_cfg["req_per_min"]
+        # Task #386 — when DO_CHAT_ON is set, the per-minute throttle
+        # is checked against the global RateLimiter Durable Object so
+        # a user that switches between regions / pods cannot reset
+        # their counter. The helper transparently falls back to the
+        # in-process bucket when the edge is unreachable, so we
+        # *also* keep the existing local check as the source of truth
+        # — both must allow the request. This belt-and-braces
+        # approach matches the rollback story in RUNBOOK.md (flag
+        # off ⇒ behaviour identical to before).
+        try:
+            from do_chat import is_enabled as _do_enabled, rate_check as _do_rate
+            if _do_enabled():
+                allowed, _remaining = await _do_rate(
+                    f"chat:{user_id}", limit=limit, window_s=60,
+                )
+                if not allowed:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Chat rate limit exceeded — {limit} messages/minute ({plan} plan). Upgrade for higher limits.",
+                        headers={"Retry-After": "60", "X-RateLimit-Limit": str(limit), "X-RateLimit-Source": "do"},
+                    )
+        except HTTPException:
+            raise
+        except Exception:
+            # do_chat failed catastrophically — fall through to the
+            # in-process gate; never block a paying user because the
+            # edge dispatch broke.
+            pass
         if not check_rate_limit(f"chat:{user_id}", max_requests=limit, window_seconds=60):
             raise HTTPException(
                 status_code=429,

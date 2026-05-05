@@ -36,6 +36,76 @@ export interface Env {
   ORIGIN_TARGET?: string;
   DO_APP_BACKEND_URL?: string;
   DISPATCH_SHARED_SECRET: string;
+  // Durable Object bindings (see wrangler.toml).
+  CHAT_SESSION?: DurableObjectNamespace;
+  RATE_LIMITER?: DurableObjectNamespace;
+  DO_CHAT_ON?: string;
+  EDGE_CHAT_RATE_LIMIT?: string;
+  EDGE_CHAT_USER_RATE_LIMIT?: string;
+  // HS256 secret mirrored from the backend (`JWT_SECRET`) so the edge
+  // can cryptographically verify the Bearer token before deriving a
+  // per-user limiter scope. When unset the limiter degrades to per-IP
+  // — never to client-supplied identity.
+  EDGE_JWT_HS256_SECRET?: string;
+}
+
+// Re-export DO classes so wrangler can find them at the worker entrypoint.
+export { ChatSession } from './chat_session';
+export { RateLimiter } from './rate_limiter';
+export { deriveLimiterScope, verifyHS256Jwt } from './edge_identity';
+import { deriveLimiterScope } from './edge_identity';
+
+/**
+ * Task #386 — dispatch `/do/...` paths to the corresponding Durable
+ * Object namespace. Returns null when the path is not a DO route so
+ * the caller can fall through to the regular origin proxy.
+ *
+ * Auth: same shared bearer as the regular dispatch — the backend
+ * `do_chat.py` shim sets `Authorization: Bearer <DISPATCH_SHARED_SECRET>`
+ * on every call.
+ */
+async function dispatchDurableObject(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response | null> {
+  if (!url.pathname.startsWith('/do/')) {
+    return null;
+  }
+
+  // Bearer auth is mandatory for DO dispatch — these endpoints carry
+  // chat-session payloads and decrement rate-limit counters, so an
+  // unauthenticated caller must never reach them.
+  const auth = request.headers.get('authorization') || '';
+  const expected = `Bearer ${env.DISPATCH_SHARED_SECRET ?? ''}`;
+  if (!env.DISPATCH_SHARED_SECRET || auth !== expected) {
+    return new Response('unauthorised', { status: 401 });
+  }
+
+  // /do/chat-session/<id>[/<sub>]  — sub-paths (e.g. /typing) are
+  // forwarded to the DO so it can dispatch on the path internally.
+  const chatMatch = url.pathname.match(/^\/do\/chat-session\/([^/]+)(?:\/[^/]+)?$/);
+  if (chatMatch) {
+    if (!env.CHAT_SESSION) {
+      return new Response('CHAT_SESSION binding missing', { status: 503 });
+    }
+    const id = env.CHAT_SESSION.idFromName(chatMatch[1]);
+    const stub = env.CHAT_SESSION.get(id);
+    return stub.fetch(request);
+  }
+
+  // /do/rate-limiter/check  — singleton DO id "global" so the same
+  // bucket is consulted from every region.
+  if (url.pathname === '/do/rate-limiter/check') {
+    if (!env.RATE_LIMITER) {
+      return new Response('RATE_LIMITER binding missing', { status: 503 });
+    }
+    const id = env.RATE_LIMITER.idFromName('global');
+    const stub = env.RATE_LIMITER.get(id);
+    return stub.fetch(request);
+  }
+
+  return new Response('unknown DO route', { status: 404 });
 }
 
 const EARLY_HINTS_ASSETS = [
@@ -53,12 +123,71 @@ function resolveOrigin(env: Env): { url: string; target: string } | null {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Task #386 — DO routes are intercepted BEFORE the origin proxy
+    // so chat-session reads / rate-limit checks never hit DigitalOcean.
+    const doResponse = await dispatchDurableObject(request, env, url);
+    if (doResponse) {
+      return doResponse;
+    }
+
+    // Edge rate-limit for chat ingress, gated by DO_CHAT_ON. Scope is
+    // user-keyed when the Bearer token verifies against
+    // EDGE_JWT_HS256_SECRET (the same HS256 secret the backend uses
+    // for JWT_SECRET); otherwise it falls back to per-IP. Fails open
+    // on DO errors. Covers every chat ingress shape the backend
+    // exposes: /chat, /api/chat, /ai_chat, /api/ai_chat, /ai/chat,
+    // /api/ai/chat.
+    const chatPathRe = /^\/(?:api\/)?(?:ai\/|ai_)?chat(?:\b|\/)/i;
+    if (
+      String(env.DO_CHAT_ON ?? '').toLowerCase() === 'true' &&
+      env.RATE_LIMITER &&
+      chatPathRe.test(url.pathname)
+    ) {
+      try {
+        const { scope, kind } = await deriveLimiterScope(request, env);
+        const limit = Math.max(
+          1,
+          Number(
+            kind === 'do-chat-user'
+              ? (env.EDGE_CHAT_USER_RATE_LIMIT ?? env.EDGE_CHAT_RATE_LIMIT ?? '60')
+              : (env.EDGE_CHAT_RATE_LIMIT ?? '30'),
+          ),
+        );
+        const id = env.RATE_LIMITER.idFromName('global');
+        const stub = env.RATE_LIMITER.get(id);
+        const probe = await stub.fetch('https://internal/do/rate-limiter/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: `edge-chat:${scope}`, limit, window_s: 60 }),
+        });
+        if (probe.ok) {
+          const verdict = await probe.json() as { allowed?: boolean; remaining?: number };
+          if (verdict && verdict.allowed === false) {
+            return new Response(
+              JSON.stringify({ error: 'rate_limited', scope: 'edge', remaining: 0 }),
+              {
+                status: 429,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Retry-After': '60',
+                  'X-Edge-Rate-Scope': kind,
+                },
+              },
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('[edge-proxy] edge rate-limit probe failed', { err });
+      }
+    }
+
     const origin = resolveOrigin(env);
     if (!origin) {
       return new Response('origin not configured for ORIGIN_TARGET', { status: 503 });
     }
 
-    const url = new URL(request.url);
     const targetUrl = `${origin.url}${url.pathname}${url.search}`;
 
     const upstreamRequest = new Request(targetUrl, {

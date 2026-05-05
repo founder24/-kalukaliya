@@ -477,3 +477,114 @@ directly into the AI Gateway log search UI.
 fixtures through `ShadowRetriever(..., shadow_sample_rate=1.0)` so the
 admin panel surfaces a stable recall@10 number even when chat traffic
 is light. Schedule under cron and alert on exit code != 0.
+
+---
+
+## Task #386 — Cloudflare Tier 2 (translator gate, SSR, Polish/Mirage,
+Smart Tiered Cache, D1 mirror, Durable-Object chat)
+
+Six new flags ship behind hard rollback values. Every flag defaults
+to its previous behaviour so a rollback is always a single env-var
+flip + worker restart — no redeploy of the edge worker or Pages
+project required.
+
+### Flag matrix + rollback values
+
+| Flag | Default | Wired into | Rollback value |
+|------|---------|-----------|----------------|
+| `TRANSLATE_PROVIDER` | `auto` | `vertex_services.translate` (skips Google Translate when set to `workers_indic`); `llm.call_translate_with_dispatch` (pins pool to `workers_ai_indic`, no fallback). | `TRANSLATE_PROVIDER=auto` — restores the weighted Google + Workers + Azure pool. |
+| `SSR_ENABLED` | `false` | `artifacts/syrabit/functions/_middleware.js` Pages middleware proxies `/<seo-route>` → backend `/html/<path>`. Counter snapshot lives in `cf_ssr_health.snapshot()`. | `SSR_ENABLED=0` (in **Pages env vars** — this is read by the Pages Function, not the backend container) restores SPA-shell-only delivery. The legacy bot-UA prerender path in `_worker.js` is unaffected. |
+| `CF_SPEED_FEATURES_ON` | `false` | `cf_speed_smoke.apply_speed_features()` wraps `cf_enterprise.speed_optimize_all` (Polish + Mirage + Auto Minify + Brotli + Early Hints). `polish_smoke()` probes a known image and surfaces the `cf-polished` / `cf-bgj` headers in the cf-health row. | `CF_SPEED_FEATURES_ON=0` — the helper becomes a no-op. To **revert** zone settings already applied to CF, run `python -c "import asyncio,cf_enterprise as e; asyncio.run(e.speed_optimize_all_disable())"` (settings PATCH `value=off`). |
+| `CF_TIERED_CACHE_ON` | `false` | `cf_tiered_cache.apply_tiered_cache()` (PUT `tiered_cache_smart_topology_enable`); `cf_tiered_cache.purge_by_cache_tags(tags)` is the canonical entry point for callers that need to invalidate by `Cache-Tag`. | `CF_TIERED_CACHE_ON=0` — `apply_tiered_cache` and `purge_by_cache_tags` short-circuit. To turn the zone setting itself off run `tiered_cache_disable()`. |
+| `D1_MIRROR_ON` | `false` | `d1_mirror.export_extended_payload(db)` adds `seo_meta`, `audit_log`, `syllabus_map` to the existing D1 sync payload; `d1_mirror.sync_extended(db)` is invoked alongside `d1_sync.sync_full`. Lag exposed at `/admin/cf-health.d1_mirror`. | `D1_MIRROR_ON=0` — extended tables stop being included in the next sync. Already-mirrored rows stay in D1 (harmless — Pages Functions read them opportunistically and fall back to live origin data). |
+| `DO_CHAT_ON` | `false` | `do_chat.{get_session,put_session,delete_session,rate_check}` dispatch to the edge proxy at `/do/chat-session/<id>` and `/do/rate-limiter/check`. The edge proxy routes them to `ChatSession` / `RateLimiter` Durable Objects (`workers/edge-proxy/src/{chat_session,rate_limiter}.ts`). The same edge worker also enforces **pre-origin** chat-ingress rate limits keyed per-verified-user when `EDGE_JWT_HS256_SECRET` is set, falling back to per-IP otherwise. When the flag is off **or** the edge call fails, the helpers transparently fall through to an in-process dict + token-bucket so chat state is never lost. | `DO_CHAT_ON=0` — every call serves from the in-process backend with no edge round-trip. Existing DO storage is untouched and ready to be re-enabled. |
+
+### Required edge-side configuration (one-time, before `DO_CHAT_ON=1`)
+
+1. `cd artifacts/syrabit/workers/edge-proxy && npx wrangler deploy` —
+   the migration block `v1-task-386` creates the `ChatSession` +
+   `RateLimiter` DO classes the first time it runs.
+2. Backend env vars:
+   - `DO_CHAT_BASE_URL` (or reuse `EDGE_WORKER_URL`) — the public
+     URL of the edge proxy worker.
+   - `DO_CHAT_SHARED_SECRET` (or reuse `DISPATCH_SHARED_SECRET`) —
+     bearer auth for `/do/...` calls; must match the worker secret
+     of the same name.
+3. Verify with `curl -H "Authorization: Bearer $DISPATCH_SHARED_SECRET"
+    -X POST -d '{"key":"smoke:1","limit":3,"window_s":60}'
+    https://<edge>/do/rate-limiter/check` — expect
+    `{"allowed":true,"remaining":2,...}`.
+4. **Per-user edge rate limiting** (optional, recommended): set the
+   wrangler secret `EDGE_JWT_HS256_SECRET` to the same value as the
+   backend `JWT_SECRET`. The edge worker verifies the Bearer token
+   with HS256/SubtleCrypto **before** keying the limiter; tokens that
+   fail verification (forged signature, wrong secret, expired,
+   malformed, RS256-claimed) degrade to per-IP scope. Without this
+   secret the limiter stays per-IP — never per-client-supplied
+   identity. Per-user budget defaults to `EDGE_CHAT_USER_RATE_LIMIT`
+   (or 60 req/min); per-IP defaults to `EDGE_CHAT_RATE_LIMIT`
+   (30 req/min). The 429 response advertises which scope blocked it
+   via `X-Edge-Rate-Scope: do-chat-user|do-chat-ip`.
+
+### Pages SSR rollback
+
+Two env vars exist on purpose because Pages Functions and the backend
+container live in separate runtimes that cannot read each other's
+config:
+
+| Env var | Where it's set | What it controls |
+|---------|----------------|------------------|
+| `SSR_ENABLED` | **Pages project** env vars (Settings → Environment variables) | Whether the Pages middleware actually serves SSR HTML. Authoritative for user-visible behaviour. |
+| `PAGES_SSR_ENABLED` | **Backend container** env vars | Backend's *mirror* of the Pages flag, read only by `/admin/cf-health._ssr_snapshot` to detect drift between the two runtimes. Set to the same value as Pages `SSR_ENABLED` to keep `flag_drift=false`. |
+
+Both must be flipped together for a clean rollout/rollback. To roll back:
+
+1. Pages dashboard → Production env vars → set `SSR_ENABLED=0` →
+   "Save and redeploy" (the env-var update triggers a tiny redeploy
+   that takes < 30 s — no source change needed).
+2. Confirm by `curl -I https://syrabit.ai/seba/class-10/general/science`
+   — the response should **not** contain `X-SSR-Rendered:
+   pages-functions`.
+
+### Translation rollback verification
+
+```
+curl -H "Authorization: Bearer $ADMIN_BEARER" \
+  https://api.syrabit.ai/admin/cf-health | jq '.translate_provider'
+```
+
+Expected after rollback (`TRANSLATE_PROVIDER=auto`):
+```
+{
+  "providers": {
+    "google_translate": { "success": N, "share": ~0.9 },
+    "workers_indic":    { "success": M, "share": ~0.1 }
+  },
+  "primary_provider": "google_translate",
+  "flag": "auto"
+}
+```
+
+If `primary_provider` is still `workers_indic` after the flag flip,
+the worker process is stale — restart the API workflow. The metric
+counter is in-process and resets on restart, which is the intended
+behaviour (no false historical numbers after a rollback).
+
+### Per-workstream tests
+
+| Workstream | Test file |
+|------------|-----------|
+| Translator gate | `tests/test_translate_provider_gate.py` |
+| Speed features + smoke | `tests/test_cf_tier2_helpers.py` (`test_speed_*`, `test_polish_smoke_*`) |
+| Tiered cache + purge | `tests/test_cf_tier2_helpers.py` (`test_tiered_cache_*`) |
+| D1 mirror + lag | `tests/test_cf_tier2_helpers.py` (`test_d1_mirror_*`) |
+| Durable-Object chat fallback | `tests/test_cf_tier2_helpers.py` (`test_do_chat_*`) |
+| /admin/cf-health rows | `tests/test_admin_cf_health_route.py::test_task_386_rows_have_expected_shape` |
+
+Run all Task #386 tests in one shot:
+```
+pytest tests/test_translate_provider_gate.py \
+       tests/test_cf_tier2_helpers.py \
+       tests/test_admin_cf_health_route.py
+```
+

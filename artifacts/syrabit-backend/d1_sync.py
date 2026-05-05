@@ -230,9 +230,32 @@ async def trigger_d1_sync(payload: Dict[str, Any]) -> bool:
 
 async def sync_full(db) -> Dict[str, Any]:
     payload = await export_content_catalog(db)
+    # Task #386 — when D1_MIRROR_ON is set, fold the extended tables
+    # (seo_meta + audit_log + syllabus_map) into the same payload so
+    # they ride the existing fan-out instead of a second round-trip.
+    # The helper no-ops cleanly when the flag is off, returning {}.
+    try:
+        from d1_mirror import export_extended_payload, _record_sync
+        extended = await export_extended_payload(db)
+    except Exception as exc:
+        logger.warning("d1_sync: extended payload export failed: %s", exc)
+        extended = {}
+        _record_sync = None  # type: ignore
+    if extended:
+        payload = {**(payload or {}), **extended}
     if not payload:
         return {"success": False, "error": "Export returned empty"}
     ok = await trigger_d1_sync(payload)
+    # Record extended-mirror outcome so /admin/cf-health.d1_mirror
+    # surfaces a real lag number driven by the live sync, not just
+    # the standalone sync_extended() entrypoint.
+    if extended and _record_sync:
+        try:
+            _record_sync(ok,
+                         {k: len(v) for k, v in extended.items()},
+                         error=None if ok else "sync_full_failed")
+        except Exception:
+            pass
     return {
         "success": ok,
         "tables_exported": list(payload.keys()),
@@ -275,6 +298,16 @@ async def warmup_d1_cache(db) -> Dict[str, Any]:
     try:
         # Export current catalog state
         payload = await export_content_catalog(db)
+        # Task #386 — extended D1 mirror tables piggy-back on the same
+        # warm-up so a fresh deploy always lands with seo_meta /
+        # audit_log / syllabus_map populated for the Pages SSR layer.
+        try:
+            from d1_mirror import export_extended_payload
+            ext = await export_extended_payload(db)
+            if ext:
+                payload = {**(payload or {}), **ext}
+        except Exception as ext_err:
+            logger.warning("D1 warm-up: extended export skipped: %s", ext_err)
         if not payload:
             logger.warning("D1 warm-up: export returned empty, skipping sync")
             return {

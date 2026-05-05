@@ -15,12 +15,52 @@ def _schedule_prerender_refresh(reason: str = "content_update"):
 
     Wraps `pages_deploy.schedule_refresh` in a try/except so admin write
     paths never fail because the deploy hook is misconfigured.
+
+    Also pipes ``reason`` into the Cache-Tag purger so edge-cached HTML
+    carrying ``Cache-Tag: <entity>:*`` is invalidated immediately.
     """
     try:
         from pages_deploy import schedule_refresh
         schedule_refresh(reason)
     except Exception as exc:
         _PRERENDER_LOG.warning("schedule_refresh(%r) failed: %s", reason, exc)
+    # Cache-Tag purge — fire-and-forget, gated by CF_TIERED_CACHE_ON.
+    # The reason string ("subject_updated:<slug>", "chapter_deleted:..")
+    # is parsed into a small set of tags so the purge stays scoped to
+    # the affected entity. When the flag is off this is a cheap no-op.
+    try:
+        tags = _cache_tags_for_reason(reason)
+        if tags:
+            from cf_tiered_cache import purge_by_cache_tags
+            asyncio.create_task(purge_by_cache_tags(tags))
+    except Exception as exc:
+        _PRERENDER_LOG.warning(
+            "cache-tag purge for reason=%r failed: %s", reason, exc,
+        )
+
+
+def _cache_tags_for_reason(reason: str) -> list[str]:
+    """Map a ``_schedule_prerender_refresh`` reason into Cache-Tag tokens.
+
+    Tag format MUST match what the SSR layer emits via
+    ``cf_enterprise.build_cache_tag`` (``syrabit-<entity>-<id>``,
+    hyphen-separated). A mismatch here means the purge silently
+    leaves stale HTML in the edge cache.
+    """
+    if not reason:
+        return []
+    tags = ["syrabit-html"]
+    if ":" in reason:
+        suffix = reason.split(":", 1)[1].strip()
+        if suffix and suffix.replace("-", "").replace("_", "").isalnum():
+            event = reason.split(":", 1)[0]
+            if "subject" in event:
+                tags.append(f"syrabit-subject-{suffix}")
+            elif "chapter" in event:
+                tags.append(f"syrabit-chapter-{suffix}")
+            elif "topic" in event:
+                tags.append(f"syrabit-topic-{suffix}")
+    return tags
 
 
 async def _trigger_prerender_now(reason: str = "bulk_admin_op"):

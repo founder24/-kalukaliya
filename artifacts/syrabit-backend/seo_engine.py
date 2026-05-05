@@ -3465,6 +3465,14 @@ async def get_about_html():
         "and an AI tutor (Syra) covering subjects across Assam Higher Secondary Education Council, "
         "Board of Secondary Education Assam, and university degree programmes."
     )
+    try:
+        from d1_mirror import read_seo_meta as _d1_read_meta
+        meta_override = await _d1_read_meta("/about", _db)
+    except Exception:
+        meta_override = None
+    if isinstance(meta_override, dict):
+        title = meta_override.get("meta_title") or title
+        desc = meta_override.get("meta_description") or desc
     page_url = "https://syrabit.ai/about"
 
     schema = json.dumps({"@context": "https://schema.org", "@graph": [
@@ -4259,12 +4267,30 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 
 @router.get("/html/{board}/{class_slug}/{subject_slug}/{topic_slug}", response_class=HTMLResponse)
 async def get_seo_html_default(board: str, class_slug: str, subject_slug: str, topic_slug: str):
-    page = await _db.seo_pages.find_one(
-        {"board_slug": board, "class_slug": class_slug, "subject_slug": subject_slug,
-         "topic_slug": topic_slug, "page_type": "notes", "status": "published"},
-        {"_id": 0},
-    )
+    # D1-first read with Mongo fallback (no-op when D1_MIRROR_ON is off).
+    async def _mongo_load_page():
+        return await _db.seo_pages.find_one(
+            {"board_slug": board, "class_slug": class_slug, "subject_slug": subject_slug,
+             "topic_slug": topic_slug, "page_type": "notes", "status": "published"},
+            {"_id": 0},
+        )
+    try:
+        from d1_mirror import read_with_fallback as _d1_read
+        page = await _d1_read(
+            "seo_pages",
+            "route",
+            f"/{board}/{class_slug}/{subject_slug}/{topic_slug}",
+            _mongo_load_page,
+        )
+    except Exception:
+        page = await _mongo_load_page()
     if not page:
+        # Record fallback for /admin/cf-health.ssr.
+        try:
+            from cf_ssr_health import record_render as _ssr_rec
+            _ssr_rec(False)
+        except Exception:
+            pass
         raise HTTPException(status_code=404, detail="Page not found")
     page = await _inject_qa(page)
     page_url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{topic_slug}"
@@ -4283,10 +4309,75 @@ async def get_seo_html_default(board: str, class_slug: str, subject_slug: str, t
     resp.headers["X-Topic-Keywords"] = kw_header[:500].encode("ascii", "replace").decode("ascii")
     resp.headers["X-Content-Source"] = "Syrabit Browser"
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400"
+    # Task #386 — Cache-Tag header so Cloudflare can purge the SSR
+    # layer by entity (subject:<slug>, chapter:<slug>, topic:<slug>)
+    # in addition to the coarse "syrabit-html" tag the admin uses to
+    # nuke the whole prerender pool. The matching purge call lives
+    # in ``routes/admin_content._cache_tags_for_reason``.
+    try:
+        from cf_enterprise import build_cache_tag as _bct
+        resp.headers["Cache-Tag"] = (
+            f"syrabit-html "
+            + _bct(
+                "subject", subject_slug,
+                "chapter", page.get("chapter_slug") or "",
+                "topic", topic_slug,
+            )
+        ).strip()
+    except Exception:
+        resp.headers["Cache-Tag"] = (
+            f"syrabit-html syrabit-subject-{subject_slug} "
+            f"syrabit-topic-{topic_slug}"
+        )
     _lm = _iso_to_rfc7231(page.get("updated_at") or page.get("generated_at"))
     if _lm:
         resp.headers["Last-Modified"] = _lm
+    # Task #386 — record SSR success so /admin/cf-health.ssr can
+    # surface a real success_rate. The counter is in-process so each
+    # worker tracks its own; the cf-health route already aggregates
+    # whatever the responding pod knows about.
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
     return resp
+
+
+@router.get(
+    "/html/{board}/{class_slug}/{subject_slug}/chapter/{chapter_slug}",
+    response_class=HTMLResponse,
+)
+async def get_chapter_by_board_html(
+    board: str, class_slug: str, subject_slug: str, chapter_slug: str,
+):
+    """Board-scoped chapter landing — delegates to the slug renderer
+    after asserting the chapter actually belongs to the requested
+    (board, class, subject) chain. Registered before the typed-topic
+    route so the literal `chapter` segment wins."""
+    chap = await _db.chapters.find_one(
+        {"slug": chapter_slug},
+        {"_id": 0, "id": 1, "slug": 1, "subject_id": 1},
+    )
+    if not chap:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    subj = await _db.subjects.find_one(
+        {"id": chap.get("subject_id", "")},
+        {"_id": 0, "slug": 1, "class_id": 1, "board_id": 1},
+    ) or {}
+    cls = await _db.classes.find_one(
+        {"id": subj.get("class_id", "")}, {"_id": 0, "slug": 1},
+    ) if subj.get("class_id") else {}
+    brd = await _db.boards.find_one(
+        {"id": subj.get("board_id", "")}, {"_id": 0, "slug": 1},
+    ) if subj.get("board_id") else {}
+    if (
+        (brd or {}).get("slug") != board
+        or (cls or {}).get("slug") != class_slug
+        or subj.get("slug") != subject_slug
+    ):
+        raise HTTPException(status_code=404, detail="Chapter chain mismatch")
+    return await get_chapter_by_slug_html(chapter_slug)
 
 
 @router.get("/html/{board}/{class_slug}/{subject_slug}/{topic_slug}/{page_type}", response_class=HTMLResponse)
@@ -7882,3 +7973,246 @@ async def related_topics_by_chapter(
     resp = JSONResponse({"related": enriched, "chapter_id": chapter_id})
     resp.headers["Cache-Control"] = "public, max-age=600, s-maxage=3600"
     return resp
+
+
+# Slug-only SSR resolvers — the Pages Functions middleware proxies
+# /topic/<slug>, /chapter/<slug> and /subject/<slug> to these handlers.
+
+async def _resolve_topic_chain(topic_slug: str) -> dict | None:
+    try:
+        from d1_mirror import read_syllabus_chain
+        td = await _db.topics.find_one(
+            {"slug": topic_slug, "status": "published"},
+            {"_id": 0, "id": 1, "chapter_id": 1},
+        )
+        if td and td.get("id"):
+            chain = await read_syllabus_chain(td["id"], _db)
+            if chain:
+                return chain
+    except Exception:
+        pass
+    td = await _db.topics.find_one(
+        {"slug": topic_slug, "status": "published"},
+        {"_id": 0, "id": 1, "slug": 1, "chapter_id": 1},
+    )
+    if not td:
+        return None
+    chap = await _db.chapters.find_one(
+        {"id": td.get("chapter_id", "")},
+        {"_id": 0, "slug": 1, "subject_id": 1},
+    ) or {}
+    subj = await _db.subjects.find_one(
+        {"id": chap.get("subject_id", "")},
+        {"_id": 0, "slug": 1, "class_id": 1, "board_id": 1},
+    ) or {}
+    cls = await _db.classes.find_one(
+        {"id": subj.get("class_id", "")}, {"_id": 0, "slug": 1},
+    ) if subj.get("class_id") else {}
+    brd = await _db.boards.find_one(
+        {"id": subj.get("board_id", "")}, {"_id": 0, "slug": 1},
+    ) if subj.get("board_id") else {}
+    return {
+        "topic_slug": topic_slug,
+        "chapter_slug": chap.get("slug", ""),
+        "subject_slug": subj.get("slug", ""),
+        "class_slug": (cls or {}).get("slug", ""),
+        "board_slug": (brd or {}).get("slug", ""),
+    }
+
+
+@router.get("/html/topic/{topic_slug}", response_class=HTMLResponse)
+async def get_topic_by_slug_html(topic_slug: str):
+    chain = await _resolve_topic_chain(topic_slug)
+    if not chain:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    board = chain.get("board_slug", "")
+    cls_slug = chain.get("class_slug", "")
+    subj_slug = chain.get("subject_slug", "")
+    if not (board and cls_slug and subj_slug):
+        raise HTTPException(status_code=404, detail="Topic chain incomplete")
+    return await get_seo_html_default(board, cls_slug, subj_slug, topic_slug)
+
+
+@router.get("/html/chapter/{chapter_slug}", response_class=HTMLResponse)
+async def get_chapter_by_slug_html(chapter_slug: str):
+    """Render a chapter landing page that lists every published topic
+    in the chapter. This is a real chapter page — not a redirect to
+    the subject landing — so /chapter/<slug> is independently
+    indexable and emits its own ``syrabit-chapter-<slug>`` Cache-Tag."""
+    chap = await _db.chapters.find_one(
+        {"slug": chapter_slug},
+        {"_id": 0, "id": 1, "slug": 1, "title": 1, "subject_id": 1, "description": 1},
+    )
+    if not chap:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    subj = await _db.subjects.find_one(
+        {"id": chap.get("subject_id", "")},
+        {"_id": 0, "slug": 1, "name": 1, "class_id": 1, "board_id": 1},
+    ) or {}
+    cls = await _db.classes.find_one(
+        {"id": subj.get("class_id", "")}, {"_id": 0, "slug": 1, "name": 1},
+    ) if subj.get("class_id") else {}
+    brd = await _db.boards.find_one(
+        {"id": subj.get("board_id", "")}, {"_id": 0, "slug": 1, "name": 1},
+    ) if subj.get("board_id") else {}
+    board_slug = (brd or {}).get("slug", "")
+    class_slug = (cls or {}).get("slug", "")
+    subject_slug = subj.get("slug", "")
+    if not (board_slug and class_slug and subject_slug):
+        raise HTTPException(status_code=404, detail="Chapter chain incomplete")
+
+    pages = await _db.seo_pages.find(
+        {
+            "board_slug": board_slug, "class_slug": class_slug,
+            "subject_slug": subject_slug,
+            "chapter_slug": chap.get("slug", chapter_slug),
+            "status": "published", "page_type": "notes",
+        },
+        {"_id": 0, "topic_title": 1, "topic_slug": 1,
+         "meta_description": 1, "quality_score": 1},
+    ).to_list(500)
+
+    chapter_title = html_mod.escape(chap.get("title", chapter_slug))
+    subject_name = html_mod.escape(subj.get("name", subject_slug))
+    board_name = html_mod.escape((brd or {}).get("name", board_slug))
+    class_name = html_mod.escape((cls or {}).get("name", class_slug))
+    description = html_mod.escape(chap.get("description", "") or
+                                  f"Topics in {chap.get('title', chapter_slug)}.")
+
+    page_url = f"https://syrabit.ai/chapter/{chapter_slug}"
+    canonical = f"https://syrabit.ai/{board_slug}/{class_slug}/{subject_slug}"
+
+    items = []
+    for t in sorted(pages, key=lambda p: -float(p.get("quality_score", 0))):
+        ts = html_mod.escape(t.get("topic_slug", ""))
+        tt = html_mod.escape(t.get("topic_title", ""))
+        td = html_mod.escape(t.get("meta_description", ""))
+        items.append(
+            f'<li><a href="/{board_slug}/{class_slug}/{subject_slug}/{ts}">'
+            f'<strong>{tt}</strong></a><p>{td}</p></li>'
+        )
+    items_html = "\n".join(items) or "<li>No topics published yet.</li>"
+
+    html_out = f"""<!doctype html><html lang="en"><head>
+<meta charset="utf-8"/>
+<title>{chapter_title} — {subject_name} ({board_name} {class_name}) | Syrabit</title>
+<meta name="description" content="{description}"/>
+<link rel="canonical" href="{canonical}"/>
+<meta property="og:title" content="{chapter_title} — {subject_name}"/>
+<meta property="og:url" content="{page_url}"/>
+<meta property="og:type" content="article"/>
+</head><body>
+<header><h1>{chapter_title}</h1>
+<p>{subject_name} · {board_name} {class_name}</p></header>
+<main>
+<p>{description}</p>
+<h2>Topics in this chapter</h2>
+<ol>{items_html}</ol>
+</main>
+<footer><p><a href="{canonical}">All chapters in {subject_name}</a></p></footer>
+</body></html>"""
+
+    resp = HTMLResponse(content=html_out)
+    resp.headers["Cache-Control"] = (
+        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400"
+    )
+    try:
+        from cf_enterprise import build_cache_tag as _bct
+        resp.headers["Cache-Tag"] = (
+            "syrabit-html "
+            + _bct("subject", subject_slug, "chapter", chap.get("slug", chapter_slug))
+        ).strip()
+    except Exception:
+        resp.headers["Cache-Tag"] = (
+            f"syrabit-html syrabit-subject-{subject_slug} "
+            f"syrabit-chapter-{chap.get('slug', chapter_slug)}"
+        )
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
+    return resp
+
+
+@router.get("/html/pyq/{year}/{paper}", response_class=HTMLResponse)
+async def get_pyq_year_paper_html(year: int, paper: str):
+    """Year + paper-type PYQ landing — lists every PYQ paper that
+    matches (e.g. ``/pyq/2024/major``). Independent SSR family so
+    the URL is indexable on its own and emits a dedicated
+    ``syrabit-pyq-<year>-<paper>`` Cache-Tag."""
+    paper_slug = (paper or "").strip().lower()
+    if not (1900 < int(year) < 2100) or not paper_slug:
+        raise HTTPException(status_code=404, detail="Invalid PYQ year/paper")
+    docs = await _db.pyq_html_pages.find(
+        {"exam_year": int(year), "paper_type": paper_slug},
+        {"_id": 0, "slug": 1, "title": 1, "subject_name": 1,
+         "board_name": 1, "exam_title": 1, "meta_description": 1},
+    ).sort("subject_name", 1).to_list(500)
+
+    py = html_mod.escape(str(year))
+    pp = html_mod.escape(paper_slug.upper())
+    page_url = f"https://syrabit.ai/pyq/{year}/{paper_slug}"
+    items = []
+    for d in docs:
+        slug = html_mod.escape(d.get("slug", ""))
+        title = html_mod.escape(d.get("title") or d.get("exam_title") or slug)
+        subj = html_mod.escape(d.get("subject_name", ""))
+        board = html_mod.escape(d.get("board_name", ""))
+        desc = html_mod.escape(d.get("meta_description", ""))
+        items.append(
+            f'<li><a href="/pyq/{slug}"><strong>{title}</strong></a>'
+            f' — {subj} ({board})<p>{desc}</p></li>'
+        )
+    items_html = "\n".join(items) or "<li>No PYQ papers indexed yet.</li>"
+    title = f"{py} {pp} Previous Year Question Papers | Syrabit"
+    desc = (f"All {pp} previous year question papers from {py} indexed by "
+            "Syrabit — AHSEC, SEBA, CBSE and university board papers.")
+
+    html_out = f"""<!doctype html><html lang="en"><head>
+<meta charset="utf-8"/>
+<title>{title}</title>
+<meta name="description" content="{desc}"/>
+<link rel="canonical" href="{page_url}"/>
+<meta property="og:title" content="{title}"/>
+<meta property="og:url" content="{page_url}"/>
+<meta property="og:type" content="website"/>
+</head><body>
+<header><h1>{py} {pp} PYQ Papers</h1>
+<p>{len(docs)} paper(s) indexed.</p></header>
+<main><ol>{items_html}</ol></main>
+</body></html>"""
+    resp = HTMLResponse(content=html_out)
+    resp.headers["Cache-Control"] = (
+        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400"
+    )
+    resp.headers["Cache-Tag"] = (
+        f"syrabit-html syrabit-pyq-{int(year)}-{paper_slug}"
+    )
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
+    return resp
+
+
+@router.get("/html/subject/{subject_slug}", response_class=HTMLResponse)
+async def get_subject_by_slug_html(subject_slug: str):
+    subj = await _db.subjects.find_one(
+        {"slug": subject_slug, "status": "published"},
+        {"_id": 0, "id": 1, "class_id": 1, "board_id": 1},
+    )
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    cls = await _db.classes.find_one(
+        {"id": subj.get("class_id", "")}, {"_id": 0, "slug": 1},
+    ) if subj.get("class_id") else {}
+    brd = await _db.boards.find_one(
+        {"id": subj.get("board_id", "")}, {"_id": 0, "slug": 1},
+    ) if subj.get("board_id") else {}
+    board = (brd or {}).get("slug", "")
+    cls_slug = (cls or {}).get("slug", "")
+    if not (board and cls_slug):
+        raise HTTPException(status_code=404, detail="Subject chain incomplete")
+    return await get_subject_landing_html(board, cls_slug, subject_slug)

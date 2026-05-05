@@ -3,6 +3,27 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+# ── Task #386 — Durable Objects: ChatSession + RateLimiter ───────────────────
+# When the backend's DO_CHAT_ON flag is true, these bindings serve
+# `/do/chat-session/<id>` and `/do/rate-limiter/check` from the edge
+# (see src/chat_session.ts, src/rate_limiter.ts, and src/index.ts'
+# `dispatchDurableObject` helper). The bindings stay defined even
+# when DO_CHAT_ON is off so a flag flip needs no wrangler redeploy.
+[[durable_objects.bindings]]
+name = "CHAT_SESSION"
+class_name = "ChatSession"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+# Migrations are mandatory the first time a DO class is deployed.
+# Bumping `tag` is how we add or rename classes in subsequent
+# deployments.
+[[migrations]]
+tag = "v1-task-386"
+new_classes = ["ChatSession", "RateLimiter"]
+
 # Thin shim only — heavy dispatch lives at the origin.
 # Free tier (100 k req/day) is sufficient; Workers Paid cancelled.
 

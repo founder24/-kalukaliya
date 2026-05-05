@@ -678,6 +678,20 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
     conv_id = msg.conversation_id
     user_id = user["id"] if user else None
 
+    # ChatSession DO read keyed on conversation_id; in-process fallback.
+    _do_session_state: dict = {}
+    try:
+        from do_chat import is_enabled as _do_enabled, get_session as _do_get
+        if _do_enabled() and conv_id:
+            _do_session_state = (await _do_get(conv_id)) or {}
+            if _do_session_state:
+                logger.info(
+                    "[NON-STREAM][DO-SESSION] resumed conv_id=%s prev_provider=%s",
+                    conv_id, _do_session_state.get("last_provider", ""),
+                )
+    except Exception as _do_err:
+        logger.debug("[NON-STREAM][DO-SESSION] read failed (non-fatal): %s", _do_err)
+
     _detected_intent, _detected_db_category = classify_intent(msg.message)
     # Smart per-request budget: free plan ceiling is 10 000 (so a complex
     # "explain step by step" or "solve every PYQ" request can complete) but
@@ -1155,6 +1169,28 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
                 class_name=ctx_class_name,
                 conversation_id=conv_id,
             ))
+            # Mirror latest turn into the ChatSession DO (in-process fallback).
+            try:
+                from do_chat import is_enabled as _do_enabled, put_session as _do_put
+                if _do_enabled() and conv_id:
+                    _session_payload = {
+                        "conversation_id": conv_id,
+                        "user_id": str(user_id) if user_id else "",
+                        "last_user_message": msg.message[:4000],
+                        "last_assistant_answer": (
+                            str(answer)[:8000] if answer is not None else ""
+                        ),
+                        "last_provider": _meta_provider,
+                        "last_fallback_reason": _meta_reason,
+                        "subject_id": msg.subject_id or "",
+                        "subject_name": msg.subject_name or "",
+                        "board_name": ctx_board_name or "",
+                        "class_name": ctx_class_name or "",
+                        "ts": int(_time_mod.time()),
+                    }
+                    tasks.append(_do_put(conv_id, _session_payload, ttl=1800))
+            except Exception:
+                pass
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for _i, _res in enumerate(results):
                 if isinstance(_res, BaseException):
@@ -3308,6 +3344,64 @@ async def public_library_search(q: str = "", board: Optional[str] = None, class_
         raise HTTPException(status_code=400, detail="q parameter is required")
     results = await syrabit_library_search(q.strip(), board_slug=board, class_slug=class_num)
     return {"query": q, "results": results, "count": len(results)}
+
+
+# Typing-indicator channel — DO-backed, polled by the SPA at ~1 Hz.
+
+@router.get("/ai/chat/typing/{conversation_id}")
+async def get_chat_typing(conversation_id: str):
+    from do_chat import get_typing
+    return await get_typing(conversation_id)
+
+
+@router.put("/ai/chat/typing/{conversation_id}")
+async def put_chat_typing(conversation_id: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    typing = bool(body.get("typing", False))
+    actor = str(body.get("actor", "assistant"))
+    ttl_ms = int(body.get("ttl_ms", 5000) or 5000)
+    from do_chat import put_typing
+    ok = await put_typing(conversation_id, typing, actor=actor, ttl_ms=ttl_ms)
+    return {"ok": ok, "typing": typing, "actor": actor}
+
+
+@router.get("/ai/chat/typing/{conversation_id}/stream")
+async def stream_chat_typing(conversation_id: str, request: Request):
+    """SSE channel for the typing indicator — DO-backed when DO_CHAT_ON,
+    in-process fallback otherwise. Emits one event per state change so
+    the SPA gets sub-second updates without HEAD-of-line polling. The
+    stream auto-closes after 60 s; clients reconnect with EventSource."""
+    import asyncio, json as _json, time as _time
+    from do_chat import get_typing
+
+    async def _gen():
+        last_payload: dict | None = None
+        deadline = _time.time() + 60.0
+        try:
+            yield ": connected\n\n"
+            while _time.time() < deadline:
+                if await request.is_disconnected():
+                    break
+                state = await get_typing(conversation_id)
+                if state != last_payload:
+                    yield f"data: {_json.dumps(state)}\n\n"
+                    last_payload = state
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # ─────────────────────────────────────────────

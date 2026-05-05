@@ -230,15 +230,35 @@ async def maybe_generate_notes(db, limit: int) -> dict:
 
 async def maybe_translate_as(db, limit: int) -> dict:
     out = {"attempted": 0, "succeeded": 0, "skipped_existing": 0, "errors": []}
+    # Task #386 — surface the active translator so a one-off bulk
+    # build can be reasoned about without diffing config. When
+    # ``TRANSLATE_PROVIDER=workers_indic`` is set, only the Workers-AI
+    # IndicTrans2 client is permitted; the legacy Vertex/Gemini polish
+    # branch is intentionally not invoked here. The phase itself is
+    # still a stub (the per-chapter pipeline lives in
+    # ``scripts/bulk_translate.py``) but the gate gives the operator
+    # an early signal that the flag is honoured by this entry-point.
+    try:
+        from config import TRANSLATE_PROVIDER as _TP
+    except Exception:
+        _TP = "auto"
+    out["translate_provider"] = (_TP or "").strip().lower()
     try:
         from providers.workers_indic import call_indic_trans  # noqa: F401
     except Exception as e:
         out["errors"].append(f"providers.workers_indic import failed: {e!r}")
         return out
-    out["errors"].append(
-        "Translation phase is wired but disabled — call with content present, "
-        "see scripts/bulk_translate.py for the existing per-chapter pipeline."
-    )
+    if out["translate_provider"] == "workers_indic":
+        out["errors"].append(
+            "TRANSLATE_PROVIDER=workers_indic active — Workers-AI IndicTrans2 "
+            "is the sole translator. Per-chapter pipeline lives in "
+            "scripts/bulk_translate.py; invoke it directly for production runs."
+        )
+    else:
+        out["errors"].append(
+            "Translation phase is wired but disabled — call with content present, "
+            "see scripts/bulk_translate.py for the existing per-chapter pipeline."
+        )
     return out
 
 

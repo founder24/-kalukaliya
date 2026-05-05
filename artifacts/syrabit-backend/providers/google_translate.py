@@ -141,6 +141,24 @@ async def translate(
     if not text:
         return None
 
+    # Task #386 — when ``TRANSLATE_PROVIDER=workers_indic`` the
+    # operator wants every Indic translation to land on Cloudflare
+    # Workers-AI IndicTrans2. Short-circuiting *here* (in addition to
+    # the higher-level gate in ``vertex_services.translate``) means
+    # any caller that imported ``providers.google_translate`` directly
+    # — bypassing the dispatch layer — also obeys the flag. Returning
+    # None matches the rest of the contract: the upstream chain falls
+    # through to the Workers-AI branch when Google declines.
+    try:
+        from config import TRANSLATE_PROVIDER as _TP
+        if (_TP or "").strip().lower() == "workers_indic":
+            logger.debug(
+                "[google-translate] short-circuited by TRANSLATE_PROVIDER=workers_indic",
+            )
+            return None
+    except Exception:
+        pass
+
     lang = _LANG_NORMALISE.get(target_lang, _LANG_NORMALISE.get(target_lang.lower().strip(), target_lang.lower().strip()))
     if lang not in _INDIC_TARGET_LANGS:
         logger.debug("[google-translate] %s not an Indic target — bypassing", target_lang)

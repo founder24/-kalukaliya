@@ -4130,12 +4130,28 @@ async def call_translate_with_dispatch(
 
     Returns the translated string or raises RuntimeError if all providers fail.
     """
-    from config import PROVIDER_PRIORITY as _PP
+    from config import PROVIDER_PRIORITY as _PP, TRANSLATE_PROVIDER as _TP
     exclude: frozenset = frozenset()
     max_attempts = len(_PP.get("translate", [])) + 1
 
+    # Task #386 — when TRANSLATE_PROVIDER=workers_indic, pin the dispatch to
+    # workers_ai_indic and refuse to fall back to paid providers. The flag
+    # is only honoured for Indic targets; non-Indic targets keep the
+    # weighted fallback because IndicTrans2 cannot translate to non-Indic.
+    _workers_indic_only = (
+        _TP == 'workers_indic'
+        and target_lang.lower().replace('-', '_') in ('as', 'as_in', 'hi', 'hi_in', 'bn', 'bn_in')
+    )
+    try:
+        from translate_provider_metrics import record_provider_call as _rpc_metric
+    except Exception:
+        _rpc_metric = None
+
     for _ in range(max_attempts):
-        provider = select_provider("translate", lang=lang, exclude=exclude)
+        if _workers_indic_only:
+            provider = "workers_ai_indic"
+        else:
+            provider = select_provider("translate", lang=lang, exclude=exclude)
         try:
             if provider == "sarvam":
                 sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
@@ -4180,14 +4196,21 @@ async def call_translate_with_dispatch(
                 return await _az_translate(text, target_lang=target_lang, source_lang=source_lang)
             elif provider == "workers_ai_indic":
                 # IndicTrans2 en→indic-1b — Assamese translation pool (Task #267).
-                # Guard: only route here when target is Assamese (as / as-IN).
-                if target_lang.lower().replace("-", "_") not in ("as", "as_in"):
+                # Task #386 widened the guard to all FLORES-200-supported Indic
+                # targets so the workers_indic-only mode can serve hi/bn as
+                # well — limiting it to Assamese only would defeat the
+                # "sole translator" intent of the flag.
+                _allowed = ("as", "as_in", "hi", "hi_in", "bn", "bn_in") if _workers_indic_only else ("as", "as_in")
+                if target_lang.lower().replace("-", "_") not in _allowed:
                     raise RuntimeError(
-                        f"workers_ai_indic: IndicTrans2 only supports Assamese target "
-                        f"(got target_lang={target_lang!r}) — routing to next provider"
+                        f"workers_ai_indic: IndicTrans2 cannot serve target "
+                        f"{target_lang!r} — routing to next provider"
                     )
                 from providers.workers_indic import call_indic_trans as _indic_trans
-                return await _indic_trans(text, direction="en-indic")
+                _result = await _indic_trans(text, direction="en-indic")
+                if _rpc_metric:
+                    _rpc_metric('workers_indic', True)
+                return _result
             elif provider == "workers_ai":
                 prompt = [
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
@@ -4198,6 +4221,20 @@ async def call_translate_with_dispatch(
                 raise RuntimeError(f"translate: unknown provider {provider!r}")
         except Exception as exc:
             logger.warning("translate %s failed: %s — removing from pool", provider, exc)
+            if _rpc_metric:
+                # Canonicalise to the success-path key so the panel doesn't
+                # split workers_ai_indic / workers_indic into two buckets.
+                _rpc_metric(
+                    'workers_indic' if provider == 'workers_ai_indic' else provider,
+                    False,
+                )
+            if _workers_indic_only:
+                # In workers_indic-only mode there is no other provider to
+                # fall back to — surface the failure immediately so callers
+                # do not silently drop translations.
+                raise RuntimeError(
+                    f"translate: workers_indic-only mode and provider {provider!r} failed: {exc}"
+                )
             exclude = exclude | {provider}
 
     raise RuntimeError("translate: all providers exhausted")

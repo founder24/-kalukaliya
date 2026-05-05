@@ -837,6 +837,46 @@ REDIS_SEARCH_CACHE_TTL = 600   # 10m (was 5m)
 REDIS_SESSION_CACHE_TTL = 3600  # 1h (was 30m)
 REDIS_RATE_WINDOW = 60
 
+# ── Task #386 — Cloudflare Tier 2 feature flags ─────────────────────────────
+# All six flags default to OFF so the work can ship dark and be flipped on
+# without a redeploy. See RUNBOOK §"Cloudflare Tier 2 (Task #386)" for the
+# full rollback table and per-flag wiring map.
+def _bool_env(name: str, default: str = '0') -> bool:
+    return (os.environ.get(name, default) or default).strip().lower() in ('1', 'true', 'yes', 'on')
+
+# Translation provider routing. When set to "workers_indic", every Indic
+# translation request routes exclusively through Cloudflare Workers AI
+# IndicTrans2 — Google Translation v3, Sarvam, Vertex and Azure Translator
+# branches are short-circuited. Default "auto" preserves the existing
+# weighted fallback chain (Google → Workers AI → Vertex → AWS).
+TRANSLATE_PROVIDER = (os.environ.get('TRANSLATE_PROVIDER', 'workers_indic') or 'workers_indic').strip().lower()
+
+# Pages-Functions SSR for SEO routes (chapter / subject / topic / PYQ +
+# Assamese variants). When OFF the existing _worker.js bot-prerender path
+# remains the only HTML source. The Pages Functions live under
+# `artifacts/syrabit/functions/` and read the same flag at request time.
+SSR_ENABLED = _bool_env('SSR_ENABLED', '0')
+
+# Cloudflare Polish + Mirage + Auto Minify (zone-level Speed features).
+# Wraps the existing `cf_enterprise.speed_optimize_all` so the activation
+# step is a flag flip rather than a script run.
+CF_SPEED_FEATURES_ON = _bool_env('CF_SPEED_FEATURES_ON', '0')
+
+# Smart Tiered Cache (Cache Shield) + Cache-Tag-based purge rules. When ON
+# the bootstrap path applies Tiered Cache via the dedicated CF endpoint and
+# the Cache-Tag purge helper becomes the recommended invalidation path.
+CF_TIERED_CACHE_ON = _bool_env('CF_TIERED_CACHE_ON', '0')
+
+# D1 mirror of seo_meta + audit_log + syllabus_map tables (extension of
+# the existing D1 content sync). When OFF those tables stay in Postgres /
+# Mongo only; admin /cf-health surfaces the lag indicator regardless.
+D1_MIRROR_ON = _bool_env('D1_MIRROR_ON', '0')
+
+# Move chat session state into Cloudflare Durable Objects (`ChatSession`,
+# `RateLimiter`). When OFF the in-process fallback in `do_chat.py` is
+# used so flipping back is a one-flag rollback.
+DO_CHAT_ON = _bool_env('DO_CHAT_ON', '0')
+
 # ── Memorystore-backed AI response cache (Task #609) ────────────────────────
 # Single configurable Redis URL — Google Memorystore preferred, any
 # Redis-compatible endpoint (rediss:// for TLS, redis:// otherwise) accepted.

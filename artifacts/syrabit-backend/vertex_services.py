@@ -483,22 +483,51 @@ async def translate(text: str, target_lang: str = "as", source_lang: str = "en")
     if not text:
         return None
 
-    from providers import google_translate as _gt
-    if _gt.is_configured() and _gt.is_indic_target(target_lang):
-        try:
-            result = await _gt.translate(text, target_lang=target_lang, source_lang=source_lang)
-            if result:
-                return result
-        except Exception as exc:
-            logger.warning("[google-translate] primary failed, falling back to Workers AI: %s", str(exc)[:150])
+    # Task #386 — when TRANSLATE_PROVIDER=workers_indic, route every Indic
+    # translation request exclusively through Cloudflare Workers AI
+    # IndicTrans2 and bypass Google Translate / Vertex / AWS entirely.
+    # The flag check happens at request time (not import) so a flag flip
+    # via the admin UI does not need a restart.
+    from config import TRANSLATE_PROVIDER as _TP
+    _workers_indic_only = _TP == 'workers_indic'
+    try:
+        from translate_provider_metrics import record_provider_call as _rpc
+    except Exception:
+        _rpc = None
+
+    if not _workers_indic_only:
+        from providers import google_translate as _gt
+        if _gt.is_configured() and _gt.is_indic_target(target_lang):
+            try:
+                result = await _gt.translate(text, target_lang=target_lang, source_lang=source_lang)
+                if result:
+                    if _rpc:
+                        _rpc('google_translate', True)
+                    return result
+            except Exception as exc:
+                logger.warning("[google-translate] primary failed, falling back to Workers AI: %s", str(exc)[:150])
+                if _rpc:
+                    _rpc('google_translate', False)
+    else:
+        logger.debug("[translate] TRANSLATE_PROVIDER=workers_indic — skipping google_translate")
 
     from providers.cloudflare_ai import translate as _cf_translate
     try:
         result = await _cf_translate(text, target_lang=target_lang, source_lang=source_lang)
         if result:
+            if _rpc:
+                _rpc('workers_indic', True)
             return result
     except Exception as exc:
+        if _rpc:
+            _rpc('workers_indic', False)
+        if _workers_indic_only:
+            logger.warning("[wai] translate (indictrans2) failed under workers_indic-only flag: %s", str(exc)[:150])
+            return None
         logger.warning("[wai] translate (indictrans2) failed, trying LLM fallback: %s", str(exc)[:150])
+
+    if _workers_indic_only:
+        return None
 
     # Task #337 — AWS Translate slot in *before* the LLM-prompt fallback.
     # The runbook (§3.7) lists Translate as the Sarvam/Workers-AI fallback,
