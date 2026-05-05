@@ -4720,17 +4720,29 @@ class CmsNoIndexMiddleware(BaseHTTPMiddleware):
 # ─────────────────────────────────────────────
 _metrics_cache: dict = {"data": None, "ts": 0}
 _metrics_lock = asyncio.Lock()
-_METRICS_CACHE_TTL = 60
+# Task #395: shrunk from 60s → 5s. The original 60s TTL was set when
+# the throttle tiles were ALSO served from this cache, so a longer
+# window was needed to keep DB/provider load down. Task #388 split
+# those tiles out (see `_build_throttle_tiles` + the cache-hit branch
+# in `admin_dashboard_metrics`), leaving this TTL to gate only the
+# heavy block: one supabase user list, one Mongo `payments` find(500),
+# two `count_documents` on seo collections, plus the cached deps
+# health probe (which has its own `_HEALTH_CACHE_TTL_S`). The
+# AdminHealth frontend polls roughly every 30s, so a 5s TTL still
+# absorbs back-to-back admin requests / multi-tab dashboards while
+# making user counts and revenue feel live during a deploy or
+# incident instead of trailing real state by up to a minute.
+_METRICS_CACHE_TTL = 5
 
-# Task #388: throttle-tile keys that MUST bypass the 60s response cache.
+# Task #388: throttle-tile keys that MUST bypass the response cache.
 # Each entry is a top-level key in the metrics response that holds a
 # burst counter dict. The values come from in-process / Redis counters
-# that reset within seconds of recovery, so caching them for a full
-# minute would leave the AdminHealth panel showing red "Throttled"
-# banners up to 60s after a real 429 storm has cleared. Keep the heavy
-# queries (users / payments / SEO / deps health) cached at 60s; refresh
-# only these tiles on every poll so the dashboard reflects recovery
-# within the next admin-side poll (~30s by default).
+# that reset within seconds of recovery, so caching them alongside the
+# heavy block would leave the AdminHealth panel showing red "Throttled"
+# banners after a real 429 storm has cleared. Keep the heavy queries
+# (users / payments / SEO / deps health) cached at `_METRICS_CACHE_TTL`;
+# refresh only these tiles on every poll so the dashboard reflects
+# recovery within the next admin-side poll (~30s by default).
 _THROTTLE_TILE_KEYS = (
     "workers_ai_throttle",
     "groq_throttle",
@@ -4747,7 +4759,8 @@ def _build_throttle_tiles() -> dict:
     Called both on cache miss (to populate the full response) and on
     cache hit (to overwrite the stale tiles in the cached payload), so
     a successful provider call that resets a 429 counter is reflected
-    on the dashboard within ~5 s instead of the full 60 s cache TTL.
+    on the dashboard on the very next admin poll instead of waiting
+    for the heavy-block cache (``_METRICS_CACHE_TTL``) to expire.
 
     Returns a dict with exactly the keys in ``_THROTTLE_TILE_KEYS``.
     Each value matches the shape the AdminHealth burst-tile component
@@ -4872,11 +4885,12 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
     if _metrics_cache["data"] and (now_ts - _metrics_cache["ts"]) < _METRICS_CACHE_TTL:
         # Task #388: cache HIT — serve the heavy queries (users, payments,
         # SEO counts, deps health) from cache but recompute the throttle
-        # tiles every poll so admins see recovery within ~5 s instead of
-        # waiting up to 60 s for the cache to expire. We mutate a SHALLOW
-        # COPY of the cached dict so the cache itself stays internally
-        # consistent for the next caller and nothing else in-process can
-        # observe a half-updated payload.
+        # tiles every poll so admins see provider recovery on the very
+        # next poll instead of waiting for `_METRICS_CACHE_TTL` (Task
+        # #395 shrunk that to 5s) to expire. We mutate a SHALLOW COPY of
+        # the cached dict so the cache itself stays internally consistent
+        # for the next caller and nothing else in-process can observe a
+        # half-updated payload.
         cached = dict(_metrics_cache["data"])
         cached.update(_build_throttle_tiles())
         return cached
