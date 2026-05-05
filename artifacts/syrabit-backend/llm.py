@@ -211,6 +211,177 @@ def _reset_provider_429(provider: str) -> None:
 # no bedrock outcomes to record.
 
 
+# ── Per-provider real RPM sliding window (chat soft-shed, 2026-05-05) ─────────
+# When ``azure_openai`` / ``sarvam`` (the strict primaries for the
+# ``english_rag_chat`` / ``assamese_rag_chat`` pools after the 2026-05-05
+# vertex purge) accumulate >= 70 % of their configured RPM cap inside a
+# 60-second window, ``select_provider`` excludes them so the dispatcher
+# preemptively shifts traffic to the ``workers_ai_*`` fallback BEFORE a
+# single 429 is observed.
+#
+# This is a soft-shed; the 429-burst counter above is still the final
+# safety net for any traffic that slipped through (e.g. a sudden burst
+# that crossed the cap before the next select_provider draw saw it).
+#
+# Window width = 60 s (matches the per-minute semantics of "RPM").  Limits
+# come from ``_POOL_RPM_LIMITS`` (PROVIDER_MAX_CONCURRENT × 60, env-
+# overridable via AZURE_OPENAI_RPM_LIMIT / SARVAM_RPM_LIMIT, see
+# ``_build_pool_rpm_limits`` further down in this file).
+_PAID_PROVIDER_RPM_WINDOW_S = 60
+_PAID_PROVIDER_RPM_WINDOWS: dict = {   # provider → list[float] epoch timestamps
+    "azure_openai": [],
+    "sarvam":       [],
+}
+
+# Redis key prefix for cross-worker RPM accounting.  The shed mechanism
+# MUST see global traffic (gunicorn runs 3 workers by default — see
+# gunicorn.conf.py).  Without Redis aggregation each worker only counts
+# its own ~1/3 of traffic, so 70 % of the global cap is reached when
+# each worker has only seen ~23 %, and the shed never fires.
+#
+# Storage uses 2-bucket rolling-window counters (one INCR per dispatched
+# request, two GETs per saturation check):
+#   key = "paid_rpm:{provider}:{epoch_minute}"
+#   value = INCR-tracked count of requests inside that minute bucket
+#   TTL = 90 s (1.5 × bucket size) so the previous bucket is still
+#         readable while we are inside the current one.
+# Reads compute  cur + prev * (1 - frac_into_cur_bucket)  — standard
+# Cloudflare-style rolling window approximation, ~95 % accurate at the
+# bucket boundary and exact in steady state.
+_PAID_RPM_REDIS_KEY_PREFIX = "paid_rpm:"
+_PAID_RPM_REDIS_BUCKET_S   = 60        # one bucket per minute
+_PAID_RPM_REDIS_TTL_S      = 90        # keep the previous bucket alive
+
+
+def _record_paid_provider_request(provider: str) -> None:
+    """Record one dispatched request for *provider*'s 60-second RPM window.
+
+    Called from ``_dispatch_llm_for_feature`` for the ``azure_openai`` and
+    ``sarvam`` branches BEFORE the upstream call so that timed-out / 429ed
+    attempts still consume against the cap (matches what the provider's
+    own quota meter sees).
+
+    Records to BOTH:
+      • a per-process in-memory list (``_PAID_PROVIDER_RPM_WINDOWS``) for
+        zero-latency local trim/read, and
+      • an Upstash Redis bucket counter for cross-worker aggregation
+        (gunicorn runs 3 workers — without this the per-worker count
+        is ~1/3 of global traffic and the 70 % shed fires too late).
+
+    No-ops silently for providers not in ``_PAID_PROVIDER_RPM_WINDOWS``.
+    The list is trimmed eagerly so it never grows unbounded under
+    sustained load.  Mirrors the ``_PROVIDER_429_WINDOWS`` pattern.
+    """
+    window = _PAID_PROVIDER_RPM_WINDOWS.get(provider)
+    if window is None:
+        return
+    now = time.time()
+    window.append(now)
+    cutoff = now - _PAID_PROVIDER_RPM_WINDOW_S
+    while window and window[0] < cutoff:
+        window.pop(0)
+    # Cross-worker counter — best-effort, never blocks the dispatch path.
+    try:
+        from deps import redis_client as _rc
+        if _rc:
+            bucket = int(now // _PAID_RPM_REDIS_BUCKET_S)
+            key = f"{_PAID_RPM_REDIS_KEY_PREFIX}{provider}:{bucket}"
+            _rc.incr(key)
+            _rc.expire(key, _PAID_RPM_REDIS_TTL_S)
+    except Exception:
+        pass
+
+
+def _get_paid_provider_rpm_count(
+    provider: str,
+    window_seconds: int = _PAID_PROVIDER_RPM_WINDOW_S,
+) -> int:
+    """Return number of dispatched requests for *provider* in the last
+    *window_seconds* seconds (in-process only)."""
+    window = _PAID_PROVIDER_RPM_WINDOWS.get(provider, [])
+    cutoff = time.time() - window_seconds
+    return sum(1 for t in window if t > cutoff)
+
+
+def _get_paid_provider_rpm_count_global(provider: str) -> int:
+    """Return the cross-worker dispatched-request count for *provider*
+    in the last 60 s (Cloudflare-style rolling window approximation).
+
+    Reads the current-minute and previous-minute bucket counters from
+    Redis and weights the previous bucket by how far into the current
+    bucket we are.  Returns 0 when Redis is unavailable so the caller
+    falls back gracefully to the per-process count.
+    """
+    try:
+        from deps import redis_client as _rc
+        if not _rc:
+            return 0
+        now = time.time()
+        cur_bucket = int(now // _PAID_RPM_REDIS_BUCKET_S)
+        prev_bucket = cur_bucket - 1
+        cur_key  = f"{_PAID_RPM_REDIS_KEY_PREFIX}{provider}:{cur_bucket}"
+        prev_key = f"{_PAID_RPM_REDIS_KEY_PREFIX}{provider}:{prev_bucket}"
+        cur_val_raw  = _rc.get(cur_key)
+        prev_val_raw = _rc.get(prev_key)
+        cur_val  = int(cur_val_raw  or 0)
+        prev_val = int(prev_val_raw or 0)
+        frac_into_cur = (now % _PAID_RPM_REDIS_BUCKET_S) / float(_PAID_RPM_REDIS_BUCKET_S)
+        # Previous bucket contributes  (1 - frac_into_cur)  of its count
+        # to the trailing 60-second window.
+        return int(cur_val + prev_val * (1.0 - frac_into_cur))
+    except Exception:
+        return 0
+
+
+def _get_paid_provider_rpm_ratio(provider: str) -> float:
+    """Return real RPM-utilisation ratio (0.0 – 1.0+) for *provider*.
+
+    Takes ``max(per_process_count, cross_worker_count)`` so the shed
+    fires whichever signal crosses the cap first — the cross-worker
+    Redis aggregate is the production signal (gunicorn runs 3 workers),
+    while the per-process list keeps the unit tests deterministic and
+    serves as a fallback when Upstash is unreachable.
+
+    Reads the configured RPM cap from ``_POOL_RPM_LIMITS`` (populated at
+    module import from ``PROVIDER_MAX_CONCURRENT × 60`` with env overrides
+    from ``_build_pool_rpm_limits``).  Returns ``0.0`` when the provider
+    isn't tracked or has no positive cap.
+
+    The lookup is intentionally inside the function body so the call is
+    resolved against the module dict at *call* time — ``_POOL_RPM_LIMITS``
+    is defined further down in this file.
+    """
+    if provider not in _PAID_PROVIDER_RPM_WINDOWS:
+        return 0.0
+    limit = _POOL_RPM_LIMITS.get(provider, 0)
+    if limit <= 0:
+        return 0.0
+    local = _get_paid_provider_rpm_count(provider)
+    global_count = _get_paid_provider_rpm_count_global(provider)
+    return max(local, global_count) / float(limit)
+
+
+def _reset_paid_provider_rpm(provider: str | None = None) -> None:
+    """Test helper: clear the RPM window for one or all paid providers.
+
+    Production code never calls this — the 60-second sliding trim above
+    expires entries naturally and the Redis buckets self-expire via TTL.
+    Tests use this between cases so each test starts from a clean slate.
+    Uses ``list.clear()`` (not reassignment) so any module-level alias
+    keeps pointing at the same list object.
+
+    Does NOT touch Redis — tests that need a clean cross-worker counter
+    monkeypatch ``deps.redis_client`` to ``None`` (or a fake) instead.
+    """
+    if provider is None:
+        for w in _PAID_PROVIDER_RPM_WINDOWS.values():
+            w.clear()
+        return
+    window = _PAID_PROVIDER_RPM_WINDOWS.get(provider)
+    if window is not None:
+        window.clear()
+
+
 # ── Assamese chat "both rails red" burst tracking (Task #374) ───────────────
 # When the strict Assamese chain (Sarvam → Vertex/Gemini, Task #291) and the
 # Workers-AI Phase-2 fallback are BOTH exhausted we surface either:
@@ -1645,13 +1816,33 @@ _PROVIDER_CANONICAL: dict[str, str] = {
 # temporarily deprioritized in the weighted draw (same threshold as SLM pool).
 _SELECT_SATURATION_THRESHOLD = 0.80
 
+# Chat-pool soft-shed threshold (2026-05-05 user instruction): when the
+# strict primary for a chat pool (``azure_openai`` for english_rag_chat,
+# ``sarvam`` for assamese_rag_chat) reaches this fraction of its
+# configured RPM cap inside a 60-second window, ``select_provider``
+# excludes it and the dispatcher walks down to the ``workers_ai_*``
+# fallback BEFORE the upstream actually starts 429ing.  Default 0.70
+# per user spec; override with ``CHAT_RPM_SOFT_SHED_THRESHOLD``.
+_CHAT_RPM_SOFT_SHED_THRESHOLD = float(
+    os.environ.get("CHAT_RPM_SOFT_SHED_THRESHOLD", "0.70") or "0.70"
+)
+_CHAT_POOLS_FOR_RPM_SHED: frozenset = frozenset({
+    "english_rag_chat", "assamese_rag_chat",
+})
+
 
 def _get_provider_saturation(provider_name: str) -> float:
     """Return current RPM saturation ratio (0.0–1.0) for a provider.
 
-    Reads from the SmartKeyPool's rpm_window for workers-ai, and from
-    the in-process 429 burst counter for other providers (gemini, groq).
-    Returns 0.0 (not saturated) for providers not tracked by the pool.
+    Resolution order:
+      1. ``workers-ai`` → aggregate ``_SmartKeyPool._rpm_ratio`` across slots.
+      2. Paid chat primary (``azure_openai`` / ``sarvam``) → real
+         dispatched-request count over the last 60 s divided by the
+         configured ``_POOL_RPM_LIMITS`` cap. This drives the new 70 %
+         soft-shed (2026-05-05) so the dispatcher pre-emptively shifts
+         traffic to the ``workers_ai_*`` fallback BEFORE 429s start.
+      3. Otherwise → in-process 429-burst counter as a proxy
+         (≥ 5 bursts → 0.90, ≥ 2 → 0.70).
     """
     canonical = _PROVIDER_CANONICAL.get(provider_name, provider_name)
     if canonical == "workers-ai":
@@ -1662,6 +1853,18 @@ def _get_provider_saturation(provider_name: str) -> float:
             if s.get("provider") == "workers-ai"
         ]
         return max(ratios) if ratios else 0.0
+
+    # 2026-05-05 — Real per-provider RPM tracking for the paid chat
+    # primaries.  When the 60-second sliding window crosses the configured
+    # cap we surface the real ratio so select_provider's threshold check
+    # can shed traffic to the workers_ai_* fallback BEFORE 429s start.
+    # Falls through to the 429-burst proxy below when not yet saturated
+    # (so a transient 429-burst can still raise saturation independently).
+    if provider_name in _PAID_PROVIDER_RPM_WINDOWS:
+        ratio = _get_paid_provider_rpm_ratio(provider_name)
+        if ratio > 0.0:
+            return ratio
+
     # For other providers, use the 429 burst counter as a proxy:
     # ≥ 5 bursts in 60s → treat as saturated (0.85+).
     # NOTE: look up by the original provider_name first (azure_openai, bedrock, gemini, groq)
@@ -1731,10 +1934,20 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
         if _is_assamese_feature and p == "sarvam" and lang.lower().strip() != "as":
             continue                                   # Sarvam reserved for Assamese only
         saturation = _get_provider_saturation(p)
-        if saturation >= _SELECT_SATURATION_THRESHOLD:
+        # Chat pools (english_rag_chat / assamese_rag_chat) use the
+        # tighter 70 % soft-shed threshold so azure_openai / sarvam
+        # primaries hand off to the workers_ai_* fallback BEFORE 429s
+        # start.  All other features keep the 80 % default.
+        threshold = (
+            _CHAT_RPM_SOFT_SHED_THRESHOLD
+            if feature in _CHAT_POOLS_FOR_RPM_SHED
+            else _SELECT_SATURATION_THRESHOLD
+        )
+        if saturation >= threshold:
             logger.info(
-                "select_provider: skipping %s for feature=%s — saturated (%.0f%%)",
-                p, feature, saturation * 100,
+                "select_provider: skipping %s for feature=%s — at %.0f%% RPM "
+                "(threshold %.0f%%, shedding to fallback)",
+                p, feature, saturation * 100, threshold * 100,
             )
             continue
         pool.append(p)
@@ -1919,6 +2132,10 @@ async def _dispatch_llm_for_feature(
         sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
         if not sarvam_slot:
             raise RuntimeError("sarvam: no Sarvam LLM key available")
+        # 2026-05-05 — record against the 60-second RPM soft-shed window
+        # BEFORE issuing the call so timed-out / 429ed attempts still
+        # consume against the cap (matches Sarvam's own quota meter).
+        _record_paid_provider_request("sarvam")
         _t0 = _dp_t.perf_counter()
         try:
             result = await _call_sarvam_llm(messages, sarvam_slot["key"], "sarvam-m", max_tokens)
@@ -1946,6 +2163,10 @@ async def _dispatch_llm_for_feature(
             )
         from providers.azure_openai import call_chat as _az_chat
         from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL
+        # 2026-05-05 — record against the 60-second RPM soft-shed window
+        # BEFORE issuing the call so timed-out / 429ed attempts still
+        # consume against the cap (matches Azure's own quota meter).
+        _record_paid_provider_request("azure_openai")
         _t0 = _dp_t.perf_counter()
         try:
             result = await _az_chat(messages, model=_AZ_DEPL, max_tokens=max_tokens)
