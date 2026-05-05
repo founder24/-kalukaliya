@@ -21,3 +21,37 @@ interface ExecutionContext {
    */
   passThroughOnException(): void;
 }
+
+/**
+ * Minimal Cloudflare Workers KV stub — covers the surface used by the
+ * /api/edge/kv-cache/* routes (Task #405). Replace with the full
+ * @cloudflare/workers-types definition once that devDependency is added.
+ *
+ * Ref: https://developers.cloudflare.com/kv/api/
+ */
+interface KVNamespacePutOptions {
+  expirationTtl?: number;
+  expiration?: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface KVNamespaceGetWithMetadataResult<V, M> {
+  value: V | null;
+  metadata: M | null;
+}
+
+interface KVNamespace {
+  get(key: string): Promise<string | null>;
+  get(key: string, options: { type: 'json' }): Promise<unknown | null>;
+  get(key: string, options: { type: 'text' }): Promise<string | null>;
+  getWithMetadata<V = unknown, M = unknown>(
+    key: string,
+    options: { type: 'json' },
+  ): Promise<KVNamespaceGetWithMetadataResult<V, M>>;
+  put(
+    key: string,
+    value: string | ArrayBuffer | ReadableStream,
+    options?: KVNamespacePutOptions,
+  ): Promise<void>;
+  delete(key: string): Promise<void>;
+}

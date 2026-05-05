@@ -436,10 +436,16 @@ code change:
 3. **R2 lifecycle / Cache Reserve.** Cache Reserve is a paid add-on
    enabled per-zone in Caching → Cache Reserve. R2 lifecycle rules
    (Standard → Infrequent Access at 30 days) live in R2 → Bucket → Settings.
-4. **KV namespace.** `wrangler kv:namespace create CF_EDGE_CACHE` and add
-   the binding to `workers/edge-proxy/wrangler.toml`. The
-   `/api/edge/kv-cache/{key}` endpoints expected by `kv_cache.py` are stubs
-   on the worker side until that task lands.
+4. **KV namespace.** Provisioned in Task #405 — run
+   `wrangler kv:namespace create CF_EDGE_CACHE --env <production|staging>`
+   once per env and paste the printed id into the `[[env.<env>.kv_namespaces]]`
+   block in `workers/edge-proxy/wrangler.toml`. The worker exposes
+   GET / PUT / DELETE `/api/edge/kv-cache/{key}` gated by the
+   `X-Edge-Admin-Secret` header (matched against the worker's
+   `D1_SYNC_SECRET`), so once the namespace id is filled in and
+   `CF_EDGE_CACHE_ON=1` is set on the backend the
+   `kv_writes` / `kv_reads` counters in `/admin/cf-health` start
+   incrementing.
 5. **Cloudflare Tunnel.** Install `cloudflared` next to the origin,
    `cloudflared tunnel create syrabit-origin`, then add the tunnel to the
    Zero Trust dashboard. Flip `CF_TUNNEL_ONLY_ON=1` once the origin

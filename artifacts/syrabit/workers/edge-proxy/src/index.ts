@@ -47,6 +47,13 @@ export interface Env {
   // per-user limiter scope. When unset the limiter degrades to per-IP
   // — never to client-supplied identity.
   EDGE_JWT_HS256_SECRET?: string;
+  // Task #405 — KV namespace backing /api/edge/kv-cache/<key>. Bound
+  // in wrangler.toml under both env.production and env.staging.
+  CF_EDGE_CACHE?: KVNamespace;
+  // Shared secret matched against the X-Edge-Admin-Secret header on
+  // /api/edge/kv-cache/* (and the existing /api/edge/kv-usage probe).
+  // Mirrors the backend env var of the same name.
+  D1_SYNC_SECRET?: string;
 }
 
 // Re-export DO classes so wrangler can find them at the worker entrypoint.
@@ -108,6 +115,114 @@ async function dispatchDurableObject(
   return new Response('unknown DO route', { status: 404 });
 }
 
+/**
+ * Task #405 — KV write-through cache routes.
+ *
+ *   GET    /api/edge/kv-cache/<key>     → 200 { value, ttl_s } | 404
+ *   PUT    /api/edge/kv-cache/<key>     body { value, ttl_s }  → 200 { ok, ttl_s }
+ *   DELETE /api/edge/kv-cache/<key>                            → 200 { ok }
+ *
+ * Auth: every request must carry X-Edge-Admin-Secret matching the
+ * worker's `D1_SYNC_SECRET` (the same handshake the existing
+ * /api/edge/kv-usage probe uses, so no new credential needs
+ * provisioning). The backend's `kv_cache.KvCache` calls these from the
+ * write-through path when `CF_EDGE_CACHE_ON=1`. Returns null if the
+ * path is not a kv-cache route so the caller can fall through.
+ */
+async function dispatchKvCache(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response | null> {
+  const prefix = '/api/edge/kv-cache/';
+  if (!url.pathname.startsWith(prefix)) {
+    return null;
+  }
+  const expected = env.D1_SYNC_SECRET ?? '';
+  const provided = request.headers.get('x-edge-admin-secret') ?? '';
+  if (!expected || !constantTimeEqual(provided, expected)) {
+    return new Response('unauthorised', { status: 401 });
+  }
+  if (!env.CF_EDGE_CACHE) {
+    return new Response('CF_EDGE_CACHE binding missing', { status: 503 });
+  }
+  let key: string;
+  try {
+    key = decodeURIComponent(url.pathname.slice(prefix.length));
+  } catch {
+    return new Response('invalid key', { status: 400 });
+  }
+  // Cloudflare KV rejects keys >512 bytes. Reject early with a clear
+  // status rather than letting the KV API surface a generic 400.
+  if (!key || key.length > 512) {
+    return new Response('invalid key', { status: 400 });
+  }
+
+  if (request.method === 'GET') {
+    const stored = await env.CF_EDGE_CACHE.getWithMetadata<unknown, { ttl_s?: number }>(
+      key,
+      { type: 'json' },
+    );
+    if (stored.value === null) {
+      return new Response('not found', { status: 404 });
+    }
+    const ttl = stored.metadata?.ttl_s ?? 300;
+    return jsonResponse({ value: stored.value, ttl_s: ttl });
+  }
+
+  if (request.method === 'PUT') {
+    const body = await request.json().catch(() => null) as
+      | { value?: unknown; ttl_s?: number }
+      | null;
+    if (!body || !('value' in body)) {
+      return new Response('missing value', { status: 400 });
+    }
+    // Cloudflare KV requires expirationTtl >= 60s; clamp to a sensible
+    // upper bound (24h) so a runaway caller cannot pin a key forever.
+    const ttl = Math.max(60, Math.min(86_400, Number(body.ttl_s ?? 300)));
+    try {
+      await env.CF_EDGE_CACHE.put(key, JSON.stringify(body.value), {
+        expirationTtl: ttl,
+        metadata: { ttl_s: ttl },
+      });
+    } catch (err) {
+      console.warn('[edge-proxy] kv-cache put failed', { key, err });
+      return new Response('kv put failed', { status: 502 });
+    }
+    return jsonResponse({ ok: true, ttl_s: ttl });
+  }
+
+  if (request.method === 'DELETE') {
+    try {
+      await env.CF_EDGE_CACHE.delete(key);
+    } catch (err) {
+      console.warn('[edge-proxy] kv-cache delete failed', { key, err });
+      return new Response('kv delete failed', { status: 502 });
+    }
+    return jsonResponse({ ok: true });
+  }
+
+  return new Response('method not allowed', { status: 405 });
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 const EARLY_HINTS_ASSETS = [
   '</fonts/inter.woff2>; rel=preload; as=font; crossorigin',
   '</icons/icon-192x192.png>; rel=preload; as=image',
@@ -130,6 +245,14 @@ export default {
     const doResponse = await dispatchDurableObject(request, env, url);
     if (doResponse) {
       return doResponse;
+    }
+
+    // Task #405 — KV write-through cache routes. Handled at the edge
+    // so the in-process LRU on a sibling pod can hydrate without an
+    // origin round-trip.
+    const kvResponse = await dispatchKvCache(request, env, url);
+    if (kvResponse) {
+      return kvResponse;
     }
 
     // Edge rate-limit for chat ingress, gated by DO_CHAT_ON. Scope is

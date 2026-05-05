@@ -45,6 +45,21 @@ routes = [
 [env.production.vars]
 ORIGIN_TARGET = "do"
 
+# ── Task #405 — Cloudflare KV namespace for the hot-read cache ──────────────
+# Backs the GET/PUT/DELETE /api/edge/kv-cache/<key> routes in src/index.ts
+# which `kv_cache.KvCache` mirrors hot reads (chapter index, syllabus,
+# feature flags, edu allowlist) into when the backend's CF_EDGE_CACHE_ON
+# flag is true. The namespaces below were provisioned via the Cloudflare
+# REST API in account d66e40eac539fff1db270fddf384a5ec — equivalent to:
+#   wrangler kv:namespace create CF_EDGE_CACHE --env production
+#   wrangler kv:namespace create CF_EDGE_CACHE --env staging
+# The binding name is asserted by the worker (returns 503 if missing) so
+# any future id swap surfaces clearly instead of silently corrupting traffic.
+[[env.production.kv_namespaces]]
+binding = "CF_EDGE_CACHE"
+# title: syrabit-edge-CF_EDGE_CACHE
+id = "a672a5c8f6604db3ae07526bb30da72a"
+
 [env.staging]
 name = "syrabit-edge-proxy-staging"
 routes = [
@@ -54,9 +69,19 @@ routes = [
 [env.staging.vars]
 ORIGIN_TARGET = "do"
 
+[[env.staging.kv_namespaces]]
+binding = "CF_EDGE_CACHE"
+# title: syrabit-edge-CF_EDGE_CACHE_preview
+id = "c8cdd4710c23460caf4d6fa526d76d2e"
+
 # Actual secrets — set with `wrangler secret put <NAME> --env <env>`:
 #   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
 #   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret
+#   D1_SYNC_SECRET           — 256-bit hex shared secret matching the
+#                              backend env var of the same name. Used as
+#                              the X-Edge-Admin-Secret bearer for the
+#                              /api/edge/kv-cache/* routes (Task #405)
+#                              and the existing /api/edge/kv-usage probe.
 #
 # Removed in Task #335 (legacy origins decommissioned):
 #   DISPATCH_CLOUD_RUN_URL, BACKEND_RAILWAY_URL — delete these
