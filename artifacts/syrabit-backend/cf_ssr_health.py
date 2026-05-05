@@ -62,10 +62,29 @@ def reset() -> None:
 # Synthetic probe URLs — keep them in env so a smoke check can target
 # the public hostname without a code change. Defaults match the
 # canonical SEO routes used by Googlebot.
+# Task #408 — defaults cover one URL from every SEO family the Pages
+# middleware proxies (homepage, about, subject, topic, typed-topic,
+# board-scoped chapter, slug-only chapter / topic / subject, PYQ
+# year+paper, PYQ shortcut, Assamese variant). The cf-health row
+# reports ``probe_pass == probe_total`` only when every family is
+# reachable end-to-end (Pages → backend → ``/api/seo/html/...``).
 _PROBE_URLS = [
     u.strip() for u in os.environ.get(
         "SSR_PROBE_URLS",
-        "https://syrabit.ai/seba/class-10/general/science",
+        ",".join([
+            "https://syrabit.ai/",
+            "https://syrabit.ai/about",
+            "https://syrabit.ai/seba/class-10/general/science",
+            "https://syrabit.ai/seba/class-10/general/science/light-reflection",
+            "https://syrabit.ai/seba/class-10/general/science/light-reflection/notes",
+            "https://syrabit.ai/seba/class-10/general/science/chapter/light",
+            "https://syrabit.ai/topic/light-reflection",
+            "https://syrabit.ai/chapter/light",
+            "https://syrabit.ai/subject/science",
+            "https://syrabit.ai/pyq/2024/major",
+            "https://syrabit.ai/pyq/seba/class-10/general/science",
+            "https://syrabit.ai/as/seba/class-10/general/science",
+        ]),
     ).split(",") if u.strip()
 ]
 

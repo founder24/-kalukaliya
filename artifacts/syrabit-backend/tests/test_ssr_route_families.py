@@ -109,10 +109,25 @@ def ssr_client(monkeypatch):
     db.seo_pages.find = MagicMock(return_value=_make_async_cursor([page_doc]))
     db.seo_pages.find_one = AsyncMock(return_value=page_doc)
     db.seo_pages.count_documents = AsyncMock(return_value=1)
-    db.seo_pages.aggregate = MagicMock(return_value=_make_async_cursor([
-        {"_id": "notes", "count": 5},
-        {"_id": "mcqs", "count": 3},
-    ]))
+    db.subjects.count_documents = AsyncMock(return_value=1)
+    db.chapters.count_documents = AsyncMock(return_value=1)
+    # The aggregate output depends on the pipeline shape: subject /
+    # about routes group by ``$page_type`` (string ``_id``); the
+    # homepage groups by ``{board, cls, subj}`` (dict ``_id``). The
+    # mock inspects the pipeline and returns the matching shape.
+    def _aggregate(pipeline):
+        group_id = next((st["$group"]["_id"] for st in pipeline if "$group" in st), None)
+        if isinstance(group_id, dict):
+            return _make_async_cursor([
+                {"_id": {"board": "ahsec", "cls": "class-12", "subj": "physics"},
+                 "subject_name": "Physics", "board_name": "AHSEC",
+                 "class_name": "Class 12", "count": 12},
+            ])
+        return _make_async_cursor([
+            {"_id": "notes", "count": 5},
+            {"_id": "mcqs", "count": 3},
+        ])
+    db.seo_pages.aggregate = MagicMock(side_effect=_aggregate)
     db.boards.find_one = AsyncMock(return_value=board_doc)
     db.subjects.find_one = AsyncMock(return_value=subject_doc)
     db.chapters.find = MagicMock(return_value=_make_async_cursor([
@@ -231,3 +246,62 @@ def test_pyq_shortcut_proxies_to_subject_with_query(ssr_client):
     )
     assert res.status_code == 200
     assert "text/html" in res.headers.get("content-type", "")
+
+
+# Task #408 — every SSR family the Pages middleware proxies must emit
+# a BreadcrumbList JSON-LD node so the SSR-coverage probe can assert
+# structured data on every match (not just the canonical topic page).
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/seo/html/homepage",
+        "/api/seo/html/about",
+        "/api/seo/html/subject/ahsec/class-12/physics",
+        "/api/seo/html/ahsec/class-12/physics/newton-laws",
+        "/api/seo/html/ahsec/class-12/physics/chapter/laws-of-motion",
+        "/api/seo/html/chapter/laws-of-motion",
+        "/api/seo/html/pyq/2024/major",
+    ],
+)
+def test_every_family_emits_breadcrumb_jsonld(ssr_client, url):
+    res = ssr_client.get(url)
+    assert res.status_code == 200, url
+    body = res.text
+    assert "application/ld+json" in body, f"{url} missing JSON-LD block"
+    assert "BreadcrumbList" in body, f"{url} missing BreadcrumbList JSON-LD"
+
+
+def test_subject_route_accepts_lang_as_and_flips_html_lang(ssr_client):
+    """Task #408 — the Assamese URL family (``/as/...``) is rewritten
+    by the middleware to ``?lang=as``. The subject renderer must
+    accept the param and flip ``<html lang>`` so screen readers and
+    Google know the page is an Assamese variant."""
+    res = ssr_client.get(
+        "/api/seo/html/subject/ahsec/class-12/physics",
+        params={"lang": "as"},
+    )
+    assert res.status_code == 200
+    assert '<html lang="as-IN">' in res.text
+
+
+def test_homepage_about_and_subject_record_ssr_render(ssr_client):
+    """Task #408 — homepage / about / subject / typed-topic hits must
+    increment the cf-health ``rendered`` counter so the success-rate
+    row reflects every family the middleware can serve, not just the
+    canonical topic page."""
+    import cf_ssr_health
+    cf_ssr_health.reset()
+    for url in (
+        "/api/seo/html/homepage",
+        "/api/seo/html/about",
+        "/api/seo/html/subject/ahsec/class-12/physics",
+        "/api/seo/html/ahsec/class-12/physics/newton-laws/notes",
+    ):
+        assert ssr_client.get(url).status_code == 200, url
+    snap = asyncio.new_event_loop().run_until_complete(
+        cf_ssr_health.snapshot(probe=False)
+    )
+    assert snap["rendered"] >= 4, snap
+    assert snap["fallback"] == 0, snap
+    assert snap["success_rate"] == 1.0, snap
+

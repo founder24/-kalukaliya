@@ -576,6 +576,63 @@ the worker process is stale — restart the API workflow. The metric
 counter is in-process and resets on restart, which is the intended
 behaviour (no false historical numbers after a rollback).
 
+### Task #408 — Adding a new SEO route family
+
+The Pages middleware (`artifacts/syrabit/functions/_middleware.js`)
+proxies SEO routes to the backend at `/api/seo/html/<path>`. To add a
+new family (e.g. a new ``/exam/<board>/<class>`` landing):
+
+1. **Middleware regex** — extend `mapSsrRoute()` in
+   `artifacts/syrabit/functions/_middleware.js` to recognise the
+   pathname and return `{ backend: "/api/seo/html/...", family: "exam" }`.
+   Keep the family string short — it shows up in the
+   `X-SSR-Family` response header and the cf-health attribution row.
+
+2. **Backend renderer** — add `@router.get("/html/<path>",
+   response_class=HTMLResponse)` in `seo_engine.py`. Every renderer
+   MUST emit:
+   - `<title>`, `<meta name="description">`, `<link rel="canonical">`,
+     OpenGraph `og:title`/`og:url`/`og:type`.
+   - A visible `<nav aria-label="Breadcrumb">` trail and a
+     `BreadcrumbList` JSON-LD node inside `<script
+     type="application/ld+json">` (the SSR-coverage probe asserts both).
+   - A `Cache-Control` header (default
+     `public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400`)
+     and a `Cache-Tag` header that includes `syrabit-html` plus the
+     entity-scoped tag(s) so `cf_enterprise.purge_by_cache_tags(...)`
+     can invalidate just this family.
+   - `record_render(True)` from `cf_ssr_health` on the success path
+     and `record_render(False)` on the not-found / fallback path so
+     the cf-health `ssr` row reflects the new family in
+     `success_rate`.
+
+3. **Probe URL** — add one canonical URL to the `SSR_PROBE_URLS`
+   default list in `cf_ssr_health.py` (or set the env var in
+   production). The cf-health row only reports
+   `probe_pass == probe_total` when every family is reachable
+   end-to-end, so a missing probe is the fastest way to notice
+   when the middleware regex and the backend renderer drift apart.
+
+4. **Test** — extend `tests/test_ssr_route_families.py` with the new
+   URL shape so the contract is pinned. The test mounts the real
+   `/api/seo` router with a mocked Mongo and asserts
+   `200 text/html` plus the presence of `BreadcrumbList`.
+
+5. **Assamese variant** — if the route should also serve under
+   `/as/...`, the middleware already strips the `as` prefix and
+   appends `?lang=as`. Make the renderer accept `lang: Optional[str]
+   = None` and flip `<html lang="as-IN">` (see
+   `get_subject_landing_html` for the pattern).
+
+6. **`page_type` is best-effort** — the PYQ shortcut
+   (`/pyq/<board>/<class>/<subject>`) rewrites to the subject route
+   with `?page_type=pyq`. The subject renderer accepts the param but
+   currently does NOT filter on it (the page already lists every
+   page-type per topic) — this is a deliberate no-op until the
+   filter lands (follow-up #431). New renderers should treat any
+   `page_type=` query string the middleware passes the same way:
+   accept, log, render the default view rather than 422.
+
 ### Per-workstream tests
 
 | Workstream | Test file |

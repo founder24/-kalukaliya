@@ -3351,6 +3351,9 @@ async def get_homepage_html():
          "isPartOf": {"@id": "https://syrabit.ai/#website"},
          "about": {"@id": "https://syrabit.ai/#organization"},
          "primaryImageOfPage": {"@type": "ImageObject", "url": "https://syrabit.ai/opengraph.jpg"}},
+        {"@type": "BreadcrumbList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://syrabit.ai"},
+        ]},
     ]}, ensure_ascii=False)
 
     html_out = f"""<!DOCTYPE html>
@@ -3441,7 +3444,20 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 </footer>
 </body>
 </html>"""
-    return HTMLResponse(content=html_out)
+    # Task #408 — count homepage SSR hits toward cf-health success rate.
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
+    resp = HTMLResponse(content=html_out)
+    # Task #408 — match the cache contract used by the topic/chapter
+    # renderers so the edge can serve from cache and be purged by tag.
+    resp.headers["Cache-Control"] = (
+        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400"
+    )
+    resp.headers["Cache-Tag"] = "syrabit-html syrabit-homepage"
+    return resp
 
 
 @router.get("/html/about", response_class=HTMLResponse)
@@ -3569,6 +3585,12 @@ async def get_about_html():
             "about": {"@type": "Organization", "name": "Syrabit.ai"},
             "inLanguage": "en-IN",
         },
+        # Task #408 — emit BreadcrumbList on every SSR page so the
+        # coverage probe can assert structured data on every family.
+        {"@type": "BreadcrumbList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://syrabit.ai"},
+            {"@type": "ListItem", "position": 2, "name": "About", "item": page_url},
+        ]},
         {
             "@type": "FAQPage",
             "mainEntity": [
@@ -3985,11 +4007,34 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 </footer>
 </body>
 </html>"""
-    return HTMLResponse(content=html_out)
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
+    resp = HTMLResponse(content=html_out)
+    resp.headers["Cache-Control"] = (
+        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400"
+    )
+    resp.headers["Cache-Tag"] = "syrabit-html syrabit-about"
+    return resp
 
 
 @router.get("/html/subject/{board}/{class_slug}/{subject_slug}", response_class=HTMLResponse)
-async def get_subject_landing_html(board: str, class_slug: str, subject_slug: str):
+async def get_subject_landing_html(
+    board: str,
+    class_slug: str,
+    subject_slug: str,
+    page_type: Optional[str] = None,
+    lang: Optional[str] = None,
+):
+    # ``page_type`` is accepted so the middleware's PYQ shortcut
+    # (``/pyq/<board>/<class>/<subject>`` → ``?page_type=pyq``) doesn't
+    # 422 here. The rendered page already lists every available
+    # page-type per topic, so the param is currently a deliberate
+    # no-op — see follow-up task #431 for the planned filter.
+    _ = page_type
+    _lang_attr = "as-IN" if (lang or "").lower().startswith("as") else "en-IN"
     pages = await _db.seo_pages.find(
         {"board_slug": board, "class_slug": class_slug, "subject_slug": subject_slug,
          "status": "published", "page_type": "notes"},
@@ -4184,7 +4229,7 @@ async def get_subject_landing_html(board: str, class_slug: str, subject_slug: st
     ]}, ensure_ascii=False)
 
     html_out = f"""<!DOCTYPE html>
-<html lang="en-IN">
+<html lang="{_lang_attr}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -4274,7 +4319,25 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 </footer>
 </body>
 </html>"""
-    return HTMLResponse(content=html_out)
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
+    resp = HTMLResponse(content=html_out)
+    resp.headers["Cache-Control"] = (
+        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400"
+    )
+    try:
+        from cf_enterprise import build_cache_tag as _bct
+        resp.headers["Cache-Tag"] = (
+            "syrabit-html " + _bct("subject", subject_slug)
+        ).strip()
+    except Exception:
+        resp.headers["Cache-Tag"] = (
+            f"syrabit-html syrabit-subject-{subject_slug}"
+        )
+    return resp
 
 
 @router.get("/html/{board}/{class_slug}/{subject_slug}/{topic_slug}", response_class=HTMLResponse)
@@ -4423,6 +4486,11 @@ async def get_seo_html_typed(board: str, class_slug: str, subject_slug: str, top
     _lm = _iso_to_rfc7231(page.get("updated_at") or page.get("generated_at"))
     if _lm:
         resp.headers["Last-Modified"] = _lm
+    try:
+        from cf_ssr_health import record_render as _ssr_rec
+        _ssr_rec(True)
+    except Exception:
+        pass
     return resp
 
 
@@ -8105,6 +8173,25 @@ async def get_chapter_by_slug_html(chapter_slug: str):
         )
     items_html = "\n".join(items) or "<li>No topics published yet.</li>"
 
+    # Task #408 — every SSR family must emit BreadcrumbList JSON-LD so
+    # the SSR-coverage probe can assert structured data on every match.
+    bc_schema = json.dumps({"@context": "https://schema.org", "@graph": [
+        {"@type": "BreadcrumbList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home",
+             "item": "https://syrabit.ai"},
+            {"@type": "ListItem", "position": 2, "name": board_name,
+             "item": f"https://syrabit.ai/{board_slug}"},
+            {"@type": "ListItem", "position": 3, "name": subject_name,
+             "item": canonical},
+            {"@type": "ListItem", "position": 4, "name": chapter_title,
+             "item": page_url},
+        ]},
+        {"@type": "CollectionPage", "name": chapter_title,
+         "description": description, "url": page_url,
+         "isPartOf": {"@type": "WebSite", "@id": "https://syrabit.ai",
+                      "name": "Syrabit.ai"}},
+    ]}, ensure_ascii=False)
+
     html_out = f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"/>
 <title>{chapter_title} — {subject_name} ({board_name} {class_name}) | Syrabit</title>
@@ -8113,7 +8200,13 @@ async def get_chapter_by_slug_html(chapter_slug: str):
 <meta property="og:title" content="{chapter_title} — {subject_name}"/>
 <meta property="og:url" content="{page_url}"/>
 <meta property="og:type" content="article"/>
+<script type="application/ld+json">{bc_schema}</script>
 </head><body>
+<nav aria-label="Breadcrumb">
+<a href="https://syrabit.ai">Home</a> &rsaquo;
+<a href="{canonical}">{subject_name}</a> &rsaquo;
+<span>{chapter_title}</span>
+</nav>
 <header><h1>{chapter_title}</h1>
 <p>{subject_name} · {board_name} {class_name}</p></header>
 <main>
@@ -8181,6 +8274,24 @@ async def get_pyq_year_paper_html(year: int, paper: str):
     desc = (f"All {pp} previous year question papers from {py} indexed by "
             "Syrabit — AHSEC, SEBA, CBSE and university board papers.")
 
+    # Task #408 — BreadcrumbList JSON-LD so the PYQ year+paper family
+    # carries the same structured-data contract as the topic / chapter
+    # families (the SSR-coverage probe asserts this on every match).
+    bc_schema = json.dumps({"@context": "https://schema.org", "@graph": [
+        {"@type": "BreadcrumbList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home",
+             "item": "https://syrabit.ai"},
+            {"@type": "ListItem", "position": 2, "name": "PYQ",
+             "item": "https://syrabit.ai/pyq"},
+            {"@type": "ListItem", "position": 3, "name": f"{py} {pp}",
+             "item": page_url},
+        ]},
+        {"@type": "CollectionPage", "name": title, "description": desc,
+         "url": page_url,
+         "isPartOf": {"@type": "WebSite", "@id": "https://syrabit.ai",
+                      "name": "Syrabit.ai"}},
+    ]}, ensure_ascii=False)
+
     html_out = f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"/>
 <title>{title}</title>
@@ -8189,7 +8300,13 @@ async def get_pyq_year_paper_html(year: int, paper: str):
 <meta property="og:title" content="{title}"/>
 <meta property="og:url" content="{page_url}"/>
 <meta property="og:type" content="website"/>
+<script type="application/ld+json">{bc_schema}</script>
 </head><body>
+<nav aria-label="Breadcrumb">
+<a href="https://syrabit.ai">Home</a> &rsaquo;
+<a href="https://syrabit.ai/pyq">PYQ</a> &rsaquo;
+<span>{py} {pp}</span>
+</nav>
 <header><h1>{py} {pp} PYQ Papers</h1>
 <p>{len(docs)} paper(s) indexed.</p></header>
 <main><ol>{items_html}</ol></main>
