@@ -1999,6 +1999,8 @@ from routes.synthetic_probe_secret_alert import router as synthetic_probe_secret
 # pages on-call via the dashboard they already watch, instead of
 # relying on someone noticing a red badge in the GitHub Actions UI.
 from routes.admin_health import router as admin_health_router
+# Task #382 — embed/rerank/memory-brain combined health pill.
+from routes.admin_embed_stack_health import router as admin_embed_stack_health_router
 from routes.admin_ads import router as admin_ads_router
 from routes.admin_review_prompts import router as admin_review_prompts_router
 from routes.edu_browser import router as edu_browser_router
@@ -2153,6 +2155,7 @@ api.include_router(admin_logs_cf_pull_saturation_alerts_router)
 api.include_router(admin_slack_webhook_missing_alerts_router)
 api.include_router(synthetic_probe_secret_alert_router)
 api.include_router(admin_health_router)
+api.include_router(admin_embed_stack_health_router)
 api.include_router(admin_ads_router)
 api.include_router(admin_review_prompts_router)
 api.include_router(edu_browser_router)

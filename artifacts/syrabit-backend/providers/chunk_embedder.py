@@ -40,12 +40,68 @@ _EMBED_MODEL = "embed-multilingual-v3.0"
 _EMBED_DIM   = 1024
 _BATCH_SIZE  = 48   # Cohere allows up to 96 inputs; keep below for safety
 
+# Task #382 — when the primary is the custom Workers-AI worker we tag
+# inserted chunks with that source name (so admin/diagnostics can tell
+# at-a-glance which embed provider produced a given vector batch) and
+# fall back to the historical "cohere" tag for the legacy path.
+_EMBED_MODEL_WORKERS = "workers_ai_custom@gemma+qwen3-meanpool-1024"
 
-async def _cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
-    """Embed a batch of texts using Cohere via CF AI Gateway (BYOK).
 
-    Returns None slots for any individual failure; never raises.
-    Falls back to Pinecone if Cohere is unavailable.
+def _embed_source_for_primary() -> tuple[str, str]:
+    """Return (model_string, source_tag) for the active primary."""
+    if _embed_provider_primary() == "workers_ai_custom":
+        return (_EMBED_MODEL_WORKERS, "workers_ai_custom")
+    return (_EMBED_MODEL, "cohere")
+
+
+def _embed_provider_primary() -> str:
+    """Return the configured primary embed provider for the chunk path.
+
+    Reads ``EMBED_PROVIDER_PRIMARY`` lazily so test monkeypatches and
+    runtime overrides take effect without re-importing this module.
+    """
+    try:
+        from config import EMBED_PROVIDER_PRIMARY as _epp
+        return (_epp or "").strip().lower() or "workers_ai_custom"
+    except Exception:
+        return "workers_ai_custom"
+
+
+async def _workers_custom_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
+    """Embed a batch of texts via the Task #382 custom Workers-AI worker.
+
+    Returns one vector per input text, or ``None`` slots when the worker
+    cannot serve a particular call. Never raises.
+    """
+    try:
+        from providers import workers_embed as _we
+        if not _we.is_enabled():
+            logger.warning(
+                "[chunk_embedder] workers_ai_custom embed disabled — "
+                "WORKERS_EMBED_URL/SECRET not set"
+            )
+            return [None] * len(texts)
+        vecs = await asyncio.wait_for(
+            _we.embed(texts, input_type="search_document"),
+            timeout=30.0,
+        )
+        if vecs and len(vecs) == len(texts):
+            return vecs
+        logger.warning(
+            "[chunk_embedder] workers_ai_custom returned %d vectors for %d texts",
+            len(vecs) if vecs else 0, len(texts),
+        )
+    except Exception as exc:
+        logger.warning("[chunk_embedder] workers_ai_custom embed failed: %s", exc)
+    return [None] * len(texts)
+
+
+async def _legacy_cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
+    """Legacy embed path — Cohere → Pinecone Inference fallback.
+
+    Kept for the rollback case (``EMBED_PROVIDER_PRIMARY != workers_ai_custom``)
+    so flipping the flag back restores the prior behaviour without a
+    code change. Never raises.
     """
     try:
         from providers.cohere import embed as _cohere_embed, ENABLED as _cohere_on
@@ -59,7 +115,6 @@ async def _cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
     except Exception as exc:
         logger.warning("[chunk_embedder] Cohere embed batch failed: %s", exc)
 
-    # Fallback: Pinecone multilingual-e5-large
     try:
         from providers.pinecone_ai import embed as pc_embed, ENABLED as _pc_on
         if _pc_on:
@@ -73,6 +128,38 @@ async def _cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
         logger.warning("[chunk_embedder] Pinecone fallback also failed: %s", exc)
 
     return [None] * len(texts)
+
+
+async def _embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
+    """Dispatch a chunk batch to the configured primary embed provider.
+
+    STRICT provider isolation (Task #382): when
+    ``EMBED_PROVIDER_PRIMARY=workers_ai_custom`` (the default), this
+    function is a single-source pipeline — it calls ONLY the custom
+    Workers-AI worker. A worker failure surfaces as None slots so
+    ``embed_chunks_bulk`` can mark those chunks as failed and retry
+    them on the next run; it does NOT silently fall back to Cohere /
+    Voyage / Pinecone Inference. The legacy multi-provider path is
+    only reachable when the operator flips
+    ``EMBED_PROVIDER_PRIMARY`` to a legacy provider name (cohere /
+    voyage_ai / vertex / azure_openai / workers_ai), which is the
+    explicit rollback contract. Voyage in particular is reserved for
+    the memory_brain collection (``providers.memory_brain``) and is
+    never reached from this chunk path under either flag value.
+    """
+    primary = _embed_provider_primary()
+    if primary == "workers_ai_custom":
+        return await _workers_custom_embed_batch(texts)
+    # Rollback path — Cohere → Pinecone Inference, original behaviour.
+    return await _legacy_cohere_embed_batch(texts)
+
+
+# Back-compat alias — keep the historical symbol importable for any
+# downstream caller (and in-tree tests) that still references the
+# Cohere-batch helper directly. The alias forwards to the dispatcher
+# so the new flag is honoured even via the old symbol name.
+async def _cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
+    return await _embed_batch(texts)
 
 
 async def embed_chunks_bulk(
@@ -152,7 +239,7 @@ async def embed_chunks_bulk(
             continue
 
         idxs, embed_texts = zip(*to_embed)
-        vecs = await _cohere_embed_batch(list(embed_texts))
+        vecs = await _embed_batch(list(embed_texts))
 
         # Update MongoDB (source of truth — always written)
         from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -178,6 +265,7 @@ async def embed_chunks_bulk(
         # Track which chunk _ids were successfully queued for Pinecone upsert
         # so we can write the completion marker after the upsert succeeds.
         pinecone_chunk_ids: list = []
+        _embed_model_tag, _embed_source_tag = _embed_source_for_primary()
         for i, vec in zip(idxs, vecs):
             if vec is None:
                 failed += 1
@@ -189,9 +277,9 @@ async def embed_chunks_bulk(
                     filter_q,
                     {"$set": {
                         "embedding":        vec,
-                        "embedding_model":  _EMBED_MODEL,
+                        "embedding_model":  _embed_model_tag,
                         "embedding_dim":    _EMBED_DIM,
-                        "embedding_source": "cohere",
+                        "embedding_source": _embed_source_tag,
                     }},
                     upsert=False,
                 ))
@@ -206,7 +294,7 @@ async def embed_chunks_bulk(
                         "board_id":        chunk.get("board_id", ""),
                         "chapter_title":   chunk.get("chapter_title", ""),
                         "topic_name":      chunk.get("topic_name", ""),
-                        "embedding_model": _EMBED_MODEL,
+                        "embedding_model": _embed_model_tag,
                     },
                 })
                 pinecone_chunk_ids.append(chunk["_id"])
@@ -260,13 +348,18 @@ async def embed_chunks_bulk(
         await asyncio.sleep(0.1)
 
     duration = round(time.perf_counter() - t0, 2)
+    # Report the model/source actually used for this run so admin
+    # diagnostics don't mis-label a workers_ai_custom run as Cohere.
+    _active_model_tag, _active_source_tag = _embed_source_for_primary()
     result = {
-        "total":      total,
-        "embedded":   embedded,
-        "skipped":    skipped,
-        "failed":     failed,
-        "duration_s": duration,
-        "model":      _EMBED_MODEL,
+        "total":            total,
+        "embedded":         embedded,
+        "skipped":          skipped,
+        "failed":           failed,
+        "duration_s":       duration,
+        "model":            _active_model_tag,
+        "embedding_source": _active_source_tag,
+        "primary":          _embed_provider_primary(),
     }
     logger.info("[chunk_embedder] Bulk embed complete: %s", result)
     return result

@@ -499,6 +499,32 @@ try:
 except ValueError:
     VOYAGE_EMBED_DIMS = 1024
 
+# ── Task #382 — Workers-AI custom embed worker + memory brain ───────────────
+# After Task #382 the embedding stack is owned by a Cloudflare Worker
+# that runs Gemma-300M + Qwen3-0.6B and mean-pools their hidden states
+# into a 1024-dim vector. Pinecone handles RAG vector storage and the
+# rerank endpoint; Voyage is repurposed as the only embed provider for
+# a new long-term-memory MongoDB collection (``memory_brain``) and is
+# no longer touched on the chunk path.
+#
+# Old providers (cohere, vertex_embed, voyage on chunks, workers_ai
+# bge-small) stay in the repo but are skipped at runtime when the new
+# flags are on. Flip the env values back to roll back.
+EMBED_PROVIDER_PRIMARY = os.environ.get(
+    'EMBED_PROVIDER_PRIMARY', 'workers_ai_custom'
+).strip().lower() or 'workers_ai_custom'
+RERANK_PROVIDER = os.environ.get(
+    'RERANK_PROVIDER', 'pinecone_only'
+).strip().lower() or 'pinecone_only'
+MEMORY_BRAIN_PROVIDER = os.environ.get(
+    'MEMORY_BRAIN_PROVIDER', 'voyage'
+).strip().lower() or 'voyage'
+MEMORY_BRAIN_COLLECTION = os.environ.get(
+    'MEMORY_BRAIN_COLLECTION', 'memory_brain'
+).strip() or 'memory_brain'
+WORKERS_EMBED_URL = os.environ.get('WORKERS_EMBED_URL', '').strip()
+WORKERS_EMBED_SECRET = os.environ.get('WORKERS_EMBED_SECRET', '').strip()
+
 # ── Vertex AI Gemini Flash chat (Task #607) ─────────────────────────────────
 # When VERTEX_PROJECT_ID is set, the chat path can route through Vertex AI's
 # Gemini Flash streaming endpoint for lower TTFT. Auth is via Application
@@ -1102,10 +1128,23 @@ PROVIDER_PRIORITY: dict = {
     # as named entries so call_embed_with_dispatch's script detection
     # continues to work; both currently resolve to the same single-provider
     # Workers AI chain.
-    "embed":             ["workers_ai"],
-    "embed_en":          ["workers_ai"],
-    "embed_indic":       ["workers_ai"],
-    # Reranking: Pinecone AI (primary) → Workers AI (last resort).
+    # Task #382 — primary embed is the custom Workers-AI worker
+    # (Gemma-300M + Qwen3-0.6B, mean-pooled to 1024-dim) when
+    # EMBED_PROVIDER_PRIMARY=workers_ai_custom. When the flag is
+    # flipped to a legacy provider name (cohere / voyage_ai / vertex
+    # / azure_openai / workers_ai) the dispatcher restores the
+    # pre-Task-#382 multi-provider draw — every legacy provider stays
+    # listed here so the exclusion-redraw loop can advance through
+    # them. The exact non-zero weights come from POOL_WEIGHTS["embed"]
+    # below, which is rebuilt from EMBED_PROVIDER_PRIMARY at import.
+    "embed":             ["workers_ai_custom", "cohere", "voyage_ai", "vertex", "azure_openai", "workers_ai"],
+    "embed_en":          ["workers_ai_custom", "cohere", "voyage_ai", "vertex", "azure_openai", "workers_ai"],
+    "embed_indic":       ["workers_ai_custom", "cohere", "voyage_ai", "vertex", "azure_openai", "workers_ai"],
+    # Reranking: Task #382 collapses this to Pinecone-only when
+    # RERANK_PROVIDER=pinecone_only. Workers AI remains in the list as
+    # a dormant fallback the dispatcher can advance to if the flag is
+    # flipped back, but call_rerank_with_dispatch short-circuits to
+    # pinecone_ai under the new default.
     "rerank":            ["pinecone_ai", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
@@ -1134,7 +1173,8 @@ PROVIDER_CREDITS: dict = {
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
     "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback
     "cohere":           1000,   # Cohere startup credits — $1k; primary embed
-    "voyage_ai":         500,   # Voyage AI startup credits — $500; secondary embed
+    "voyage_ai":         500,   # Voyage AI startup credits — $500; memory-brain only after Task #382
+    "workers_ai_custom":   0,   # Cloudflare custom embed worker — Task #382 primary embed (free tier)
     "pinecone_ai":       500,   # Pinecone startup credits — $500; primary rerank
     "exa_ai":           1000,   # Exa startup credits — $1k
     "tavily":            500,   # Tavily startup credits — $500
@@ -1232,19 +1272,13 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     },
     # embed/tts/stt explicit overrides so the established primaries
     # (ElevenLabs/Deepgram) keep deterministic priority over generic
-    # fallbacks. Cohere and Voyage AI removed from embed pools
-    # (2026-05-04 rollback per user instruction); Workers AI is the
-    # sole embed provider — non-zero weight so select_provider treats
-    # it as the active primary rather than a weight-0 last-resort.
-    "embed": {
-        "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
-    },
-    "embed_en": {
-        "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
-    },
-    "embed_indic": {
-        "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
-    },
+    # fallbacks. The embed pool is REWRITTEN immediately after this
+    # dict literal based on EMBED_PROVIDER_PRIMARY (Task #382) so
+    # flipping the env var actually changes provider draws — the
+    # entries below are just structural placeholders.
+    "embed":       {"workers_ai_custom": 10000, "workers_ai": 0},
+    "embed_en":    {"workers_ai_custom": 10000, "workers_ai": 0},
+    "embed_indic": {"workers_ai_custom": 10000, "workers_ai": 0},
     "tts": {
         "elevenlabs": 1000,   # equal weight — eleven_multilingual_v2
         "deepgram":   1000,   # equal weight — Aura-2
@@ -1271,6 +1305,51 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "vertex":      1000,
     },
 }
+
+# ── Task #382 — flag-driven embed pool weights ──────────────────────────────
+# `EMBED_PROVIDER_PRIMARY` flips the weighted draw between the new custom
+# Workers-AI worker and the legacy multi-provider chain. Rebuilding the
+# pool here (rather than baking it into the literal above) means the
+# rollback story is genuine: setting `EMBED_PROVIDER_PRIMARY=cohere`
+# (or `vertex`/`voyage_ai`/`azure_openai`/`workers_ai`) actually removes
+# `workers_ai_custom` from the draw and restores the prior weighted
+# distribution across the legacy providers, so the dispatcher's
+# `select_provider` weighted draw + exclusion-redraw loop walks the
+# same chain it did before Task #382.
+_LEGACY_EMBED_WEIGHTS = {
+    "cohere":       1000,
+    "voyage_ai":    1000,
+    "vertex":        500,
+    "azure_openai":  500,
+    "workers_ai":    100,
+}
+def _build_embed_pool(primary: str) -> dict[str, int]:
+    primary = (primary or "").strip().lower()
+    if primary == "workers_ai_custom":
+        # Custom worker is the sole active provider; legacy providers
+        # remain in the pool at weight 0 so the exclusion-redraw loop
+        # can advance to them only after the worker is fully exhausted.
+        return {
+            "workers_ai_custom": 10000,
+            "cohere":                0,
+            "voyage_ai":             0,
+            "vertex":                0,
+            "azure_openai":          0,
+            "workers_ai":            0,
+        }
+    # Rollback — workers_ai_custom is forced to weight 0 (effectively
+    # excluded from the draw) and the legacy chain is restored. If the
+    # operator named a specific legacy provider, that one gets the top
+    # weight; otherwise the legacy defaults stand.
+    pool = {"workers_ai_custom": 0, **_LEGACY_EMBED_WEIGHTS}
+    if primary in pool and primary != "workers_ai_custom":
+        pool[primary] = max(pool[primary], 10000)
+    return pool
+
+_embed_pool = _build_embed_pool(EMBED_PROVIDER_PRIMARY)
+POOL_WEIGHTS["embed"]       = dict(_embed_pool)
+POOL_WEIGHTS["embed_en"]    = dict(_embed_pool)
+POOL_WEIGHTS["embed_indic"] = dict(_embed_pool)
 
 SEED_DATA = {
     "boards": [

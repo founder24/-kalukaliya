@@ -224,3 +224,44 @@ async def health_check() -> dict:
             "latency_ms": round((time.perf_counter() - t0) * 1000),
             "error": str(exc)[:200],
         }
+
+
+async def rerank_health_check() -> dict:
+    """Rerank-specific health probe (Task #382).
+
+    The generic ``health_check`` above probes Pinecone's *embed*
+    endpoint, which doesn't tell us whether the rerank surface is
+    reachable or whether the configured rerank model is still
+    available. This probe scores a single trivial pair against
+    ``PINECONE_RERANK_MODEL`` so the admin dashboard can pin a green
+    pill on the actual rerank capability that
+    ``llm.call_rerank_with_dispatch`` depends on under
+    ``RERANK_PROVIDER=pinecone_only``.
+    """
+    if not ENABLED:
+        return {
+            "ok":    False,
+            "model": _RERANK_MODEL,
+            "error": "not_configured",
+        }
+    t0 = time.perf_counter()
+    try:
+        scores = await rerank(
+            "health check query",
+            ["a benign reference document"],
+            top_n=1,
+        )
+        latency_ms = round((time.perf_counter() - t0) * 1000)
+        return {
+            "ok":         bool(scores),
+            "model":      _RERANK_MODEL,
+            "scored":     len(scores),
+            "latency_ms": latency_ms,
+        }
+    except Exception as exc:
+        return {
+            "ok":         False,
+            "model":      _RERANK_MODEL,
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+            "error":      str(exc)[:200],
+        }

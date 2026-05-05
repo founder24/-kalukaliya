@@ -3950,15 +3950,21 @@ async def call_embed_with_dispatch(
       Indic-script / Indic lang → POOL_WEIGHTS['embed_indic']
                                    cohere(10000) → voyage_ai(100) → workers_ai(0)
 
-    voyage_ai: providers.voyage_ai.embed_query (1024-dim, voyage-3.5).
+    workers_ai_custom: providers.workers_embed.embed_query — Task #382
+                       primary embed via the custom Cloudflare Worker
+                       (Gemma-300M + Qwen3-0.6B mean-pooled to 1024-dim).
+    voyage_ai: providers.voyage_ai.embed_query (1024-dim, voyage-3.5)
+               — kept dormant on the embed pool after Task #382;
+               Voyage now powers only the memory_brain collection.
     cohere:    providers.cohere.embed_query    (1024-dim, embed-multilingual-v3.0).
-    workers_ai: cloudflare_ai.embed (1024-dim, @cf/baai/bge-m3).
+    workers_ai: cloudflare_ai.embed (1024-dim, @cf/baai/bge-m3) — dormant
+                fallback after Task #382.
     azure_openai: branch kept for back-compat in case POOL_WEIGHTS
     is overridden at runtime; not selected by the default hybrid pools.
     (bedrock embed branch removed in Task #347.)
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
-    from config import PROVIDER_PRIORITY as _PP
+    from config import PROVIDER_PRIORITY as _PP, EMBED_PROVIDER_PRIMARY as _EPP
     feature = _embed_feature_for(text, lang)
 
     # Task #361 §2 — embedding cache lookup. Vectors are deterministic
@@ -3974,6 +3980,47 @@ async def call_embed_with_dispatch(
     if _cached_vec:
         return _cached_vec
 
+    def _persist_early(_vec):
+        if _embed_cache_set is None or not _vec:
+            return
+        try:
+            _embed_cache_set(text, _vec, task_type=task_type, lang=lang)
+        except Exception:
+            pass
+
+    # Task #382 — STRICT provider isolation under the new default flag.
+    # When EMBED_PROVIDER_PRIMARY=workers_ai_custom we short-circuit
+    # the entire weighted-draw + exclusion-redraw loop and call the
+    # custom Workers-AI worker directly. A worker failure raises
+    # `RuntimeError("embed: workers_ai_custom failed: …")` and the
+    # caller decides how to handle it — we DO NOT silently fall back
+    # to legacy providers (Cohere / Voyage / Vertex / Pinecone
+    # Inference / generic workers_ai bge-m3). The legacy weighted
+    # ladder is only reachable when the operator explicitly flips
+    # EMBED_PROVIDER_PRIMARY to a legacy provider name, which is the
+    # documented rollback contract.
+    if (_EPP or "").strip().lower() == "workers_ai_custom":
+        from providers import workers_embed as _we_prov
+        if not _we_prov.is_enabled():
+            raise RuntimeError(
+                "embed: workers_ai_custom is the active primary but "
+                "WORKERS_EMBED_URL/SECRET are not configured — set them "
+                "or flip EMBED_PROVIDER_PRIMARY to a legacy provider "
+                "name to roll back"
+            )
+        _input_type_strict = (
+            "search_query" if (task_type or "").upper().endswith("QUERY")
+            else "search_document"
+        )
+        try:
+            _strict_vecs = await _we_prov.embed([text], input_type=_input_type_strict)
+        except Exception as _exc:
+            raise RuntimeError(f"embed: workers_ai_custom failed: {_exc}") from _exc
+        if not _strict_vecs:
+            raise RuntimeError("embed: workers_ai_custom returned no vectors")
+        _persist_early(_strict_vecs[0])
+        return _strict_vecs[0]
+
     exclude: frozenset = frozenset()
     # Total attempts allowed = the union of providers across the chosen
     # sub-pool plus the generic embed pool's last-resort entry, +1 so we
@@ -3983,12 +4030,10 @@ async def call_embed_with_dispatch(
     max_attempts = len(pool) + 1
 
     def _persist(_vec):
-        if _embed_cache_set is None or not _vec:
-            return
-        try:
-            _embed_cache_set(text, _vec, task_type=task_type, lang=lang)
-        except Exception:
-            pass
+        # Reuse the early-persist closure so cache writes are
+        # consistent across both the strict-isolation short-circuit
+        # and the rollback weighted-draw loop.
+        _persist_early(_vec)
 
     for _ in range(max_attempts):
         provider = select_provider(feature, lang=lang, exclude=exclude)
@@ -4000,6 +4045,37 @@ async def call_embed_with_dispatch(
                     raise RuntimeError("vertex embed_text returned None")
                 _persist(result)
                 return result
+            elif provider == "workers_ai_custom":
+                # Task #382 — custom Workers-AI embed worker
+                # (Gemma-300M + Qwen3-0.6B → 1024-dim). Only routed
+                # when EMBED_PROVIDER_PRIMARY=workers_ai_custom; the
+                # config-side pool rebuild already zeroes out this
+                # entry on rollback, but we double-gate here so a
+                # stale POOL_WEIGHTS in tests can't accidentally hit
+                # the worker after the flag has been flipped off.
+                from config import EMBED_PROVIDER_PRIMARY as _ep_primary
+                if _ep_primary != "workers_ai_custom":
+                    raise RuntimeError(
+                        f"workers_ai_custom embed disabled "
+                        f"(EMBED_PROVIDER_PRIMARY={_ep_primary!r})"
+                    )
+                from providers import workers_embed as _we_prov
+                if not _we_prov.is_enabled():
+                    raise RuntimeError(
+                        "workers_ai_custom embed: WORKERS_EMBED_URL / "
+                        "WORKERS_EMBED_SECRET not configured"
+                    )
+                _input_type = (
+                    "search_query" if (task_type or "").upper().endswith("QUERY")
+                    else "search_document"
+                )
+                _we_vecs = await _we_prov.embed([text], input_type=_input_type)
+                if not _we_vecs:
+                    raise RuntimeError(
+                        "workers_ai_custom embed: empty response"
+                    )
+                _persist(_we_vecs[0])
+                return _we_vecs[0]
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
                 _vec_wai = await _cf_embed(text)
@@ -4209,12 +4285,39 @@ async def call_rerank_with_dispatch(
     azure_openai: rerank not wired (Task #257) — excluded gracefully.
     workers_ai: no rerank endpoint — excluded gracefully.
 
+    Task #382 — when ``RERANK_PROVIDER=pinecone_only`` (the new default)
+    the dispatcher short-circuits to pinecone_ai exclusively. Other
+    providers stay in the pool definitions but never get drawn,
+    matching the "Pinecone-only rerank" goal of the task.
+
     Each doc should be a string or a dict with a 'text' key.
     Returns the docs list reordered by relevance (most relevant first),
     or the original list unchanged if all providers fail.
     """
-    from config import PROVIDER_PRIORITY as _PP
+    from config import PROVIDER_PRIORITY as _PP, RERANK_PROVIDER as _RR
     exclude: frozenset = frozenset()
+
+    # Task #382 — Pinecone-only short-circuit. We do NOT consult the
+    # weighted draw at all; pinecone_ai is called directly so a
+    # provider key drift in POOL_WEIGHTS cannot accidentally re-enable
+    # cohere/azure/workers_ai rerank attempts.
+    if _RR == "pinecone_only":
+        try:
+            from providers import pinecone_ai as _pc_prov
+            doc_texts = [d if isinstance(d, str) else d.get("text", str(d)) for d in docs]
+            if not doc_texts:
+                return docs
+            scores = await _pc_prov.rerank(query, doc_texts)
+            ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+            return [d for _, d in ranked]
+        except Exception as exc:
+            logger.warning(
+                "rerank pinecone_only short-circuit failed (%s) — "
+                "returning docs unranked",
+                exc,
+            )
+            return docs
+
     max_attempts = len(_PP.get("rerank", [])) + 1
 
     for _ in range(max_attempts):
