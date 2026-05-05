@@ -295,6 +295,12 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Task #398 — render-only tick so the "Last updated Xs ago" badge on
+  // the Revenue section advances visibly between the 60s polls. We
+  // only flip this counter; the actual age math reads ``Date.now()``
+  // at render so the value is always current. Mirrors the metricsMeta
+  // tick pattern from AdminHealth.jsx (Task #396).
+  const [, setMetricsMetaTick] = useState(0);
 
   const [ragAccuracy, setRagAccuracy] = useState(null);
   const [chatFallbacks, setChatFallbacks] = useState(null);
@@ -760,6 +766,22 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     return () => clearInterval(interval);
   }, [load, loadNotifPrefs]);
 
+  // Task #398 — 1s tick for the Revenue-section freshness badge.
+  // Only runs while the metrics endpoint has actually returned a
+  // ``_meta`` block (Task #396), so a failed /admin/dashboard/metrics
+  // fetch doesn't leak a useless interval. Depends on a stable
+  // boolean rather than the ``_meta`` object reference so the
+  // interval isn't torn down and re-created on every successful
+  // poll (which arrives as a new ``metrics`` object every 60s).
+  const hasMetricsMeta = !!metrics?._meta;
+  useEffect(() => {
+    if (!hasMetricsMeta) return undefined;
+    const id = setInterval(() => {
+      setMetricsMetaTick((t) => (t + 1) % 1_000_000);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [hasMetricsMeta]);
+
   // Task #991 — poll the persistent alert-cooldown active count so the
   // Alert History header can surface a "N on hold" pill whenever the
   // 6h cross-worker cooldown is silencing alerts that would otherwise
@@ -1205,6 +1227,47 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
           <StatCard label="Bot Renders"    value={metrics.bot_render?.total_requests || 0} icon={Bot} color="#8b5cf6"
             subLabel="Success Rate" subValue={metrics.bot_render?.success_rate_pct != null ? `${metrics.bot_render.success_rate_pct}%` : '—'} />
         </div>
+        {/* Task #398 — freshness badge for the heavy users / revenue / SEO
+            block. The numbers above (Revenue, Paid/Free Users, SEO Pages,
+            Bot Renders) all read from `metrics`, which the backend caches
+            for ~5 s (Task #395). Without this badge an admin staring at
+            a revenue figure during an incident has no way to tell whether
+            it was just computed or is up to 5 s stale. The 1 s tick
+            useEffect above keeps the "Xs ago" label moving between the
+            60 s polls so the cache age advances visibly while the panel
+            sits idle. Anything beyond ~5 s flips the badge to amber so
+            on-call notices when the heavy cache TTL has been blown
+            (likely a wedged backend or a stuck refresh). The four heavy
+            sections share one ``heavy_cached_at`` timestamp because they
+            are computed and cached as a single block server-side. */}
+        {metrics?._meta && (() => {
+          const fmtAgo = (s) => {
+            const n = Math.max(0, Math.floor(s));
+            if (n < 1) return 'just now';
+            if (n < 60) return `${n}s ago`;
+            if (n < 3600) return `${Math.floor(n / 60)}m ago`;
+            return `${Math.floor(n / 3600)}h ago`;
+          };
+          const heavyAt = Number(metrics._meta.heavy_cached_at);
+          const heavyAgeS = Number.isFinite(heavyAt) ? Date.now() / 1000 - heavyAt : NaN;
+          const heavyLabel = Number.isFinite(heavyAgeS) ? fmtAgo(heavyAgeS) : '—';
+          const stale = Number.isFinite(heavyAgeS) && heavyAgeS > 5;
+          return (
+            <p
+              className={`text-[11px] mt-2 px-1 ${stale ? 'text-amber-600 font-medium' : 'text-gray-400'}`}
+              data-testid="dashboard-metrics-freshness"
+              title={`heavy_cached_at=${heavyAt} (Task #396)`}
+            >
+              Last updated{' '}
+              <span data-testid="dashboard-metrics-freshness-age">{heavyLabel}</span>
+              {stale && (
+                <span className="ml-1" data-testid="dashboard-metrics-freshness-stale">
+                  — cache TTL (~5s) exceeded
+                </span>
+              )}
+            </p>
+          );
+        })()}
         <p className="text-[11px] text-gray-400 mt-2 px-1">
           Revenue includes Razorpay (INR) + Stripe (USD→INR via daily ECB rate). All values stored as <code>amount_inr</code> on each payment row.
         </p>
