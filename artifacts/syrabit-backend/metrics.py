@@ -1310,6 +1310,20 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # usually signals an account-level quota exhaustion, not normal traffic.
     # Set to 0 to disable.
     "gemini_429_burst_threshold": 5,
+    # Task #373: Azure OpenAI 429 burst alert.  llm._track_provider_429 has
+    # been counting Azure 429s into _PROVIDER_429_WINDOWS["azure_openai"]
+    # (Redis key: azure_429_burst) since the provider was added, but the
+    # alerting loop never dispatched on them — bursts were silently logged
+    # and never paged on-call.  Same TTL-consecutive semantics as the
+    # other providers above.  Default 5 — enough to distinguish a real
+    # throttle burst from a transient single-request spike.  Set to 0 to
+    # disable.
+    "azure_openai_429_burst_threshold": 5,
+    # Task #373: Deepgram 429 burst alert.  Same semantics; Redis key:
+    # deepgram_429_burst.  Deepgram is the primary STT/TTS provider, so a
+    # sustained burst means voice features are degrading even when chat
+    # completions look healthy — well worth a page.  Set to 0 to disable.
+    "deepgram_429_burst_threshold": 5,
 }
 _ALERT_EXPIRATION_DEFAULT = {
     "enabled": False,
@@ -2345,6 +2359,78 @@ async def _alerting_loop():
                                 "metric": "gemini_429_burst_threshold",
                                 "value": _gemini_threshold,
                                 "actual": _gemini_burst,
+                                "window_seconds": _PROVIDER_429_BURST_WINDOW_S,
+                            },
+                        )
+            except Exception:
+                pass
+
+            # ── 11. Azure OpenAI 429 burst (Task #373) ───────────────────
+            # Same TTL-consecutive semantics as checks #8–#10.  Azure OpenAI
+            # is the primary path for the gpt-4o-mini / gpt-4.1-mini chat
+            # branch (and the failover chain for several feature pools), so
+            # a sustained 429 burst means we're being throttled at the
+            # deployment quota — chat will degrade even though Workers AI
+            # itself looks fine.  Redis key: azure_429_burst.
+            try:
+                _az_raw = _ALERT_THRESHOLDS.get("azure_openai_429_burst_threshold")
+                try:
+                    _az_threshold = int(_az_raw) if _az_raw is not None else 5
+                except (TypeError, ValueError):
+                    _az_threshold = 5
+                if _az_threshold > 0:
+                    from llm import get_provider_429_burst, _PROVIDER_429_BURST_WINDOW_S
+                    _az_burst = get_provider_429_burst("azure_openai", _PROVIDER_429_BURST_WINDOW_S)
+                    if _az_burst >= _az_threshold:
+                        await _dispatch_alert(
+                            "azure_openai_429_burst",
+                            "Azure OpenAI rate-limit burst — chat fallback throttled",
+                            f"{_az_burst} Azure OpenAI 429 rate-limit responses recorded "
+                            f"in the last {_PROVIDER_429_BURST_WINDOW_S}s (threshold: {_az_threshold}). "
+                            f"Azure OpenAI is being throttled, which may affect chat completions "
+                            f"and any feature pool that fails over to Azure. "
+                            f"Check the Azure OpenAI deployment's TPM/RPM quota in the Azure portal "
+                            f"and verify no quota has been exhausted. "
+                            f"The counter resets automatically when a successful Azure call goes through.",
+                            threshold_snapshot={
+                                "metric": "azure_openai_429_burst_threshold",
+                                "value": _az_threshold,
+                                "actual": _az_burst,
+                                "window_seconds": _PROVIDER_429_BURST_WINDOW_S,
+                            },
+                        )
+            except Exception:
+                pass
+
+            # ── 12. Deepgram 429 burst (Task #373) ───────────────────────
+            # Deepgram is our primary STT (nova-3) and TTS (Aura-2) provider.
+            # A sustained 429 burst means voice features (transcription,
+            # text-to-speech) are degrading — that's invisible from a
+            # chat-completions health check, so it gets its own alert.
+            # Redis key: deepgram_429_burst.
+            try:
+                _dg_raw = _ALERT_THRESHOLDS.get("deepgram_429_burst_threshold")
+                try:
+                    _dg_threshold = int(_dg_raw) if _dg_raw is not None else 5
+                except (TypeError, ValueError):
+                    _dg_threshold = 5
+                if _dg_threshold > 0:
+                    from llm import get_provider_429_burst, _PROVIDER_429_BURST_WINDOW_S
+                    _dg_burst = get_provider_429_burst("deepgram", _PROVIDER_429_BURST_WINDOW_S)
+                    if _dg_burst >= _dg_threshold:
+                        await _dispatch_alert(
+                            "deepgram_429_burst",
+                            "Deepgram rate-limit burst — voice features throttled",
+                            f"{_dg_burst} Deepgram 429 rate-limit responses recorded "
+                            f"in the last {_PROVIDER_429_BURST_WINDOW_S}s (threshold: {_dg_threshold}). "
+                            f"Deepgram is being throttled, which will degrade speech-to-text and "
+                            f"text-to-speech features (chat voice replies, transcription). "
+                            f"Check your Deepgram account concurrency / RPM limits and key usage. "
+                            f"The counter resets automatically when a successful Deepgram call goes through.",
+                            threshold_snapshot={
+                                "metric": "deepgram_429_burst_threshold",
+                                "value": _dg_threshold,
+                                "actual": _dg_burst,
                                 "window_seconds": _PROVIDER_429_BURST_WINDOW_S,
                             },
                         )

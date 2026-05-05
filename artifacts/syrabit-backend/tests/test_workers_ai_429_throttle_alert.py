@@ -1013,6 +1013,11 @@ def _make_alerting_loop_patches(provider_bursts: dict, *, threshold: int = 5):
         "workers_ai_429_burst_threshold": threshold,
         "groq_429_burst_threshold":       threshold,
         "gemini_429_burst_threshold":      threshold,
+        # Task #373 — Azure OpenAI + Deepgram bursts now alert too.  Default
+        # to the same caller-provided threshold so the helper can drive the
+        # new checks without separate plumbing.
+        "azure_openai_429_burst_threshold": threshold,
+        "deepgram_429_burst_threshold":     threshold,
         # keep other checks silent by setting thresholds very high
         "error_rate_pct":         999,
         "latency_p95_ms":         999_999,
@@ -1124,3 +1129,343 @@ class TestGroqGeminiAlertingLoop:
         ))
         assert "groq_429_burst" in dispatched
         assert "workers_ai_429_burst" not in dispatched
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# F. Azure OpenAI + Deepgram burst alerts (Task #373)
+#
+# llm._track_provider_429 has been counting Azure OpenAI and Deepgram 429s
+# into _PROVIDER_429_WINDOWS since the providers were added, but checks
+# #11 / #12 in metrics._alerting_loop are new. These tests prove that:
+#   • the threshold defaults are wired and configurable
+#   • burst >= threshold dispatches the correct alert_type
+#   • burst < threshold stays silent
+#   • threshold=0 disables the alert (matches the documented contract)
+#   • the inline dispatch payload carries the right metric/value/actual
+#   • Azure and Deepgram bursts do not bleed into each other or into
+#     Workers AI / Groq / Gemini counters
+#   • the source-level contract on metrics.py and llm.py is preserved
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestAzureOpenAIAlertCheckFires:
+    """Run check #11 in isolation through the shared _run_check_for_provider
+    helper — same pattern as the Groq/Gemini coverage above."""
+
+    def test_alert_fires_when_burst_equals_threshold(self):
+        dispatch = _run(_run_check_for_provider(
+            "azure_openai", "azure_openai_429_burst_threshold",
+            "azure_openai_429_burst", burst=5, threshold=5,
+        ))
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.args[0] == "azure_openai_429_burst"
+
+    def test_alert_fires_when_burst_exceeds_threshold(self):
+        dispatch = _run(_run_check_for_provider(
+            "azure_openai", "azure_openai_429_burst_threshold",
+            "azure_openai_429_burst", burst=12, threshold=5,
+        ))
+        dispatch.assert_awaited_once()
+
+    def test_alert_does_not_fire_when_burst_below_threshold(self):
+        dispatch = _run(_run_check_for_provider(
+            "azure_openai", "azure_openai_429_burst_threshold",
+            "azure_openai_429_burst", burst=4, threshold=5,
+        ))
+        dispatch.assert_not_awaited()
+
+    def test_alert_does_not_fire_when_threshold_is_zero(self):
+        """threshold=0 disables the alert per the documented contract."""
+        dispatch = _run(_run_check_for_provider(
+            "azure_openai", "azure_openai_429_burst_threshold",
+            "azure_openai_429_burst", burst=100, threshold=0,
+        ))
+        dispatch.assert_not_awaited()
+
+    def test_threshold_snapshot_carries_correct_fields(self):
+        dispatch = _run(_run_check_for_provider(
+            "azure_openai", "azure_openai_429_burst_threshold",
+            "azure_openai_429_burst", burst=7, threshold=5,
+        ))
+        snap = dispatch.await_args.kwargs.get("threshold_snapshot")
+        assert snap is not None
+        assert snap["metric"] == "azure_openai_429_burst_threshold"
+        assert snap["value"] == 5
+        assert snap["actual"] == 7
+        assert snap["window_seconds"] == 180
+
+
+class TestDeepgramAlertCheckFires:
+    """Run check #12 in isolation."""
+
+    def test_alert_fires_when_burst_equals_threshold(self):
+        dispatch = _run(_run_check_for_provider(
+            "deepgram", "deepgram_429_burst_threshold",
+            "deepgram_429_burst", burst=5, threshold=5,
+        ))
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.args[0] == "deepgram_429_burst"
+
+    def test_alert_fires_when_burst_exceeds_threshold(self):
+        dispatch = _run(_run_check_for_provider(
+            "deepgram", "deepgram_429_burst_threshold",
+            "deepgram_429_burst", burst=9, threshold=5,
+        ))
+        dispatch.assert_awaited_once()
+
+    def test_alert_does_not_fire_when_burst_below_threshold(self):
+        dispatch = _run(_run_check_for_provider(
+            "deepgram", "deepgram_429_burst_threshold",
+            "deepgram_429_burst", burst=3, threshold=5,
+        ))
+        dispatch.assert_not_awaited()
+
+    def test_alert_does_not_fire_when_threshold_is_zero(self):
+        dispatch = _run(_run_check_for_provider(
+            "deepgram", "deepgram_429_burst_threshold",
+            "deepgram_429_burst", burst=100, threshold=0,
+        ))
+        dispatch.assert_not_awaited()
+
+    def test_threshold_snapshot_carries_correct_fields(self):
+        dispatch = _run(_run_check_for_provider(
+            "deepgram", "deepgram_429_burst_threshold",
+            "deepgram_429_burst", burst=8, threshold=5,
+        ))
+        snap = dispatch.await_args.kwargs.get("threshold_snapshot")
+        assert snap is not None
+        assert snap["metric"] == "deepgram_429_burst_threshold"
+        assert snap["value"] == 5
+        assert snap["actual"] == 8
+        assert snap["window_seconds"] == 180
+
+
+class TestAzureDeepgramAlertingLoop:
+    """End-to-end: drive a real _alerting_loop iteration and assert the
+    dispatched alert_type strings for checks #11 and #12.
+
+    Uses the shared _run_one_alerting_loop_iteration helper which already
+    feeds the new threshold keys (added in this task) into the patched
+    _ALERT_THRESHOLDS dict."""
+
+    def test_azure_openai_alert_loop_fires_at_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 5}, threshold=5
+        ))
+        assert "azure_openai_429_burst" in dispatched, (
+            f"expected 'azure_openai_429_burst' in dispatched alerts; "
+            f"got {dispatched}"
+        )
+
+    def test_azure_openai_alert_loop_fires_above_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 11}, threshold=5
+        ))
+        assert "azure_openai_429_burst" in dispatched
+
+    def test_azure_openai_alert_loop_silent_below_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 4}, threshold=5
+        ))
+        assert "azure_openai_429_burst" not in dispatched
+
+    def test_azure_openai_alert_loop_silent_when_threshold_zero(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 100}, threshold=0
+        ))
+        assert "azure_openai_429_burst" not in dispatched
+
+    def test_deepgram_alert_loop_fires_at_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"deepgram": 5}, threshold=5
+        ))
+        assert "deepgram_429_burst" in dispatched, (
+            f"expected 'deepgram_429_burst' in dispatched alerts; "
+            f"got {dispatched}"
+        )
+
+    def test_deepgram_alert_loop_fires_above_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"deepgram": 7}, threshold=5
+        ))
+        assert "deepgram_429_burst" in dispatched
+
+    def test_deepgram_alert_loop_silent_below_threshold(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"deepgram": 2}, threshold=5
+        ))
+        assert "deepgram_429_burst" not in dispatched
+
+    def test_deepgram_alert_loop_silent_when_threshold_zero(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"deepgram": 100}, threshold=0
+        ))
+        assert "deepgram_429_burst" not in dispatched
+
+    def test_both_azure_and_deepgram_fire_in_same_iteration(self):
+        """Both providers throttled simultaneously → both alerts dispatched."""
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 6, "deepgram": 8}, threshold=5
+        ))
+        assert "azure_openai_429_burst" in dispatched
+        assert "deepgram_429_burst" in dispatched
+
+    def test_azure_burst_does_not_fire_deepgram_alert(self):
+        """Azure burst must not bleed into the Deepgram counter."""
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 10, "deepgram": 0}, threshold=5
+        ))
+        assert "azure_openai_429_burst" in dispatched
+        assert "deepgram_429_burst" not in dispatched
+
+    def test_deepgram_burst_does_not_fire_azure_alert(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"deepgram": 10, "azure_openai": 0}, threshold=5
+        ))
+        assert "deepgram_429_burst" in dispatched
+        assert "azure_openai_429_burst" not in dispatched
+
+    def test_azure_burst_does_not_fire_other_provider_alerts(self):
+        """Azure burst alone must not trigger Workers AI / Groq / Gemini."""
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"azure_openai": 20}, threshold=5
+        ))
+        assert "azure_openai_429_burst" in dispatched
+        assert "workers_ai_429_burst" not in dispatched
+        assert "groq_429_burst" not in dispatched
+        assert "gemini_429_burst" not in dispatched
+
+    def test_deepgram_burst_does_not_fire_other_provider_alerts(self):
+        dispatched = _run(_run_one_alerting_loop_iteration(
+            {"deepgram": 20}, threshold=5
+        ))
+        assert "deepgram_429_burst" in dispatched
+        assert "workers_ai_429_burst" not in dispatched
+        assert "groq_429_burst" not in dispatched
+        assert "gemini_429_burst" not in dispatched
+
+
+class TestAzureDeepgramSourceContract:
+    """Source-level guarantees so future renames break tests, not prod."""
+
+    def test_metrics_default_thresholds_include_azure_openai_key(self):
+        assert (
+            "azure_openai_429_burst_threshold"
+            in metrics_mod._ALERT_THRESHOLDS_DEFAULT
+        )
+        assert metrics_mod._ALERT_THRESHOLDS_DEFAULT[
+            "azure_openai_429_burst_threshold"
+        ] == 5
+
+    def test_metrics_default_thresholds_include_deepgram_key(self):
+        assert (
+            "deepgram_429_burst_threshold"
+            in metrics_mod._ALERT_THRESHOLDS_DEFAULT
+        )
+        assert metrics_mod._ALERT_THRESHOLDS_DEFAULT[
+            "deepgram_429_burst_threshold"
+        ] == 5
+
+    def test_metrics_alerting_loop_dispatches_azure_openai_429_burst(self):
+        """_alerting_loop must contain a dispatch for azure_openai_429_burst."""
+        tree = ast.parse(_METRICS_PY.read_text(encoding="utf-8"))
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_alerting_loop":
+                body = ast.unparse(node)
+                if "azure_openai_429_burst" in body and "_dispatch_alert" in body:
+                    found = True
+                    break
+        assert found, (
+            "_alerting_loop must contain _dispatch_alert('azure_openai_429_burst', ...)"
+        )
+
+    def test_metrics_alerting_loop_dispatches_deepgram_429_burst(self):
+        tree = ast.parse(_METRICS_PY.read_text(encoding="utf-8"))
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_alerting_loop":
+                body = ast.unparse(node)
+                if "deepgram_429_burst" in body and "_dispatch_alert" in body:
+                    found = True
+                    break
+        assert found, (
+            "_alerting_loop must contain _dispatch_alert('deepgram_429_burst', ...)"
+        )
+
+    def test_llm_provider_429_windows_includes_azure_openai(self):
+        assert "azure_openai" in llm_mod._PROVIDER_429_WINDOWS
+
+    def test_llm_provider_429_windows_includes_deepgram(self):
+        assert "deepgram" in llm_mod._PROVIDER_429_WINDOWS
+
+    def test_llm_redis_keys_for_azure_and_deepgram_unchanged(self):
+        """Redis keys must stay stable so existing TTL keys in prod aren't
+        orphaned mid-burst."""
+        assert llm_mod._PROVIDER_429_REDIS_KEYS["azure_openai"] == "azure_429_burst"
+        assert llm_mod._PROVIDER_429_REDIS_KEYS["deepgram"] == "deepgram_429_burst"
+
+
+class TestAzureDeepgramTrackingIsolation:
+    """The new alert checks rely on _track_provider_429 routing 429s into
+    the right per-provider window. Verify Azure/Deepgram tracking does not
+    leak into Workers AI / Groq / Gemini (and vice versa)."""
+
+    def test_track_azure_openai_increments_only_azure_burst(self):
+        for _ in range(4):
+            llm_mod._track_provider_429("azure_openai")
+        assert llm_mod.get_provider_429_burst_inprocess("azure_openai", 60) == 4
+        assert llm_mod.get_provider_429_burst_inprocess("workers-ai", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("groq", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("gemini", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("deepgram", 60) == 0
+
+    def test_track_deepgram_increments_only_deepgram_burst(self):
+        for _ in range(3):
+            llm_mod._track_provider_429("deepgram")
+        assert llm_mod.get_provider_429_burst_inprocess("deepgram", 60) == 3
+        assert llm_mod.get_provider_429_burst_inprocess("workers-ai", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("groq", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("gemini", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("azure_openai", 60) == 0
+
+    def test_reset_azure_openai_does_not_clear_deepgram(self):
+        for _ in range(3):
+            llm_mod._track_provider_429("azure_openai")
+        for _ in range(2):
+            llm_mod._track_provider_429("deepgram")
+        llm_mod._reset_provider_429("azure_openai")
+        assert llm_mod.get_provider_429_burst_inprocess("azure_openai", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("deepgram", 60) == 2
+
+    def test_reset_deepgram_does_not_clear_azure_openai(self):
+        for _ in range(3):
+            llm_mod._track_provider_429("azure_openai")
+        for _ in range(2):
+            llm_mod._track_provider_429("deepgram")
+        llm_mod._reset_provider_429("deepgram")
+        assert llm_mod.get_provider_429_burst_inprocess("deepgram", 60) == 0
+        assert llm_mod.get_provider_429_burst_inprocess("azure_openai", 60) == 3
+
+    def test_track_azure_uses_azure_redis_key(self):
+        mock_rc = MagicMock()
+        with patch("deps.redis_client", mock_rc):
+            llm_mod._track_provider_429("azure_openai")
+        mock_rc.incr.assert_called_once_with(
+            llm_mod._PROVIDER_429_REDIS_KEYS["azure_openai"]
+        )
+        mock_rc.expire.assert_called_once_with(
+            llm_mod._PROVIDER_429_REDIS_KEYS["azure_openai"],
+            llm_mod._PROVIDER_429_BURST_WINDOW_S,
+        )
+
+    def test_track_deepgram_uses_deepgram_redis_key(self):
+        mock_rc = MagicMock()
+        with patch("deps.redis_client", mock_rc):
+            llm_mod._track_provider_429("deepgram")
+        mock_rc.incr.assert_called_once_with(
+            llm_mod._PROVIDER_429_REDIS_KEYS["deepgram"]
+        )
+        mock_rc.expire.assert_called_once_with(
+            llm_mod._PROVIDER_429_REDIS_KEYS["deepgram"],
+            llm_mod._PROVIDER_429_BURST_WINDOW_S,
+        )
