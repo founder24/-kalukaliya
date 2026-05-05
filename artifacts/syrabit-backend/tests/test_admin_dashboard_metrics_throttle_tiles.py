@@ -261,6 +261,28 @@ async def test_successful_call_resets_throttle_counter(
     assert post["deepgram_throttle"]["throttled"] is False
 
 
+def test_throttle_tile_keys_match_helper_output():
+    """Task #388 drift guard: ``_THROTTLE_TILE_KEYS`` declares the
+    canonical set of tile keys the cache-hit branch overlays on top of
+    the cached payload. ``_build_throttle_tiles()`` MUST return exactly
+    those keys (no more, no less). If a future change adds a new
+    throttle tile but forgets to register it here, the cache-hit path
+    would silently keep serving the stale value for up to 60 s — the
+    exact regression Task #388 was filed to fix.
+
+    Pure data-shape test, no async / no mocks.
+    """
+    import routes.cms_sarvam_health as cms
+
+    produced = set(cms._build_throttle_tiles().keys())
+    declared = set(cms._THROTTLE_TILE_KEYS)
+    assert produced == declared, (
+        f"Task #388 drift: _build_throttle_tiles() and _THROTTLE_TILE_KEYS "
+        f"are out of sync. produced={produced} declared={declared}. "
+        f"Update _THROTTLE_TILE_KEYS so the cache-hit refresh covers all tiles."
+    )
+
+
 @pytest.mark.asyncio
 async def test_throttle_dict_is_fresh_even_when_rest_of_response_is_cached(
     stub_admin_dependencies, monkeypatch,
