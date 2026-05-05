@@ -3187,7 +3187,14 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
                 f"[INDIC] Phase 2 unavailable — Workers AI not configured. "
                 f"Returning error for {response_lang}."
             )
-            yield f"data: {json.dumps({'error': 'Indic language AI service temporarily unavailable'})}\n\n"
+            _is_as = (response_lang or "").lower().strip() in ("as", "as-in")
+            _err_payload = {
+                'error': 'Assamese chat service temporarily unavailable. Please try again.' if _is_as else 'Indic language AI service temporarily unavailable. Please try again.',
+                'lang': response_lang or 'as',
+            }
+            if _is_as:
+                _err_payload['error_kind'] = 'assamese_unavailable'
+            yield f"data: {json.dumps(_err_payload)}\n\n"
             return
 
         # Strip the Sarvam-specific `/think …` prefix from the system
@@ -3243,7 +3250,14 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
                 f"[INDIC] Phase 2 failed before first token: "
                 f"{type(_ge).__name__}: {str(_ge)[:160]}"
             )
-            yield f"data: {json.dumps({'error': 'Indic language AI service temporarily unavailable'})}\n\n"
+            _is_as2 = (response_lang or "").lower().strip() in ("as", "as-in")
+            _err_payload2 = {
+                'error': 'Assamese chat service temporarily unavailable. Please try again.' if _is_as2 else 'Indic language AI service temporarily unavailable. Please try again.',
+                'lang': response_lang or 'as',
+            }
+            if _is_as2:
+                _err_payload2['error_kind'] = 'assamese_unavailable'
+            yield f"data: {json.dumps(_err_payload2)}\n\n"
             return
 
         _phase2_total_ms = (time.monotonic() - _phase2_t0) * 1000

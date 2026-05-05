@@ -11,7 +11,7 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 
 const MarkdownContent = lazy(() => import('./MarkdownContent').then(m => ({ default: m.MarkdownContent })));
 
-export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegenerate, onRetry, isLast, messageIndex, conversationId, responseLang, subject, scopedChapters }) {
+export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegenerate, onRetry, onSwitchToEnglish, isLast, messageIndex, conversationId, responseLang, subject, scopedChapters }) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState(null);
   const [showComment, setShowComment] = useState(false);
@@ -29,8 +29,11 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
 
   // Start an 8-second countdown display when the message becomes an error card.
   // The actual retry is triggered by ChatPage; this is just the visual countdown.
+  // Task #370 — skip the countdown for the Assamese-mode error card. The
+  // strict 2-leg chain has no further fallback, so ChatPage disables the
+  // auto-retry timer and the countdown would mislead the user.
   useEffect(() => {
-    if (!msg.isAiUnavailable) {
+    if (!msg.isAiUnavailable || msg.isAssameseUnavailable) {
       setRetryCountdown(null);
       if (retryTimerRef.current) clearInterval(retryTimerRef.current);
       return;
@@ -49,7 +52,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
     return () => {
       if (retryTimerRef.current) clearInterval(retryTimerRef.current);
     };
-  }, [msg.isAiUnavailable]);
+  }, [msg.isAiUnavailable, msg.isAssameseUnavailable]);
 
   const handleHiddenLinks = useCallback((items) => {
     setHiddenLinks(items || []);
@@ -196,9 +199,17 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
             )}
 
             {msg.isAiUnavailable && (
+              /*
+                Task #370 — Assamese-mode strict-chain exhaustion gets a
+                localized card (অসমীয়া title/body) plus a "Switch to
+                English mode" escape hatch that re-routes the same query
+                through english_rag_chat. The generic English variant is
+                still used for every other failure (English chain
+                exhaustion, generic 5xx, etc).
+              */
               <div
                 role="alert"
-                data-testid="ai-unavailable-card"
+                data-testid={msg.isAssameseUnavailable ? 'assamese-unavailable-card' : 'ai-unavailable-card'}
                 className="flex flex-col gap-3 rounded-2xl px-4 py-3.5 mt-1"
                 style={{
                   background: 'rgba(124,58,237,0.06)',
@@ -216,26 +227,53 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
-                      Syra is resting — please try again in a moment
-                    </p>
-                    <p className="text-[12.5px] text-muted-foreground mt-0.5">
-                      All AI services are temporarily busy. Your question is saved.
-                    </p>
+                  <div lang={msg.isAssameseUnavailable ? 'as' : undefined}>
+                    {msg.isAssameseUnavailable ? (
+                      <>
+                        <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
+                          অসমীয়া চেট সেৱা সাময়িকভাৱে অনুপলব্ধ
+                        </p>
+                        <p className="text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
+                          অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত আকৌ চেষ্টা কৰক, বা ইংৰাজী মোডলৈ সলনি কৰক।
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
+                          Syra is resting — please try again in a moment
+                        </p>
+                        <p className="text-[12.5px] text-muted-foreground mt-0.5">
+                          All AI services are temporarily busy. Your question is saved.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => { if (onRetry) onRetry(); }}
                     className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors"
                     style={{ background: '#7c3aed', color: '#fff' }}
-                    aria-label="Retry now"
+                    aria-label={msg.isAssameseUnavailable ? 'আকৌ চেষ্টা কৰক' : 'Retry now'}
+                    data-testid="ai-unavailable-retry"
                   >
                     <RefreshCw size={13} />
-                    Retry now
+                    {msg.isAssameseUnavailable ? 'আকৌ চেষ্টা কৰক' : 'Retry now'}
                   </button>
+                  {msg.isAssameseUnavailable && onSwitchToEnglish && (
+                    <button
+                      type="button"
+                      onClick={onSwitchToEnglish}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors border"
+                      style={{ background: 'transparent', borderColor: 'rgba(124,58,237,0.35)', color: '#7c3aed' }}
+                      aria-label="Switch to English mode and retry"
+                      data-testid="assamese-switch-english"
+                    >
+                      <Globe size={13} />
+                      Switch to English mode
+                    </button>
+                  )}
                   {retryCountdown !== null && (
                     <span className="text-[12px] text-muted-foreground">
                       Auto-retry in {retryCountdown}s…

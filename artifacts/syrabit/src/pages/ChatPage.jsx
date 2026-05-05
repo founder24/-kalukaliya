@@ -374,6 +374,26 @@ export default function ChatPage() {
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;
         }
+        // Task #370 — backend's strict 2-leg Assamese chat chain raises
+        // HTTPException(503, "Assamese chat service temporarily
+        // unavailable...") when both Sarvam and Vertex are down. Render
+        // the localized in-bubble error card (with a "Switch to English
+        // mode" escape hatch) instead of the generic toast.
+        if (response.status === 503 && /^assamese chat/i.test(String(errData.detail || ''))) {
+          setMessages((prev) => prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  content: '',
+                  isAiUnavailable: true,
+                  isAssameseUnavailable: true,
+                  retryText: text,
+                  streaming: false,
+                }
+              : m
+          ));
+          return;
+        }
         if (response.status === 429) {
           const detail = String(errData.detail || '');
           const isAnonWall = !user && /daily request ceiling|sign in|anon/i.test(detail);
@@ -476,17 +496,36 @@ export default function ChatPage() {
             meta.hasError = true;
             // Clear any previous auto-retry timer before scheduling a new one.
             if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+            // Task #370 — Assamese chat strict-chain exhaustion is a
+            // *known* unrecoverable state for Assamese mode. Auto-retrying
+            // just hits the same dead chain again, so surface a localized
+            // Assamese error card with a "Switch to English mode" escape
+            // hatch instead of the generic English "Syra is resting"
+            // toast + 8s auto-retry.
+            const isAssameseUnavailable =
+              parsed.error_kind === 'assamese_unavailable' ||
+              (responseLang === 'as' &&
+                /assamese chat|indic language ai|অসমীয়া/i.test(String(parsed.error || '')));
             setMessages((prev) => prev.map((m) =>
               m.id === aiMsgId
-                ? { ...m, content: '', isAiUnavailable: true, retryText: text, streaming: false }
+                ? {
+                    ...m,
+                    content: '',
+                    isAiUnavailable: true,
+                    isAssameseUnavailable,
+                    retryText: text,
+                    streaming: false,
+                  }
                 : m
             ));
-            // Auto-retry once after 8 seconds using the latest sendMsg closure.
-            autoRetryTimerRef.current = setTimeout(() => {
-              autoRetryTimerRef.current = null;
-              setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
-              sendMsgRef.current?.(text);
-            }, 8000);
+            if (!isAssameseUnavailable) {
+              // Auto-retry once after 8 seconds using the latest sendMsg closure.
+              autoRetryTimerRef.current = setTimeout(() => {
+                autoRetryTimerRef.current = null;
+                setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+                sendMsgRef.current?.(text);
+              }, 8000);
+            }
             continue;
           }
           if (meta.hasError) continue;
@@ -689,7 +728,38 @@ export default function ChatPage() {
                 messages.forEach((msg, i) => {
                   out.push(
                     <div key={msg.id || i} ref={i === lastUIdx ? lastUserMsgRef : undefined}>
-                      <MessageBubble msg={msg} isLast={i === messages.length - 1} onCopy={handleCopy} onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : null} onRetry={msg.isAiUnavailable && msg.retryText ? () => { if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); autoRetryTimerRef.current = null; } setMessages((prev) => prev.filter((m) => m.id !== msg.id)); sendMsgRef.current?.(msg.retryText); } : null} messageIndex={i} conversationId={conversationId} responseLang={responseLang} subject={subject} scopedChapters={scopedChapters} />
+                      <MessageBubble
+                        msg={msg}
+                        isLast={i === messages.length - 1}
+                        onCopy={handleCopy}
+                        onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : null}
+                        onRetry={msg.isAiUnavailable && msg.retryText ? () => {
+                          if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); autoRetryTimerRef.current = null; }
+                          setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+                          sendMsgRef.current?.(msg.retryText);
+                        } : null}
+                        // Task #370 — when the strict Assamese chat chain
+                        // is exhausted, surface a one-click escape to the
+                        // English chain. Switch responseLang to 'en'
+                        // (persisted via the same key the LanguageSelector
+                        // uses, so the toggle in the header reflects the
+                        // change) and re-send the same query through
+                        // english_rag_chat.
+                        onSwitchToEnglish={msg.isAssameseUnavailable && msg.retryText ? () => {
+                          if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); autoRetryTimerRef.current = null; }
+                          setResponseLang('en');
+                          try { localStorage.setItem('syrabit_response_lang', 'en'); } catch {}
+                          setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+                          // Defer one tick so the responseLang state
+                          // commits before sendMsg captures the payload.
+                          setTimeout(() => sendMsgRef.current?.(msg.retryText), 0);
+                        } : null}
+                        messageIndex={i}
+                        conversationId={conversationId}
+                        responseLang={responseLang}
+                        subject={subject}
+                        scopedChapters={scopedChapters}
+                      />
                     </div>
                   );
                 });
