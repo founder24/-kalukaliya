@@ -554,6 +554,7 @@ async def _generate_and_clean_quiz(
     count: int,
     response_lang: str,
     max_tokens: int = 2000,
+    prefer_vertex: bool = False,
 ) -> list[dict]:
     """Pure LLM-call + parse + clean + safety-validate path. Extracted
     from ``quiz_generate`` so the admin background pre-generation hook
@@ -564,6 +565,15 @@ async def _generate_and_clean_quiz(
     ``max_tokens`` lets the pool-generation caller raise the LLM
     output budget (24 questions need ≈3-5k tokens; the legacy
     7-question request fits well inside the 2000-token default).
+
+    ``prefer_vertex=True`` swaps the provider order to **Vertex
+    Gemini PRIMARY → Azure GPT-4.1-mini FALLBACK**. The 2026-05-05
+    user instruction made Vertex / Gemini the formatting-stage owner
+    (see ``llm.polish_notes_with_vertex``); the same Vertex slot now
+    owns quiz pre-generation kicked off from the polish stage so the
+    "Quiz Me" cache is hot the moment the chapter polishes through.
+    Default ``False`` preserves the historical Azure-primary order
+    used by lazy on-click generation in ``quiz_generate``.
 
     Returns the cleaned list of question dicts. Raises ``HTTPException``
     on any failure so the route handler can propagate the same status
@@ -587,15 +597,31 @@ async def _generate_and_clean_quiz(
         {"role": "system", "content": _QUIZ_SYS},
         {"role": "user",   "content": "\n".join([p for p in user_msg_parts if p])},
     ]
-    try:
-        raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
-    except Exception as e:
-        logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e} — trying Vertex Gemini fallback")
+    if prefer_vertex:
+        # Vertex / Gemini PRIMARY (formatting-stage owner per 2026-05-05
+        # instruction) → Azure GPT-4.1-mini FALLBACK.
         try:
             raw = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
-        except Exception as e2:
-            logger.warning(f"[edu_quiz] Vertex Gemini quiz fallback also failed: {e2}")
-            raise HTTPException(status_code=502, detail="quiz_llm_failed")
+        except Exception as e:
+            logger.warning(
+                f"[edu_quiz] Vertex Gemini quiz LLM call failed (prefer_vertex=True): "
+                f"{e} — falling back to Azure GPT-4.1-mini"
+            )
+            try:
+                raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
+            except Exception as e2:
+                logger.warning(f"[edu_quiz] Azure quiz fallback also failed: {e2}")
+                raise HTTPException(status_code=502, detail="quiz_llm_failed")
+    else:
+        try:
+            raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
+        except Exception as e:
+            logger.warning(f"[edu_quiz] Azure quiz LLM call failed: {e} — trying Vertex Gemini fallback")
+            try:
+                raw = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
+            except Exception as e2:
+                logger.warning(f"[edu_quiz] Vertex Gemini quiz fallback also failed: {e2}")
+                raise HTTPException(status_code=502, detail="quiz_llm_failed")
     payload = _coerce_quiz_payload(raw)
     questions = payload.get("questions") or []
     cleaned: list[dict] = []
@@ -691,7 +717,11 @@ async def _resolve_quiz_cache_chapter_ref(chapter_doc: dict) -> str:
 
 
 async def pregenerate_chapter_quiz(
-    chapter_doc: dict, *, count: int = _QUIZ_POOL_SIZE, response_lang: str = "en",
+    chapter_doc: dict,
+    *,
+    count: int = _QUIZ_POOL_SIZE,
+    response_lang: str = "en",
+    prefer_vertex: bool = False,
 ) -> bool:
     """Public hook called from ``admin_create_chapter`` (and any future
     bulk-import / migration script) to materialise the permanent quiz
@@ -758,6 +788,14 @@ async def pregenerate_chapter_quiz(
                     # Pool generation needs a much larger output budget than
                     # the legacy 7-question request — see _QUIZ_POOL_MAX_TOKENS.
                     max_tokens=(_QUIZ_POOL_MAX_TOKENS if count >= 12 else 2000),
+                    # Honour the caller's provider preference: when the
+                    # polish/format stage triggers pre-generation
+                    # (`prefer_vertex=True`) the Vertex Gemini slot is
+                    # primary so a single Gemini session formats the notes
+                    # AND writes the quiz pool; lazy on-click pre-gen from
+                    # `quiz_generate` keeps the historical Azure-primary
+                    # default.
+                    prefer_vertex=prefer_vertex,
                 )
                 await _save_quiz_cache(
                     chapter_ref, lang, cleaned, chapter_id=chapter_id

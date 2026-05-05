@@ -374,6 +374,36 @@ Generate **topic-wise study notes** for the chapter below.
                 await auto_chunk_content(chapter_id=chapter_id, content=notes_text, subject_id=chapter.get("subject_id"), category=chapter.get("category", "notes"), topics=topics)
             except Exception:
                 pass
+
+            # Stage-3 (POOL): Vertex / Gemini also writes the quiz pool
+            # for the freshly-polished chapter so the "Quiz Me" cache is
+            # hot the moment the chapter publishes (no first-click LLM
+            # round-trip for the student). Fire-and-forget — never
+            # blocks the bulk-generate response, and `pregenerate_chapter_quiz`
+            # is best-effort by contract (logs + returns False on any
+            # per-language failure, never raises). `prefer_vertex=True`
+            # makes Gemini PRIMARY for this slot to match the formatting
+            # stage owner; Azure GPT-4.1-mini stays as the fallback.
+            #
+            # Concurrency: routed through `_polish_stage_quiz_pregen`
+            # which acquires `_quiz_pregen_sem` (default cap = 2) so the
+            # bulk wave's per-chapter scheduling cannot pile up an
+            # unbounded number of parallel Vertex quiz jobs.
+            try:
+                fresh_chapter = await db.chapters.find_one(
+                    {"id": chapter_id}, {"_id": 0}
+                )
+                if fresh_chapter:
+                    asyncio.create_task(
+                        _polish_stage_quiz_pregen(fresh_chapter)
+                    )
+                    result["quiz_pregenerate"] = {"status": "scheduled", "provider": "vertex"}
+            except Exception as e:
+                logger.warning(
+                    f"[POLISH] quiz pre-gen scheduling failed for {chapter_id}: {e}"
+                )
+                result["quiz_pregenerate"] = {"status": "error", "reason": str(e)}
+
             result["notes"] = {"status": "ok", "word_count": wc, "topics_extracted": len(new_topics)}
             if needs_sequential:
                 content = notes_text
@@ -1129,6 +1159,46 @@ async def admin_list_thin_chapters(
 _PIPELINE_CONCURRENCY = int(os.environ.get("PIPELINE_LLM_CONCURRENCY", 4))
 _pipeline_sem = asyncio.Semaphore(_PIPELINE_CONCURRENCY)
 _WAVE_SIZE = int(os.environ.get("CONTENT_WAVE_SIZE", 3))
+
+# Polish-stage quiz pre-generation (Vertex Gemini) runs as a fire-and-forget
+# background task per chapter. Without a dedicated semaphore the bulk
+# generate-all flow would schedule N independent 3-language Vertex jobs
+# in parallel (one per chapter in a wave × all waves) which both pile up
+# Gemini calls and starves observability. This semaphore caps the
+# concurrent polish-stage quiz jobs across the whole process.
+_QUIZ_PREGEN_CONCURRENCY = int(
+    os.environ.get("PIPELINE_QUIZ_PREGEN_CONCURRENCY", 2)
+)
+_quiz_pregen_sem = asyncio.Semaphore(_QUIZ_PREGEN_CONCURRENCY)
+
+
+async def _polish_stage_quiz_pregen(chapter_doc: dict) -> None:
+    """Bounded wrapper around `pregenerate_chapter_quiz(prefer_vertex=True)`
+    used by the polish stage in `_generate_chapter_all`.
+
+    * Acquires `_quiz_pregen_sem` so the bulk wave never schedules an
+      unbounded number of concurrent Vertex Gemini quiz jobs.
+    * Logs structured completion / failure so the otherwise-silent
+      fire-and-forget scheduling is observable in production.
+    * Never raises — `pregenerate_chapter_quiz` is best-effort by
+      contract and the lazy fallback in `quiz_generate` recovers any
+      miss the first time a student opens the quiz.
+    """
+    chapter_id = chapter_doc.get("id") or "<unknown>"
+    title = (chapter_doc.get("title") or "")[:80]
+    try:
+        async with _quiz_pregen_sem:
+            from routes.edu_study import pregenerate_chapter_quiz
+            ok = await pregenerate_chapter_quiz(chapter_doc, prefer_vertex=True)
+        logger.info(
+            f"[POLISH] quiz pre-gen {'ok' if ok else 'partial'} for "
+            f"chapter_id={chapter_id} title={title!r} provider=vertex"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[POLISH] quiz pre-gen crashed for chapter_id={chapter_id} "
+            f"title={title!r}: {e}"
+        )
 
 
 async def _resolve_board_context(subject: dict) -> tuple:
