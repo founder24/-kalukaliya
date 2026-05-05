@@ -135,6 +135,21 @@ async def _post(model_key: str, payload: dict, *, stream: bool = False,
         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
         last_resp = resp
 
+        # Task #403 — feed CF AI Gateway response headers (cf-aig-*) into the
+        # observability counters whenever the request actually went through the
+        # gateway. Pure observation: never raises, never blocks the chat path.
+        # When the direct CF API URL is in use (no _GW_ID), the headers carry
+        # no cf-aig-* values and record_aig_response() no-ops via summary.present.
+        try:
+            from ai_gateway_observability import record_aig_response
+            record_aig_response(
+                resp.headers,
+                provider="workers-ai",
+                model=MODELS.get(model_key, model_key),
+            )
+        except Exception:
+            pass
+
         if stream:
             resp.raise_for_status()
             return resp
@@ -230,6 +245,18 @@ async def chat_stream(
     client = await _get_client()
     headers = {**_headers(), "Content-Type": "application/json", "Accept": "text/event-stream"}
     async with client.stream("POST", url, json=payload, headers=headers, timeout=120.0) as resp:
+        # Task #403 — feed CF AI Gateway response headers (cf-aig-*) into the
+        # observability counters as soon as the streaming response object
+        # exists, before any tokens flow. Best-effort, never blocks the stream.
+        try:
+            from ai_gateway_observability import record_aig_response
+            record_aig_response(
+                resp.headers,
+                provider="workers-ai-stream",
+                model=MODELS.get(model_key, model_key),
+            )
+        except Exception:
+            pass
         resp.raise_for_status()
         async for line in resp.aiter_lines():
             if not line.startswith("data: "):
