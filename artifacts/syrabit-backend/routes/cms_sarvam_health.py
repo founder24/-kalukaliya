@@ -4837,13 +4837,22 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
         _as_burst_60 = 0
         _as_burst_180 = 0
         _as_threshold = 3
+        _as_recent: list = []
         try:
             from llm import (
                 get_assamese_unavailable_burst,
                 get_assamese_unavailable_burst_inprocess,
+                get_assamese_recent_outages,
             )
             _as_burst_60 = get_assamese_unavailable_burst_inprocess(60)
             _as_burst_180 = get_assamese_unavailable_burst(180)
+            # Task #379 — last 5 outage events for the AdminHealth tile.
+            # Best-effort: a Redis hiccup must not break the whole metrics
+            # endpoint, so wrap in its own try/except.
+            try:
+                _as_recent = get_assamese_recent_outages(limit=5) or []
+            except Exception:
+                _as_recent = []
         except Exception:
             pass
         try:
@@ -4906,6 +4915,12 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
                 "burst_180s": _as_burst_180,
                 "alert_threshold": _as_threshold,
                 "throttled": _as_burst_180 >= _as_threshold,
+                # Task #379 — last ~5 outage events so the AdminHealth tile
+                # can show timestamps + which leg failed + a short error
+                # excerpt. Each entry: {ts, failing_leg, error_summary,
+                # conversation_id_hash}. Empty list when there are no
+                # recent events (Redis cleared via TTL after 180 s of calm).
+                "recent": _as_recent,
             },
         }
         _metrics_cache["data"] = result

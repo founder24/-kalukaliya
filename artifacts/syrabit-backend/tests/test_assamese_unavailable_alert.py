@@ -112,7 +112,9 @@ class TestRecordAndCount:
         with patch("deps.redis_client", mock_rc):
             llm_mod.record_assamese_unavailable()
         mock_rc.incr.assert_called_once_with(llm_mod._ASSAMESE_UNAVAILABLE_REDIS_KEY)
-        mock_rc.expire.assert_called_once_with(
+        # Task #379: expire is now called for BOTH the burst counter and
+        # the recent-events list — pin only the burst-counter call here.
+        mock_rc.expire.assert_any_call(
             llm_mod._ASSAMESE_UNAVAILABLE_REDIS_KEY,
             llm_mod._ASSAMESE_UNAVAILABLE_BURST_WINDOW_S,
         )

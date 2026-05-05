@@ -1004,9 +1004,20 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   // chain (Task #291) AND the Workers-AI Phase-2 fallback have failed
   // enough times within the alerting window to suggest a real outage.
   const [assameseUnavailable, setAssameseUnavailable] = useState(null);
+  // Task #379 — expand/collapse state for the Assamese tile's recent-events
+  // list. Auto-expands while the rail is throttled so on-call sees the
+  // failing leg + error excerpt without an extra click; operators can
+  // collapse it again to reclaim screen real-estate.
+  const [assameseRecentExpanded, setAssameseRecentExpanded] = useState(false);
   // Task #297 — locked provider chain surfacing (deepgram, workers_ai_indic,
   // mongodb_atlas) sourced from GET /admin/routing-config.
   const [routingConfig, setRoutingConfig] = useState(null);
+  // Task #379 — auto-expand the Assamese recent-events panel as soon as
+  // the rail flips to "throttled" so on-call sees the failing leg + error
+  // excerpt the moment the alert fires (without an extra click).
+  useEffect(() => {
+    if (assameseUnavailable?.throttled) setAssameseRecentExpanded(true);
+  }, [assameseUnavailable?.throttled]);
   // Task #93 — embed 429 cooldown stats from GET /admin/llm/pool-stats.
   const [embedBurst, setEmbedBurst] = useState(null);
   // Task #98 — live countdown display for the embed cooldown timer.
@@ -2594,6 +2605,78 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                               <div className="text-[10px] uppercase text-gray-400 font-semibold mb-0.5">Alert threshold</div>
                               <div className="text-base font-bold tabular-nums text-gray-700">{limit}</div>
                             </div>
+                          </div>
+                        )}
+                        {/* Task #379 — recent outage events for the Assamese
+                            tile only. The other burst tiles aggregate
+                            generic 429s where per-event detail isn't
+                            useful; the Assamese rail is a P0 outage where
+                            knowing *which leg* failed first speeds triage. */}
+                        {key === 'assamese-chat' && !isLoading && (
+                          <div className="mt-3 pt-3 border-t border-gray-100">
+                            <button
+                              type="button"
+                              onClick={() => setAssameseRecentExpanded(v => !v)}
+                              className="flex items-center justify-between w-full text-[11px] font-semibold text-gray-600 hover:text-gray-900"
+                              aria-expanded={assameseRecentExpanded}
+                              data-testid="assamese-recent-toggle"
+                            >
+                              <span>
+                                Recent outage events
+                                <span className="ml-1 text-gray-400 font-normal">
+                                  ({(thr?.recent ?? []).length})
+                                </span>
+                              </span>
+                              <span className="text-gray-400">{assameseRecentExpanded ? '▾' : '▸'}</span>
+                            </button>
+                            {assameseRecentExpanded && (
+                              <div className="mt-2" data-testid="assamese-recent-list">
+                                {(thr?.recent ?? []).length === 0 ? (
+                                  <p className="text-[11px] text-gray-400 italic py-2">
+                                    No recent outage events recorded — the rail has been calm for the last 180 s.
+                                  </p>
+                                ) : (
+                                  <ul className="space-y-1.5">
+                                    {(thr?.recent ?? []).slice(0, 5).map((ev, idx) => {
+                                      const ts = typeof ev?.ts === 'number'
+                                        ? new Date(ev.ts * 1000)
+                                        : null;
+                                      const tsStr = ts && !isNaN(ts.getTime())
+                                        ? ts.toLocaleTimeString([], { hour12: false })
+                                        : '—';
+                                      const legLabels = {
+                                        sarvam_vertex_chain: 'Sarvam → Vertex/Gemini',
+                                        workers_ai_unavailable: 'Workers-AI Phase-2 unavailable',
+                                        workers_ai_phase2: 'Workers-AI Phase-2 errored',
+                                      };
+                                      const legLabel = legLabels[ev?.failing_leg] || (ev?.failing_leg || 'unknown');
+                                      const errSummary = (ev?.error_summary || '').trim();
+                                      const convHash = (ev?.conversation_id_hash || '').trim();
+                                      return (
+                                        <li
+                                          key={`${ev?.ts ?? 'na'}-${idx}`}
+                                          className="rounded-md px-2.5 py-1.5 bg-white/80 border border-gray-100 text-[11px]"
+                                          data-testid="assamese-recent-event"
+                                        >
+                                          <div className="flex items-baseline gap-2">
+                                            <span className="font-mono text-gray-500 tabular-nums shrink-0">{tsStr}</span>
+                                            <span className="font-semibold text-gray-700">{legLabel}</span>
+                                            {convHash && (
+                                              <span className="ml-auto text-[10px] text-gray-400 font-mono">conv {convHash}</span>
+                                            )}
+                                          </div>
+                                          {errSummary && (
+                                            <div className="mt-0.5 text-[10.5px] text-gray-500 break-words" title={errSummary}>
+                                              {errSummary.length > 140 ? `${errSummary.slice(0, 139)}…` : errSummary}
+                                            </div>
+                                          )}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

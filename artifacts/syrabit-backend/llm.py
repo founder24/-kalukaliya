@@ -397,8 +397,41 @@ _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S = 180
 _ASSAMESE_UNAVAILABLE_WINDOW: list = []   # list[float] epoch timestamps
 _ASSAMESE_UNAVAILABLE_REDIS_KEY = "assamese_unavailable_burst"
 
+# Task #379 — capped recent-events log so the admin "Assamese Chat (both rails)"
+# tile can render which conversations were affected, which leg failed first,
+# and the underlying provider error. In-memory list (most recent last) +
+# Redis list (LPUSH/LTRIM, most recent first) for cross-worker visibility.
+# 20 entries is plenty: the alerting threshold is 3 events / 180s, and the
+# UI only shows the most recent 5 by default — but keeping a small buffer
+# means an operator who arrives a minute late can still see the ramp-up.
+_ASSAMESE_RECENT_OUTAGES_MAX = 20
+_ASSAMESE_RECENT_OUTAGES: list = []   # list[dict] in insertion order
+_ASSAMESE_RECENT_OUTAGES_REDIS_KEY = "assamese_unavailable_events"
+# Same TTL as the burst counter — recent-event context is only useful while
+# the outage is still "live". After 180 s of silence the panel can be empty.
+_ASSAMESE_RECENT_OUTAGES_TTL_S = _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S
+_ASSAMESE_ERROR_SUMMARY_MAX_LEN = 200
 
-def record_assamese_unavailable() -> None:
+
+def _hash_conversation_id(conversation_id: str | None) -> str:
+    """Return a short, irreversible hash of a conversation id for the
+    recent-outages log. We never store the raw id — operators only need
+    a stable opaque token to spot "is this the same conversation as the
+    last event?". Empty / falsy id → "" (rendered as "—" in the UI).
+    """
+    if not conversation_id:
+        return ""
+    try:
+        return hashlib.sha256(str(conversation_id).encode("utf-8")).hexdigest()[:12]
+    except Exception:
+        return ""
+
+
+def record_assamese_unavailable(
+    failing_leg: str = "",
+    error_summary: str = "",
+    conversation_id: str | None = None,
+) -> None:
     """Record one "both Assamese rails red" event (in-memory + Redis).
 
     Called from the three error sites in this module that surface an
@@ -410,20 +443,101 @@ def record_assamese_unavailable() -> None:
     The Redis key uses TTL-INCR semantics identical to the per-provider
     429 counters so the alerting loop and the dashboard tile read a
     cross-worker value. In-memory list survives Redis outages.
+
+    Task #379 — also persists a capped recent-events document so the admin
+    health panel can show which leg failed and a short error excerpt for
+    each of the last events. ``failing_leg`` is one of:
+      • ``sarvam_vertex_chain``  — non-stream 503 (Sarvam→Vertex exhausted)
+      • ``workers_ai_unavailable`` — Phase-2 fallback not configured
+      • ``workers_ai_phase2``      — Phase-2 fallback errored before token
+    ``error_summary`` is truncated to ``_ASSAMESE_ERROR_SUMMARY_MAX_LEN``
+    characters; ``conversation_id`` (if provided) is hashed before storage.
+    All three kwargs are optional so legacy callers keep working.
     """
-    _ASSAMESE_UNAVAILABLE_WINDOW.append(time.time())
+    now_ts = time.time()
+    _ASSAMESE_UNAVAILABLE_WINDOW.append(now_ts)
     # Trim eagerly so the in-memory list never grows unbounded in long runs.
-    cutoff = time.time() - _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S * 2
+    cutoff = now_ts - _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S * 2
     while _ASSAMESE_UNAVAILABLE_WINDOW and _ASSAMESE_UNAVAILABLE_WINDOW[0] < cutoff:
         _ASSAMESE_UNAVAILABLE_WINDOW.pop(0)
+
+    # Build the recent-event document (Task #379). Truncate error summary so
+    # a noisy stack trace from a buggy provider can't blow up Redis memory.
+    _err_short = (error_summary or "").strip()
+    if len(_err_short) > _ASSAMESE_ERROR_SUMMARY_MAX_LEN:
+        _err_short = _err_short[: _ASSAMESE_ERROR_SUMMARY_MAX_LEN - 1] + "…"
+    event = {
+        "ts": now_ts,
+        "failing_leg": (failing_leg or "unknown").strip() or "unknown",
+        "error_summary": _err_short,
+        "conversation_id_hash": _hash_conversation_id(conversation_id),
+    }
+    _ASSAMESE_RECENT_OUTAGES.append(event)
+    # Cap the in-memory buffer.
+    while len(_ASSAMESE_RECENT_OUTAGES) > _ASSAMESE_RECENT_OUTAGES_MAX:
+        _ASSAMESE_RECENT_OUTAGES.pop(0)
+
     try:
         from deps import redis_client as _rc
         if _rc:
             _rc.incr(_ASSAMESE_UNAVAILABLE_REDIS_KEY)
             _rc.expire(_ASSAMESE_UNAVAILABLE_REDIS_KEY,
                        _ASSAMESE_UNAVAILABLE_BURST_WINDOW_S)
+            # Capped event log — LPUSH (newest first) + LTRIM to cap size.
+            try:
+                _rc.lpush(_ASSAMESE_RECENT_OUTAGES_REDIS_KEY,
+                          json.dumps(event, separators=(",", ":")))
+                _rc.ltrim(_ASSAMESE_RECENT_OUTAGES_REDIS_KEY,
+                          0, _ASSAMESE_RECENT_OUTAGES_MAX - 1)
+                _rc.expire(_ASSAMESE_RECENT_OUTAGES_REDIS_KEY,
+                           _ASSAMESE_RECENT_OUTAGES_TTL_S)
+            except Exception:
+                pass
     except Exception:
         pass
+
+
+def get_assamese_recent_outages(limit: int = 5) -> list[dict]:
+    """Return up to ``limit`` recent Assamese-unavailable events, newest first.
+
+    Redis is the primary source (cross-worker, TTL-backed list). Falls back
+    to the in-process ``_ASSAMESE_RECENT_OUTAGES`` buffer when Redis is
+    unavailable or returns nothing. Each entry is a dict with keys
+    ``ts`` (epoch seconds), ``failing_leg``, ``error_summary``,
+    ``conversation_id_hash``.
+
+    Defensive: malformed Redis entries are skipped, and a Redis outage
+    never causes the caller to fail — the in-process buffer is always
+    consulted as a last resort.
+    """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 5
+    if limit <= 0:
+        return []
+
+    out: list[dict] = []
+    try:
+        from deps import redis_client as _rc
+        if _rc:
+            raw_items = _rc.lrange(_ASSAMESE_RECENT_OUTAGES_REDIS_KEY, 0, limit - 1)
+            for raw in raw_items or []:
+                try:
+                    if isinstance(raw, bytes):
+                        raw = raw.decode("utf-8", errors="replace")
+                    doc = json.loads(raw)
+                    if isinstance(doc, dict):
+                        out.append(doc)
+                except Exception:
+                    continue
+            if out:
+                return out[:limit]
+    except Exception:
+        pass
+
+    # Fallback: in-process buffer (newest last → reverse).
+    return list(reversed(_ASSAMESE_RECENT_OUTAGES))[:limit]
 
 
 def get_assamese_unavailable_burst_inprocess(window_seconds: int = 60) -> int:
@@ -2648,8 +2762,13 @@ async def call_llm_api_chat(
             )
             # Task #374: page on-call when both Assamese rails are red. The
             # alerting loop reads this counter; counter resets via TTL.
+            # Task #379: also persist event metadata (failing leg + error
+            # excerpt) so the admin health panel can show recent outages.
             try:
-                record_assamese_unavailable()
+                record_assamese_unavailable(
+                    failing_leg="sarvam_vertex_chain",
+                    error_summary=f"{type(exc).__name__}: {exc}",
+                )
             except Exception:
                 pass
             raise HTTPException(
@@ -3637,8 +3756,13 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             if _is_as:
                 _err_payload['error_kind'] = 'assamese_unavailable'
                 # Task #374: page on-call when both Assamese rails are red.
+                # Task #379: persist failing leg so admins see which fallback
+                # was missing (vs. errored).
                 try:
-                    record_assamese_unavailable()
+                    record_assamese_unavailable(
+                        failing_leg="workers_ai_unavailable",
+                        error_summary="Workers AI Phase-2 fallback not configured (CF_AI_ENABLED=false)",
+                    )
                 except Exception:
                     pass
             yield f"data: {json.dumps(_err_payload)}\n\n"
@@ -3705,8 +3829,13 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             if _is_as2:
                 _err_payload2['error_kind'] = 'assamese_unavailable'
                 # Task #374: page on-call when both Assamese rails are red.
+                # Task #379: persist failing leg + the underlying provider
+                # error so admins can see *why* Phase-2 died.
                 try:
-                    record_assamese_unavailable()
+                    record_assamese_unavailable(
+                        failing_leg="workers_ai_phase2",
+                        error_summary=f"{type(_ge).__name__}: {str(_ge)[:160]}",
+                    )
                 except Exception:
                     pass
             yield f"data: {json.dumps(_err_payload2)}\n\n"
