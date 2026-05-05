@@ -990,6 +990,14 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   // surfaced by /admin/dashboard/metrics; not rendered as a card after Task #297.
   const [groqThrottle, setGroqThrottle] = useState(null);
   const [geminiThrottle, setGeminiThrottle] = useState(null);
+  // Task #378 — Azure OpenAI and Deepgram 429 burst gauges.  Same shape
+  // as the other *Throttle gauges so the existing burst-tile component
+  // renders them without changes.  Their alert thresholds were already
+  // wired into the alerting pipeline by Task #373 — this surfaces the
+  // live burst counts so admins spot a building burst BEFORE on-call
+  // gets paged.
+  const [azureOpenaiThrottle, setAzureOpenaiThrottle] = useState(null);
+  const [deepgramThrottle, setDeepgramThrottle] = useState(null);
   // Task #374 — Assamese chat "both rails red" indicator.  Same shape as
   // the *Throttle gauges so the existing burst-tile component renders it.
   // ``throttled === true`` means both the strict Sarvam → Vertex/Gemini
@@ -1043,12 +1051,17 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         setWaiThrottle(md?.workers_ai_throttle ?? null);
         setGroqThrottle(md?.groq_throttle ?? null);
         setGeminiThrottle(md?.gemini_throttle ?? null);
+        // Task #378 — Azure OpenAI + Deepgram burst tiles.
+        setAzureOpenaiThrottle(md?.azure_openai_throttle ?? null);
+        setDeepgramThrottle(md?.deepgram_throttle ?? null);
         // Task #374 — "both rails red" indicator for Assamese chat.
         setAssameseUnavailable(md?.assamese_chat_unavailable ?? null);
       } else {
         setWaiThrottle(null);
         setGroqThrottle(null);
         setGeminiThrottle(null);
+        setAzureOpenaiThrottle(null);
+        setDeepgramThrottle(null);
         setAssameseUnavailable(null);
       }
       if (poolRes.status === 'fulfilled')
@@ -2516,13 +2529,17 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                 )}
               </div>
 
-              {/* Tasks #85/#90/#374 — reusable burst gauge for any provider.
+              {/* Tasks #85/#90/#374/#378 — reusable burst gauge for any provider.
                   ``assamese-chat`` reuses the same shape but counts
                   ``assamese_unavailable`` events (both rails red) instead of
-                  429s — see backend ``record_assamese_unavailable``. */}
+                  429s — see backend ``record_assamese_unavailable``.
+                  Azure OpenAI and Deepgram added per Task #378 so admins
+                  can spot a building burst before on-call is paged. */}
               {[
                 { key: 'workers-ai',    label: 'Workers AI',                thr: waiThrottle,         unit: '429s' },
                 { key: 'gemini',        label: 'Gemini',                    thr: geminiThrottle,      unit: '429s' },
+                { key: 'azure-openai',  label: 'Azure OpenAI',              thr: azureOpenaiThrottle, unit: '429s' },
+                { key: 'deepgram',      label: 'Deepgram',                  thr: deepgramThrottle,    unit: '429s' },
                 { key: 'assamese-chat', label: 'Assamese Chat (both rails)', thr: assameseUnavailable, unit: 'outage events' },
               ].map(({ key, label, thr: _thr, unit }) => (
                 <div key={key}>

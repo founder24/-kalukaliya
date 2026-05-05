@@ -4773,7 +4773,13 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
 
         elapsed = round((time.time() - start) * 1000, 1)
 
-        # Workers AI / Groq / Gemini 429 burst — cross-worker via Redis, in-process fallback.
+        # Workers AI / Groq / Gemini / Azure OpenAI / Deepgram 429 burst —
+        # cross-worker via Redis, in-process fallback.  Azure OpenAI and
+        # Deepgram added per Task #378: their 429-burst alerts have been
+        # wired into the alerting pipeline since Task #373, but the admin
+        # health panel surfaced only Workers AI / Groq / Gemini, so admins
+        # could not spot a building Azure / Deepgram throttle burst until
+        # an alert actually fired.
         _wai_burst_60 = 0
         _wai_burst_180 = 0
         _wai_threshold = 5
@@ -4783,6 +4789,12 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
         _gemini_burst_60 = 0
         _gemini_burst_180 = 0
         _gemini_threshold = 5
+        _azure_burst_60 = 0
+        _azure_burst_180 = 0
+        _azure_threshold = 5
+        _deepgram_burst_60 = 0
+        _deepgram_burst_180 = 0
+        _deepgram_threshold = 5
         try:
             from llm import get_workers_ai_429_burst as _get_wai_burst
             from llm import get_workers_ai_429_burst_inprocess as _get_wai_burst_ip
@@ -4796,6 +4808,14 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
             _groq_burst_180 = _get_p_burst("groq", 180)
             _gemini_burst_60 = _get_p_burst_ip("gemini", 60)
             _gemini_burst_180 = _get_p_burst("gemini", 180)
+            # Task #378 — Azure OpenAI + Deepgram tiles.  Provider keys
+            # match _PROVIDER_429_WINDOWS / _PROVIDER_429_REDIS_KEYS in
+            # llm.py: "azure_openai" → Redis key "azure_429_burst",
+            # "deepgram" → Redis key "deepgram_429_burst".
+            _azure_burst_60 = _get_p_burst_ip("azure_openai", 60)
+            _azure_burst_180 = _get_p_burst("azure_openai", 180)
+            _deepgram_burst_60 = _get_p_burst_ip("deepgram", 60)
+            _deepgram_burst_180 = _get_p_burst("deepgram", 180)
         except Exception:
             pass
         try:
@@ -4803,6 +4823,8 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
             _wai_threshold = int(_at.get("workers_ai_429_burst_threshold", 5))
             _groq_threshold = int(_at.get("groq_429_burst_threshold", 5))
             _gemini_threshold = int(_at.get("gemini_429_burst_threshold", 5))
+            _azure_threshold = int(_at.get("azure_openai_429_burst_threshold", 5))
+            _deepgram_threshold = int(_at.get("deepgram_429_burst_threshold", 5))
         except Exception:
             pass
 
@@ -4855,6 +4877,23 @@ async def admin_dashboard_metrics(admin: dict = Depends(get_admin_user)):
                 "burst_180s": _gemini_burst_180,
                 "alert_threshold": _gemini_threshold,
                 "throttled": _gemini_burst_60 >= _gemini_threshold,
+            },
+            # Task #378 — Azure OpenAI 429 burst tile.  Same shape as the
+            # other *_throttle dicts so the AdminHealth burst-tile
+            # component renders it without changes (it just iterates
+            # over a config array of {key, label, thr, unit}).
+            "azure_openai_throttle": {
+                "burst_60s": _azure_burst_60,
+                "burst_180s": _azure_burst_180,
+                "alert_threshold": _azure_threshold,
+                "throttled": _azure_burst_60 >= _azure_threshold,
+            },
+            # Task #378 — Deepgram (STT/TTS) 429 burst tile.  Same shape.
+            "deepgram_throttle": {
+                "burst_60s": _deepgram_burst_60,
+                "burst_180s": _deepgram_burst_180,
+                "alert_threshold": _deepgram_threshold,
+                "throttled": _deepgram_burst_60 >= _deepgram_threshold,
             },
             # Task #374 — "both rails red" indicator for the Assamese
             # chat path. ``throttled`` is wired off the cross-worker
