@@ -413,3 +413,129 @@ async def test_dashboard_still_succeeds_when_llm_imports_fail(
     assert result["azure_openai_throttle"]["throttled"] is False
     assert result["deepgram_throttle"]["burst_60s"] == 0
     assert result["deepgram_throttle"]["throttled"] is False
+
+
+@pytest.mark.asyncio
+async def test_heavy_query_cache_expires_after_ttl(
+    stub_admin_dependencies, monkeypatch,
+):
+    """Task #394: complement the Task #388 throttle-bypass test by pinning
+    the OTHER half of the cache contract — the heavy users / payments /
+    SEO / deps queries MUST be re-run after ``_METRICS_CACHE_TTL``
+    seconds, not served stale forever.
+
+    Without this guard, a future refactor that accidentally extends the
+    TTL (or breaks the ``ts`` write-back) would silently leave admins
+    looking at hours-old revenue / user-count numbers, and the existing
+    throttle-only test from #388 would NOT catch it.
+
+    Pin three things in one flow:
+      1. Cache HIT path: a second call within the TTL serves the same
+         heavy snapshot (proves the cache is wired up — without this,
+         step 3 below would be vacuously true).
+      2. Cache EXPIRY: after fast-forwarding ``_metrics_cache['ts']``
+         back by more than ``_METRICS_CACHE_TTL`` seconds, the heavy
+         fields are recomputed and reflect the new fake state.
+      3. Write-back: the freshly computed payload is re-cached (the
+         ``ts`` advances forward, not stuck at the rewound value), so
+         the cache continues to function on subsequent calls.
+    """
+    cms = stub_admin_dependencies
+
+    # Mutable user / payment fakes so we can change them between calls
+    # and observe the cache behavior without touching real services.
+    users_state = []  # starts empty
+    payment_count_state = {"n": 0}
+
+    async def _fake_supa_list_users():
+        # Return a fresh copy each call so the route's len() reflects
+        # whatever's in the closure at call time.
+        return list(users_state)
+    monkeypatch.setattr(
+        cms, "supa_list_users", _fake_supa_list_users, raising=False
+    )
+
+    class _MutPaymentsCursor:
+        def sort(self, *_a, **_kw): return self
+        async def to_list(self, *_a, **_kw):
+            # Each "payment" is a minimal dict that contributes to
+            # ``payments_count`` and revenue=0 (no amount fields).
+            return [{"verified_at": "2026-01-01T00:00:00+00:00"}
+                    for _ in range(payment_count_state["n"])]
+
+    class _MutPayments:
+        def find(self, *_a, **_kw): return _MutPaymentsCursor()
+        async def count_documents(self, *_a, **_kw):
+            return payment_count_state["n"]
+
+    fake_db = type("D", (), {
+        "payments": _MutPayments(),
+        "seo_topics": _FakeCollection(),
+        "seo_pages": _FakeCollection(),
+    })()
+    monkeypatch.setattr(cms, "db", fake_db, raising=False)
+
+    import deps
+    monkeypatch.setattr(deps, "redis_client", None, raising=False)
+    _reset_429_windows()
+
+    # ── First call: cache MISS, captures the initial empty state ──
+    first = await cms.admin_dashboard_metrics(admin={"username": "test"})
+    assert first["users"]["total"] == 0, "initial users.total must be 0"
+    assert first["payments_count"] == 0, "initial payments_count must be 0"
+
+    # ── Mutate the underlying fakes BEFORE the cache expires. ──
+    users_state.append({"plan": "pro"})
+    users_state.append({"plan": "free"})
+    payment_count_state["n"] = 7
+
+    # ── Second call WITHIN the TTL: must serve the cached snapshot. ──
+    # This proves the cache is real, so the expiry assertion below is
+    # not vacuously satisfied by a missing cache.
+    cached = await cms.admin_dashboard_metrics(admin={"username": "test"})
+    assert cached["users"]["total"] == 0, (
+        "Task #394: within the TTL, users.total must come from the cache "
+        "(seeing 2 here would mean the cache is broken — which would also "
+        "make the expiry assertion below trivially pass)"
+    )
+    assert cached["payments_count"] == 0, (
+        "Task #394: within the TTL, payments_count must come from cache"
+    )
+
+    # ── Fast-forward the cache timestamp so it appears expired. ──
+    # Rewind ``ts`` by ``_METRICS_CACHE_TTL + 1`` seconds — equivalent
+    # to wall-clock time advancing past the TTL but without any sleep.
+    cms._metrics_cache["ts"] -= cms._METRICS_CACHE_TTL + 1
+    rewound_ts = cms._metrics_cache["ts"]
+
+    # ── Third call: cache MISS (TTL elapsed), heavy fields recomputed. ──
+    fresh = await cms.admin_dashboard_metrics(admin={"username": "test"})
+    assert fresh["users"]["total"] == 2, (
+        "Task #394: after _METRICS_CACHE_TTL elapses, the heavy "
+        "supa_list_users query MUST be re-run so admins do not see "
+        "stale user counts on the AdminHealth panel"
+    )
+    assert fresh["users"]["paid"] == 1, (
+        "Task #394: derived users.paid count must reflect the fresh data"
+    )
+    assert fresh["payments_count"] == 7, (
+        "Task #394: after the TTL, payments_count MUST be recomputed "
+        "from the underlying Mongo find — silently caching forever "
+        "would give admins stale revenue numbers"
+    )
+
+    # ── Write-back contract: the cache ts must have advanced forward. ──
+    # If a future refactor recomputes on miss but forgets to update the
+    # cache entry, every subsequent call would also miss (DB hammer)
+    # OR worse — keep returning the rewound ``ts`` and never recover.
+    assert cms._metrics_cache["ts"] > rewound_ts, (
+        "Task #394: a fresh recompute MUST write the new ts back to the "
+        "cache, otherwise either every call hits the DB (load spike) or "
+        "the cache entry stays permanently expired"
+    )
+    assert cms._metrics_cache["data"] is fresh, (
+        "Task #394: the freshly computed dict must BE the cached entry "
+        "(identity-equal), proving the write-back wired up to the same "
+        "object the caller saw — Task #388's cache-hit overlay returns a "
+        "shallow copy on read, so write-back identity must be checked here"
+    )
