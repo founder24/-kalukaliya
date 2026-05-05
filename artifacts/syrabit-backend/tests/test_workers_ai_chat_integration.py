@@ -203,9 +203,11 @@ def test_english_chat_falls_back_to_workers_ai_tail_when_paid_throttled(monkeypa
 
     # Drain the random draw enough times that we are statistically guaranteed
     # to have observed every paid provider being excluded AND a NAMED tail
-    # variant winning at least once. With weights (azure 10000, vertex 100,
-    # sarvam 50, llama32 20, mistral 10) and 6 attempts per call, a few dozen
-    # iterations is more than enough.
+    # variant winning at least once. Round-robin pool (2026-05-05): every
+    # active provider in english_rag_chat (azure_openai, vertex,
+    # workers_ai_llama32_3b, workers_ai_mistral_7b) carries weight 1000, so
+    # each gets ~25% of draws; with 6 attempts per call and 40 iterations a
+    # NAMED tail variant winning at least once is virtually guaranteed.
     seen_named_tail: set = set()
     for _ in range(40):
         captured.clear()

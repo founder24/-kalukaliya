@@ -1145,68 +1145,66 @@ PROVIDER_CREDITS: dict = {
     "workers_ai_llama31_8b": 0,  # @cf/meta/llama-3.1-8b-instruct-fp8       — Indic chat fallback
 }
 
+# Per-provider max-concurrent caps. Per-model RPM is derived as
+# `max_concurrent * 60` (assumes ~1 second per request). The literal formula
+# was chosen by the user on 2026-05-05; ops can still override the resulting
+# RPM via the per-provider env vars consumed in `llm._parse_rpm_limit`.
+PROVIDER_MAX_CONCURRENT: dict[str, int] = {
+    "workers-ai":   167,   # combined Cloudflare account — Standard plan ~10 000 RPM total
+    "sarvam":         5,   # paid tier
+    "gemini":        10,   # Vertex AI Gemini 2.5 Flash
+    "azure_openai":   8,   # Azure GPT-4.1-mini
+    "openai":         1,   # transport-only (Workers AI uses AsyncOpenAI client) — no real api.openai.com traffic
+}
+
 # Per-pool weight overrides — take precedence over PROVIDER_CREDITS in select_provider.
 # Use this when a provider should have a different priority in one pool vs. the global default.
+#
+# 2026-05-05 — Round-robin / load-balanced dispatch (per user instruction).
+# Every active provider in a pool gets the SAME weight (1000) so
+# `random.choices(pool, weights=…)` produces a uniform draw across all
+# healthy providers. There is no "primary" any more; load is shared
+# equally across every provider that is not saturated / already-failed
+# in the current request. The previous 10 000-vs-100-vs-50 spread (which
+# made the dispatcher behave as a strict primary→fallback ladder) has
+# been removed everywhere.
+#
+# Weight-0 entries are kept at 0 because they represent an explicit
+# last-resort safety net (e.g. the generic workers_ai gpt-oss-20b free-
+# tier slot, vertex/workers_ai stubs in tts/stt that are not actually
+# wired) — they only fire when every active provider is exhausted.
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
-    # Task #291 — strict primary→fallback chains (locked).
-    # Weights are intentionally orders-of-magnitude apart so the weighted
-    # draw acts as a deterministic priority ladder: the primary wins on
-    # every healthy draw, and only when the primary is excluded (saturated
-    # or already-failed-this-request) does the fallback get selected.
-    #
-    # Chains:
-    #   content              vertex(10000) → azure_openai(100) → workers_ai(0, gpt-oss-20b)
-    #   english_rag_chat     azure_openai(10000) → vertex(100) → workers_ai(0, gpt-oss-20b)
-    #   assamese_rag_chat    sarvam(10000) → workers_ai_indic(1000) → vertex(100)
-    #   translate            workers_ai_indic(10000) → vertex(100)
     "content": {
-        "vertex":                 10000,  # primary — Gemini 2.5 Flash, 1M-token context
-        "azure_openai":             100,  # fallback — GPT-4.1-mini
-        "sarvam":                    50,  # tertiary — Sarvam-M (Indic-aware fallback)
-        # Task #347 — Workers AI named promotions sit at non-zero but tiny
-        # weights so they only fire after every paid provider is excluded.
-        "workers_ai_mistral_7b":     10,  # quaternary — Mistral 7B Instruct (balanced)
-        "workers_ai":                 0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
+        "vertex":                 1000,
+        "azure_openai":           1000,
+        "sarvam":                 1000,
+        "workers_ai_mistral_7b":  1000,
+        "workers_ai":                0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
     },
     "english_rag_chat": {
-        "azure_openai":           10000,  # primary — GPT-4.1-mini (Azure)
-        "vertex":                   100,  # fallback — Gemini 2.5 Flash
-        # Sarvam removed 2026-05-05 per user instruction — reserved for
-        # the Assamese conversational chain only.
-        # Workers AI promotions (Task #347) — fast-mode 3B picks up first
-        # because it has the lowest TTFT; mistral-7b is the second swing
-        # for slightly more capable answers when 3B is overloaded.
-        "workers_ai_llama32_3b":     20,  # fast-mode — Llama 3.2 3B
-        "workers_ai_mistral_7b":     10,  # balanced — Mistral 7B Instruct
-        "workers_ai":                 0,  # last-resort — gpt-oss-20b (see WORKERS_AI_FALLBACK_MODELS)
+        "azure_openai":           1000,
+        "vertex":                 1000,
+        # Sarvam reserved for the Assamese conversational chain only.
+        "workers_ai_llama32_3b":  1000,
+        "workers_ai_mistral_7b":  1000,
+        "workers_ai":                0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
     },
     "assamese_rag_chat": {
-        # 3-leg chain (re-introduced 2026-05-05): sarvam → workers_ai_indic → vertex.
-        # IndicTrans2 sits between Sarvam and Vertex so a Sarvam outage
-        # hands off to the in-house Cloudflare neural MT before paying
-        # for Gemini. Strict-chain exhaustion still surfaces 503 (no silent
-        # downgrade to generic workers_ai for Assamese prompts).
-        # Weights are 10x-spaced so select_provider's STRICT primary
-        # short-circuit (max_w >= 10x second) fires at every leg, giving
-        # a fully deterministic sarvam → workers_ai_indic → vertex ladder
-        # rather than a probabilistic draw between legs 2 and 3.
-        "sarvam":                 10000,  # primary — native Assamese conversational reasoning
-        "workers_ai_indic":        1000,  # fallback — IndicTrans2 (en-indic neural MT)
-        "vertex":                   100,  # tertiary — Gemini 2.5 Flash
+        # 3-leg pool (sarvam, workers_ai_indic, vertex) load-balanced
+        # equally per 2026-05-05 user instruction. Strict-chain
+        # exhaustion still surfaces 503 (no silent downgrade to generic
+        # workers_ai / workers_ai_llama31_8b for Assamese prompts).
+        "sarvam":                 1000,
+        "workers_ai_indic":       1000,
+        "vertex":                 1000,
     },
-    # assamese_content (Task #281): IndicTrans2 dominant primary, Gemini reserved
-    # at low weight strictly for formatting / structuring notes. Sarvam removed
-    # per spec — Sarvam stays on the conversational `assamese_rag_chat` path.
     "assamese_content": {
-        "workers_ai_indic": 5000,   # primary — purpose-built Indic neural MT
-        "vertex":            100,   # small slice for note formatting / structure
+        "workers_ai_indic": 1000,
+        "vertex":           1000,
     },
-    # translate: Task #291 strict locked chain — IndicTrans2 (10000) → Vertex (100).
-    # 100x ratio matches the other locked chains so select_provider's strict-primary
-    # short-circuit picks IndicTrans2 deterministically on every healthy draw.
     "translate": {
-        "workers_ai_indic": 10000,  # primary — dedicated Indic MT model, fastest (Task #291 strict lock)
-        "vertex":            100,   # fallback — Gemini handles any edge cases
+        "workers_ai_indic": 1000,
+        "vertex":           1000,
     },
     # embed/tts/stt explicit overrides so the established primaries
     # (ElevenLabs/Deepgram) keep deterministic priority over generic
@@ -1224,8 +1222,8 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai":  10000,   # sole provider — @cf/baai/bge-m3 (1024-dim)
     },
     "tts": {
-        "elevenlabs": 500,   # primary — eleven_multilingual_v2
-        "deepgram":   500,   # secondary — Aura-2
+        "elevenlabs": 1000,   # equal weight — eleven_multilingual_v2
+        "deepgram":   1000,   # equal weight — Aura-2
         # Vertex TTS endpoint is intentionally not wired (see routes/voice.py
         # _synthesize_with_fallback); it stays in PROVIDER_PRIORITY['tts'] only
         # as a placeholder so the "graceful exclusion" path is exercised. Weight
@@ -1236,20 +1234,17 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai":   0,   # last-resort
     },
     "stt": {
-        "deepgram":   500,   # primary — Deepgram Nova-3
-        "assemblyai":1000,   # secondary — AssemblyAI best
+        "deepgram":   1000,   # equal weight — Deepgram Nova-3
+        "assemblyai": 1000,   # equal weight — AssemblyAI best
         # Vertex STT endpoint is intentionally not wired — see the tts note
         # above; same rationale for pinning to weight 0.
         "vertex":       0,
         "workers_ai":   0,   # last-resort
     },
-    # vector_search: Pinecone curated index primary (3000) → Atlas/Vertex fallback (500).
-    # Pinecone syrabit-ahsec index is chapter-level, Cohere 1024-dim, purpose-built for
-    # Syrabit content → better recall than generic Atlas $vectorSearch with Vertex embeddings.
-    # Previous: vertex=2000, pinecone_ai=500 → Pinecone only ~20% of draws (too low).
+    # vector_search: round-robin between Pinecone curated index and Atlas/Vertex.
     "vector_search": {
-        "pinecone_ai": 3000,   # primary — curated Syrabit chapter index
-        "vertex":       500,   # fallback — Atlas $vectorSearch with Vertex embeddings
+        "pinecone_ai": 1000,
+        "vertex":      1000,
     },
 }
 

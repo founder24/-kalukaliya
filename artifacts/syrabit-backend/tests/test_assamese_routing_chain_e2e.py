@@ -101,23 +101,23 @@ class TestSelectProviderAssamese:
             f"must not be drawn; got {providers_seen}"
         )
 
-    def test_sarvam_excluded_draws_workers_ai_indic(self):
-        """3-leg chain (2026-05-05): when sarvam is excluded the next
-        deterministic STRICT pick must be workers_ai_indic (weight 1000 vs
-        vertex 100 — 10x ratio fires the strict-primary short-circuit)."""
+    def test_sarvam_excluded_draws_remaining_legs(self):
+        """3-leg pool with round-robin weights (2026-05-05): when sarvam is
+        excluded the remaining draws must come from {workers_ai_indic, vertex}
+        only — sarvam never reappears, and no other provider sneaks in."""
         import llm
 
         providers_seen: set = set()
-        for _ in range(20):
+        for _ in range(60):
             p = llm.select_provider(
                 "assamese_rag_chat", lang="as",
                 exclude=frozenset({"sarvam"}),
             )
             providers_seen.add(p)
 
-        assert providers_seen == {"workers_ai_indic"}, (
-            f"Expected only workers_ai_indic when sarvam is excluded "
-            f"(STRICT 10x primary handoff); got {providers_seen}"
+        assert providers_seen <= {"workers_ai_indic", "vertex"}, (
+            f"Expected only workers_ai_indic / vertex when sarvam is excluded; "
+            f"got {providers_seen}"
         )
         assert "sarvam" not in providers_seen, (
             "sarvam must not appear when it is in the exclude set"

@@ -639,19 +639,34 @@ def _parse_rpm_limit(env_var: str, default: int) -> int:
 #   On the Standard plan, the embedding model also has 3 000 RPM (same as LLMs);
 #   the old ~50 RPM free-tier limit no longer applies.  See _EMBED_429_THRESHOLD
 #   in vertex_services.py — threshold raised to 10 hits accordingly.
-_POOL_RPM_LIMITS = {
-    "workers-ai":   _parse_rpm_limit("WORKERS_AI_RPM_LIMIT", 10000),
-    "sarvam":       _parse_rpm_limit("SARVAM_RPM_LIMIT",        30),
-    "gemini":       _parse_rpm_limit("GEMINI_RPM_LIMIT",       600),
-    # Task #347 — bare ``openai`` RPM entry retained because the AsyncOpenAI
-    # SDK is still the transport for Azure OpenAI / Workers AI / CF AI Gateway
-    # calls (no api.openai.com traffic). The SLM RPM key is keyed by the
-    # transport slug, not by the OpenAI provider itself.
-    "azure_openai": _parse_rpm_limit("AZURE_OPENAI_RPM_LIMIT", 500),
-    "openai":       60,
-    # bedrock removed in Task #347
-}
-logger.info("SLM RPM limits (overridable via env): %s", _POOL_RPM_LIMITS)
+# 2026-05-05 — Per-provider RPM is derived from PROVIDER_MAX_CONCURRENT × 60
+# (formula chosen by the user: assumes ~1 second per request). The legacy
+# per-provider env-var overrides (WORKERS_AI_RPM_LIMIT, SARVAM_RPM_LIMIT, …)
+# still take precedence so ops can tune any single provider without a deploy.
+# Task #347 — bare ``openai`` RPM entry retained because the AsyncOpenAI SDK
+# is still the transport for Azure OpenAI / Workers AI / CF AI Gateway calls
+# (no real api.openai.com traffic).
+def _build_pool_rpm_limits() -> dict:
+    from config import PROVIDER_MAX_CONCURRENT
+    env_var_for = {
+        "workers-ai":   "WORKERS_AI_RPM_LIMIT",
+        "sarvam":       "SARVAM_RPM_LIMIT",
+        "gemini":       "GEMINI_RPM_LIMIT",
+        "azure_openai": "AZURE_OPENAI_RPM_LIMIT",
+        "openai":       "OPENAI_RPM_LIMIT",
+    }
+    out: dict = {}
+    for provider, max_concurrent in PROVIDER_MAX_CONCURRENT.items():
+        derived = max_concurrent * 60
+        env_var = env_var_for.get(provider, f"{provider.upper().replace('-', '_')}_RPM_LIMIT")
+        out[provider] = _parse_rpm_limit(env_var, derived)
+    return out
+
+_POOL_RPM_LIMITS = _build_pool_rpm_limits()
+logger.info(
+    "SLM RPM limits (max_concurrent × 60, env-overridable): %s",
+    _POOL_RPM_LIMITS,
+)
 
 
 class _SmartKeyPool:
@@ -1584,7 +1599,13 @@ def _get_provider_saturation(provider_name: str) -> float:
 
 
 def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset()) -> str:
-    """Weighted round-robin provider selection for *feature*.
+    """Round-robin / load-balanced provider selection for *feature*.
+
+    2026-05-05 — converted from strict primary→fallback to round-robin
+    per user instruction. Every active provider in a pool gets the same
+    weight in POOL_WEIGHTS, so `random.choices(pool, weights)` is a
+    uniform draw across all healthy providers. Load is shared equally;
+    there is no "primary" any more.
 
     Algorithm:
     1. Build candidate pool from ``PROVIDER_PRIORITY[feature]``.
@@ -1599,7 +1620,9 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
        (``mongodb_atlas`` for ``vector_search``, then ``workers_ai`` for all).
 
     Returns the selected provider *name* (e.g. ``"vertex"``, ``"sarvam"``).
-    Returns ``"workers_ai"`` when all else fails.
+    Returns ``"workers_ai"`` when all else fails, or ``None`` for the
+    Assamese strict-chain when all 3 legs are exhausted (no silent
+    downgrade to wrong-language output).
     """
     import random as _random
     from config import PROVIDER_PRIORITY, PROVIDER_CREDITS, POOL_WEIGHTS
@@ -1641,24 +1664,12 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
         weights.append(credit)
 
     if pool:
-        # Task #291 — STRICT primary→fallback for locked chains.
-        # When the highest weight dominates the next-highest by >=10x (the
-        # lock signal used in POOL_WEIGHTS for content / english_rag_chat /
-        # assamese_rag_chat / translate), pick that primary deterministically
-        # instead of drawing from the weighted distribution. This eliminates
-        # the residual ~1% probability that the secondary wins a draw while
-        # the primary is healthy, giving a true strict-fallback contract.
-        max_w = max(weights)
-        contenders = [(p, w) for p, w in zip(pool, weights) if w == max_w]
-        if len(contenders) == 1:
-            second = max((w for w in weights if w < max_w), default=0)
-            if second == 0 or max_w >= 10 * second:
-                chosen = contenders[0][0]
-                logger.debug(
-                    "select_provider: feature=%s lang=%s → %s [STRICT primary, ratio=%s:%s]",
-                    feature, lang, chosen, max_w, second,
-                )
-                return chosen
+        # 2026-05-05 — Round-robin / load-balanced draw. POOL_WEIGHTS is now
+        # equalized across all active providers in every pool, so this
+        # uniform-random selection effectively rotates traffic evenly.
+        # The strict primary→fallback short-circuit (Task #291) was
+        # removed per user instruction — every healthy provider gets a
+        # share of every batch instead of one dominant primary.
         chosen = _random.choices(pool, weights=weights, k=1)[0]
         logger.debug("select_provider: feature=%s lang=%s → %s (pool=%s)", feature, lang, chosen, pool)
         return chosen

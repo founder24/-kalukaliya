@@ -1,12 +1,17 @@
-"""Smoke test — Task #291: locked PROVIDER_PRIORITY chains.
+"""Smoke test — Round-robin / load-balanced POOL_WEIGHTS contract (2026-05-05).
 
-Verifies that POOL_WEIGHTS yields strict primary→fallback selection for
-the four pools the spec locks down:
+Verifies that POOL_WEIGHTS gives every active provider an EQUAL share of the
+draw for every locked-down pool the spec covers:
 
-  english_rag_chat    azure_openai → vertex → workers_ai
-  content             vertex       → azure_openai → workers_ai
-  assamese_rag_chat   sarvam       → workers_ai_indic → vertex    (3-leg, 2026-05-05)
-  translate           workers_ai_indic → vertex
+  english_rag_chat    azure_openai, vertex, workers_ai_llama32_3b, workers_ai_mistral_7b
+  content             vertex, azure_openai, sarvam, workers_ai_mistral_7b
+  assamese_rag_chat   sarvam, workers_ai_indic, vertex
+  translate           workers_ai_indic, vertex
+
+Replaces the previous Task #291 strict primary→fallback assertions per the
+2026-05-05 user instruction ("all llm should work as a batch not one primary
+other fallback"). The dispatcher now uses a uniform random draw across all
+active providers; weight-0 entries (last-resort safety net) are still gated.
 
 Run::
 
@@ -25,68 +30,94 @@ logging.disable(logging.CRITICAL)
 from config import POOL_WEIGHTS, PROVIDER_PRIORITY
 
 
-def _expect_primary(feature: str, primary: str, lang: str = "en", *, draws: int = 200):
+def _expect_round_robin(feature: str, expected_active: set[str], lang: str = "en",
+                        *, draws: int = 600, tolerance: float = 0.40):
+    """Assert that all *expected_active* providers appear in roughly equal share.
+
+    With ``draws=600`` and ``tolerance=0.40``, each provider should land in
+    ``[ (1/N - tol/N), (1/N + tol/N) ]`` of draws — i.e. within 40% of its
+    fair share. This is a loose bound chosen to keep the test stable under
+    the binomial variance of `random.choices` with N=4 (~95 expected hits per
+    bucket, std-dev ≈9; ±40% is ±38 hits, well outside 2σ noise).
+    """
     from llm import select_provider
-    hits = sum(1 for _ in range(draws)
-               if select_provider(feature, lang=lang) == primary)
-    ratio = hits / draws
-    assert ratio >= 0.90, (
-        f"{feature}: expected {primary} primary >=90% of {draws} draws, got {ratio:.0%}"
+    from collections import Counter
+    counts = Counter(select_provider(feature, lang=lang) for _ in range(draws))
+    fair = draws / len(expected_active)
+    lower = fair * (1 - tolerance)
+    upper = fair * (1 + tolerance)
+    seen_active = {p for p in counts if p in expected_active}
+    assert seen_active == expected_active, (
+        f"{feature}: expected every active provider in {expected_active} to be drawn at "
+        f"least once across {draws} draws, missing {expected_active - seen_active}; "
+        f"counts={dict(counts)}"
+    )
+    for p in expected_active:
+        assert lower <= counts[p] <= upper, (
+            f"{feature}: provider {p} drawn {counts[p]}/{draws} times — "
+            f"outside ±{tolerance:.0%} of fair share ({fair:.0f}); counts={dict(counts)}"
+        )
+
+
+def _assert_equal_weights(feature: str, expected_active: set[str]):
+    """Each active provider in the pool must carry the same weight."""
+    weights = POOL_WEIGHTS[feature]
+    active_weights = {p: weights[p] for p in expected_active if p in weights}
+    assert set(active_weights.keys()) == expected_active, (
+        f"{feature}: POOL_WEIGHTS missing entries for {expected_active - set(active_weights)}"
+    )
+    distinct = set(active_weights.values())
+    assert len(distinct) == 1, (
+        f"{feature}: round-robin requires equal weights across active providers, "
+        f"got {active_weights}"
+    )
+    only_weight = distinct.pop()
+    assert only_weight > 0, (
+        f"{feature}: active providers must have a positive equal weight, got {only_weight}"
     )
 
 
-def test_english_rag_chat_locked_to_azure_primary():
-    weights = POOL_WEIGHTS["english_rag_chat"]
-    assert weights["azure_openai"] >= 100 * weights.get("vertex", 1), \
-        "english_rag_chat: azure must dominate vertex by >=100x"
-    assert weights.get("workers_ai", 0) == 0, "workers_ai must be last-resort (weight 0)"
-    _expect_primary("english_rag_chat", "azure_openai", lang="en")
-    print("  PASS: english_rag_chat locked to azure_openai → vertex → workers_ai")
+def test_english_rag_chat_round_robin():
+    expected = {"azure_openai", "vertex", "workers_ai_llama32_3b", "workers_ai_mistral_7b"}
+    _assert_equal_weights("english_rag_chat", expected)
+    assert POOL_WEIGHTS["english_rag_chat"].get("workers_ai", 0) == 0, \
+        "workers_ai must remain weight-0 (last-resort safety net)"
+    _expect_round_robin("english_rag_chat", expected, lang="en")
+    print("  PASS: english_rag_chat round-robin across "
+          "azure_openai / vertex / workers_ai_llama32_3b / workers_ai_mistral_7b")
 
 
-def test_content_locked_to_vertex_primary():
-    weights = POOL_WEIGHTS["content"]
-    assert weights["vertex"] >= 100 * weights.get("azure_openai", 1), \
-        "content: vertex must dominate azure by >=100x"
-    assert weights.get("workers_ai", 0) == 0
-    _expect_primary("content", "vertex", lang="en")
-    print("  PASS: content locked to vertex → azure_openai → workers_ai")
+def test_content_round_robin():
+    expected = {"vertex", "azure_openai", "sarvam", "workers_ai_mistral_7b"}
+    _assert_equal_weights("content", expected)
+    assert POOL_WEIGHTS["content"].get("workers_ai", 0) == 0
+    _expect_round_robin("content", expected, lang="en")
+    print("  PASS: content round-robin across vertex / azure_openai / sarvam / workers_ai_mistral_7b")
 
 
-def test_assamese_rag_chat_locked_to_sarvam_primary():
-    weights = POOL_WEIGHTS["assamese_rag_chat"]
-    assert weights["sarvam"] >= 10 * weights.get("workers_ai_indic", 1), \
-        "assamese_rag_chat: sarvam must dominate workers_ai_indic by >=10x"
-    assert weights.get("workers_ai_indic", 0) > weights.get("vertex", 0), (
-        "assamese_rag_chat: workers_ai_indic must outweigh vertex (it sits "
-        "between sarvam and vertex in the 3-leg chain, 2026-05-05)"
-    )
-    # workers_ai_indic IS now permitted in the chat pool (re-introduced
-    # 2026-05-05 per user instruction). It sits between Sarvam and Vertex
-    # so a Sarvam outage hands off to the in-house Cloudflare neural MT
-    # before paying for Gemini.
-    assert "workers_ai_indic" in weights, (
-        "workers_ai_indic must be in assamese_rag_chat POOL_WEIGHTS — "
-        "3-leg chain re-introduced 2026-05-05"
-    )
-    assert "workers_ai_indic" in PROVIDER_PRIORITY["assamese_rag_chat"], (
-        "workers_ai_indic must be in PROVIDER_PRIORITY['assamese_rag_chat']"
-    )
-    _expect_primary("assamese_rag_chat", "sarvam", lang="as")
-    print("  PASS: assamese_rag_chat locked to sarvam → workers_ai_indic → vertex")
+def test_assamese_rag_chat_round_robin():
+    expected = {"sarvam", "workers_ai_indic", "vertex"}
+    _assert_equal_weights("assamese_rag_chat", expected)
+    # workers_ai_indic IS still in the chain (re-introduced 2026-05-05) and
+    # is now drawn equally with sarvam and vertex.
+    for p in expected:
+        assert p in PROVIDER_PRIORITY["assamese_rag_chat"], (
+            f"{p} must be in PROVIDER_PRIORITY['assamese_rag_chat']"
+        )
+    _expect_round_robin("assamese_rag_chat", expected, lang="as")
+    print("  PASS: assamese_rag_chat round-robin across sarvam / workers_ai_indic / vertex")
 
 
-def test_translate_locked_to_indictrans2_primary():
-    weights = POOL_WEIGHTS["translate"]
-    assert weights["workers_ai_indic"] >= 100 * weights.get("vertex", 1), \
-        "translate: workers_ai_indic must dominate vertex by >=100x"
-    _expect_primary("translate", "workers_ai_indic", lang="as")
-    print("  PASS: translate locked to workers_ai_indic → vertex")
+def test_translate_round_robin():
+    expected = {"workers_ai_indic", "vertex"}
+    _assert_equal_weights("translate", expected)
+    _expect_round_robin("translate", expected, lang="as")
+    print("  PASS: translate round-robin across workers_ai_indic / vertex")
 
 
 def test_workers_ai_fallback_uses_gpt_oss_20b():
-    """Task #291 — when content / english_rag_chat fall through to the
-    weight-0 workers_ai last-resort leg, the dispatched model must be
+    """When content / english_rag_chat fall through to the weight-0
+    workers_ai last-resort leg, the dispatched model must be
     @cf/openai/gpt-oss-20b (no quota lock-up like llama-3.3-70b)."""
     from llm import _PROVIDER_DEFAULT_MODELS
     assert _PROVIDER_DEFAULT_MODELS["workers_ai"] == "@cf/openai/gpt-oss-20b", (
@@ -97,35 +128,37 @@ def test_workers_ai_fallback_uses_gpt_oss_20b():
     print("  PASS: workers_ai default model is @cf/openai/gpt-oss-20b")
 
 
-def test_priority_lists_match_locked_chain_order():
-    """First entry of each PROVIDER_PRIORITY list must match its primary."""
+def test_priority_lists_contain_every_active_member():
+    """PROVIDER_PRIORITY list-order is preserved (used to seed the candidate
+    pool for select_provider) but no longer encodes a "primary" — the first
+    entry is just the iteration starting point."""
     expectations = {
-        "english_rag_chat": "azure_openai",
-        "content":          "vertex",
-        "assamese_rag_chat": "sarvam",
-        "translate":        "workers_ai_indic",
+        "english_rag_chat":  {"azure_openai", "vertex",
+                              "workers_ai_llama32_3b", "workers_ai_mistral_7b"},
+        "content":           {"vertex", "azure_openai", "sarvam", "workers_ai_mistral_7b"},
+        "assamese_rag_chat": {"sarvam", "workers_ai_indic", "vertex"},
+        "translate":         {"workers_ai_indic", "vertex"},
     }
-    for feature, primary in expectations.items():
-        order = PROVIDER_PRIORITY[feature]
-        assert order[0] == primary, (
-            f"{feature}: PROVIDER_PRIORITY[0] must be {primary}, got {order}"
-        )
-    # assamese_rag_chat is the 3-leg chain (re-introduced 2026-05-05):
-    # sarvam → workers_ai_indic → vertex. workers_ai_llama31_8b and the
+    for feature, members in expectations.items():
+        chain = set(PROVIDER_PRIORITY[feature])
+        missing = members - chain
+        assert not missing, f"{feature}: PROVIDER_PRIORITY missing {missing}; got {PROVIDER_PRIORITY[feature]}"
+    # assamese_rag_chat is still the strict 3-leg chain in terms of *membership*
+    # (sarvam, workers_ai_indic, vertex) — workers_ai_llama31_8b and the
     # generic workers_ai shorthand remain forbidden because they emit
-    # non-Assamese output.
-    assert PROVIDER_PRIORITY["assamese_rag_chat"] == ["sarvam", "workers_ai_indic", "vertex"], (
-        f"assamese_rag_chat must be exactly ['sarvam', 'workers_ai_indic', 'vertex']; "
+    # non-Assamese output. Order is no longer significant.
+    assert set(PROVIDER_PRIORITY["assamese_rag_chat"]) == {"sarvam", "workers_ai_indic", "vertex"}, (
+        f"assamese_rag_chat must contain exactly sarvam/workers_ai_indic/vertex; "
         f"got {PROVIDER_PRIORITY['assamese_rag_chat']}"
     )
-    print("  PASS: PROVIDER_PRIORITY ordering matches locked chains")
+    print("  PASS: PROVIDER_PRIORITY membership matches round-robin pools")
 
 
 if __name__ == "__main__":
-    test_english_rag_chat_locked_to_azure_primary()
-    test_content_locked_to_vertex_primary()
-    test_assamese_rag_chat_locked_to_sarvam_primary()
-    test_translate_locked_to_indictrans2_primary()
+    test_english_rag_chat_round_robin()
+    test_content_round_robin()
+    test_assamese_rag_chat_round_robin()
+    test_translate_round_robin()
     test_workers_ai_fallback_uses_gpt_oss_20b()
-    test_priority_lists_match_locked_chain_order()
-    print("\nAll Task #291 provider-chain locks verified.")
+    test_priority_lists_contain_every_active_member()
+    print("\nAll round-robin POOL_WEIGHTS assertions verified.")

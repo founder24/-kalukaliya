@@ -29,7 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def test_assamese_rag_chat_falls_over_from_sarvam_to_indic_to_vertex():
-    """3-leg chain (2026-05-05): sarvam → workers_ai_indic → vertex.
+    """3-leg pool (2026-05-05) with round-robin equal weights:
+    {sarvam, workers_ai_indic, vertex}.
 
     Strict-chain exhaustion still surfaces None when ALL three legs are
     excluded so the caller errors out cleanly rather than silently routing
@@ -38,16 +39,16 @@ def test_assamese_rag_chat_falls_over_from_sarvam_to_indic_to_vertex():
     """
     from llm import select_provider
 
-    # Sarvam excluded → next deterministic draw must be workers_ai_indic
-    # (priority 500, vertex is 100).
-    chosen = select_provider("assamese_rag_chat", lang="as",
-                             exclude=frozenset({"sarvam"}))
-    assert chosen == "workers_ai_indic", (
-        f"Expected fallback to 'workers_ai_indic' after excluding sarvam, "
-        f"got {chosen!r}. This breaks the sarvam→workers_ai_indic→vertex chain."
-    )
+    # Sarvam excluded → next draw must come from the remaining 2 legs only.
+    for _ in range(40):
+        chosen = select_provider("assamese_rag_chat", lang="as",
+                                 exclude=frozenset({"sarvam"}))
+        assert chosen in ("workers_ai_indic", "vertex"), (
+            f"Expected workers_ai_indic or vertex after excluding sarvam, "
+            f"got {chosen!r}. Round-robin must stay inside the 3-leg pool."
+        )
 
-    # Sarvam + workers_ai_indic excluded → next pick must be vertex.
+    # Sarvam + workers_ai_indic excluded → only vertex left.
     chosen = select_provider("assamese_rag_chat", lang="as",
                              exclude=frozenset({"sarvam", "workers_ai_indic"}))
     assert chosen == "vertex", (
@@ -62,7 +63,7 @@ def test_assamese_rag_chat_falls_over_from_sarvam_to_indic_to_vertex():
         f"Expected None when all 3 legs excluded (strict-chain); got {chosen!r}. "
         f"workers_ai_llama31_8b / generic workers_ai must NEVER be selected for chat."
     )
-    print("  PASS: assamese_rag_chat sarvam→workers_ai_indic→vertex cascade verified (no wrong-language downgrade)")
+    print("  PASS: assamese_rag_chat round-robin pool cascade verified (no wrong-language downgrade)")
 
 
 def test_assamese_rag_chat_logs_locked_chain_order_on_fallback():
@@ -90,13 +91,17 @@ def test_assamese_rag_chat_logs_locked_chain_order_on_fallback():
         llm.logger.removeHandler(h)
 
     msgs = [r.getMessage() for r in handler_records]
-    # Must mention workers_ai_indic (the new 2nd leg as of 2026-05-05)
-    # and the assamese feature in some informational record.
-    assert any("workers_ai_indic" in m and "assamese_rag_chat" in m for m in msgs), (
-        f"Expected select_provider to log fallback to workers_ai_indic for "
-        f"assamese_rag_chat; captured records were: {msgs!r}"
+    # Round-robin (2026-05-05): with sarvam excluded the chosen provider
+    # is either workers_ai_indic or vertex; either must appear alongside
+    # the assamese feature key in some log record so on-call can audit.
+    assert any(
+        ("workers_ai_indic" in m or "vertex" in m) and "assamese_rag_chat" in m
+        for m in msgs
+    ), (
+        f"Expected select_provider to log fallback to workers_ai_indic or vertex "
+        f"for assamese_rag_chat; captured records were: {msgs!r}"
     )
-    print("  PASS: select_provider logs assamese_rag_chat → workers_ai_indic fallback")
+    print("  PASS: select_provider logs assamese_rag_chat round-robin fallback")
 
 
 def test_english_question_in_assamese_mode_triggers_cross_lang_translation():
