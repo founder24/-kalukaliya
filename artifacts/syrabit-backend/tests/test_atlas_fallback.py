@@ -1,4 +1,4 @@
-"""Task #217 — Confirm the emergency Atlas fallback can be switched back on safely.
+"""Task #217 + Task #372 — Atlas vector-search fallback safety net.
 
 Tests cover three surfaces:
 
@@ -10,11 +10,12 @@ Tests cover three surfaces:
    the env var is absent (default off); when it is set and the call fails,
    startup continues rather than crashing.
 
-3. ``_fetch_chunks_semantic`` fallback routing — with
-   ``PINECONE_ATLAS_FALLBACK=true`` and a broken Atlas index, the function
-   still returns ``[]`` (no 500); with ``PINECONE_ATLAS_FALLBACK=false`` the
-   Atlas path is never attempted; when Pinecone returns results the Atlas path
-   is completely bypassed.
+3. ``_fetch_chunks_semantic`` weighted-pool fallback routing
+   (Task #291+ / re-enabled in Task #372) — vector retrieval now dispatches
+   through ``llm.select_provider("vector_search", …)`` with exclusion-based
+   retry. Tests pin: Pinecone fails → Atlas serves; both fail → empty (no
+   500); Pinecone results bypass Atlas entirely; all embedders down → no
+   backend touched; failed providers are excluded on the next draw.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import os
 import sys
 import types
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -271,242 +272,434 @@ def _make_pc_retriever(*, configured=True, raises=False, results=None):
     return _FakePcRetriever
 
 
-@pytest.mark.skip(
-    reason=(
-        "Architecture changed (Task #291+): _fetch_chunks_semantic no "
-        "longer routes through a binary PINECONE_ATLAS_FALLBACK env "
-        "switch. Vector retrieval now goes through a weighted "
-        "vector_search pool (`_select_vs` → `_try_vector_provider`) "
-        "with per-provider embedding (pinecone_ai uses Pinecone "
-        "Inference, mongodb_atlas uses Cohere) and exclusion-based "
-        "retry. These tests pin the old contract — rewriting them "
-        "against the new dispatch surface is tracked as a follow-up."
-    )
-)
 class TestFetchChunksSemanticFallback:
-    """Tests for ``rag._fetch_chunks_semantic`` Atlas fallback routing.
+    """Tests for ``rag._fetch_chunks_semantic`` — Task #291+ weighted-pool dispatch.
+
+    Vector retrieval now goes through a weighted ``vector_search`` pool
+    (``llm.select_provider("vector_search", …)``) with exclusion-based retry:
+
+      pinecone_ai  → Pinecone Inference embed + Pinecone $vectorSearch  [primary]
+      vertex       → Gemini embed + Atlas $vectorSearch                  [fallback]
+      mongodb_atlas→ Cohere embed + Atlas $vectorSearch        [weight-0 last resort]
+      workers_ai   → no vector endpoint (raises immediately)
+
+    These tests pin the safety contract that survived the architectural change:
+
+      1. Pinecone fails  → Atlas serves the request (no 500)
+      2. Both legs fail  → empty result (no 500)
+      3. Pinecone succeeds → Atlas $vectorSearch is never queried
+      4. All embedders down → empty result, no vector backend touched
+      5. Each failed/zero-result provider is added to the next ``select_provider``
+         ``exclude`` set (weighted exclusion-based retry).
 
     All external I/O is mocked:
-      - Cohere embed_query returns _FAKE_QVEC (or is patched to fail)
-      - PineconeVectorRetriever is replaced with _make_pc_retriever(...)
-      - rag.db.chunks.aggregate is replaced with _AggregateCursor(...)
+      - ``llm.select_provider`` is replaced with a deterministic preference-list
+        mock that honours the ``exclude`` frozenset
+      - ``providers.pinecone_ai.embed_one`` / ``providers.cohere.embed_query`` /
+        ``vertex_services.embed_text`` are stubbed
+      - ``retrievers.pinecone_vector.PineconeVectorRetriever`` is replaced
+      - ``rag.db.chunks.aggregate`` (Atlas $vectorSearch) and
+        ``rag.db.chapters.find`` are mocked
+      - ``rag._generate_hyde_passage`` is stubbed to skip the LLM HyDE call
     """
 
-    def _run_semantic(self, query="test", subject_id=None, monkeypatch=None, env=None):
-        """Helper: patch env, run _fetch_chunks_semantic, return result."""
-        import rag as _rag
-        if env:
-            for k, v in env.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
+    # ── helpers ───────────────────────────────────────────────────────────────
 
-        return _run(_rag._fetch_chunks_semantic(query, subject_id=subject_id))
+    def _stub_no_hyde(self, monkeypatch):
+        async def _no_hyde(_q):
+            return None
+        monkeypatch.setattr("rag._generate_hyde_passage", _no_hyde)
 
-    def test_pinecone_fails_atlas_raises_fallback_enabled_returns_empty(self, monkeypatch):
-        """When Pinecone fails AND the Atlas aggregate also raises (deleted index)
-        AND PINECONE_ATLAS_FALLBACK=true, the function must return [] without
-        raising — no 500 error is surfaced to the caller."""
-        import rag as _rag
+    def _stub_select_provider(self, monkeypatch, preference_order):
+        """Replace ``llm.select_provider`` with a deterministic mock that:
 
-        monkeypatch.setenv("PINECONE_ATLAS_FALLBACK", "true")
+        - records every call
+        - returns the first provider in ``preference_order`` not in ``exclude``
+        - raises RuntimeError when the preference list is exhausted
 
-        # Cohere embed succeeds
-        monkeypatch.setattr("providers.cohere.ENABLED", True, raising=False)
+        Returns the list of recorded calls so tests can assert on the
+        progression of the ``exclude`` frozenset.
+        """
+        calls: list[dict] = []
+
+        def _mock_select(feature, lang="", exclude=frozenset()):
+            calls.append({
+                "feature": feature,
+                "lang": lang,
+                "exclude": frozenset(exclude),
+            })
+            for p in preference_order:
+                if p not in exclude:
+                    return p
+            raise RuntimeError(f"vector_search pool exhausted (excluded={exclude})")
+
+        import llm as _llm
+        monkeypatch.setattr(_llm, "select_provider", _mock_select)
+        return calls
+
+    def _stub_pinecone_embed(self, monkeypatch, *, enabled=True, vec=None, raises=False):
+        import providers.pinecone_ai as _pa
+        monkeypatch.setattr(_pa, "ENABLED", enabled, raising=False)
+        if raises:
+            async def _embed_one(_text, *, input_type="query"):
+                raise RuntimeError("pinecone embed failed in test")
+        else:
+            async def _embed_one(_text, *, input_type="query"):
+                return vec if vec is not None else _FAKE_QVEC
+        monkeypatch.setattr(_pa, "embed_one", _embed_one, raising=False)
+
+    def _stub_cohere_embed(self, monkeypatch, *, enabled=True, vec=None, raises=False):
+        import providers.cohere as _co
+        monkeypatch.setattr(_co, "ENABLED", enabled, raising=False)
+        if raises:
+            async def _embed_query(_text):
+                raise RuntimeError("cohere embed failed in test")
+        else:
+            async def _embed_query(_text):
+                return vec if vec is not None else _FAKE_QVEC
+        monkeypatch.setattr(_co, "embed_query", _embed_query, raising=False)
+
+    def _stub_vertex_embed(self, monkeypatch, *, vec=None, raises=False):
+        # vertex_services may not be importable in the stubbed test env; create
+        # a minimal stub module on sys.modules so rag.py's local import succeeds.
+        mod = sys.modules.get("vertex_services")
+        if mod is None:
+            mod = types.ModuleType("vertex_services")
+            sys.modules["vertex_services"] = mod
+        if raises:
+            async def _embed_text(_text, *, task_type="RETRIEVAL_QUERY"):
+                raise RuntimeError("vertex embed failed in test")
+        else:
+            async def _embed_text(_text, *, task_type="RETRIEVAL_QUERY"):
+                return vec if vec is not None else _FAKE_QVEC
+        monkeypatch.setattr(mod, "embed_text", _embed_text, raising=False)
+
+    def _stub_pinecone_retriever(self, monkeypatch, *, configured=True, raises=False, results=None):
+        """Replace ``retrievers.pinecone_vector.PineconeVectorRetriever``."""
+        query_calls: list[dict] = []
+
+        class _FakePc:
+            def is_configured(self):
+                return configured
+
+            async def query(self, vec, top_k=10, metadata_filter=None,
+                            return_metadata=True, namespace=None):
+                query_calls.append({"top_k": top_k, "namespace": namespace,
+                                    "metadata_filter": metadata_filter})
+                if raises:
+                    raise RuntimeError("Pinecone unavailable in test")
+                return results or []
+
         monkeypatch.setattr(
-            "providers.cohere.embed_query",
-            AsyncMock(return_value=_FAKE_QVEC),
-            raising=False,
+            "retrievers.pinecone_vector.PineconeVectorRetriever",
+            _FakePc,
         )
+        return query_calls
 
-        # Pinecone raises
-        FakePc = _make_pc_retriever(configured=True, raises=True)
-        monkeypatch.setattr("retrievers.pinecone_vector.PineconeVectorRetriever", FakePc)
+    def _make_db(self, monkeypatch, *, atlas_cursor_factory=None, chapters=None):
+        """Build & install a mock ``rag.db`` with chunks + chapters collections.
 
-        # Atlas aggregate raises (deleted index)
-        atlas_error = Exception("PlanExecutor error — vector index 'vector_index' not found")
-        mock_chunks = MagicMock()
-        mock_chunks.aggregate = lambda pipeline: _AggregateCursor(raise_exc=atlas_error)
-        mock_db = MagicMock()
-        mock_db.chunks = mock_chunks
-        monkeypatch.setattr(_rag, "db", mock_db)
-
-        result = _run(_rag._fetch_chunks_semantic("photosynthesis"))
-        assert result == [], f"Expected [] but got {result!r}"
-
-    def test_atlas_fallback_disabled_pinecone_fails_atlas_never_queried(self, monkeypatch):
-        """With PINECONE_ATLAS_FALLBACK=false, even when Pinecone fails, the
-        Atlas $vectorSearch path must not be attempted — db.chunks.aggregate
-        is never called."""
-        import rag as _rag
-
-        monkeypatch.setenv("PINECONE_ATLAS_FALLBACK", "false")
-
-        monkeypatch.setattr("providers.cohere.ENABLED", True, raising=False)
-        monkeypatch.setattr(
-            "providers.cohere.embed_query",
-            AsyncMock(return_value=_FAKE_QVEC),
-            raising=False,
-        )
-
-        FakePc = _make_pc_retriever(configured=True, raises=True)
-        monkeypatch.setattr("retrievers.pinecone_vector.PineconeVectorRetriever", FakePc)
-
-        aggregate_calls = []
-
-        class _TrackingCursor:
-            async def to_list(self, length=None):
-                return []
-
-        mock_chunks = MagicMock()
-        mock_chunks.aggregate = lambda p: (_TrackingCursor() if not aggregate_calls.append(p) else None)
-        mock_db = MagicMock()
-        mock_db.chunks = mock_chunks
-        monkeypatch.setattr(_rag, "db", mock_db)
-
-        result = _run(_rag._fetch_chunks_semantic("osmosis"))
-        assert result == []
-        assert aggregate_calls == [], (
-            "Atlas aggregate must not be called when PINECONE_ATLAS_FALLBACK=false"
-        )
-
-    def test_pinecone_results_bypass_atlas_entirely(self, monkeypatch):
-        """When Pinecone returns results, Atlas $vectorSearch must not be
-        queried — even with PINECONE_ATLAS_FALLBACK=true — since raw is
-        non-empty and the condition ``if not raw and _atlas_fallback_enabled``
-        is false."""
-        import rag as _rag
-
-        monkeypatch.setenv("PINECONE_ATLAS_FALLBACK", "true")
-
-        monkeypatch.setattr("providers.cohere.ENABLED", True, raising=False)
-        monkeypatch.setattr(
-            "providers.cohere.embed_query",
-            AsyncMock(return_value=_FAKE_QVEC),
-            raising=False,
-        )
-
-        # Pinecone returns one match with a chapter_id so raw is non-empty
-        pc_results = [
-            {"score": 0.92, "metadata": {"chapter_id": "ch-bio-1", "chapter_title": "Bio", "subject_id": "bio"}}
-        ]
-        FakePc = _make_pc_retriever(configured=True, results=pc_results)
-        monkeypatch.setattr("retrievers.pinecone_vector.PineconeVectorRetriever", FakePc)
-
-        aggregate_calls = []
-
-        class _TrackingCursor:
-            async def to_list(self, length=None):
-                return []
-
-        mock_chunks = MagicMock()
-        mock_chunks.aggregate = lambda p: (_TrackingCursor() if not aggregate_calls.append(p) else None)
-        # Mock chapters fetch so the function doesn't error after raw is set
-        mock_chapters = MagicMock()
-        mock_chapters.find.return_value.to_list = AsyncMock(return_value=[])
-        mock_db = MagicMock()
-        mock_db.chunks = mock_chunks
-        mock_db.chapters = mock_chapters
-        monkeypatch.setattr(_rag, "db", mock_db)
-
-        _run(_rag._fetch_chunks_semantic("cell division"))
-        assert aggregate_calls == [], (
-            "Atlas aggregate must not be called when Pinecone returned results"
-        )
-
-    def test_pinecone_returns_chapter_even_when_atlas_index_absent(self, monkeypatch):
-        """Decisive end-to-end positive test — no silent empty.
-
-        Scenario: PINECONE_ATLAS_FALLBACK=true, Atlas vector_index deleted,
-        Pinecone returns a match, chapter lookup finds the chapter doc.
-        Expected: _fetch_chunks_semantic returns the chapter (not []).
-
-        This is the key guarantee: even after the embedding cleanup drops the
-        Atlas vector_index, Pinecone still delivers results and the function
-        does not silently return an empty list.
+        ``atlas_cursor_factory`` is called with the aggregate ``pipeline`` and
+        must return an awaitable cursor (use _AggregateCursor). Each call is
+        recorded in the returned ``aggregate_calls`` list.
+        ``chapters`` is the list of chapter docs returned by ``db.chapters.find``.
         """
         import rag as _rag
 
-        monkeypatch.setenv("PINECONE_ATLAS_FALLBACK", "true")
+        aggregate_calls: list[list] = []
+        chapters = list(chapters or [])
 
-        monkeypatch.setattr("providers.cohere.ENABLED", True, raising=False)
-        monkeypatch.setattr(
-            "providers.cohere.embed_query",
-            AsyncMock(return_value=_FAKE_QVEC),
-            raising=False,
-        )
-
-        # Pinecone returns one result — chapter_id present
-        pc_results = [
-            {
-                "score": 0.91,
-                "metadata": {
-                    "chapter_id": "ch-bio-photosyn",
-                    "chapter_title": "Photosynthesis",
-                    "subject_id": "bio-11",
-                },
-            }
-        ]
-        FakePc = _make_pc_retriever(configured=True, results=pc_results)
-        monkeypatch.setattr("retrievers.pinecone_vector.PineconeVectorRetriever", FakePc)
-
-        # Chapters collection returns the chapter doc
-        chapter_doc = {
-            "id": "ch-bio-photosyn",
-            "title": "Photosynthesis",
-            "content": "Plants convert sunlight to chemical energy via chlorophyll.",
-            "slug": "photosynthesis",
-            "subject_id": "bio-11",
-        }
+        def _aggregate(pipeline):
+            aggregate_calls.append(pipeline)
+            if atlas_cursor_factory is not None:
+                return atlas_cursor_factory(pipeline)
+            return _AggregateCursor(result=[])
 
         class _FakeFindCursor:
             async def to_list(self, length=None):
-                return [chapter_doc]
+                return chapters
 
         mock_chunks = MagicMock()
-        # Atlas NOT called (Pinecone raw is non-empty)
-        mock_chunks.aggregate = lambda pipeline: _AggregateCursor(
-            raise_exc=Exception("No vector_index — should not be reached")
-        )
+        mock_chunks.aggregate = _aggregate
+
         mock_chapters = MagicMock()
         mock_chapters.find = lambda *a, **kw: _FakeFindCursor()
+
         mock_db = MagicMock()
         mock_db.chunks = mock_chunks
         mock_db.chapters = mock_chapters
+
         monkeypatch.setattr(_rag, "db", mock_db)
+        return mock_db, aggregate_calls
+
+    # ── tests ─────────────────────────────────────────────────────────────────
+
+    def test_pinecone_fails_then_atlas_serves(self, monkeypatch):
+        """Pinecone leg raises → ``_fetch_chunks_semantic`` must exclude
+        pinecone_ai, redraw mongodb_atlas from the pool, run Atlas
+        $vectorSearch, resolve the chapter doc, and return it.
+
+        This is the headline fallback-safety guarantee: a Pinecone outage is
+        absorbed by the weight-0 Atlas leg with no caller-visible error.
+        """
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        self._stub_select_provider(monkeypatch, ["pinecone_ai", "mongodb_atlas"])
+
+        # pinecone_ai embed succeeds (so the pinecone leg fails at the
+        # vector-store query, not at embed — this exercises the retriever path)
+        self._stub_pinecone_embed(monkeypatch)
+        # …but the Pinecone retriever itself raises (simulated outage)
+        pc_calls = self._stub_pinecone_retriever(monkeypatch, raises=True)
+
+        # mongodb_atlas leg embed (Cohere) succeeds
+        self._stub_cohere_embed(monkeypatch)
+
+        chapter_doc = {
+            "id": "ch-bio-photosyn",
+            "title": "Photosynthesis",
+            "content": "Plants convert sunlight to chemical energy.",
+            "slug": "photosynthesis",
+            "subject_id": "bio-11",
+        }
+        # Atlas $vectorSearch returns one match, chapters lookup resolves it
+        atlas_match = [{
+            "chapter_id": "ch-bio-photosyn",
+            "chapter_title": "Photosynthesis",
+            "subject_id": "bio-11",
+            "_vs_score": 0.81,
+        }]
+        _, aggregate_calls = self._make_db(
+            monkeypatch,
+            atlas_cursor_factory=lambda p: _AggregateCursor(result=atlas_match),
+            chapters=[chapter_doc],
+        )
 
         result = _run(_rag._fetch_chunks_semantic("photosynthesis"))
 
-        assert len(result) == 1, f"Expected 1 chapter from Pinecone, got: {result!r}"
+        assert len(pc_calls) == 1, "Pinecone retriever must have been attempted once"
+        assert len(aggregate_calls) == 1, "Atlas $vectorSearch must have been queried as fallback"
+        assert len(result) == 1
         assert result[0]["id"] == "ch-bio-photosyn"
-        assert "Photosynthesis" in result[0]["title"]
 
-    def test_cohere_unavailable_returns_empty_without_querying_either_backend(self, monkeypatch):
-        """When Cohere embed is unavailable (ENABLED=False), _fetch_chunks_semantic
-        must return [] immediately — neither Pinecone nor Atlas is queried.
-        This confirms the semantic search skip path works end-to-end."""
+    def test_atlas_index_missing_returns_empty_no_500(self, monkeypatch):
+        """When Pinecone fails AND the Atlas aggregate also raises (e.g.
+        the Atlas vector_index was dropped), the function must return ``[]``
+        without surfacing a 500. The pool is exhausted by the exclusion loop
+        and the function exits gracefully.
+        """
         import rag as _rag
 
-        monkeypatch.setattr("providers.cohere.ENABLED", False, raising=False)
-        monkeypatch.setattr(
-            "providers.cohere.embed_query",
-            AsyncMock(return_value=None),
-            raising=False,
+        self._stub_no_hyde(monkeypatch)
+        self._stub_select_provider(monkeypatch, ["pinecone_ai", "mongodb_atlas"])
+
+        self._stub_pinecone_embed(monkeypatch)
+        self._stub_pinecone_retriever(monkeypatch, raises=True)
+
+        self._stub_cohere_embed(monkeypatch)
+
+        atlas_error = Exception(
+            "PlanExecutor error — vector index 'vector_index' not found"
+        )
+        _, aggregate_calls = self._make_db(
+            monkeypatch,
+            atlas_cursor_factory=lambda p: _AggregateCursor(raise_exc=atlas_error),
+            chapters=[],
         )
 
-        pc_calls = []
+        result = _run(_rag._fetch_chunks_semantic("photosynthesis"))
 
-        class _TrackingPc:
-            def is_configured(self):
-                return True
+        assert result == [], f"Expected [] when both legs fail, got {result!r}"
+        # Both legs were attempted — Pinecone (via mocked retriever) AND Atlas
+        # (db.chunks.aggregate was called and raised inside .to_list)
+        assert len(aggregate_calls) == 1, (
+            "Atlas $vectorSearch must have been attempted exactly once before exclusion"
+        )
 
-            async def query(self, *a, **kw):
-                pc_calls.append(True)
-                return []
+    def test_pinecone_results_bypass_atlas_entirely(self, monkeypatch):
+        """When Pinecone returns a non-empty result on the first draw, the
+        loop returns immediately — Atlas $vectorSearch must never be queried.
 
-        monkeypatch.setattr("retrievers.pinecone_vector.PineconeVectorRetriever", _TrackingPc)
+        This guards the perf contract: healthy Pinecone responses do NOT pay
+        the Atlas latency tax even though Atlas is in the pool.
+        """
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        self._stub_select_provider(monkeypatch, ["pinecone_ai", "mongodb_atlas"])
+
+        self._stub_pinecone_embed(monkeypatch)
+        # Pinecone retriever returns one match with chapter_id metadata
+        self._stub_pinecone_retriever(monkeypatch, results=[
+            {"score": 0.92, "metadata": {
+                "chapter_id": "ch-bio-1",
+                "chapter_title": "Bio",
+                "subject_id": "bio",
+            }}
+        ])
+
+        # Cohere is configured but its embed must never be called (Atlas leg
+        # never runs). We assert this by tracking calls.
+        cohere_embed_calls = []
+
+        import providers.cohere as _co
+        monkeypatch.setattr(_co, "ENABLED", True, raising=False)
+
+        async def _tracking_embed(_text):
+            cohere_embed_calls.append(_text)
+            return _FAKE_QVEC
+        monkeypatch.setattr(_co, "embed_query", _tracking_embed, raising=False)
+
+        chapter_doc = {
+            "id": "ch-bio-1",
+            "title": "Bio",
+            "content": "x",
+            "slug": "bio",
+            "subject_id": "bio",
+        }
+        _, aggregate_calls = self._make_db(monkeypatch, chapters=[chapter_doc])
+
+        result = _run(_rag._fetch_chunks_semantic("cell division"))
+
+        assert len(result) == 1
+        assert result[0]["id"] == "ch-bio-1"
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called when Pinecone returned results"
+        )
+        assert cohere_embed_calls == [], (
+            "Cohere embed must NOT be called when Pinecone returned results"
+        )
+
+    def test_all_embedders_unavailable_returns_empty_without_querying_backends(self, monkeypatch):
+        """When every leg's embedder fails (Pinecone Inference disabled, Cohere
+        disabled), each provider raises in the embed step, the loop excludes
+        them all, the pool empties, and the function returns ``[]`` — without
+        any vector backend (Pinecone retriever or Atlas $vectorSearch) being
+        queried. This is the analogue of the historic "no Cohere → no
+        backend touched" guarantee under the new per-leg embedder design.
+        """
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        self._stub_select_provider(monkeypatch, ["pinecone_ai", "mongodb_atlas"])
+
+        # Both embedders disabled → _try_vector_provider raises in step 1
+        # before any retriever / aggregate call.
+        self._stub_pinecone_embed(monkeypatch, enabled=False)
+        self._stub_cohere_embed(monkeypatch, enabled=False)
+
+        pc_calls = self._stub_pinecone_retriever(monkeypatch)
+        _, aggregate_calls = self._make_db(monkeypatch, chapters=[])
 
         result = _run(_rag._fetch_chunks_semantic("anything"))
+
         assert result == []
-        assert pc_calls == [], "Pinecone must not be queried when embed_query returns no vector"
+        assert pc_calls == [], (
+            "Pinecone retriever must NOT be queried when its embedder is disabled"
+        )
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called when its embedder is disabled"
+        )
+
+    def test_cohere_unavailable_excludes_atlas_leg_without_querying_atlas(self, monkeypatch):
+        """Narrow per-leg embedder-disabled contract.
+
+        Setup:
+          - Pinecone Inference is configured AND raises in the retriever
+            step (so the pinecone_ai leg fails AFTER its own embed succeeds)
+          - Cohere is disabled (``providers.cohere.ENABLED = False``)
+          - The mock pool falls back to mongodb_atlas next
+
+        Expected:
+          - The mongodb_atlas leg fails inside ``_try_vector_provider``'s
+            embed step (Cohere disabled → RuntimeError) BEFORE
+            ``db.chunks.aggregate`` is called.
+          - Atlas $vectorSearch is therefore never queried — the Cohere-
+            unavailable case must not reach the Atlas backend.
+          - The function returns ``[]`` after both legs are excluded.
+
+        This pins the historic "Cohere unavailable → Atlas not touched"
+        contract under the new per-leg embedder design (Pinecone is a
+        separate leg with its own embedder, so it is independently
+        attempted; only the Atlas-backed leg is gated by Cohere).
+        """
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        self._stub_select_provider(monkeypatch, ["pinecone_ai", "mongodb_atlas"])
+
+        # Pinecone leg: embed enabled (so the leg reaches the retriever),
+        # retriever raises (simulated outage). This forces fallback to
+        # mongodb_atlas without short-circuiting at embed time.
+        self._stub_pinecone_embed(monkeypatch, enabled=True)
+        pc_calls = self._stub_pinecone_retriever(monkeypatch, raises=True)
+
+        # Cohere disabled → mongodb_atlas leg's embed step raises.
+        self._stub_cohere_embed(monkeypatch, enabled=False)
+
+        _, aggregate_calls = self._make_db(monkeypatch, chapters=[])
+
+        result = _run(_rag._fetch_chunks_semantic("anything"))
+
+        assert result == []
+        assert len(pc_calls) == 1, (
+            "Pinecone retriever must have been attempted exactly once"
+        )
+        assert aggregate_calls == [], (
+            "Atlas $vectorSearch must NOT be called when Cohere is disabled — "
+            "the mongodb_atlas leg must short-circuit at the embed step"
+        )
+
+    def test_weighted_exclusion_retry_excludes_failed_providers(self, monkeypatch):
+        """Each failed or zero-result provider must be added to the
+        ``exclude`` frozenset on the next ``select_provider`` call.
+
+        Sequence we set up:
+          1st call → pinecone_ai (raises) → excluded
+          2nd call → mongodb_atlas (returns 0 matches) → excluded
+          3rd call → pool exhausted → loop breaks → returns []
+
+        We pin this contract by inspecting the ``exclude`` arg of every
+        ``select_provider`` call recorded by the mock.
+        """
+        import rag as _rag
+
+        self._stub_no_hyde(monkeypatch)
+        select_calls = self._stub_select_provider(
+            monkeypatch, ["pinecone_ai", "mongodb_atlas"],
+        )
+
+        self._stub_pinecone_embed(monkeypatch)
+        self._stub_pinecone_retriever(monkeypatch, raises=True)
+
+        self._stub_cohere_embed(monkeypatch)
+
+        # Atlas $vectorSearch returns 0 matches → triggers exclusion path
+        _, aggregate_calls = self._make_db(
+            monkeypatch,
+            atlas_cursor_factory=lambda p: _AggregateCursor(result=[]),
+            chapters=[],
+        )
+
+        result = _run(_rag._fetch_chunks_semantic("anything"))
+
+        assert result == []
+        # Verify the dispatch progression
+        assert len(select_calls) >= 3, (
+            f"Expected ≥3 select_provider calls (pinecone, atlas, exhausted), "
+            f"got: {select_calls}"
+        )
+        # 1st call: empty exclude
+        assert select_calls[0]["exclude"] == frozenset()
+        # 2nd call: pinecone_ai excluded after retriever raised
+        assert select_calls[1]["exclude"] == frozenset({"pinecone_ai"}), (
+            f"Expected pinecone_ai excluded on 2nd draw, got {select_calls[1]['exclude']}"
+        )
+        # 3rd call: both excluded after Atlas returned 0 matches
+        assert select_calls[2]["exclude"] == frozenset({"pinecone_ai", "mongodb_atlas"}), (
+            f"Expected both providers excluded on 3rd draw, "
+            f"got {select_calls[2]['exclude']}"
+        )
+        # Atlas was attempted exactly once before being excluded
+        assert len(aggregate_calls) == 1
