@@ -82,6 +82,7 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         { name: 'azure-openai-api-key',  keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/AZURE-OPENAI-API-KEY',  identity: 'system' }
         { name: 'mongo-uri',             keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/MONGO-URI',             identity: 'system' }
         { name: 'jwt-secret',            keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/JWT-SECRET',             identity: 'system' }
+        { name: 'admin-jwt-secret',      keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/ADMIN-JWT-SECRET',       identity: 'system' }
         { name: 'razorpay-key-secret',   keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/RAZORPAY-KEY-SECRET',    identity: 'system' }
         // Task #400 — shared secret the backend sends as `X-Embed-Secret` to the
         // Cloudflare embed worker (`embed.syrabit.ai`). Same value as the worker's
@@ -110,6 +111,7 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'AZURE_OPENAI_API_KEY',  secretRef: 'azure-openai-api-key' }
             { name: 'MONGO_URL',             secretRef: 'mongo-uri' }
             { name: 'JWT_SECRET',            secretRef: 'jwt-secret' }
+            { name: 'ADMIN_JWT_SECRET',      secretRef: 'admin-jwt-secret' }
             { name: 'RAZORPAY_KEY_SECRET',   secretRef: 'razorpay-key-secret' }
             { name: 'EMAIL_FROM',            value: 'Syrabit.ai <noreply@syrabit.ai>' }
             { name: 'ENV',                   value: 'production' }
@@ -124,15 +126,17 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
           probes: [
             {
               type: 'Liveness'
-              httpGet: { path: '/health', port: 8000 }
-              initialDelaySeconds: 20
-              periodSeconds: 30
+              httpGet: { path: '/api/health', port: 8000 }
+              initialDelaySeconds: 60
+              periodSeconds: 15
+              failureThreshold: 10
             }
             {
               type: 'Readiness'
-              httpGet: { path: '/health', port: 8000 }
-              initialDelaySeconds: 5
+              httpGet: { path: '/api/health', port: 8000 }
+              initialDelaySeconds: 30
               periodSeconds: 10
+              failureThreshold: 6
             }
           ]
         }

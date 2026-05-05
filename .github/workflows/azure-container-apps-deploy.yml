@@ -183,93 +183,153 @@ jobs:
               exit 1
             fi
             echo "::notice::Deploying $image → $app_name"
-            # Ensure the Container App uses its system-assigned managed
-            # identity to pull from ACR (idempotent — safe to re-apply).
-            az containerapp registry set \
+
+            # Pre-flight cleanup: deactivate any *unhealthy* active
+            # revisions left behind by previous failed runs. They keep
+            # piling up replicas and noise but otherwise don't block
+            # the single-PATCH approach below. Idempotent.
+            echo "::group::Pre-flight: deactivate unhealthy revisions"
+            BROKEN_REVS=$(az containerapp revision list \
               --name "$app_name" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
-              --server "$AZURE_ACR_NAME.azurecr.io" \
-              --identity system
+              --query "[?properties.healthState=='Unhealthy' && properties.active].name" \
+              -o tsv 2>/dev/null || true)
+            if [ -n "$BROKEN_REVS" ]; then
+              for rev in $BROKEN_REVS; do
+                echo "  deactivating $rev"
+                az containerapp revision deactivate \
+                  --name "$app_name" \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --revision "$rev" \
+                  --output none || \
+                  echo "  (failed to deactivate $rev — continuing)"
+              done
+            else
+              echo "  (no unhealthy active revisions found)"
+            fi
+            echo "::endgroup::"
 
-            # Sync the KV-backed secret refs declared in
-            # infra/azure/aca-syrabit-backend.bicep. Idempotent —
-            # `az containerapp secret set` overwrites existing entries.
-            # The Container App's system identity already has
-            # `Key Vault Secrets User` on syrabit-prod-kv (granted out
-            # of band, see runbook section 0a step 7).
-            if [ "$app_name" = "syrabit-backend" ]; then
-              KV_BASE="https://syrabit-prod-kv.vault.azure.net/secrets"
-              az containerapp secret set \
+            # rust-core (and any future non-syrabit-backend app) keeps
+            # the simple two-call CLI flow — no SES migration, no
+            # KV-secret rewrite, no orphan env vars to dodge.
+            if [ "$app_name" != "syrabit-backend" ]; then
+              az containerapp registry set \
                 --name "$app_name" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
-                --secrets \
-                  "aws-access-key-id=keyvaultref:${KV_BASE}/AWS-ACCESS-KEY-ID,identityref:system" \
-                  "aws-secret-access-key=keyvaultref:${KV_BASE}/AWS-SECRET-ACCESS-KEY,identityref:system" \
-                  "azure-openai-api-key=keyvaultref:${KV_BASE}/AZURE-OPENAI-API-KEY,identityref:system" \
-                  "mongo-uri=keyvaultref:${KV_BASE}/MONGO-URI,identityref:system" \
-                  "jwt-secret=keyvaultref:${KV_BASE}/JWT-SECRET,identityref:system" \
-                  "razorpay-key-secret=keyvaultref:${KV_BASE}/RAZORPAY-KEY-SECRET,identityref:system" \
-                  "workers-embed-secret=keyvaultref:${KV_BASE}/WORKERS-EMBED-SECRET,identityref:system"
+                --server "$AZURE_ACR_NAME.azurecr.io" \
+                --identity system
+              az containerapp update \
+                --name "$app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --image "$image" \
+                --revision-suffix "ci-$(date -u +%Y%m%d-%H%M%S)"
+              return 0
             fi
 
-            # Build the env-var spec. Plain values + secretrefs in a
-            # single --set-env-vars call so the new revision sees the
-            # complete environment on first boot.
-            ENV_ARGS=()
-            if [ "$app_name" = "syrabit-backend" ]; then
-              ENV_ARGS=(
-                # Task #400 — Tier-2 email migrated SendGrid → Amazon SES.
-                # EMAIL_PROVIDER=ses selects the boto3 path in
-                # email_templates._send_sync / send_admin_email; flip to
-                # `sendgrid` to roll back without redeploying code.
-                "AWS_ACCESS_KEY_ID=secretref:aws-access-key-id"
-                "AWS_SECRET_ACCESS_KEY=secretref:aws-secret-access-key"
-                "AWS_SES_REGION=us-east-1"
-                "EMAIL_PROVIDER=ses"
-                "AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key"
-                # config.py reads MONGO_URL (with MONGODB_URI fallback);
-                # the bicep mistakenly used MONGO_URI, fixed here.
-                "MONGO_URL=secretref:mongo-uri"
-                "JWT_SECRET=secretref:jwt-secret"
-                "RAZORPAY_KEY_SECRET=secretref:razorpay-key-secret"
-                "WORKERS_EMBED_SECRET=secretref:workers-embed-secret"
-                "EMAIL_FROM=Syrabit.ai <noreply@syrabit.ai>"
-                "ENV=production"
-                "PORT=8000"
-                "WORKERS_EMBED_URL=https://embed.syrabit.ai"
-                "EMBED_PROVIDER_PRIMARY=workers_ai_custom"
-              )
-            fi
+            # ----- syrabit-backend: single authoritative `az rest`
+            # PATCH that mutates secrets + env + image + probes + ACR
+            # registry binding in one ARM transaction. The fragmented
+            # `az containerapp registry set` / `secret set` /
+            # `update --set-env-vars` / `update --image` sequence kept
+            # tripping ARM validation:
+            #   - `registry set` validates the LATEST revision template,
+            #     which in our environment carries env-vars referencing
+            #     secrets that the array no longer holds (orphans from
+            #     earlier half-applied runs), so it 400s with
+            #     ContainerAppSecretRefNotFound before any of our cleanup
+            #     can run.
+            #   - `secret set --secrets …` is a REPLACE in some az CLI
+            #     versions and an UPSERT in others, so the same script
+            #     would behave differently across runners.
+            #   - `update --remove-env-vars X --set-env-vars Y` does a
+            #     PATCH that ARM merges then validates, again hitting
+            #     the orphan-ref check before the merge has settled.
+            # The single-PATCH path below is the documented escape hatch:
+            # GET → mutate the full spec → PATCH/PUT, so ARM only sees
+            # the final state. Task #400.
+            KV_BASE="https://syrabit-prod-kv.vault.azure.net/secrets"
+            SUB_ID="$(az account show --query id -o tsv)"
+            ACA_URL="https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${app_name}?api-version=2024-03-01"
 
-            # Two-call approach (separate `secret set` + `containerapp
-            # update`) — proven to work in run #6. The single-PATCH
-            # alternative was rejected by ARM with
-            # `ContainerAppSecretRefNotFound` because env-secretRef
-            # validation ran against the merged-but-not-yet-committed
-            # secrets array. Cost: this triggers two revisions in
-            # single-revision mode (the second from the probe REST
-            # PATCH below). Acceptable — the post-deploy probe waits
-            # long enough for the second revision to become active.
-            az containerapp update \
-              --name "$app_name" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --image "$image" \
-              --revision-suffix "ci-$(date -u +%Y%m%d-%H%M%S)" \
-              ${ENV_ARGS:+--set-env-vars "${ENV_ARGS[@]}"}
+            echo "::group::Fetch current Container App spec"
+            az rest --method get --url "$ACA_URL" -o json > /tmp/aca-current.json
+            echo "  fetched ($(wc -c < /tmp/aca-current.json) bytes)"
+            echo "::endgroup::"
 
-            # Patch only the probes (path /health → /api/health). Uses
-            # ARM merge-patch on properties.template.containers[0].
-            # initialDelay=60s + failureThreshold=10 gives FastAPI
-            # ~210s to finish heavy imports before the revision is
-            # marked Unhealthy.
-            if [ "$app_name" = "syrabit-backend" ]; then
-              SUB_ID="$(az account show --query id -o tsv)"
-              ACA_URL="https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${app_name}?api-version=2024-03-01"
-              az rest --method get --url "$ACA_URL" --query 'properties.template' -o json > /tmp/aca-template.json
-              jq '.containers[0].probes = [{"type":"Liveness","httpGet":{"path":"/api/health","port":8000},"initialDelaySeconds":60,"periodSeconds":15,"failureThreshold":10},{"type":"Readiness","httpGet":{"path":"/api/health","port":8000},"initialDelaySeconds":30,"periodSeconds":10,"failureThreshold":6}] | {properties: {template: .}}' /tmp/aca-template.json > /tmp/aca-patch.json
-              az rest --method patch --url "$ACA_URL" --body @/tmp/aca-patch.json --headers "Content-Type=application/json" > /dev/null
-              echo "::notice::Patched probes to /api/health on $app_name"
-            fi
+            # Build the new spec with `jq`. We REPLACE the secrets array,
+            # the env array, the image, and the probes. We KEEP the rest
+            # of the spec (identity, ingress, scale rules, etc.) intact.
+            # `--arg image …` and `--arg kv …` are passed in so the JQ
+            # program itself never embeds the values literally.
+            REV_SUFFIX="ci-$(date -u +%Y%m%d-%H%M%S)"
+            echo "::group::Build target spec"
+            jq \
+              --arg image  "$image" \
+              --arg kv     "$KV_BASE" \
+              --arg suffix "$REV_SUFFIX" \
+              --arg acr    "$AZURE_ACR_NAME.azurecr.io" \
+              '
+              .properties.configuration.registries = [{
+                "server":   $acr,
+                "identity": "system"
+              }]
+              | .properties.configuration.secrets = [
+                  {"name":"aws-access-key-id",     "keyVaultUrl": ($kv + "/AWS-ACCESS-KEY-ID"),     "identity":"system"},
+                  {"name":"aws-secret-access-key", "keyVaultUrl": ($kv + "/AWS-SECRET-ACCESS-KEY"), "identity":"system"},
+                  {"name":"azure-openai-api-key",  "keyVaultUrl": ($kv + "/AZURE-OPENAI-API-KEY"),  "identity":"system"},
+                  {"name":"mongo-uri",             "keyVaultUrl": ($kv + "/MONGO-URI"),             "identity":"system"},
+                  {"name":"jwt-secret",            "keyVaultUrl": ($kv + "/JWT-SECRET"),            "identity":"system"},
+                  {"name":"admin-jwt-secret",      "keyVaultUrl": ($kv + "/ADMIN-JWT-SECRET"),      "identity":"system"},
+                  {"name":"razorpay-key-secret",   "keyVaultUrl": ($kv + "/RAZORPAY-KEY-SECRET"),   "identity":"system"},
+                  {"name":"workers-embed-secret",  "keyVaultUrl": ($kv + "/WORKERS-EMBED-SECRET"),  "identity":"system"}
+                ]
+              | .properties.configuration.ingress.traffic = [{"latestRevision": true, "weight": 100}]
+              | .properties.configuration.ingress.targetPort = 8000
+              | .properties.configuration.ingress.transport = (.properties.configuration.ingress.transport // "auto")
+              | .properties.template.revisionSuffix = $suffix
+              | .properties.template.containers = [{
+                  "name":  "syrabit-backend",
+                  "image": $image,
+                  "env": [
+                    {"name":"AWS_ACCESS_KEY_ID",     "secretRef":"aws-access-key-id"},
+                    {"name":"AWS_SECRET_ACCESS_KEY", "secretRef":"aws-secret-access-key"},
+                    {"name":"AWS_SES_REGION",        "value":"us-east-1"},
+                    {"name":"EMAIL_PROVIDER",        "value":"ses"},
+                    {"name":"AZURE_OPENAI_API_KEY",  "secretRef":"azure-openai-api-key"},
+                    {"name":"MONGO_URL",             "secretRef":"mongo-uri"},
+                    {"name":"JWT_SECRET",            "secretRef":"jwt-secret"},
+                    {"name":"ADMIN_JWT_SECRET",      "secretRef":"admin-jwt-secret"},
+                    {"name":"RAZORPAY_KEY_SECRET",   "secretRef":"razorpay-key-secret"},
+                    {"name":"WORKERS_EMBED_SECRET",  "secretRef":"workers-embed-secret"},
+                    {"name":"EMAIL_FROM",            "value":"Syrabit.ai <noreply@syrabit.ai>"},
+                    {"name":"ENV",                   "value":"production"},
+                    {"name":"PORT",                  "value":"8000"},
+                    {"name":"WORKERS_EMBED_URL",     "value":"https://embed.syrabit.ai"},
+                    {"name":"EMBED_PROVIDER_PRIMARY","value":"workers_ai_custom"}
+                  ],
+                  "resources": (.properties.template.containers[0].resources // {"cpu":1,"memory":"2Gi"}),
+                  "probes": [
+                    {"type":"Liveness", "httpGet":{"path":"/api/health","port":8000},"initialDelaySeconds":60,"periodSeconds":15,"failureThreshold":10},
+                    {"type":"Readiness","httpGet":{"path":"/api/health","port":8000},"initialDelaySeconds":30,"periodSeconds":10,"failureThreshold":6}
+                  ]
+                }]
+              ' /tmp/aca-current.json > /tmp/aca-target.json
+            echo "  built ($(wc -c < /tmp/aca-target.json) bytes)"
+            # Echo the (sanitized) env / secret names for debug — values
+            # are KV refs not literals so this is safe.
+            jq '{ingress: .properties.configuration.ingress,
+                 secrets: [.properties.configuration.secrets[].name],
+                 env:     [.properties.template.containers[0].env[] | {name, value: (.value // ""), secretRef}]}' \
+              /tmp/aca-target.json
+            echo "::endgroup::"
+
+            echo "::group::Apply spec via single ARM PATCH"
+            az rest --method patch --url "$ACA_URL" \
+              --body @/tmp/aca-target.json \
+              --headers "Content-Type=application/json" \
+              -o json > /tmp/aca-patched.json
+            echo "  PATCH returned ($(wc -c < /tmp/aca-patched.json) bytes)"
+            echo "::endgroup::"
 
             # Diagnostic: show all revisions so failures are visible.
             az containerapp revision list \
