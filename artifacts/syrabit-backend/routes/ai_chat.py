@@ -1514,6 +1514,26 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
         if _raw_anon and re.match(r"^anon_[a-f0-9]{32}$", _raw_anon):
             anon_id = _raw_anon
 
+    # Task #407 — ChatSession DO read keyed on conversation_id; in-process
+    # fallback when DO_CHAT_ON is unset or the edge is unreachable. Mirrors
+    # the non-streaming path (line 686) so a session that flips between the
+    # /ai/chat and /ai/chat/stream endpoints sees the same edge-cached
+    # state, and so the cf-health snapshot's session_get_total counter
+    # actually moves on streaming traffic.
+    _do_session_state: dict = {}
+    try:
+        from do_chat import is_enabled as _do_enabled, get_session as _do_get
+        if _do_enabled() and msg.conversation_id:
+            _do_session_state = (await _do_get(msg.conversation_id)) or {}
+            if _do_session_state:
+                logger.info(
+                    "[STREAM][DO-SESSION] resumed conv_id=%s prev_provider=%s",
+                    msg.conversation_id,
+                    _do_session_state.get("last_provider", ""),
+                )
+    except Exception as _do_err:
+        logger.debug("[STREAM][DO-SESSION] read failed (non-fatal): %s", _do_err)
+
     safe_prompt, fallback_msg, guardrail_tag = evaluate_prompt_safety(msg.message)
     if safe_prompt is not None:
         _llm_safety_tag = await llm_classify_safety(safe_prompt)
@@ -3283,6 +3303,40 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
                         geo_score_boost=_enhanced_result.get("geo_score_boost", 0.0) if _enhanced_result else 0.0,
                         cognitive_anchor=_enhanced_result.get("metadata", {}).get("framework_used") if _enhanced_result else None,
                     ))
+                    # Task #407 — mirror the latest streaming turn into the
+                    # ChatSession DO so a follow-up request hitting either
+                    # the streaming or non-streaming endpoint sees the same
+                    # last_provider / last_assistant_answer at the edge.
+                    # Best-effort: a DO outage falls back to in-process and
+                    # must never break the SSE response.
+                    try:
+                        from do_chat import (
+                            is_enabled as _do_enabled_put,
+                            put_session as _do_put,
+                        )
+                        if _do_enabled_put() and conv_id:
+                            _stream_session_payload = {
+                                "conversation_id": conv_id,
+                                "user_id": str(user_id) if user_id else "",
+                                "last_user_message": (user_msg_saved or "")[:4000],
+                                "last_assistant_answer": (
+                                    str(answer)[:8000] if answer is not None else ""
+                                ),
+                                "last_provider": locals().get("_stream_provider", "") or "",
+                                "subject_id": msg.subject_id or "",
+                                "subject_name": msg.subject_name or "",
+                                "board_name": _src_board_s or "",
+                                "class_name": _src_class_s or "",
+                                "ts": int(_time_mod.time()),
+                            }
+                            asyncio.create_task(
+                                _do_put(conv_id, _stream_session_payload, ttl=1800)
+                            )
+                    except Exception as _do_put_err:
+                        logger.debug(
+                            "[STREAM][DO-SESSION] put failed (non-fatal): %s",
+                            _do_put_err,
+                        )
                     asyncio.create_task(_log_chat_message(
                         user_id=user_id,
                         question=user_msg_saved,

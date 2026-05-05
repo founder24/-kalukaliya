@@ -467,39 +467,34 @@ async def rate_limit_chat_optional(
         plan = user.get("plan", "free")
         plan_cfg = PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
         limit = plan_cfg["req_per_min"]
-        # Task #386 — when DO_CHAT_ON is set, the per-minute throttle
-        # is checked against the global RateLimiter Durable Object so
-        # a user that switches between regions / pods cannot reset
-        # their counter. The helper transparently falls back to the
-        # in-process bucket when the edge is unreachable, so we
-        # *also* keep the existing local check as the source of truth
-        # — both must allow the request. This belt-and-braces
-        # approach matches the rollback story in RUNBOOK.md (flag
-        # off ⇒ behaviour identical to before).
+        # Task #407 — ``do_chat.rate_check`` is the SOLE per-minute
+        # authority for chat traffic. The helper transparently falls
+        # back to its in-process token bucket when DO_CHAT_ON is unset
+        # or the edge is unreachable, so we no longer double-gate
+        # against ``check_rate_limit`` (which used to produce
+        # inconsistent 429s across pods because each pod had its own
+        # local sliding window).
         try:
-            from do_chat import is_enabled as _do_enabled, rate_check as _do_rate
-            if _do_enabled():
-                allowed, _remaining = await _do_rate(
-                    f"chat:{user_id}", limit=limit, window_s=60,
-                )
-                if not allowed:
-                    raise HTTPException(
-                        status_code=429,
-                        detail=f"Chat rate limit exceeded — {limit} messages/minute ({plan} plan). Upgrade for higher limits.",
-                        headers={"Retry-After": "60", "X-RateLimit-Limit": str(limit), "X-RateLimit-Source": "do"},
-                    )
+            from do_chat import rate_check as _do_rate
+            allowed, _remaining = await _do_rate(
+                f"chat:{user_id}", limit=limit, window_s=60,
+            )
         except HTTPException:
             raise
         except Exception:
-            # do_chat failed catastrophically — fall through to the
-            # in-process gate; never block a paying user because the
-            # edge dispatch broke.
-            pass
-        if not check_rate_limit(f"chat:{user_id}", max_requests=limit, window_seconds=60):
+            # rate_check itself crashed (not just an edge outage —
+            # that already falls back internally). Fail open rather
+            # than block a paying user on a helper bug.
+            allowed = True
+        if not allowed:
             raise HTTPException(
                 status_code=429,
                 detail=f"Chat rate limit exceeded — {limit} messages/minute ({plan} plan). Upgrade for higher limits.",
-                headers={"Retry-After": "60", "X-RateLimit-Limit": str(limit)},
+                headers={
+                    "Retry-After": "60",
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Source": "do_chat",
+                },
             )
         return user
 
@@ -551,12 +546,32 @@ async def rate_limit_chat_optional(
         token_id = device_token_id(new_cookie)
 
     # ── 2. Per-minute throttle (device-scoped when possible) ─────────
+    # Task #407 — ``do_chat.rate_check`` is the sole per-minute
+    # authority for anon chat traffic. The helper falls back to its
+    # in-process bucket when DO_CHAT_ON is off or the edge is
+    # unreachable, so we no longer also call ``check_rate_limit``
+    # (which gave inconsistent throttling across pods).
     rl_key = f"chat:dev:{token_id}" if token_id else f"chat:ip:{ip}"
-    if not check_rate_limit(rl_key, max_requests=per_min_cap, window_seconds=60):
+    try:
+        from do_chat import rate_check as _do_rate
+        allowed_do, _rem_do = await _do_rate(
+            rl_key, limit=per_min_cap, window_s=60,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        # Fail open on a helper crash — never 429 a real user because
+        # ``do_chat.rate_check`` itself broke.
+        allowed_do = True
+    if not allowed_do:
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Sign in for higher limits.",
-            headers={"Retry-After": "60"},
+            headers={
+                "Retry-After": "60",
+                "X-RateLimit-Limit": str(per_min_cap),
+                "X-RateLimit-Source": "do_chat",
+            },
         )
 
     # ── 3. Coarse per-IP abuse cap ───────────────────────────────────

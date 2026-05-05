@@ -22,7 +22,7 @@ from config import (
 from deps import pwd_ctx
 from auth_deps import (
     get_current_user, create_access_token, create_refresh_token,
-    get_user_credits, get_current_user_optional,
+    get_user_credits, get_current_user_optional, _real_client_ip,
 )
 # Task #383 — Turnstile dependency. Dormant when TURNSTILE_ON is false
 # so the dependency can ship in production ahead of flipping the flag.
@@ -51,6 +51,35 @@ async def signup(
     response: Response,
     syrabit_device: Optional[str] = Cookie(default=None),
 ):
+    # Task #407 — per-IP signup rate gate routed through the shared
+    # ``do_chat.rate_check`` helper. Backed by the global RateLimiter
+    # Durable Object when DO_CHAT_ON is set (so a scripted client cannot
+    # rotate across regions to reset its counter), with the in-process
+    # token-bucket as a safe fallback when the edge is unreachable.
+    # Tight window (5 signup attempts / 5 min / IP) — Turnstile already
+    # gates this endpoint, so this is the secondary anti-abuse layer.
+    _signup_ip = _real_client_ip(request)
+    if _signup_ip and _signup_ip != "unknown":
+        try:
+            from do_chat import rate_check as _do_rate_check
+            allowed, _remaining = await _do_rate_check(
+                f"signup:ip:{_signup_ip}", limit=5, window_s=300,
+            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        "Too many signup attempts from this network. "
+                        "Please wait a few minutes and try again."
+                    ),
+                    headers={"Retry-After": "300", "X-RateLimit-Limit": "5"},
+                )
+        except HTTPException:
+            raise
+        except Exception as _rate_err:
+            # Never block a real signup because rate_check itself crashed.
+            logger.debug("signup rate_check skipped: %s", _rate_err)
+
     existing = await supa_get_user(data.email.lower())
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")

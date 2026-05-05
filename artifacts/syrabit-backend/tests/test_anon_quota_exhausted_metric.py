@@ -62,6 +62,14 @@ def _install_fake_redis(monkeypatch):
     # Disable the per-minute throttle so we exercise only the daily
     # quota path (the per-minute logic has its own test surface).
     monkeypatch.setattr(auth_deps, "check_rate_limit", lambda *a, **kw: True)
+    # Task #407 — the per-minute throttle now flows through
+    # ``do_chat.rate_check``; stub it so daily-quota tests can fire
+    # the dependency many times in a tight loop without tripping the
+    # in-process token bucket.
+    import do_chat as _do_chat_mod
+    async def _allow_all(*_a, **_kw):
+        return True, 999
+    monkeypatch.setattr(_do_chat_mod, "rate_check", _allow_all)
 
     # Reset metric state. Hold the lock so we don't race a snapshot
     # collector that might be live in the test interpreter.
