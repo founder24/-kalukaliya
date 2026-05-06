@@ -354,6 +354,16 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   const [seoLive, setSeoLive] = useState(null);
   const [seoLiveLoading, setSeoLiveLoading] = useState(false);
   const [seoLiveError, setSeoLiveError] = useState(null);
+  // Task #461 — manual D1 sync trigger + post-sync result rendering.
+  // The backend (`POST /admin/d1-sync`, see admin_content.py) returns
+  // the primary `sync_full` result merged with an `extended_mirror`
+  // sub-block: `{ success, tables[], row_counts{}, reason? }`. Until
+  // this state landed the UI dropped the extended-mirror block on the
+  // floor, forcing operators to inspect the network tab to see if the
+  // seo_meta / audit_log / syllabus_map mirror actually succeeded.
+  const [d1SyncRunning, setD1SyncRunning] = useState(false);
+  const [d1SyncResult, setD1SyncResult] = useState(null);
+  const [d1SyncError, setD1SyncError] = useState(null);
   // Task #299: which sitemap row is currently expanded to show its
   // failing URL list. Only one is open at a time to keep the card compact.
   const [expandedSitemap, setExpandedSitemap] = useState(null);
@@ -2438,6 +2448,47 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                   </>
                 );
               })()}
+              <button
+                type="button"
+                data-testid="d1-sync-trigger"
+                disabled={d1SyncRunning}
+                onClick={async () => {
+                  setD1SyncRunning(true);
+                  setD1SyncError(null);
+                  try {
+                    const res = await axios.post(
+                      `${API_BASE}/admin/d1-sync`,
+                      null,
+                      adminHdr(adminToken),
+                    );
+                    setD1SyncResult(res?.data ?? {});
+                    const data = res?.data || {};
+                    const primary = data.primary || data;
+                    const ext = data.extended_mirror;
+                    if (primary && primary.success === false) {
+                      toast.error(`D1 sync failed: ${primary.reason || 'unknown reason'}`);
+                    } else if (ext && ext.success === false) {
+                      toast.error(`Extended mirror failed: ${ext.reason || 'unknown reason'}`);
+                    } else {
+                      toast.success('D1 sync complete');
+                    }
+                  } catch (e) {
+                    const detail = e?.response?.data?.detail || e?.message || 'D1 sync failed';
+                    setD1SyncResult(null);
+                    setD1SyncError(typeof detail === 'string' ? detail : JSON.stringify(detail));
+                    toast.error(`D1 sync failed: ${typeof detail === 'string' ? detail : 'see console'}`);
+                  } finally {
+                    setD1SyncRunning(false);
+                  }
+                }}
+                className="ml-1 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Trigger MongoDB → D1 sync (primary + extended mirror)"
+              >
+                {d1SyncRunning
+                  ? <Loader2 size={11} className="animate-spin" />
+                  : <RefreshCw size={11} />}
+                {d1SyncRunning ? 'Syncing…' : 'Sync now'}
+              </button>
               {seoLive.content_stats?.last_content_update && (
                 <span className="ml-auto text-[11px] text-gray-500">
                   <Clock size={11} className="inline mr-1 -mt-0.5" />
@@ -2445,6 +2496,141 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                 </span>
               )}
             </div>
+
+            {/*
+              Task #461 — surface the post-sync result so operators can see
+              both the primary sync_full outcome and the extended mirror
+              (seo_meta / audit_log / syllabus_map) summary returned by
+              `POST /admin/d1-sync` without having to inspect the network
+              tab. A failed extended_mirror surfaces the `reason` string
+              the backend returned (flag_off, empty_payload, primary
+              target failure, exception class) instead of being silently
+              dropped.
+            */}
+            {(d1SyncResult || d1SyncError) && (
+              <div
+                className="mt-3 p-3 rounded-lg border border-gray-200 bg-gray-50"
+                data-testid="d1-sync-result"
+              >
+                {(() => {
+                  const _primary = d1SyncResult ? (d1SyncResult.primary || d1SyncResult) : null;
+                  const _ext = d1SyncResult ? d1SyncResult.extended_mirror : null;
+                  const overallFailed =
+                    !!d1SyncError
+                    || (_primary && _primary.success === false)
+                    || (_ext && _ext.success === false);
+                  return (
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-600">
+                        Last manual sync
+                      </span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold uppercase tracking-wider ${
+                          overallFailed
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}
+                        data-testid="d1-sync-result-status"
+                      >
+                        {overallFailed ? 'failed' : 'ok'}
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                {d1SyncError && (
+                  <p
+                    className="text-[11px] text-red-600 break-all"
+                    data-testid="d1-sync-error"
+                  >
+                    {d1SyncError}
+                  </p>
+                )}
+
+                {d1SyncResult && (() => {
+                  const primary = d1SyncResult.primary || d1SyncResult;
+                  const ext = d1SyncResult.extended_mirror;
+                  const primaryRows = primary?.row_counts || primary?.tables_synced || null;
+                  return (
+                    <>
+                      <div className="text-[11px] text-gray-700 font-mono mb-2">
+                        primary:{' '}
+                        {primary?.success === false ? (
+                          <span className="text-red-600">failed</span>
+                        ) : (
+                          <span className="text-emerald-700">ok</span>
+                        )}
+                        {typeof primary?.total === 'number' && (
+                          <span className="text-gray-500"> · {primary.total.toLocaleString()} rows</span>
+                        )}
+                        {primary?.reason && (
+                          <span className="text-red-600"> · {primary.reason}</span>
+                        )}
+                      </div>
+                      {primaryRows && typeof primaryRows === 'object' && (
+                        <ul className="text-[10px] text-gray-600 font-mono mb-2 grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5">
+                          {Object.entries(primaryRows).map(([t, c]) => (
+                            <li key={`prim-${t}`}>
+                              <span className="text-gray-400">{t}:</span>{' '}
+                              {Number(c).toLocaleString()}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {ext && (
+                        <div
+                          className="mt-2 pt-2 border-t border-gray-200"
+                          data-testid="d1-sync-extended-mirror"
+                        >
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[11px] font-semibold text-gray-700">
+                              Extended mirror
+                            </span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold uppercase tracking-wider ${
+                                ext.success
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-red-50 text-red-700 border-red-200'
+                              }`}
+                              data-testid="d1-sync-extended-mirror-status"
+                            >
+                              {ext.success ? 'ok' : 'failed'}
+                            </span>
+                            {Array.isArray(ext.tables) && ext.tables.length > 0 && (
+                              <span className="text-[10px] text-gray-500 font-mono">
+                                {ext.tables.length} table{ext.tables.length === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </div>
+                          {!ext.success && ext.reason && (
+                            <p
+                              className="text-[11px] text-red-600 break-all"
+                              data-testid="d1-sync-extended-mirror-reason"
+                            >
+                              {ext.reason}
+                            </p>
+                          )}
+                          {ext.row_counts && typeof ext.row_counts === 'object' && Object.keys(ext.row_counts).length > 0 && (
+                            <ul
+                              className="text-[10px] text-gray-600 font-mono grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5"
+                              data-testid="d1-sync-extended-mirror-rows"
+                            >
+                              {Object.entries(ext.row_counts).map(([t, c]) => (
+                                <li key={`ext-${t}`}>
+                                  <span className="text-gray-400">{t}:</span>{' '}
+                                  {Number(c).toLocaleString()}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
           </>
         )}
       </GlassCard>
