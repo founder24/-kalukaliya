@@ -122,39 +122,56 @@ The application serves as a comprehensive study companion for Assam Board studen
 
 | Technology | Notes |
 |---|---|
-| FastAPI | Python 3.10+, fully async |
-| Pydantic | Request/response validation models |
-| JWT | Dual-secret authentication (user + admin) |
-| Google OAuth 2.0 | Social login integration |
-| SSE (Server-Sent Events) | Streaming AI responses |
+| FastAPI | Python 3.11, fully async, served by Gunicorn (Uvicorn workers) on Azure ACA `eastus2`. |
+| Pydantic | Request/response validation models. |
+| JWT | Dual-secret authentication (`JWT_SECRET` for user, `ADMIN_JWT_SECRET` for admin — never share). |
+| Google OAuth 2.0 | Social login integration. |
+| SSE (Server-Sent Events) | Streaming AI responses. |
+| Rust core | Async-batch worker on a separate ACA app (`rust-core`), off the chat hot path. |
 
-### Databases
+### Databases (V4 §11 storage roles)
 
 | Database | Purpose |
 |---|---|
-| PostgreSQL | Primary relational — users, conversations, activity logs, notifications, password resets |
-| MongoDB Atlas | Content, syllabus, RAG chunks, SEO pages, analytics, config, payments |
-| Redis / Upstash | Session caching, rate limiting, AI response caching |
-| Supabase | Legacy mirror for users/conversations durability |
+| **MongoDB Atlas** (`ap-south-1`, AWS-peered VPC) | Source of truth for user data — `conversations`, `user_profile`, `chunks` (metadata + Pinecone ID only), `chat_memory_brain`. **Stores no embeddings.** |
+| **Pinecone** (`aws-ap-south-1`) | Embeddings — namespace `cached_gemma_today` (Gemma-300M 1024-dim) + namespace `fallback_vertex_pending_reembed` (Vertex multilingual; queued for re-embed). |
+| **Cloudflare D1** | SEO meta, audit logs, syllabus map (read-before-Mongo for V4 vectorless RAG tier-1, V4 §5). |
+| **Cloudflare Vectorize** | Edge RAG cache only — never primary store. |
+| **Cloudflare R2** | Chapter PDFs, audio, exports, **final backups** (S3 dumps sync into R2 nightly). |
+| **AWS S3** | Temp dumps and intermediate exports only. |
+| **Redis (Upstash)** | Hot counter for credit-burn meter (V4 §10 Rule C) and translation cache. |
+| ~~PostgreSQL~~ | **Removed in V4** — Mongo Atlas is the SoT for user data. |
+| ~~Supabase~~ | **Removed in V4** — legacy auth mirror was decommissioned in Task #347. |
 
-### AI/LLM Providers (multi-provider with fallback)
+### AI / LLM Providers — V4 dispatch (V4 §3 / §4)
 
-| Provider | Models / Purpose |
+| Provider | Role |
 |---|---|
-| Groq | Llama 3.1/3.3 — primary fast inference |
-| Google Gemini / Vertex AI | Embeddings (`text-multilingual-embedding-002`), Vision OCR, content enhancement |
-| Sarvam AI | Regional language support, translation, TTS |
-| Fireworks AI | DeepSeek, Qwen models |
-| Cerebras | Ultra-fast Llama inference |
-| OpenRouter / OpenAI / xAI | Fallback providers |
+| **Cloudflare Workers AI** | Embedding **primary** (EmbeddingGemma-300M + Qwen3-0.6B mean-pooled to 1024-dim); chat short / low-risk turns (Qwen3-0.6B); chat 5xx fallback (Mistral-7B / Llama-3.2-3B); IndicTrans2 translation fallback. |
+| **Vertex AI (GCP)** | Chat **co-primary** for long / high-risk turns (Gemini 2.5 Flash via AI Gateway BYOK); embedding **failover** (multilingual; writes only to `fallback_vertex_pending_reembed` namespace); Gemini RAI batch-only for `exam_model_paper`. |
+| **Azure OpenAI** | Chat secondary (`gpt-4.1-mini` in `eastus2`) — takes over on Vertex 429 / quota exhaust. |
+| **Sarvam AI** | Assamese / Indic chat **primary** (weight 10000). |
+| **Llama-Guard-2** | Moderation **primary**, self-hosted on the Azure ACA compute. |
+| **Azure AI Content Safety** | Moderation **secondary** (parallel pre-filter). |
+| **Deepgram / ElevenLabs / Cartesia** | STT / TTS / alternate TTS. |
+| ~~Groq, Fireworks, Cerebras, OpenRouter, OpenAI direct, xAI/Grok, Anthropic, AWS Bedrock direct~~ | **Removed in Task #347** — never re-add without a V5 spec change. |
 
-### Infrastructure
+### Infrastructure (V4 §0 cost-share: 40 CF / 30 Azure / 20 AWS / 10 GCP)
 
 | Service | Purpose |
 |---|---|
-| Cloudflare Pages | Frontend hosting |
-| Cloudflare AI Gateway | LLM request routing, caching, fallback |
-| Replit | Backend hosting |
+| **Cloudflare Pages** (`syrabit-web`) | Frontend SSR for `syrabit.ai` and `chat.syrabit.ai`. |
+| **Cloudflare Worker** (`syrabit-edge-proxy`, `workers/edge-proxy/`) | Fronts `api.syrabit.ai`; injects `ORIGIN_SHARED_SECRET` + `traceparent` / `baggage`; routes to Azure ACA. |
+| **Cloudflare Worker** (`syrabit-embed-worker`, `artifacts/syrabit/workers/embed-worker/`) | Hosts EmbeddingGemma-300M + Qwen3-0.6B at `embed.syrabit.ai` (+ staging). |
+| **Cloudflare AI Gateway** (`syrabit-aig`) | BYOK to Vertex Gemini + Azure OpenAI; `cf-aig-cost` headers feed credit-burn meter (V4 §10 Rule C). |
+| **Azure Container Apps** (`syrabit-backend`, `eastus2`) | Live HTTP backend. **Explicit accepted SPOF** (V4 §8); manual `westus3` re-deploy on regional outage. |
+| **Azure Container Apps** (`rust-core`, `eastus2`) | Async-batch worker. |
+| **Azure Key Vault** (`syrabit-prod-kv`) | Source of truth for all secrets (V4 §6); AWS Secrets Manager + Cloudflare Secrets are read-only replicas synced daily by Terraform-CI with SHA-256 hash validation. |
+| **AWS Lambda + SQS + EventBridge** (`ap-south-1`) | Re-embed queue worker (V4 §3), batch ops, observability. |
+| **Sentry Performance** | End-to-end trace owner across CF Worker → Azure ACA → Lambda → Vertex / Pinecone / Mongo (V4 §7). |
+| ~~Replit~~ | **Removed** — backend hosting moved to Azure ACA in the V4 cutover (`artifacts/syrabit/docs/infra/aca-cutover.md`). |
+| ~~DigitalOcean App Platform~~ | **Removed** — fully purged 2026-05-06. |
+| ~~Railway~~ | **Removed** — Task #336. |
 
 ---
 
@@ -971,30 +988,34 @@ Context is gathered from multiple tiers, each progressively broader:
 
 4. **No External Link Injection:** The AI does not include external links in responses — all source references point to internal Syrabit.ai content pages.
 
-### 6e. LLM Infrastructure
+### 6e. LLM Infrastructure (V4 §4)
 
-**Smart Key Pool:** Load-balances API requests across all configured provider keys. Distributes calls to avoid per-key rate limits.
+The chat hot path is dispatched **per turn** by a token-length + risk-score router in the Cloudflare edge worker. Moderation pre-filters with **Llama-Guard-2** on the Azure ACA compute (primary) and **Azure AI Content Safety** in parallel (secondary). **Vertex Gemini RAI** is batch / async only for `content_type=exam_model_paper` and never blocks a live turn.
 
-**Speed Tier Ordering (fastest first):**
-1. Cerebras — Ultra-fast Llama inference
-2. Groq — Fast Llama 3.1/3.3 inference
-3. Fireworks AI — DeepSeek, Qwen models
-4. Sarvam AI — Regional language models
-5. Google Gemini — Vertex AI
-6. OpenRouter — Fallback aggregator
+**English chat dispatch (locked order):**
 
-**Cloudflare AI Gateway:**
-- Routes LLM requests through Cloudflare for caching, analytics, and automatic fallback
-- Caches identical requests to reduce latency and cost
-- Provides request logging and token usage analytics
+1. **Short / low-risk turn → Workers-AI Qwen3-0.6B** (edge inference, <200 ms).
+2. **Long / high-risk turn → Vertex Gemini 2.5 Flash** (BYOK via Cloudflare AI Gateway). Co-primary with Workers-AI.
+3. On Vertex 429 / quota exhaust → **Azure OpenAI `gpt-4.1-mini`** (`eastus2`).
+4. On 5xx from above → **Workers-AI Mistral-7B / Llama-3.2-3B** (edge fallback).
 
-**Fallback Behavior:**
-- If the primary provider fails mid-stream, the system automatically retries with the next provider in the speed-priority order
-- The user does not see the failover — streaming continues seamlessly
-- Identical queries within a 15ms window are batched/deduped to prevent duplicate API calls
+**Assamese / Indic chat dispatch:**
 
-**Model Selection:**
-The frontend provides a `ModelSelector` component allowing users to choose models. The default model is `openai/gpt-oss-20b`. The selected model is sent as part of the chat request payload.
+1. **Sarvam Indic chat** (primary, weight 10000).
+2. **Workers-AI IndicTrans2** (fallback, weight 0; reachable only via exclusion-redraw).
+
+**Cloudflare AI Gateway (`syrabit-aig`):**
+- BYOK paths to Vertex Gemini and Azure OpenAI.
+- `cf-aig-cost`, `cf-aig-cache`, `cf-aig-model` response headers feed the credit-burn meter (V4 §10 Rule C — notify-only Slack alert at 80 % of the provider credit pool).
+
+**Three independent fallback rules (V4 §10):**
+- **Rule A — RPM exhaustion:** sliding-window 1-min counter exceeds quota → auto-flip `CHAT_FALLBACK=1`.
+- **Rule B — Hot-path 5xx:** ≥3 consecutive 5xx in 30 s → auto-flip `CHAT_FALLBACK=1`.
+- **Rule C — Credit-burn:** 365-day rolling cost crosses 80 % of provider credit pool → notify-only Slack alert in `#syrabit-oncall`. Manual decision to flip provider weights.
+
+**Latency budget (V4 §9):** total p95 chat turn `<2.5 s`, including moderation + RAG. Pinecone in `aws-ap-south-1` keeps the RAG hop `<50 ms` inside the India region.
+
+**Removed in Task #347:** Groq, Fireworks AI, Cerebras, OpenRouter, OpenAI direct, xAI/Grok, Anthropic, AWS Bedrock direct. The v3 default model `openai/gpt-oss-20b` is removed; the V4 router selects models server-side based on token length + risk score, not user-supplied model strings.
 
 ### 6f. Credit System
 
@@ -1187,27 +1208,25 @@ Pages are auto-generated for high-intent educational topics from the syllabus:
 - Webhook integration for payment verification
 - Payment records stored in MongoDB `payments` collection
 
-### Stripe (USD — International Payments)
+### ~~Stripe (USD — International Payments)~~ — **Removed in V4 (Task #347)**
 
-| Plan | Price | Credits |
-|---|---|---|
-| Starter | $1.99 | 300 / month |
-| Pro | $12.99 | 4000 / month + full document access |
-
-- Stripe Checkout Sessions for payment flow
-- `payment/success` and `payment/cancel` redirect pages
-- Webhook integration for async payment confirmation
+Stripe was decommissioned in Task #347. **Razorpay (INR-only) is the
+sole payment gateway in V4.** USD plans, Stripe Checkout Sessions,
+`payment/success` / `payment/cancel` Stripe redirect pages, and the
+Stripe webhook routes on the edge proxy were all removed. The
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` env vars are actively
+rejected by the secrets-sync pipeline (`docs/SECRET_ROTATION.md` §5).
 
 ### Credit Top-Ups
 
-- Users can purchase additional credits beyond their plan limits
-- Top-up purchases processed through the same Razorpay/Stripe gateways
+- Users can purchase additional credits beyond their plan limits.
+- Top-up purchases processed through Razorpay (INR-only — Stripe was removed in Task #347).
 
 ### Plan Configuration
 
-- Plan details stored in MongoDB `plan_config` collection
-- Configurable via Admin Panel → Plans & Credits section
-- Prices stored in smallest currency unit (paise for INR, cents for USD)
+- Plan details stored in MongoDB `plan_config` collection.
+- Configurable via Admin Panel → Plans & Credits section.
+- Prices stored in smallest currency unit (paise for INR). USD plans were removed with Stripe in Task #347.
 
 ---
 
@@ -1301,30 +1320,38 @@ Pages are auto-generated for high-intent educational topics from the syllabus:
 
 ---
 
-## 11. Third-Party Integrations Summary
+## 11. Third-Party Integrations Summary (V4-true)
 
 | Service | Purpose | Integration Point |
 |---|---|---|
-| **Groq** | Primary LLM inference (Llama 3.1/3.3 models) | Backend `llm.py` |
-| **Google Gemini / Vertex AI** | Embeddings (`text-multilingual-embedding-002`), Vision OCR, content enhancement | Backend `rag.py`, Admin Vertex Panel |
-| **Sarvam AI** | Regional language support, translation, TTS | Backend, Admin Translation tool |
-| **Fireworks AI** | DeepSeek/Qwen model inference | Backend `llm.py` |
-| **Cerebras** | Ultra-fast Llama inference | Backend `llm.py` |
-| **OpenRouter / OpenAI / xAI** | Fallback LLM providers | Backend `llm.py` |
-| **MongoDB Atlas** | Content database + vector search | Backend `db_ops.py` |
-| **Redis (Upstash)** | Sessions, rate limiting, AI response caching | Backend `cache.py` |
-| **PostgreSQL** | Users, conversations, activity logs | Backend `db_ops.py` |
-| **Supabase** | Legacy data mirror for durability | Backend `db_ops.py` |
-| **Razorpay** | INR payments (Starter ₹99, Pro ₹999) | Backend `routes/admin_monetization.py` |
-| **Stripe** | USD payments (Starter $1.99, Pro $12.99) | Backend `routes/admin_monetization.py` |
-| **Google Analytics 4** | Frontend page tracking + backend event tracking | Frontend `analytics.js`, Admin Analytics |
-| **PostHog** | Product analytics and user behavior tracking | Frontend |
-| **Resend** | Transactional emails (password reset, welcome) | Backend `routes/auth.py` |
-| **Web Push (pywebpush)** | Browser push notifications (VAPID) | Backend, Service Worker |
-| **Cloudflare AI Gateway** | LLM routing, caching, fallback orchestration | Backend `llm.py` |
-| **DuckDuckGo / Tavily** | Web search for AI context (Tier 3 grounding) | Backend `routes/ai_chat.py` |
-| **Google OAuth 2.0** | Social login ("Sign in with Google") | Backend `routes/auth.py`, Frontend Login/Signup |
-| **Playwright / Trafilatura** | Web scraping and content extraction for RAG | Backend |
+| **Cloudflare Workers AI** | Embedding primary (Gemma-300M + Qwen3-0.6B mean-pool 1024-dim); chat short/low-risk (Qwen3-0.6B); chat 5xx fallback (Mistral-7B / Llama-3.2-3B); IndicTrans2 fallback. | Embed worker + edge dispatch |
+| **Vertex AI (GCP)** | Chat co-primary (Gemini 2.5 Flash via AI Gateway BYOK); embedding failover (multilingual → `fallback_vertex_pending_reembed` namespace); Gemini RAI batch-only. | Backend `llm.py`, `rag.py` |
+| **Azure OpenAI** | Chat secondary (`gpt-4.1-mini`, `eastus2`) on Vertex 429/exhaust. | Backend `llm.py` |
+| **Sarvam AI** | Assamese / Indic chat primary (weight 10000). | Backend `llm.py` |
+| **Llama-Guard-2** | Moderation primary, self-hosted on ACA. | Backend moderation pipeline |
+| **Azure AI Content Safety** | Moderation secondary, parallel pre-filter. | Backend moderation pipeline |
+| **Cloudflare AI Gateway** (`syrabit-aig`) | BYOK to Gemini + Azure OpenAI; `cf-aig-cost` headers → credit-burn meter (V4 §10 Rule C). | Edge + backend |
+| **Cloudflare D1 / R2 / KV / Vectorize** | SEO meta + audit + syllabus map (D1); chapter PDFs + audio + final backups (R2); chapter index + flags (KV); edge RAG cache only (Vectorize). | Edge + backend |
+| **MongoDB Atlas** (`ap-south-1`) | SoT for user data — conversations, profile, chunk metadata + Pinecone IDs. **No embeddings.** | Backend `db_ops.py` |
+| **Pinecone** (`aws-ap-south-1`) | Embeddings — `cached_gemma_today` (primary) + `fallback_vertex_pending_reembed` (failover). | Backend `rag.py` |
+| **AWS Lambda + SQS + EventBridge + SES** (`ap-south-1`) | Re-embed queue worker (drains `syrabit-reembed-queue` back to primary namespace, V4 §3); fallback transactional email when SendGrid burn-threshold exceeded. | Lambda + backend SES client |
+| **AWS S3** | Temp dumps + intermediate exports; finals sync nightly to R2. | Backend |
+| **SendGrid (Pro 100k via Azure Marketplace)** | Primary transactional email (`EMAIL_PROVIDER=sendgrid`). | Backend `routes/auth.py` |
+| **Redis (Upstash)** | Hot counter for credit-burn meter; translation cache. | Backend `cache.py` |
+| **Razorpay (INR-only)** | Sole payment gateway in V4 (Starter ₹99, Pro ₹999). | Backend `routes/admin_monetization.py` |
+| **Deepgram / ElevenLabs / Cartesia** | STT / TTS / alternate TTS. | Backend |
+| **Sentry Performance** | End-to-end trace owner; `traceparent` / `baggage` propagated CF → ACA → Lambda → Vertex / Pinecone / Mongo (V4 §7). | Edge + backend |
+| **GCP Cloud Trace** | OTEL long-retention backstop beyond Sentry's 30-day window. | Backend |
+| **Google Web Risk API** | Malicious-URL checks for educational browser. | Backend `url_safety.py` |
+| **Google OAuth 2.0** | Social login. | Backend `routes/auth.py`, Frontend |
+| **Google Analytics 4 / PostHog** | Frontend + backend analytics. | Frontend |
+| **Web Push (pywebpush)** | Browser push notifications (VAPID). | Backend + Service Worker |
+| **DuckDuckGo / Tavily** | Web search for AI context (Tier 3 grounding). | Backend `routes/ai_chat.py` |
+| **Playwright / Trafilatura** | Web scraping + content extraction for RAG. | Backend |
+| ~~Groq, Fireworks AI, Cerebras, OpenRouter, OpenAI direct, xAI/Grok, Anthropic, AWS Bedrock direct~~ | **Removed in Task #347.** | — |
+| ~~Stripe~~ | **Removed in Task #347** — Razorpay INR-only. | — |
+| ~~Resend~~ | **Removed in Task #347** — replaced by SendGrid via Azure Marketplace. | — |
+| ~~PostgreSQL, Supabase~~ | **Removed in V4** — Mongo Atlas is SoT for user data. | — |
 
 ---
 

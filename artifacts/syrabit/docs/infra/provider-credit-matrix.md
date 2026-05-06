@@ -1,5 +1,13 @@
 # Multi-Cloud Credit-Weighted Delegation Matrix
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> v3 credit-weighted delegation matrix; cost-share is now **locked to
+> 40 / 30 / 20 / 10 (CF / Azure / AWS / GCP)** per V4 §0 with single
+> integers (no ranges). Provider sets removed in Task #347 are no longer
+> part of the matrix.
+
 **Last updated:** 2026-05-03
 **Status:** Doc-only audit (Task #303). No dispatcher / refresh job / admin
 panel changes are made by this task — those are listed under

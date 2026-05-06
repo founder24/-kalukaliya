@@ -1,5 +1,12 @@
 # Azure Container Apps cutover runbook (Task #347)
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> historical record of the DigitalOcean → Azure Container Apps cutover
+> (DigitalOcean files purged 2026-05-06); regions, embedding namespaces,
+> providers, and failover semantics are governed by V4 (see V4 §0–§11).
+
 This runbook walks an operator through cutting the Syrabit FastAPI
 backend over from the legacy DigitalOcean App Platform onto Azure Container Apps. (DigitalOcean files purged from the repo on 2026-05-06; this runbook is preserved as the historical cutover record.)
 The motivation is co-location with the Azure OpenAI primary so every

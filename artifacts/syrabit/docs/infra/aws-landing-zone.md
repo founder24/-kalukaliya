@@ -1,5 +1,13 @@
 # AWS Landing Zone Runbook — Async Workers, Queues & SES
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> operator runbook for the AWS landing zone (Lambda + SQS + SES + S3); the
+> Vertex re-embed queue worker that drains `syrabit-reembed-queue` (V4 §3)
+> lives here. Regions, namespaces, providers, and failover semantics are
+> governed by V4 (see V4 §0–§11).
+
 **Status:** Live (Phase 1b of ADR-0001)
 **Owner:** infra
 **Task:** #328

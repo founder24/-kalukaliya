@@ -1,5 +1,12 @@
 # Provider Decommissioning — Task #347 (2026-05-04)
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> operator-facing rationale for each Task #347 vendor removal and its
+> replacement — it is the V4-companion to V4 §0 (cost-share) and the
+> "Removed providers" gotchas in `replit.md`.
+
 This document records why each vendor was removed in Task #347 and what
 its replacement is. It is the operator-facing companion to the deeper
 `provider-credit-matrix.md` and `providers-architecture.md` docs.

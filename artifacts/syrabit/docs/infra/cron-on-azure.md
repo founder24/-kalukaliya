@@ -1,5 +1,11 @@
 # Cron on Azure — runbook
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> operator runbook for cron jobs on Azure (Task #332). Regions, namespaces,
+> providers, and failover semantics are governed by V4 (see V4 §0–§11).
+
 **Status:** active (Phase 4 — Task #332)
 **Owners:** infra@syrabit.ai
 **Pages to:** `azurerm_monitor_action_group.ops_alerts` (see `infra/azure/observability.tf`)

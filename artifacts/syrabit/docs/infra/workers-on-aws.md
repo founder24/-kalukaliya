@@ -1,5 +1,13 @@
 # Workers on AWS — runbook
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> operator runbook for the AWS workers fabric (Phase 4 — Task #332); the
+> SQS + Lambda re-embed queue topology that drains
+> `syrabit-reembed-queue` back into the primary Pinecone namespace is
+> governed by V4 §3.
+
 **Status:** active (Phase 4 — Task #332)
 **Owners:** infra@syrabit.ai
 **Pages to:** `aws_sns_topic.ops_alerts` (see `infra/aws/observability.tf`)

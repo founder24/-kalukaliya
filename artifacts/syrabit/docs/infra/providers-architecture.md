@@ -1,5 +1,15 @@
 # Providers & Architecture
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> v3 four-cloud rebalance map (ADR-0001). The V4 chat dispatch order
+> (token-length + risk-score router → Workers-AI Qwen3-0.6B / Vertex Gemini
+> 2.5 Flash co-primary / Azure OpenAI gpt-4.1-mini / Workers-AI fallbacks),
+> embedding namespace separation (`cached_gemma_today` vs
+> `fallback_vertex_pending_reembed`), and Pinecone region
+> (`aws-ap-south-1`) override anything implied here.
+
 This is the canonical map of *which provider does what* in the
 four-cloud rebalance under [`ADR-0001-four-way-hosting-rebalance.md`](ADR-0001-four-way-hosting-rebalance.md).
 For request-time call-out behaviour and failure modes see the

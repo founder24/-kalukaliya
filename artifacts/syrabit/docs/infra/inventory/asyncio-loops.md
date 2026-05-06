@@ -1,5 +1,12 @@
 # Inventory — In-process `asyncio` background loops on the Python backend
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as a
+> static inventory of in-process `asyncio` loops on the FastAPI backend
+> (snapshot 2026-05-03). Hosting moved to Azure ACA `eastus2` after this
+> snapshot was taken (V4 §0).
+
 **Captured:** 2026-05-03 (source: `artifacts/syrabit-backend/server.py` lines
 1170–1700, plus ripgrep for `asyncio.create_task` across the backend).
 **Method:** static enumeration of every `asyncio.create_task(...)` reached

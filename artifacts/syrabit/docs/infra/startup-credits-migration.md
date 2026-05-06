@@ -1,5 +1,12 @@
 # Startup Credits Migration Runbook
 
+> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
+> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> If anything below disagrees with V4, V4 wins. This doc is preserved as the
+> historical migration runbook for GCP startup credits — the GCP-hosted
+> compute portion was superseded by the four-cloud rebalance
+> (Tasks #330–#335) and locked into V4 §0's 40 / 30 / 20 / 10 cost-share.
+
 **Last updated:** 2026-05-04  
 **Status:** Historical — superseded for the GCP-hosted resources by
 the four-cloud rebalance (Tasks #330–#335). The Cloud Run dispatch

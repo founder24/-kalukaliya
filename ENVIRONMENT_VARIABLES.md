@@ -60,14 +60,12 @@ When the embed-worker health check fails:
 | `ELEVENLABS_API_KEY` | TTS. |
 | `VOYAGE_API_KEY` | `memory_brain` collection embeddings (separate from chunks; voyage-3.5, 1024-dim, Atlas `$vectorSearch`). |
 | `CARTESIA_API_KEY` | Voice TTS (alternate). |
-| `GROQ_API_KEY` | Optional fast-inference fallback (kept at weight 0 in V4 chat dispatch). |
-| `CEREBRAS_API_KEY` | Optional fast-inference fallback (weight 0). |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Hot counter for credit-burn meter (V4 §10) and translation cache. |
 | `GITHUB_TOKEN` | Used by ops scripts only (not by FastAPI runtime). |
 
 ### Removed (Task #347 — never re-add without a V5 spec change)
 
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `BEDROCK_PROXY_AUTH_TOKEN`, `RESEND_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RAILWAY_TOKEN`, `QUGE5_*`.
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `BEDROCK_PROXY_AUTH_TOKEN`, `RESEND_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RAILWAY_TOKEN`, `QUGE5_*`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `FIREWORKS_API_KEY`, `OPENROUTER_API_KEY`.
 
 ---
 
