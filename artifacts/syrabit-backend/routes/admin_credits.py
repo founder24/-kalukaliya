@@ -72,7 +72,11 @@ _CREDIT_REFERENCE: dict[str, int] = {
 }
 
 _PROGRAMME_NAMES: dict[str, str] = {
-    "vertex":        "Google Cloud for Startups",
+    # Task #494 — Vertex Gemini 2.5 Flash is the `content_format` primary
+    # (NotebookLM-style polish). Fallback is Workers-AI Llama-3.3-70b, which
+    # rides the existing Cloudflare Workers AI free tier — no separate
+    # programme entry is required for the fallback.
+    "vertex":        "Google Cloud for Startups (content_format primary)",
     "bedrock":       "AWS Activate",
     "azure_openai":  "Azure for Startups",
     "sarvam":        "Sarvam Startup Credits",

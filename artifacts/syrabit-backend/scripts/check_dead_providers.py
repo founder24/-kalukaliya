@@ -98,6 +98,24 @@ BANNED_VENDOR_USES = re.compile(
 # an LLM provider anywhere in the active routing chain.
 DIRECT_GEMINI = re.compile(r"""os\.environ\.get\(\s*['"]GEMINI_API_KEY""")
 
+# Task #494 — `vertex_format.format_with_vertex` MUST be reached only
+# through the `content_formatter.format_content` dispatcher so the
+# Workers-AI Llama-3.3-70b fallback is never silently bypassed (V4 §15
+# §6). Direct imports from any other module re-introduce the
+# Vertex-only single point of failure that #494 was created to remove.
+DIRECT_VERTEX_FORMAT_IMPORT = re.compile(
+    r"from\s+vertex_format\s+import\s+[^#\n]*\bformat_with_vertex\b"
+    r"|vertex_format\.format_with_vertex\("
+)
+# Files that are allowed to call `format_with_vertex` directly: the
+# dispatcher itself, the module that defines it, and the contract test
+# that pins its signature.
+VERTEX_FORMAT_DIRECT_CALLERS = {
+    "artifacts/syrabit-backend/content_formatter.py",
+    "artifacts/syrabit-backend/vertex_format.py",
+    "artifacts/syrabit-backend/tests/test_vertex_format_contract.py",
+}
+
 ALLOWLIST_PARTS = {
     "attached_assets",
     ".local",
@@ -248,6 +266,13 @@ def _scan_file(p: Path) -> list[str]:
             failures.append(f"{p.relative_to(ROOT)}:{ln}: banned vendor use (Task #347) → {line.strip()[:120]}")
         if is_code and DIRECT_GEMINI.search(line) and p.name != "config.py":
             failures.append(f"{p.relative_to(ROOT)}:{ln}: direct GEMINI_API_KEY env read → {line.strip()[:120]}")
+        if is_code and DIRECT_VERTEX_FORMAT_IMPORT.search(line):
+            rel = p.relative_to(ROOT).as_posix()
+            if rel not in VERTEX_FORMAT_DIRECT_CALLERS:
+                failures.append(
+                    f"{p.relative_to(ROOT)}:{ln}: direct vertex_format.format_with_vertex use "
+                    f"(Task #494: route through content_formatter.format_content) → {line.strip()[:120]}"
+                )
     return failures
 
 
@@ -262,6 +287,31 @@ def main() -> int:
     failures: list[str] = []
     for p in targets:
         if _is_allowlisted(p):
+            # Task #494 — the file-level allowlist exempts legacy banned
+            # tokens (groq/cerebras prose, vendored SDK code) but MUST
+            # NOT exempt the new direct vertex_format ban: every caller
+            # of `vertex_format.format_with_vertex` outside the
+            # dispatcher / module / contract test re-introduces the
+            # Vertex-only single point of failure §15 §6 was created to
+            # remove. Run the vertex_format scan unconditionally for any
+            # code file that is not on VERTEX_FORMAT_DIRECT_CALLERS.
+            rel = p.relative_to(ROOT).as_posix()
+            if (
+                p.suffix in (".py", ".js", ".jsx", ".ts", ".tsx")
+                and rel not in VERTEX_FORMAT_DIRECT_CALLERS
+            ):
+                try:
+                    text = p.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    text = ""
+                for ln, line in enumerate(text.splitlines(), 1):
+                    if DIRECT_VERTEX_FORMAT_IMPORT.search(line):
+                        failures.append(
+                            f"{p.relative_to(ROOT)}:{ln}: direct vertex_format.format_with_vertex use "
+                            f"(Task #494: route through content_formatter.format_content; "
+                            f"file-level allowlist does NOT exempt this check) → "
+                            f"{line.strip()[:120]}"
+                        )
             continue
         failures.extend(_scan_file(p))
 

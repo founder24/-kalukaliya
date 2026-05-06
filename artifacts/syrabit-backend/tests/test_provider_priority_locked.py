@@ -195,26 +195,40 @@ def test_content_workers_ai_primary():
     assert as_counts.get("workers_ai_indic", 0) == draws
     assert as_counts.get("vertex", 0) == 0
 
-    # ---- Stage-2 polish pool (`content_format`) — Vertex-only ----------
+    # ---- Stage-2 polish pool (`content_format`) — Vertex primary +
+    # Workers-AI Llama-3.3-70b sole fallback (Task #494, V4 §15 §6) -----
     polish_weights = POOL_WEIGHTS["content_format"]
-    assert polish_weights == {"vertex": 10000}, (
-        f"content_format must be {{'vertex': 10000}} (Task #490 V4 §15); "
-        f"got {polish_weights}"
+    assert set(polish_weights.keys()) == {"vertex", "workers_ai_llama33_70b"}, (
+        f"content_format must list exactly {{'vertex','workers_ai_llama33_70b'}} "
+        f"(Task #494 V4 §15 §6); got {polish_weights}"
+    )
+    assert polish_weights["vertex"] == 10000
+    assert 0 < polish_weights["workers_ai_llama33_70b"] < polish_weights["vertex"], (
+        "Llama-3.3-70b must be a non-zero but dominated fallback so the "
+        "weighted draw still lands on Vertex deterministically while the "
+        "dispatcher retains an explicit advance path on Vertex outage."
     )
     polish_counts = Counter(select_provider("content_format") for _ in range(200))
-    assert polish_counts.get("vertex", 0) == 200, (
-        f"content_format: every draw must select vertex; got {dict(polish_counts)}"
+    # With vertex weight 10000 vs llama 100, vertex must dominate (>95%).
+    assert polish_counts.get("vertex", 0) >= 190, (
+        f"content_format: weighted draw must overwhelmingly select vertex; "
+        f"got {dict(polish_counts)}"
     )
 
-    # ---- Stage-2 polish helper exists and is callable -----------------
+    # ---- Stage-2 polish helpers exist and are callable -----------------
     assert callable(polish_notes_with_vertex), (
         "llm.polish_notes_with_vertex must exist as a callable — it now "
-        "delegates to vertex_format.format_with_vertex"
+        "delegates to content_formatter.format_content"
+    )
+    from llm import polish_notes_with_format
+    assert callable(polish_notes_with_format), (
+        "llm.polish_notes_with_format must exist as the dict-returning "
+        "Task #494 wrapper that surfaces formatted_by for the audit field"
     )
 
     print(
         "  PASS: content + assamese_content stage-1 is workers-only; "
-        "content_format stage-2 is vertex-only (Task #490)"
+        "content_format stage-2 is vertex(primary)+llama33-70b(fallback) (Task #494)"
     )
 
 

@@ -952,6 +952,19 @@ async def admin_diagnostics(admin: dict = Depends(get_admin_user)) -> dict[str, 
         result["llm_providers"]["workers_ai"] = err_entry
         result["llm_providers"]["gemini"] = err_entry
         result["llm_providers"]["vertex_gemini"] = err_entry
+
+    # Task #494 — content_formatter dispatcher panel. Surfaces the rolling
+    # in-process counts of how many recent polish invocations landed on
+    # Vertex / WAI-Llama-3.3-70b / passthrough so operators can spot a
+    # Vertex outage even when /admin/llm/health still reports it healthy.
+    try:
+        from content_formatter import get_recent_breakdown as _cf_breakdown
+        result["llm_providers"]["content_formatter"] = {
+            "policy": "V4 §15 §6 — Vertex primary → workers_ai_llama33_70b fallback (formatter only)",
+            "recent": _cf_breakdown(),
+        }
+    except Exception as e:
+        result["llm_providers"]["content_formatter"] = {"status": "error", "error": str(e)}
     
     # Check Sarvam status — V4 §15 / Task #492 scopes Sarvam to the
     # `assamese_rag_chat` LLM client only. There is no longer a translate

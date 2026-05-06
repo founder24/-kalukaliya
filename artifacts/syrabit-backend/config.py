@@ -1237,10 +1237,11 @@ PROVIDER_PRIORITY: dict = {
     # Assamese content generation (Task #281): IndicTrans2 only — Vertex
     # is no longer in the chat / content pool. Polish is `content_format`.
     "assamese_content":  ["workers_ai_indic"],
-    # Stage-2 polish / NotebookLM-style formatter — Task #490 dedicated
-    # pool. Vertex Gemini 2.5 Flash is the SOLE entry; this is the only
-    # remaining Vertex surface in syrabit-backend.
-    "content_format":    ["vertex"],
+    # Stage-2 polish / NotebookLM-style formatter — Task #490 / #494.
+    # Vertex Gemini 2.5 Flash is the primary; Workers-AI Llama-3.3-70b is
+    # the SOLE allowed fallback (V4 §15 §6). No third-party formatter is
+    # added. Vertex remains the only direct GCP surface in syrabit-backend.
+    "content_format":    ["vertex", "workers_ai_llama33_70b"],
     # Text-to-speech: ElevenLabs (primary) → Deepgram → Workers AI.
     # Vertex removed (Task #490 — Vertex is content_format only).
     "tts":               ["elevenlabs", "deepgram", "workers_ai"],
@@ -1325,6 +1326,11 @@ PROVIDER_CREDITS: dict = {
     "workers_ai_mistral_7b": 0,  # @cf/mistral/mistral-7b-instruct-v0.3     — balanced English fallback
     "workers_ai_llama32_3b": 0,  # @cf/meta/llama-3.2-3b-instruct           — ultrafast 3B for burst / fast-mode
     "workers_ai_llama31_8b": 0,  # @cf/meta/llama-3.1-8b-instruct-fp8       — Indic chat fallback
+    # Task #494 — V4 utility 70B model (also used for routing/classify/
+    # rewrite). Promoted to a separately-addressable pool entry so the
+    # `content_format` fallback chain can reference it without
+    # accidentally touching the chat hot path.
+    "workers_ai_llama33_70b": 0,  # @cf/meta/llama-3.3-70b-instruct-fp8-fast — content_format fallback
 }
 
 # Per-provider max-concurrent caps. Per-model RPM is derived as
@@ -1366,13 +1372,16 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai":                 0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
     },
     "content_format": {
-        # Task #490 — STAGE 2 (POLISH) — NotebookLM-style formatter pool.
-        # Vertex Gemini 2.5 Flash is the SOLE entry, weight 10000 so the
-        # weighted-draw deterministically selects it. This is the only
-        # remaining Vertex surface in syrabit-backend; if Vertex is down
-        # callers MUST handle the polish failure themselves (V4 §12 — no
-        # silent fallback).
-        "vertex": 10000,
+        # Task #494 — STAGE 2 (POLISH) — NotebookLM-style formatter pool.
+        # Vertex Gemini 2.5 Flash is the dominant primary at weight 10000;
+        # Workers-AI Llama-3.3-70b sits at weight 100 as the SOLE allowed
+        # fallback (V4 §15 §6). The dispatcher in `content_formatter.py`
+        # tries Vertex first and only advances to Llama-3.3-70b on Vertex
+        # 5xx / timeout / breaker-open — Llama-3.3-70b is the V4 utility
+        # 70B model already used for routing/classify/rewrite, so adding a
+        # formatting role is on-spec. NO third-party formatter fallback.
+        "vertex":                 10000,
+        "workers_ai_llama33_70b":   100,
     },
     "english_rag_chat": {
         # Strict primary/fallback (2026-05-05 user instruction): Azure

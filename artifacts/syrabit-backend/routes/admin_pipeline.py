@@ -22,6 +22,7 @@ from llm import (
     call_translate_with_dispatch,
     call_embed_with_dispatch,
     polish_notes_with_vertex,
+    polish_notes_with_format,
 )
 from rag import (
     auto_chunk_content,
@@ -102,7 +103,9 @@ def _trim_long_intro(content: str, max_intro_lines: int = 4) -> str:
     return "\n".join(lines[first_heading_idx:]).strip()
 
 
-async def _polish_notes_with_vertex_safely(raw_notes: str, title: str, subject_name: str) -> str:
+async def _polish_notes_with_vertex_safely(
+    raw_notes: str, title: str, subject_name: str, *, lang: str = "en"
+) -> tuple[str, str]:
     """Stage-2 NotebookLM-style polish — pinned to Vertex / Gemini.
 
     Renamed from ``_polish_notes_with_sarvam`` by Task #492 (V4 §15 Sarvam
@@ -114,16 +117,41 @@ async def _polish_notes_with_vertex_safely(raw_notes: str, title: str, subject_n
     """
     try:
         async with _pipeline_sem:
-            return await polish_notes_with_vertex(
+            res = await polish_notes_with_format(
                 raw_notes,
                 title=title,
                 subject_name=subject_name,
-                lang="en",
+                lang=lang,
                 max_tokens=4000,
             )
+        return (res.get("text") or raw_notes, res.get("formatted_by", "passthrough"))
     except Exception as e:
-        logger.warning(f"[POLISH] Vertex polish failed for '{title}': {e} — keeping raw notes")
-        return raw_notes
+        logger.warning(f"[POLISH] format_content failed for '{title}': {e} — keeping raw notes")
+        return (raw_notes, "passthrough")
+
+
+async def _format_translation_safely(
+    translated: str, *, title: str = "", subject_name: str = ""
+) -> tuple[str, str]:
+    """Task #494 — run an Assamese translation result through the
+    NotebookLM-style content formatter so bulk-translate output gets the
+    same Vertex polish (with Workers-AI Llama-3.3-70b fallback) that
+    English notes get. Soft-fails to the raw translation on dual outage."""
+    if not translated or len(translated.strip()) < 100:
+        return translated, "passthrough"
+    try:
+        async with _pipeline_sem:
+            res = await polish_notes_with_format(
+                translated,
+                title=title,
+                subject_name=subject_name,
+                lang="as",
+                max_tokens=4000,
+            )
+        return (res.get("text") or translated, res.get("formatted_by", "passthrough"))
+    except Exception as e:
+        logger.warning(f"[POLISH-AS] format_content failed for '{title}': {e} — keeping raw translation")
+        return (translated, "passthrough")
 
 
 def _validate_mcq_output(result: str, expected_count: int = 5) -> bool:
@@ -322,7 +350,9 @@ Generate **topic-wise study notes** for the chapter below.
         if notes_raw and len(notes_raw.split()) >= 200:
             notes_text = _normalize_headings(notes_raw).strip()
             notes_text = _trim_long_intro(notes_text)
-            notes_text = await _polish_notes_with_vertex_safely(notes_text, title, subject_name or "")
+            notes_text, notes_formatted_by = await _polish_notes_with_vertex_safely(
+                notes_text, title, subject_name or "", lang="en"
+            )
             notes_text = _normalize_headings(notes_text).strip()
             notes_text = _trim_long_intro(notes_text)
             wc = len(notes_text.split())
@@ -341,6 +371,8 @@ Generate **topic-wise study notes** for the chapter below.
                     "notes_generated": True,
                     "notes_generated_at": datetime.now(timezone.utc).isoformat(),
                     "topics": topics,
+                    # Task #494 — audit trail of which polish leg shipped.
+                    "formatted_by": notes_formatted_by,
                 }}
             )
             _invalidate_content_cache("chapters")
@@ -824,12 +856,23 @@ async def admin_translate_chapter(chapter_id: str, data: dict = Body(default={})
     if not translated or len(translated.strip()) < 50:
         raise HTTPException(status_code=502, detail="Translation returned empty or too short")
 
+    # Task #494 — Assamese polish: Vertex Gemini 2.5 Flash → Llama-3.3-70b
+    # fallback. The dispatcher rejects English-leakage and passes through
+    # the IndicTrans2 output unchanged on purity violation.
+    if "as" in target_lang:
+        translated, translate_formatted_by = await _format_translation_safely(
+            translated, title=chapter.get("title", ""), subject_name=""
+        )
+    else:
+        translate_formatted_by = "passthrough"
+
     field_name = "content_as" if "as" in target_lang else f"content_{target_lang.split('-')[0]}"
     await db.chapters.update_one(
         {"id": chapter_id},
         {"$set": {
             field_name: translated,
             f"{field_name}_generated_at": datetime.now(timezone.utc).isoformat(),
+            f"{field_name}_formatted_by": translate_formatted_by,
         }}
     )
     _invalidate_content_cache("chapters")
@@ -864,14 +907,19 @@ async def admin_bulk_translate_subject(data: dict = Body(...), admin: dict = Dep
             translated = await _translate_text_chunked(ch["content"], "en-IN", target_lang)
             if translated and len(translated.strip()) >= 50:
                 field_name = "content_as"
+                # Task #494 — Assamese polish via content_formatter.
+                translated, fmt_by = await _format_translation_safely(
+                    translated, title=ch.get("title", ""), subject_name=""
+                )
                 await db.chapters.update_one(
                     {"id": ch["id"]},
                     {"$set": {
                         field_name: translated,
                         f"{field_name}_generated_at": datetime.now(timezone.utc).isoformat(),
+                        f"{field_name}_formatted_by": fmt_by,
                     }}
                 )
-                results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "translated", "words": len(translated.split())})
+                results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "translated", "words": len(translated.split()), "formatted_by": fmt_by})
             else:
                 results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "failed", "reason": "empty translation"})
         except Exception as e:
@@ -922,14 +970,19 @@ async def admin_bulk_translate_all(data: dict = Body(default={}), admin: dict = 
         try:
             translated = await _translate_text_chunked(content, "en-IN", target_lang)
             if translated and len(translated.strip()) >= 50:
+                # Task #494 — Assamese polish via content_formatter.
+                translated, fmt_by = await _format_translation_safely(
+                    translated, title=ch.get("title", ""), subject_name=""
+                )
                 await db.chapters.update_one(
                     {"id": ch["id"]},
                     {"$set": {
                         "content_as": translated,
                         "content_as_generated_at": datetime.now(timezone.utc).isoformat(),
+                        "content_as_formatted_by": fmt_by,
                     }}
                 )
-                results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "translated", "words": len(translated.split())})
+                results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "translated", "words": len(translated.split()), "formatted_by": fmt_by})
                 logger.info(f"Translated {i+1}/{len(chapters)}: {ch.get('title', '')[:40]} ({len(translated.split())} words)")
             else:
                 results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "failed", "reason": "empty translation"})
@@ -1244,7 +1297,9 @@ Generate topic-wise study notes for:
         if generated and len(generated.split()) >= 200:
             generated = _normalize_headings(generated).strip()
             generated = _trim_long_intro(generated)
-            generated = await _polish_notes_with_vertex_safely(generated, title, subject_name or "")
+            generated, regen_formatted_by = await _polish_notes_with_vertex_safely(
+                generated, title, subject_name or "", lang="en"
+            )
             generated = _normalize_headings(generated).strip()
             generated = _trim_long_intro(generated)
             wc = len(generated.split())
@@ -1252,6 +1307,8 @@ Generate topic-wise study notes for:
                 "content": generated,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "needs_review": wc < min_words,
+                # Task #494 — audit trail of which polish leg shipped.
+                "formatted_by": regen_formatted_by,
             }
             await db.chapters.update_one({"id": chapter_id}, {"$set": update_fields})
             try:

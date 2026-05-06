@@ -321,17 +321,16 @@ async def _assamese_translate_gemini_main_sarvam_polish(
                     src[:60])
         return ""
 
-    # ── Step 2 (polish, ALWAYS): vertex_format polishes IndicTrans2 ───────
-    # Task #490 — Vertex chat dispatch removed; polish now goes through
-    # `vertex_format.format_with_vertex` (the single Vertex surface).
-    # Polish failure returns the un-polished IndicTrans2 string so the
-    # user still gets a translation.
+    # ── Step 2 (polish, ALWAYS): content_formatter dispatcher polishes
+    # the IndicTrans2 output. Task #494 routes Vertex Gemini 2.5 Flash
+    # primary → Workers-AI Llama-3.3-70b fallback → passthrough so a
+    # Vertex outage no longer drops Assamese chat polish on the floor.
+    # Polish failure (passthrough or empty) returns the un-polished
+    # IndicTrans2 string so the user still gets a translation.
     try:
-        if not (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "") or "").strip():
-            return _tr_cache_store(translate_out)
-        from vertex_format import format_with_vertex as _vertex_format
-        polished = await asyncio.wait_for(
-            _vertex_format(
+        from content_formatter import format_content as _format_content
+        res = await asyncio.wait_for(
+            _format_content(
                 f"{_POLISH_SYSTEM_PROMPT}\n\n---\n{translate_out[:4000]}",
                 style="notebook_lm",
                 lang="as",
@@ -339,7 +338,9 @@ async def _assamese_translate_gemini_main_sarvam_polish(
             ),
             timeout=_SARVAM_POLISH_TIMEOUT_SEC,
         )
-        polished = (polished or "").strip()
+        polished = (res.get("text") or "").strip()
+        if res.get("formatted_by") == "passthrough":
+            polished = ""  # force fall-through to un-polished translate_out
         polished = re.sub(r"<think>[\s\S]*?</think>", "", polished).strip()
         if polished.startswith(('"', "'", "“", "‘")) and polished.endswith(('"', "'", "”", "’")):
             polished = polished[1:-1].strip()
@@ -347,9 +348,9 @@ async def _assamese_translate_gemini_main_sarvam_polish(
             logger.info("[INDIC-TRANSLATE][T291] Vertex polish OK (%d chars)", len(polished))
             return _tr_cache_store(polished)
     except asyncio.TimeoutError:
-        logger.info("[INDIC-TRANSLATE][T291] Vertex polish timed out — using un-polished output")
+        logger.info("[INDIC-TRANSLATE][T291] content_formatter polish timed out — using un-polished output")
     except Exception as _pe:  # pragma: no cover — network defensive
-        logger.warning("[INDIC-TRANSLATE][T291] Vertex polish exception (%s) — using un-polished",
+        logger.warning("[INDIC-TRANSLATE][T291] content_formatter polish exception (%s) — using un-polished",
                        type(_pe).__name__)
 
     return _tr_cache_store(translate_out)

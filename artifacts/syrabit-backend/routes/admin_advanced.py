@@ -20,7 +20,7 @@ from auth_deps import (
     get_admin_user,
 )
 from db_ops import supa_list_users
-from llm import call_llm_api_content, _call_llm_raw, polish_notes_with_vertex
+from llm import call_llm_api_content, _call_llm_raw, polish_notes_with_vertex, polish_notes_with_format
 from seo_engine import _normalize_headings
 from rag import (
     _embed_and_store_chapter,
@@ -1728,9 +1728,9 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
     )
     from config import PROVIDER_PRIORITY, POOL_WEIGHTS, PROVIDER_CREDITS
 
-    # Task #490: `content_format` exposed as its own routing-chain row so
-    # operators see the formatter-only Vertex surface alongside the chat
-    # pools (was previously only described in the trailing `note` string).
+    # Task #490 / #494: `content_format` exposed as its own routing-chain
+    # row so operators see the Vertex → Workers-AI Llama-3.3-70b fallback
+    # chain alongside the chat pools.
     _FEATURE_KEYS = ["english_rag_chat", "assamese_rag_chat", "content_format"]
 
     def _build_chain(feature: str) -> list[dict]:
@@ -1763,8 +1763,10 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
         "burst_429_60s":  burst_60,
         "note": (
             "routing_chains: Bedrock REMOVED from all pools (AWS account-wide daily token quota exhausted). "
-            "Task #490 — Vertex REMOVED from chat/safety pools entirely; only "
-            "remaining Vertex surface is `content_format` (NotebookLM-style polish). "
+            "Task #490 / #494 — Vertex REMOVED from chat/safety pools entirely; only "
+            "remaining Vertex surface is `content_format` (NotebookLM-style polish via "
+            "`content_formatter.format_content` → vertex/gemini-2.5-flash primary, "
+            "workers_ai_llama33_70b sole allowed fallback). "
             "english_rag_chat = azure_openai/gpt-4.1-nano (10000) → workers_ai_llama32_3b / workers_ai_mistral_7b / workers_ai (0, last-resort fallbacks); "
             "assamese_rag_chat = sarvam/sarvam-m (10000) → workers_ai_indic (0, last-resort). "
             "Active chat/content allowlist: Azure OpenAI, Sarvam, Workers AI. "
@@ -2118,22 +2120,33 @@ Write **exam-focused, topic-wise summary notes** for the chapter below. These ar
         if not text:
             return ""
 
-        # Stage 2 (POLISH): Vertex / Gemini 2.5 Flash re-formats into
-        # NotebookLM-style notes. Failure is non-fatal — the helper
-        # returns raw notes unchanged on Vertex error / safety block.
+        # Stage 2 (POLISH): Vertex Gemini 2.5 Flash → Workers-AI Llama-3.3-70b
+        # fallback (Task #494, V4 §15 §6). Dispatcher never raises; on dual
+        # outage we keep the raw Workers-AI notes and surface formatted_by
+        # so the chapter Mongo doc records actual provenance.
+        formatted_by = "passthrough"
         try:
-            text = await polish_notes_with_vertex(
+            res = await polish_notes_with_format(
                 text,
                 title=title,
                 subject_name=subject_name or "",
                 lang="en",
                 max_tokens=4000,
             )
+            text = res.get("text") or text
+            formatted_by = res.get("formatted_by", "passthrough")
         except Exception:
-            pass  # polish_notes_with_vertex already logs + degrades gracefully
+            pass  # polish_notes_with_format never raises; defensive only
 
         text = _normalize_headings(text)
         _redis_set("pipeline_notes", cache_key, text, 3600)
+        # Also stash the formatter id in Redis under a sibling key so the
+        # caller (atomic chapter writer) can persist it without changing
+        # this function's return type.
+        try:
+            _redis_set("pipeline_notes_fmt", cache_key, formatted_by, 3600)
+        except Exception:
+            pass
         return text
     except Exception:
         return ""
@@ -2775,11 +2788,31 @@ async def _pipeline_process_one_chapter(
         # ── ATOMIC CHAPTER UPDATE: write notes + questions + flashcards in one operation ──
         chapter_atomic_update = {"updated_at": now_iso}
         if generated_notes:
+            # Task #494 — recover the formatter audit value the pipeline
+            # generator stashed in Redis under the SAME cache_key shape
+            # used by `_pipeline_generate_chapter_notes` (see L2062:
+            # ``pipeline_notes:{chapter_id}:{md5(title+subject_name)}``).
+            # The earlier review caught a key-shape mismatch where the
+            # reader used `_pipeline_content_hash(...)` while the writer
+            # used `chapter_id + md5`; this canonical form keeps the two
+            # sides in lock-step. Defaults to "passthrough" if the
+            # helper had no formatter telemetry to report (e.g. cache
+            # miss after TTL or dispatcher dual-outage path).
+            _fmt_cache_key = (
+                f"pipeline_notes:{chapter_id}:"
+                f"{hashlib.md5((chapter_title + subject_name).lower().encode()).hexdigest()}"
+            )
+            _formatted_by = "passthrough"
+            try:
+                _formatted_by = _redis_get("pipeline_notes_fmt", _fmt_cache_key) or "passthrough"
+            except Exception:
+                pass
             chapter_atomic_update.update({
                 "content": generated_notes,
                 "content_type": "notes",
                 "notes_generated": True,
                 "notes_generated_at": now_iso,
+                "formatted_by": _formatted_by,
             })
         if mark_wise_result and mark_wise_result.get("pyqs"):
             chapter_atomic_update["has_important_questions"] = True

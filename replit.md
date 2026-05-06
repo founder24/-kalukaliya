@@ -34,6 +34,7 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 - **Cost split:** 40% Cloudflare, 30% Azure, 20% AWS, 10% GCP.
 - **Embedding strategy:** Primary is Gemma-300M + Qwen3-0.6B on Cloudflare Workers AI (1024-dim) to Pinecone. On primary outage, system enters cache-only degraded mode, queuing fresh content for replay.
 - **Chat dispatch:** Azure `gpt-4.1-nano` is primary, falling back to Workers-AI Mistral-7B, then Llama-3.2-3B. Vertex is for `content_format` only.
+- **Content formatter (§15 §6, Task #494):** All notebook/study/exam polish flows route through `content_formatter.format_content` — Vertex Gemini 2.5 Flash primary → Workers-AI Llama-3.3-70b fallback → passthrough on dual outage / Assamese purity-gate rejection. Every polished Mongo doc carries a `formatted_by` audit field; admin health panel reports per-formatter rolling counts.
 - **Vectorless RAG:** A three-tier router performs tree-walk on D1 syllabus, then BM25 on Mongo, then a vector pass. Results are fused with RRF before Pinecone rerank.
 - **Secrets management:** Azure Key Vault is the source of truth, with AWS Secrets Manager and Cloudflare Secrets as read-only replicas.
 - **Observability:** Sentry Performance for tracing, OTEL to GCP Cloud Trace for long-term retention.
