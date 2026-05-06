@@ -1,0 +1,39 @@
+# Performance Architecture & Locked Decisions
+
+⚠️ **Do not modify `vite.config.js`, `public/sw.js`, or `scripts/prerender-*.mjs` without updating this document and running a full PSI measurement report using the `PAGESPEED_*.md` template.** Generic Vite/PSI checklists will regress existing scores.
+
+## 🔒 Locked Decisions
+
+### Chunking Strategy & Preload Targets
+Granular `manualChunks` splits (`router`, `query`, `radix`, etc.) are intentional and production-verified. Merging these back into a single `vendor` chunk regresses library preload size by ~174 KB. `modulepreload-inject.js` targets are calibrated to match these boundaries. Any new chunk split must be validated against `dist/assets` size and PSI preload metrics.  
+**Verified by:** Task #639
+
+### Service Worker & Edge Caching
+`public/sw.js` implements a hand-rolled strategy: stale-while-revalidate for API routes, cache-first for hashed static assets, and explicit admin/crawler bypass logic. Replacing this with `vite-plugin-pwa` or generic caching plugins breaks authentication bypass and introduces conflicting cache layers.  
+**Verified by:** Foundational infrastructure tasks; preserved across #391–#639
+
+### Image Delivery Pipeline
+Runtime image optimization is handled exclusively by Cloudflare Image Resizing, probed via `probeImageResizer`. Build-time `sharp` conversion, WebP generation, or duplicate `public/images-optimized` directories bypass CF's edge negotiation and increase bundle bloat. Serve original formats; let CF handle resizing/format selection.  
+**Verified by:** Infrastructure alignment with CF edge capabilities
+
+### Third-Party & Analytics Deferral
+All non-critical injectors (PostHog, Emergent, GA4, CF Web Analytics) are LCP-gated and deferred. They are dynamically injected only after the main thread is free and above-the-fold content has painted. Library-bundle prefetch was explicitly moved to `requestIdleCallback` to avoid main-thread contention. Never load synchronously in `<head>`.  
+**Verified by:** Task #391 (deferral/LCP-gating), Task #496 (`requestIdleCallback` prefetch migration)
+
+### Prerender Parity Requirement
+Per-route prerendering via `scripts/prerender-library.mjs` eliminates SPA hydration overhead for `/library`. The homepage currently ships the full SPA preload set on mobile, creating a ~26-point PSI gap. Closing this gap requires applying the same per-route prerender pattern to `/`, not asset-level compression or CSS tweaks.  
+**Verified by:** Task #453 (homepage parity scope)
+
+## 📏 Measurement Protocol
+1. **Always run PSI against the public production URL.** Localhost and Replit preview ports are invalid for Core Web Vitals measurement.
+2. Use the `PAGESPEED_*.md` template (e.g., `PAGESPEED_LIBRARY_2026-04-21.md`) for before/after reports.
+3. Validate LCP, INP, and CLS separately for **mobile** and **desktop**.
+4. Any change must include a regression check on already-tuned routes (`/library`, `/api`, authenticated flows).
+5. Cloudflare edge already handles Brotli, HTTP/2 multiplexing, and image optimization. Do not duplicate these in build steps.
+
+## 🔗 Back-Pointers
+- **#391**: Third-party deferral pattern & LCP-gating
+- **#395**: Preload of prerendered route chunks before hydration
+- **#496**: Library-bundle prefetch moved to `requestIdleCallback`
+- **#639**: Granular vendor chunk splits & preload audit
+- **#453**: Homepage prerender parity (mobile PSI gap closure)
