@@ -226,3 +226,69 @@ def test_run_reports_db_unavailable(app_client_authed, monkeypatch,
     assert body["ok"] is False
     assert body["reason"] == "db unavailable"
     assert patched_backfill["run_calls"] == []
+
+
+# ── Task #438 — embed_environments payload shape ────────────────────────────
+
+def test_embed_stack_health_surfaces_staging_row(app_client_authed,
+                                                  patched_backfill,
+                                                  monkeypatch):
+    """The route must surface ``embed_environments`` with one row per
+    registered worker env, and a failing staging row must NOT flip the
+    top-level ``ok`` field (staging is a canary — see Task #438)."""
+    from providers import workers_embed as _we
+
+    async def _fake_envs():
+        return [
+            {"env": "production", "label": "Production", "ok": True,
+             "configured": True, "pages": True, "dims": 1024,
+             "model_version": "1.0.0", "latency_ms": 42, "status_code": 200,
+             "url": "https://embed.test.local"},
+            {"env": "staging", "label": "Staging", "ok": False,
+             "configured": True, "pages": False, "dims": 1024,
+             "model_version": "staging-2026-05-06",
+             "latency_ms": 71, "status_code": 503,
+             "url": "https://embed-staging.test.local",
+             "reason": "workers_embed: HTTP 503: down"},
+        ]
+
+    async def _fake_health_check():
+        return {"ok": True, "configured": True, "dims": 1024,
+                "model_version": "1.0.0", "latency_ms": 42}
+
+    async def _fake_rerank_health_check():
+        return {"ok": True}
+
+    async def _fake_memory_health_check():
+        return {"ok": True}
+
+    monkeypatch.setattr(_we, "health_check_environments", _fake_envs)
+    monkeypatch.setattr(_we, "health_check", _fake_health_check)
+
+    from providers import pinecone_ai as _pc
+    from providers import memory_brain as _mb
+    monkeypatch.setattr(_pc, "rerank_health_check",
+                        _fake_rerank_health_check, raising=False)
+    monkeypatch.setattr(_mb, "health_check",
+                        _fake_memory_health_check, raising=False)
+
+    res = app_client_authed.get("/admin/health/embed-stack")
+    assert res.status_code == 200
+    body = res.json()
+
+    # Multi-env payload must be present + correctly shaped.
+    envs = body.get("embed_environments")
+    assert isinstance(envs, list) and len(envs) == 2
+    by_env = {e["env"]: e for e in envs}
+    assert set(by_env) == {"production", "staging"}
+    for required in ("dims", "model_version", "latency_ms",
+                     "configured", "pages", "ok"):
+        assert required in by_env["production"], f"prod missing {required}"
+        assert required in by_env["staging"],    f"staging missing {required}"
+    assert by_env["production"]["pages"] is True
+    assert by_env["staging"]["pages"] is False
+
+    # Critical: staging being down must NOT page — top-level ok stays True
+    # because production embed + rerank + memory_brain are all healthy.
+    assert body["ok"] is True
+    assert body["embed"]["ok"] is True  # back-compat field still production-only

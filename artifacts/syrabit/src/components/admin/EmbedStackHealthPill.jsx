@@ -29,6 +29,88 @@ const LEGS = [
   { key: 'memory', label: 'Memory brain', sub: 'Voyage + Atlas' },
 ];
 
+// Task #438 — one row per embed-worker environment (production + staging,
+// plus any future env). Staging failures render in amber instead of red
+// because the staging worker is a canary and does NOT page on-call.
+function EmbedEnvRow({ envInfo }) {
+  const env       = envInfo?.env || 'unknown';
+  const label     = envInfo?.label || env;
+  const ok        = !!envInfo?.ok;
+  const configured = envInfo?.configured !== false;
+  const pages     = !!envInfo?.pages;
+  const dims      = envInfo?.dims;
+  const modelVer  = envInfo?.model_version || envInfo?.version || '';
+  const latency   = envInfo?.latency_ms;
+  const status    = envInfo?.status_code;
+  const reason    = envInfo?.reason;
+  const url       = envInfo?.url;
+
+  // Tone:
+  //  • not configured → slate (neutral, "not wired yet")
+  //  • ok            → emerald
+  //  • failing prod  → red (pages)
+  //  • failing canary → amber (does not page)
+  let tone = 'bg-emerald-50 border-emerald-200 text-emerald-700';
+  let badgeTone = 'bg-emerald-100 text-emerald-700 border-emerald-200';
+  let badgeText = 'OK';
+  if (!configured) {
+    tone = 'bg-slate-50 border-slate-200 text-slate-600';
+    badgeTone = 'bg-slate-100 text-slate-600 border-slate-200';
+    badgeText = 'Not configured';
+  } else if (!ok) {
+    if (pages) {
+      tone = 'bg-rose-50 border-rose-200 text-rose-700';
+      badgeTone = 'bg-rose-100 text-rose-700 border-rose-300';
+      badgeText = 'DOWN';
+    } else {
+      tone = 'bg-amber-50 border-amber-200 text-amber-700';
+      badgeTone = 'bg-amber-100 text-amber-700 border-amber-300';
+      badgeText = 'CANARY DOWN';
+    }
+  }
+
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${tone}`}
+      data-testid={`embed-env-row-${env}`}
+    >
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-semibold flex-1 min-w-0 truncate">
+          {label}
+          {!pages && configured && (
+            <span className="ml-1 text-[9px] uppercase tracking-wide text-amber-600 font-bold">
+              canary
+            </span>
+          )}
+        </p>
+        <span
+          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border tabular-nums ${badgeTone}`}
+          data-testid={`embed-env-row-${env}-status`}
+          title={reason || (status ? `HTTP ${status}` : '')}
+        >
+          {badgeText}
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-3 gap-2 text-[10px] text-gray-600 tabular-nums">
+        <span title="vector dimension"               data-testid={`embed-env-row-${env}-dims`}>
+          dims: <span className="font-semibold">{dims ?? '—'}</span>
+        </span>
+        <span title="model version reported by /health" data-testid={`embed-env-row-${env}-model-version`}>
+          ver: <span className="font-semibold truncate">{modelVer || '—'}</span>
+        </span>
+        <span title="last probe latency"             data-testid={`embed-env-row-${env}-latency`}>
+          {latency != null ? `${latency} ms` : '— ms'}
+        </span>
+      </div>
+      {(reason || url) && (
+        <p className="mt-1 text-[10px] text-gray-500 truncate" title={url || ''}>
+          {reason ? `${reason}` : url}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function LegPill({ leg, pill }) {
   const ok = !!pill?.ok;
   const failures = Number(pill?.consecutive_failures || 0);
@@ -129,6 +211,15 @@ export default function EmbedStackHealthPill({ adminToken }) {
     memory: data?.memory,
   };
 
+  // Task #438 — staging worker side-by-side with production. Falls back
+  // to a single production-only entry built from the legacy `embed`
+  // field if the backend hasn't shipped `embed_environments` yet.
+  const embedEnvs = Array.isArray(data?.embed_environments) && data.embed_environments.length > 0
+    ? data.embed_environments
+    : (data?.embed
+        ? [{ ...data.embed, env: 'production', label: 'Production', pages: true }]
+        : []);
+
   return (
     <div
       className={`rounded-2xl p-4 border ${tone.tile}`}
@@ -167,6 +258,25 @@ export default function EmbedStackHealthPill({ adminToken }) {
           {LEGS.map((leg) => (
             <LegPill key={leg.key} leg={leg} pill={pills[leg.key]} />
           ))}
+        </div>
+      )}
+
+      {!error && embedEnvs.length > 0 && (
+        <div
+          className="mt-3 pt-3 border-t border-white/60"
+          data-testid="embed-stack-environments"
+        >
+          <p className="text-[11px] font-semibold text-gray-700 mb-2">
+            Embed workers — by environment
+            <span className="ml-2 text-[10px] font-normal text-gray-500">
+              (Task #438 — staging canary visible alongside production)
+            </span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {embedEnvs.map((envInfo) => (
+              <EmbedEnvRow key={envInfo.env || envInfo.label} envInfo={envInfo} />
+            ))}
+          </div>
         </div>
       )}
     </div>

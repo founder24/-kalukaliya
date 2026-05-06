@@ -178,3 +178,107 @@ def test_is_enabled_and_expected_dims():
     we = _fresh_module()
     assert we.is_enabled() is True
     assert we.expected_dims() == 1024
+
+
+# ── Task #438 — multi-environment health probes ─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_health_check_environments_lists_production_and_staging(monkeypatch):
+    """``health_check_environments`` returns one entry per registered env
+    and each row carries dims / model_version / latency / status_code so
+    the admin embed-stack panel can render production + staging side-by-side
+    (Task #438)."""
+    monkeypatch.setenv("WORKERS_EMBED_URL", "https://embed.test.local")
+    monkeypatch.setenv("WORKERS_EMBED_SECRET", "test-secret-abc123")
+    monkeypatch.setenv("WORKERS_EMBED_STAGING_URL", "https://embed-staging.test.local")
+    monkeypatch.setenv("EMBED_STAGING_SHARED_SECRET", "staging-secret-xyz")
+    we = _fresh_module()
+
+    def handler(request):
+        # Both prod and staging hit the SAME mock — distinguish by host.
+        host = request.url.host
+        if "staging" in host:
+            return httpx.Response(200, json={
+                "ok": True, "dims": 1024,
+                "models": ["@cf/google/gemma-3-1b-it"],
+                "version": "staging-2026-05-06",
+            })
+        return httpx.Response(200, json={
+            "ok": True, "dims": 1024,
+            "models": ["@cf/google/gemma-3-1b-it", "@cf/qwen/qwen2.5-0.5b"],
+            "version": "1.0.0",
+        })
+
+    transport = _MockTransport(handler)
+    _patch_client(monkeypatch, we, transport)
+
+    envs = await we.health_check_environments()
+    by_env = {e["env"]: e for e in envs}
+
+    assert "production" in by_env and "staging" in by_env
+    prod = by_env["production"]
+    stg  = by_env["staging"]
+    assert prod["ok"] is True
+    assert prod["pages"] is True
+    assert prod["dims"] == 1024
+    assert prod["model_version"] == "1.0.0"
+    assert isinstance(prod["latency_ms"], int)
+    assert prod["status_code"] == 200
+    assert stg["ok"] is True
+    assert stg["pages"] is False  # canary — does not page
+    assert stg["model_version"] == "staging-2026-05-06"
+    assert stg["url"] == "https://embed-staging.test.local"
+
+
+@pytest.mark.asyncio
+async def test_health_check_environments_marks_unconfigured_staging(monkeypatch):
+    """When only production env vars are set, staging row still renders
+    with ``configured=false`` so the dashboard shows the explicit gap
+    instead of silently dropping the staging cell."""
+    monkeypatch.setenv("WORKERS_EMBED_URL", "https://embed.test.local")
+    monkeypatch.setenv("WORKERS_EMBED_SECRET", "test-secret-abc123")
+    monkeypatch.delenv("WORKERS_EMBED_STAGING_URL", raising=False)
+    monkeypatch.delenv("WORKERS_EMBED_STAGING_SECRET", raising=False)
+    monkeypatch.delenv("EMBED_STAGING_SHARED_SECRET", raising=False)
+    we = _fresh_module()
+
+    def handler(request):
+        return httpx.Response(200, json={"ok": True, "dims": 1024,
+                                          "models": [], "version": "1.0.0"})
+
+    transport = _MockTransport(handler)
+    _patch_client(monkeypatch, we, transport)
+
+    envs = await we.health_check_environments()
+    by_env = {e["env"]: e for e in envs}
+    assert by_env["staging"]["configured"] is False
+    assert by_env["staging"]["ok"] is False
+    # Production must still be probed and OK in the same call.
+    assert by_env["production"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_health_check_environments_staging_failure_does_not_flip_pages(monkeypatch):
+    """A 5xx from staging must surface as a not-OK canary row (pages=False)
+    so the page-level red banner stays driven by production alone."""
+    monkeypatch.setenv("WORKERS_EMBED_URL", "https://embed.test.local")
+    monkeypatch.setenv("WORKERS_EMBED_SECRET", "test-secret-abc123")
+    monkeypatch.setenv("WORKERS_EMBED_STAGING_URL", "https://embed-staging.test.local")
+    monkeypatch.setenv("EMBED_STAGING_SHARED_SECRET", "staging-secret-xyz")
+    we = _fresh_module()
+
+    def handler(request):
+        if "staging" in request.url.host:
+            return httpx.Response(503, json={"error": "down"})
+        return httpx.Response(200, json={"ok": True, "dims": 1024,
+                                          "models": [], "version": "1.0.0"})
+
+    transport = _MockTransport(handler)
+    _patch_client(monkeypatch, we, transport)
+
+    envs = await we.health_check_environments()
+    by_env = {e["env"]: e for e in envs}
+    assert by_env["production"]["ok"] is True
+    assert by_env["staging"]["ok"] is False
+    assert by_env["staging"]["pages"] is False
+    assert "503" in (by_env["staging"].get("reason") or "")

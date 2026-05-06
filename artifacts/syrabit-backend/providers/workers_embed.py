@@ -219,36 +219,143 @@ async def embed_documents(texts: List[str]) -> List[List[float]]:
     return await embed(texts, input_type="search_document")
 
 
+def _model_version(info: dict) -> str:
+    """Derive a single ``model_version`` string from the worker /health
+    payload. Prefers an explicit ``version`` field, falls back to a
+    ``+``-joined ``models`` list, else returns ``""``."""
+    ver = info.get("version")
+    if ver:
+        return str(ver)
+    models = info.get("models") or []
+    if isinstance(models, list) and models:
+        # Strip the @cf/<vendor>/ prefix so the dashboard cell stays
+        # readable — full ids are still in `models`.
+        short = [str(m).rsplit("/", 1)[-1] for m in models]
+        return "+".join(short)
+    return ""
+
+
+async def probe_health(url: str, secret: str) -> dict:
+    """Probe an arbitrary worker's ``/health`` endpoint.
+
+    Generic helper backing :func:`health_check` and
+    :func:`health_check_environments` — extracted (Task #438) so the
+    admin embed-stack panel can probe production AND the staging canary
+    (and any future env) through the same code path. ``url`` / ``secret``
+    are passed in so a future "preview" env is a config change, not a
+    code change.
+    """
+    url = (url or "").strip().rstrip("/")
+    secret = (secret or "").strip()
+    if not url or not secret:
+        return {
+            "ok": False,
+            "configured": False,
+            "reason": "url/secret not configured",
+        }
+    t0 = time.perf_counter()
+    headers = {"Content-Type": "application/json", "X-Embed-Secret": secret}
+    try:
+        client = await _get_client()
+        resp = await client.get(f"{url}/health", headers=headers)
+        latency_ms = round((time.perf_counter() - t0) * 1000)
+        status_code = resp.status_code
+        resp.raise_for_status()
+        info = resp.json()
+        return {
+            "ok": bool(info.get("ok")),
+            "configured": True,
+            "url": url,
+            "dims": int(info.get("dims") or 0) or _DIMS,
+            "models": info.get("models") or [],
+            "version": info.get("version"),
+            "model_version": _model_version(info),
+            "latency_ms": latency_ms,
+            "status_code": status_code,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "configured": True,
+            "url": url,
+            "reason": str(exc)[:200],
+            "latency_ms": round((time.perf_counter() - t0) * 1000),
+        }
+
+
+# ── Multi-environment probe registry (Task #438) ─────────────────────────────
+# Adding a third env (e.g. preview) is a one-line append here — no other code
+# changes required. Each entry lists candidate env-var names; the first one
+# present in the process environment wins, so both the legacy
+# ``WORKERS_EMBED_SECRET`` and the canonical ``EMBED_SHARED_SECRET`` names
+# work for production.
+_ENVIRONMENTS: list[dict] = [
+    {
+        "env": "production",
+        "label": "Production",
+        "url_vars":    ["WORKERS_EMBED_URL"],
+        "secret_vars": ["WORKERS_EMBED_SECRET", "EMBED_SHARED_SECRET"],
+        "pages": True,   # production failures page on-call
+    },
+    {
+        "env": "staging",
+        "label": "Staging",
+        "url_vars":    ["WORKERS_EMBED_STAGING_URL"],
+        "secret_vars": ["WORKERS_EMBED_STAGING_SECRET", "EMBED_STAGING_SHARED_SECRET"],
+        "pages": False,  # canary — surfaces yellow, never pages
+    },
+]
+
+
+def _first_env(names: list[str]) -> str:
+    for n in names:
+        v = os.environ.get(n, "").strip()
+        if v:
+            return v
+    return ""
+
+
+async def health_check_environments() -> list[dict]:
+    """Probe every registered embed-worker environment in parallel and
+    return one dict per env (Task #438).
+
+    Each entry carries:
+      ``env``, ``label``, ``url``, ``configured``, ``ok``, ``dims``,
+      ``model_version``, ``latency_ms``, ``status_code``, ``reason``,
+      ``pages``.
+
+    Unconfigured envs (no URL/secret) are still returned with
+    ``configured=false`` so the dashboard can render an explicit
+    "staging not wired" cell instead of silently dropping the row.
+    """
+    async def _one(spec: dict) -> dict:
+        url    = _first_env(spec["url_vars"])
+        secret = _first_env(spec["secret_vars"])
+        result = await probe_health(url, secret)
+        result["env"]   = spec["env"]
+        result["label"] = spec["label"]
+        result["pages"] = bool(spec.get("pages"))
+        return result
+
+    return list(
+        await asyncio.gather(*[_one(spec) for spec in _ENVIRONMENTS])
+    )
+
+
 async def health_check() -> dict:
-    """Probe the worker's /health endpoint and return a status dict."""
+    """Probe the production worker's /health endpoint.
+
+    Kept as a thin wrapper over :func:`probe_health` for back-compat —
+    the admin route now also calls :func:`health_check_environments`
+    to surface the staging canary alongside production.
+    """
     if not ENABLED:
         return {
             "ok": False,
             "configured": False,
             "reason": "WORKERS_EMBED_URL / WORKERS_EMBED_SECRET not set",
         }
-    t0 = time.perf_counter()
-    try:
-        client = await _get_client()
-        resp = await client.get(f"{_URL}/health", headers=_headers())
-        resp.raise_for_status()
-        info = resp.json()
-        return {
-            "ok": bool(info.get("ok")),
-            "configured": True,
-            "url": _URL,
-            "dims": int(info.get("dims") or 0) or _DIMS,
-            "models": info.get("models") or [],
-            "version": info.get("version"),
-            "latency_ms": round((time.perf_counter() - t0) * 1000),
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "configured": True,
-            "url": _URL,
-            "reason": str(exc)[:200],
-        }
+    return await probe_health(_URL, _SECRET)
 
 
 def is_enabled() -> bool:

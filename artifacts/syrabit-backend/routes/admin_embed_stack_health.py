@@ -21,6 +21,7 @@ inline so a single bad provider can't blank out the page.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -46,12 +47,29 @@ async def admin_embed_stack_health(
     )
 
     # ── Embed (Workers-AI custom worker) ───────────────────────────────────
-    embed_health: dict[str, Any]
+    # Task #438: probe production AND staging (and any future env) in
+    # parallel through providers.workers_embed.health_check_environments.
+    # ``embed`` keeps the production-only payload for back-compat with the
+    # existing dashboard pill; ``embed_environments`` is the new list the
+    # multi-row card renders from.
+    embed_health: dict[str, Any] = {"ok": False, "configured": False,
+                                    "reason": "embed registry returned no envs"}
+    embed_environments: list[dict[str, Any]] = []
     try:
         from providers import workers_embed as _we
-        embed_health = await _we.health_check()
+        embed_environments = await _we.health_check_environments()
     except Exception as exc:
+        embed_environments = []
         embed_health = {"ok": False, "configured": False, "reason": str(exc)[:200]}
+    # Production = first env tagged "production"; the registry always
+    # includes it (even when unconfigured), so this is the production
+    # pill payload the existing dashboard already consumes.
+    prod_entry = next(
+        (e for e in embed_environments if e.get("env") == "production"),
+        None,
+    )
+    if prod_entry is not None:
+        embed_health = dict(prod_entry)
     embed_health["flag"] = {"name": "EMBED_PROVIDER_PRIMARY", "value": EMBED_PROVIDER_PRIMARY}
 
     # ── Task #436 — per-leg watchdog counters ──────────────────────────────
@@ -116,6 +134,9 @@ async def admin_embed_stack_health(
     except Exception as exc:
         backfill = {"ok": False, "reason": str(exc)[:200]}
 
+    # Task #438: only the production embed env counts toward overall ok.
+    # Staging is a canary — its failures surface as a yellow row but do
+    # not flip the page-level red banner.
     return {
         "ok": all([
             embed_health.get("ok"),
@@ -123,6 +144,7 @@ async def admin_embed_stack_health(
             memory_health.get("ok"),
         ]),
         "embed":  embed_health,
+        "embed_environments": embed_environments,
         "rerank": rerank_health,
         "memory": memory_health,
         "backfill": backfill,
@@ -130,11 +152,15 @@ async def admin_embed_stack_health(
         # badge ("N/3 consecutive failures", red when firing).
         "alert_state": _alert_snapshot,
         "flags": {
-            "EMBED_PROVIDER_PRIMARY":  EMBED_PROVIDER_PRIMARY,
-            "RERANK_PROVIDER":         RERANK_PROVIDER,
-            "MEMORY_BRAIN_PROVIDER":   MEMORY_BRAIN_PROVIDER,
-            "MEMORY_BRAIN_COLLECTION": MEMORY_BRAIN_COLLECTION,
-            "WORKERS_EMBED_URL":       WORKERS_EMBED_URL or None,
+            "EMBED_PROVIDER_PRIMARY":   EMBED_PROVIDER_PRIMARY,
+            "RERANK_PROVIDER":          RERANK_PROVIDER,
+            "MEMORY_BRAIN_PROVIDER":    MEMORY_BRAIN_PROVIDER,
+            "MEMORY_BRAIN_COLLECTION":  MEMORY_BRAIN_COLLECTION,
+            "WORKERS_EMBED_URL":         WORKERS_EMBED_URL or None,
+            # Task #438 — staging URL surfaced for parity with production.
+            "WORKERS_EMBED_STAGING_URL": (
+                os.environ.get("WORKERS_EMBED_STAGING_URL", "").strip() or None
+            ),
         },
         # Old providers kept in the repo but skipped at runtime when
         # the new flags are active. Surfaced so on-call can see exactly
