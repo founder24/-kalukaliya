@@ -129,11 +129,11 @@ Set every variable listed below. Values marked **required** must be set for the 
 | `LLM_PROVIDER` | LLM provider: `sarvam`, `openai`, `groq`, `fireworks` (Gemini is BYOK via the Cloudflare AI Gateway binding — see note below — and is not selectable as a backend provider) |
 | `LLM_MODEL` | Model identifier (e.g. `sarvam-m`) |
 | `SARVAM_API_KEY` | API key for chosen LLM provider |
-| `VERTEX_PROJECT_ID` | (Task #607) GCP project for Vertex AI Gemini Flash chat — leaving blank disables Vertex and forces the legacy SLM pool |
+| `VERTEX_PROJECT_ID` | GCP project for the Vertex Gemini 2.5 Flash content-formatter (Task #490 scope-down: Vertex is **formatter-only** — no chat / embed / Vector Search). Leaving blank disables the formatter polish pass. |
 | `VERTEX_LOCATION` | Vertex region (default `us-central1`) |
 | `VERTEX_GEMINI_MODEL` | Vertex Gemini model id (default `gemini-2.5-flash`) |
 | `VERTEX_SERVICE_ACCOUNT_JSON` | Inline service-account JSON (raw, single-line) — alternative to `GOOGLE_APPLICATION_CREDENTIALS` |
-| `CHAT_DEFAULT_MODEL` | System-wide chat model when admin has no override (`vertex/gemini-flash` or `openai/gpt-oss-20b`) |
+| `CHAT_DEFAULT_MODEL` | System-wide chat model when admin has no override (e.g. `openai/gpt-oss-20b`). Task #490: the legacy `vertex/gemini-flash` value is no longer valid — Vertex was removed from the chat hot-path; if set it is transparently rewritten to `openai/gpt-oss-20b` at dispatch. |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST endpoint |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token |
 | `RESEND_API_KEY` | Resend API key for transactional email |
