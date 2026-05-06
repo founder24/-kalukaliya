@@ -81,6 +81,48 @@ async def test_format_with_vertex_returns_string_and_calls_vertex_endpoint(monke
     assert payload["contents"][0]["parts"][0]["text"].startswith("Some raw notes")
 
 
+@pytest.mark.anyio
+async def test_format_with_vertex_rejects_unknown_style(monkeypatch):
+    """Unknown `style` values must raise ValueError BEFORE any network call —
+    the formatter is not a free-form prompt surface."""
+    async def _should_not_be_called():
+        raise AssertionError("_ensure_creds must not run when style validation fails")
+
+    monkeypatch.setattr(vertex_format, "_ensure_creds", _should_not_be_called, raising=True)
+
+    with pytest.raises(ValueError):
+        await vertex_format.format_with_vertex(
+            "anything",
+            style="freeform_chat",  # not in SUPPORTED_STYLES
+            lang="en",
+        )
+
+
+def test_supported_styles_locked():
+    """`SUPPORTED_STYLES` is the formatter's frozen public enum. If a future
+    refactor changes it, this test pins the contract so callers (notes,
+    study_notes, flashcards) cannot drift silently."""
+    assert isinstance(vertex_format.SUPPORTED_STYLES, frozenset)
+    assert vertex_format.SUPPORTED_STYLES == frozenset(
+        {"notebook_lm", "study_notes", "flashcard"}
+    )
+
+
+def test_vertex_format_module_has_no_chat_or_stream_surface():
+    """Task #490: Vertex is formatter-only. The module must NOT export any
+    chat/streaming entrypoints (which would constitute a back-door
+    re-introduction of the deleted hot-path)."""
+    forbidden = {
+        "stream_with_vertex", "chat_with_vertex", "_call_vertex_chat",
+        "_stream_vertex_gemini", "vertex_chat_completion",
+    }
+    public = {n for n in dir(vertex_format) if not n.startswith("_") or n in forbidden}
+    leaks = forbidden & public
+    assert not leaks, f"vertex_format must not expose chat/stream surface: {leaks}"
+    # The single generation entrypoint is `format_with_vertex`.
+    assert hasattr(vertex_format, "format_with_vertex")
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

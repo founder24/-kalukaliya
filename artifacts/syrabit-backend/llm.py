@@ -896,7 +896,10 @@ _MODEL_PROVIDER_MAP = {
     "sarvam-30b-16k": "sarvam",
     "sarvam-105b": "sarvam",
     "sarvam-105b-32k": "sarvam",
-    "gemini-2.5-flash": "gemini",
+    # Task #490: `"gemini-2.5-flash" -> "gemini"` mapping removed; the
+    # in-llm gemini chat dispatch branch was deleted along with the
+    # Vertex chat hot path. Gemini 2.5 Flash is now reachable ONLY via
+    # `vertex_format.format_with_vertex` (formatter polish).
     "gpt-4o-mini": "azure_openai",
     "gpt-4.1-mini": "azure_openai",
 }
@@ -907,18 +910,14 @@ _MODEL_ALIAS_MAP = {
     "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
     "llama-3.3-70b-versatile": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    # Gemini deprecations — only the 2.5 family is provisioned in our Vertex
-    # project (verified 2026-05-03). Normalise stale IDs here so provider
-    # selection in _call_llm_raw / call_llm_api_stream picks the gemini
-    # provider with the correct supported model BEFORE dispatch.
-    "gemini-2.0-flash":          "gemini-2.5-flash",
-    "gemini-2.0-flash-001":      "gemini-2.5-flash",
-    "gemini-2.0-flash-lite-001": "gemini-2.5-flash",
-    "gemini-1.5-flash":          "gemini-2.5-flash",
-    "gemini-1.5-pro":            "gemini-2.5-flash",
-    "gemini-flash-latest":       "gemini-2.5-flash",
-    "gemini-pro-latest":         "gemini-2.5-flash",
-    "gemini-2.5-pro":            "gemini-2.5-flash",
+    # Task #490: legacy Gemini-version aliases removed. The "gemini"
+    # chat provider was deleted along with the Vertex chat hot path,
+    # so a `"gemini-2.0-flash" -> "gemini-2.5-flash"` rewrite would
+    # only resolve to a model id no chat dispatch branch can serve.
+    # Any caller that still passes a `gemini-*` model id will now
+    # fail loud with "no provider configured" instead of silently
+    # routing to a deleted backend. The formatter consumes
+    # `VERTEX_GEMINI_MODEL` directly via `vertex_format`.
 }
 
 # ── SLM slot table ────────────────────────────────────────────────────────────
@@ -951,10 +950,12 @@ _SLM_SLOT_CANDIDATES = [
     ("workers-ai",  "@cf/meta/llama-3.2-3b-instruct",                 128, 3),
     # Tier 4: Workers AI llama-3.1-8b — fast 8B fallback.
     ("workers-ai",  "@cf/meta/llama-3.1-8b-instruct-fp8",              64, 4),
-    # Tier 5: Vertex Gemini 2.5 Flash — GCP fallback when Workers AI load > 0.80.
-    # Consumes GCP credits via CF AI Gateway BYOK (project blissful-acumen-…).
-    # Only 2.5-flash / 2.5-flash-lite are enabled in the project; 2.0/1.5 are not.
-    ("gemini",      "gemini-2.5-flash",                                  4, 5),
+    # Task #490: Tier 5 (`("gemini", "gemini-2.5-flash", 4, 5)`) removed —
+    # the gemini chat provider was deleted along with the Vertex chat
+    # hot path. Workers-AI tiers 0–4 above are now the full chat pool
+    # (Azure OpenAI gpt-4.1-nano sits ahead of the SLM pool entirely
+    # in `PROVIDER_PRIORITY['english_rag_chat']`). Vertex Gemini 2.5
+    # Flash is reachable ONLY via `vertex_format.format_with_vertex`.
 ]
 
 # Content SmartKeyPool — serves `_CONTENT_INTENTS` (notes, important_questions,
@@ -1149,13 +1150,11 @@ class _SmartKeyPool:
             return base + 100
         if ratio >= self._RPM_SOFT_THRESHOLD:
             return base + 10
-        # Task #247: Gemini 2.0 Flash is position-2 external fallback.
-        # Penalize it until Workers AI aggregate load exceeds 80%, ensuring it
-        # is not used before we actually need the GCP credit budget.
-        if slot["provider"] == "gemini":
-            wai_load = self._workers_ai_aggregate_load()
-            if wai_load < self._GEMINI_WAI_LOAD_THRESHOLD:
-                return base + self._GEMINI_WAI_PENALTY
+        # Task #490: dead `slot["provider"] == "gemini"` priority-penalty
+        # branch removed — no gemini slot is registered in
+        # `_SLM_SLOT_CANDIDATES` anymore. The `_GEMINI_WAI_*` constants
+        # are retained as inert config (no live consumer) so admin
+        # health diagnostics that probe their existence don't NameError.
         return base
 
     def pick(self, exclude_ids: set = None):
