@@ -245,6 +245,108 @@ def test_pyq_year_paper_renders_dedicated_landing(ssr_client):
     assert "ahsec-physics-2024-major" in body or "pyq" in body
 
 
+def test_pyq_shortcut_falls_back_to_full_syllabus_when_no_pyq_pages(monkeypatch):
+    """Task #464 — when ``page_type=pyq`` is set for a subject that
+    has zero ``important-questions`` pages generated yet, the
+    subject landing must fall back to listing every chapter/topic
+    from the syllabus marked as 'PYQ coming soon' rather than
+    rendering an almost-empty topic grid."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import seo_engine
+
+    subject_doc = {
+        "id": "subj-physics",
+        "slug": "physics",
+        "name": "Physics",
+        "description": "AHSEC Class-12 Physics",
+        "thumbnailUrl": "https://example.com/phys.png",
+        "class_id": "cls-12",
+        "board_id": "brd-ahsec",
+    }
+    board_doc = {"id": "brd-ahsec", "slug": "ahsec"}
+
+    db = SimpleNamespace(
+        seo_pages=MagicMock(),
+        boards=MagicMock(),
+        subjects=MagicMock(),
+        chapters=MagicMock(),
+        topics=MagicMock(),
+        classes=MagicMock(),
+        homepage_seo=MagicMock(),
+        syllabus_map=MagicMock(),
+        seo_meta=MagicMock(),
+        audit_log=MagicMock(),
+        pyq_html_pages=MagicMock(),
+    )
+    # No PYQ (important-questions) pages exist for this subject.
+    db.seo_pages.find = MagicMock(return_value=_make_async_cursor([]))
+    db.seo_pages.find_one = AsyncMock(return_value=None)
+    db.seo_pages.count_documents = AsyncMock(return_value=0)
+    db.seo_pages.aggregate = MagicMock(return_value=_make_async_cursor([]))
+    db.boards.find_one = AsyncMock(return_value=board_doc)
+    db.subjects.find_one = AsyncMock(return_value=subject_doc)
+    db.chapters.find = MagicMock(return_value=_make_async_cursor([
+        {"title": "Laws of Motion",
+         "topics": ["Newton's First Law", "Newton's Second Law"],
+         "order_index": 1},
+        {"title": "Work and Energy",
+         "topics": "Work, Kinetic Energy, Potential Energy",
+         "order_index": 2},
+    ]))
+    db.homepage_seo.find_one = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(seo_engine, "_db", db, raising=False)
+
+    async def _noop_inject_qa(p): return p
+    async def _noop_pt_links(*a, **kw): return []
+    async def _noop_related(*a, **kw): return ([], None, None)
+    async def _noop_og_image(*a, **kw): return ""
+    monkeypatch.setattr(seo_engine, "_inject_qa", _noop_inject_qa, raising=False)
+    monkeypatch.setattr(seo_engine, "_build_page_type_links", _noop_pt_links, raising=False)
+    monkeypatch.setattr(seo_engine, "_build_related_data", _noop_related, raising=False)
+    monkeypatch.setattr(seo_engine, "_resolve_og_image", _noop_og_image, raising=False)
+
+    app = FastAPI()
+    app.include_router(seo_engine.router, prefix="/api")
+    client = TestClient(app)
+
+    res = client.get(
+        "/api/seo/html/subject/ahsec/class-12/physics",
+        params={"page_type": "pyq"},
+    )
+    assert res.status_code == 200
+    body = res.text
+
+    # The PYQ framing (title/meta/canonical) must still apply.
+    assert "Previous Year Questions" in body
+    assert "https://syrabit.ai/pyq/ahsec/class-12/physics" in body
+
+    # Both syllabus chapters must appear in the topic list.
+    assert "Laws of Motion" in body
+    assert "Work and Energy" in body
+
+    # Each topic from the syllabus (list-form and CSV-form) must be
+    # rendered as a clickable PYQ link, even though no PYQ page
+    # exists yet (links go to the per-topic important-questions URL
+    # which will generate on demand).
+    assert "newtons-first-law/important-questions" in body
+    assert "newtons-second-law/important-questions" in body
+    assert "work/important-questions" in body
+    assert "kinetic-energy/important-questions" in body
+    assert "potential-energy/important-questions" in body
+
+    # The "PYQ coming soon" hint must surface so visitors understand
+    # why the per-topic pages aren't ready yet.
+    assert "PYQ coming soon" in body
+
+    # The PYQ stat badge must reflect the real count (0 sets), not
+    # the synthesized topic count.
+    assert "<strong>0</strong> PYQ sets" not in body  # zero suppressed entirely
+    # Default subject "Complete Study Guide" framing must NOT leak.
+    assert "Complete Study Guide" not in body
+
+
 def test_pyq_shortcut_proxies_to_subject_with_query(ssr_client):
     """The middleware maps ``/pyq/<board>/<class>/<subject>`` →
     ``/api/seo/html/subject/...?page_type=pyq``. Task #431 — when

@@ -4277,6 +4277,39 @@ async def get_subject_landing_html(
     total_mcqs = page_type_counts.get("mcqs", 0)
     total_pyqs = page_type_counts.get("important-questions", 0)
 
+    # Task #464 — when the PYQ shortcut is used for a subject that
+    # doesn't have any ``important-questions`` pages generated yet,
+    # fall back to the full syllabus (chapters × topics) marked
+    # "PYQ coming soon" instead of rendering an almost-empty list.
+    # When at least one PYQ page exists, the original filtered
+    # behaviour from Task #431 is preserved unchanged.
+    pyq_fallback = False
+    if is_pyq and not pages and chapters_docs:
+        pyq_fallback = True
+        coming_soon_label = (
+            "PYQ শীঘ্ৰে আহিব" if is_as else "PYQ coming soon"
+        )
+        synthesized: list[dict] = []
+        for ch in chapters_docs:
+            ch_title = ch.get("title", "")
+            raw_topics = ch.get("topics", "")
+            if isinstance(raw_topics, list):
+                topic_titles = [str(t).strip() for t in raw_topics if str(t).strip()]
+            else:
+                topic_titles = [
+                    t.strip() for t in str(raw_topics).split(",") if t.strip()
+                ]
+            if not topic_titles and ch_title:
+                topic_titles = [ch_title]
+            for t_title in topic_titles:
+                synthesized.append({
+                    "topic_title": t_title,
+                    "topic_slug": _slug(t_title),
+                    "chapter_title": ch_title,
+                    "meta_description": coming_soon_label,
+                })
+        pages = synthesized
+
     if is_pyq:
         page_url = f"https://syrabit.ai/pyq/{board}/{class_slug}/{subject_slug}"
         if is_as:
@@ -4388,6 +4421,21 @@ async def get_subject_landing_html(
         f"<h2>{_t('Topic-wise Previous Year Questions', lang)}</h2>" if is_pyq
         else f"<h2>{_t('Topic-wise Study Material', lang)}</h2>"
     )
+    if pyq_fallback:
+        if is_as:
+            topics_html_parts.append(
+                "<p class='pyq-coming-soon-note'>এই বিষয়ৰ বিগত বছৰৰ প্ৰশ্ন (PYQ) "
+                "এতিয়া প্ৰস্তুত কৰা হৈ আছে। তলৰ তালিকাত আনুষ্ঠানিক পাঠ্যক্ৰমৰ "
+                "সকলো অধ্যায় আৰু বিষয় দেখুওৱা হৈছে — শীঘ্ৰে প্ৰতিটো বিষয়ৰ বাবে "
+                "PYQ পোৱা যাব।</p>"
+            )
+        else:
+            topics_html_parts.append(
+                "<p class='pyq-coming-soon-note'>Previous year questions for this "
+                "subject are still being prepared. The list below shows every "
+                "chapter and topic from the official syllabus — PYQ sets will "
+                "appear here for each topic soon.</p>"
+            )
     for ch, ch_pages in by_chapter.items():
         topics_html_parts.append(f'<h3>{html_mod.escape(ch)}</h3><ul>')
         for tp in ch_pages:
