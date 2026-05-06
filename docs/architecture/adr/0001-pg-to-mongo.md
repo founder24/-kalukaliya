@@ -49,7 +49,7 @@ that any production route reads or writes is listed below.
 | `notifications` | `notifications` *(already exists)* | Soft join | Mongo target already populated by admin notify flow. Indexes: `{audience: 1, sent_at: -1}`. |
 | `edu_notes` | `edu_notes` (NEW) | Greenfield | PG schema uses `actor_kind, actor` composite key. Mongo translation: `{actor_kind, actor, _id}` document, `tags: [string]`, `structured: {...}` JSON, `citations: [{...}]`. Indexes: `{actor_kind: 1, actor: 1, created_at: -1}`, `{actor_kind: 1, actor: 1, generated: 1}`. |
 | `edu_flashcards` | `edu_flashcards` (NEW) | Greenfield | Same actor pattern. Indexes: `{actor_kind: 1, actor: 1, due_at: 1}` for the SR scheduler. Field-level rename: PG `interval_days` → Mongo `interval_days` (no change; explicit so future drift is caught). |
-| `edu_study_settings` | `edu_study_settings` (NEW) | Greenfield | Composite key `(actor_kind, actor)` becomes Mongo `_id = "{actor_kind}:{actor}"`. Indexes: none (point lookups by `_id`). |
+| `edu_study_settings` | `edu_study_settings` (NEW) | Greenfield | Composite key `(actor_kind, actor)` is preserved as a natural-key filter `{actor_kind, actor}` on every `update_one` / `delete_one` call (NOT collapsed into a synthetic `_id` string — keeps the two fields independently queryable for read-shadow diffs and for any future Mongo-side analytics by `actor_kind`). Indexes: compound unique on `(actor_kind, actor)` to enforce the PG PK contract; Mongo's auto `_id` ObjectId is left as the document key. Reconciled 2026-05-06 with the shipped Phase 2 implementation. |
 
 ## Read/write semantics each phase must preserve
 
@@ -125,6 +125,52 @@ print('V4 §13 acceptance: PASS')
 
 - **2026-05-06**: ADR proposed (Phase 1 of V4 §13). Awaiting approval
   before opening Phase 2 dual-write PRs.
+- **2026-05-06**: **Phase 2 (edu_study_settings collection) merged.**
+  Greenfield Mongo target per §50; fifth collection in the per-collection
+  rollout. Distinguishing characteristic: composite primary key
+  ``(actor_kind, actor)`` — there is no surrogate ``id`` column, so the
+  Mongo doc uses the same composite as its natural key, with every
+  write expressed as ``update_one(filter, $set, upsert=True)`` (or
+  ``delete_one`` for the claim cleanup). Added
+  ``mirror_edu_study_settings_write()`` shim and
+  ``_FLAG_NAME_OVERRIDES["edu_study_settings"] = "EDU_STUDY_SETTING"``
+  (rollback flag ``MONGO_EDU_STUDY_SETTING_WRITES``, singular form per
+  the existing edu_notes / edu_flashcards convention). Wired all 8 PG
+  write sites in ``routes/edu_study.py`` — collapsed into 5 mirror
+  calls because several PG branches share a final state we can express
+  as one upsert: (1-3) the streak block in ``review_flashcard`` has 3
+  mutually-exclusive PG writes (first-review INSERT / streak +1 UPDATE
+  / streak-reset UPDATE) plus a no-op same-day branch — collapsed into
+  ONE post-block ``update_one({actor_kind,actor}, $set, $setOnInsert,
+  upsert=True)`` mirror gated on ``_settings_mirror_needed`` (skipped
+  when same-day re-review). ``$setOnInsert`` carries the PG defaults
+  for ``strict_mode`` / ``guardian_pin_hash`` so the first review
+  materialises a complete doc. (4) ``set_study_settings`` strict-mode
+  upsert mirrored as ``$set: {updated_at, strict_mode?}`` (the
+  ``strict_mode`` $set is omitted when ``req.strict_mode is None`` to
+  faithfully replicate PG's ``COALESCE($3, existing)`` no-op
+  semantics) plus ``$setOnInsert`` for ``DEFAULT FALSE`` only when the
+  request didn't supply a value. (5) ``guardian_pin_set`` PIN upsert
+  mirrored as ``$set: {guardian_pin_hash, updated_at}`` plus
+  ``$setOnInsert`` defaults — the hash is salted with
+  ``f"{actor_kind}:{actor}"`` so it's actor-bound and safe to mirror
+  as-is. (6-8) ``claim_anon_data`` has 3 PG writes inside the txn (one
+  of {INSERT user-side, UPDATE user-side, no-op} + DELETE anon-side
+  + the no-op same-day branch). Captured ``_settings_user_payload``
+  (kind=insert | update + the final field values) and
+  ``_settings_anon_had_doc`` flag inside the txn; AFTER the txn
+  commits, the mirrors fire as: (a) user-side
+  ``update_one(filter, $set, upsert=True)`` — INSERT branch overwrites
+  fully (we know PG had no user row), UPDATE branch only $sets the 3
+  merged fields (leaves Mongo-side ``guardian_pin_hash`` untouched),
+  with ``$setOnInsert`` defaults for safety; (b) anon-side
+  ``delete_one(filter)``. Same "no phantom Mongo write on PG
+  rollback" guarantee as edu_notes / edu_flashcards. Test suite grew
+  26 → 31 (5 new edu_study_settings cases — env-flag name singular,
+  default enabled, per-collection isolation across all 5 collections,
+  upsert success counter, delete_one success, swallows-exception).
+  ``routes/edu_study.py`` import line updated to a 3-name multiline
+  ``from db_dualwrite import (...)``.
 - **2026-05-06**: **Phase 2 (edu_flashcards collection) merged.** Greenfield
   Mongo target per §50; FK child of edu_notes (one note → many cards via
   SM-2 spaced-repetition expansion). Added `mirror_edu_flashcards_write()`

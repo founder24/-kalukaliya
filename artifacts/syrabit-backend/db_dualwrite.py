@@ -26,7 +26,13 @@ Per-collection rollout (Phase 2):
   build_flashcards uses bulk ``insert_many`` to amortise the
   ≤2.4 k-card fan-out, review uses ``replace_one(upsert=True)``,
   claim mirror fires post-transaction with ``cards_count > 0`` gate).
-- 6 remaining collections . NOT STARTED — separate sessions per the
+- ``edu_study_settings`` .. SHIPPED 2026-05-06 (greenfield; composite
+  PK ``(actor_kind, actor)`` — no surrogate id; 8 PG write sites in
+  ``routes/edu_study.py`` collapsed into 5 mirror calls — streak's
+  3 mutually-exclusive branches collapsed into 1 post-block upsert,
+  claim's 3 writes collapsed into 1 user-side upsert + 1 anon-side
+  delete after txn commit).
+- 5 remaining collections . NOT STARTED — separate sessions per the
   ADR's per-table contract.
 
 Carve-outs (do NOT migrate to this helper):
@@ -62,6 +68,7 @@ _FLAG_NAME_OVERRIDES: dict[str, str] = {
     "conversations": "CONVERSATION",
     "edu_notes": "EDU_NOTE",
     "edu_flashcards": "EDU_FLASHCARD",
+    "edu_study_settings": "EDU_STUDY_SETTING",
 }
 
 
@@ -232,3 +239,27 @@ async def mirror_edu_flashcards_write(
     than per-card mirror calls to avoid serial round-trip latency.
     """
     await mirror_collection_write("edu_flashcards", op_label, fn)
+
+
+async def mirror_edu_study_settings_write(
+    op_label: str,
+    fn: Callable[[], Awaitable[Any]],
+) -> None:
+    """Mirror a write to the ``edu_study_settings`` collection (best-effort).
+
+    Greenfield collection per ADR-0001 §50 — PG remains read-of-record
+    until Phase 4 cutover. Rollback flag:
+    ``MONGO_EDU_STUDY_SETTING_WRITES=0`` (singular form per the
+    edu_notes / edu_flashcards convention).
+
+    edu_study_settings has a composite primary key
+    ``(actor_kind, actor)`` — there is no surrogate ``id`` column. The
+    Mongo doc therefore uses ``{actor_kind, actor}`` as the natural
+    key, with every write expressed as
+    ``update_one(filter, {$set: ...}, upsert=True)`` (or ``delete_one``
+    for the claim cleanup). Callers may collapse multiple branches
+    into a single mirror call when the final state is determinable
+    after the PG write block exits (see the streak-update + claim
+    flows in ``routes/edu_study.py``).
+    """
+    await mirror_collection_write("edu_study_settings", op_label, fn)

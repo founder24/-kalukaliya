@@ -379,3 +379,104 @@ def test_edu_notes_mirror_swallows_exception(fresh_module, fake_edu_notes_db):
     counters = fresh_module.get_dualwrite_counters()
     assert counters["edu_notes.fail"] == 1
     assert counters["edu_notes.success"] == 0
+
+
+# ── edu_study_settings collection (fifth Phase 2 rollout) ──
+
+@pytest.fixture
+def fake_edu_study_settings_db(monkeypatch, fresh_module):
+    import deps
+    fake = MagicMock()
+    fake.edu_study_settings = MagicMock()
+    fake.edu_study_settings.update_one = AsyncMock(return_value=None)
+    fake.edu_study_settings.delete_one = AsyncMock(return_value=None)
+    monkeypatch.setattr(deps, "db", fake)
+    return fake
+
+
+def test_edu_study_settings_flag_env_name(fresh_module):
+    """edu_study_settings must use MONGO_EDU_STUDY_SETTING_WRITES (singular)."""
+    assert (
+        fresh_module._flag_env_for("edu_study_settings")
+        == "MONGO_EDU_STUDY_SETTING_WRITES"
+    )
+
+
+def test_edu_study_settings_flag_default_enabled(fresh_module):
+    assert (
+        fresh_module.mongo_collection_writes_enabled("edu_study_settings") is True
+    )
+
+
+def test_edu_study_settings_flag_disable_independent(reset_env, fresh_module):
+    reset_env.setenv("MONGO_EDU_STUDY_SETTING_WRITES", "0")
+    assert (
+        fresh_module.mongo_collection_writes_enabled("edu_study_settings") is False
+    )
+    # Sibling collections must NOT be affected.
+    assert fresh_module.mongo_collection_writes_enabled("users") is True
+    assert fresh_module.mongo_collection_writes_enabled("conversations") is True
+    assert fresh_module.mongo_collection_writes_enabled("edu_notes") is True
+    assert fresh_module.mongo_collection_writes_enabled("edu_flashcards") is True
+
+
+def test_edu_study_settings_upsert_success(
+    fresh_module, fake_edu_study_settings_db
+):
+    """Mirror a streak update_one upsert (the review_flashcard hot path)."""
+    async def go():
+        await fresh_module.mirror_edu_study_settings_write(
+            "streak_update",
+            lambda: fake_edu_study_settings_db.edu_study_settings.update_one(
+                {"actor_kind": "user", "actor": "u1"},
+                {"$set": {"streak_count": 3, "streak_last_day": "2026-05-06"}},
+                upsert=True,
+            ),
+        )
+    _run(go())
+    fake_edu_study_settings_db.edu_study_settings.update_one.assert_awaited_once()
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_study_settings.success"] == 1
+    assert counters["edu_study_settings.fail"] == 0
+    # Sibling counters untouched.
+    assert counters.get("edu_flashcards.success", 0) == 0
+    assert counters.get("edu_notes.success", 0) == 0
+
+
+def test_edu_study_settings_delete_one_success(
+    fresh_module, fake_edu_study_settings_db
+):
+    """Mirror the anon-side delete fired post-claim-transaction."""
+    async def go():
+        await fresh_module.mirror_edu_study_settings_write(
+            "claim_anon_delete",
+            lambda: fake_edu_study_settings_db.edu_study_settings.delete_one(
+                {"actor_kind": "anon", "actor": "a1"},
+            ),
+        )
+    _run(go())
+    fake_edu_study_settings_db.edu_study_settings.delete_one.assert_awaited_once()
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_study_settings.success"] == 1
+
+
+def test_edu_study_settings_mirror_swallows_exception(
+    fresh_module, fake_edu_study_settings_db
+):
+    fake_edu_study_settings_db.edu_study_settings.update_one.side_effect = (
+        RuntimeError("boom")
+    )
+
+    async def go():
+        await fresh_module.mirror_edu_study_settings_write(
+            "set_strict_mode",
+            lambda: fake_edu_study_settings_db.edu_study_settings.update_one(
+                {"actor_kind": "user", "actor": "u1"},
+                {"$set": {"strict_mode": True}},
+                upsert=True,
+            ),
+        )
+    _run(go())  # must NOT raise — PG is SoT
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_study_settings.fail"] == 1
+    assert counters["edu_study_settings.success"] == 0

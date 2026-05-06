@@ -46,7 +46,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from auth_deps import get_current_user, get_current_user_optional, check_rate_limit, get_user_credits
-from db_dualwrite import mirror_edu_flashcards_write, mirror_edu_notes_write
+from db_dualwrite import (
+    mirror_edu_flashcards_write,
+    mirror_edu_notes_write,
+    mirror_edu_study_settings_write,
+)
 from llm import call_llm_api, _call_vertex_chat
 from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
@@ -2492,6 +2496,12 @@ async def review_flashcard(req: CardReviewReq, request: Request,
             upsert=True,
         ),
     )
+    # ADR-0001 Phase 2 (edu_study_settings): the streak block has 3
+    # mutually-exclusive PG writes (first-review INSERT / streak +1
+    # UPDATE / streak-reset UPDATE) plus a no-op same-day branch. We
+    # collapse them into one post-block ``update_one upsert=True``
+    # mirror by tracking whether the streak/last_day actually moved.
+    _settings_mirror_needed = False
     async with deps.pg_pool.acquire() as conn:
         # Streak update
         today = date.today()
@@ -2506,10 +2516,12 @@ async def review_flashcard(req: CardReviewReq, request: Request,
                 kind, actor, today,
             )
             streak = 1
+            _settings_mirror_needed = True
         else:
             last = s["streak_last_day"]
             if last == today:
                 streak = int(s["streak_count"] or 0)
+                # Same-day re-review — no PG mutation, no mirror needed.
             elif last and (today - last).days == 1:
                 streak = int(s["streak_count"] or 0) + 1
                 await conn.execute(
@@ -2517,6 +2529,7 @@ async def review_flashcard(req: CardReviewReq, request: Request,
                     "WHERE actor_kind=$3 AND actor=$4",
                     streak, today, kind, actor,
                 )
+                _settings_mirror_needed = True
             else:
                 streak = 1
                 await conn.execute(
@@ -2524,6 +2537,35 @@ async def review_flashcard(req: CardReviewReq, request: Request,
                     "WHERE actor_kind=$2 AND actor=$3",
                     today, kind, actor,
                 )
+                _settings_mirror_needed = True
+    # ADR-0001 Phase 2: single post-block upsert mirror for the streak.
+    # Greenfield-safe — pre-Phase-2 settings rows have no Mongo twin,
+    # so ``upsert=True`` lets the first review materialise the doc.
+    if _settings_mirror_needed:
+        _kind = kind
+        _actor = actor
+        _streak = streak
+        _today = today
+        _now_utc = datetime.now(timezone.utc)
+        await mirror_edu_study_settings_write(
+            "streak_update",
+            lambda: deps.db.edu_study_settings.update_one(
+                {"actor_kind": _kind, "actor": _actor},
+                {"$set": {
+                    "actor_kind": _kind,
+                    "actor": _actor,
+                    "streak_count": _streak,
+                    "streak_last_day": _today.isoformat(),
+                    "updated_at": _now_utc,
+                },
+                "$setOnInsert": {
+                    # PG defaults — only applied if the doc didn't exist.
+                    "strict_mode": False,
+                    "guardian_pin_hash": None,
+                }},
+                upsert=True,
+            ),
+        )
     # Task #401 — for *successful* recalls (SM-2 quality 4 / 5) of a
     # logged-in user, persist the card's front/back into the memory_brain
     # as a `fact` memory so the next chat turn can ground on what the
@@ -2622,6 +2664,36 @@ async def set_study_settings(req: SettingsReq, request: Request,
                              updated_at=NOW()""",
             kind, actor, req.strict_mode,
         )
+    # ADR-0001 Phase 2: mirror the strict-mode upsert. PG uses
+    # COALESCE($3, existing) so a None request is a no-op on PG; we
+    # replicate that by only setting strict_mode when it's not None.
+    # ``$setOnInsert`` carries the PG ``DEFAULT FALSE`` for the strict
+    # column when the doc doesn't yet exist and req.strict_mode is None
+    # (matches PG's ``VALUES (..., COALESCE($3, FALSE))``).
+    _kind = kind
+    _actor = actor
+    _now_utc = datetime.now(timezone.utc)
+    _strict = req.strict_mode
+    _set: dict = {"updated_at": _now_utc}
+    if _strict is not None:
+        _set["strict_mode"] = bool(_strict)
+    _set_on_insert = {
+        "actor_kind": _kind,
+        "actor": _actor,
+        "guardian_pin_hash": None,
+        "streak_count": 0,
+        "streak_last_day": None,
+    }
+    if _strict is None:
+        _set_on_insert["strict_mode"] = False
+    await mirror_edu_study_settings_write(
+        "set_strict_mode",
+        lambda: deps.db.edu_study_settings.update_one(
+            {"actor_kind": _kind, "actor": _actor},
+            {"$set": _set, "$setOnInsert": _set_on_insert},
+            upsert=True,
+        ),
+    )
     return {"ok": True}
 
 
@@ -2658,6 +2730,32 @@ async def guardian_pin_set(req: PinSetReq, request: Request,
                DO UPDATE SET guardian_pin_hash=$3, updated_at=NOW()""",
             kind, actor, new_hash,
         )
+    # ADR-0001 Phase 2: mirror the PIN upsert. The hash is salted with
+    # ``f"{kind}:{actor}"`` so it's actor-bound and safe to mirror as-is.
+    _kind = kind
+    _actor = actor
+    _hash = new_hash
+    _now_utc = datetime.now(timezone.utc)
+    await mirror_edu_study_settings_write(
+        "set_pin",
+        lambda: deps.db.edu_study_settings.update_one(
+            {"actor_kind": _kind, "actor": _actor},
+            {
+                "$set": {
+                    "guardian_pin_hash": _hash,
+                    "updated_at": _now_utc,
+                },
+                "$setOnInsert": {
+                    "actor_kind": _kind,
+                    "actor": _actor,
+                    "strict_mode": False,
+                    "streak_count": 0,
+                    "streak_last_day": None,
+                },
+            },
+            upsert=True,
+        ),
+    )
     return {"ok": True}
 
 
@@ -2710,6 +2808,12 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
     cards_count = 0
     settings_merged = False
     pin_dropped = False
+    # ADR-0001 Phase 2 (edu_study_settings): capture the final user-side
+    # settings payload + anon-had-settings flag inside the txn so we can
+    # fire the Mongo mirrors AFTER the txn commits — same "no phantom
+    # write on PG rollback" pattern as edu_notes / edu_flashcards.
+    _settings_anon_had_doc = False
+    _settings_user_payload: dict | None = None  # filled if PG wrote user side
     async with deps.pg_pool.acquire() as conn:
         async with conn.transaction():
             notes_res = await conn.execute(
@@ -2731,6 +2835,7 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
             )
             anon_had_pin = bool(anon_settings and anon_settings["guardian_pin_hash"])
             if anon_settings:
+                _settings_anon_had_doc = True
                 user_settings = await conn.fetchrow(
                     "SELECT * FROM edu_study_settings "
                     "WHERE actor_kind='user' AND actor=$1",
@@ -2752,6 +2857,16 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
                         user_id, anon_strict, anon_streak, anon_last,
                     )
                     settings_merged = True
+                    # Mongo mirror plan: full overwrite (we know user side
+                    # had no PG row, so it's safe to overwrite a stray
+                    # Mongo doc if one exists). No PIN — match PG NULL.
+                    _settings_user_payload = {
+                        "kind": "insert",
+                        "strict_mode": anon_strict,
+                        "guardian_pin_hash": None,
+                        "streak_count": anon_streak,
+                        "streak_last_day": anon_last.isoformat() if anon_last else None,
+                    }
                 else:
                     # Merge into existing user settings so signed-out
                     # changes are not silently lost.
@@ -2787,6 +2902,16 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
                             merged_strict, merged_streak, merged_last, user_id,
                         )
                         settings_merged = True
+                        # Mongo mirror plan: $set only the 3 merged
+                        # fields PG actually touched — leaves
+                        # guardian_pin_hash + any other Mongo-only
+                        # extensions untouched.
+                        _settings_user_payload = {
+                            "kind": "update",
+                            "strict_mode": merged_strict,
+                            "streak_count": merged_streak,
+                            "streak_last_day": merged_last.isoformat() if merged_last else None,
+                        }
                 await conn.execute(
                     "DELETE FROM edu_study_settings "
                     "WHERE actor_kind='anon' AND actor=$1",
@@ -2847,6 +2972,60 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
                     "actor": _uid,
                     "claimed_at": _claimed_at,
                 }},
+            ),
+        )
+    # ADR-0001 Phase 2 (edu_study_settings): two post-transaction
+    # mirrors — (1) user-side upsert iff PG wrote to the user row, and
+    # (2) anon-side delete iff there was an anon settings row to start
+    # with. Both gated on the locals captured inside the txn so a PG
+    # rollback could not leave a phantom Mongo write.
+    if _settings_user_payload is not None:
+        _payload = _settings_user_payload
+        _kind_name = _payload["kind"]
+        if _kind_name == "insert":
+            # PG side had no user row — full overwrite is safe.
+            _set_doc = {
+                "actor_kind": "user",
+                "actor": _uid,
+                "strict_mode": _payload["strict_mode"],
+                "guardian_pin_hash": _payload["guardian_pin_hash"],
+                "streak_count": _payload["streak_count"],
+                "streak_last_day": _payload["streak_last_day"],
+                "updated_at": _claimed_at,
+            }
+            await mirror_edu_study_settings_write(
+                "claim_user_insert",
+                lambda: deps.db.edu_study_settings.update_one(
+                    {"actor_kind": "user", "actor": _uid},
+                    {"$set": _set_doc},
+                    upsert=True,
+                ),
+            )
+        else:  # "update" — merge only the 3 fields PG actually touched
+            _set_doc = {
+                "strict_mode": _payload["strict_mode"],
+                "streak_count": _payload["streak_count"],
+                "streak_last_day": _payload["streak_last_day"],
+                "updated_at": _claimed_at,
+            }
+            _set_on_insert = {
+                "actor_kind": "user",
+                "actor": _uid,
+                "guardian_pin_hash": None,
+            }
+            await mirror_edu_study_settings_write(
+                "claim_user_merge",
+                lambda: deps.db.edu_study_settings.update_one(
+                    {"actor_kind": "user", "actor": _uid},
+                    {"$set": _set_doc, "$setOnInsert": _set_on_insert},
+                    upsert=True,
+                ),
+            )
+    if _settings_anon_had_doc:
+        await mirror_edu_study_settings_write(
+            "claim_anon_delete",
+            lambda: deps.db.edu_study_settings.delete_one(
+                {"actor_kind": "anon", "actor": _anon},
             ),
         )
     return {"ok": True, "notes": notes_count, "flashcards": cards_count,
