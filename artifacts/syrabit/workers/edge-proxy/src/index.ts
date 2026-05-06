@@ -136,12 +136,19 @@ async function dispatchDurableObject(
  *
  * The counters live in module-scoped memory (per-isolate, per-UTC-day)
  * — same shape and quota defaults the workers/edge-proxy `kv-monitor`
- * uses so the admin route can render the new row identically. A more
- * elaborate cross-isolate aggregation (the workers/edge-proxy
- * `__kv_usage:*` shared key trick) is intentionally NOT replicated here:
- * a single isolate's counter is enough to surface a quota burn within
- * one snapshot poll, and the alert dispatch is per-isolate idempotent
- * via `_kvAlertedToday`.
+ * uses so the admin route can render the new row identically.
+ *
+ * Task #454 — cross-isolate aggregation. Per-isolate counters were
+ * silently under-reporting global burn by 10-20× on a hot day because
+ * the snapshot endpoint only saw whichever isolate happened to handle
+ * the probe. We now mirror the workers/edge-proxy `kv-monitor` trick:
+ * each isolate periodically flushes its counters under
+ * `__kv_usage:<binding>:<utc-day>:<isolate-id>` (stored inside the
+ * binding's own KV namespace), and `dispatchKvUsage` lists+sums every
+ * isolate's key before returning the snapshot. Alert dispatch is still
+ * per-isolate idempotent via `alertedToday` — operators see the global
+ * tally, but every isolate independently fires the warning/exhausted
+ * webhook once per day so a quiet isolate can still surface a problem.
  */
 type KvOpName = 'read' | 'write' | 'delete' | 'list';
 
@@ -170,6 +177,72 @@ interface KvBindingState {
 
 const _kvState: Map<string, KvBindingState> = new Map();
 let _kvCurrentDay = utcDayKey();
+
+// Task #454 — cross-isolate aggregation primitives. Each worker isolate
+// gets a stable UUID (lazy-init: the Workers validator rejects async I/O
+// AND random-value generation in module global scope, so we defer the
+// call to first use) and periodically writes its counters under
+// `__kv_usage:<binding>:<day>:<isolate-id>` inside the binding's KV
+// namespace. The aggregated snapshot lists+sums every isolate's key.
+const SHARED_KV_USAGE_PREFIX = '__kv_usage:';
+const KV_FLUSH_EVERY_OPS = 10;
+const _kvOpsSinceFlush: Map<string, number> = new Map();
+let _kvIsolateIdCache: string | null = null;
+function _kvIsolateId(): string {
+  if (_kvIsolateIdCache !== null) return _kvIsolateIdCache;
+  _kvIsolateIdCache =
+    typeof crypto !== 'undefined' && (crypto as Crypto).randomUUID
+      ? (crypto as Crypto).randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return _kvIsolateIdCache;
+}
+
+function _sharedCounterKey(binding: string): string {
+  return `${SHARED_KV_USAGE_PREFIX}${binding}:${_kvCurrentDay}:${_kvIsolateId()}`;
+}
+
+/** Persist this isolate's counters under its shared key. Best-effort —
+ *  a failed write just means the next snapshot poll under-counts this
+ *  isolate by a few ops until the next flush succeeds. */
+async function _flushSharedKvCounter(
+  binding: string,
+  kv: KVNamespace,
+): Promise<void> {
+  _rollKvDayIfNeeded();
+  const s = _kvBindingState(binding);
+  try {
+    await kv.put(_sharedCounterKey(binding), JSON.stringify(s.counters), {
+      // 48h TTL: long enough that yesterday's keys naturally expire after
+      // today's snapshot has accumulated, short enough that abandoned
+      // isolate IDs don't pile up in the namespace.
+      expirationTtl: 60 * 60 * 48,
+    });
+  } catch {
+    /* shared-store write best-effort */
+  }
+}
+
+/** Schedule a shared-counter flush every Nth op via ctx.waitUntil so
+ *  cross-isolate aggregation stays roughly current without blocking the
+ *  request. The `_sharedCounterKey` write itself bumps the binding's KV
+ *  write counter — that's intentional accounting (these PUTs really do
+ *  consume quota), and FLUSH_EVERY_OPS keeps the overhead at ~10% of
+ *  total writes which is well below the warning threshold for a busy
+ *  binding. */
+function _maybeFlushSharedKvCounter(
+  binding: string,
+  kv: KVNamespace | undefined,
+  ctx: ExecutionContext,
+): void {
+  if (!kv) return;
+  const n = (_kvOpsSinceFlush.get(binding) ?? 0) + 1;
+  if (n < KV_FLUSH_EVERY_OPS) {
+    _kvOpsSinceFlush.set(binding, n);
+    return;
+  }
+  _kvOpsSinceFlush.set(binding, 0);
+  ctx.waitUntil(_flushSharedKvCounter(binding, kv));
+}
 
 function utcDayKey(d: Date = new Date()): string {
   return d.toISOString().slice(0, 10);
@@ -225,15 +298,18 @@ interface KvBindingSnapshot {
   fallbackActive: boolean;
 }
 
-function _kvSnapshotFor(binding: string, env: Env): KvBindingSnapshot {
-  const s = _kvBindingState(binding);
+function _kvSnapshotFromCounters(
+  binding: string,
+  counters: Record<KvOpName, number>,
+  env: Env,
+): KvBindingSnapshot {
   const quota = _resolveKvQuota(env);
   const warningPct = _resolveKvWarningPct(env);
   const ops: KvOpName[] = ['read', 'write', 'list', 'delete'];
   const percentages = {} as Record<KvOpName, number>;
   let status: 'healthy' | 'warning' | 'exhausted' = 'healthy';
   for (const op of ops) {
-    const used = s.counters[op] ?? 0;
+    const used = counters[op] ?? 0;
     const cap = quota[op] || 1;
     const pct = Math.round((used / cap) * 1000) / 10;
     percentages[op] = pct;
@@ -243,7 +319,7 @@ function _kvSnapshotFor(binding: string, env: Env): KvBindingSnapshot {
   return {
     binding,
     utcDay: _kvCurrentDay,
-    counters: { ...s.counters },
+    counters: { ...counters },
     quota,
     percentages,
     status,
@@ -251,10 +327,91 @@ function _kvSnapshotFor(binding: string, env: Env): KvBindingSnapshot {
   };
 }
 
+function _kvSnapshotFor(binding: string, env: Env): KvBindingSnapshot {
+  const s = _kvBindingState(binding);
+  return _kvSnapshotFromCounters(binding, s.counters, env);
+}
+
+/**
+ * Task #454 — sum the local isolate's counters with every other
+ * isolate's persisted counters under `__kv_usage:<binding>:<day>:*`.
+ * Used by `dispatchKvUsage` so the dashboard reflects global burn
+ * instead of whichever isolate happened to serve the probe.
+ *
+ * Local counters are flushed first so this isolate's contribution is
+ * always part of the listed set (rather than added on top, which would
+ * double-count the ops we just flushed). If the listing fails (KV
+ * outage) we fall back to local-only counters so the panel still
+ * renders something.
+ */
+export async function _aggregateKvCountersAcrossIsolates(
+  binding: string,
+  kv: KVNamespace,
+): Promise<Record<KvOpName, number>> {
+  _rollKvDayIfNeeded();
+  const local = _kvBindingState(binding);
+  await _flushSharedKvCounter(binding, kv);
+  const aggregated: Record<KvOpName, number> = {
+    read: 0,
+    write: 0,
+    list: 0,
+    delete: 0,
+  };
+  try {
+    const listResult = await kv.list({
+      prefix: `${SHARED_KV_USAGE_PREFIX}${binding}:${_kvCurrentDay}:`,
+    });
+    const keys = (listResult as { keys: { name: string }[] }).keys || [];
+    for (const k of keys) {
+      try {
+        const raw = await kv.get(k.name);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as Partial<Record<KvOpName, number>>;
+        for (const op of ['read', 'write', 'list', 'delete'] as KvOpName[]) {
+          aggregated[op] += parsed[op] ?? 0;
+        }
+      } catch {
+        /* skip malformed isolate entry */
+      }
+    }
+  } catch {
+    return { ...local.counters };
+  }
+  // If the shared store had nothing yet (cold isolate, or list returned
+  // before our own flush propagated), fall back to local counters so
+  // the snapshot is never spuriously empty.
+  const sum =
+    aggregated.read + aggregated.write + aggregated.list + aggregated.delete;
+  if (sum === 0) return { ...local.counters };
+  return aggregated;
+}
+
 /** Test-only reset hook so unit tests can start from a clean slate. */
 export function _resetKvCountersForTests(): void {
   _kvState.clear();
+  _kvOpsSinceFlush.clear();
+  _kvIsolateIdCache = null;
   _kvCurrentDay = utcDayKey();
+}
+
+/** Test-only override of the per-isolate identity. Unit tests use this
+ *  to simulate a second isolate writing under a different shared key. */
+export function _setKvIsolateIdForTests(id: string | null): void {
+  _kvIsolateIdCache = id;
+}
+
+/** Test-only seed for the in-memory per-isolate counters. Lets a unit
+ *  test pretend this isolate has already handled some ops without
+ *  going through the full _bumpKvCounter path (which would also fire
+ *  alerts and a shared-counter flush). */
+export function _seedKvCountersForTests(
+  binding: string,
+  counters: Partial<Record<KvOpName, number>>,
+): void {
+  const s = _kvBindingState(binding);
+  for (const op of ['read', 'write', 'list', 'delete'] as KvOpName[]) {
+    if (counters[op] !== undefined) s.counters[op] = counters[op] as number;
+  }
 }
 
 function _backendUrlForAlert(env: Env): string | null {
@@ -322,6 +479,12 @@ function _bumpKvCounter(
   // every op is safe; the actual POST happens at most twice per
   // (binding,op) per UTC day (warning + exhausted).
   void _maybeFireKvAlert(binding, op, env, ctx);
+  // Task #454 — periodically mirror our local counters to the shared
+  // `__kv_usage:*` key so the snapshot endpoint can sum across every
+  // isolate that has handled CF_EDGE_CACHE traffic.
+  if (binding === 'CF_EDGE_CACHE') {
+    _maybeFlushSharedKvCounter(binding, env.CF_EDGE_CACHE, ctx);
+  }
 }
 
 /**
@@ -351,7 +514,14 @@ async function dispatchKvUsage(
   _rollKvDayIfNeeded();
   const bindings: KvBindingSnapshot[] = [];
   if (env.CF_EDGE_CACHE) {
-    bindings.push(_kvSnapshotFor('CF_EDGE_CACHE', env));
+    // Task #454 — sum every isolate's persisted counters before
+    // returning so the dashboard sees global burn, not just whichever
+    // isolate happened to serve this probe.
+    const counters = await _aggregateKvCountersAcrossIsolates(
+      'CF_EDGE_CACHE',
+      env.CF_EDGE_CACHE,
+    );
+    bindings.push(_kvSnapshotFromCounters('CF_EDGE_CACHE', counters, env));
   }
   return jsonResponse({
     utcDay: _kvCurrentDay,

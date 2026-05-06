@@ -40,6 +40,18 @@ interface KVNamespaceGetWithMetadataResult<V, M> {
   metadata: M | null;
 }
 
+interface KVNamespaceListOptions {
+  prefix?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+interface KVNamespaceListResult {
+  keys: { name: string; expiration?: number; metadata?: unknown }[];
+  list_complete: boolean;
+  cursor?: string;
+}
+
 interface KVNamespace {
   get(key: string): Promise<string | null>;
   get(key: string, options: { type: 'json' }): Promise<unknown | null>;
@@ -54,4 +66,7 @@ interface KVNamespace {
     options?: KVNamespacePutOptions,
   ): Promise<void>;
   delete(key: string): Promise<void>;
+  // Task #454 — `list` is needed by `_aggregateKvCountersAcrossIsolates`
+  // to enumerate every isolate's `__kv_usage:*` shared key.
+  list(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult>;
 }
