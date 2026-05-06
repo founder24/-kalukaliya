@@ -28,7 +28,7 @@ import os
 import logging
 import asyncio
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
@@ -347,3 +347,139 @@ async def warmup_d1_cache(db) -> Dict[str, Any]:
             "error": f"{type(e).__name__}: {str(e)}",
             "duration_ms": duration_ms,
         }
+
+
+# ---------------------------------------------------------------------------
+# Task #427 — in-process nightly safety net for the D1 mirror.
+#
+# The only path that previously triggered ``sync_full`` (and the extended
+# mirror) was the admin endpoint ``POST /admin/d1-sync``, which depends on an
+# external Cloud Scheduler job pinging us once per day. If that scheduler is
+# paused / misconfigured, ``/admin/cf-health.d1_mirror.lag_seconds`` silently
+# climbs without anyone noticing until a downstream Pages SSR read returns
+# stale rows. This loop runs in-process alongside ``pages_deploy.nightly_loop``
+# and uses the same Mongo-backed cross-replica lease so only ONE worker fires
+# the sync per cycle, even with N ACA replicas behind the same revision.
+#
+# Mirrors the admin endpoint exactly:
+#   1. ``sync_full`` (folds in the extended mirror payload)
+#   2. ``d1_mirror.sync_extended`` (best-effort second pass for lag bookkeeping)
+#   3. ``cloudflare_client.purge_worker_cache(purge_all=True)`` (best-effort)
+# ---------------------------------------------------------------------------
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "d1_sync: invalid %s=%r — falling back to default %d",
+            name, raw, default,
+        )
+        return default
+
+
+NIGHTLY_INTERVAL_SEC = _env_int("D1_SYNC_NIGHTLY_INTERVAL_SEC", 24 * 3600)
+_NIGHTLY_LOCK_ID = "d1_sync_nightly_lease"
+_NIGHTLY_LAST_FIRED_FIELD = "last_fired_at"
+_NIGHTLY_FOLLOWER_INTERVAL_S = max(60, min(600, NIGHTLY_INTERVAL_SEC // 12 or 60))
+
+
+def _parse_iso_utc(s: Any) -> Optional[datetime]:
+    if isinstance(s, datetime):
+        return s if s.tzinfo else s.replace(tzinfo=timezone.utc)
+    if not isinstance(s, str) or not s:
+        return None
+    try:
+        out = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return out if out.tzinfo else out.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+async def _run_one_cycle(db) -> bool:
+    """Run sync_full + sync_extended + worker purge. Returns True iff sync_full
+    reported success. Extended-mirror and purge are best-effort and never flip
+    the return value (matches the admin endpoint's wrapping)."""
+    primary_ok = False
+    try:
+        result = await sync_full(db)
+        primary_ok = bool(result.get("success"))
+        logger.info("d1_sync.nightly: sync_full result=%s", result)
+    except Exception:
+        logger.exception("d1_sync.nightly: sync_full crashed")
+        return False
+    try:
+        import d1_mirror as _d1_mirror
+        ext_result = await _d1_mirror.sync_extended(db)
+        logger.info("d1_sync.nightly: sync_extended result=%s", ext_result)
+    except Exception as exc:
+        logger.warning("d1_sync.nightly: sync_extended failed (non-blocking): %s", exc)
+    try:
+        from cloudflare_client import purge_worker_cache
+        await purge_worker_cache(purge_all=True)
+        logger.info("d1_sync.nightly: worker cache purge_all ok")
+    except Exception as exc:
+        logger.warning("d1_sync.nightly: worker cache purge failed (non-blocking): %s", exc)
+    return primary_ok
+
+
+async def nightly_loop() -> None:
+    """Leader-gated nightly trigger for ``sync_full`` + ``sync_extended``.
+
+    No-ops cleanly when D1 sync is not configured or the interval is set to
+    0. Cross-replica dedup matches ``pages_deploy.nightly_loop``: every
+    replica polls at a follower cadence, but only the lease-holder runs the
+    sync and stamps ``last_fired_at`` on success — a transient failure is
+    retried on the next follower tick instead of being silently suppressed
+    for the rest of the cycle.
+    """
+    if not is_d1_configured() or NIGHTLY_INTERVAL_SEC <= 0:
+        return
+    import background_lease as _bglease
+    from deps import db
+    owner_id = _bglease.make_owner_id("d1-sync-nightly")
+    ttl_s = max(NIGHTLY_INTERVAL_SEC * 3, 24 * 3600)
+    try:
+        while True:
+            try:
+                await asyncio.sleep(_NIGHTLY_FOLLOWER_INTERVAL_S)
+                if not await _bglease.try_acquire_lease(
+                    db, _NIGHTLY_LOCK_ID, owner_id, ttl_s,
+                ):
+                    continue
+                doc = await db.job_locks.find_one({"_id": _NIGHTLY_LOCK_ID})
+                last_fired = _parse_iso_utc(
+                    (doc or {}).get(_NIGHTLY_LAST_FIRED_FIELD))
+                now = datetime.now(timezone.utc)
+                if last_fired is not None and (
+                    now - last_fired
+                ).total_seconds() < NIGHTLY_INTERVAL_SEC:
+                    continue
+                ok = await _run_one_cycle(db)
+                if not ok:
+                    # Don't stamp — retry on the next follower tick.
+                    continue
+                try:
+                    await db.job_locks.update_one(
+                        {"_id": _NIGHTLY_LOCK_ID},
+                        {"$set": {
+                            _NIGHTLY_LAST_FIRED_FIELD: now.isoformat(),
+                        }},
+                    )
+                except Exception:
+                    logger.exception(
+                        "d1_sync.nightly: failed to stamp last_fired_at")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("d1_sync.nightly: loop iteration failed")
+    finally:
+        try:
+            await asyncio.shield(_bglease.release_lease(
+                db, _NIGHTLY_LOCK_ID, owner_id,
+            ))
+        except Exception:
+            pass

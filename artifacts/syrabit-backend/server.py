@@ -1655,6 +1655,18 @@ async def lifespan(app):
     except Exception as _pd_err:
         logger.warning(f"pages_deploy nightly loop not started: {_pd_err}")
 
+    # Task #427 — in-process nightly safety net for the D1 mirror so
+    # ``/admin/cf-health.d1_mirror.lag_seconds`` stays under threshold
+    # even if the external Cloud Scheduler job that hits
+    # ``POST /admin/d1-sync`` is paused or misconfigured. Mongo-leased
+    # across replicas (``d1_sync_nightly_lease``); no-ops cleanly when
+    # ``D1_SYNC_SECRET`` is unset or ``D1_SYNC_NIGHTLY_INTERVAL_SEC=0``.
+    try:
+        import d1_sync as _d1_sync
+        _aca_create_task(_d1_sync.nightly_loop(), key="d1-sync-nightly")
+    except Exception as _d1_err:
+        logger.warning(f"d1_sync nightly loop not started: {_d1_err}")
+
     # Task #314 uses atomic Mongo CAS via db.job_locks for dedup across
     # replicas, so it does not need a leader gate.
     _aca_create_task(_bot_traffic_report_loop(), key="bot-traffic-report")
