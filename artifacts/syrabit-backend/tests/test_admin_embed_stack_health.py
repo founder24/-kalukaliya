@@ -292,3 +292,146 @@ def test_embed_stack_health_surfaces_staging_row(app_client_authed,
     # because production embed + rerank + memory_brain are all healthy.
     assert body["ok"] is True
     assert body["embed"]["ok"] is True  # back-compat field still production-only
+
+
+# ── Task #469 — embed-stack alert pill counter contract ─────────────────
+# Task #436 added the per-leg "N/3 consecutive failures" badge driven by
+# the Task #412 watchdog counters in metrics.py. The metrics accessor
+# and the route fields are now load-bearing for on-call awareness, but
+# nothing pinned their shape — a silent rename of any of
+# ``consecutive_failures`` / ``firing`` / ``alert_threshold`` /
+# ``alert_state.legs.<leg>`` would blank out the dashboard badge
+# without any test failing. These tests lock the contract.
+
+
+def _reset_embed_stack_counters():
+    import metrics as _m
+    for leg in _m._EMBED_STACK_LEGS:
+        _m._embed_stack_consecutive_failures[leg] = 0
+        _m._embed_stack_was_firing[leg] = False
+        _m._embed_stack_last_error[leg] = None
+        _m._embed_stack_last_latency_ms[leg] = None
+
+
+@pytest.fixture
+def reset_embed_stack_counters():
+    _reset_embed_stack_counters()
+    yield
+    _reset_embed_stack_counters()
+
+
+def test_get_embed_stack_alert_snapshot_shape(reset_embed_stack_counters):
+    """The Task #436 dashboard badge reads exactly these keys; if any
+    field is renamed the per-leg counter pill goes dark in production."""
+    import metrics as _m
+    snap = _m.get_embed_stack_alert_snapshot()
+
+    # Top-level: threshold (int) + legs dict keyed by every leg.
+    assert isinstance(snap, dict)
+    assert "threshold" in snap and isinstance(snap["threshold"], int)
+    assert snap["threshold"] >= 1
+    assert "legs" in snap and isinstance(snap["legs"], dict)
+    assert set(snap["legs"].keys()) == set(_m._EMBED_STACK_LEGS)
+
+    # Per-leg: every key the EmbedStackHealthPill consumes.
+    for leg, leg_state in snap["legs"].items():
+        for key in ("consecutive_failures", "firing",
+                    "last_error", "last_latency_ms"):
+            assert key in leg_state, f"{leg} missing {key}"
+        assert leg_state["consecutive_failures"] == 0
+        assert leg_state["firing"] is False
+
+
+def test_get_embed_stack_alert_snapshot_reflects_counter_mutation(
+        reset_embed_stack_counters):
+    """Driving the in-memory counters must show through the snapshot —
+    this is the watchdog -> dashboard data path the badge depends on."""
+    import metrics as _m
+    _m._embed_stack_consecutive_failures["embed"] = 2
+    _m._embed_stack_was_firing["rerank"] = True
+    _m._embed_stack_consecutive_failures["rerank"] = 5
+    _m._embed_stack_last_error["memory_brain"] = "voyage 503"
+    _m._embed_stack_last_latency_ms["embed"] = 137
+
+    snap = _m.get_embed_stack_alert_snapshot()
+    assert snap["legs"]["embed"]["consecutive_failures"] == 2
+    assert snap["legs"]["embed"]["firing"] is False
+    assert snap["legs"]["embed"]["last_latency_ms"] == 137
+    assert snap["legs"]["rerank"]["consecutive_failures"] == 5
+    assert snap["legs"]["rerank"]["firing"] is True
+    assert snap["legs"]["memory_brain"]["last_error"] == "voyage 503"
+
+
+def test_admin_embed_stack_health_surfaces_alert_state_per_leg(
+        app_client_authed, patched_backfill, monkeypatch,
+        reset_embed_stack_counters):
+    """GET /admin/health/embed-stack must carry the per-leg counter
+    fields on each leg pill (embed/rerank/memory) AND the top-level
+    ``alert_state`` block. The frontend pill renders ``firing`` red and
+    ``1..threshold-1`` amber — both come from these fields."""
+    import metrics as _m
+    # Drive the watchdog state: embed in warm-up window (amber on the
+    # frontend), rerank firing (red), memory_brain clean (emerald).
+    _m._embed_stack_consecutive_failures["embed"] = 1
+    _m._embed_stack_consecutive_failures["rerank"] = 3
+    _m._embed_stack_was_firing["rerank"] = True
+
+    from providers import workers_embed as _we
+    from providers import pinecone_ai as _pc
+    from providers import memory_brain as _mb
+
+    async def _envs():
+        return [{"env": "production", "label": "Production", "ok": True,
+                 "configured": True, "pages": True, "dims": 1024,
+                 "model_version": "1.0.0", "latency_ms": 42,
+                 "status_code": 200, "url": "https://embed.test"}]
+
+    async def _embed_health():
+        return {"ok": True, "configured": True, "dims": 1024,
+                "model_version": "1.0.0", "latency_ms": 42}
+
+    async def _rerank_health():
+        return {"ok": False, "reason": "down"}
+
+    async def _memory_health():
+        return {"ok": True}
+
+    monkeypatch.setattr(_we, "health_check_environments", _envs)
+    monkeypatch.setattr(_we, "health_check", _embed_health)
+    monkeypatch.setattr(_pc, "rerank_health_check", _rerank_health,
+                        raising=False)
+    monkeypatch.setattr(_mb, "health_check", _memory_health, raising=False)
+
+    res = app_client_authed.get("/admin/health/embed-stack")
+    assert res.status_code == 200
+    body = res.json()
+
+    # Every leg pill carries the three counter fields the dashboard
+    # badge depends on. A silent rename here blanks out the badge.
+    for leg in ("embed", "rerank", "memory"):
+        pill = body[leg]
+        for key in ("consecutive_failures", "firing", "alert_threshold"):
+            assert key in pill, f"{leg} pill missing {key}"
+        assert isinstance(pill["consecutive_failures"], int)
+        assert isinstance(pill["firing"], bool)
+        assert isinstance(pill["alert_threshold"], int)
+
+    assert body["embed"]["consecutive_failures"] == 1
+    assert body["embed"]["firing"] is False
+    assert body["rerank"]["consecutive_failures"] == 3
+    assert body["rerank"]["firing"] is True
+    assert body["memory"]["consecutive_failures"] == 0
+    assert body["memory"]["firing"] is False
+
+    # Top-level alert_state block — the EmbedStackHealthPill component
+    # also reads this for the page-wide threshold/legs view.
+    alert_state = body.get("alert_state")
+    assert isinstance(alert_state, dict)
+    assert isinstance(alert_state.get("threshold"), int)
+    assert alert_state["threshold"] == body["embed"]["alert_threshold"]
+    assert isinstance(alert_state.get("legs"), dict)
+    assert set(alert_state["legs"].keys()) >= {"embed", "rerank",
+                                                "memory_brain"}
+    for leg_state in alert_state["legs"].values():
+        for key in ("consecutive_failures", "firing"):
+            assert key in leg_state
