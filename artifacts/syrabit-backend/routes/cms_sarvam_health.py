@@ -5888,10 +5888,13 @@ async def admin_cms_scraper_status(admin: dict = Depends(get_admin_user)):
         except Exception:
             pass
 
-        # Check LLM connectivity — quick probe (new plan generation fails if LLM is down)
+        # Check LLM connectivity — quick probe (new plan generation fails if LLM is down).
+        # Task #492 (V4 §15): probe via the dispatcher's default English model
+        # (Azure gpt-4.1-nano primary). Sarvam-m is reserved for `assamese_rag_chat`
+        # only and must not be invoked outside that surface.
         llm_ok = True
         try:
-            test_resp = await call_llm_api([{"role": "user", "content": "Say OK"}], model="sarvam-m", max_tokens=5)
+            test_resp = await call_llm_api([{"role": "user", "content": "Say OK"}], max_tokens=5)
             if not test_resp or len(test_resp.strip()) == 0:
                 llm_ok = False
         except Exception:
