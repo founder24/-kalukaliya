@@ -23,6 +23,7 @@ marker. The ``metrics`` snapshot is symmetric: we always restore the
 module identity that existed pre-test (since ``metrics`` has no stub
 distinction — it's always the real thing in the test process).
 """
+import logging
 import os
 import sys
 
@@ -30,6 +31,53 @@ import pytest
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+
+# Task #418 — guard against test modules that leak ``logging.disable``.
+#
+# Task #402 fixed four files that called ``logging.disable(logging.CRITICAL)``
+# at module scope without ever restoring it. Any test file that ran after
+# such a module silently lost ERROR-log assertions (most painfully
+# ``tests/test_vertex_startup_probe.py``) because ``logging.disable`` is a
+# process-global switch on ``logging.root.manager.disable``. The per-file
+# fix was to wrap the suppression in a try/finally (see
+# ``tests/test_provider_dispatch.py``) or in a fixture (see
+# ``tests/test_assamese_rag_namespace.py``).
+#
+# This module-scoped autouse fixture catches the regression at the moment
+# it lands. It runs once per test module: pytest tears it down after the
+# last test in the module has finished (and after every per-test fixture
+# has run its own teardown), so any properly-scoped restore has already
+# happened. If ``logging.disable`` is still non-NOTSET at that point, the
+# offending module either set it at module scope without a try/finally or
+# left a fixture without a yield/finally restore.
+#
+# The fixture resets the level itself before raising so a single offending
+# module fails loud once instead of cascading into every downstream test.
+@pytest.fixture(scope="module", autouse=True)
+def _no_logging_disable_leak(request):
+    yield
+    current = logging.root.manager.disable
+    if current == logging.NOTSET:
+        return
+    # Reset so this leak does not contaminate the rest of the suite.
+    logging.disable(logging.NOTSET)
+    module_name = getattr(request.module, "__name__", "<unknown>")
+    module_file = getattr(request.module, "__file__", "<unknown>")
+    raise AssertionError(
+        f"Test module {module_name} ({module_file}) left "
+        f"logging.disable set to level {current} (expected "
+        f"logging.NOTSET = {logging.NOTSET}). This silently swallows "
+        f"ERROR-log assertions in any test that runs afterwards "
+        f"(see Task #402, Task #418).\n\n"
+        f"Fix: wrap the disable() call in a try/finally that restores "
+        f"the previous level, or move it into a fixture whose teardown "
+        f"calls logging.disable(prev). Reference patterns:\n"
+        f"  - tests/test_provider_dispatch.py "
+        f"(try/finally around an import)\n"
+        f"  - tests/test_assamese_rag_namespace.py "
+        f"(fixture-based, for lazy imports)"
+    )
 
 
 _DEPS_KEY = "deps"
