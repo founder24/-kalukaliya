@@ -1761,6 +1761,26 @@ async def lifespan(app):
     except Exception as _ebf_err:
         logger.warning(f"[embed-backfill] start failed: {_ebf_err}")
 
+    # Task #434 — page on-call when the embed backfill stalls
+    # (running=true but state.updated_at hasn't advanced) or starts
+    # failing (last_run.failed crosses threshold). Routes through
+    # ``metrics._dispatch_alert`` — the same email/Slack pipeline as
+    # ``_vertex_periodic_probe_loop`` and ``_seo_health_alert_loop``.
+    # Independent of EMBED_BACKFILL_AUTOSTART so admin-triggered runs
+    # are also watched. Under ACA-jobs takeover the loop is driven by
+    # the matching ``embed-backfill-alert`` cron entry in
+    # ``services/cron-jobs/run.py``; ``_aca_create_task`` no-ops here.
+    try:
+        from aca_jobs import embed_backfill as _ebf_alert
+        _aca_create_task(
+            _ebf_alert.alert_loop(db),
+            key="embed-backfill-alert",
+        )
+    except Exception as _ebf_alert_err:
+        logger.warning(
+            f"[embed-backfill] alert loop start failed: {_ebf_alert_err}"
+        )
+
     # Task #609 — initialise the managed AI response cache. Safe no-op when
     # MEMORYSTORE_REDIS_URL is unset; the cache transparently falls back to
     # in-memory L1. LLM upstream caching is handled by Cloudflare AI Gateway.

@@ -119,6 +119,10 @@ locals {
     "vertex-startup-probe"            = { kind = "loop", cron = "0 0 1 1 *",  parallel = 1, replica_timeout = 120, cpu = 0.25, mem = "0.5Gi" }
     "vertex-periodic-probe"           = { kind = "loop", cron = "*/5 * * * *", parallel = 1, replica_timeout = 120, cpu = 0.25, mem = "0.5Gi" }
     "unified-logs-cf-pull"            = { kind = "loop", cron = "*/2 * * * *", parallel = 1, replica_timeout = 240, cpu = 0.5,  mem = "1Gi"   }
+    # Task #434 — alert on-call when the embed backfill stalls or
+    # starts failing. Cheap one-doc poll; cadence matches the in-process
+    # ALERT_LOOP_INTERVAL_S default (300s).
+    "embed-backfill-alert"            = { kind = "loop", cron = "*/5 * * * *", parallel = 1, replica_timeout = 120, cpu = 0.25, mem = "0.5Gi" }
     # Task #332 — 3 additional periodic loops that were previously
     # `asyncio.create_task(...)` calls in server.py with no aca-job
     # mapping. Migrated here so `_aca_jobs_takeover() == True` does

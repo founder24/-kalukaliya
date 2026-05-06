@@ -124,6 +124,12 @@ DISPATCH: dict[str, tuple[str, int, bool]] = {
     "vertex-startup-probe":             ("server:_vertex_startup_probe",                                            60,  False),  # one-shot probe
     "vertex-periodic-probe":            ("server:_vertex_periodic_probe_loop",                                     120,  True),
     "unified-logs-cf-pull":             ("routes.admin_logs:_unified_logs_cf_pull_loop",                           120,  False),  # 30s stagger < threshold
+    # Task #434 — alert on-call when the embed backfill stalls or starts
+    # failing. Boot stagger = ALERT_LOOP_INTERVAL_S (default 300s ≥ 45s
+    # threshold) so the first long sleep is the stagger, second is the
+    # inter-iteration wait. One body iteration evaluates state once and
+    # may dispatch via metrics._dispatch_alert.
+    "embed-backfill-alert":             ("__adapter:embed_backfill_alert",                                         120,  True),
     # ── 3 additional periodic loops migrated alongside the original 38
     #    so the API tier is fully out of the cron business once the
     #    aca-jobs takeover is on (Task #332 reviewer rev #8).
@@ -152,6 +158,12 @@ def _resolve(job_name: str) -> tuple[Callable[[], Awaitable[None]], int, bool, s
         from seo_internal_linker import _internal_linker_loop  # type: ignore
         return ((lambda: _with_db(_internal_linker_loop)), timeout_s, has_stagger,
                 "seo_internal_linker:_internal_linker_loop(db)", False)
+    if target == "__adapter:embed_backfill_alert":
+        # Task #434 — db-bound alert watcher for the embedding backfill.
+        # Same shape as the internal_linker adapter above.
+        from aca_jobs.embed_backfill import alert_loop as _ebf_alert_loop  # type: ignore
+        return ((lambda: _with_db(_ebf_alert_loop)), timeout_s, has_stagger,
+                "aca_jobs.embed_backfill:alert_loop(db)", False)
     if target.startswith("__adapter:lang-"):
         lang = target.split("-", 1)[1]
         return ((lambda: _per_language_loop(lang)), timeout_s, has_stagger,

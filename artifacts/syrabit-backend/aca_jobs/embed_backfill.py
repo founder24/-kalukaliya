@@ -501,3 +501,218 @@ def start(db_handle) -> Optional[asyncio.Task]:
         )
         return None
     return asyncio.create_task(run_loop(db_handle))
+
+
+# ── Task #434 — alert on-call when backfill stalls or starts failing ─────────
+# The job persists progress in ``embed_backfill_state``. If the worker starts
+# returning errors mid-run, or the autostart loop crashes (so ``running=True``
+# never flips back), nobody is paged — the admin pill quietly stops moving.
+# This loop polls the same state doc and dispatches via the same email/Slack
+# pipeline as ``_vertex_periodic_probe_loop`` (``metrics._dispatch_alert``)
+# so on-call gets paged for both failure modes.
+
+# Cadence + thresholds, all env-tunable so ops can quiet a noisy run without
+# a deploy. Defaults are conservative on a 600 RPM job processing ~5000
+# chunks per pass: a stall of 30 min implies 4+ missed batches, and a
+# ``failed`` count of 50 implies a sustained worker problem rather than a
+# single transient blip.
+ALERT_LOOP_INTERVAL_S = max(
+    60, int(os.environ.get("EMBED_BACKFILL_ALERT_INTERVAL_S", "300") or 300)
+)
+ALERT_FAILED_THRESHOLD = int(
+    os.environ.get("EMBED_BACKFILL_ALERT_FAILED_THRESHOLD", "50") or 50
+)
+ALERT_STALL_MINUTES = int(
+    os.environ.get("EMBED_BACKFILL_ALERT_STALL_MINUTES", "30") or 30
+)
+ALERT_STARTUP_DELAY_S = max(0, ALERT_LOOP_INTERVAL_S)
+
+ALERT_TYPE_FAILING = "embed_backfill_failing"
+ALERT_TYPE_STALLED = "embed_backfill_stalled"
+ALERT_TYPE_RECOVERED = "embed_backfill_recovered"
+
+
+def _state_updated_at_age_seconds(state: dict) -> Optional[float]:
+    """Return seconds since ``state.updated_at`` (None when missing/bad)."""
+    ts = state.get("updated_at")
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        try:
+            ts = _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(ts, _dt.datetime):
+        return None
+    # ``_write_state`` writes naive UTC via ``utcnow()`` — match that here.
+    if ts.tzinfo is not None:
+        ts = ts.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+    return max(0.0, (_dt.datetime.utcnow() - ts).total_seconds())
+
+
+async def _evaluate_alert_state(db: Any) -> dict:
+    """One iteration of the alert watcher.
+
+    Returns a decision dict so the unit tests can assert on the outcome
+    without monkey-patching the dispatcher itself::
+
+        {
+            "alert_type":   "embed_backfill_failing" | "embed_backfill_stalled" | None,
+            "title":        str | None,
+            "body":         str | None,
+            "snapshot":     dict | None,   # fed to threshold_snapshot=
+            "skipped":      str | None,    # reason when no decision
+            "state":        dict,          # raw state doc snapshot
+        }
+    """
+    state = await _load_state(db)
+    out = {
+        "alert_type": None, "title": None, "body": None,
+        "snapshot": None, "skipped": None, "state": state,
+    }
+
+    # No state doc yet → nothing to alert on (job has never run).
+    if not state:
+        out["skipped"] = "no_state"
+        return out
+
+    last_run = state.get("last_run") or {}
+    try:
+        failed = int(last_run.get("failed", 0) or 0)
+    except (TypeError, ValueError):
+        failed = 0
+
+    running = bool(state.get("running"))
+    age_s = _state_updated_at_age_seconds(state)
+    stall_threshold_s = ALERT_STALL_MINUTES * 60
+
+    # Failing condition takes priority — it carries actionable detail
+    # (which leg blew up) the stall message can't.
+    if ALERT_FAILED_THRESHOLD > 0 and failed >= ALERT_FAILED_THRESHOLD:
+        out["alert_type"] = ALERT_TYPE_FAILING
+        out["title"] = "Embedding backfill failing"
+        out["body"] = (
+            f"aca_jobs.embed_backfill last_run.failed={failed} "
+            f"(threshold={ALERT_FAILED_THRESHOLD}). "
+            f"processed={last_run.get('processed', 0)} "
+            f"succeeded={last_run.get('succeeded', 0)} "
+            f"skipped={last_run.get('skipped', 0)} "
+            f"remaining={last_run.get('remaining', '?')}. "
+            f"Check Workers-AI / Pinecone health — chunks selected for "
+            f"retry on next pass, no Mongo markers stamped."
+        )
+        out["snapshot"] = {
+            "metric": "embed_backfill_last_run_failed",
+            "value": ALERT_FAILED_THRESHOLD,
+            "actual": failed,
+        }
+        return out
+
+    if (
+        running
+        and ALERT_STALL_MINUTES > 0
+        and age_s is not None
+        and age_s >= stall_threshold_s
+    ):
+        out["alert_type"] = ALERT_TYPE_STALLED
+        out["body"] = (
+            f"aca_jobs.embed_backfill state.running=true but "
+            f"state.updated_at is {int(age_s // 60)} min old "
+            f"(threshold={ALERT_STALL_MINUTES} min). The autostart loop "
+            f"may have crashed or the worker may be hung. "
+            f"last_processed_id={state.get('last_processed_id')!r} "
+            f"started_at={state.get('started_at')!r}."
+        )
+        out["title"] = "Embedding backfill stalled"
+        out["snapshot"] = {
+            "metric": "embed_backfill_updated_at_age_min",
+            "value": ALERT_STALL_MINUTES,
+            "actual": int(age_s // 60),
+        }
+        return out
+
+    out["skipped"] = "healthy"
+    return out
+
+
+async def alert_loop(db_handle) -> None:
+    """Forever loop. Polls ``embed_backfill_state`` and pages on-call when
+    the job stalls or starts failing. Never raises — the same defensive
+    shape as ``_vertex_periodic_probe_loop``."""
+    logger.info(
+        "embed_backfill alert loop started "
+        "(interval=%ds, failed_threshold=%d, stall_minutes=%d)",
+        ALERT_LOOP_INTERVAL_S, ALERT_FAILED_THRESHOLD, ALERT_STALL_MINUTES,
+    )
+    await asyncio.sleep(ALERT_STARTUP_DELAY_S)
+    alerted_for_run = False
+    last_alert_type: Optional[str] = None
+    while True:
+        try:
+            decision = await _evaluate_alert_state(db_handle)
+            alert_type = decision.get("alert_type")
+            if alert_type:
+                # Page once per failure run; suppress further dispatches
+                # until a healthy iteration resets the flag. The same
+                # alert_type also goes through ``_dispatch_alert``'s
+                # 30-min cooldown as a secondary guard.
+                if not alerted_for_run or alert_type != last_alert_type:
+                    try:
+                        from metrics import _dispatch_alert
+                        await _dispatch_alert(
+                            alert_type,
+                            decision["title"],
+                            decision["body"],
+                            threshold_snapshot=decision.get("snapshot"),
+                        )
+                        alerted_for_run = True
+                        last_alert_type = alert_type
+                    except Exception as dispatch_err:
+                        logger.error(
+                            "[embed_backfill_alert] _dispatch_alert raised: %r",
+                            dispatch_err,
+                        )
+            else:
+                # Healthy iteration — close the loop with a single
+                # all-clear if we previously paged. ``force=True`` so
+                # the recovery message isn't silenced by the cooldown
+                # the matching failure alert just consumed.
+                if alerted_for_run:
+                    try:
+                        from metrics import _dispatch_alert
+                        await _dispatch_alert(
+                            ALERT_TYPE_RECOVERED,
+                            "Embedding backfill recovered",
+                            f"aca_jobs.embed_backfill is healthy again "
+                            f"(closes prior {last_alert_type!r}). "
+                            f"No on-call action needed.",
+                            threshold_snapshot={
+                                "metric": "embed_backfill_recovered",
+                                "value": 0,
+                                "actual": 0,
+                            },
+                            force=True,
+                        )
+                    except Exception as recovery_err:
+                        logger.error(
+                            "[embed_backfill_alert] recovery _dispatch_alert "
+                            "raised: %r", recovery_err,
+                        )
+                    alerted_for_run = False
+                    last_alert_type = None
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "embed_backfill alert iteration crashed: %s", str(exc)[:200]
+            )
+        await asyncio.sleep(ALERT_LOOP_INTERVAL_S)
+
+
+def start_alert_loop(db_handle) -> Optional[asyncio.Task]:
+    """Kick off the alert watcher. Always on when the DB is available — the
+    watcher is cheap (one ``find_one`` per ``ALERT_LOOP_INTERVAL_S``) and
+    the whole point is to page on-call regardless of whether the run loop
+    itself is autostarted or driven by the admin endpoint."""
+    if db_handle is None:
+        logger.info("embed_backfill alert loop not started (db unavailable)")
+        return None
+    return asyncio.create_task(alert_loop(db_handle))
