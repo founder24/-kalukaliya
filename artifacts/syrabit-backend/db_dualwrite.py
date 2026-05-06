@@ -298,3 +298,33 @@ async def mirror_activity_log_write(
     helper in the call graph.
     """
     await mirror_collection_write("activity_log", op_label, fn)
+
+
+async def mirror_notifications_write(
+    op_label: str,
+    fn: Callable[[], Awaitable[Any]],
+) -> None:
+    """Mirror a write to the ``notifications`` collection (best-effort).
+
+    Soft-join collection (same pattern as ``activity_log``): the Mongo
+    target is *already populated* by the existing 3rd-tier fallback in
+    :func:`db_ops.supa_insert_notification` /
+    :func:`db_ops.supa_delete_notification` whenever both PG and the
+    Supabase legacy tier raise. Phase 2 adds a mirror on the
+    **PG-success** branch so Mongo now sees every notification write,
+    not only the PG-failure ones — the prerequisite for the Phase-3
+    read-shadow row-count comparison.
+
+    Two centralised wire-ups in ``db_ops.py`` cover every route-level
+    caller (admin notification CRUD, push-notification dispatch helpers
+    that funnel through ``supa_insert_notification``) — insert via
+    ``mirror_notifications_write("insert", ...)`` and per-id delete via
+    ``mirror_notifications_write("delete", ...)``. Routes do NOT call
+    this helper directly.
+
+    Rollback flag: ``MONGO_NOTIFICATION_WRITES=0`` (singularised by the
+    default ``rstrip('S')`` rule — no override entry needed). The
+    existing 3rd-tier fallback keeps working unchanged because it
+    lives below this helper in the call graph.
+    """
+    await mirror_collection_write("notifications", op_label, fn)

@@ -46,7 +46,7 @@ that any production route reads or writes is listed below.
 | `password_resets` | `password_resets` | TTL collection | Mongo TTL index on `expires` replaces the manual cron sweep used in PG. Index: `{expires: 1}` with `expireAfterSeconds: 0`. |
 | `chat_feedback` | `chat_feedback` *(already exists)* | Soft join | Already dual-written by `routes/ai_chat.py`. Phase 3 will diff aggregations. Indexes: `{created_at: -1}`, `{user_id: 1}`. |
 | `activity_log` | `activity_log` *(already exists)* | Soft join | Mongo collection already used by `db_ops.supa_insert_activity_log`. Phase 3 diff is on per-day count parity. Indexes: `{created_at: -1}`, `{admin_email: 1, created_at: -1}`. |
-| `notifications` | `notifications` *(already exists)* | Soft join | Mongo target already populated by admin notify flow. Indexes: `{audience: 1, sent_at: -1}`. |
+| `notifications` | `notifications` *(already exists)* | Soft join — **Phase 2 SHIPPED 2026-05-06** | Mongo target already populated by admin notify flow's 3rd-tier fallback; Phase 2 adds `mirror_notifications_write()` on the PG-success branches of `supa_insert_notification` + `supa_delete_notification` so Mongo sees every admin notification write, not only PG-failure ones. Rollback switch: set `MONGO_NOTIFICATION_WRITES=0` (default unset = mirror enabled; no `_FLAG_NAME_OVERRIDES` entry — default `rstrip('S')` already yields the singular form). Indexes: `{audience: 1, sent_at: -1}`. |
 | `edu_notes` | `edu_notes` (NEW) | Greenfield | PG schema uses `actor_kind, actor` composite key. Mongo translation: `{actor_kind, actor, _id}` document, `tags: [string]`, `structured: {...}` JSON, `citations: [{...}]`. Indexes: `{actor_kind: 1, actor: 1, created_at: -1}`, `{actor_kind: 1, actor: 1, generated: 1}`. |
 | `edu_flashcards` | `edu_flashcards` (NEW) | Greenfield | Same actor pattern. Indexes: `{actor_kind: 1, actor: 1, due_at: 1}` for the SR scheduler. Field-level rename: PG `interval_days` → Mongo `interval_days` (no change; explicit so future drift is caught). |
 | `edu_study_settings` | `edu_study_settings` (NEW) | Greenfield | Composite key `(actor_kind, actor)` is preserved as a natural-key filter `{actor_kind, actor}` on every `update_one` / `delete_one` call (NOT collapsed into a synthetic `_id` string — keeps the two fields independently queryable for read-shadow diffs and for any future Mongo-side analytics by `actor_kind`). Indexes: compound unique on `(actor_kind, actor)` to enforce the PG PK contract; Mongo's auto `_id` ObjectId is left as the document key. Reconciled 2026-05-06 with the shipped Phase 2 implementation. |
@@ -160,6 +160,39 @@ print('V4 §13 acceptance: PASS')
   *converge* on the same Mongo doc shape, so post-Phase-2 Mongo
   contains the union of both — exactly what Phase-3 read-shadow
   needs to compare against PG.
+- **2026-05-06**: **Phase 2 (notifications collection) merged.** Seventh
+  collection in the per-collection rollout; second soft-join target
+  after ``activity_log``. The Mongo ``deps.db.notifications`` collection
+  is *already* populated by the existing 3rd-tier fallback inside
+  ``db_ops.supa_insert_notification`` and ``supa_delete_notification``
+  whenever both PG and the Supabase legacy tier raise. Phase 2 adds
+  the missing piece: a mirror on the **PG-success** branch of both
+  helpers so Mongo now sees *every* admin notification write
+  (insert + per-id delete), not only PG-failure ones — prerequisite
+  for the Phase-3 per-day count read-shadow. Added
+  ``mirror_notifications_write()`` shim — no ``_FLAG_NAME_OVERRIDES``
+  entry needed because the default
+  ``_flag_env_for("notifications") = "MONGO_NOTIFICATION_WRITES"``
+  already produces the correct singularised name (trailing 's'
+  stripped). Only **2 db_ops sites** instrumented
+  (``supa_insert_notification`` + ``supa_delete_notification``) —
+  every route-level caller (admin notification CRUD plus the push-
+  notification dispatch helpers in ``deps.py`` /
+  ``cloudflare_client.py``) funnels through these centralised
+  helpers, so zero route-level edits required. Mirror placement:
+  AFTER the ``async with pg_pool.acquire()`` block exits but BEFORE
+  ``return`` so the mirror call is still in scope of the PG-success
+  branch's exception handler. The existing 3rd-tier Mongo fallback
+  is left untouched — independently rollback-flagged off because the
+  fallback never consults ``MONGO_NOTIFICATION_WRITES``, so flipping
+  the mirror off doesn't break the failure-mode safety net. Test
+  suite grew 38 → 44 (6 new notifications cases — env-flag default
+  name asserts trailing-'s' singularisation, default enabled,
+  per-collection isolation across all 7 collections, insert success
+  counter, delete_one success counter, swallows-exception). Same
+  soft-join convergence semantics as activity_log: mirror-on-PG-
+  success and fallback-on-PG-failure paths converge on the same
+  Mongo doc shape, so post-Phase-2 Mongo contains the union of both.
 - **2026-05-06**: **Phase 2 (edu_study_settings collection) merged.**
   Greenfield Mongo target per §50; fifth collection in the per-collection
   rollout. Distinguishing characteristic: composite primary key

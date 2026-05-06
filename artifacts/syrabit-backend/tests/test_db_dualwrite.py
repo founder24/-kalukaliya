@@ -574,3 +574,98 @@ def test_activity_log_mirror_swallows_exception(
     counters = fresh_module.get_dualwrite_counters()
     assert counters["activity_log.fail"] == 1
     assert counters["activity_log.success"] == 0
+
+
+# ── notifications collection (seventh Phase 2 rollout — soft join) ──
+
+@pytest.fixture
+def fake_notifications_db(monkeypatch, fresh_module):
+    import deps
+    fake = MagicMock()
+    fake.notifications = MagicMock()
+    fake.notifications.insert_one = AsyncMock(return_value=None)
+    fake.notifications.delete_one = AsyncMock(return_value=None)
+    monkeypatch.setattr(deps, "db", fake)
+    return fake
+
+
+def test_notifications_flag_env_name(fresh_module):
+    """notifications has a trailing 's' — default rstrip rule yields the
+    singular ``MONGO_NOTIFICATION_WRITES`` (no override entry needed)."""
+    assert (
+        fresh_module._flag_env_for("notifications")
+        == "MONGO_NOTIFICATION_WRITES"
+    )
+
+
+def test_notifications_flag_default_enabled(fresh_module):
+    assert (
+        fresh_module.mongo_collection_writes_enabled("notifications") is True
+    )
+
+
+def test_notifications_flag_disable_independent(reset_env, fresh_module):
+    reset_env.setenv("MONGO_NOTIFICATION_WRITES", "0")
+    assert fresh_module.mongo_collection_writes_enabled("notifications") is False
+    # Sibling collections must NOT be affected.
+    assert fresh_module.mongo_collection_writes_enabled("activity_log") is True
+    assert fresh_module.mongo_collection_writes_enabled("users") is True
+    assert fresh_module.mongo_collection_writes_enabled("conversations") is True
+
+
+def test_notifications_insert_success(fresh_module, fake_notifications_db):
+    """Mirror the supa_insert_notification PG-success branch."""
+    async def go():
+        await fresh_module.mirror_notifications_write(
+            "insert",
+            lambda: fake_notifications_db.notifications.insert_one(
+                {"id": "n1", "title": "Hi", "message": "test"},
+            ),
+        )
+    _run(go())
+    fake_notifications_db.notifications.insert_one.assert_awaited_once()
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["notifications.success"] == 1
+    assert counters["notifications.fail"] == 0
+    # Sibling counters untouched.
+    assert counters.get("activity_log.success", 0) == 0
+
+
+def test_notifications_delete_one_success(
+    fresh_module, fake_notifications_db
+):
+    """Mirror the supa_delete_notification per-id delete."""
+    async def go():
+        await fresh_module.mirror_notifications_write(
+            "delete",
+            lambda: fake_notifications_db.notifications.delete_one(
+                {"id": "n1"},
+            ),
+        )
+    _run(go())
+    fake_notifications_db.notifications.delete_one.assert_awaited_once_with(
+        {"id": "n1"}
+    )
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["notifications.success"] == 1
+
+
+def test_notifications_mirror_swallows_exception(
+    fresh_module, fake_notifications_db
+):
+    """Mongo failure must NOT propagate — PG remains SoT."""
+    fake_notifications_db.notifications.insert_one.side_effect = (
+        RuntimeError("mongo down")
+    )
+
+    async def go():
+        await fresh_module.mirror_notifications_write(
+            "insert",
+            lambda: fake_notifications_db.notifications.insert_one(
+                {"id": "n1", "title": "broken"},
+            ),
+        )
+    _run(go())  # must NOT raise — PG is SoT
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["notifications.fail"] == 1
+    assert counters["notifications.success"] == 0

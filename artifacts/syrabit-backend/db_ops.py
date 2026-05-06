@@ -13,6 +13,7 @@ from db_dualwrite import (
     mirror_user_write,
     mirror_conversation_write,
     mirror_activity_log_write,
+    mirror_notifications_write,
     clamped_decrement_pipeline,
 )
 
@@ -1340,6 +1341,14 @@ async def supa_insert_notification(notif: dict):
                     notif.get("audience","all"), notif.get("status","sent"),
                     notif.get("sent_at"), notif.get("created_at", datetime.now(timezone.utc).isoformat())
                 )
+            # Phase 2 PG→Mongo mirror (V4 §13). Soft-join collection — the
+            # 3rd-tier fallback below already writes to Mongo on PG failure;
+            # this mirror covers the PG-success branch so Mongo sees every
+            # notification write. Best-effort, never raises.
+            await mirror_notifications_write(
+                "insert",
+                lambda: _deps_mod.db.notifications.insert_one(dict(notif)),
+            )
             return
         except Exception as e:
             logger.warning(f"pg supa_insert_notification failed: {e}")
@@ -1358,6 +1367,12 @@ async def supa_delete_notification(notif_id: str):
         try:
             async with _deps_mod.pg_pool.acquire() as conn:
                 await conn.execute("DELETE FROM notifications WHERE id = $1", notif_id)
+            # Phase 2 PG→Mongo mirror (V4 §13). Soft-join — same per-id
+            # delete shape as the 3rd-tier fallback below.
+            await mirror_notifications_write(
+                "delete",
+                lambda: _deps_mod.db.notifications.delete_one({"id": notif_id}),
+            )
             return
         except Exception: pass
     if supa:
