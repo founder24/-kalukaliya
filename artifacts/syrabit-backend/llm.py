@@ -2477,13 +2477,13 @@ async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048
 
 # Admin content batcher chain — terminal hard-fallback pool only. The
 # active dispatch order is PROVIDER_PRIORITY['content'] in config.py
-# (V4 §4 A9, user-locked 2026-05-06 via B3): Workers-AI Mistral-7B (#1)
-# → Workers-AI Llama-3.2-3B (#2) → Vertex Gemini 2.5 Flash (long-context
-# fallback) → generic Workers-AI. The list below is the *last-ditch*
-# Cloudflare-only pool reached after that chain exhausts; Workers-AI
-# 120B/70B kept here for long-form quality. Direct Gemini removed
-# (vertex-only auth since 2026-05-03; content reaches Gemini via the
-# vertex branch of PROVIDER_PRIORITY['content']).
+# (V4 §4 A9, user-locked 2026-05-06 via B3, post-Task-#490 cleanup):
+# Workers-AI Mistral-7B (#1) → Workers-AI Llama-3.2-3B (#2) → generic
+# Workers-AI. The list below is the *last-ditch* Cloudflare-only pool
+# reached after that chain exhausts; Workers-AI 120B/70B kept here for
+# long-form quality. Vertex Gemini was REMOVED from the content pool
+# in Task #490 — Vertex is now `content_format` (formatter polish) only,
+# reachable via `vertex_format.format_with_vertex`, not via this batcher.
 _LLM_PROVIDERS_CONTENT: list[dict] = []
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
@@ -2498,13 +2498,14 @@ async def call_llm_api_content(messages: list, model: str = None, max_tokens: in
     """LLM call for admin content / notes generation via PROVIDER_PRIORITY weighted dispatch.
 
     Feature key: "content" — chain (PROVIDER_PRIORITY["content"] in config.py,
-    V4 §4 A9 ordering, user-locked 2026-05-06 via B3):
+    V4 §4 A9 ordering, user-locked 2026-05-06 via B3, post-Task-#490):
       Workers-AI Mistral-7B (#1) → Workers-AI Llama-3.2-3B (#2)
-      → Vertex Gemini 2.5 Flash (long-form quality fallback) → generic Workers-AI (last-resort).
+      → generic Workers-AI (last-resort).
 
     Workers-AI leads (V4 §4 + 2026-05-05 user instruction — content gen is fully
-    Cloudflare-native + Vertex overflow). Vertex retains the long-context fallback
-    role because its 1M-token window is still useful when Workers-AI exhausts.
+    Cloudflare-native). Vertex was REMOVED from the content pool in Task #490
+    (Vertex is now `content_format` formatter only, reachable via
+    `vertex_format.format_with_vertex` — not via this dispatch path).
     Azure removed from this pool (chat-only); Bedrock removed in Task #347.
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers

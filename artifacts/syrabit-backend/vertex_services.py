@@ -352,16 +352,17 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
     Uses the local LRU cache (cache.py) when available so hot queries
     never round-trip to any embedding provider.
 
-    Embedding priority:
+    Embedding priority (Task #490 — Option-D cache-only degraded mode):
     1. If COHERE_EMBED_PRIMARY=true — Cohere embed-multilingual-v3.0
        (NOTE: requires ALL content to have been indexed with Cohere vectors;
         re-run the embedding pipeline after switching.)
-    2. Workers AI BGE-large-en-v1.5 (default primary)
-    3. Vertex AI text-embedding-004 (fallback for long-form content > 2048 tokens
-       or when Workers AI embed is in cooldown) — Task #247.
-       WARNING: Vertex vectors are 768-dim and in a different embedding space;
-       results are only useful for standalone long-doc similarity, not for
-       mixing with the main 1024-dim Vectorize index.
+    2. Workers AI BGE-large-en-v1.5 (default primary, 1024-dim).
+    3. NO secondary embed provider. The legacy Vertex `text-embedding-004`
+       fallback (768-dim, second Pinecone namespace) was REMOVED in
+       Task #490. On Workers-AI outage `call_embed_with_dispatch` raises
+       `EmbedDegradedMode`; the SQS deferred-embed consumer replays the
+       request once the primary recovers. Cached vectors continue to
+       serve reads. See `infra/v4-locked-architecture.md` §15.
     """
     if not text:
         return None
@@ -503,9 +504,10 @@ async def translate(text: str, target_lang: str = "as", source_lang: str = "en")
 
     # Task #386 — when TRANSLATE_PROVIDER=workers_indic, route every Indic
     # translation request exclusively through Cloudflare Workers AI
-    # IndicTrans2 and bypass Google Translate / Vertex / AWS entirely.
-    # The flag check happens at request time (not import) so a flag flip
-    # via the admin UI does not need a restart.
+    # IndicTrans2 and bypass Google Translate / AWS entirely. (Vertex
+    # was removed from the translate pool in Task #490 — it is now
+    # `content_format` only.) The flag check happens at request time
+    # (not import) so a flag flip via the admin UI does not need a restart.
     from config import TRANSLATE_PROVIDER as _TP
     _workers_indic_only = _TP == 'workers_indic'
     try:
