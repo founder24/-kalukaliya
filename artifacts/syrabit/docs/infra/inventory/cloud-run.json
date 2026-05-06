@@ -6,7 +6,7 @@
   "traffic_share": 0,
   "decommissioned_at": "2026-05-04T00:00:00Z",
   "decommission_task": "#335",
-  "status": "decommissioned — dispatch-v2 service deleted, Cloud Run API disabled for the syrabit-prod project. Tenant dispatch logic now lives at /internal/dispatch on the DO App Platform syrabit-api service. See docs/infra/decommission.md.",
+  "status": "decommissioned — dispatch-v2 service deleted, Cloud Run API disabled for the syrabit-prod project. Tenant dispatch logic now lives at /internal/dispatch on the Azure Container Apps syrabit-backend service. See docs/infra/decommission.md.",
   "services": [
     {
       "name": "dispatch-v2",
@@ -22,7 +22,7 @@
         "TENANT_ROUTES",
         "CLOUDRUN_HOST_PATTERN"
       ],
-      "target_landing": "Folded into DO App Platform service syrabit-api at route /internal/dispatch. CF Worker syrabit-edge-proxy is rewired to point at DO."
+      "target_landing": "Folded into Azure Container Apps service syrabit-backend at route /internal/dispatch. CF Worker syrabit-edge-proxy is rewired to point at api.syrabit.ai (Azure ACA origin)."
     }
   ],
   "verification": {

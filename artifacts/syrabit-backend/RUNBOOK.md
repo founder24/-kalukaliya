@@ -364,7 +364,7 @@ Five Cloudflare workstreams were activated under one task, each gated by an
 independent flag so on-call can flip / roll back any one piece without
 touching the others. All flags are read at module-import time from the
 process environment; flip them in Replit Secrets (or your prod env: Railway,
-Cloud Run, DO App Platform) and restart the app.
+Cloud Run, Azure Container Apps) and restart the app.
 
 | Flag                   | Default | What it gates                                                                 |
 |------------------------|---------|-------------------------------------------------------------------------------|

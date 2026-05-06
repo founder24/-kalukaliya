@@ -12,7 +12,6 @@ matching feature runbooks under [`../features/`](../features/).
 | Pillar | Hosts | Key docs |
 |--------|-------|----------|
 | Cloudflare | Edge, DNS, WAF, R2 (object store CDN), Logpush | [`../CLOUDFLARE_OBSERVATORY.md`](../CLOUDFLARE_OBSERVATORY.md) |
-| Digital Ocean | Sync API tier (FastAPI) + Rust core | [`api-on-do.md`](api-on-do.md) |
 | AWS | SQS + Lambda async fan-out, S3 (sole object store), Textract, Rekognition, Personalize, Bedrock-Cohere | [`aws-landing-zone.md`](aws-landing-zone.md), [`workers-on-aws.md`](workers-on-aws.md) |
 | Azure | Container Apps Jobs (cron), Application Insights + Log Analytics (unified observability sink), Key Vault, Azure OpenAI, Azure AI services | [`azure-landing-zone.md`](azure-landing-zone.md), [`cron-on-azure.md`](cron-on-azure.md), [`../features/azure-native.md`](../features/azure-native.md) |
 | GCP | Vision, Speech-to-Text, Text-to-Speech, Discovery Engine, Web Risk | _legacy provider chain — kept as primary tier for these features pending the Azure A/B results_ |

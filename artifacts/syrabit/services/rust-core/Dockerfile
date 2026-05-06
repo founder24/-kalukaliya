@@ -1,11 +1,11 @@
 # services/rust-core/Dockerfile
 #
-# Production image for the Rust core on DO App Platform (Task #331).
+# Production image for the Rust core on Azure Container Apps.
 # Mirrors `backend/rust-core/Dockerfile` with the following tweaks
 # specific to App Platform:
 #
 #   1. Two ports are EXPOSEd (3000 HTTP, 50051 gRPC) and both are
-#      declared in `infra/do/app-rust-core.yaml` as `http_port` and
+#      declared in the rust-core ACA bicep template as `targetPort` and
 #      `internal_ports`. App Platform terminates HTTP/2 at the LB so
 #      gRPC works without a Droplet.
 #   2. The /health endpoint is on HTTP_PORT — same path the spec's

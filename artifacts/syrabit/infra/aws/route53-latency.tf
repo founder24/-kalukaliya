@@ -6,7 +6,7 @@
 # well within Activate credit balance).
 #
 # Task #335 decommissioned the legacy Railway and GCP Cloud Run origins.
-# The remaining production origin is Digital Ocean App Platform; the
+# The remaining production origin is Azure Container Apps; the
 # latency record now points at the DO floating IP exclusively. AWS
 # Global Accelerator is left commented as an optional perf boost.
 #
@@ -26,8 +26,8 @@ terraform {
   }
 }
 
-variable "do_app_backend_ip" {
-  description = "Static IP of the Digital Ocean App Platform backend (blr1)"
+variable "azure_aca_backend_ip" {
+  description = "Static IP of the Azure Container Apps backend (eastus2)"
   type        = string
 }
 
@@ -71,7 +71,7 @@ resource "aws_route53_record" "api_do_latency" {
   }
 
   health_check_id = aws_route53_health_check.do.id
-  records         = [var.do_app_backend_ip]
+  records         = [var.azure_aca_backend_ip]
 }
 
 # ─── CloudWatch alarms for health-check failures ─────────────────────────────
@@ -90,7 +90,7 @@ resource "aws_cloudwatch_metric_alarm" "do_health" {
     HealthCheckId = aws_route53_health_check.do.id
   }
 
-  alarm_description  = "DO App Platform origin failing Route53 health check"
+  alarm_description  = "Azure Container Apps origin failing Route53 health check"
   treat_missing_data = "breaching"
 }
 

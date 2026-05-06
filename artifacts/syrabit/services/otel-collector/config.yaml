@@ -14,7 +14,7 @@
 # entry; a failure to one does not block the other.
 #
 # Credentials are read from environment variables that are populated
-# by the DO App Platform spec at `infra/do/app-otel-collector.yaml`.
+# by the Azure Container Apps revision spec.
 
 receivers:
   otlp:

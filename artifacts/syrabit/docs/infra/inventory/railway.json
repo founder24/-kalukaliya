@@ -39,7 +39,7 @@
         "FRONTEND_URL", "CORS_ORIGINS",
         "GOOGLE_APPLICATION_CREDENTIALS_JSON"
       ],
-      "target_landing": "Digital Ocean App Platform service syrabit-api (HTTP/2)"
+      "target_landing": "Azure Container Apps service syrabit-backend (HTTP/2)"
     },
     {
       "name": "syrabit-core (Rust)",
@@ -60,7 +60,7 @@
         "PINECONE_API_KEY", "MONGO_URL", "AIG_BASE_URL",
         "RUST_LOG", "CORE_GRPC_TOKEN"
       ],
-      "target_landing": "Digital Ocean App Platform service syrabit-core (HTTP/2 + gRPC). Fallback: DO Droplet if bidi gRPC streaming GA blocks port."
+      "target_landing": "Azure Container Apps service syrabit-core (HTTP/2 + gRPC)."
     }
   ],
   "verification": {

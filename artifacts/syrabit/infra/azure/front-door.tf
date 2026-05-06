@@ -18,7 +18,7 @@
 #   volumetric attacks before they reach DO or Cloudflare.
 #
 # Task #335 decommissioned the legacy GCP Cloud Run origin; the only
-# backend origin behind Front Door is now Digital Ocean App Platform
+# backend origin behind Front Door is now Azure Container Apps
 # (api.syrabit.ai → DO).
 #
 # All covered by Azure for Startups credits ($5 000 for 12 months).

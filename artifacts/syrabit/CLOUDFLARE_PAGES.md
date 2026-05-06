@@ -1,11 +1,11 @@
 # Cloudflare Pages — Syrabit Frontend Deploy
 
 > **Backend hosting note (post-Task #335).** The backend is hosted on
-> **Digital Ocean App Platform** at `api.syrabit.ai`; see
-> [`docs/infra/api-on-do.md`](docs/infra/api-on-do.md) for the
+> **Azure Container Apps** at `api.syrabit.ai`; see
+> [`docs/infra/aca-cutover.md`](docs/infra/aca-cutover.md) for the
 > canonical runbook. The Railway origin and the GCP Cloud Run dispatch
 > tier referenced in some sections below were **decommissioned** in
-> Task #335 — see [`docs/infra/decommission.md`](docs/infra/decommission.md).
+> Task #335 — see [`infra/v4-locked-architecture.md`](../../infra/v4-locked-architecture.md).
 > Treat any "Railway" / "Cloud Run" mention in this file as historical
 > context unless it sits inside an explicit `Historical` /
 > `CANCELLED` block. The Cloudflare Pages settings, build pipeline,

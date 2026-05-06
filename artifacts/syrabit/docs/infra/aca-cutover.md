@@ -1,7 +1,7 @@
 # Azure Container Apps cutover runbook (Task #347)
 
 This runbook walks an operator through cutting the Syrabit FastAPI
-backend over from Digital Ocean App Platform onto Azure Container Apps.
+backend over from the legacy DigitalOcean App Platform onto Azure Container Apps. (DigitalOcean files purged from the repo on 2026-05-06; this runbook is preserved as the historical cutover record.)
 The motivation is co-location with the Azure OpenAI primary so every
 chat request stops paying the cross-cloud egress + RTT it currently
 pays from `blr1` → Azure `eastus`.
@@ -276,6 +276,6 @@ az containerapp ingress traffic set \
   --revision-weight <prev-revision>=100
 ```
 
-The `digitalocean-deploy.yml` workflow remains intact while the cutover
+The legacy `digitalocean-deploy.yml` workflow was removed on 2026-05-06 once the cutover
 is in progress so DO can serve as the immediate rollback floor for the
 first 14 days post-cutover.

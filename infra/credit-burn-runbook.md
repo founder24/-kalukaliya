@@ -11,7 +11,7 @@
 # Credit-Burn Runbook — v3 Canonical (HISTORICAL)
 
 > **Provider removals (OpenAI, Anthropic, Bedrock, Stripe, Quge5,
-> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.**
+> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347. DigitalOcean files and references purged on 2026-05-06.**
 >
 > Companion docs:
 > - `infra/per-cloud-feature-delegation.md` — full v3 spec (authoritative).

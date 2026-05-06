@@ -471,7 +471,6 @@ the cutover ticket.
 | 7 | xAI probe: `curl -X POST https://api.syrabit.ai/api/ai/chat -H 'X-Force-Provider: grok'` | HTTP 400 with `unknown_provider` body |
 | 8 | Workers AI fallback hit-rate over the prior hour > 0 (proves the chain still serves traffic from the replacement tier) | Cloudflare AI Gateway logs |
 | 9 | `python3 scripts/infra/sendgrid_warmup_monitor.py --mode messages --window-minutes 360 --bounce-max-pct 2.0 --spam-max-pct 0.05 --min-messages 200` (or `--mode stats` if the SendGrid plan lacks the Email Activity History add-on, with `--window-days 1`) | exit 0 |
-| 10 | DO rollback floor still serves `/api/health` (kept for 14 days post-cutover, per `aca-cutover.md` §99) | `curl -fsS https://syrabit-backend-app.ondigitalocean.app/api/health` returns 200 |
 
 ---
 

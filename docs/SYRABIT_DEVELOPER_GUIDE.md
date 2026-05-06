@@ -9,7 +9,7 @@
 > - Chat dispatch (v3 = Azure-only English primary; **V4 = Vertex Gemini 2.5 Flash co-primary for long/high-risk turns via token+risk router**).
 > - Moderation primary (v3 = Azure AI Content Safety; **V4 = Llama-Guard-2 self-hosted on ACA**).
 > - Secrets (v3 = AKV-only; **V4 = AKV SoT + AWS SM + CF Secrets, Terraform-CI synced with SHA-256 hash check**).
-> - Hosting (v3 = Railway/DO; **V4 = Azure Container Apps `eastus2` live; DO is 14-day rollback floor only**).
+> - Hosting (v3 = Railway/DO; **V4 = Azure Container Apps `eastus2` live; Railway and DigitalOcean fully decommissioned**).
 >
 > If anything below disagrees with V4, **V4 wins**. The
 > product / feature / database-schema / API-contract sections of this

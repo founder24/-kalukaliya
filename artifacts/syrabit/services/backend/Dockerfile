@@ -1,6 +1,6 @@
 # services/backend/Dockerfile
 #
-# Production image for the Python FastAPI backend on DO App Platform
+# Production image for the Python FastAPI backend on Azure Container Apps
 # (Task #331). Mirrors the existing Railway Dockerfile at
 # `artifacts/syrabit-backend/Dockerfile` with two DO-specific tweaks:
 #

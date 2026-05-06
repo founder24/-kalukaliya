@@ -1,18 +1,18 @@
 # mTLS Activation Operational Checklist
 
 **Purpose:** Fully activate the mTLS "fail-closed" gate between the Cloudflare
-edge worker (`syrabit-edge`) and the Digital Ocean App Platform backend
+edge worker (`syrabit-edge`) and the Azure Container Apps backend
 (Task #336 — replaces the legacy Railway origin). Complete all four steps
 in order — skipping or misordering them will either break production
 traffic or leave the gate unarmed.
 
 > **Origin migration note (Task #336).** Every reference to "Railway"
-> below means the same operation on the Digital Ocean App Platform
+> below means the same operation on the Azure Container Apps
 > service `syrabit-backend`. Concretely, replace any
 > `railway variables set FOO=bar` with
-> `bash scripts/digitalocean.sh var-set syrabit-backend FOO=bar`, and
-> any Railway dashboard click-path with the equivalent `doctl apps`
-> command (or App Platform UI under cloud.digitalocean.com → Apps →
+> `az containerapp update -n syrabit-backend -g <rg> --set-env-vars FOO=bar`, and
+> any Railway dashboard click-path with the equivalent `az containerapp`
+> command (or Azure Portal under Container Apps →
 > syrabit-backend → Settings → App-Level Environment Variables).
 > The TLS-level "require client certificate" toggle on the Railway
 > Networking tab maps to **App Platform → Settings → Domains →

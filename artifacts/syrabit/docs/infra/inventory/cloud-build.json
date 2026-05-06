@@ -11,7 +11,7 @@
       "trigger": "GitHub push to master under artifacts/syrabit-backend/",
       "config": "artifacts/syrabit-backend/cloudbuild.yaml",
       "purpose": "Build the Python container, push to Artifact Registry, deploy dispatch-v2 to Cloud Run.",
-      "target_landing": "GitHub Actions workflow do-deploy-api.yml (DO App Platform builds the Python container directly from GitHub source). Pipeline deleted in Phase 7."
+      "target_landing": "GitHub Actions workflow azure-container-apps-deploy.yml (Azure Container Apps single-PATCH ARM deploy from GitHub source)."
     },
     {
       "name": "syrabit-core",

@@ -167,11 +167,11 @@ def init_tracing(app: Any) -> bool:
         return False
 
     ratio = max(0.0, min(1.0, _env_float("TRACE_SAMPLE_RATIO", 0.1)))
-    service_name = os.environ.get("OTEL_SERVICE_NAME", "syrabit-backend-do")
+    service_name = os.environ.get("OTEL_SERVICE_NAME", "syrabit-backend")
 
     # Resource attributes pinned to "where is this running?" so App
     # Insights queries can filter by `cloud.provider` and on-call can
-    # answer "is the slowness on DO, AWS, or Azure?" without relying
+    # answer "is the slowness on Azure, AWS, or GCP?" without relying
     # on naming conventions.
     resource = Resource.create({
         "service.name":           service_name,
@@ -179,9 +179,9 @@ def init_tracing(app: Any) -> bool:
         "service.version":        os.environ.get("OTEL_SERVICE_VERSION", "2.0.0"),
         "service.instance.id":    os.environ.get("HOSTNAME", "unknown"),
         "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "production"),
-        "cloud.provider":         "digitalocean",
-        "cloud.platform":         "digitalocean_app_platform",
-        "cloud.region":           os.environ.get("DO_REGION", "blr1"),
+        "cloud.provider":         "azure",
+        "cloud.platform":         "azure_container_apps",
+        "cloud.region":           os.environ.get("AZURE_REGION", "eastus2"),
     })
     sampler = TraceIdRatioBased(ratio)
     provider = TracerProvider(resource=resource, sampler=sampler)

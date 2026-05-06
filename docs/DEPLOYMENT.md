@@ -77,19 +77,19 @@ az containerapp ingress traffic set \
   --revision-weight <previous-revision-name>=100
 ```
 
-Hard rollback to DigitalOcean (within 14 days post-cutover only):
+ACA regional-failover (Azure `eastus2` is the accepted SPOF — V4 §8):
 
 ```bash
-# Re-deploy from .do/app.yaml
-doctl apps create-deployment <app-id>
-# Flip edge-proxy BACKEND_URL back to the DO origin
+# Re-deploy the same Bicep template into westus3
+az deployment group create \
+  -g syrabit-prod-westus3 \
+  -f infra/azure/aca-syrabit-backend.bicep \
+  -p location=westus3
+# Flip edge-proxy BACKEND_URL to the new ACA FQDN
 cd workers/edge-proxy
-wrangler secret put BACKEND_URL --env production  # paste the DO FQDN
+wrangler secret put BACKEND_URL --env production
 wrangler deploy --env production
 ```
-
-After 14 days, the DO floor expires; only ACA `westus3` re-deploy
-remains as the regional-failover path (V4 §8).
 
 ---
 
@@ -138,8 +138,6 @@ pnpm run deploy:production
 ## §6 — Removed deploy targets (Task #347)
 
 - **Railway** — fully decommissioned by Task #336.
-- **DigitalOcean App Platform** — kept on disk for 14-day rollback
-  floor only; `.do/app.yaml` and `digitalocean-deploy.yml` will be
-  deleted after the rollback window expires.
+- **DigitalOcean App Platform** — fully purged 2026-05-06. All `.do/` specs, `scripts/digitalocean.sh`, the `digitalocean-deploy.yml` workflow, and DO-themed planning docs (cutover.md, ADR-0001, cicd.md, observability.md, decommission.md) were deleted.
 - **Stripe webhooks** — routes deleted.
 - **Resend** — replaced by SendGrid via Azure Marketplace.

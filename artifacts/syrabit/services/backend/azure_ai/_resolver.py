@@ -34,7 +34,7 @@ _credential_singleton = None
 
 KEY_VAULT_URI_ENV = "AZURE_CRON_OBS_KV_URI"
 """Set by ``container-apps-jobs.tf`` per-job env block; for the
-backend container it comes from the DO App Platform env via
+backend container it comes from the Azure Container Apps env via
 ``infra/dogcp/``."""
 
 

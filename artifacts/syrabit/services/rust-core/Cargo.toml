@@ -10,7 +10,7 @@ edition = "2021"
 # and serve both an HTTP `/health` (port 3000) and a gRPC
 # `grpc.health.v1.Health/Check` (port 50051) endpoint. The full
 # service implementation lives in `backend/rust-core/`; this scaffold
-# is what the DO App Platform container image actually builds.
+# is what the Azure Container Apps container image actually builds.
 
 [[bin]]
 name = "rust-core"

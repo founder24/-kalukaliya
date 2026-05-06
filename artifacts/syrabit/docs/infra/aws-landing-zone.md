@@ -21,7 +21,7 @@ This AWS account is **only** the foundation for the Phase 4 worker tier:
 It is **not** the home of:
 
 - The synchronous API tier (FastAPI) or the Rust core — both go to
-  Digital Ocean App Platform.
+  Azure Container Apps.
 - Cron / scheduled jobs — those land on Azure Container Apps Jobs.
 - ElastiCache / Redis — Upstash stays as the Redis surface.
 - Production DNS — Cloudflare keeps the apex and `api.syrabit.ai`.
@@ -296,7 +296,7 @@ references the secret ARNs and the SES identity ARN.)
 |--------------------------------------|------------------------------------------------------|
 | SQS queues, Lambda consumers         | Phase 4 Terraform (downstream task)                  |
 | ElastiCache / Redis                  | Upstash (unchanged)                                  |
-| API ingress, Rust core gRPC          | Digital Ocean App Platform                           |
+| API ingress, Rust core gRPC          | Azure Container Apps                                 |
 | Cron jobs                            | Azure Container Apps Jobs                            |
 | Bedrock / Polly / Transcribe IAM     | Phase "AWS-native advanced features" task            |
 | Production DNS apex (`syrabit.ai`)   | Cloudflare; only `api.syrabit.ai` latency record     |

@@ -4,7 +4,7 @@
 #
 # VPC baseline for the async worker tier. Sized for Lambda + occasional
 # Fargate jobs, NOT for synchronous API traffic (the sync API tier lives
-# on Digital Ocean per ADR-0001).
+# on Azure Container Apps).
 #
 # Layout
 # ──────

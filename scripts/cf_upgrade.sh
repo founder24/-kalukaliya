@@ -40,7 +40,7 @@ ZONE_ID="5b8c97df4431491dc7f60ea72fb61871"
 ZONE_NAME="syrabit.ai"
 ADMIN_EMAIL="admin@syrabit.ai"
 AI_GATEWAY_ID="syrabit"
-# Task #336 — cut over from the Railway hostname to the Digital Ocean
+# Task #336 — cut over from the legacy Railway/DigitalOcean hostname to the Azure Container Apps
 # App Platform-fronted custom domain. The legacy Railway URL is
 # preserved here as a comment so anyone bisecting cf_upgrade.sh
 # history can find the cutover commit.

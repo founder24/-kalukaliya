@@ -44,7 +44,7 @@
 - **Observability:** Sentry Performance is the end-to-end trace owner; `traceparent`/`baggage` propagate CF Worker → Azure ACA → Lambda → Vertex/Pinecone/Mongo. OTEL → GCP Cloud Trace as the long-retention backstop.
 - **DR:** RTO = 4 h, RPO = 15 min, quarterly restore drill. **Azure `eastus2` is an explicit accepted SPOF** — manual `westus3` re-deploy from Bicep on regional outage.
 - **Latency:** p95 chat turn budget = 2.5 s. Pinecone in `ap-south-1` keeps the RAG hop <50 ms inside India.
-- **Hosting:** Azure Container Apps `syrabit-backend` (`eastus2`) is the live HTTP face as of 2026-05-05. DigitalOcean App Platform specs (`.do/app.yaml`) are kept on disk for 14-day rollback only. Railway hosting is fully decommissioned (Task #336).
+- **Hosting:** Azure Container Apps `syrabit-backend` (`eastus2`) is the live HTTP face. DigitalOcean and Railway hosting are fully decommissioned (Tasks #336, #347).
 - **Storage roles:** D1 = SEO meta + audit logs + syllabus map. Mongo Atlas = conversations + profiles + chunk **metadata** (Pinecone IDs only — never re-embedded from Mongo). Pinecone = embeddings. Vectorize = edge cache. R2 = canonical assets + final backups. S3 = temp dumps.
 - **Removed providers (Task #347):** OpenAI, Anthropic, AWS Bedrock direct, Stripe, Quge5, Resend, xAI/Grok, Railway, DigitalOcean. See `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`.
 

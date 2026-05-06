@@ -64,7 +64,6 @@ When the embed-worker health check fails:
 | `CEREBRAS_API_KEY` | Optional fast-inference fallback (weight 0). |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Hot counter for credit-burn meter (V4 §10) and translation cache. |
 | `GITHUB_TOKEN` | Used by ops scripts only (not by FastAPI runtime). |
-| `DIGITALOCEAN_API_TOKEN` | **Rollback only** — DO specs (`.do/app.yaml`) kept on disk for 14-day post-cutover floor. Will be removed once cutover stabilizes. |
 
 ### Removed (Task #347 — never re-add without a V5 spec change)
 

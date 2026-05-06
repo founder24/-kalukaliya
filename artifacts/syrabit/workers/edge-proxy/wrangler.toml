@@ -30,11 +30,11 @@ new_classes = ["ChatSession", "RateLimiter"]
 [vars]
 # Non-secret vars; secrets set via: wrangler secret put <NAME> --env <env>
 NODE_ENV = "production"
-# Origin selector — "do" only after Task #335 decommissioned the
-# legacy Railway and GCP Cloud Run origins. The variable is retained
-# so a future provider can be added without changing the worker
-# source, but currently only "do" is wired.
-ORIGIN_TARGET = "do"
+# Origin selector — "azure" routes to the Azure Container Apps
+# syrabit-backend service (the only live origin as of the V4 cutover).
+# The variable is retained so a future provider can be added without
+# changing the worker source.
+ORIGIN_TARGET = "azure"
 
 [env.production]
 name = "syrabit-edge-proxy"
@@ -43,7 +43,7 @@ routes = [
 ]
 
 [env.production.vars]
-ORIGIN_TARGET = "do"
+ORIGIN_TARGET = "azure"
 
 # ── Task #405 — Cloudflare KV namespace for the hot-read cache ──────────────
 # Backs the GET/PUT/DELETE /api/edge/kv-cache/<key> routes in src/index.ts
@@ -67,7 +67,7 @@ routes = [
 ]
 
 [env.staging.vars]
-ORIGIN_TARGET = "do"
+ORIGIN_TARGET = "azure"
 
 [[env.staging.kv_namespaces]]
 binding = "CF_EDGE_CACHE"
@@ -75,7 +75,7 @@ binding = "CF_EDGE_CACHE"
 id = "c8cdd4710c23460caf4d6fa526d76d2e"
 
 # Actual secrets — set with `wrangler secret put <NAME> --env <env>`:
-#   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
+#   AZURE_BACKEND_URL        — https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io
 #   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret
 #   D1_SYNC_SECRET           — 256-bit hex shared secret matching the
 #                              backend env var of the same name. Used as

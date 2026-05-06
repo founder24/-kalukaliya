@@ -21,7 +21,7 @@
 #
 # Calling pattern
 # ───────────────
-# The Python backend on Digital Ocean and the Lambda workers on AWS
+# The Python backend on Azure Container Apps and the Lambda workers on AWS
 # both call these services via short-lived role assumption — no static
 # AWS access keys are issued. Each role is least-privilege and tagged
 # `feature=<service>` so Cost Explorer can break down spend per

@@ -3,38 +3,31 @@
  *
  * Lightweight Cloudflare Worker that fronts the API. Originally a
  * Workers-for-Platforms tenant dispatcher, simplified into a routing
- * shim when dispatch moved to GCP Cloud Run, and extended in
- * Task #331 with an `ORIGIN_TARGET` feature flag so traffic could be
- * flipped between the Railway, Cloud Run, and Digital Ocean origins
- * without a code deploy at cutover.
- *
- * Task #335 decommissioned the legacy Railway and GCP Cloud Run
- * origins. The `ORIGIN_TARGET` variable is retained so a future
- * provider can be wired in without changing the worker source, but
- * only `do` resolves to a configured origin today.
+ * shim when dispatch moved to GCP Cloud Run. As of the V4 cutover the
+ * `ORIGIN_TARGET` flag selects the Azure Container Apps origin.
  *
  * Origin selection
  * ────────────────
- *   ORIGIN_TARGET=do        → DO_APP_BACKEND_URL  (Digital Ocean App Platform)
+ *   ORIGIN_TARGET=azure     → AZURE_BACKEND_URL  (Azure Container Apps syrabit-backend)
  *
  * Performance boost wiring
  * ────────────────────────
  * • Cache-Control headers set by the downstream service are respected
- *   verbatim; cache layer (Cloudflare or DO LB) caches static + API
+ *   verbatim; cache layer (Cloudflare or origin LB) caches static + API
  *   responses.
  * • Early Hints (103) are emitted for key assets so browsers start
  *   fetching sub-resources before the full response arrives.
  *
  * Required wrangler secrets / vars
  * ─────────────────────────────────
- *   ORIGIN_TARGET            — "do" (default)
- *   DO_APP_BACKEND_URL       — https://syrabit-backend-<hash>.ondigitalocean.app
+ *   ORIGIN_TARGET            — "azure" (default)
+ *   AZURE_BACKEND_URL        — https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io
  *   DISPATCH_SHARED_SECRET   — random 256-bit hex, matched server-side
  */
 
 export interface Env {
   ORIGIN_TARGET?: string;
-  DO_APP_BACKEND_URL?: string;
+  AZURE_BACKEND_URL?: string;
   DISPATCH_SHARED_SECRET: string;
   // Durable Object bindings (see wrangler.toml).
   CHAT_SESSION?: DurableObjectNamespace;
@@ -229,19 +222,20 @@ const EARLY_HINTS_ASSETS = [
 ];
 
 function resolveOrigin(env: Env): { url: string; target: string } | null {
-  const target = (env.ORIGIN_TARGET ?? 'do').toLowerCase();
-  if (target !== 'do') {
-    console.warn('[edge-proxy] unsupported ORIGIN_TARGET — Railway and Cloud Run were decommissioned in Task #335', { target });
+  const target = (env.ORIGIN_TARGET ?? 'azure').toLowerCase();
+  if (target !== 'azure') {
+    console.warn('[edge-proxy] unsupported ORIGIN_TARGET — only "azure" is wired post-V4 cutover', { target });
   }
-  return env.DO_APP_BACKEND_URL ? { url: env.DO_APP_BACKEND_URL, target: 'do' } : null;
+  return env.AZURE_BACKEND_URL ? { url: env.AZURE_BACKEND_URL, target: 'azure' } : null;
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Task #386 — DO routes are intercepted BEFORE the origin proxy
-    // so chat-session reads / rate-limit checks never hit DigitalOcean.
+    // Task #386 — Durable Object routes are intercepted BEFORE the
+    // origin proxy so chat-session reads / rate-limit checks never hit
+    // the Azure backend.
     const doResponse = await dispatchDurableObject(request, env, url);
     if (doResponse) {
       return doResponse;

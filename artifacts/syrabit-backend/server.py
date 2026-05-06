@@ -2087,7 +2087,7 @@ def _aca_jobs_takeover() -> bool:
 
     DEFAULT: ON. The acceptance bar for this task is that the API
     container stops running migrated cron loops once this code ships,
-    on every host (DigitalOcean App Platform, Replit deploy, container,
+    on every host (Azure Container Apps, Replit deploy, container,
     etc.) — making the default depend on a host-specific env var meant
     a forgotten env caused legacy loops to keep firing. The cutover is
     therefore unconditional and contributors who want the in-process

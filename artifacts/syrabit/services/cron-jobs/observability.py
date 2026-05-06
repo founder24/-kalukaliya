@@ -30,7 +30,7 @@ def configure_otel(job_name: str) -> Any:
 
     Resource attributes pin every span to ``cloud.provider=azure`` and
     ``cloud.platform=azure_container_apps_jobs`` so the App Insights
-    KQL filters in the runbook (``docs/infra/observability.md``) can
+    KQL filters in the runbook (``docs/infra/aca-cutover.md``) can
     slice cron traces vs DO API traces vs AWS Lambda traces without
     relying on naming conventions.
 

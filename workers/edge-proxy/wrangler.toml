@@ -18,9 +18,8 @@ compatibility_flags = [
 # Until then the Standard Workers model applies (10ms CPU / 128MB RAM).
 
 # Smart Placement — Cloudflare automatically routes each isolate invocation
-# to the data-centre closest to the Digital Ocean backend origin (blr1),
-# not to the user. This cuts origin RTT on API proxying by 30–60 ms in
-# Asia Pacific markets (the primary Assam user base). Available on
+# to the data-centre closest to the Azure Container Apps origin (eastus2),
+# not to the user. This cuts origin RTT on API proxying. Available on
 # Workers Standard Paid.
 [placement]
 mode = "smart"
@@ -48,21 +47,20 @@ routes = [
 # ---------------------------------------------------------------------------
 # BACKEND_URL — the production backend origin the edge worker proxies to.
 #
-# Task #336 — cut over from the legacy Railway hostname
-# (`workspacemockup-sandbox-production-df37.up.railway.app`) to the
-# Digital Ocean App Platform service `syrabit-backend` in region blr1.
-# The DO default-ingress hostname (`syrabit-backend-XXXXX.ondigitalocean.app`)
+# V4 cutover — the live backend origin is the Azure Container Apps
+# service `syrabit-backend` in region eastus2. The ACA default-ingress
+# hostname (`syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io`)
 # is wrapped behind the public custom domain `api.syrabit.ai` so any
-# future DO redeploy that mints a new default-ingress URL needs no
+# future ACA revision that mints a new default-ingress URL needs no
 # `wrangler deploy` from this repo.
 #
-# Verified state (May 2026, post-cutover):
+# Verified state (post-cutover):
 #   - Live worker has BACKEND_URL set ONLY as a plaintext binding (this
 #     value); there is no encrypted secret override on the dashboard.
 #   - `wrangler deploy` from this repo round-trips the same value back
 #     into production — safe to redeploy at any time.
 #   - `curl https://api.syrabit.ai/api/health` returns
-#     `{"status":"ok","service":"Syrabit.ai API"}` from the DO origin.
+#     `{"status":"ok","service":"Syrabit.ai API"}` from the ACA origin.
 #
 # How to change the backend URL:
 #   1. Update this line and `wrangler deploy`. The new value is what
@@ -75,11 +73,10 @@ routes = [
 #      the same name overwrites the secret on every deploy).
 #   3. For local `wrangler dev`, create workers/edge-proxy/.dev.vars
 #      (gitignored):
-#        BACKEND_URL=https://syrabit-backend-staging.ondigitalocean.app
+#        BACKEND_URL=https://syrabit-backend-staging.eastus.azurecontainerapps.io
 #
-# Rollback during cutover soak: temporarily set this back to the legacy
-# Railway URL until the Railway project is decommissioned (see
-# docs/ops/digitalocean-cutover.md §Rollback).
+# Rollback during cutover soak: temporarily set this back to the prior
+# revision URL — see docs/DEPLOYMENT.md §Rollback.
 # ---------------------------------------------------------------------------
 BACKEND_URL = "https://api.syrabit.ai"
 
@@ -124,14 +121,14 @@ PAGES_ORIGIN = "https://syrabit-zip-convert.pages.dev"
 # D1_SYNC_SECRET must be set via Wrangler secret (not committed to source control):
 #   wrangler secret put D1_SYNC_SECRET
 #
-# Task #606 / Task #336 — BACKEND_ORIGIN_SECRET: shared secret the worker
-# injects on every backend fetch as `X-Origin-Auth`. Required because the
-# Digital Ocean `syrabit-backend` app rejects requests without it via
+# BACKEND_ORIGIN_SECRET: shared secret the worker injects on every
+# backend fetch as `X-Origin-Auth`. Required because the Azure Container
+# Apps `syrabit-backend` app rejects requests without it via
 # OriginSharedSecretMiddleware. Set via:
 #   wrangler secret put BACKEND_ORIGIN_SECRET
-# The same value MUST be set as ORIGIN_SHARED_SECRET on the DO app
-# (`scripts/digitalocean.sh var-set syrabit-backend ORIGIN_SHARED_SECRET=…`
-# — see docs/DIGITALOCEAN-DEPLOYMENT.md).
+# The same value MUST be set as ORIGIN_SHARED_SECRET on the ACA app
+# (`az containerapp update -n syrabit-backend -g <rg> --set-env-vars ORIGIN_SHARED_SECRET=…`
+# — see docs/DEPLOYMENT.md).
 
 # Task #636 — Workers AI binding for the auto-fallback fan-out at
 # /api/ai/fallback/{chat,embed,tts,stt}. The backend hits these routes
@@ -151,7 +148,7 @@ binding = "AI"
 # /api/ai/fallback/* call. Without it the routes reject with 401 — this
 # stops randoms from burning Workers AI quota by hitting api.syrabit.ai
 # directly. Set via `wrangler secret put EDGE_AI_FALLBACK_SECRET` and the
-# *same* value as WORKERS_AI_FALLBACK_SECRET on the Cloud Run / Railway
+# *same* value as WORKERS_AI_FALLBACK_SECRET on the Azure Container Apps
 # backend (see providers/workers_ai.py).
 
 [[kv_namespaces]]

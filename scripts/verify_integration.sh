@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # verify_integration.sh
-# End-to-end verification of Pages + Worker + Digital Ocean + D1 integration.
+# End-to-end verification of Pages + Worker + Azure Container Apps + D1 integration.
 # Run from any environment with curl + bash.
 #
-# Task #336 — backend origin migrated from Railway to Digital Ocean App
+# Backend origin is Azure Container Apps (post-cutover); historical migration was Railway →
 # Platform. The `RAILWAY_DIRECT` / `RAILWAY_URL` variables below are
 # kept under their old names so existing CI invocations keep working,
 # but the default value now points at the DO direct-ingress hostname;
-# override with `DO_DIRECT=https://syrabit-backend-XXXXX.ondigitalocean.app`
+# override with `BACKEND_DIRECT=https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io`
 # (preferred) or `RAILWAY_URL=…` (legacy, still honoured).
 #
 # Usage:
@@ -25,7 +25,7 @@ set -u
 EDGE="${EDGE_URL:-https://api.syrabit.ai}"
 SITE="${SITE_URL:-https://syrabit.ai}"
 WWW="${WWW_URL:-https://www.syrabit.ai}"
-RAILWAY_DIRECT="${DO_DIRECT:-${RAILWAY_URL:-https://syrabit-backend-app.ondigitalocean.app}}"
+RAILWAY_DIRECT="${BACKEND_DIRECT:-${RAILWAY_URL:-https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io}}"
 ADMIN_JWT="${ADMIN_JWT:-}"
 
 PASS=0
@@ -79,7 +79,7 @@ http_head_code() { curl -sI -o /dev/null -w "%{http_code}" -m 15 "$@"; }
 # ─── Phase 1: Build is live ───────────────────────────────────────────────────
 phase "PHASE 1 — Confirm latest build is live"
 
-check "Backend health (direct Digital Ocean origin — Task #336)" \
+check "Backend health (direct Azure Container Apps origin)" \
   "http_code '$RAILWAY_DIRECT/api/health'" \
   "^200$"
 
@@ -131,7 +131,7 @@ check "Googlebot prerender path returns HTML" \
   "^200\\|text/html"
 
 # ─── Phase 4: D1 catalog serving ──────────────────────────────────────────────
-phase "PHASE 4 — D1 edge cache serves catalog (instead of Digital Ocean fall-through)"
+phase "PHASE 4 — D1 edge cache serves catalog (instead of backend fall-through)"
 
 # Probe each catalog endpoint with cache-bust. Pick correct separator based on
 # whether the path already has a query string.

@@ -1,6 +1,6 @@
 # services/rust-core
 
-Rust core, packaged for Digital Ocean App Platform (Task #331). The
+Rust core, packaged for Azure Container Apps. The
 actual source lives at `backend/rust-core/` — this directory contains
 only the DO-specific container build context.
 
@@ -19,7 +19,7 @@ Two ports:
 Verify gRPC after deploy:
 
 ```sh
-grpcurl -plaintext rust-core-app.ondigitalocean.app:50051 health.Check
+grpcurl -plaintext rust-core.<aca-suffix>.azurecontainerapps.io:50051 health.Check
 ```
 
-See `docs/infra/api-on-do.md` for runbook details.
+See `docs/infra/aca-cutover.md` for runbook details.

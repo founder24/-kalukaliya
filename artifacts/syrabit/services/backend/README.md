@@ -1,6 +1,6 @@
 # services/backend
 
-Python FastAPI backend, packaged for Digital Ocean App Platform
+Python FastAPI backend, packaged for Azure Container Apps
 (Task #331). The actual application source lives at
 `artifacts/syrabit-backend/` — this directory contains only the
 DO-specific container build context.
@@ -15,7 +15,7 @@ docker build -f services/backend/Dockerfile -t syrabit-backend:dev \
 ```
 
 Health endpoint: `GET /api/health` on port `8080` (matches the
-`http_port` in `infra/do/app-syrabit-backend.yaml`).
+`targetPort` in `infra/azure/aca-syrabit-backend.bicep`).
 
-See `docs/infra/api-on-do.md` for the full deploy / scale / rollback
+See `docs/infra/aca-cutover.md` for the full deploy / scale / rollback
 runbook.

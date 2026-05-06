@@ -239,7 +239,7 @@ back to this runbook.
 
 * Hosting / queue / cron infra (covered by `aws-landing-zone.md` +
   `workers-on-aws.md`).
-* Any GCP / Cloudflare / Digital Ocean changes.
+* Any GCP / Cloudflare / Azure changes.
 * Replacing any existing provider — every AWS feature here is an
   *additional* path.
 * Routing Anthropic Claude / Llama / Mistral / Titan / Nova through

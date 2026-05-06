@@ -6,7 +6,7 @@ Replaces the ad-hoc ``/healthz/ai`` / ``/healthz/r2`` probes with a
 unified pair:
 
   * ``GET /api/health``  — liveness only (process alive, event loop
-    ticking). DO App Platform's HEALTHCHECK probes this; a 5xx here
+    ticking). Azure Container Apps' liveness probe hits this; a 5xx here
     triggers a pod restart.
 
   * ``GET /api/readyz``  — readiness, fans out concurrent dependency
@@ -34,7 +34,7 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
-# Per-probe budget. Kept well below DO App Platform's 5s health-check
+# Per-probe budget. Kept well below Azure Container Apps' 5s health-check
 # timeout so a single slow backend never propagates into a flapping
 # readiness state for the whole pod.
 DEP_PROBE_TIMEOUT_S = 1.5

@@ -82,7 +82,7 @@ AI later, and lets us justify a top-up to the startup rep with a clean
 | `syrabit.ai` zone — DNS, free SSL, basic WAF, basic DDoS | All Syrabit traffic routes through this zone. | 🟪 **ENT-INCLUDED** once the free Enterprise upgrade is applied to this zone | **Action:** apply one of the 3 free Enterprise domain slots to apex `syrabit.ai`. Confirm Bot Management, advanced WAF, prioritized DDoS, 100% SLA, Argo Smart Routing, and Enterprise support are live. |
 | Bot Management add-on | Currently using the free heuristic `cf.verifiedBot` flag. | 🟪 ENT-INCLUDED after the upgrade | After Enterprise upgrade: enable Super Bot Fight Mode + Bot Analytics; do **not** enable JS Detections on `/api/*` routes (would break the FastAPI clients). |
 | Cloudflare Access | `cf_access.py` admin route protection (Task #637). | 🟦 STARTUP-100% (Access seats up to startup cap) | Keep. Audit seat count quarterly to stay under cap. |
-| Cloudflare Tunnel | Not in use. | n/a | If we adopt it for the Digital Ocean origin (Task #336 made DO the canonical backend), it remains 🟦 under the Access subscription. |
+| Cloudflare Tunnel | Not in use. | n/a | If we adopt it for the Azure Container Apps origin, it remains 🟦 under the Access subscription. |
 | WAF custom rulesets | A handful of country-of-origin and path rules. | 🟪 ENT-INCLUDED after the upgrade | Keep current rules; document any new rule in the same PR that adds it. |
 | Argo Smart Routing | Routes via CF private backbone. | 🟪 ENT-INCLUDED on the Enterprise zone plan | **Do NOT subscribe to "Smart Shield Argo Zone Level Plan - Basic" separately** ($5/mo) — it duplicates what the Enterprise zone already bundles. The standalone subscription was cancelled 2026-05-03; rely on the Enterprise inclusion. |
 | Rate Limiting (advanced) | Not used today (DO-based limiter does the job). | 🟦 STARTUP-100% (locked-but-free per startup rep) | **Action:** request unlock from the startup team email; once unlocked, evaluate whether the DO limiter can be retired in favour of the dashboard rules (would remove a paid DO line item). |
@@ -149,7 +149,7 @@ re-subscribing.
 |---|---|---|
 | Workers for Platforms | $25/mo | SaaS-multitenant Worker dispatch — Syrabit does not run customer-supplied code in Workers. Pure waste. |
 | Smart Shield Argo Zone Level Plan - Basic | $5/mo | **Duplicate of the Argo Smart Routing already bundled in the Enterprise zone plan.** Two charges for the same product. |
-| Basic Load Balancing | $5/mo | Only one origin (Digital Ocean App Platform — Task #336 replaced Railway) — LB needs ≥2 pools to do anything. Re-subscribe only when a second origin is provisioned. The deleted setup script `workers/edge-proxy/scripts/setup-load-balancer.mjs` and the historical runbook block in `artifacts/syrabit/CLOUDFLARE_PAGES.md` (now collapsed under a "CANCELLED" header) cover what to re-create at that point. |
+| Basic Load Balancing | $5/mo | Only one origin (Azure Container Apps `syrabit-backend`) — LB needs ≥2 pools to do anything. Re-subscribe only when a second origin is provisioned. The deleted setup script `workers/edge-proxy/scripts/setup-load-balancer.mjs` and the historical runbook block in `artifacts/syrabit/CLOUDFLARE_PAGES.md` (now collapsed under a "CANCELLED" header) cover what to re-create at that point. |
 | Cache Reserve | $0 base + usage | Tier-2 cache lives in R2 → double R2 spend. Hot path is already covered by per-POP `caches.default` and KV `BOT_HTML_CACHE`. |
 | Cloudflare Log Explorer - Base Fee | $0 base + usage | Indexed log storage burns the $5k pool on every query. Backend logs (Replit) and GraphQL Analytics API (free) cover the same need. |
 | Zaraz | $0 (free-tier) | Edge tag manager not in use. Free tier silently overages past 100k events/mo. The setup script `workers/edge-proxy/scripts/setup-zaraz.mjs` was deleted in the same change. |
@@ -169,7 +169,7 @@ listed in the Storage section above).
   *preserves* the credit pool for that migration.
 - Negotiating partner-tier upgrades ($25k tier via NVIDIA Inception /
   Microsoft for Startups / VC nomination) — separate task.
-- Moving the API off Digital Ocean (Task #336 made DO canonical) onto Workers — out of scope.
+- Moving the API off Azure Container Apps onto Workers — out of scope.
 - Buying new domains through Cloudflare Registrar (not credit-eligible
   anyway).
 

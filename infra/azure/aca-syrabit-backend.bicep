@@ -1,6 +1,6 @@
 // Task #347 — Azure Container Apps spec for the Syrabit FastAPI backend.
 //
-// Replaces the Digital Ocean App Platform spec at .do/app.yaml as the
+// Azure Container Apps spec for the syrabit-backend FastAPI service —
 // production deploy target. This Bicep file is the single source of
 // truth for the syrabit-backend Container App resource — the
 // .github/workflows/azure-container-apps-deploy.yml workflow only swaps

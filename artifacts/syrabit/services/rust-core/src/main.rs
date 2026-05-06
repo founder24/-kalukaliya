@@ -1,13 +1,13 @@
 //! Phase 5 — Observability rewire (Task #333).
 //!
-//! Rust core entrypoint for DO App Platform. Wires:
+//! Rust core entrypoint for Azure Container Apps. Wires:
 //!
 //!   * OpenTelemetry tracing with two parallel exporters
 //!     (Application Insights + Axiom, both via OTLP/HTTP). Either
 //!     sink may be missing without breaking the other; the SDK
 //!     stays idle when neither is configured.
 //!   * Axum HTTP server on `HTTP_PORT` (default 3000) exposing
-//!     `GET /health` for DO App Platform's HEALTHCHECK.
+//!     `GET /health` for Azure Container Apps' liveness probe.
 //!   * Tonic gRPC server on `GRPC_PORT` (default 50051) exposing
 //!     the standard `grpc.health.v1.Health/Check` so the in-VPC
 //!     Python caller's failover-aware health watch can pin a
@@ -35,9 +35,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 static BOOT: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
 
 /// Wire OTel tracing via a single OTLP/HTTP exporter pointed at the
-/// in-cluster Azure Monitor OpenTelemetry Collector (DO App Platform
+/// in-cluster Azure Monitor OpenTelemetry Collector (Azure Container Apps
 /// runs the collector as a separate component in the same App spec —
-/// see `infra/do/app-otel-collector.yaml`). The collector then fans
+/// see the otel-collector ACA bicep template). The collector then fans
 /// out to App Insights + Axiom in parallel.
 ///
 /// Rationale: the Rust ecosystem does not have a native App Insights
@@ -55,9 +55,9 @@ fn init_tracing() -> Result<()> {
         KeyValue::new("service.name", "syrabit-rust-core-do"),
         KeyValue::new("service.namespace", "syrabit"),
         KeyValue::new("deployment.environment", env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "production".into())),
-        KeyValue::new("cloud.provider", "digitalocean"),
-        KeyValue::new("cloud.platform", "digitalocean_app_platform"),
-        KeyValue::new("cloud.region", env::var("DO_REGION").unwrap_or_else(|_| "blr1".into())),
+        KeyValue::new("cloud.provider", "azure"),
+        KeyValue::new("cloud.platform", "azure_container_apps"),
+        KeyValue::new("cloud.region", env::var("AZURE_REGION").unwrap_or_else(|_| "eastus2".into())),
         KeyValue::new("service.version", env::var("GIT_SHA").unwrap_or_else(|_| "dev".into())),
     ]);
 
@@ -99,7 +99,7 @@ fn init_tracing() -> Result<()> {
     Ok(())
 }
 
-/// Liveness probe for DO App Platform's HEALTHCHECK + the Dockerfile
+/// Liveness probe for Azure Container Apps' liveness probe + the Dockerfile
 /// `wget --spider` health check.
 async fn http_health() -> Json<serde_json::Value> {
     Json(json!({
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
     let http_addr: SocketAddr = ([0, 0, 0, 0], http_port).into();
     let http_listener = tokio::net::TcpListener::bind(http_addr).await?;
     tracing::info!(addr = %http_addr, "HTTP server listening");
-    // Graceful-shutdown future: fires on either SIGTERM (DO App
+    // Graceful-shutdown future: fires on either SIGTERM (Azure Container Apps
     // Platform's rolling-deploy signal) or SIGINT (Ctrl-C in dev).
     // Both servers below dial into the same broadcast so they exit
     // together and OTel gets a chance to flush.

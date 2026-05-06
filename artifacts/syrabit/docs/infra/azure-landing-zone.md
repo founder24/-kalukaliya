@@ -25,7 +25,7 @@ four-way split:
 It is **not** the home of:
 
 - The synchronous API tier (FastAPI) or the Rust core — both go to
-  Digital Ocean App Platform.
+  Azure Container Apps.
 - Async fan-out queues / workers — those go to AWS (SQS + Lambda).
 - Azure Cache for Redis — Upstash stays as the Redis surface.
 - Production DNS — Cloudflare keeps the apex and `api.syrabit.ai`.
@@ -384,7 +384,7 @@ re-apply.
 |-----------------------------------------|--------------------------------------------|
 | Container Apps environment + cron jobs  | Phase 4 Terraform (downstream task)        |
 | Azure Cache for Redis                   | Upstash (unchanged)                        |
-| API ingress, Rust core gRPC             | Digital Ocean App Platform                 |
+| API ingress, Rust core gRPC             | Azure Container Apps                       |
 | Async workers / SQS                     | AWS                                        |
 | Azure Front Door, Cosmos DB cache       | `front-door.tf` / `cosmos-db-cache.tf` (predate this LZ; separate RG) |
 | Azure OpenAI / AI Speech / Translator   | "Azure-native advanced features" task      |
