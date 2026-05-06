@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Activity, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { API_BASE } from '@/utils/api';
@@ -181,8 +181,13 @@ export default function EmbedStackHealthPill({ adminToken }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const inFlightRef = useRef(false);
 
   const load = useCallback(async () => {
+    // Guard against overlapping requests — if a poll is still in flight
+    // when the next interval tick (or visibility resume) fires, skip it.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -194,11 +199,58 @@ export default function EmbedStackHealthPill({ adminToken }) {
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Failed to load');
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, [adminToken]);
 
-  useEffect(() => { load(); }, [load]);
+  // Task #470 — auto-refresh every ~30s while the dashboard tab is
+  // visible so on-call sees recovery (or fresh failures) without
+  // clicking the refresh icon. Polling pauses when the tab is hidden
+  // (Page Visibility API) to avoid burning admin requests, and the
+  // manual refresh button still works and resets the timer.
+  const POLL_MS = 30_000;
+  const timerRef = useRef(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const startTimer = useCallback(() => {
+    clearTimer();
+    if (typeof document !== 'undefined' && document.hidden) return;
+    timerRef.current = setInterval(() => { load(); }, POLL_MS);
+  }, [clearTimer, load]);
+
+  const refreshNow = useCallback(() => {
+    load();
+    startTimer();
+  }, [load, startTimer]);
+
+  useEffect(() => {
+    load();
+    startTimer();
+    const onVis = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        clearTimer();
+      } else {
+        load();
+        startTimer();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+    }
+    return () => {
+      clearTimer();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+      }
+    };
+  }, [load, startTimer, clearTimer]);
 
   const overallOk = !!data?.ok;
   const tone = overallOk
@@ -238,7 +290,7 @@ export default function EmbedStackHealthPill({ adminToken }) {
           </p>
         </div>
         <button
-          onClick={load}
+          onClick={refreshNow}
           disabled={loading}
           className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-white"
           data-testid="button-refresh-embed-stack-health"
