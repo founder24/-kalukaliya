@@ -6,6 +6,7 @@ import TrustpilotRefreshCronPill from './TrustpilotRefreshCronPill';
 import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
 import EmbedBackfillPill from './EmbedBackfillPill';
+import EmbedStackHealthPill from './EmbedStackHealthPill';
 import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
 // Phase 4 — Task #332. SQS+Lambda worker tier health (replaces the
@@ -3586,6 +3587,20 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           /admin/embed/backfill/progress.
         */}
         <EmbedBackfillPill adminToken={adminToken} />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="Embed Stack Health">
+        {/*
+          Task #436 — surface the live per-leg watchdog state from
+          GET /admin/health/embed-stack so on-call sees "embed leg has
+          failed 2/3 times" *before* the Task #412 page fires, and can
+          confirm recovery without waiting for the recovery alert.
+          Each of the three legs (embed / rerank / memory_brain) gets
+          a small badge that turns amber during the warm-up window
+          (1..threshold-1 failures) and red the moment the watchdog
+          latches firing=true.
+        */}
+        <EmbedStackHealthPill adminToken={adminToken} />
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="AI Gateway Cache by Model">

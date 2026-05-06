@@ -54,6 +54,27 @@ async def admin_embed_stack_health(
         embed_health = {"ok": False, "configured": False, "reason": str(exc)[:200]}
     embed_health["flag"] = {"name": "EMBED_PROVIDER_PRIMARY", "value": EMBED_PROVIDER_PRIMARY}
 
+    # ── Task #436 — per-leg watchdog counters ──────────────────────────────
+    # Surface the in-memory consecutive-failure counters maintained by the
+    # Task #412 alerting loop so on-call sees "embed leg has failed 2/3
+    # times" *before* the page fires (and can confirm recovery without
+    # waiting for the recovery alert to land in the inbox).
+    try:
+        import metrics as _metrics
+        _alert_snapshot = _metrics.get_embed_stack_alert_snapshot()
+    except Exception as exc:  # pragma: no cover - defensive
+        _alert_snapshot = {"threshold": 3, "legs": {}, "error": str(exc)[:200]}
+    _alert_threshold = _alert_snapshot.get("threshold", 3)
+    _alert_legs = _alert_snapshot.get("legs", {}) or {}
+
+    def _attach_alert_state(pill: dict, leg: str) -> None:
+        leg_state = _alert_legs.get(leg) or {}
+        pill["consecutive_failures"] = int(leg_state.get("consecutive_failures") or 0)
+        pill["firing"] = bool(leg_state.get("firing"))
+        pill["alert_threshold"] = _alert_threshold
+
+    _attach_alert_state(embed_health, "embed")
+
     # ── Rerank (Pinecone only) ─────────────────────────────────────────────
     # Use the rerank-specific probe (Task #382) which actually exercises
     # /rerank with the configured PINECONE_RERANK_MODEL. The generic
@@ -66,6 +87,7 @@ async def admin_embed_stack_health(
     except Exception as exc:
         rerank_health = {"ok": False, "reason": str(exc)[:200]}
     rerank_health["flag"] = {"name": "RERANK_PROVIDER", "value": RERANK_PROVIDER}
+    _attach_alert_state(rerank_health, "rerank")
 
     # ── Memory brain (Voyage + Atlas) ──────────────────────────────────────
     memory_health: dict[str, Any]
@@ -76,6 +98,7 @@ async def admin_embed_stack_health(
         memory_health = {"ok": False, "reason": str(exc)[:200]}
     memory_health["flag"] = {"name": "MEMORY_BRAIN_PROVIDER", "value": MEMORY_BRAIN_PROVIDER}
     memory_health["collection"] = MEMORY_BRAIN_COLLECTION
+    _attach_alert_state(memory_health, "memory_brain")
 
     # ── Backfill progress (Task #411) ──────────────────────────────────────
     # Surface how many legacy chunks are still on the old embed stack so the
@@ -103,6 +126,9 @@ async def admin_embed_stack_health(
         "rerank": rerank_health,
         "memory": memory_health,
         "backfill": backfill,
+        # Task #436 — full per-leg watchdog snapshot for the dashboard
+        # badge ("N/3 consecutive failures", red when firing).
+        "alert_state": _alert_snapshot,
         "flags": {
             "EMBED_PROVIDER_PRIMARY":  EMBED_PROVIDER_PRIMARY,
             "RERANK_PROVIDER":         RERANK_PROVIDER,

@@ -2151,6 +2151,36 @@ _embed_stack_last_error: dict[str, str | None] = {leg: None for leg in _EMBED_ST
 _embed_stack_last_latency_ms: dict[str, int | None] = {leg: None for leg in _EMBED_STACK_LEGS}
 
 
+def get_embed_stack_alert_snapshot() -> dict:
+    """Task #436 — read-only snapshot of the per-leg watchdog state.
+
+    Returns the in-memory consecutive-failure counters and ``firing``
+    latches maintained by ``_check_embed_stack_health_once`` plus the
+    active ``embed_stack_consecutive_failures_threshold``. Surfaced via
+    ``GET /admin/health/embed-stack`` so the dashboard can render an
+    "N/3 consecutive failures" badge and turn red the moment the
+    watchdog crosses the paging threshold (rather than waiting for the
+    alert payload to land in the on-call inbox).
+    """
+    raw = _ALERT_THRESHOLDS.get("embed_stack_consecutive_failures_threshold")
+    try:
+        threshold = int(raw) if raw is not None else 3
+    except (TypeError, ValueError):
+        threshold = 3
+    return {
+        "threshold": threshold,
+        "legs": {
+            leg: {
+                "consecutive_failures": _embed_stack_consecutive_failures[leg],
+                "firing": _embed_stack_was_firing[leg],
+                "last_error": _embed_stack_last_error[leg],
+                "last_latency_ms": _embed_stack_last_latency_ms[leg],
+            }
+            for leg in _EMBED_STACK_LEGS
+        },
+    }
+
+
 async def _probe_embed_stack_leg(leg: str) -> dict:
     """Probe a single embed-stack leg and return its health dict.
 
