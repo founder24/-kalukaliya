@@ -49,6 +49,7 @@ from db_ops import (
 from analytics_helpers import get_recent_user_events, get_session_metrics
 import cloudflare_client
 from cf_access import require_cf_access_admin
+from turnstile import require_turnstile
 
 # Supabase Auth error class — raised on wrong email/password.
 try:
@@ -88,7 +89,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.post("/admin/login")
+@router.post("/admin/login", dependencies=[Depends(require_turnstile)])
 async def admin_login(
     data: AdminLoginReq,
     response: Response,
@@ -101,6 +102,12 @@ async def admin_login(
     # device-posture rules. The dependency is a no-op when
     # CF_ACCESS_ENFORCE is unset (dev / pre-rollout) and 401s the
     # request before the password compare in production.
+    #
+    # Task #423 — also wrap with `require_turnstile` so unauthenticated
+    # bot traffic eats a CF challenge before the credential check, on
+    # parity with /auth/signup, /auth/login, /auth/reset-request. The
+    # dependency is dormant when TURNSTILE_ON=0 (dev), and 403s with
+    # `turnstile_required` / `turnstile_failed` once the flag is on.
     _cf_access_claims: Optional[dict] = Depends(require_cf_access_admin),
 ):
     submitted_email = (data.email or "").strip().lower()

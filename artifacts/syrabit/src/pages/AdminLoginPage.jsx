@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ShieldCheck, Mail, Lock, Eye, EyeOff, Loader2, AlertCircle,
 } from 'lucide-react';
 import { adminLogin } from '@/utils/api';
 import { toast } from 'sonner';
+import TurnstileWidget from '@/components/TurnstileWidget';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -13,13 +14,18 @@ export default function AdminLoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
+  const turnstileRef = useRef(null);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    // Task #423 — collect Turnstile token (empty when the widget is
+    // disabled / not rendered, in which case the backend dependency
+    // is dormant too so the request still succeeds).
+    const turnstileToken = turnstileRef.current?.getToken?.() || '';
     try {
-      const res = await adminLogin(email, password);
+      const res = await adminLogin(email, password, turnstileToken);
       // Session is the httponly `syrabit_admin_session` cookie set by
       // the backend — do NOT mirror the JWT into localStorage. Storing
       // it there exposes it to any XSS on the admin domain (the cookie
@@ -31,8 +37,15 @@ export default function AdminLoginPage() {
       });
       navigate('/admin');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid credentials');
+      const detail = err.response?.data?.detail;
+      const msg = (detail && typeof detail === 'object' && detail.message)
+        || (typeof detail === 'string' ? detail : null)
+        || 'Invalid credentials';
+      setError(msg);
     } finally {
+      // Tokens are one-shot per the Turnstile contract — reset so the
+      // next attempt mints a fresh one.
+      turnstileRef.current?.reset?.();
       setLoading(false);
     }
   };
@@ -98,6 +111,8 @@ export default function AdminLoginPage() {
                 </button>
               </div>
             </div>
+
+            <TurnstileWidget ref={turnstileRef} action="admin-login" />
 
             <button
               type="submit"

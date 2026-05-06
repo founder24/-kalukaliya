@@ -168,8 +168,15 @@ export const deleteAnonConversation = (id) =>
 export const saveOnboarding = (data) =>
   axios.post(`${API_BASE}/user/onboarding`, data, authConfig());
 
-export const adminLogin = (email, password) =>
-  axios.post(`${API_BASE}/admin/login`, { email, password }, { withCredentials: true });
+export const adminLogin = (email, password, turnstileToken = '') => {
+  const headers = {};
+  if (turnstileToken) headers['x-turnstile-token'] = turnstileToken;
+  return axios.post(
+    `${API_BASE}/admin/login`,
+    { email, password },
+    { withCredentials: true, headers },
+  );
+};
 
 export const adminHeaders = (token) => {
   const isRealJwt = token && typeof token === 'string' && token.split('.').length === 3;
