@@ -46,7 +46,10 @@
 - **Latency:** p95 chat turn budget = 2.5 s. Pinecone in `ap-south-1` keeps the RAG hop <50 ms inside India.
 - **Hosting:** Azure Container Apps `syrabit-backend` (`eastus2`) is the live HTTP face. DigitalOcean and Railway hosting are fully decommissioned (Tasks #336, #347).
 - **Storage roles:** D1 = SEO meta + audit logs + syllabus map. Mongo Atlas = conversations + profiles + chunk **metadata** (Pinecone IDs only — never re-embedded from Mongo). Pinecone = embeddings. Vectorize = edge cache. R2 = canonical assets + final backups. S3 = temp dumps.
-- **Removed providers (Task #347):** OpenAI, Anthropic, AWS Bedrock direct, Stripe, Quge5, Resend, xAI/Grok, Railway, DigitalOcean. See `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`.
+- **Removed providers (Task #347):** OpenAI, Anthropic, AWS Bedrock direct, Stripe, Quge5, Resend, xAI/Grok, Railway, DigitalOcean, **Groq (purged 2026-05-06)**. See `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`.
+- **Cerebras retained as CF-Gateway-only fallback** (V4 §1, §4) — re-instated by Task #420 for telemetry parity; direct (non-gateway) calls remain blocked by `scripts/check_dead_providers.py`. Never primary, never used for content-gen.
+- **Cohere retained as embed-failover specialist** (V4 §1) — BYOK via CF AI Gateway slug `cohere/v1`; not on the chat hot-path.
+- **PG → Mongo migration** (V4 §13): NOT STARTED. ADR → dual-write → read-shadow → cutover → rip-out, gated on Supabase OAuth replacement. Until Phase 4 completes, V4 is *aspirational* on the user-data SoT axis.
 
 ## Product
 

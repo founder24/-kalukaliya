@@ -139,19 +139,21 @@ _LLM_ROUTING_HISTORY_MAX_ENTRIES = 100_000
 _PROVIDER_429_BURST_WINDOW_S = 180   # shared lookback / Redis TTL for all providers
 _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps]
     "workers-ai":   [],
-    "groq":         [],
+    # groq removed in Task #347 / V4 §0
     "gemini":       [],
     "azure_openai": [],
     # bedrock removed in Task #347
     "deepgram":     [],
+    "cerebras":     [],   # V4 §1 / §4 — CF-Gateway-only fallback (Task #420)
 }
 _PROVIDER_429_REDIS_KEYS: dict = {
     "workers-ai":   "wai_429_burst",
-    "groq":         "groq_429_burst",
+    # groq removed in Task #347 / V4 §0
     "gemini":       "gemini_429_burst",
     "azure_openai": "azure_429_burst",
     # bedrock removed in Task #347
     "deepgram":     "deepgram_429_burst",
+    "cerebras":     "cerebras_429_burst",   # V4 §4 fallback
 }
 
 # Backwards-compat module-level aliases for code that references these directly
@@ -1049,17 +1051,17 @@ class _SmartKeyPool:
     _RL_COOLDOWN  = 20.0
     _ERR_COOLDOWN = 7.0
     # With unified billing and a combined 10 000 RPM budget, keep Workers AI
-    # as primary until 85% (8 500 RPM) before soft-shifting to Groq/Cerebras,
-    # and hard-deprioritize only at 95% (9 500 RPM).  Per-model quota is
-    # independent so a single model saturating does not affect others.
+    # as primary until 85% (8 500 RPM) before soft-shifting to Cerebras
+    # (V4 §4 CF-Gateway-only fallback), and hard-deprioritize only at 95%
+    # (9 500 RPM). Per-model quota is independent so a single model
+    # saturating does not affect others. Groq removed in Task #347 / V4 §0.
     _RPM_SOFT_THRESHOLD = 0.85
     _RPM_HARD_THRESHOLD = 0.95
 
     # RPM limits per provider — see _parse_rpm_limit() for the env-var safe parser.
     # Workers AI: CF Standard plan with unified billing — 3 000 RPM per model.
     # Override with WORKERS_AI_RPM_LIMIT env var if the account tier differs.
-    # Groq / Cerebras: 30 RPM on the free / preview tier; set GROQ_RPM_LIMIT
-    # or CEREBRAS_RPM_LIMIT to a higher value on a paid plan.
+    # Cerebras: preview tier; set CEREBRAS_RPM_LIMIT for paid plan.
     _PROVIDER_RPM_LIMITS = _POOL_RPM_LIMITS  # module-level dict, populated just above
 
     def __init__(self, candidates: list):
@@ -1295,8 +1297,7 @@ def _safe_model_for_provider(model: str, provider: str, provider_list=None) -> s
     Otherwise fall back to the provider's configured default_model."""
     if provider == "sarvam" and not model.startswith("sarvam-"):
         return "sarvam-m"
-    if provider == "groq" and not model.startswith(("llama-", "meta-llama/")):
-        return "meta-llama/llama-4-scout-17b-16e-instruct"
+    # Task #347 / V4 §0: groq branch removed — provider no longer dispatchable.
     mapped_provider = _MODEL_PROVIDER_MAP.get(model)
     if mapped_provider == provider:
         return model
@@ -1640,8 +1641,8 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
         return await _call_vertex_chat(messages, model or "gemini-2.5-flash", max_tokens)
     if provider == "cerebras":
         return await _call_cerebras(messages, api_key, model, max_tokens)
-    if provider == "groq":
-        return await _call_openai_compat(messages, api_key, model, max_tokens, "groq", "https://api.groq.com/openai/v1")
+    # Task #347 / V4 §0: groq dispatch branch removed — provider no longer
+    # in PROVIDER_PRIORITY; CF AI Gateway slug `groq/v1` is not configured.
     # Task #347: xAI/Grok dispatch branch removed — provider is no longer
     # in PROVIDER_PRIORITY and the SDK is uninstalled.
     if provider == "openrouter":
@@ -3355,10 +3356,10 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             logger.info(f"LLM stream: provider=cerebras, model={p_model}")
             async for token in _stream_cerebras(messages, p_key, p_model, _mt):
                 yield token
-        elif p_name == "groq":
-            logger.info(f"LLM stream: provider=groq, model={p_model}")
-            async for token in _stream_openai_compat(messages, p_key, p_model, _mt, "groq", "https://api.groq.com/openai/v1"):
-                yield token
+        # Task #347 / V4 §0: groq stream branch removed — _stream_openai_compat
+        # is no longer invoked with the groq base URL. PROVIDER_PRIORITY drops
+        # groq; alerting (metrics.py check #9) and counters (llm.py
+        # _PROVIDER_429_WINDOWS) also dropped.
         # Task #347: xAI/Grok stream branch removed — _stream_xai is gone
         # and PROVIDER_PRIORITY no longer routes to "xai".
         elif p_name == "openrouter":
@@ -3384,7 +3385,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     _SLM_PROVIDER_MAX_INPUT_CHARS = {
         "cerebras": 24000,
         "sarvam": 12000,
-        "groq": 100000,
+        # groq removed in Task #347 / V4 §0
         "gemini": 500000,
         "openrouter": 200000,
         "openai": 80000,

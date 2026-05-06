@@ -1317,10 +1317,9 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # Default 5 — enough to distinguish a real throttle burst from a
     # transient single-request spike. Set to 0 to disable.
     "workers_ai_429_burst_threshold": 5,
-    # Task #75: Groq 429 burst alert.  Same semantics as Workers AI above.
-    # Groq operates at 30 RPM on the free tier so 5 hits in 180 s means
-    # it is fully throttled.  Redis key: groq_429_burst.  Set to 0 to disable.
-    "groq_429_burst_threshold": 5,
+    # Task #347 / V4 §0: Groq 429 burst threshold removed alongside the
+    # provider purge. The matching alert dispatch (former check #9) is also
+    # removed below.
     # Task #75: Gemini 429 burst alert.  Same semantics.  Redis key:
     # gemini_429_burst.  Gemini's paid quota is much higher so a burst here
     # usually signals an account-level quota exhaustion, not normal traffic.
@@ -2527,36 +2526,11 @@ async def _alerting_loop():
             except Exception:
                 pass
 
-            # ── 9. Groq 429 burst (Task #75) ─────────────────────────────
-            # Same semantics as check #8.  Groq has a 30 RPM free-tier cap
-            # so 5 hits in 180 s means it is fully throttled.
-            try:
-                _groq_raw = _ALERT_THRESHOLDS.get("groq_429_burst_threshold")
-                try:
-                    _groq_threshold = int(_groq_raw) if _groq_raw is not None else 5
-                except (TypeError, ValueError):
-                    _groq_threshold = 5
-                if _groq_threshold > 0:
-                    from llm import get_provider_429_burst, _PROVIDER_429_BURST_WINDOW_S
-                    _groq_burst = get_provider_429_burst("groq", _PROVIDER_429_BURST_WINDOW_S)
-                    if _groq_burst >= _groq_threshold:
-                        await _dispatch_alert(
-                            "groq_429_burst",
-                            "Groq rate-limit burst — fallback LLM throttled",
-                            f"{_groq_burst} Groq 429 rate-limit responses recorded "
-                            f"in the last {_PROVIDER_429_BURST_WINDOW_S}s (threshold: {_groq_threshold}). "
-                            f"Groq is being throttled, which may affect chat fallback availability. "
-                            f"Check your Groq account RPM limits and key usage. "
-                            f"The counter resets automatically when a successful Groq call goes through.",
-                            threshold_snapshot={
-                                "metric": "groq_429_burst_threshold",
-                                "value": _groq_threshold,
-                                "actual": _groq_burst,
-                                "window_seconds": _PROVIDER_429_BURST_WINDOW_S,
-                            },
-                        )
-            except Exception:
-                pass
+            # ── 9. Groq 429 burst — REMOVED (Task #347 / V4 §0) ──────────
+            # Provider purged from PROVIDER_PRIORITY; counter dropped from
+            # llm._PROVIDER_429_WINDOWS. Check intentionally left as a
+            # numbered tombstone so check-#10/#11 numbering is stable in
+            # operator runbooks and Sentry alert grepping.
 
             # ── 10. Gemini 429 burst (Task #75) ──────────────────────────
             # Same semantics.  Gemini's paid quota is high so a burst here

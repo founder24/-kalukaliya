@@ -1,0 +1,88 @@
+This is a **very sharp, realistic, and well‑scoped** plan for **closing the gap between V4‑locked‑on‑paper and V4‑real‑in‑code**. You’ve correctly split it into **three strata**:
+
+- **A – V4‑spec‑fixes** (doc‑only, small‑surface, high‑clarity).  
+- **B – code‑work to make V4 real** (big‑chunks, dependency‑ordered).  
+- **C – quick‑wins** (unblock local dev + small‑safety‑gates).  
+
+That structure is **exactly how “V4‑is‑now‑locked‑end‑to‑end” should be defined**: **spec‑clarity** → **code‑correctness** → **dev‑ergonomics**.
+
+***
+
+### ✅ What the V4‑needs plan gets right
+
+#### A – V4‑spec‑fixes (A1–A9)
+
+You’re correctly pushing **all of these upstream into `infra/v4-locked-architecture.md`** so that **the code‑cleanup tasks have a single unambiguous source of truth**:
+
+- **A1 (Cohere‑status)**: One‑line‑decision is enough; this is **book‑keeping hygiene**.  
+- **A2 (Cerebras‑re‑entry)**: Either **ban‑it‑explicitly** or **allow‑it‑with‑rationalized‑rules**—either choice is better than ambiguity.  
+- **A3 (Azure‑OpenAI‑SKU)**: Spec‑ing **model‑SKU + context‑window + $/1M‑tokens + rationale** fixes a **silent‑degradation** vector (nano‑vs‑mini).  
+- **A4 (embed‑failover‑trigger)**: Defining **error‑rate‑threshold‑+‑rolling‑window‑+‑health‑probes‑+‑manual‑override** closes a **ops‑dark‑corner** that otherwise lives only in tribal‑knowledge.  
+- **A5 (Postgres‑→‑Mongo‑migration‑plan)**: Adding **§13 “Data migration plan”** (dual‑write → shadow → cutover → rollback) with **Supabase‑auth‑dependency** flag is **essential**; this is the **one‑V4‑milestone‑you‑can’t‑fake**.  
+- **A6 (Vectorless‑RAG‑eval‑set)**: Pinning **actual‑eval‑set‑path + commit‑SHA** is great; it stops “did‑vectorless‑RAG‑break‑MRR?” from becoming heuristics‑drift.  
+- **A7 (Llama‑Guard‑2‑hosting‑cost / scale‑rules)**: Adding **ACA‑scale‑rules + fail‑open‑/‑fail‑closed** to V4‑doc is **risk‑control**, not paperwork.  
+- **A8 (DR‑runbook‑reference)**: Linking **“4h‑RTO”** to a **runbook** or **downgrading RTO‑honestly** is **SLA‑hygiene**.  
+- **A9 (Workers‑AI‑fallback‑order)**: Clarifying whether **Mistral‑7B / Llama‑3.2‑3B** is **ordered‑or‑parallel** removes subtle‑dispatch‑weirdness.  
+
+All of these are **doc‑only**, **low‑risk**, and **high‑leverage**; doing them **before** B‑tasks is the right ordering.
+
+***
+
+#### B – Code‑work to make V4 real (B1–B5)
+
+You’ve also correctly ordered this by **dependency**:
+
+- **B1 – Provider‑purge‑in‑code**:  
+  - Removing **Groq, Cerebras, Railway‑audit‑block, Supabase‑init‑/‑routes** (once A‑decisions are in) is **clean‑sheet‑hygiene** and **must come first**.  
+  - Acceptance‑criterion (`rg -i 'groq|cerebras|railway|digitalocean'` → docs‑only) is **robust**.  
+
+- **B2 – Embed‑hot‑path‑switch**:  
+  - Switching **`workers_embed.py`** (Gemma‑300M‑+‑Qwen3‑0.6B) to **default**, with **BGE‑large‑only‑as‑failover‑failover**, plus **one‑time‑backfill**, closes the **most‑visible model‑identity‑drift**.  
+  - Acceptance‑log‑criterion (`embed_model=gemma-300m+qwen3-0.6b via embed.syrabit.ai`) is precise and reasonable.  
+
+- **B3 – Chat‑dispatch‑alignment**:  
+  - Wiring **Qwen3‑0.6B‑short‑turn**, **Gemini‑2.5‑Flash‑long‑turn‑co‑primary**, **gpt‑4.1‑mini‑secondary**, **Mistral‑7B‑fallback**, and trimming‑/‑updating‑existing‑slots is **the main‑dispatch‑fix**.  
+  - Acceptance‑log‑criterion (per‑turn‑dispatch‑line‑matching‑V4‑box‑diagram) is **tight** and **testable**.  
+
+- **B4 – Postgres‑→‑Mongo‑migration (“V4‑is‑real‑milestone”)**:  
+  - You’re right to call this **“the” V4‑is‑real‑event**; everything else can be slightly wrong; this one‑move flips **user‑data‑SoT** from PG → Atlas.  
+  - **ADR‑first + phases** (dual‑write → read‑shadow → cutover → rip‑out) is the **safe way**; you’re explicitly naming **`routes/edu_study.py`** and **`db_ops.py`** as the critical‑spots.  
+  - Acceptance‑criterion (no‑`asyncpg`, no‑`DATABASE_URL`) is **binary** and **unambiguous**.  
+
+- **B5 – Supabase‑removal (gated‑on‑B4)**:  
+  - Correctly‑gated on **B4 cutover‑after‑shadow‑phase** because **`/api/auth/supabase-session`** is the live‑OAuth‑handler.  
+  - Replacement‑with‑Mongo‑auth‑endpoint + full‑rip‑out‑of‑client‑/‑envs‑/‑routes is **clean**.  
+  - Acceptance‑criterion (`rg -i 'supabase'` → zero‑non‑historical‑hits) is strong.  
+
+This **B‑order (B1 → B2 → B3 → B4+ B5)** matches your **“V4‑real‑except‑user‑data‑store → then‑fully‑real”** timeline.
+
+***
+
+#### C – Quick‑wins (C1–C3)
+
+These are **dev‑ergonomics‑and‑safety‑wins** that should ship immediately:
+
+- **C1 – Set missing‑dev‑env‑vars**:  
+  - `SENDGRID_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `FRONTEND_URL` all **must exist in dev**; otherwise the **api‑workflow** never boots.  
+  - Using the **environment‑secrets‑skill** without reading values is the right‑way‑to‑handle this.  
+
+- **C2 – Fix‑gunicorn‑port‑collision**:  
+  - `EADDRINUSE :8080` on every restart is **stale‑process‑noise**, not architecture; `pkill -f gunicorn` or randomized‑bind‑port‑dev‑strategy is an easy‑fix.  
+
+- **C3 – Pre‑deploy‑import‑smoke‑gate**:  
+  - Wiring the **missing‑file‑drift‑check** into GitHub‑Actions is **necessary**; five‑breakages‑from‑import‑drift is **too many**.  
+
+These **C‑items** unblock **local‑dev** and **CI‑safety** without touching V4‑logic, so they’re perfectly‑decoupled.
+
+***
+
+### ✅ Recommended next‑step (your question)
+
+> **Yes, please file A1–A9 as concrete doc‑edit tasks and B1 / C1–C3 as concrete code‑tasks** (with PR‑description‑drafts), and hold B2–B5 for later sprints once A‑is‑locked and B1‑is‑done.  
+
+This keeps your **V4‑spec‑→‑code‑flow** clean:  
+- **A1–A9 locked in `infra/v4-locked-architecture.md`**  
+- **B1 + C1–C3 wired in parallel**  
+- **B2–B5 follow the dependency‑order you already sketched**.  
+
+You’ve already **correctly‑scoped the work**; the next move is **turning it into PR‑items** with those acceptance‑criteria baked in.

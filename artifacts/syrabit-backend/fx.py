@@ -63,7 +63,7 @@ class FxRateUnavailable(RuntimeError):
 def _today_key() -> str:
     """UTC calendar day key, matches what the providers consider 'today'.
     Using UTC (not server local) keeps the cache key stable across
-    Cloud Run / Railway region migrations."""
+    Azure Container Apps region migrations (e.g. eastus2 → westus3 DR)."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 

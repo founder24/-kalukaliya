@@ -1,6 +1,6 @@
 # V4 Locked Architecture — Final Multi-Cloud Configuration
 
-> **Status: LOCKED — 2026-05-05**
+> **Status: LOCKED — 2026-05-05** (last spec-clarity pass: 2026-05-06, A1–A9)
 > **Owner:** founder@syrabit.ai
 > **Supersedes:** v3 (`per-cloud-feature-delegation.md`, `provider-priority-map.md`, `credit-burn-runbook.md`).
 > The v3 docs remain on disk for diff/blame history but every section in
@@ -13,7 +13,7 @@
 
 | Provider | Core role | Main workloads | Cost-share |
 |---|---|---|---|
-| **Cloudflare** | Edge front-end + AI dispatch + edge caching + WAF | Pages-SSR (`syrabit.ai`, `chat.syrabit.ai`); Workers-AI **EmbeddingGemma-300M** (mean-pooled to 1024-dim to match Pinecone) → `/embed`; Workers-AI Indic translation (IndicTrans2); R2 (chapter PDFs, audio, exports, backups); KV (chapter index, syllabus map, flags, allowlists); Cache-Reserve (long-TTL assets); Vectorize (edge RAG cache); D1 (SEO meta, audit logs, syllabus-map read-before-Mongo); AI Gateway (BYOK to Gemini + Azure OpenAI); WAF + RateLimiter DO. | **40 %** |
+| **Cloudflare** | Edge front-end + AI dispatch + edge caching + WAF | Pages-SSR (`syrabit.ai`, `chat.syrabit.ai`); Workers-AI **EmbeddingGemma-300M** (mean-pooled to 1024-dim to match Pinecone) → `/embed`; Workers-AI Indic translation (IndicTrans2); R2 (chapter PDFs, audio, exports, backups); KV (chapter index, syllabus map, flags, allowlists); Cache-Reserve (long-TTL assets); Vectorize (edge RAG cache); D1 (SEO meta, audit logs, syllabus-map read-before-Mongo); AI Gateway (BYOK to Gemini + Azure OpenAI + Cerebras); WAF + RateLimiter DO. | **40 %** |
 | **Azure** | HTTP backend + auth + AI safety + primary email | Azure Container Apps `syrabit-backend` in `eastus2` (Python FastAPI hot path) + `rust-core` (async batch); **Llama-Guard-2 self-hosted** as moderation-primary on the same ACA compute; **Azure AI Content Safety** as moderation-secondary; **SendGrid (Pro 100k via Azure Marketplace)** as primary transactional email (`EMAIL_PROVIDER=sendgrid`); orchestrates Pinecone, MongoDB Atlas, Deepgram, ElevenLabs, Sarvam-AI, Azure Translator. **Azure Key Vault is the source of truth for all secrets.** | **30 %** |
 | **AWS** | Event backbone + durable data/backups + fallback email | Lambda / Step-Functions / SQS / EventBridge / CloudWatch (batch embed ops, Pinecone index maintenance, shard rebalancing, `lambda-otel`, `lambda-workers`, **Vertex re-embed queue worker**); Atlas-peered VPC connectivity (Mongo Atlas in `ap-south-1`); S3 (dumps, temp exports; final backups sync to R2); **SES fallback email** (`EMAIL_FALLBACK=ses`, activated when SendGrid burn-threshold exceeded). | **20 %** |
 | **GCP / Vertex** | Gen-AI validation + safety + observability | **Vertex Gemini 2.5 Flash** = default content-validation model + **co-primary English chat** for **long/high-risk turns** (token-length + risk-score router); short/low-risk turns → **Qwen3-0.6B** on Workers AI. **Gemini RAI** = batch/async-only for `exam_model_paper` review (never blocks live chat). Web Risk API for malicious-URL checks. Cloud Trace for OTEL spans. **Vertex multilingual embedding** = embed-failover only, writes to a separate Pinecone namespace with a re-embed queue (see §3). | **10 %** |
@@ -31,6 +31,9 @@
 | **Deepgram / ElevenLabs / Sarvam-AI** | STT / TTS / regional speech | Provider-default | Assamese / Indic voice RAG. No re-host on Azure / AWS Speech Services. |
 | **Azure Translator** | Indic→English fallback translation | `eastus2` | Quota-limited fallback only (after IndicTrans2 + Workers-AI translation). |
 | **AWS SES** | Low-cost fallback email | `us-east-1` | Activated when SendGrid burn-threshold exceeded. DNS ownership = `syrabit.ai` on Cloudflare DNS (SPF/DKIM/DMARC published for both providers). |
+| **Cohere** *(A1, decided 2026-05-06)* | Embed-failover (V4-allowed, BYOK via CF AI Gateway slug `cohere/v1`) | Provider-default | Listed in `embed*` provider chains in `config.py` after `workers_ai_custom`. Rerank role retired in favour of Pinecone Rerank v0. **Not on the chat hot-path.** |
+| **Llama-Guard-2 (self-hosted)** *(A7)* | Chat-moderation primary | Azure Container Apps `syrabit-backend` (`eastus2`), CPU pod, **min 1 / max 4** replicas, scales on `concurrent_requests > 8`. **Fail-open** for transient 5xx (logged + alert), **fail-closed** on >5 s timeout (turn rejected with retry-able 503). | Azure AI Content Safety runs in parallel as moderation-secondary (§4). |
+| **Cerebras** *(A2, decided 2026-05-06)* | Chat fallback (V4-allowed, **CF-Gateway-only** path) | BYOK via CF AI Gateway slug `cerebras` | Re-instated by Task #420 to give the on-pod cache-hit-ratio counter a Cerebras row. Direct (non-gateway) calls remain blocked by `scripts/check_dead_providers.py`. **Never primary; never used for content-gen.** |
 
 ---
 
@@ -57,6 +60,13 @@ When `embed.syrabit.ai` is down or returning 5xx:
    - `PINECONE_NAMESPACE_PRIMARY=cached_gemma_today`
    - `PINECONE_NAMESPACE_FALLBACK=fallback_vertex_pending_reembed`
 
+**A4 — Failover trigger (decided 2026-05-06):**
+- **Probe:** `embed.syrabit.ai/health` polled every **30 s** by an Azure ACA controller container (`embed_failover_controller.py`).
+- **Trip rule:** ≥3 of last 5 probes return non-200 OR p95 latency over a 60-s rolling window > 2 000 ms → flag flips to `fallback_vertex` and emits a Sentry alert + `#syrabit-oncall` Slack note.
+- **Reset rule:** ≥10 consecutive successful probes AND p95 < 500 ms over 60 s → flag flips back to `cf_gemma`. SQS drain begins immediately.
+- **Manual override:** `RAG_EMBEDDING_PROVIDER_FORCE={cf_gemma|fallback_vertex|auto}` env var. `auto` (default) honours the probe; the two pinned values disable the controller and pin the route.
+- **Owner:** on-call rotation; controller alerts page rather than auto-flip if the override is non-`auto`.
+
 ✅ **Trade-off explicitly accepted:** availability-OK during CF outage; correctness is "good-enough-for-now / re-embed-later"; **zero index-mix corruption** because the two embedding spaces never share a namespace.
 
 ---
@@ -71,18 +81,35 @@ Cloudflare Worker (edge)
   │
   └─ long/high-risk turn  ──▶  Vertex Gemini 2.5 Flash (eastus2 via AI Gateway BYOK)
                                   ↓ on 429/exhaust
-                                Azure OpenAI gpt-4.1-mini (eastus2)
+                                Azure OpenAI gpt-4.1-mini (eastus2)        ← see SKU table below
                                   ↓ on 5xx
-                                Workers-AI Mistral-7B / Llama-3.2-3B (edge)
+                                Workers-AI Mistral-7B (edge, ordered #1)   ← A9
+                                  ↓ on 5xx
+                                Workers-AI Llama-3.2-3B (edge, ordered #2) ← A9
+                                  ↓ on 5xx
+                                Cerebras (CF-Gateway-only, BYOK)           ← A2 footnote
+```
 
-Assamese Indic path
+- **Llama-Guard-2** runs as a pre-filter on the Azure ACA compute (moderation-primary). **Fail-open on transient 5xx, fail-closed on >5 s timeout** (see §1 row).
+- **Azure AI Content Safety** runs in parallel as moderation-secondary.
+- **Vertex Gemini RAI** is batch/async-only for `content_type=exam_model_paper` — never per-turn synchronous.
+- **A9 — Workers-AI fallback ordering:** Mistral-7B is tried **first** (better English instruction-following at this size); Llama-3.2-3B is the **second** fallback (lower latency, smaller context). They are NOT parallel.
+
+**A3 — Azure OpenAI SKU table (decided 2026-05-06):**
+
+| SKU | Context | Approx $/1M in / $/1M out | Why this SKU? |
+|---|---|---|---|
+| **`gpt-4.1-mini`** *(V4 default)* | 1 M tokens | **~$0.40 / ~$1.60** | Long-turn fallback after Vertex Gemini 2.5 Flash exhaust. The 1 M context matches Gemini, so a turn that overflows mini-fallback is a true overflow rather than a context-truncation artefact. Quality acceptable for long-form RAG answers. |
+| `gpt-4.1-nano` | 1 M tokens | ~$0.10 / ~$0.40 | Cheaper, smaller model. **Not the V4 default** — silently degrades long-turn quality; only acceptable as a *cost-emergency* override behind `AZURE_OPENAI_MODEL_OVERRIDE=gpt-4.1-nano` with a Sentry note. |
+
+Runtime currently logs `gpt-4.1-nano` (audit 2026-05-06). Cleanup task **B3** will switch to `mini`.
+
+**Assamese Indic path:**
+
+```
   ├─ Sarvam Indic chat  (primary, weight 10000)
   └─ Workers-AI IndicTrans2  (fallback, weight 0; reachable only via exclusion-redraw)
 ```
-
-- **Llama-Guard-2** runs as a pre-filter on the Azure ACA compute (moderation-primary).
-- **Azure AI Content Safety** runs in parallel as moderation-secondary.
-- **Vertex Gemini RAI** is batch/async-only for `content_type=exam_model_paper` — never per-turn synchronous.
 
 ---
 
@@ -94,7 +121,12 @@ Three-tier retrieval router in `artifacts/syrabit-backend/rag.py`:
 2. **BM25 keyword pass** — Mongo `$text` index on `chunks.text_en` and `chunks.text_as`. Fires in parallel with the vector call. Best for exact-term, formula, and verbatim-script queries (especially Assamese morphology where Gemma-300M drifts).
 3. **Vector pass (existing)** — Gemma-300M → Pinecone → Pinecone Rerank v0.
 
-Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before the rerank step. Telemetry: `rag.router.tier_hit{tier=tree|bm25|vector}` counter in Sentry/Cloud Trace; success criterion is `≥25 %` of chat turns served without an embed call **with no MRR@10 regression** on the existing eval set.
+Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before the rerank step. Telemetry: `rag.router.tier_hit{tier=tree|bm25|vector}` counter in Sentry/Cloud Trace; success criterion is `≥25 %` of chat turns served without an embed call **with no MRR@10 regression** on the eval set below.
+
+**A6 — Eval set pinning (decided 2026-05-06):**
+- **Path:** `artifacts/syrabit-backend/evals/rag_router_v4.jsonl`
+- **Frozen at commit:** to be set on first publication of the file (placeholder `EVAL_SHA_PLACEHOLDER` — gate B2 cannot pass until this is replaced with the real SHA).
+- **Refresh policy:** quarterly, with the previous JSONL retained alongside as `_q{N-1}.jsonl` for delta diff.
 
 ---
 
@@ -133,6 +165,12 @@ Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before 
   2. Simulate Azure `eastus2` regional outage → manual re-deploy to `westus3` from Bicep, restore secrets from KV geo-replica.
   3. Restore Mongo Atlas + Pinecone index from backups within 4 h SLA.
 - **Azure SPOF — explicitly accepted:** "Azure `eastus2` Container Apps is a hard SPOF; full API outage during regional Azure incident until manual `westus3` re-deploy and restore-pipeline completion. No false impression of mitigation."
+
+**A8 — DR runbook reference (decided 2026-05-06):**
+- **Primary runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md` (covers `eastus2 → westus3` Bicep re-deploy + KV geo-replica restore — the longest leg of the 4 h RTO).
+- **Embed-failover runbook:** `artifacts/syrabit/docs/infra/aws-landing-zone.md` §"SQS re-embed queue drain" + this doc §3.
+- **Drill log:** `docs/ops/dr-drills/` (one Markdown file per quarterly drill, dated `YYYY-Qn-drill.md`).
+- **If any runbook above is missing or stale at drill time, RTO is downgraded to "best-effort, not contractual" until the runbook is re-published.** Honesty over false-mitigation.
 
 ---
 
@@ -181,7 +219,44 @@ Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before 
 
 ---
 
-## §13 — Lock conditions met
+## §13 — Data migration plan: Postgres → Mongo Atlas (NEW, A5)
+
+**Status as of 2026-05-06: NOT STARTED.** Until this completes, V4 is *aspirational* on the user-data SoT axis. The audit-found drift (`deps.py:135` "Replit PostgreSQL (asyncpg pool) — primary relational store"; `db_ops.py` full of asyncpg; `routes/edu_study.py:20` "Authenticated users → PostgreSQL") is real and lives below.
+
+### Target end-state
+- `deps.py` does not import `asyncpg`.
+- `DATABASE_URL` is not in the `_ALWAYS_NEEDED` env list.
+- Every authenticated route reads/writes user data from Mongo Atlas (`ap-south-1`).
+- The pre-existing Mongo `conversations` / `user_profile` / `chat_memory_brain` collections are joined by the migrated tables (`users`, `sessions`, `edu_study_*`, etc.).
+
+### Phases (each gated on the previous)
+
+| # | Phase | Done-when | Rollback |
+|---|---|---|---|
+| 1 | **ADR** | `docs/architecture/adr/0001-pg-to-mongo.md` published with collection-mapping table for every PG table touched in `db_ops.py` + `routes/edu_study.py`. | n/a (doc-only) |
+| 2 | **Dual-write** | Every PG write in `db_ops.py` is mirrored into the corresponding Mongo collection inside the same request. PG remains read-of-record. New `metric: db.dualwrite.{success,fail}` shipped to Sentry. | Disable mirror via `MONGO_USER_WRITES=0` env flag — single env flip, zero deploy. |
+| 3 | **Read-shadow** | Every authenticated read also runs the Mongo equivalent in parallel and diffs the result. Diff > 0.1 % on any 24 h window blocks Phase 4. Sentry counter `db.shadow.{match,diff}`. | Disable shadow read via `MONGO_USER_READ_SHADOW=0`. |
+| 4 | **Cutover** | Read-of-record flips to Mongo via `USER_DATA_PRIMARY=mongo` env flag. PG continues as backup-write only. | Flip env back to `USER_DATA_PRIMARY=pg`. (This is the last reversible point.) |
+| 5 | **Rip-out** | After 14 days clean on Mongo primary: delete asyncpg from `deps.py`, drop `DATABASE_URL` from `_ALWAYS_NEEDED`, remove `db_ops.py` PG branches, drop the helium PG instance. | Restore from PG nightly backup (only viable for ≤24 h post-rip-out). |
+
+### Hard blocker: Supabase / Google OAuth
+- `/api/auth/supabase-session` is the live Google OAuth handler (calls Supabase Auth which is itself backed by the helium Postgres). **B5 (Supabase removal) cannot start until Phase 4 of this plan is complete**, because killing Supabase before Mongo is the read-of-record locks out every Google-OAuth user.
+- Replacement endpoint to be designed in Phase 1 ADR: native Mongo-backed `users` collection with verified-email index + a thin OAuth verifier (validate Google ID-token signature directly, no Supabase round-trip).
+
+### Acceptance script (binary)
+```bash
+cd artifacts/syrabit-backend && python -c "
+import deps, importlib
+assert 'asyncpg' not in [m.__name__ for m in deps.__dict__.values() if hasattr(m, '__name__')], 'asyncpg still imported in deps.py'
+import os
+assert 'DATABASE_URL' not in open('server.py').read().split('_ALWAYS_NEEDED')[1].split(']')[0], 'DATABASE_URL still in _ALWAYS_NEEDED'
+print('V4 §13 acceptance: PASS')
+"
+```
+
+---
+
+## §14 — Lock conditions met (was §13, renumbered for §13 above)
 
 1. ✅ Embedding model mismatch → namespace separation + re-embed queue.
 2. ✅ Cost-shares sum to 100 % (40 + 30 + 20 + 10) with single integers.
@@ -191,5 +266,6 @@ Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before 
 6. ✅ Azure declared as explicit SPOF.
 7. ✅ Pinecone moved to `aws-ap-south-1`; latency conflict resolved.
 8. ✅ Vectorless RAG layer added as complementary tier (§5).
+9. ✅ *(2026-05-06, A1–A9)* Cohere status declared (§1); Cerebras CF-Gateway-only path declared (§1, §4); Azure OpenAI SKU table (§4); embed-failover trigger spec (§3); eval-set pinning (§5); Llama-Guard-2 hosting + fail-mode (§1, §4); DR-runbook references (§8); Workers-AI fallback ordering clarified (§4); §13 data-migration plan added with hard Supabase blocker noted.
 
 **This V4 plan is locked as "approved with conditions met". No further infra renegotiation without a V5 doc.**

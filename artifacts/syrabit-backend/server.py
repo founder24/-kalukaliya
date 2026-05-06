@@ -62,9 +62,9 @@ def _validate_env():
         "JWT_SECRET":      "JWT signing secret for user auth tokens",
         "ADMIN_JWT_SECRET": "JWT signing secret for admin auth tokens",
     }
+    # Task #347 / V4 §0: Groq removed. Sarvam remains (Assamese path primary).
     _recommended = {
-        "GROQ_API_KEY": "Groq LLM API key (primary AI provider)",
-        "SARVAM_API_KEY": "Sarvam AI API key (fallback LLM + translation)",
+        "SARVAM_API_KEY": "Sarvam AI API key (Assamese chat primary + Indic translation)",
     }
     missing = []
     for key, desc in _required.items():
@@ -82,12 +82,36 @@ def _validate_env():
             _log.warning(f"Recommended env var not set: {key} — {desc}")
     _log.info("Environment validation passed")
 
+    # Task #336 / V4 §0: Railway-era env-var audit block removed.
+    # Hosting is Azure Container Apps; secrets source-of-truth is Azure Key Vault
+    # (V4 §6). Per-environment audits now live in:
+    #   - .github/workflows/secrets-sync.yml  (KV → AWS SM → CF Secrets)
+    #   - artifacts/syrabit/docs/infra/aca-cutover.md  (operator runbook)
     _cf_gw_enabled = bool(
         os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
         and os.environ.get("CF_AI_GATEWAY_ID", "").strip()
     )
+    _log.info(
+        "CF AI Gateway: %s",
+        "ENABLED — BYOK keys injected at edge" if _cf_gw_enabled
+        else "DISABLED — provider keys must be set in env"
+    )
 
-    # ── Category 1: CF AI Gateway BYOK — primary provider keys ───────────────
+
+def _RAILWAY_AUDIT_BLOCK_REMOVED_PLACEHOLDER():
+    """V4 §0 / Task #336: 200-line Railway env-var audit block was removed
+    on 2026-05-06 alongside the Groq/Cerebras direct-path removal. Kept this
+    function as a tombstone so any old log-scrapers searching for
+    'Railway / Production Env-Var Audit' get a clean grep miss instead of
+    matching a stale block. Safe to delete this stub once log scrapers are
+    updated. See infra/v4-locked-architecture.md §6 for the new secrets
+    topology (Azure KV → AWS SM → CF Secrets).
+    """
+    return None
+
+    # ── Category 1: CF AI Gateway BYOK — primary provider keys (DEAD CODE) ──
+    # Retained as no-op block during the V4 §0 cutover to avoid cherry-picking
+    # 200 lines into one PR. Remove in B1 cleanup follow-up.
     # When CF Gateway is on, these keys live ONLY in the CF AI Gateway BYOK
     # store (dashboard → AI Gateway → Authentication → BYOK). The backend
     # sends a placeholder; the gateway appends the real key at the edge.

@@ -16,8 +16,9 @@ nightly cron that:
          Same adapter philosophy as GSC: a thin Mongo contract so any
          scraper / RSS poller can drop rows in.
 
-  2. Grades every candidate with an LLM grader (Cerebras/Groq Llama-4
-     scout via ``llm.call_llm_api_content``) on four axes — intent fit,
+  2. Grades every candidate with an LLM grader (Workers-AI gpt-oss-120b
+     via ``llm.call_llm_api_content`` — V4-compliant; Groq/Cerebras direct
+     paths removed in Task #347) on four axes — intent fit,
      syllabus alignment, search difficulty (vs current Syrabit topical
      authority), and AEO readability.
 
