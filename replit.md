@@ -1,26 +1,22 @@
-# Workspace — Syrabit.ai
+# Syrabit.ai
 
-> **V4 LOCKED (2026-05-05):** the canonical infra spec is
-> [`infra/v4-locked-architecture.md`](infra/v4-locked-architecture.md).
-> v3 docs (`per-cloud-feature-delegation.md`, `provider-priority-map.md`,
-> `credit-burn-runbook.md`) are superseded and carry V4 back-pointers.
-> If anything below disagrees with V4, **V4 wins**.
+Syrabit.ai is an AI-powered educational platform providing bilingual localized learning for students in Assam across 55 subjects.
 
 ## Run & Operate
 
 - **Frontend dev:** `cd artifacts/syrabit && PORT=5000 pnpm dev`
 - **Backend dev:** `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
 - **Mockup sandbox:** `pnpm --filter @workspace/mockup-sandbox run dev`
-- **Production health:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
-- **Required env vars (ACA, sourced from Azure KV):** `MONGO_URL`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `AZURE_OPENAI_API_KEY`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_PROVIDER=sendgrid`, `EMAIL_FALLBACK=ses`, `EMBED_PROVIDER_PRIMARY=workers_ai_custom`, `WORKERS_EMBED_URL=https://embed.syrabit.ai`.
+- **Health check:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
+- **Required env vars (ACA, from Azure KV):** `MONGO_URL`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `AZURE_OPENAI_API_KEY`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_PROVIDER`, `EMAIL_FALLBACK`, `EMBED_PROVIDER_PRIMARY`, `WORKERS_EMBED_URL`.
 
 ## Stack
 
-- **Frontend:** React 18 + Vite + React Router + Tailwind CSS + Drizzle ORM (where used).
-- **Backend:** Python 3.11 + FastAPI + Gunicorn (Uvicorn workers).
-- **Rust core:** async-batch worker on a separate ACA app.
-- **Validation/codegen:** Zod + Orval.
-- **Build:** pnpm monorepo + esbuild + Docker.
+- **Frontend:** React 18, Vite, React Router, Tailwind CSS, Drizzle ORM
+- **Backend:** Python 3.11, FastAPI, Gunicorn (Uvicorn workers)
+- **Rust core:** `async-batch` worker
+- **Validation/Codegen:** Zod, Orval
+- **Build:** pnpm monorepo, esbuild, Docker
 
 ## Where things live
 
@@ -32,33 +28,20 @@
 - **Threat model:** `threat_model.md`
 - **V4 architecture (source of truth):** `infra/v4-locked-architecture.md`
 
-## Architecture decisions (V4 highlights)
+## Architecture decisions
 
-- **Cost split locked:** 40 % Cloudflare / 30 % Azure / 20 % AWS / 10 % GCP. Single integers, no ranges.
-- **Embedding primary:** EmbeddingGemma-300M + Qwen3-0.6B on Cloudflare Workers AI, mean-pooled to 1024-dim, written to Pinecone (`aws-ap-south-1`, namespace `cached_gemma_today`).
-- **Embed-failover:** Vertex multilingual embedding writes to a **separate** Pinecone namespace (`fallback_vertex_pending_reembed`); an AWS SQS-backed Lambda re-embeds back to the primary namespace when Cloudflare returns. **Zero index-mix corruption.**
-- **Chat dispatch (V4 §4, user-locked 2026-05-06 via B3):** Azure `gpt-4.1-nano` SOLE primary → Workers-AI Mistral-7B → Workers-AI Llama-3.2-3B → generic Workers-AI (gpt-oss-20b, terminal). Vertex stays out of the chat hot path (kept for `content` pool + safety/validation only). Cerebras is not in `PROVIDER_PRIORITY["english_rag_chat"]` — only reachable via explicit CF-AI-Gateway routes (telemetry-parity role, never per-turn fallback). No CF Worker token-length / risk-score router built. Assamese path = Sarvam primary → IndicTrans2 fallback.
-- **Moderation:** Llama-Guard-2 self-hosted on ACA (primary) → Azure AI Content Safety (secondary). Gemini RAI is batch-only for `exam_model_paper`, never blocks chat.
-- **Vectorless RAG (new in V4):** three-tier router in `artifacts/syrabit-backend/rag.py` — tree-walk over D1 syllabus map, then BM25 on Mongo `$text`, then vector pass. Results fused with RRF before Pinecone rerank. Target: ≥25 % of chat turns served without an embed call.
-- **Secrets:** Azure Key Vault is source of truth; AWS Secrets Manager + Cloudflare Secrets are read-only replicas synced daily via Terraform-CI with SHA-256 hash validation.
-- **Observability:** Sentry Performance is the end-to-end trace owner; `traceparent`/`baggage` propagate CF Worker → Azure ACA → Lambda → Vertex/Pinecone/Mongo. OTEL → GCP Cloud Trace as the long-retention backstop.
-- **DR:** RTO = 4 h, RPO = 15 min, quarterly restore drill. **Azure `eastus2` is an explicit accepted SPOF** — manual `westus3` re-deploy from Bicep on regional outage.
-- **Latency:** p95 chat turn budget = 2.5 s. Pinecone in `ap-south-1` keeps the RAG hop <50 ms inside India.
-- **Hosting:** Azure Container Apps `syrabit-backend` (`eastus2`) is the live HTTP face. DigitalOcean and Railway hosting are fully decommissioned (Tasks #336, #347).
-- **Storage roles:** D1 = SEO meta + audit logs + syllabus map. Mongo Atlas = conversations + profiles + chunk **metadata** (Pinecone IDs only — never re-embedded from Mongo). Pinecone = embeddings. Vectorize = edge cache. R2 = canonical assets + final backups. S3 = temp dumps.
-- **Removed providers (Task #347):** OpenAI, Anthropic, AWS Bedrock direct, Stripe, Quge5, Resend, xAI/Grok, Railway, DigitalOcean, **Groq (purged 2026-05-06)**. See `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`.
-- **CF redeploy from `founder24/-kalukaliya` (Task #472, partial 2026-05-06):** `syrabit-embed-worker` redeployed (version `934ea313-...`, route `embed.syrabit.ai/*`). `syrabit-edge` + `syrabit-edge-preview` failed at the mTLS gate because `CF_MTLS_CERT_ID` is unset — a side-effect of the failed deploy is that R2 buckets `syrabit-assets` and `syrabit-media` were auto-provisioned in production (DO `RateLimiter` was NOT created — deploy aborted before script upload). Live `syrabit-edge` is currently drifted from the repo: missing R2/Analytics/DurableObjects/mTLS bindings, `compatibility_date=2025-05-01`, `logpush=false`. Git push to the new repo is sandbox-blocked — handoff doc `artifacts/syrabit/docs/infra/task-472-cf-redeploy-handoff.md` documents the exact `git push kalu master:syrabit-import --force-with-lease` workflow plus the post-push wiring (Pages source rewire, GH Actions secrets, mTLS cert provisioning).
-- **Cerebras retained as CF-Gateway-only fallback** (V4 §1, §4) — re-instated by Task #420 for telemetry parity; direct (non-gateway) calls remain blocked by `scripts/check_dead_providers.py`. Never primary, never used for content-gen.
-- **Cohere retained as embed-failover specialist** (V4 §1) — BYOK via CF AI Gateway slug `cohere/v1`; not on the chat hot-path.
-- **PG → Mongo migration** (V4 §13): Phase 1 (ADR) DONE — see `docs/architecture/adr/0001-pg-to-mongo.md` (10-table collection map, per-phase rollback flags, Supabase OAuth blocker). **Phase 2 SHIPPED for `users` + `conversations` + `edu_notes` + `edu_flashcards` + `edu_study_settings` + `activity_log` + `notifications`** (2026-05-06): `artifacts/syrabit-backend/db_dualwrite.py` is now per-collection (counter keys `<collection>.{success,fail,skipped_disabled,skipped_no_db}`; env flag `MONGO_<NAME>_WRITES` per collection, default ON). `users` wired into `db_ops` (3 sites) + `atomic_deduct_credit` PG path + 3 route refund mirrors (`ai_chat`, `edu_study`); `conversations` wired into `db_ops` upsert/update/delete via `mirror_conversation_write()`; `edu_notes` wired into all 5 sites in `routes/edu_study.py` (create / patch / delete / AI-autogen / claim_anon_data bulk reassign) via `mirror_edu_notes_write()` — greenfield Mongo target so PATCH uses `replace_one(upsert=True)`, and the claim mirror fires AFTER the PG `async with conn.transaction()` exits so a PG rollback cannot leave a phantom Mongo write; `edu_flashcards` wired into all 5 sites in `routes/edu_study.py` via `mirror_edu_flashcards_write()` — 3 INSERT branches in build_flashcards bulk-mirrored as one `insert_many(ordered=False)` after PG block exits (amortises ≤2.4 k-card fan-out into one round-trip), review SM-2 UPDATE uses `replace_one(upsert=True)`, claim mirror gated on `cards_count > 0`; `edu_study_settings` wired into all 8 PG write sites in `routes/edu_study.py` via `mirror_edu_study_settings_write()` — composite PK `(actor_kind, actor)` so no surrogate id column, every write expressed as `update_one($set, upsert=True)` with `$setOnInsert` for PG defaults; the streak block's 3 mutually-exclusive branches collapsed into 1 post-block upsert (skipped on same-day no-op), the claim flow's 3 txn writes collapsed into 1 user-side upsert + 1 anon-side `delete_one` fired post-commit (INSERT vs UPDATE branch carries a `_settings_user_payload` plan captured in-txn). `activity_log` is the first soft-join collection (Mongo target already populated by `db_ops.supa_insert_activity_log`'s 3rd-tier fallback) — Phase 2 adds `mirror_activity_log_write()` on the PG-success branches of `supa_insert_activity_log` + `supa_clear_activity_log` so Mongo now sees every audit write (not only PG-failure ones); only 2 db_ops sites instrumented because all 8 route-level callers (admin_settings, admin_logs, admin_auth_users) funnel through these centralised helpers; rollback flag `MONGO_ACTIVITY_LOG_WRITES=0` (default name, no override — no trailing 's' to strip). `notifications` is the second soft-join collection — `mirror_notifications_write()` wired on PG-success branches of `supa_insert_notification` + `supa_delete_notification`, only 2 db_ops sites because every route + push-dispatch helper funnels through them; rollback flag `MONGO_NOTIFICATION_WRITES=0` (singularised by default rstrip rule, no override). `routes/admin_monetization.py` 8 paired writes carved out (transactional rollback semantics — see ADR decision log). Other 3 collections still on Phase 1. Phase 3 (read-shadow) → 4 (cutover) → 5 (rip-out) NOT STARTED. Until Phase 4 cutover, V4 is *aspirational* on the user-data SoT axis.
-- **Embed acceptance banner** (V4 §2, B2): `providers/workers_embed.py` emits `embed_model=gemma-300m+qwen3-0.6b via <WORKERS_EMBED_URL> (V4 §2 primary, dims=1024, max_batch=32)` on module import when both URL+SECRET are set; partial config logs a WARNING and the first embed call raises (no silent fallback). Dispatch short-circuit lives in `llm.py:4067`. Backfill driver: `scripts/backfill_workers_embeddings.py` (resumable via `embed_backfill_state` collection).
-- **Azure OpenAI default** (V4 §4 A3, B3 user-locked 2026-05-06): `gpt-4.1-nano` is the canonical default (founder choice — cheapest 1 M-context Azure SKU). Override via `AZURE_OPENAI_MODEL_OVERRIDE=<sku>` env flip — no secret rotation needed. Code default in `config.py:689`; emits INFO log when override is active. `gpt-4.1-mini` is the staged upgrade if long-turn quality degrades.
-- **Workers-AI fallback ordering** (V4 §4 A9, B3): `english_rag_chat` and `content` pools both walk `workers_ai_mistral_7b → workers_ai_llama32_3b → workers_ai` (was reversed; Mistral-7B has better English instruction-following at this size).
-- **B3 complete** (user-locked 2026-05-06): A3 SKU (`gpt-4.1-nano` default + `AZURE_OPENAI_MODEL_OVERRIDE` env) + A9 ordering (Mistral-7B #1, Llama-3.2-3B #2) shipped. Chat-pool conflict resolved in favour of code: V4 §4 hot-path rewritten to Azure-SOLE-primary; the proposed Vertex co-primary + Qwen3-0.6B short-turn router is **explicitly rejected** (no CF Worker router built). Vertex retained for §1 safety/validation + `content` pool fallback only.
+- **Cost split:** 40% Cloudflare, 30% Azure, 20% AWS, 10% GCP.
+- **Embedding strategy:** Primary is Gemma-300M + Qwen3-0.6B on Cloudflare Workers AI (1024-dim, mean-pooled) to Pinecone (`aws-ap-south-1`, `cached_gemma_today`). Failover uses Vertex multilingual embedding to a separate Pinecone namespace (`fallback_vertex_pending_reembed`) with re-embedding back to primary via AWS SQS Lambda.
+- **Chat dispatch:** Azure `gpt-4.1-nano` is the sole primary, falling back to Workers-AI Mistral-7B, then Llama-3.2-3B, then generic Workers-AI. Vertex is used for `content` pool and safety/validation, not the chat hot path.
+- **Vectorless RAG:** A three-tier router (`artifacts/syrabit-backend/rag.py`) performs tree-walk on D1 syllabus, then BM25 on Mongo, then a vector pass. Results are fused with RRF before Pinecone rerank to reduce embed calls.
+- **Secrets management:** Azure Key Vault is the source of truth, with AWS Secrets Manager and Cloudflare Secrets as read-only replicas synced daily.
+- **Observability:** Sentry Performance for end-to-end tracing, with `traceparent`/`baggage` propagation. OTEL to GCP Cloud Trace for long-term retention.
+- **PG to Mongo Migration:** Phase 2 complete for `users`, `conversations`, `edu_notes`, `edu_flashcards`, `edu_study_settings`, `activity_log`, and `notifications` via dual-write mirroring (`db_dualwrite.py`). Phase 3 (read-shadow) and 4 (cutover) are pending.
+- **Cloudflare edge (Task #472, 2026-05-06):** Live edge worker is `syrabitworker` (deployed via `workers/edge-proxy/wrangler.syrabitworker.toml`, 13 bindings inc. `BACKEND_ORIGIN_SECRET`/`D1_SYNC_SECRET`/`EDGE_AI_FALLBACK_SECRET`). Live frontend is Pages project `syrabitfrontend` (prod branch `main` of `founder24/-kalukaliya`, build → `artifacts/syrabit/dist`). Routes `syrabit.ai/*`, `www.syrabit.ai/*`, `api.syrabit.ai/*` all point at `syrabitworker`; `embed.syrabit.ai/*` stays on `syrabit-embed-worker`. Old `syrabit-edge` worker + `syrabit-analytics` Pages project deleted. Leftover to clean: `syrabit-edge-preview` worker.
 
 ## Product
 
-Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degree students in Assam. Bilingual (English + Assamese) localized learning across 55 subjects: chapter-level RAG notes, MCQs, flashcards, PYQ OCR pipeline, in-app educational browser with grounded chat, admin CMS for content/SEO/QA, credit-based monetization (Razorpay INR-only), DPDP-compliant.
+Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degree students in Assam. It offers bilingual (English + Assamese) localized learning across 55 subjects, including RAG notes, MCQs, flashcards, PYQ OCR, an in-app browser with grounded chat, admin CMS, credit-based monetization (Razorpay INR-only), and DPDP-compliance.
 
 ## User preferences
 
@@ -70,18 +53,17 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 
 ## Gotchas
 
-- Always run `python -c "import server"` from `artifacts/syrabit-backend/` before pushing — silent missing-file drift between local FS and `main` has broken the live deploy 5 times. Pre-deploy import smoke gate is tracked in follow-up Task #439.
-- The deploy workflow's single ARM PATCH **must** include `properties.configuration.ingress.traffic = [{latestRevision: true, weight: 100}]` and `targetPort: 8000`. Removing either strands traffic on the helloworld fallback revision.
-- Bicep template (`infra/azure/aca-syrabit-backend.bicep`) must mirror the runtime contract enforced by the workflow (probe path `/api/health`, `ADMIN_JWT_SECRET` wired). A drift here regresses the running revision on next `az deployment group create`.
-- Pinecone embedding dimension is **1024**. Vertex `text-embedding-004` (768-dim) is dimension-incompatible — never force it into the primary chain. The fallback path uses Vertex multilingual embedding **into a separate namespace** to avoid corruption.
-- Multi-revision mode + healthy old revisions = traffic-split drift hazard. Follow-up Task #440 will deactivate non-latest active revisions or flip to single-revision mode.
+- **Backend import check:** Always run `python -c "import server"` from `artifacts/syrabit-backend/` before pushing to prevent silent missing-file deployment issues.
+- **ACA Deploy config:** Bicep ARM PATCH must include `properties.configuration.ingress.traffic = [{latestRevision: true, weight: 100}]` and `targetPort: 8000`. Missing these strands traffic on fallback.
+- **Bicep template drift:** The Bicep template (`infra/azure/aca-syrabit-backend.bicep`) must precisely mirror the runtime contract (e.g., probe path, env vars) to avoid deployment regressions.
+- **Pinecone dimension incompatibility:** Pinecone embedding dimension is 1024. Vertex `text-embedding-004` (768-dim) is incompatible and must be used in a separate namespace for fallbacks.
+- **`OriginGate` middleware issue:** The `OriginGate` middleware is currently non-operational in production due to missing `ORIGIN_SHARED_SECRET` in ACA env vars, allowing direct backend access. This needs to be remediated.
 
 ## Pointers
 
 - **V4 spec:** `infra/v4-locked-architecture.md`
-- **v3 (historical):** `infra/per-cloud-feature-delegation.md`, `infra/provider-priority-map.md`, `infra/credit-burn-runbook.md`
 - **Azure landing zone:** `artifacts/syrabit/docs/infra/azure-landing-zone.md`
 - **AWS landing zone:** `artifacts/syrabit/docs/infra/aws-landing-zone.md`
 - **ACA cutover runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md`
 - **Provider decommission rationale (#347):** `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`
-- **Skills index:** `.local/skills/` (deployment, environment-secrets, integrations, workflows, validation, code_review, follow-up-tasks)
+- **Skills index:** `.local/skills/`
