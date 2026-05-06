@@ -50,7 +50,7 @@ _MODEL_ALIASES: dict[str, str] = {
 def _clamp_max_tokens(model: str, max_tokens: int) -> int:
     cap = _MODEL_MAX_OUTPUT_TOKENS.get(model)
     return min(max_tokens, cap) if cap else max_tokens
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from fastapi import HTTPException
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from config import (
@@ -1512,35 +1512,68 @@ async def _call_vertex_chat(messages: list, model: str, max_tokens: int) -> str:
     return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
 
+def _is_cf_gateway_base(base: str) -> bool:
+    """True iff ``base`` is a Cloudflare AI Gateway URL (so cf-aig-* response
+    headers are expected). When the gateway is down we fall back to
+    direct provider URLs and must NOT record AI Gateway telemetry."""
+    from config import CF_GATEWAY_BASE as _CF_BASE
+    return bool(_CF_BASE) and base.startswith(_CF_BASE)
+
+
+def _record_aig_from_raw(raw: Any, *, base: str, provider: str, model: str) -> None:
+    """Pure-observation: forward cf-aig-* response headers to the AI
+    Gateway counters when the request actually went through CF. Never
+    raises — telemetry must not be able to break a chat response."""
+    if not _is_cf_gateway_base(base):
+        return
+    try:
+        from ai_gateway_observability import record_aig_response
+        record_aig_response(getattr(raw, "headers", {}) or {},
+                            provider=provider, model=model)
+    except Exception:
+        pass
+
+
 async def _call_openai_compat(messages: list, api_key: str, model: str, max_tokens: int, provider: str, fallback_base: str) -> str:
     """Non-streaming call via an OpenAI-compatible provider (OpenAI, xAI, Fireworks)."""
     base = get_provider_base_url(provider) or fallback_base
     client = _get_oai_client(api_key, base)
+    raw = None
     try:
-        resp = await client.chat.completions.create(
+        # Task #420 — use ``with_raw_response`` so the underlying httpx
+        # Response (and its cf-aig-* headers) is reachable. The parsed
+        # body is identical to the regular client.chat.completions.create
+        # return value, just one ``.parse()`` call away.
+        raw = await client.chat.completions.with_raw_response.create(
             model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
             # Pass api_key so BYOK
             # placeholders correctly trigger the clear-Authorization branch.
             extra_headers=_cf_cache_headers(api_key=api_key) or None,
         )
+        resp = raw.parse()
     except _oai.APIConnectionError as e:
         if base != fallback_base and _is_cf_connection_error(e):
             _handle_cf_connection_error(e)
             client = _get_oai_client(api_key, fallback_base)
-            resp = await client.chat.completions.create(
+            base = fallback_base
+            raw = await client.chat.completions.with_raw_response.create(
                 model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
             )
+            resp = raw.parse()
         else:
             raise
     except _oai.AuthenticationError as e:
         if base != fallback_base:
             _handle_cf_gateway_auth_error(e)
             client = _get_oai_client(api_key, fallback_base)
-            resp = await client.chat.completions.create(
+            base = fallback_base
+            raw = await client.chat.completions.with_raw_response.create(
                 model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
             )
+            resp = raw.parse()
         else:
             raise
+    _record_aig_from_raw(raw, base=base, provider=provider, model=model)
     content = resp.choices[0].message.content or ""
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
@@ -1548,29 +1581,36 @@ async def _call_cerebras(messages: list, api_key: str, model: str, max_tokens: i
     direct_base = "https://api.cerebras.ai/v1"
     base = get_provider_base_url("cerebras") or direct_base
     client = _get_oai_client(api_key, base)
+    raw = None
     try:
-        resp = await client.chat.completions.create(
+        raw = await client.chat.completions.with_raw_response.create(
             model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
             extra_headers=_cf_cache_headers(api_key=api_key) or None,
         )
+        resp = raw.parse()
     except _oai.APIConnectionError as e:
         if base != direct_base and _is_cf_connection_error(e):
             _handle_cf_connection_error(e)
             client = _get_oai_client(api_key, direct_base)
-            resp = await client.chat.completions.create(
+            base = direct_base
+            raw = await client.chat.completions.with_raw_response.create(
                 model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
             )
+            resp = raw.parse()
         else:
             raise
     except _oai.AuthenticationError as e:
         if base != direct_base:
             _handle_cf_gateway_auth_error(e)
             client = _get_oai_client(api_key, direct_base)
-            resp = await client.chat.completions.create(
+            base = direct_base
+            raw = await client.chat.completions.with_raw_response.create(
                 model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
             )
+            resp = raw.parse()
         else:
             raise
+    _record_aig_from_raw(raw, base=base, provider="cerebras", model=model)
     content = resp.choices[0].message.content or ""
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
@@ -2926,12 +2966,33 @@ async def _stream_vertex_gemini(messages: list, model: str, max_tokens: int):
         yield token
 
 
+def _record_aig_from_stream(stream: Any, *, base: str, provider: str, model: str) -> None:
+    """Task #420 — pull cf-aig-* headers off an openai-python AsyncStream
+    object's underlying httpx response. The SDK exposes ``.response`` on
+    AsyncStream in recent versions; older versions kept it on
+    ``._raw_response``. We tolerate either, and stay silent on miss so
+    telemetry can never break a streaming chat."""
+    if not _is_cf_gateway_base(base):
+        return
+    raw = getattr(stream, "response", None) or getattr(stream, "_raw_response", None)
+    if raw is None:
+        return
+    try:
+        from ai_gateway_observability import record_aig_response
+        record_aig_response(getattr(raw, "headers", {}) or {},
+                            provider=provider, model=model)
+    except Exception:
+        pass
+
+
 async def _stream_cerebras(messages: list, api_key: str, model: str, max_tokens: int):
-    base = get_provider_base_url("cerebras") or "https://api.cerebras.ai/v1"
+    direct_base = "https://api.cerebras.ai/v1"
+    base = get_provider_base_url("cerebras") or direct_base
     client = _get_oai_client(api_key, base)
     stream = await client.chat.completions.create(
         model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
     )
+    _record_aig_from_stream(stream, base=base, provider="cerebras", model=model)
     async for chunk in stream:
         delta = chunk.choices[0].delta if chunk.choices else None
         if delta and delta.content:
@@ -2954,6 +3015,7 @@ async def _stream_openai_compat(messages: list, api_key: str, model: str, max_to
         if base != fallback_base and _is_cf_connection_error(e):
             _handle_cf_connection_error(e)
             client = _get_oai_client(api_key, fallback_base)
+            base = fallback_base
             stream = await client.chat.completions.create(
                 model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
             )
@@ -2963,11 +3025,13 @@ async def _stream_openai_compat(messages: list, api_key: str, model: str, max_to
         if base != fallback_base:
             _handle_cf_gateway_auth_error(e)
             client = _get_oai_client(api_key, fallback_base)
+            base = fallback_base
             stream = await client.chat.completions.create(
                 model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
             )
         else:
             raise
+    _record_aig_from_stream(stream, base=base, provider=provider, model=model)
     async for chunk in stream:
         delta = chunk.choices[0].delta if chunk.choices else None
         if delta and delta.content:
