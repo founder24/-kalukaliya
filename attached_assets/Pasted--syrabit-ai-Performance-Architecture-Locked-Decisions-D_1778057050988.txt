@@ -1,0 +1,42 @@
+# syrabit.ai Performance Architecture & Locked Decisions
+
+⚠️ **Do not modify `vite.config.js`, `sw.js`, prerender scripts, or preload strategy without updating this document and running a full PSI measurement report using the `PAGESPEED_*.md` template.** Generic Vite/PSI checklists will regress scores.
+
+## 🔒 Locked-In Decisions
+
+### Chunking Strategy
+- Granular `manualChunks` split (`router`, `query`, `radix`, etc.) is intentional and production-verified.
+- **Task #639**: Merging vendors back to a single `vendor` chunk regresses library preload size by ~174 KB.
+- Keep chunk boundaries as-is. Any new chunk split must be validated against `dist/assets` size and PSI preload metrics.
+
+### Service Worker & Caching
+- Custom `public/sw.js` handles stale-while-revalidate, admin bypass, and crawler bypass.
+- **Tasks #391 / #395**: Replacing with `vite-plugin-pwa` breaks admin login bypass and introduces conflicting cache strategies.
+- SW updates require explicit regression testing on authenticated and unauthenticated routes.
+
+### Image Delivery
+- Uses Cloudflare Image Resizing (probed via `probeImageResizer`). Runtime format/size negotiation happens at the edge.
+- Build-time `sharp`/WebP conversion or duplicate `public/images-optimized` folders bypass CF and increase bundle bloat.
+- **Rule**: Serve original formats; let CF handle resizing/format negotiation.
+
+### Third-Party & Analytics Scripts
+- All non-critical injectors are LCP-gated and deferred.
+- **Task #496**: CF Web Analytics and similar injectors follow the same deferral pattern. Never load synchronously in `<head>`.
+
+### Prerender Parity Requirement
+- `/library` is fully prerendered; `/` (homepage) is not. This asymmetry is the root cause of the ~26-point mobile PSI gap.
+- **Task #453**: Closing the gap requires applying the `/library` prerender pattern to `/`, not asset-level tweaks.
+- Any prerender changes must include before/after PSI reports for both mobile and desktop, plus a `/library` regression check.
+
+## 📏 Measurement Protocol
+1. Always run PSI against the **public production URL**, never localhost or Replit preview ports.
+2. Use the `PAGESPEED_*.md` template for before/after reports.
+3. Validate Core Web Vitals (LCP, INP, CLS) separately for mobile and desktop.
+4. Cloudflare edge already handles Brotli, HTTP/2 multiplexing, and image optimization. Do not duplicate these in build steps.
+
+## 🔗 Back-Pointers
+- Task #391: Third-party deferral pattern
+- Task #395: Custom SW & admin/crawler bypass
+- Task #496: LCP-gated analytics injectors
+- Task #639: Granular chunk splits & preload validation
+- Task #453: Homepage prerender parity (mobile PSI gap closure)

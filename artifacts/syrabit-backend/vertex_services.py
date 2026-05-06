@@ -396,18 +396,44 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
         else:
             vec = await _workers_ai_primary_embed(text)
 
-    # Vertex AI embed fallback (Task #247) — for long-form content or when
-    # Workers AI embed is in cooldown. NOTE: Vertex text-embedding-004 is
-    # 768-dim; results must NOT be mixed with 1024-dim bge-large vectors in
-    # the main Vectorize index. Use only for standalone long-doc similarity.
+    # Vertex AI embed fallback (V4 §3, B2 2026-05-06) — controller-flag gated.
+    #
+    # V4 §3 hard rule: Vertex (text-embedding-004 / multilingual, 768-dim)
+    # is in a DIFFERENT embedding space than the V4 primary
+    # (Gemma-300M+Qwen3-0.6B, 1024-dim) and writes go to the SEPARATE
+    # Pinecone namespace `fallback_vertex_pending_reembed`, not the
+    # primary `cached_gemma_today`. The AWS SQS-backed re-embed worker
+    # drains that namespace back when Cloudflare returns.
+    #
+    # The legacy v3 trigger (long-form-text OR Workers-AI cooldown) is
+    # NOT enough on its own under V4 — silently routing a long request
+    # to Vertex while Cloudflare is healthy is exactly the index-mix
+    # corruption V4 §3 forbids. We therefore require BOTH:
+    #   (a) `RAG_EMBEDDING_PROVIDER=fallback_vertex` set by the V4
+    #       failover controller (flag flip = explicit operator/probe
+    #       decision; matches the docstring in providers/vertex_embed.py).
+    #   (b) Either long-form OR active cooldown (preserve v3's
+    #       internal load-shed signal as a SECOND guard so a stale
+    #       flag flip cannot silently steal short-text traffic from
+    #       the primary worker).
+    #
+    # When this branch fires, the caller is responsible for honoring
+    # the namespace split (ingest_vertex_index.py / chunk_embedder.py).
     if vec is None:
-        from providers import vertex_embed as _vx_embed
-        if _vx_embed.is_configured() and (
-            _vx_embed.is_long_form(text) or is_embed_cooldown_active()
-        ):
-            logger.debug("[embed] Vertex AI embed fallback triggered (long_form=%s, cooldown=%s)",
-                         _vx_embed.is_long_form(text), is_embed_cooldown_active())
-            vec = await _vx_embed.embed_text(text, task_type)
+        _v4_failover_flag = (os.environ.get("RAG_EMBEDDING_PROVIDER", "")
+                             .strip().lower() == "fallback_vertex")
+        if _v4_failover_flag:
+            from providers import vertex_embed as _vx_embed
+            if _vx_embed.is_configured() and (
+                _vx_embed.is_long_form(text) or is_embed_cooldown_active()
+            ):
+                logger.info(
+                    "[embed] V4 §3 Vertex failover triggered "
+                    "(flag=fallback_vertex, long_form=%s, cooldown=%s) — "
+                    "vector MUST be written to namespace "
+                    "fallback_vertex_pending_reembed",
+                    _vx_embed.is_long_form(text), is_embed_cooldown_active())
+                vec = await _vx_embed.embed_text(text, task_type)
 
     try:
         if _ek and vec and _embedding_cache is not None:

@@ -49,6 +49,32 @@ _MAX_BATCH    = int(os.environ.get("WORKERS_EMBED_MAX_BATCH", "32") or "32")
 _TIMEOUT      = float(os.environ.get("WORKERS_EMBED_TIMEOUT_S", "20") or "20")
 _RETRIES      = int(os.environ.get("WORKERS_EMBED_RETRIES", "2") or "2")
 
+# V4 §2 acceptance banner (B2, 2026-05-06): operators / log scrapers grep
+# for the exact string `embed_model=gemma-300m+qwen3-0.6b via embed.syrabit.ai`
+# to confirm the worker-AI custom embed path is the active primary on the
+# pod. Emitted once per process at module import (cheap; no I/O). When URL
+# or SECRET is missing the banner is suppressed and llm.py raises a hard
+# RuntimeError on the first embed attempt — fail-loud per V4 §12.
+if _URL and _SECRET:
+    logger.info(
+        "embed_model=gemma-300m+qwen3-0.6b via %s "
+        "(V4 §2 primary, dims=%d, max_batch=%d)",
+        _URL, _DIMS, _MAX_BATCH,
+    )
+elif _URL or _SECRET:
+    logger.warning(
+        "workers_embed: partial config (URL set=%s, SECRET set=%s) — "
+        "primary embed path will fail until both are set; "
+        "V4 §3 failover to Vertex requires RAG_EMBEDDING_PROVIDER=fallback_vertex",
+        bool(_URL), bool(_SECRET),
+    )
+else:
+    logger.info(
+        "workers_embed: not configured (WORKERS_EMBED_URL/SECRET unset) — "
+        "EMBED_PROVIDER_PRIMARY must be flipped off workers_ai_custom or "
+        "embed calls will raise on first use (V4 §3 manual override)"
+    )
+
 ENABLED: bool = bool(_URL and _SECRET)
 
 if ENABLED:

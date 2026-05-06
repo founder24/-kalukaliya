@@ -1,19 +1,28 @@
-"""Vertex AI Embeddings — text-embedding-004 fallback for long-form content.
+"""Vertex AI Embeddings — V4 §3 embed-failover-only path (NOT a long-form fallback).
 
-Position-2 in the embed fallback chain:
-  workers_ai(bge-m3) → vertex_embed → cohere → voyage_ai
-
-Triggers only when:
-  - Content length > 2048 tokens (long-form: papers, chapters), OR
-  - Workers AI embed is saturated (cooldown active).
+V4 architecture (2026-05-05): the primary embed path is the custom Cloudflare
+Workers-AI worker (`providers/workers_embed.py`, EmbeddingGemma-300M +
+Qwen3-0.6B mean-pooled to 1024-dim). This module is now the **embed-failover
+specialist** activated only when `RAG_EMBEDDING_PROVIDER=fallback_vertex`
+(set by the embed-failover controller on Cloudflare worker outage; see V4 §3
+trigger spec). Triggering on long-form content was the v3 contract and is
+no longer in effect — the V4 controller flips the flag based on probe
+health, not request size.
 
 Auth: GOOGLE_APPLICATION_CREDENTIALS_JSON (service account JSON blob).
 
-Model: text-embedding-004 (768-dim — note: smaller than bge-large 1024-dim).
-WARNING: Vertex embed vectors are in a different embedding space than
-Workers AI bge-large-en-v1.5. Do NOT mix them in the same Vectorize index.
-This provider is intended as a long-doc fallback where the text exceeds
-Workers AI token limits, NOT as a primary embedding provider.
+Model: `text-embedding-004` (768-dim). Vertex multilingual embedding (also
+768-dim) is the production target; this client picks whichever model the
+controller has configured.
+
+**HARD RULE (V4 §3, no silent index corruption):** Vertex vectors are in a
+different embedding space than Gemma-300M+Qwen3-0.6B. They are written to
+the **separate Pinecone namespace `fallback_vertex_pending_reembed`** —
+NEVER to the primary `cached_gemma_today` namespace. The AWS SQS-backed
+re-embed worker drains the fallback namespace back into the primary
+namespace once Cloudflare returns. This module's caller MUST honor the
+namespace split; the legacy "Do NOT mix them in the same Vectorize index"
+warning is preserved as the operative rule for the new namespace topology.
 
 Pricing: ~$0.00013 / 1K chars (text-embedding-004).
 At $2,000 credits → ~15 billion chars embedded.

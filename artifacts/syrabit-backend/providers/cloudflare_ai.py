@@ -1,17 +1,25 @@
-"""Cloudflare Workers AI — primary LLM/embed/translate/vision provider.
+"""Cloudflare Workers AI — primary LLM / translate / vision provider.
 
 Replaces Groq, Cerebras, OpenRouter, Sarvam (translation), and
-Vertex AI (embeddings) as the primary tier. All calls go through
-the Cloudflare AI REST API (api.cloudflare.com/client/v4/accounts/
-{account_id}/ai/run/{model}) — no edge worker round-trip needed
-from the backend.
+Vertex AI (legacy embeddings) as the primary tier. All calls go
+through the Cloudflare AI REST API (api.cloudflare.com/client/v4/
+accounts/{account_id}/ai/run/{model}) — no edge worker round-trip
+needed from the backend.
+
+**Embed note (V4 §2, 2026-05-06):** The 1024-dim primary embed path is
+the *custom* Workers-AI worker at `embed.syrabit.ai` (Gemma-300M +
+Qwen3-0.6B mean-pooled), NOT `@cf/baai/bge-large-en-v1.5` from this
+catalog. The catalog entry below is retained as a *failover-failover*
+target — only reachable when both `workers_ai_custom` AND `vertex_embed`
+have been excluded by the dispatcher. See `providers/workers_embed.py`
+for the active primary client.
 
 Models used (all available on Workers AI Enterprise):
   chat        → @cf/meta/llama-3.3-70b-instruct-fp8-fast (70B, fp8)
   chat_long   → @cf/openai/gpt-oss-120b (120B, for admin content gen)
   chat_code   → @cf/qwen/qwen2.5-coder-32b-instruct
-  embed       → @cf/baai/bge-large-en-v1.5 (1024-dim, matches Vectorize)
-  embed_multi → @cf/baai/bge-m3 (multilingual, for Assamese content)
+  embed       → @cf/baai/bge-large-en-v1.5 (1024-dim — V4 failover-failover only)
+  embed_multi → @cf/baai/bge-m3 (multilingual — V4 failover-failover only)
   translate   → @cf/ai4bharat/indictrans2-en-indic-1B (EN→Indic, free on CF)
   vision      → @cf/meta/llama-3.2-11b-vision-instruct
   stt         → @cf/openai/whisper-large-v3-turbo

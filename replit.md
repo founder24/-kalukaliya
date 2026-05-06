@@ -49,7 +49,8 @@
 - **Removed providers (Task #347):** OpenAI, Anthropic, AWS Bedrock direct, Stripe, Quge5, Resend, xAI/Grok, Railway, DigitalOcean, **Groq (purged 2026-05-06)**. See `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`.
 - **Cerebras retained as CF-Gateway-only fallback** (V4 §1, §4) — re-instated by Task #420 for telemetry parity; direct (non-gateway) calls remain blocked by `scripts/check_dead_providers.py`. Never primary, never used for content-gen.
 - **Cohere retained as embed-failover specialist** (V4 §1) — BYOK via CF AI Gateway slug `cohere/v1`; not on the chat hot-path.
-- **PG → Mongo migration** (V4 §13): NOT STARTED. ADR → dual-write → read-shadow → cutover → rip-out, gated on Supabase OAuth replacement. Until Phase 4 completes, V4 is *aspirational* on the user-data SoT axis.
+- **PG → Mongo migration** (V4 §13): Phase 1 (ADR) DONE — see `docs/architecture/adr/0001-pg-to-mongo.md` (10-table collection map, per-phase rollback flags, Supabase OAuth blocker). Phases 2–5 (dual-write → read-shadow → cutover → rip-out) NOT STARTED. Until Phase 4 cutover, V4 is *aspirational* on the user-data SoT axis.
+- **Embed acceptance banner** (V4 §2, B2): `providers/workers_embed.py` emits `embed_model=gemma-300m+qwen3-0.6b via <WORKERS_EMBED_URL> (V4 §2 primary, dims=1024, max_batch=32)` on module import when both URL+SECRET are set; partial config logs a WARNING and the first embed call raises (no silent fallback). Dispatch short-circuit lives in `llm.py:4067`. Backfill driver: `scripts/backfill_workers_embeddings.py` (resumable via `embed_backfill_state` collection).
 
 ## Product
 
