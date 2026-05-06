@@ -2320,6 +2320,8 @@ api.include_router(admin_credits_router)
 # Axiom, and Sentry.  Routes: /admin/billing/{aws-activate,azure-startups,axiom,sentry}
 from routes.admin_billing import router as admin_billing_router
 api.include_router(admin_billing_router)
+from routes.admin_observability_canary import router as admin_observability_canary_router
+api.include_router(admin_observability_canary_router)
 
 from llm import call_llm_api_content
 from auth_deps import get_admin_user

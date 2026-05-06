@@ -27,6 +27,7 @@ locals {
     "slack/ops-webhook"         = "Slack incoming webhook for #infra-alerts."
     "pinecone/api-key"          = "Pinecone API key (embedding refresh worker)."
     "cohere/api-key"            = "Cohere API key (re-rank worker)."
+    "workers-embed/secret"      = "Cloudflare Workers-AI embed-worker shared secret (deferred-embed Lambda calls embed.syrabit.ai with this on the X-Origin-Auth header). Task #489."
   }
 }
 

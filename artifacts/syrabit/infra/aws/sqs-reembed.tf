@@ -16,6 +16,28 @@
 # cache-only degraded mode", not "drain Vertex fallback namespace"
 # (since Vertex no longer writes to Pinecone).
 
+# ─── Secret look-ups (declared in `secrets.tf` via the `workers` map) ───
+# `aws_secretsmanager_secret.workers` is a `for_each` map keyed by the
+# logical secret name. We resolve the two we need at module-eval time
+# via `data` blocks so the consumer Lambda env can pin a stable ARN
+# without a cross-resource depends_on dance. Names match the `local.lz_worker_secrets`
+# entries in `secrets.tf` (`pinecone/api-key`, plus a new
+# `workers-embed/secret` we expect ops to register before first apply).
+data "aws_secretsmanager_secret" "pinecone" {
+  name = "${local.lz_project}/${local.lz_env}/pinecone/api-key"
+  # Defensive: ensure the secret exists in `secrets.tf` before this
+  # data block is read on first apply.
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+data "aws_secretsmanager_secret" "workers_embed" {
+  name = "${local.lz_project}/${local.lz_env}/workers-embed/secret"
+  # Same guard as above; the secret is created by `secrets.tf` once
+  # ops adds `workers-embed/secret` to `local.lz_worker_secrets`
+  # (see the AWS landing-zone runbook §3 secret-onboarding step).
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
 resource "aws_sqs_queue" "reembed_dlq" {
   name                      = "${local.lz_project}-reembed-dlq-${local.lz_env}"
   message_retention_seconds = 1209600 # 14 days
