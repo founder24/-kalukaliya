@@ -1282,9 +1282,15 @@ PROVIDER_PRIORITY: dict = {
     # Task #490 — Vertex Vector Search removed. Pinecone is the canonical
     # vector store; Atlas remains as a weight-0 disaster fallback.
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "workers_ai"],
-    # Translation (English→Assamese): Workers AI IndicTrans2 only.
-    # Vertex translate branch removed Task #490.
-    "translate":         ["workers_ai_indic"],
+    # Translation (English→Assamese):
+    #   workers_ai_indic (IndicTrans2, primary)
+    #   → azure_openai  (Azure Translator REST, paid fallback, gated by
+    #                    `azure.translator.enabled` admin toggle)
+    #   → workers_ai    (generic LLM translate prompt, last-resort)
+    # Task #490 removed Vertex; Task #492 removed Sarvam. The chain is
+    # multi-leg again so a single Workers-AI IndicTrans2 outage does
+    # not collapse Assamese translation into a hard 503.
+    "translate":         ["workers_ai_indic", "azure_openai", "workers_ai"],
     # Vision / OCR: Azure OpenAI GPT-4o → Workers AI. Vertex removed (Task #490).
     "vision":            ["azure_openai", "workers_ai"],
     # Safety checks: Workers AI. Vertex safety branch removed (Task #490).
@@ -1400,7 +1406,14 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_indic": 10000,
     },
     "translate": {
+        # Task #492 (V4 §15): IndicTrans2 stays the dominant primary;
+        # Azure Translator + generic Workers-AI carry weight-1/0 so
+        # `select_provider` actually advances on outage rather than
+        # raising "translate: all providers exhausted" on a single
+        # IndicTrans2 hiccup. Sarvam was removed from this pool.
         "workers_ai_indic": 1000,
+        "azure_openai":        1,
+        "workers_ai":          0,
     },
     # embed/tts/stt explicit overrides so the established primaries
     # (ElevenLabs/Deepgram) keep deterministic priority over generic
