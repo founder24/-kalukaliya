@@ -1,5 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import PageMeta from '@/components/seo/PageMeta';
 import { PublicNavbar } from '@/components/layout/PublicNavbar';
 import { PublicBottomNav } from '@/components/layout/PublicBottomNav';
@@ -9,6 +8,7 @@ import LangToggle from '@/components/ui/LangToggle';
 import HeroSection from './landing/HeroSection';
 import PopularSubjects from './landing/PopularSubjects';
 import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
+import { RecentMemoriesSection } from './chat/RecentMemoriesSection';
 const FeaturesGrid = lazy(() => import('./landing/FeaturesGrid'));
 const PricingSection = lazy(() => import('./landing/PricingSection'));
 const PlatformSection = lazy(() => import('./landing/PlatformSection'));
@@ -73,15 +73,15 @@ const faqJsonLd = {
 };
 
 export default function LandingPage() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { contentLang, switchLang } = useContentLang();
 
-  useEffect(() => {
-    if (user) {
-      navigate('/chat', { replace: true });
-    }
-  }, [user, navigate]);
+  // Task #441 — signed-in students no longer auto-redirect to /chat.
+  // Instead they see a personalised "Pick up where you left off"
+  // dashboard inline at the top of the landing surface, then the
+  // marketing sections below as a familiar fallback. Anonymous
+  // visitors continue to see the marketing landing as before
+  // (RecentMemoriesSection no-ops when not signed in).
 
   const year = new Date().getFullYear();
   const m = _meta[contentLang] || _meta.en;
@@ -108,6 +108,11 @@ export default function LandingPage() {
       />
       <PublicNavbar />
       <LangToggle contentLang={contentLang} switchLang={switchLang} variant="floating" />
+      {user && (
+        <div className="px-4 pt-6">
+          <RecentMemoriesSection />
+        </div>
+      )}
       <HeroSection contentLang={contentLang} />
       <PopularSubjects contentLang={contentLang} />
       {/* Reserve vertical space for each lazy section so Suspense fall-in does

@@ -10,6 +10,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
 import { apiClient } from '@/utils/api';
 import { buildPlanSeedContext } from '@/utils/cardContext';
+import { RecentMemoriesSection } from './chat/RecentMemoriesSection';
 
 export default function PersonalizedCmsPage() {
   const { userId, slug } = useParams();
@@ -200,6 +201,19 @@ export default function PersonalizedCmsPage() {
             lineHeight: '1.75',
           }}
         />
+
+        {/* Task #441 — show the same "Pick up where you left off"
+            dashboard widget that lives on /home and the chat empty
+            state, so a returning student finishing a plan can jump
+            straight back into their other recent study moments. The
+            component no-ops gracefully for anonymous users and on
+            memory_brain failures, so it can never break the plan
+            view. */}
+        {user && (
+          <div className="mt-10">
+            <RecentMemoriesSection />
+          </div>
+        )}
 
         {/* Bottom nav */}
         <div className="mt-12 pt-6 flex justify-between items-center" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
