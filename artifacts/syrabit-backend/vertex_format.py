@@ -41,7 +41,7 @@ import json
 import logging
 import os
 import re
-from typing import Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,13 @@ _NOTEBOOK_LM_SYSTEM_AS = (
 
 
 SUPPORTED_STYLES: frozenset[str] = frozenset({"notebook_lm", "study_notes", "flashcard"})
+SUPPORTED_LANGS:  frozenset[str] = frozenset({"en", "as"})
+
+# `Literal` aliases for the `format_with_vertex` typed contract — exported so
+# callers (notes / study_notes / flashcard wiring tasks #494 / #519) get
+# editor + mypy enforcement of the formatter's frozen public enum.
+FormatterStyle = Literal["notebook_lm", "study_notes", "flashcard"]
+FormatterLang  = Literal["en", "as"]
 
 
 def _select_system_prompt(style: str, lang: str) -> str:
@@ -96,10 +103,18 @@ def _select_system_prompt(style: str, lang: str) -> str:
             f"vertex_format: unknown style {style!r} — supported styles: "
             f"{sorted(SUPPORTED_STYLES)}"
         )
+    # Task #490: lang is now a strict `{en, as}` enum — silently
+    # defaulting non-`as` strings to English masked typo bugs (e.g.
+    # `"hi"` / `"asm"` / `"english"` falling through to EN). Fail loud.
+    if lang_norm not in SUPPORTED_LANGS:
+        raise ValueError(
+            f"vertex_format: unknown lang {lang!r} — supported langs: "
+            f"{sorted(SUPPORTED_LANGS)}"
+        )
     # All shipped styles currently share the NotebookLM-style prompt
     # backend; the public surface keeps them distinct so wiring tasks
     # (#494 / #519) can specialize each style without breaking callers.
-    return _NOTEBOOK_LM_SYSTEM_AS if lang_norm.startswith("as") else _NOTEBOOK_LM_SYSTEM_EN
+    return _NOTEBOOK_LM_SYSTEM_AS if lang_norm == "as" else _NOTEBOOK_LM_SYSTEM_EN
 
 
 def is_configured() -> bool:
@@ -155,17 +170,28 @@ async def _ensure_creds():
 async def format_with_vertex(
     text: str,
     *,
-    style: str = "notebook_lm",
-    lang: str = "en",
+    style: FormatterStyle = "notebook_lm",
+    lang: FormatterLang = "en",
     max_tokens: int = 4000,
     timeout_s: float = 15.0,
 ) -> str:
     """Polish/format ``text`` via Vertex AI Gemini 2.5 Flash.
 
-    Returns the polished Markdown string. Raises on misconfiguration,
-    HTTP failure, breaker-open, or empty / safety-blocked Vertex
-    response. Callers MUST handle the failure path themselves — there
-    is no silent fallback (V4 §12 / §15).
+    Returns the polished Markdown string. Raises ``ValueError`` for
+    invalid ``style`` / ``lang`` enum values (no silent default).
+    Raises on misconfiguration, HTTP failure, breaker-open, or empty /
+    safety-blocked Vertex response. Callers MUST handle the failure
+    path themselves — there is no silent fallback (V4 §12 / §15).
+
+    Contract (Task #490):
+      - ``style`` ∈ ``{"notebook_lm", "study_notes", "flashcard"}``
+        (== ``SUPPORTED_STYLES``). Wiring tasks #494 / #519 may add
+        new styles; updating this enum is the only place to change.
+      - ``lang``  ∈ ``{"en", "as"}`` (== ``SUPPORTED_LANGS``). The
+        previous behavior of silently treating any non-`as` value as
+        English was removed — typo bugs (`"hi"`, `"asm"`, `"english"`)
+        now fail loud at the call site instead of producing English
+        polish for non-English content.
     """
     if not text or not text.strip():
         raise ValueError("vertex_format: empty input text")

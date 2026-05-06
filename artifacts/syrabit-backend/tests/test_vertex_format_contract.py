@@ -82,6 +82,30 @@ async def test_format_with_vertex_returns_string_and_calls_vertex_endpoint(monke
 
 
 @pytest.mark.anyio
+async def test_format_with_vertex_rejects_unknown_lang(monkeypatch):
+    """Unknown `lang` values must raise ValueError BEFORE any network call —
+    Task #490 removed the silent "any non-`as` → English" default that
+    masked typo bugs (`"hi"`, `"asm"`, `"english"`)."""
+    async def _should_not_be_called():
+        raise AssertionError("_ensure_creds must not run when lang validation fails")
+
+    monkeypatch.setattr(vertex_format, "_ensure_creds", _should_not_be_called, raising=True)
+
+    with pytest.raises(ValueError):
+        await vertex_format.format_with_vertex(
+            "anything",
+            style="notebook_lm",
+            lang="hi",  # not in SUPPORTED_LANGS
+        )
+
+
+def test_supported_langs_locked():
+    """`SUPPORTED_LANGS` is the formatter's frozen public lang enum."""
+    assert isinstance(vertex_format.SUPPORTED_LANGS, frozenset)
+    assert vertex_format.SUPPORTED_LANGS == frozenset({"en", "as"})
+
+
+@pytest.mark.anyio
 async def test_format_with_vertex_rejects_unknown_style(monkeypatch):
     """Unknown `style` values must raise ValueError BEFORE any network call —
     the formatter is not a free-form prompt surface."""
