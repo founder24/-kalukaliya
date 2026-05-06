@@ -3865,7 +3865,15 @@ async def call_embed_with_dispatch(
     # above still return; everything else raises `EmbedDeferredError`
     # so callers fail loud instead of getting a silent zero-vector.
     from vertex_services import EmbedDegradedMode as _EmbedDegradedMode
-    if os.environ.get("EMBED_DEGRADED_MODE", "").strip().lower() in {"1", "true", "yes"}:
+    # Task #490: gate now combines (a) the operator env override
+    # (`EMBED_DEGRADED_MODE=true`, manual cutover) AND (b) the in-process
+    # auto-trip controller (`embed_degraded_controller.is_degraded()`,
+    # which trips on >=3/5 probe failures or p95 > 2000ms and resets on
+    # 5 consecutive successful probes). Either signal flips us into the
+    # SQS deferred-replay path so an outage degrades automatically
+    # before on-call has to flip the env var by hand.
+    from embed_degraded_controller import is_degraded as _embed_is_degraded
+    if _embed_is_degraded():
         # Deterministic chunk_id so replay upserts into the same Pinecone
         # vector slot as the original embed would have. Matches the
         # consumer contract in `sqs_consumers/reembed.py` (`chunk_id` +
