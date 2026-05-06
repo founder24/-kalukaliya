@@ -2041,6 +2041,7 @@ from routes.admin_review_prompts import router as admin_review_prompts_router
 from routes.edu_browser import router as edu_browser_router
 from routes.edu_study import router as edu_study_router
 from routes.memory_recent import router as memory_recent_router
+from routes.memory_browse import router as memory_browse_router
 from routes.admin_seo_keywords import router as admin_seo_keywords_router
 from routes.admin_topic_discovery import router as admin_topic_discovery_router
 from routes.admin_seo_remediation import router as admin_seo_remediation_router
@@ -2203,6 +2204,7 @@ api.include_router(admin_review_prompts_router)
 api.include_router(edu_browser_router)
 api.include_router(edu_study_router)
 api.include_router(memory_recent_router)
+api.include_router(memory_browse_router)
 api.include_router(admin_seo_keywords_router)
 api.include_router(admin_topic_discovery_router)
 api.include_router(admin_seo_remediation_router)

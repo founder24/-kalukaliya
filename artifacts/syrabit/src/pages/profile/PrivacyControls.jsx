@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldOff, ChevronRight } from 'lucide-react';
+import { ShieldOff, ChevronRight, Brain } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getAdsOptOut,
@@ -146,6 +146,26 @@ export default function PrivacyControls({ profile }) {
             />
           </button>
         </div>
+
+        <Link
+          to="/profile/memories"
+          data-testid="my-memories-link"
+          className="flex items-center gap-3 p-3 rounded-xl hover:bg-foreground/5 transition-colors"
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.25)' }}
+          >
+            <Brain size={16} style={{ color: 'hsl(var(--primary))' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground">My memories</p>
+            <p className="text-xs text-muted-foreground/70 mt-0.5">
+              Browse and delete what Syra has saved about you.
+            </p>
+          </div>
+          <ChevronRight size={16} className="text-muted-foreground" />
+        </Link>
 
         <Link
           to="/privacy"

@@ -94,6 +94,7 @@ export function preloadPageForKind(kind) {
 }
 const HistoryPage        = lazy(pageImports.history);
 const ProfilePage        = lazy(pageImports.profile);
+const MyMemoriesPage     = lazy(() => import("@/pages/MyMemoriesPage"));
 const PricingPage        = lazy(() => import("@/pages/PricingPage"));
 const TermsPage          = lazy(() => import("@/pages/TermsPage"));
 const PrivacyPage        = lazy(() => import("@/pages/PrivacyPage"));
@@ -350,6 +351,7 @@ export function AppRoutes() {
       <Route path="/read"              element={<BrowsePage />} />
       <Route path="/history"           element={<HistoryPage />} />
       <Route path="/profile"           element={<ProfilePage />} />
+      <Route path="/profile/memories"  element={<MyMemoriesPage />} />
 
       {/* ── Educational Browser Phase 3 — study tools ── */}
       <Route path="/notebook"          element={<NotebookPage />} />
