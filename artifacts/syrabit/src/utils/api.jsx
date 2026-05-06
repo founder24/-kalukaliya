@@ -77,6 +77,9 @@ axios.interceptors.response.use(
 export const apiClient = () =>
   axios.create({ baseURL: API_BASE, withCredentials: true });
 
+export const getRecentMemories = (limit = 5) =>
+  axios.get(`${API_BASE}/edu/memory/recent`, { params: { limit }, ...authConfig() });
+
 export const getBoards = () => axios.get(`${WORKER_API}/content/boards`);
 export const getClasses = (boardId) => axios.get(`${WORKER_API}/content/classes?board_id=${boardId}`);
 export const getStreams = (classId) => axios.get(`${WORKER_API}/content/streams?class_id=${classId}`);

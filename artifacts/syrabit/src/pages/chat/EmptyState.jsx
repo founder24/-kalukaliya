@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 import { useContentLang } from '@/context/LanguageContext';
+import { RecentMemoriesSection } from './RecentMemoriesSection';
 
 // Static EmptyState copy for the chat page. Assamese strings are picked
 // up only after `LanguageProvider` hydrates from localStorage (post-
@@ -96,6 +97,13 @@ export function EmptyState({ subject, documentId, defaultPrompts, setInput, text
           </button>
         ))}
       </div>
+
+      {/* Task #415 — "Pick up where you left off" widget. Only shown
+          on the bare dashboard surface (no subject and no loaded
+          document) so it doesn't compete with the subject-scoped
+          empty state. The component itself no-ops for anonymous
+          users and on memory_brain failures. */}
+      {!subject && !showDocumentText && <RecentMemoriesSection />}
     </div>
   );
 }
