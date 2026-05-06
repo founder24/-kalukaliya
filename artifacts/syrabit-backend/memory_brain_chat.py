@@ -29,7 +29,27 @@ import logging
 import os
 from typing import Any, Optional
 
+import memory_brain_metrics as _mbm
+
 logger = logging.getLogger("memory_brain_chat")
+
+
+def _classify(exc: BaseException) -> str:
+    """Map an exception to a short, low-cardinality reason label so
+    the dashboard's "top failure reasons" doesn't explode into a
+    long-tail of per-stack-trace strings.
+    """
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    if "voyage" in msg:
+        return "voyage_error"
+    if "mongo" in msg or "motor" in msg:
+        return "mongo_error"
+    if "vector" in msg and "index" in msg:
+        return "vector_index_missing"
+    if "timeout" in msg or name.endswith("TimeoutError"):
+        return "timeout"
+    return name.lower()[:40] or "error"
 
 
 def _enabled() -> bool:
@@ -86,6 +106,7 @@ async def query_user_memories(
         from providers.memory_brain import query_memory as _qm
     except Exception as exc:
         logger.debug("memory_brain import failed: %s", exc)
+        _mbm.record_event("read", kind="query", ok=False, reason="import_error")
         return []
     try:
         results = await asyncio.wait_for(
@@ -94,11 +115,14 @@ async def query_user_memories(
         )
     except asyncio.TimeoutError:
         logger.debug("memory_brain query timed out (>%ss)", timeout_s)
+        _mbm.record_event("read", kind="query", ok=False, reason="timeout")
         return []
     except Exception as exc:
         logger.warning("memory_brain query failed (non-fatal): %s", exc)
+        _mbm.record_event("read", kind="query", ok=False, reason=_classify(exc))
         return []
 
+    _mbm.record_event("read", kind="query", ok=True)
     if not isinstance(results, list):
         return []
     filtered: list[dict[str, Any]] = []
@@ -128,6 +152,7 @@ async def _safe_write(
         from providers.memory_brain import write_memory as _wm
     except Exception as exc:
         logger.debug("memory_brain import failed: %s", exc)
+        _mbm.record_event("write", kind=kind, ok=False, reason="import_error")
         return
     try:
         await _wm(user_id, text, kind=kind, metadata=metadata or {})
@@ -136,6 +161,9 @@ async def _safe_write(
             "memory_brain write_memory(kind=%s) failed (non-fatal): %s",
             kind, exc,
         )
+        _mbm.record_event("write", kind=kind, ok=False, reason=_classify(exc))
+        return
+    _mbm.record_event("write", kind=kind, ok=True)
 
 
 _QA_USER_CHAR_CAP = 600

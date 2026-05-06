@@ -1285,6 +1285,14 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # refresh loop hasn't ticked successfully in this many seconds. The
     # poll cadence is 15s so 60s == 4 missed ticks before paging.
     "assamese_refresh_stale_seconds": 60,
+    # Task #417: memory_brain hot-path failure-rate watcher. Fires
+    # `memory_brain_failure_rate` when the per-worker rolling-window
+    # failure rate exceeds the threshold AND there's enough sample
+    # to be meaningful (the min-sample gate is intentionally low —
+    # memory_brain writes are bursty and we want to catch a sustained
+    # Voyage outage well before the daily aggregate would surface it).
+    "memory_brain_failure_rate_pct": 25.0,
+    "memory_brain_failure_min_sample": 20,
     # Task #707: silent-lockout watcher. Fires
     # `cf_access_admin_silent_lockout` when the CF_ACCESS_* env state has
     # changed but no admin login has succeeded for this many hours since
@@ -2405,6 +2413,45 @@ async def _alerting_loop():
                                 "value": _stale_threshold,
                                 "actual": int(_age),
                                 "worker_pid": _worker_pid,
+                            },
+                        )
+            except Exception:
+                pass
+
+            # ── 6b. memory_brain hot-path failure rate (Task #417) ──
+            # Best-effort wrappers in `memory_brain_chat` swallow every
+            # Voyage / Mongo error so chat never breaks. Without this
+            # alert a Voyage outage would silently disable long-term
+            # memory until a student noticed; this hooks the same
+            # rolling-window counter that powers the admin tile.
+            try:
+                _mb_threshold = float(_ALERT_THRESHOLDS.get("memory_brain_failure_rate_pct", 0) or 0)
+                _mb_min_sample = int(_ALERT_THRESHOLDS.get("memory_brain_failure_min_sample", 20) or 20)
+                if _mb_threshold > 0:
+                    import memory_brain_metrics as _mbm_alert
+                    _mb_stats = _mbm_alert.get_stats(window_seconds=900)
+                    if (
+                        _mb_stats.get("total", 0) >= _mb_min_sample
+                        and _mb_stats.get("failure_rate_pct", 0) > _mb_threshold
+                    ):
+                        _top = _mb_stats.get("top_failure_reasons") or []
+                        _top_str = ", ".join(f"{r['reason']}={r['count']}" for r in _top[:3]) or "-"
+                        await _dispatch_alert(
+                            "memory_brain_failure_rate",
+                            "memory_brain failure rate high",
+                            f"{_mb_stats['failure_rate_pct']:.1f}% of last "
+                            f"{_mb_stats['total']} memory_brain ops failed in 15 min "
+                            f"(threshold: {_mb_threshold:.0f}%). "
+                            f"Top reasons: {_top_str}. "
+                            f"Worker pid={os.getpid()}. "
+                            f"Long-term chat memory writes/reads are silently "
+                            f"degrading — check Voyage status and Atlas vector "
+                            f"index health. See /admin/memory-brain/metrics.",
+                            threshold_snapshot={
+                                "metric": "memory_brain_failure_rate_pct",
+                                "value": _mb_threshold,
+                                "actual": _mb_stats["failure_rate_pct"],
+                                "sample": _mb_stats["total"],
                             },
                         )
             except Exception:

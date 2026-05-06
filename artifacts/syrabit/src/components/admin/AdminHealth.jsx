@@ -13,6 +13,7 @@ import CfAuditCard from './CfAuditCard';
 // Infrastructure tab so the on-call has a single pane of glass.
 import AdminAwsInfraCard from './AdminAwsInfraCard';
 import AdminCronJobsCard from './AdminCronJobsCard';
+import AdminMemoryBrainTile from './AdminMemoryBrainTile';
 // Phase 5b — Task #338. Azure-native AI features panel (Azure OpenAI,
 // AI Speech, Translator, Document Intelligence, AI Vision, Content
 // Safety, AI Language, AI Search, Anomaly Detector, Personalizer).
@@ -3001,6 +3002,11 @@ export default function AdminHealth({ adminToken, onNavigate }) {
 
         <SectionErrorBoundary name="Cron (Azure Container Apps Jobs)">
           <AdminCronJobsCard adminToken={adminToken} />
+        </SectionErrorBoundary>
+
+        {/* Task #417 — memory_brain hot-path counters + 24h sparkline. */}
+        <SectionErrorBoundary name="Memory Brain hot-path">
+          <AdminMemoryBrainTile adminToken={adminToken} />
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="Azure-native AI features">

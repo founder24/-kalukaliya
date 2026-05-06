@@ -2036,6 +2036,7 @@ from routes.cf_web_analytics_config import router as cf_web_analytics_config_rou
 from routes.turnstile_config import router as turnstile_config_router  # Task #404
 # Task #382 — embed/rerank/memory-brain combined health pill.
 from routes.admin_embed_stack_health import router as admin_embed_stack_health_router
+from routes.admin_memory_brain_metrics import router as admin_memory_brain_metrics_router
 from routes.admin_ads import router as admin_ads_router
 from routes.admin_review_prompts import router as admin_review_prompts_router
 from routes.edu_browser import router as edu_browser_router
@@ -2199,6 +2200,7 @@ api.include_router(admin_vectorize_shadow_router)  # Task #383 — Vectorize par
 api.include_router(cf_web_analytics_config_router)  # Task #383 — public CF beacon config
 api.include_router(turnstile_config_router)  # Task #404 — public Turnstile site-key config
 api.include_router(admin_embed_stack_health_router)
+api.include_router(admin_memory_brain_metrics_router)
 api.include_router(admin_ads_router)
 api.include_router(admin_review_prompts_router)
 api.include_router(edu_browser_router)
