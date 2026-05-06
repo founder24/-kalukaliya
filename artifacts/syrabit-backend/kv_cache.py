@@ -174,6 +174,14 @@ class KvCache:
             self.kv_failures += 1
             logger.warning("[kv-cache] edge set failed for %r: %s", key, exc)
 
+    def clear_local(self, key: str) -> bool:
+        """Drop the in-process LRU entry WITHOUT touching the worker
+        mirror. Used by the Task #425 smoke endpoint to force the next
+        ``get`` to round-trip through the edge worker (and therefore
+        bump ``kv_reads``); a normal ``invalidate`` would also delete
+        the KV side and the follow-up GET would just see a 404 miss."""
+        return self._lru.invalidate(key)
+
     async def invalidate(self, key: str) -> None:
         """Remove from local + KV mirror (best-effort)."""
         self._lru.invalidate(key)

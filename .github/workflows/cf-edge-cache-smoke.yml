@@ -1,0 +1,147 @@
+name: cf-edge-cache-smoke
+
+#
+# Supply-chain hardening: every `uses:` reference in this file is pinned to a
+# full 40-char commit SHA (with a trailing `# vX.Y.Z` tag comment for
+# readability). Float tags like `actions/checkout@v4` are forbidden because a
+# compromise of the upstream tag — as happened with tj-actions/changed-files in
+# 2025 — would let an attacker silently exfiltrate this repo's secrets on the
+# next push. See https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+# To upgrade an action: look up the SHA for the new tag (e.g.
+# `gh api repos/actions/checkout/git/refs/tags/v4.3.0 --jq .object.sha`) and
+# update both the SHA and the trailing tag comment.
+#
+# Least-privilege scopes (Task #905): every workflow declares an explicit
+# top-level `permissions:` block granting only the `GITHUB_TOKEN` scopes its
+# jobs actually need — read-only by default. Omitting `permissions:` falls
+# back to the repo default (`contents: write`), which would defeat the
+# SHA-pinning hardening if a pinned action were ever compromised.
+#
+# Task #425 — End-to-end smoke for the CF_EDGE_CACHE_ON write-through path.
+#
+# What this proves
+# ----------------
+# The Task #405 done-criteria included "flipping CF_EDGE_CACHE_ON=1 in
+# staging makes the admin panel show non-zero kv_writes / kv_reads
+# counters under /admin/cf-health". Without this gate that outcome was
+# only verifiable by hand and a contract drift between
+# `kv_cache.KvCache` (Python client) and `dispatchKvCache` (TypeScript
+# worker) would only show up the first time an admin opened the panel
+# in staging — already too late.
+#
+# The smoke calls a dedicated `POST /admin/cf-health/kv-smoke` endpoint
+# that triggers a single `set → drop-LRU → get → invalidate` round trip
+# through the deployed edge worker, then re-reads `/admin/cf-health` to
+# assert that both `kv_writes` AND `kv_reads` advanced. A failure means
+# either:
+#   - the worker rejected the contract (auth / payload / route shape), OR
+#   - the backend client stopped issuing the HTTP hops (e.g. a refactor
+#     accidentally short-circuited on the LRU and never round-tripped).
+#
+# Cadence
+# -------
+#   - workflow_dispatch: manual smoke from the Actions tab.
+#   - workflow_run: fires after the staging deploy lane of
+#     azure-container-apps-deploy.yml so a regression is caught
+#     immediately on the freshly-deployed revision (only when the
+#     upstream workflow actually succeeded — there is no point smoking
+#     a failed deploy).
+#   - schedule: 04:11 UTC daily as a belt-and-suspenders gate against
+#     drift introduced by an unrelated config change (env var rename,
+#     KV namespace re-bind, etc.).
+#
+# Required repo secrets / vars
+# ----------------------------
+#   STAGING_BASE_URL       Repo variable. Backend base URL for the
+#                          staging deploy, e.g.
+#                          https://syrabit-backend-staging.eastus.azurecontainerapps.io
+#                          When unset the job no-ops with a clear log
+#                          line so a fresh fork doesn't fail noisily.
+#   STAGING_ADMIN_JWT      Repo secret. Long-lived admin Bearer token
+#                          accepted by `auth_deps.get_admin_user`. Same
+#                          token shape used by the admin dashboard. Must
+#                          ONLY be a staging credential — never wire the
+#                          production admin JWT here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Override STAGING_BASE_URL (e.g. https://staging.syrabit.ai)."
+        required: false
+        default: ""
+  workflow_run:
+    # Must match the upstream workflow's `name:` (not its filename) —
+    # GitHub's `workflow_run` trigger keys off the human-readable name.
+    workflows: ["Azure Container Apps deploy (manual)"]
+    types: [completed]
+    # No branch filter: the staging deploy lane can be invoked from any
+    # branch (Replit-agent, main, master, hot-fix branches), and we want
+    # the smoke to gate the freshly-deployed revision regardless of
+    # which branch shipped it.
+  schedule:
+    # 04:11 UTC daily — off the hour to dodge the GitHub cron stampede
+    # and offset from the other nightly probes (admin-smoke 02:00,
+    # grounded-recall 04:30, synthetic-probe-secrets 05:13).
+    - cron: "11 4 * * *"
+
+# Read-only token: this job checks out the repo and probes the deployed
+# staging backend over HTTPS. It does not write back to the repo, touch
+# packages, or open PRs.
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: CF_EDGE_CACHE write-through round trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # When fired by `workflow_run`, only run if the upstream deploy
+    # actually succeeded — smoking a failed deploy would just turn the
+    # workflow red for a reason already reported elsewhere.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+
+    defaults:
+      run:
+        working-directory: artifacts/syrabit-backend
+
+    env:
+      STAGING_BASE_URL: ${{ github.event.inputs.base_url || vars.STAGING_BASE_URL }}
+      STAGING_ADMIN_JWT: ${{ secrets.STAGING_ADMIN_JWT }}
+      STAGING_TIMEOUT_S: "20"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Task #906 — strip the GITHUB_TOKEN from .git/config after
+          # checkout. This job only runs an HTTP probe; persisting the
+          # token would only widen blast radius on an accidental .git/
+          # artifact upload.
+          persist-credentials: false
+
+      - name: Skip when staging not configured
+        id: gate
+        run: |
+          if [ -z "$STAGING_BASE_URL" ] || [ -z "$STAGING_ADMIN_JWT" ]; then
+            echo "::notice::STAGING_BASE_URL or STAGING_ADMIN_JWT not configured; skipping CF_EDGE_CACHE smoke."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install httpx
+        if: steps.gate.outputs.skip != 'true'
+        # The smoke script only needs the standard library + httpx, so
+        # avoid pulling the full backend requirements.txt for speed.
+        run: pip install "httpx>=0.27,<0.29"
+
+      - name: Run CF_EDGE_CACHE end-to-end smoke
+        if: steps.gate.outputs.skip != 'true'
+        run: python -m scripts.cf_edge_cache_smoke

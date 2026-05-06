@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from auth_deps import get_admin_user
 from config import (
@@ -211,6 +213,91 @@ async def admin_cf_tier2_apply(admin: dict = Depends(get_admin_user)):
         out["cache_rules"] = {"applied": False,
                               "error": f"{type(exc).__name__}: {exc}"}
     return out
+
+
+@router.post("/admin/cf-health/kv-smoke")
+async def admin_cf_health_kv_smoke(admin: dict = Depends(get_admin_user)):
+    """Task #425 — end-to-end smoke for the CF_EDGE_CACHE_ON write-through path.
+
+    Performs a single ``set → drop-LRU → get → invalidate`` round trip
+    against the deployed edge worker via the process-wide ``KvCache``
+    singleton. The two HTTP hops it generates show up in the
+    ``kv_writes`` / ``kv_reads`` counters surfaced under
+    ``/admin/cf-health → kv_cache``, so a CI smoke can:
+
+      1. Read ``/admin/cf-health`` and capture the baseline counters.
+      2. POST here to trigger the round trip.
+      3. Read ``/admin/cf-health`` again and assert both counters
+         incremented.
+
+    Done-criteria for Task #405 ("flipping CF_EDGE_CACHE_ON=1 in
+    staging makes the admin panel show non-zero kv_writes / kv_reads
+    counters") was previously only verifiable by hand. With this
+    endpoint a regression in either the Python client (``kv_cache.py``)
+    or the TypeScript worker (``dispatchKvCache``) breaks a CI gate
+    before it reaches production.
+
+    Returns 503 when the edge mirror is not active (flag off, URL or
+    secret unset) so the smoke fails loud rather than silently passing
+    while the counters stay at zero.
+    """
+    from kv_cache import default_cache
+
+    cache = default_cache()
+    if not cache._edge_active():  # noqa: SLF001 — internal gate is the source of truth
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "CF_EDGE_CACHE mirror is not active — set CF_EDGE_CACHE_ON=1 "
+                "and ensure CF_EDGE_PROXY_URL + D1_SYNC_SECRET are configured."
+            ),
+        )
+
+    pre = cache.snapshot()
+    key = f"_smoke/cf_edge_cache/{uuid.uuid4().hex}"
+    value = {"task": 425, "ts": time.time(), "marker": uuid.uuid4().hex}
+    started = time.time()
+
+    await cache.set(key, value, ttl_s=60)
+    # Drop the local LRU entry so the follow-up ``get`` is forced to
+    # round-trip through the worker (otherwise it would short-circuit on
+    # the in-process layer and ``kv_reads`` would stay flat).
+    cache.clear_local(key)
+    got = await cache.get(key)
+    # Best-effort cleanup — the KV TTL would expire it in 60s anyway,
+    # but explicit invalidation keeps the namespace tidy.
+    try:
+        await cache.invalidate(key)
+    except Exception:
+        # Do not let a cleanup failure mask a successful round trip.
+        pass
+
+    after = cache.snapshot()
+    round_trip_ok = (got == value)
+    kv_writes_delta = after["kv_writes"] - pre["kv_writes"]
+    kv_reads_delta = after["kv_reads"] - pre["kv_reads"]
+
+    return {
+        "ok": bool(round_trip_ok and kv_writes_delta >= 1 and kv_reads_delta >= 1),
+        "key": key,
+        "round_trip_ok": round_trip_ok,
+        "elapsed_ms": int((time.time() - started) * 1000),
+        "baseline": {
+            "kv_writes": pre["kv_writes"],
+            "kv_reads": pre["kv_reads"],
+            "kv_failures": pre["kv_failures"],
+        },
+        "after": {
+            "kv_writes": after["kv_writes"],
+            "kv_reads": after["kv_reads"],
+            "kv_failures": after["kv_failures"],
+        },
+        "deltas": {
+            "kv_writes": kv_writes_delta,
+            "kv_reads": kv_reads_delta,
+            "kv_failures": after["kv_failures"] - pre["kv_failures"],
+        },
+    }
 
 
 @router.get("/admin/cf-health")
