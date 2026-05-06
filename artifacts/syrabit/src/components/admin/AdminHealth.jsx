@@ -6,6 +6,7 @@ import TrustpilotRefreshCronPill from './TrustpilotRefreshCronPill';
 import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
 import CfAuditCard from './CfAuditCard';
+import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
 // Phase 4 — Task #332. SQS+Lambda worker tier health (replaces the
 // GCP Cloud Tasks tile inside AdminGcpPanel) and the Azure Container
 // Apps Jobs cron health table (replaces the Cloud Scheduler source
@@ -492,6 +493,23 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       .finally(() => setCfAuditLoading(false));
   }, [adminToken]);
 
+  // Task #419 — unified /admin/cf-health snapshot. We only consume the
+  // ai_gateway.cache_by_model slice today (top-models cache hit ratio
+  // tile), but holding the whole snapshot here keeps the door open for
+  // sibling CF workstream tiles to share the same fetch.
+  const [cfHealthData, setCfHealthData] = useState(null);
+  const [cfHealthLoading, setCfHealthLoading] = useState(false);
+
+  const loadCfHealth = useCallback(() => {
+    setCfHealthLoading(true);
+    axios.get(`${API_BASE}/admin/cf-health`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setCfHealthData(r.data))
+      .catch(() => setCfHealthData({ _error: true }))
+      .finally(() => setCfHealthLoading(false));
+  }, [adminToken]);
+
   // Task #902 — alerter-state lock-doc snapshots for the three cron
   // pills above. The pill data answers "is the workflow currently
   // red?"; the alert-state data answers "have we paged on-call about
@@ -855,6 +873,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     // Redis-caches the artifact summary per run_id for 4 hours so the
     // artifact ZIP is not re-downloaded on every poll.
     loadCfAudit();
+    // Task #419 — unified CF Health snapshot (ai_gateway cache-by-model tile).
+    loadCfHealth();
     // Task #255 — GCP credit burn panel row.
     loadGcpCredits();
     // Task #263 — CF add-on migration panel + per-provider credit burn panels.
@@ -878,6 +898,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadSlackWebhookMissingAlertStates();
       loadSlackWebhookMissingAlertHistories();
       loadCfAudit();
+      loadCfHealth();
       loadGcpCredits();
       loadCfAddons();
       loadAwsCredits();
@@ -892,7 +913,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadEdgeProxyDeployCronAlertState, loadCfDriftCronAlertState,
       loadTpCronAlertState, loadUnifiedLogsCfPullCronAlertState,
       loadSlackWebhookMissingAlertStates,
-      loadSlackWebhookMissingAlertHistories, loadCfAudit, loadGcpCredits,
+      loadSlackWebhookMissingAlertHistories, loadCfAudit, loadCfHealth, loadGcpCredits,
       loadCfAddons, loadAwsCredits, loadAzureCredits, loadAxiomCredits, loadSentryCredits]);
 
   // Task #609 — managed AI response cache stats + admin purge controls.
@@ -3551,6 +3572,25 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           data={cfAuditData}
           loading={cfAuditLoading}
           onRefresh={loadCfAudit}
+        />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="AI Gateway Cache by Model">
+        {/*
+          Task #419 — surface "top models by cache hit ratio" from the
+          unified /admin/cf-health snapshot. Until this tile shipped,
+          on-call could only see aggregate hit/miss totals on the CF
+          panel and had to slice ai_gateway.recent_samples by hand to
+          tell whether the cache was actually doing its job for the
+          high-volume models (e.g. llama-3.3-70b-instruct-fp8-fast vs
+          gpt-oss-120b). A model with no cache telemetry in the window
+          renders as "—" rather than 0% so it isn't mistaken for a
+          100% miss outlier.
+        */}
+        <AiGatewayCacheByModelTile
+          data={cfHealthData?.ai_gateway}
+          loading={cfHealthLoading}
+          onRefresh={loadCfHealth}
         />
         </SectionErrorBoundary>
 

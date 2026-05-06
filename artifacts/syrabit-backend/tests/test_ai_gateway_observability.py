@@ -99,6 +99,82 @@ def test_record_returns_summary_when_disabled(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Task #419 — per-model cache aggregation surfaced via snapshot() so the
+# admin CF Health tile can show "top models by cache hit ratio" without
+# re-slicing recent_samples on the frontend.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_cache_by_model_aggregates_per_model_hit_ratio(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # llama: 2 hits, 1 miss → 2/3
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({"cf-aig-cache-status": "MISS"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    # gpt-oss: 1 miss only → 0.0
+    record_aig_response({"cf-aig-cache-status": "MISS"},
+                        provider="workers_ai", model="gpt-oss-120b")
+    rows = snapshot()["cache_by_model"]
+    by_model = {r["model"]: r for r in rows}
+    assert by_model["llama-3.3-70b"]["hits"] == 2
+    assert by_model["llama-3.3-70b"]["misses"] == 1
+    assert by_model["llama-3.3-70b"]["hit_ratio"] == pytest.approx(2 / 3, rel=1e-3)
+    assert by_model["gpt-oss-120b"]["hit_ratio"] == 0.0
+    # llama (highest ratio) should sort before gpt-oss.
+    assert rows[0]["model"] == "llama-3.3-70b"
+
+
+def test_cache_by_model_renders_dash_when_no_cache_status(monkeypatch):
+    """A model whose samples carried no cf-aig-cache-status (e.g. only
+    guardrail events) must report hit_ratio=None so the frontend can
+    render '—' instead of misleadingly painting it as 0%."""
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # Guardrail-only event: cf-aig-* present, but no cache-status header.
+    record_aig_response({
+        "cf-aig-guardrail-action": "allow",
+        "cf-aig-log-id": "log-x",
+    }, provider="vertex", model="gemini-2.5-flash")
+    rows = snapshot()["cache_by_model"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["provider"] == "vertex"
+    assert row["model"] == "gemini-2.5-flash"
+    assert row["samples"] == 1
+    assert row["cache_status_total"] == 0
+    assert row["hit_ratio"] is None
+
+
+def test_cache_by_model_empty_when_no_samples(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import snapshot
+    snap = snapshot()
+    assert snap["cache_by_model"] == []
+
+
+def test_cache_by_model_ratio_rows_sort_before_dash_rows(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # Model A: has cache telemetry (1 miss → 0.0 ratio).
+    record_aig_response({"cf-aig-cache-status": "MISS"},
+                        provider="azure", model="model-a")
+    # Model B: only guardrail telemetry → ratio is None ("—").
+    record_aig_response({"cf-aig-guardrail-action": "allow"},
+                        provider="azure", model="model-b")
+    rows = snapshot()["cache_by_model"]
+    # Even though A's ratio is 0.0 and B's is None, A must sort first
+    # so the frontend's "top models" view does not bury a real 0% under
+    # rows with no telemetry at all.
+    assert [r["model"] for r in rows] == ["model-a", "model-b"]
+    assert rows[0]["hit_ratio"] == 0.0
+    assert rows[1]["hit_ratio"] is None
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Task #403 — integration test: a live chat call through the
 # providers/cloudflare_ai.py path (Workers AI via CF AI Gateway) must
 # bump aig_responses_total by 1. Uses httpx.MockTransport to shim the

@@ -177,6 +177,57 @@ def record_aig_response(headers: Any, *, provider: str = "",
     return summary
 
 
+def _aggregate_cache_by_model(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Task #419 — bucket the rolling sample window by ``(provider, model)``
+    so the admin CF Health tile can show on-call which model is most
+    often served from cache.
+
+    A bucket whose samples carried no ``cache_status`` at all (e.g. every
+    sample was a guardrail-only event with no ``cf-aig-cache-status``
+    header) reports ``hit_ratio = None``. The frontend renders that as
+    "—" rather than 0% so the tile does not paint a model that simply
+    has no cache telemetry as a "100% miss" outlier.
+    """
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for s in samples:
+        provider = s.get("provider") or "unknown"
+        model = s.get("model") or "unknown"
+        bucket = by_key.setdefault((provider, model), {
+            "provider": provider,
+            "model": model,
+            "samples": 0,
+            "hits": 0,
+            "misses": 0,
+            "bypass": 0,
+        })
+        bucket["samples"] += 1
+        cs = s.get("cache_status")
+        if cs == "hit":
+            bucket["hits"] += 1
+        elif cs == "miss":
+            bucket["misses"] += 1
+        elif cs == "bypass":
+            bucket["bypass"] += 1
+    out: list[dict[str, Any]] = []
+    for bucket in by_key.values():
+        cache_total = bucket["hits"] + bucket["misses"] + bucket["bypass"]
+        bucket["cache_status_total"] = cache_total
+        bucket["hit_ratio"] = (
+            round(bucket["hits"] / cache_total, 4) if cache_total else None
+        )
+        out.append(bucket)
+    # Sort: rows with a ratio first (highest hit_ratio, then most hits),
+    # rows with no cache telemetry (ratio is None) last so on-call's eye
+    # lands on the high-volume cached models first.
+    out.sort(key=lambda b: (
+        0 if b["hit_ratio"] is not None else 1,
+        -(b["hit_ratio"] or 0.0),
+        -b["hits"],
+        b["model"],
+    ))
+    return out
+
+
 def snapshot() -> dict[str, Any]:
     """Return a JSON-serialisable snapshot for the admin health route."""
     with _LOCK:
@@ -187,12 +238,18 @@ def snapshot() -> dict[str, Any]:
                    + counters["aig_cache_bypass"])
     hit_ratio = (counters["aig_cache_hits"] / cache_total) if cache_total else 0.0
     block_ratio = (counters["aig_guardrails_blocked"] / total) if total else 0.0
+    recent_samples = samples[-32:]  # cap to keep payload small
     return {
         "enabled": bool(CF_AIGW_OBS_ON),
         "counters": counters,
         "cache_hit_ratio": round(hit_ratio, 4),
         "guardrail_block_ratio": round(block_ratio, 4),
-        "recent_samples": samples[-32:],  # cap to keep payload small
+        "recent_samples": recent_samples,
+        # Task #419 — per-model breakdown built from the *same*
+        # ``recent_samples`` window the admin payload exposes, so the
+        # tile and the raw sample list cannot disagree about what
+        # "in the current window" means.
+        "cache_by_model": _aggregate_cache_by_model(recent_samples),
     }
 
 
