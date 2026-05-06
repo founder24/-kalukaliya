@@ -516,8 +516,13 @@ async def _try_vector_provider(
                         against namespace="as" — Task #291 cross-language RAG.
           • else      : Cohere embed (1024-dim, matches syrabit-ahsec default ns).
       - mongodb_atlas → Cohere embed (1024-dim, matches Atlas embedding space)
-      - vertex        → vertex_services.embed_text (Gemini RETRIEVAL_QUERY)
       - workers_ai    → raises immediately (no vector endpoint available)
+
+    Task #490: the `vertex` provider branch (Vertex `embed_text` +
+    Atlas `$vectorSearch`) was removed alongside the rest of the Vertex
+    chat/embed/Vector-Search scope-down. Vertex is now `content_format`
+    only; vector retrieval is Pinecone-primary with Atlas as the
+    weight-0 fallback.
     """
     # ── 1. Embed the query using the provider's required embedding model ───────
     q_vec: Optional[list] = None
@@ -592,8 +597,10 @@ async def _try_vector_provider(
             if m.get("metadata", {}).get("chapter_id")
         ]
 
-    elif provider in ("mongodb_atlas", "vertex"):
-        # Both Atlas and Vertex embed routes query Atlas $vectorSearch.
+    elif provider == "mongodb_atlas":
+        # Atlas $vectorSearch is the weight-0 fallback for vector
+        # retrieval. Task #490: the sibling `vertex` branch (Vertex
+        # embed + Atlas $vectorSearch) was removed.
         pipeline: list = [
             {
                 "$vectorSearch": {
@@ -664,15 +671,15 @@ async def _fetch_chunks_semantic(
 ) -> list:
     """Semantic retrieval with weighted fallback-without-replacement via PROVIDER_PRIORITY['vector_search'].
 
-    Dispatch order (by PROVIDER_CREDITS weight, now overridden by POOL_WEIGHTS["vector_search"]):
-      pinecone_ai(3000) → vertex(500) → mongodb_atlas(0) → workers_ai(0)
+    Dispatch order (by POOL_WEIGHTS["vector_search"], Task #490 update —
+    Vertex Vector-Search retriever was deleted):
+      pinecone_ai(1000) → mongodb_atlas(0) → workers_ai(0)
 
     select_provider("vector_search") draws a weighted provider without replacement.
     Each failed or zero-result attempt excludes that provider and redraws from the
     remaining weighted pool — identical fallback semantics to all other dispatch functions.
 
       - pinecone_ai   → Cohere embed + Pinecone syrabit-ahsec $vectorSearch  [primary]
-      - vertex        → Gemini embed + Atlas $vectorSearch                    [fallback]
       - mongodb_atlas → Cohere embed + Atlas $vectorSearch (weight-0, last resort)
       - workers_ai    → no vector endpoint; excluded immediately
 
@@ -706,12 +713,13 @@ async def _fetch_chunks_semantic(
     # is restricted to Pinecone Inference (multilingual-e5-large + namespace="as")
     # — the only embedding space that contains the Assamese corpus written by
     # scripts/embed_assamese_corpus.py. We deliberately do NOT fall back to
-    # Vertex/Atlas vector search on miss/error: those indexes are English-only
+    # Atlas vector search on miss/error: that index is English-only
     # (Cohere) and would silently surface English chapters as "Assamese
     # context", breaking the spec's Assamese-first guarantee. A miss here
-    # returns []; the chat layer then performs Sarvam→Vertex answer-only
+    # returns []; the chat layer then performs the Sarvam answer-only
     # fallback over the same (empty) Assamese context instead of crossing
-    # corpora.
+    # corpora. (Task #490: the prior Vertex leg in this fallback chain
+    # was removed entirely.)
     _is_as = (lang or "").lower().strip() == "as"
     if _is_as:
         try:

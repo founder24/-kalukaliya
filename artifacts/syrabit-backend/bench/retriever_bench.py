@@ -2,14 +2,18 @@
 retriever_bench.py — side-by-side latency + retrieval-overlap benchmark.
 
 Runs an identical query set against every available retriever
-(Vectorize and Vertex by default), reports p50 / p95 / p99 latency
+(`pinecone` and `vectorize` by default), reports p50 / p95 / p99 latency
 plus pairwise top-k overlap (Jaccard + intersection-at-k as proxy
 metrics for recall in the absence of a ground-truth gold set).
+
+Task #490: the legacy `vertex` retriever was deleted (Vertex Vector
+Search retired). The active retriever set is the Pinecone primary +
+the Cloudflare Vectorize cache.
 
 Usage:
     cd artifacts/syrabit-backend
     python -m bench.retriever_bench [--queries N] [--top-k K] \\
-        [--retrievers vectorize,vertex] [--out path.json]
+        [--retrievers pinecone,vectorize] [--out path.json]
 
 Exit codes:
     0 — at least one configured retriever served queries
@@ -20,16 +24,16 @@ Output JSON shape:
         "queries": ["…", "…", …],
         "top_k": 10,
         "retrievers": {
-            "vectorize": {
+            "pinecone": {
                 "configured": true,
                 "latency_ms": {"p50": …, "p95": …, "p99": …, "mean": …, "min": …, "max": …, "n": …},
                 "results": [{"query": "…", "ids": [...], "scores": [...], "ms": …}, …],
                 "errors": 0
             },
-            "vertex": { … }
+            "vectorize": { … }
         },
         "overlap": {
-            "vectorize_vs_vertex": {
+            "pinecone_vs_vectorize": {
                 "jaccard_mean": …,
                 "intersection_at_k_mean": …,
                 "perfect_overlap_pct": …,
@@ -252,7 +256,7 @@ def main() -> int:
                         help="Cap number of queries (0 = all).")
     parser.add_argument("--queries-file", default=os.environ.get("BENCH_QUERIES_FILE"))
     parser.add_argument("--top-k", type=int, default=int(os.environ.get("BENCH_TOP_K", "10")))
-    parser.add_argument("--retrievers", default=os.environ.get("BENCH_RETRIEVERS", "vectorize,vertex"))
+    parser.add_argument("--retrievers", default=os.environ.get("BENCH_RETRIEVERS", "pinecone,vectorize"))
     parser.add_argument("--out", default=os.environ.get("BENCH_OUT"))
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
