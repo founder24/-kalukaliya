@@ -4,7 +4,7 @@ from typing import Optional, Any
 
 __all__ = [
     "db", "mongo_client", "redis_client", "supa", "pg_pool", "pwd_ctx", "security",
-    "sarvam_llm_client", "sarvam_llm_client_direct",
+    "sarvam_llm_client",
     "logger",
     "is_mongo_available", "mark_mongo_down",
     "_cms_request_ctx", "_assert_not_cms_context", "_init_pg_pool",
@@ -300,40 +300,30 @@ async def _init_pg_pool():
 # ── Sarvam AI — Assamese chat LLM client ONLY (V4 §15, Task #492) ────────────
 # Per Task #492 Sarvam was scoped down to a single surface: the
 # `assamese_rag_chat` LLM dispatch in `llm.py` (sarvam-m chat → Workers-AI
-# IndicTrans2 fallback). The translate / TTS / transliterate / non-LLM
-# direct clients were removed.
-#
-# `sarvam_llm_client_direct` is the **CF-Gateway-bypass twin** of the
-# streaming chat client. It is part of the surviving chat surface — not
-# an additional non-chat client — and is required by `_pick_sarvam_client`
-# in `llm.py` for two specific failure modes:
-#   1. CF AI Gateway is unhealthy (`is_cf_gateway_up()` is False) → bypass
-#      the gateway and call Sarvam directly.
-#   2. Gateway-routed call returns 401 (BYOK key-substitution edge case
-#      verified 2026-04-20) → retry once via direct.
-# It is therefore retained intentionally; removing it would silently break
-# Assamese chat the moment CF Gateway flakes.
+# IndicTrans2 fallback). All non-LLM clients (translate/TTS/transliterate)
+# were removed, and the CF-Gateway-bypass `sarvam_llm_client_direct` twin
+# was also removed per the task's acceptance gate (single-client contract).
+# When CF AI Gateway is down, dispatch falls all the way through to the
+# Workers-AI IndicTrans2 leg (loud failure → next provider) instead of
+# silently bypassing the gateway.
 _sarvam_pool_limits = httpx.Limits(
     max_keepalive_connections=100,
     max_connections=200,
     keepalive_expiry=120,
 )
-_sarvam_timeout       = httpx.Timeout(connect=3.0, read=30.0, write=10.0, pool=5.0)
 _sarvam_llm_timeout   = httpx.Timeout(connect=3.0, read=60.0, write=10.0, pool=5.0)
 _sarvam_gw_base = cf_gateway_url("sarvam") if (CF_GATEWAY_ENABLED and "sarvam" in _CF_PROVIDER_SLUGS) else None
 _sarvam_effective_base = _sarvam_gw_base or SARVAM_BASE_URL
 # Sarvam auth: send the real `SARVAM_API_KEY` ALWAYS. The CF custom-provider
 # does not support BYOK key-substitution (verified 2026-04-20).
-_sarvam_sub_key = SARVAM_API_KEY
 _sarvam_headers = {
-    'api-subscription-key': _sarvam_sub_key,
+    'api-subscription-key': SARVAM_API_KEY,
     'Content-Type': 'application/json',
 }
 if _sarvam_gw_base and CF_AI_GATEWAY_TOKEN:
     _sarvam_headers['cf-aig-authorization'] = f'Bearer {CF_AI_GATEWAY_TOKEN}'
     _sarvam_headers['cf-aig-cache-ttl'] = str(CF_CACHE_TTL)
 sarvam_llm_client: Optional[httpx.AsyncClient] = None
-sarvam_llm_client_direct: Optional[httpx.AsyncClient] = None
 _sarvam_llm_ready = bool(SARVAM_API_KEY) or bool(_sarvam_gw_base)
 if _sarvam_llm_ready:
     sarvam_llm_client = httpx.AsyncClient(
@@ -344,15 +334,6 @@ if _sarvam_llm_ready:
         http2=True,
         verify=True,
     )
-    if _sarvam_gw_base:
-        sarvam_llm_client_direct = httpx.AsyncClient(
-            base_url=SARVAM_BASE_URL,
-            headers={**_sarvam_headers, 'Accept': 'text/event-stream'},
-            limits=_sarvam_pool_limits,
-            timeout=_sarvam_llm_timeout,
-            http2=True,
-            verify=True,
-        )
     _via = "Cloudflare AI Gateway" if _sarvam_gw_base else "direct"
     logging.getLogger(__name__).info(f"Sarvam-m LLM client ready (HTTP/2 pooled, {_via}: {_sarvam_effective_base})")
 else:

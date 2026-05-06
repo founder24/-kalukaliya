@@ -2029,19 +2029,15 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                     <div>
                       <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                         Indic provider
-                        <span className="ml-2 text-[10px] font-normal text-amber-600 normal-case tracking-normal">A/B</span>
+                        <span className="ml-2 text-[10px] font-normal text-emerald-700 normal-case tracking-normal">LOCKED · V4 §15</span>
                       </label>
-                      <select
-                        value={asmDraft.indic_provider}
-                        onChange={(e) => setAsmDraft(d => ({ ...d, indic_provider: e.target.value }))}
-                        className="w-full text-sm font-mono px-3 py-2 rounded-lg border border-gray-200 focus:border-violet-300 focus:ring-1 focus:ring-violet-200 outline-none"
+                      <div
+                        className="w-full text-sm font-mono px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 select-none"
                         data-testid="select-asm-indic-provider"
-                        title="sarvam = Sarvam-m chat (assamese_rag_chat); falls back to Workers-AI IndicTrans2 (V4 §15 / Task #492)"
+                        title="V4 §15 / Task #492 locks the Indic chat provider to sarvam-m chat (assamese_rag_chat) → Workers-AI IndicTrans2 fallback. Vertex was removed by Task #490."
                       >
-                        {(asmCfg.config?.valid_indic_providers || ['sarvam', 'vertex']).map(p => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
-                      </select>
+                        sarvam <span className="text-emerald-600 text-xs">(assamese_rag_chat → Workers-AI IndicTrans2)</span>
+                      </div>
                     </div>
                   </div>
 

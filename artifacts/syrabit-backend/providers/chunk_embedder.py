@@ -418,7 +418,7 @@ async def translate_chapters_to_assamese(
     ).limit(limit).to_list(length=limit)
 
     total = len(chapters)
-    translated = failed = skipped = 0
+    translated_count = failed = skipped = 0
 
     # Task #492 — translate via the unified weighted dispatch (Workers-AI
     # IndicTrans2 primary). The Sarvam-specific HTTP loop was removed
@@ -442,12 +442,12 @@ async def translate_chapters_to_assamese(
         ok = True
         for part in parts:
             try:
-                translated = await asyncio.wait_for(
+                translated_text = await asyncio.wait_for(
                     call_translate_with_dispatch(part, "en-IN", "as-IN", lang="as"),
                     timeout=8.0,
                 )
-                if translated:
-                    translated_parts.append(translated.strip())
+                if translated_text:
+                    translated_parts.append(translated_text.strip())
                 else:
                     logger.warning("[chunk_embedder] Empty translation for chapter %s", ch["id"])
                     ok = False
@@ -477,19 +477,19 @@ async def translate_chapters_to_assamese(
         except Exception:
             pass
 
-        translated += 1
+        translated_count += 1
         logger.info("[chunk_embedder] Translated '%s' (%d chars → %d chars as)", ch["title"][:40], len(content), len(content_as))
         await asyncio.sleep(0.2)
 
     # Re-embed all modified chunks
     embed_result = {}
-    if translated > 0:
+    if translated_count > 0:
         embed_result = await embed_chunks_bulk(db, force_all=False)
 
     duration = round(time.perf_counter() - t0, 2)
     return {
         "total":        total,
-        "translated":   translated,
+        "translated":   translated_count,
         "failed":       failed,
         "skipped":      skipped,
         "duration_s":   duration,

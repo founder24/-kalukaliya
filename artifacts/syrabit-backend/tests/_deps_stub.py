@@ -240,10 +240,10 @@ def install_deps_stub(*, force: bool = False, db: Any = None,
 
     _set("logger", logging.getLogger("tests.deps_stub"))
 
-    # Sarvam chat client — only the `assamese_rag_chat` LLM client and its
-    # CF-gateway-bypass twin survive (V4 §15 / Task #492).
+    # Sarvam chat client — V4 §15 / Task #492 collapsed Sarvam to a single
+    # surface: the `assamese_rag_chat` LLM client. The CF-gateway-bypass
+    # twin (`sarvam_llm_client_direct`) was removed per the acceptance gate.
     _set("sarvam_llm_client", None)
-    _set("sarvam_llm_client_direct", None)
 
     # Misc helpers production code occasionally pulls.
     def _noop_assert_not_cms_context(*_a, **_kw):

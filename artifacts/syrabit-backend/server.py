@@ -308,7 +308,7 @@ _validate_env()
 
 from config import ROOT_DIR, CORS_ORIGINS, CORS_ORIGIN_REGEX, _CORS_ALLOW_CREDENTIALS, Configurator
 from deps import (
-    db, sarvam_llm_client, sarvam_llm_client_direct,
+    db, sarvam_llm_client,
     mongo_client, logger, _init_pg_pool,
 )
 from auth_deps import _rate_limiter_cleanup
@@ -1921,8 +1921,7 @@ async def lifespan(app):
             pass
     if sarvam_llm_client:
         await sarvam_llm_client.aclose()
-    if sarvam_llm_client_direct:
-        await sarvam_llm_client_direct.aclose()
+    # Task #492: sarvam_llm_client_direct removed — single-client contract.
     try:
         from ga4_client import _ga4_http
         if _ga4_http:
