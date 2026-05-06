@@ -1667,6 +1667,28 @@ async def lifespan(app):
     except Exception as _d1_err:
         logger.warning(f"d1_sync nightly loop not started: {_d1_err}")
 
+    # Task #460 — watchdog for the safety net above. If BOTH the
+    # external Cloud Scheduler ping AND the in-process nightly loop
+    # fail (stuck lease, wedged sync coroutine, repeated transient
+    # failures), ``/admin/cf-health.d1_mirror.lag_seconds`` quietly
+    # climbs without anyone noticing. This loop pages on-call once
+    # the lag exceeds ``D1_MIRROR_LAG_THRESHOLD_S`` (default 36h)
+    # for ``D1_MIRROR_LAG_REQUIRED_STREAK`` consecutive checks
+    # (default 2), and fires a one-shot recovery alert as soon as a
+    # fresh sync lands. Mongo-leased across replicas; no-ops cleanly
+    # when ``D1_MIRROR_ON`` is off.
+    try:
+        from routes.admin_d1_mirror_lag_alerts import (
+            _d1_mirror_lag_alert_loop,
+        )
+        _aca_create_task(
+            _d1_mirror_lag_alert_loop(), key="d1-mirror-lag-alert",
+        )
+    except Exception as _d1_lag_err:
+        logger.warning(
+            f"d1_mirror lag alert loop not started: {_d1_lag_err}"
+        )
+
     # Task #314 uses atomic Mongo CAS via db.job_locks for dedup across
     # replicas, so it does not need a leader gate.
     _aca_create_task(_bot_traffic_report_loop(), key="bot-traffic-report")
@@ -2062,6 +2084,12 @@ from routes.admin_cf_enterprise import router as admin_cf_enterprise_router
 from routes.admin_logs_cf_pull_silence_alerts import (
     router as admin_logs_cf_pull_silence_alerts_router,
 )
+# Task #460 — admin-readable surface for the D1 mirror lag watchdog
+# (status pill + lag/threshold/streak snapshot). Pairs with the
+# in-process ``_d1_mirror_lag_alert_loop`` started in the lifespan.
+from routes.admin_d1_mirror_lag_alerts import (
+    router as admin_d1_mirror_lag_alerts_router,
+)
 # Task #952 — pages on-call when busy hours saturate the 200-buckets
 # CF GraphQL cap and the unified-logs explorer starts losing rows
 # (the failure mode Task #948's pagination surfaces but doesn't
@@ -2245,6 +2273,7 @@ api.include_router(cf_waf_drift_cron_heartbeat_router)
 api.include_router(admin_cf_waf_drift_cron_alerts_router)
 api.include_router(admin_cf_enterprise_router)
 api.include_router(admin_logs_cf_pull_silence_alerts_router)
+api.include_router(admin_d1_mirror_lag_alerts_router)
 api.include_router(admin_logs_cf_pull_saturation_alerts_router)
 api.include_router(admin_slack_webhook_missing_alerts_router)
 api.include_router(synthetic_probe_secret_alert_router)
