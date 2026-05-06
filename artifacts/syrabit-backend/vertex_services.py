@@ -413,7 +413,7 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
 
     # Task #490 — V4 §3 Vertex embed fallback REMOVED. The legacy
     # second-Pinecone-namespace path, the `RAG_EMBEDDING_PROVIDER`
-    # toggle for the Vertex fallback, and `providers/vertex_embed.py`
+    # toggle for the Vertex fallback, and the legacy Vertex embed module
     # are all gone (see V4 §15 amendment). On Workers-AI custom
     # embed outage the new Option-D contract (V4 §15 amendment) is:
     #

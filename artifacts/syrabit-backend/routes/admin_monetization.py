@@ -76,9 +76,10 @@ DEFAULT_API_CONFIG = {
     "google_auth": {"client_id": "", "client_secret": "", "enabled": False},
     "supabase":    {"url": "", "service_key": "", "anon_key": ""},
     # Task #607: active chat model for the user-facing chat stream.
+    # Task #490: Vertex was removed from the chat hot-path; only
+    # Workers-AI variants are valid here.
     # "openai/gpt-oss-20b"  → Workers AI GPT-OSS-20B (primary, no quota issues)
     # "openai/gpt-oss-120b" → Workers AI GPT-OSS-120B (higher quality)
-    # "vertex/gemini-flash" → Vertex AI Gemini Flash (if quota available)
     "chat_model":  {"default": "openai/gpt-oss-20b"},
 }
 

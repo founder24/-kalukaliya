@@ -2980,8 +2980,11 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     # admin toggle is also gone (Sarvam is the sole Indic provider per V4 §4).
     _indic_vertex_active = False  # retained for downstream conditionals (Task #490)
 
-    # If a caller still asks for the legacy Vertex chat alias, redirect to
-    # the SLM pool so the request never falls through to a missing branch.
+    # Task #490 — Vertex chat hot-path was removed. Some clients (admin
+    # API config, env CHAT_DEFAULT_MODEL set on legacy deploys) still
+    # send the legacy `"vertex/gemini-flash"` alias; transparently
+    # rewrite it to the Workers-AI primary so the request lands on a
+    # live branch instead of 5xxing.
     if use_model_raw == "vertex/gemini-flash":
         use_model_raw = "openai/gpt-oss-20b"
         model = use_model_raw

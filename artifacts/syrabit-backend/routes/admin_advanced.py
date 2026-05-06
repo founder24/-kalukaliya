@@ -1757,10 +1757,12 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
         "burst_429_60s":  burst_60,
         "note": (
             "routing_chains: Bedrock REMOVED from all pools (AWS account-wide daily token quota exhausted). "
-            "english_rag_chat = azure_openai/gpt-4.1-mini (10000) → vertex/gemini-2.5-flash (100) → sarvam (50) → workers_ai (0); "
-            "assamese_rag_chat = sarvam/sarvam-m (10000) → vertex/gemini-2.5-flash (100) → workers_ai_indic (0, last-resort). "
-            "Active chat/content allowlist: Azure OpenAI, Vertex (Gemini), Sarvam, Workers AI. "
-            "Safety pool primary is now Vertex (Gemini). Re-add Bedrock only after AWS Service Quotas are raised. "
+            "Task #490 — Vertex REMOVED from chat/safety pools entirely; only "
+            "remaining Vertex surface is `content_format` (NotebookLM-style polish). "
+            "english_rag_chat = azure_openai/gpt-4.1-nano (10000) → workers_ai_llama32_3b / workers_ai_mistral_7b / workers_ai (0, last-resort fallbacks); "
+            "assamese_rag_chat = sarvam/sarvam-m (10000) → workers_ai_indic (0, last-resort). "
+            "Active chat/content allowlist: Azure OpenAI, Sarvam, Workers AI. "
+            "Safety pool primary is Workers AI. Re-add Bedrock only after AWS Service Quotas are raised. "
             "burst_429 uses Redis when available (180s TTL); burst_429_60s is always in-process."
         ),
     }

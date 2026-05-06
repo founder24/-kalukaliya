@@ -11,10 +11,18 @@ Public API:
     await format_with_vertex(text, *, style="notebook_lm", lang="en",
                              max_tokens=4000, timeout_s=15.0) -> str
 
-`style` selects the system prompt template ("notebook_lm" is the only
-shipped style today; future styles can be appended without callers
-having to change). `lang` controls language preservation ("en" or
-"as"); the formatter is forbidden from translating between languages.
+`style` selects the system prompt template:
+    - "notebook_lm" (default) — NotebookLM-style polished study notes.
+    - "study_notes"           — concise exam-prep notes; same backend
+                                prompt today, reserved for future
+                                divergence so callers can lock the
+                                contract now.
+    - "flashcard"             — 1-2 sentence Q/A flashcard polish; same
+                                backend prompt today, reserved for
+                                future divergence.
+
+`lang` controls language preservation ("en" or "as"); the formatter is
+forbidden from translating between languages.
 
 Auth: GOOGLE_APPLICATION_CREDENTIALS_JSON service account JSON blob,
 project picked from GCP_PROJECT_ID / GOOGLE_CLOUD_PROJECT /
@@ -77,14 +85,20 @@ _NOTEBOOK_LM_SYSTEM_AS = (
 )
 
 
+SUPPORTED_STYLES: frozenset[str] = frozenset({"notebook_lm", "study_notes", "flashcard"})
+
+
 def _select_system_prompt(style: str, lang: str) -> str:
     style_norm = (style or "notebook_lm").strip().lower()
     lang_norm = (lang or "en").strip().lower()
-    if style_norm != "notebook_lm":
+    if style_norm not in SUPPORTED_STYLES:
         raise ValueError(
-            f"vertex_format: unknown style {style!r} — only 'notebook_lm' "
-            f"is shipped today"
+            f"vertex_format: unknown style {style!r} — supported styles: "
+            f"{sorted(SUPPORTED_STYLES)}"
         )
+    # All shipped styles currently share the NotebookLM-style prompt
+    # backend; the public surface keeps them distinct so wiring tasks
+    # (#494 / #519) can specialize each style without breaking callers.
     return _NOTEBOOK_LM_SYSTEM_AS if lang_norm.startswith("as") else _NOTEBOOK_LM_SYSTEM_EN
 
 

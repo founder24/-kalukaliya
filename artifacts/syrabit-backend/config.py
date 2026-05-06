@@ -569,9 +569,10 @@ except ValueError:
 # a new long-term-memory MongoDB collection (``memory_brain``) and is
 # no longer touched on the chunk path.
 #
-# Old providers (cohere, vertex_embed, voyage on chunks, workers_ai
-# bge-small) stay in the repo but are skipped at runtime when the new
-# flags are on. Flip the env values back to roll back.
+# Old providers (cohere, voyage on chunks, workers_ai bge-small) stay
+# in the repo but are skipped at runtime when the new flags are on.
+# Flip the env values back to roll back. Task #490: `vertex_embed` was
+# removed entirely — Vertex is `content_format` only.
 EMBED_PROVIDER_PRIMARY = os.environ.get(
     'EMBED_PROVIDER_PRIMARY', 'workers_ai_custom'
 ).strip().lower() or 'workers_ai_custom'
@@ -600,7 +601,9 @@ VERTEX_GEMINI_MODEL = os.environ.get('VERTEX_GEMINI_MODEL', 'gemini-2.5-flash').
 # Accepted values:
 #   "openai/gpt-oss-20b"   — Workers AI GPT-OSS-20B (primary, no quota issues)
 #   "openai/gpt-oss-120b"  — Workers AI GPT-OSS-120B (higher quality, content tasks)
-#   "vertex/gemini-flash"  — Vertex AI Gemini Flash (set via CHAT_DEFAULT_MODEL env if needed)
+# Task #490: `"vertex/gemini-flash"` is no longer a valid value — Vertex
+# was scoped out of the chat hot-path; the dispatcher rewrites the legacy
+# alias to `openai/gpt-oss-20b` for backward compatibility.
 CHAT_DEFAULT_MODEL = os.environ.get(
     'CHAT_DEFAULT_MODEL',
     'openai/gpt-oss-20b',

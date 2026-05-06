@@ -9,8 +9,9 @@ Surfaces three pills for the admin dashboard:
   * **memory**  — the Voyage-backed Mongo memory_brain via
                   ``providers.memory_brain.health_check``.
 
-Disabled providers (cohere, voyage on chunks, vertex_embed, workers_ai
-bge-small fallback) are listed under ``dormant`` so the operator can
+Disabled providers (cohere, voyage on chunks, workers_ai bge-small
+fallback; `vertex_embed` was removed entirely by Task #490) are listed
+under ``dormant`` so the operator can
 see the full pre-Task-#382 layout without the dispatchers actually
 calling them. Each entry carries the flag name + active value so the
 rollback procedure is self-documenting in the dashboard.
