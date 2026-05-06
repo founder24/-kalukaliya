@@ -5,6 +5,7 @@ import CfWafDriftCronPill from './CfWafDriftCronPill';
 import TrustpilotRefreshCronPill from './TrustpilotRefreshCronPill';
 import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
+import EmbedBackfillPill from './EmbedBackfillPill';
 import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
 // Phase 4 — Task #332. SQS+Lambda worker tier health (replaces the
@@ -3573,6 +3574,18 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           loading={cfAuditLoading}
           onRefresh={loadCfAudit}
         />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="Embed Backfill Progress">
+        {/*
+          Task #433 — surface the legacy → workers_ai_custom embed
+          backfill (Task #411) on the admin dashboard so on-call can
+          see *which* old provider produced the chunks still pending
+          re-embed (cohere / voyage / (missing)) instead of treating
+          the backlog as one opaque bucket. Endpoint:
+          /admin/embed/backfill/progress.
+        */}
+        <EmbedBackfillPill adminToken={adminToken} />
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="AI Gateway Cache by Model">

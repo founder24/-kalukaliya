@@ -87,10 +87,42 @@ def _make_db(chunks: list[dict]):
     async def _count_documents(query):
         return len([c for c in chunks_state if _matches(c, query)])
 
+    def _aggregate(pipeline):
+        # Minimal $match + $group aggregation good enough for the
+        # embed_backfill ``_remaining_by_source`` pipeline.
+        match_stage = next((s["$match"] for s in pipeline if "$match" in s), {})
+        group_stage = next((s["$group"] for s in pipeline if "$group" in s), None)
+        rows = [c for c in chunks_state if _matches(c, match_stage)]
+        results: list[dict] = []
+        if group_stage and group_stage.get("_id") == "$embedding_source":
+            buckets: dict = {}
+            for row in rows:
+                key = row.get("embedding_source")
+                buckets[key] = buckets.get(key, 0) + 1
+            results = [{"_id": k, "n": n} for k, n in buckets.items()]
+
+        cursor = MagicMock()
+
+        class _AsyncIter:
+            def __init__(self, items):
+                self._items = list(items)
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self._items:
+                    raise StopAsyncIteration
+                return self._items.pop(0)
+
+        cursor.__aiter__ = lambda self=cursor: _AsyncIter(results).__aiter__()
+        return cursor
+
     chunks_coll = MagicMock(name="chunks")
     chunks_coll.find = _find
     chunks_coll.bulk_write = _bulk_write
     chunks_coll.count_documents = _count_documents
+    chunks_coll.aggregate = _aggregate
 
     state_coll = MagicMock(name="embed_backfill_state")
 
@@ -407,3 +439,32 @@ async def test_get_progress_reports_remaining_and_total():
     assert progress["re_embedded"] == 1
     assert progress["batch_size"] == embed_backfill.BATCH_SIZE
     assert progress["max_rpm"] == embed_backfill.MAX_RPM
+
+
+@pytest.mark.asyncio
+async def test_get_progress_breaks_remaining_down_by_source():
+    """Task #433 — admins need a per-old-provider breakdown of the
+    chunks still on the legacy embed stack so they can tell whether
+    the backlog is mostly Cohere (safe to defer) or something more
+    drift-prone. Missing/null tags are bucketed under '(missing)' so
+    the breakdown sums to the overall ``remaining`` count."""
+    from aca_jobs import embed_backfill
+
+    db, _, _, _ = _make_db([
+        {"_id": "c1", "content": "x", "embedding_source": "cohere"},
+        {"_id": "c2", "content": "x", "embedding_source": "cohere"},
+        {"_id": "v1", "content": "x", "embedding_source": "voyage"},
+        {"_id": "n1", "content": "x"},  # missing tag → '(missing)'
+        {"_id": "ok", "content": "x", "embedding_source": "workers_ai_custom"},
+    ])
+
+    progress = await embed_backfill.get_progress(db)
+
+    assert progress["remaining"] == 4
+    by_source = progress["remaining_by_source"]
+    assert by_source == {"cohere": 2, "voyage": 1, "(missing)": 1}
+    # Sanity: the breakdown sums to the overall remaining count, so the
+    # admin pill never shows a "missing chunks" gap.
+    assert sum(by_source.values()) == progress["remaining"]
+    # Already-migrated chunks are excluded from the breakdown.
+    assert "workers_ai_custom" not in by_source

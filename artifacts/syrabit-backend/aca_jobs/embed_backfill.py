@@ -123,6 +123,46 @@ async def _count_total(db: Any) -> int:
         return 0
 
 
+async def _remaining_by_source(db: Any) -> dict:
+    """Group still-legacy chunks by their current ``embedding_source`` tag.
+
+    Task #433 — admins need to know which *old* provider produced the
+    vectors still waiting to be re-embedded. The job flips every legacy
+    chunk to ``workers_ai_custom`` while in flight, so without a per-tag
+    breakdown the dashboard treats Cohere/Voyage/(missing) as one
+    opaque bucket. Returns a dict like ``{"cohere": 12000,
+    "voyage": 800, "(missing)": 50}``. Missing/null tags are bucketed
+    under the ``"(missing)"`` key so the breakdown surfaces *every*
+    pending chunk (not just the ones with an explicit source).
+
+    Always returns a dict — on aggregation failure we degrade to ``{}``
+    rather than blowing up the whole progress payload.
+    """
+    out: dict[str, int] = {}
+    pipeline = [
+        {"$match": {"embedding_source": {"$ne": TARGET_SOURCE_TAG}}},
+        {"$group": {"_id": "$embedding_source", "n": {"$sum": 1}}},
+    ]
+    try:
+        cursor = db.chunks.aggregate(pipeline)
+        async for doc in cursor:
+            key = doc.get("_id")
+            label = str(key) if key else "(missing)"
+            try:
+                n = int(doc.get("n", 0))
+            except Exception:
+                continue
+            if n > 0:
+                # Aggregation can in principle yield duplicate keys when
+                # the source field has whitespace/casing variants — sum
+                # rather than overwrite so the breakdown matches the
+                # overall ``remaining`` total.
+                out[label] = out.get(label, 0) + n
+    except Exception as exc:
+        logger.debug("[embed_backfill] remaining_by_source failed: %s", exc)
+    return out
+
+
 async def _embed_texts(texts: list[str]) -> list[Optional[list[float]]]:
     """Call the new Workers-AI custom embed worker. Never raises."""
     from providers import workers_embed as _we
@@ -168,10 +208,12 @@ async def get_progress(db: Any) -> dict:
     total = await _count_total(db)
     done = max(total - remaining, 0)
     pct = round((done / total) * 100.0, 2) if total else 0.0
+    by_source = await _remaining_by_source(db)
     return {
         "target_source":   TARGET_SOURCE_TAG,
         "total_chunks":    total,
         "remaining":       remaining,
+        "remaining_by_source": by_source,
         "re_embedded":     done,
         "percent":         pct,
         "running":         bool(state.get("running")),
