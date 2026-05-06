@@ -4087,21 +4087,34 @@ async def call_embed_with_dispatch(
     # above still return; everything else raises `EmbedDeferredError`
     # so callers fail loud instead of getting a silent zero-vector.
     if os.environ.get("EMBED_DEGRADED_MODE", "").strip().lower() in {"1", "true", "yes"}:
+        # Deterministic chunk_id so replay upserts into the same Pinecone
+        # vector slot as the original embed would have. Matches the
+        # consumer contract in `sqs_consumers/reembed.py` (`chunk_id` +
+        # `text` are required, everything else has consumer defaults).
+        _chunk_id = "embed:" + hashlib.sha256(
+            f"{lang}|{task_type}|{text}".encode("utf-8")
+        ).hexdigest()
         try:
             from sqs_fanout import enqueue as _sqs_enqueue
             await _sqs_enqueue(
                 "reembed",
                 {
+                    "chunk_id": _chunk_id,
                     "text": text,
                     "task_type": task_type,
                     "lang": lang,
                     "namespace": os.environ.get("PINECONE_NAMESPACE", "cached_gemma_today"),
                 },
             )
-        except Exception:
-            log.exception("EMBED_DEGRADED_MODE: reembed enqueue failed (will be retried by caller)")
+        except Exception as _enqueue_exc:
+            # Fail loud — do NOT claim the chunk was enqueued when it
+            # wasn't. Caller decides whether to surface or retry.
+            log.exception("EMBED_DEGRADED_MODE: reembed enqueue failed for chunk_id=%s", _chunk_id)
+            raise RuntimeError(
+                f"embed: EMBED_DEGRADED_MODE=true and reembed enqueue failed: {_enqueue_exc}"
+            ) from _enqueue_exc
         raise RuntimeError(
-            "embed: EMBED_DEGRADED_MODE=true — chunk enqueued to "
+            f"embed: EMBED_DEGRADED_MODE=true — chunk_id={_chunk_id} enqueued to "
             "syrabit-reembed-queue for deferred replay; caller should "
             "serve from Vectorize cache only (V4 §15)"
         )

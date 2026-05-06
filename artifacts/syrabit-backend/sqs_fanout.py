@@ -92,14 +92,46 @@ def _sqs_client():
     return boto3.client("sqs", region_name=_AWS_REGION, config=cfg)
 
 
+@lru_cache(maxsize=64)
+def _resolve_per_queue_param(queue_key: str) -> str | None:
+    """Fallback resolver: each queue may publish its own SSM parameter
+    at `<base>/<queue_key>` (string-typed, plain URL value). Used when
+    the composite map doesn't carry the key — see
+    `artifacts/syrabit/infra/aws/sqs-reembed.tf` for the canonical
+    layered-key example. Returns None when no such parameter exists so
+    callers can surface a single, clear error from `_resolve()`.
+    """
+    if boto3 is None:
+        return None
+    try:
+        ssm = boto3.client("ssm", region_name=_AWS_REGION)
+        resp = ssm.get_parameter(Name=f"{_QUEUE_URL_SSM_PARAM}/{queue_key}", WithDecryption=False)
+        return resp["Parameter"]["Value"].strip() or None
+    except Exception:
+        return None
+
+
 def _resolve(queue_key: str) -> str:
+    # 1. composite map (the cheapest path — one SSM read cached for the
+    #    process lifetime; covers every queue declared via `sqs.tf`'s
+    #    for_each).
     try:
         return _queue_url_map()[queue_key]
-    except KeyError as e:
-        raise KeyError(
-            f"Unknown SQS queue key {queue_key!r}; "
-            f"check docs/infra/inventory/cloud-tasks.json + infra/aws/sqs.tf"
-        ) from e
+    except KeyError:
+        pass
+    # 2. per-queue param fallback (Task #489 — used by independently
+    #    declared queues like `reembed` whose Terraform layers a single
+    #    new key without re-rendering the composite map).
+    per_queue = _resolve_per_queue_param(queue_key)
+    if per_queue:
+        return per_queue
+    raise KeyError(
+        f"Unknown SQS queue key {queue_key!r}; "
+        f"checked composite SSM param {_QUEUE_URL_SSM_PARAM!r} and "
+        f"per-queue param {_QUEUE_URL_SSM_PARAM}/{queue_key!r}. "
+        f"See docs/infra/inventory/cloud-tasks.json + infra/aws/sqs.tf "
+        f"+ infra/aws/sqs-reembed.tf."
+    )
 
 
 async def enqueue(queue_key: str, payload: dict[str, Any]) -> str:
