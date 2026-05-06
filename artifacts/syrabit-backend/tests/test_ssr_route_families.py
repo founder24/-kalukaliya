@@ -237,15 +237,26 @@ def test_pyq_year_paper_renders_dedicated_landing(ssr_client):
 
 def test_pyq_shortcut_proxies_to_subject_with_query(ssr_client):
     """The middleware maps ``/pyq/<board>/<class>/<subject>`` →
-    ``/api/seo/html/subject/...?page_type=pyq``. Verify the subject
-    route accepts the query string without 500'ing (the page_type
-    filter is best-effort on the backend)."""
+    ``/api/seo/html/subject/...?page_type=pyq``. Task #431 — when
+    ``page_type=pyq`` is set, the subject landing must reframe to
+    PYQ (title/meta + topic links pointing at the PYQ page)."""
     res = ssr_client.get(
         "/api/seo/html/subject/ahsec/class-12/physics",
         params={"page_type": "pyq"},
     )
     assert res.status_code == 200
     assert "text/html" in res.headers.get("content-type", "")
+    body = res.text
+    # Title + meta description must reflect the PYQ framing.
+    assert "Previous Year Questions" in body, "PYQ title framing missing"
+    assert "PYQ" in body
+    # Topic links must point at the per-topic PYQ (important-questions)
+    # page, not the generic notes landing.
+    assert "/important-questions" in body, "PYQ topic links missing"
+    # The default subject framing should NOT leak through.
+    assert "Complete Study Guide" not in body
+    # Canonical URL should reflect the PYQ shortcut path.
+    assert "https://syrabit.ai/pyq/ahsec/class-12/physics" in body
 
 
 # Task #408 — every SSR family the Pages middleware proxies must emit

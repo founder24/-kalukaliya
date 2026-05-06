@@ -4028,16 +4028,18 @@ async def get_subject_landing_html(
     page_type: Optional[str] = None,
     lang: Optional[str] = None,
 ):
-    # ``page_type`` is accepted so the middleware's PYQ shortcut
-    # (``/pyq/<board>/<class>/<subject>`` → ``?page_type=pyq``) doesn't
-    # 422 here. The rendered page already lists every available
-    # page-type per topic, so the param is currently a deliberate
-    # no-op — see follow-up task #431 for the planned filter.
-    _ = page_type
+    # Task #431 — when the middleware's PYQ shortcut
+    # (``/pyq/<board>/<class>/<subject>`` → ``?page_type=pyq``) is
+    # used, narrow the topic list to PYQ entries (stored as
+    # ``important-questions``) and link each topic straight to its
+    # PYQ page. Title/meta also flip to a PYQ framing. Default
+    # behaviour (no param) is unchanged.
+    is_pyq = (page_type or "").lower() == "pyq"
+    list_page_type = "important-questions" if is_pyq else "notes"
     _lang_attr = "as-IN" if (lang or "").lower().startswith("as") else "en-IN"
     pages = await _db.seo_pages.find(
         {"board_slug": board, "class_slug": class_slug, "subject_slug": subject_slug,
-         "status": "published", "page_type": "notes"},
+         "status": "published", "page_type": list_page_type},
         {"_id": 0, "topic_title": 1, "topic_slug": 1, "meta_description": 1,
          "chapter_title": 1, "quality_score": 1},
     ).to_list(500)
@@ -4091,14 +4093,23 @@ async def get_subject_landing_html(
     total_mcqs = page_type_counts.get("mcqs", 0)
     total_pyqs = page_type_counts.get("important-questions", 0)
 
-    page_url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}"
-    title = f"{subject_name} — {board_label} {class_label} Complete Study Guide | Syrabit.ai"
-    desc = (
-        f"Complete {subject_name} study guide for {board_label} {class_label} students. "
-        f"Covers {len(chapters_docs) or len(set(p.get('chapter_title','') for p in pages))} chapters with "
-        f"topic-wise notes, solved examples, MCQs, important questions, and previous year questions "
-        f"aligned to the official syllabus."
-    )
+    if is_pyq:
+        page_url = f"https://syrabit.ai/pyq/{board}/{class_slug}/{subject_slug}"
+        title = f"{subject_name} Previous Year Questions (PYQ) — {board_label} {class_label} | Syrabit.ai"
+        desc = (
+            f"Previous year questions (PYQ) for {subject_name}, {board_label} {class_label}. "
+            f"Topic-wise PYQ sets with mark-wise answers (1-mark to 5-mark) curated from past "
+            f"{board_label} papers, mapped to the official syllabus."
+        )
+    else:
+        page_url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}"
+        title = f"{subject_name} — {board_label} {class_label} Complete Study Guide | Syrabit.ai"
+        desc = (
+            f"Complete {subject_name} study guide for {board_label} {class_label} students. "
+            f"Covers {len(chapters_docs) or len(set(p.get('chapter_title','') for p in pages))} chapters with "
+            f"topic-wise notes, solved examples, MCQs, important questions, and previous year questions "
+            f"aligned to the official syllabus."
+        )
 
     syllabus_source = ""
     for bkey in _BOARD_SYLLABUS_SOURCE:
@@ -4153,16 +4164,24 @@ async def get_subject_landing_html(
     overview_html = "\n".join(overview_parts)
 
     topics_html_parts = []
-    topics_html_parts.append("<h2>Topic-wise Study Material</h2>")
+    topics_html_parts.append(
+        "<h2>Topic-wise Previous Year Questions</h2>" if is_pyq
+        else "<h2>Topic-wise Study Material</h2>"
+    )
     for ch, ch_pages in by_chapter.items():
         topics_html_parts.append(f'<h3>{html_mod.escape(ch)}</h3><ul>')
         for tp in ch_pages:
             t_slug = tp.get("topic_slug", "")
             t_title = html_mod.escape(tp.get("topic_title", t_slug))
             t_desc = html_mod.escape(tp.get("meta_description", "")[:150])
-            url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{t_slug}"
+            if is_pyq:
+                url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{t_slug}/important-questions"
+                link_label = f"{t_title} — PYQ"
+            else:
+                url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{t_slug}"
+                link_label = t_title
             topics_html_parts.append(
-                f'<li><a href="{url}"><strong>{t_title}</strong></a>'
+                f'<li><a href="{url}"><strong>{link_label}</strong></a>'
                 f'<br><small>{t_desc}</small></li>'
             )
         topics_html_parts.append("</ul>")
@@ -4176,9 +4195,11 @@ async def get_subject_landing_html(
     ]
     lo_html = "<h2>Learning Outcomes</h2><ul class='lo-list'>" + "".join(f"<li>{html_mod.escape(lo)}</li>" for lo in learning_outcomes) + "</ul>"
 
+    _item_suffix = "/important-questions" if is_pyq else ""
     items_ld = [
-        {"@type": "ListItem", "position": i + 1, "name": p.get("topic_title", ""),
-         "url": f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{p.get('topic_slug', '')}"}
+        {"@type": "ListItem", "position": i + 1,
+         "name": (p.get("topic_title", "") + (" — PYQ" if is_pyq else "")),
+         "url": f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{p.get('topic_slug', '')}{_item_suffix}"}
         for i, p in enumerate(pages)
     ]
 
