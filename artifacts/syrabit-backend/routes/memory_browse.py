@@ -35,6 +35,10 @@ router = APIRouter()
 _DEFAULT_LIMIT = 20
 _MAX_LIMIT = 100
 _PREVIEW_CHAR_CAP = 600
+# Whitelist matches the values written by Task #401 (memory_brain ingest).
+# Anything else is silently dropped so a hostile/typo'd query param can't
+# inject arbitrary fields into the Mongo filter.
+_ALLOWED_KINDS = {"qa", "fact", "note"}
 
 
 def _truncate(s: str, cap: int = _PREVIEW_CHAR_CAP) -> str:
@@ -64,10 +68,19 @@ def _shape(doc: dict[str, Any]) -> dict[str, Any]:
 async def list_my_memories(
     limit: int = _DEFAULT_LIMIT,
     offset: int = 0,
+    kind: Optional[str] = None,
+    subject_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return the signed-in student's saved memory_brain entries,
     newest first, with simple offset pagination.
+
+    Optional filters (Task #444):
+      * ``kind``       — one of ``qa`` / ``fact`` / ``note``. Unknown
+        values are ignored (treated as "no kind filter") so a stale
+        client cannot 4xx itself.
+      * ``subject_id`` — matches ``metadata.subject_id`` exactly. Empty
+        string is treated as "no subject filter".
     """
     try:
         n = max(1, min(int(limit or _DEFAULT_LIMIT), _MAX_LIMIT))
@@ -90,14 +103,22 @@ async def list_my_memories(
     if db is None:
         raise HTTPException(status_code=503, detail="memory store unavailable")
 
+    query: dict[str, Any] = {"user_id": user_id}
+    kind_norm = (kind or "").strip().lower()
+    if kind_norm in _ALLOWED_KINDS:
+        query["kind"] = kind_norm
+    subject_norm = (subject_id or "").strip()
+    if subject_norm:
+        query["metadata.subject_id"] = subject_norm
+
     col = db[_MB_COLLECTION]
     items: list[dict[str, Any]] = []
     total: Optional[int] = None
     try:
-        total = await col.count_documents({"user_id": user_id})
+        total = await col.count_documents(query)
         cursor = (
             col.find(
-                {"user_id": user_id},
+                query,
                 # Embedding vectors are 1024 floats — never ship them
                 # to the browser, they'd dwarf the payload.
                 {"embedding": 0},

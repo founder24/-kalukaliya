@@ -20,6 +20,15 @@ import { apiClient } from '@/utils/api';
 
 const PAGE_SIZE = 20;
 
+// Mirrors backend whitelist in routes/memory_browse.py. "all" is the
+// frontend-only sentinel meaning "send no kind param".
+const KIND_TABS = [
+  { value: 'all',  label: 'All' },
+  { value: 'qa',   label: 'Q&A' },
+  { value: 'fact', label: 'Facts' },
+  { value: 'note', label: 'Notes' },
+];
+
 function MemoryCard({ memory, onDelete, deleting }) {
   const created = memory.created_at ? new Date(memory.created_at) : null;
   const timeLabel = created
@@ -95,20 +104,37 @@ export default function MyMemoriesPage() {
   const [showForgetAll, setShowForgetAll] = useState(false);
   const [forgetText, setForgetText] = useState('');
   const [forgetting, setForgetting] = useState(false);
+  const [kindFilter, setKindFilter] = useState('all');
+  const [subjectFilter, setSubjectFilter] = useState('');
+  // Subject options accumulate across loads so the picker doesn't
+  // collapse to just the currently-selected subject after filtering.
+  const [subjectOptions, setSubjectOptions] = useState([]);
 
-  const load = useCallback(async (off, append) => {
+  const load = useCallback(async (off, append, kindArg, subjectArg) => {
     if (off === 0) setLoading(true);
     else setLoadingMore(true);
     try {
-      const res = await apiClient().get('/user/memories', {
-        params: { limit: PAGE_SIZE, offset: off },
-      });
+      const params = { limit: PAGE_SIZE, offset: off };
+      if (kindArg && kindArg !== 'all') params.kind = kindArg;
+      if (subjectArg) params.subject_id = subjectArg;
+      const res = await apiClient().get('/user/memories', { params });
       const data = res.data || {};
       const next = Array.isArray(data.items) ? data.items : [];
       setItems((prev) => (append ? [...prev, ...next] : next));
       setOffset(off + next.length);
       setTotal(Number(data.total || 0));
       setHasMore(Boolean(data.has_more));
+      setSubjectOptions((prev) => {
+        const seen = new Map(prev.map((o) => [o.id, o]));
+        for (const m of next) {
+          if (m.subject_id && m.subject_name && !seen.has(m.subject_id)) {
+            seen.set(m.subject_id, { id: m.subject_id, name: m.subject_name });
+          }
+        }
+        return Array.from(seen.values()).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+      });
     } catch (err) {
       toast.error('Failed to load your saved memories');
     } finally {
@@ -119,8 +145,8 @@ export default function MyMemoriesPage() {
 
   useEffect(() => {
     if (!user) return;
-    load(0, false);
-  }, [user, load]);
+    load(0, false, kindFilter, subjectFilter);
+  }, [user, load, kindFilter, subjectFilter]);
 
   const handleDelete = (memory) => {
     setPendingDelete(memory);
@@ -138,6 +164,9 @@ export default function MyMemoriesPage() {
       setHasMore(false);
       setShowForgetAll(false);
       setForgetText('');
+      setSubjectOptions([]);
+      setSubjectFilter('');
+      setKindFilter('all');
       toast.success(
         deleted === 0
           ? 'Nothing to forget'
@@ -226,6 +255,47 @@ export default function MyMemoriesPage() {
             )}
           </div>
 
+          {(subjectOptions.length > 0 || items.length > 0 || kindFilter !== 'all' || subjectFilter) && (
+            <div className="flex flex-wrap items-center gap-2" data-testid="memory-filters">
+              <div className="flex flex-wrap gap-1.5">
+                {KIND_TABS.map((tab) => {
+                  const active = kindFilter === tab.value;
+                  return (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      onClick={() => setKindFilter(tab.value)}
+                      data-testid={`memory-kind-${tab.value}`}
+                      aria-pressed={active}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                        active
+                          ? 'bg-primary text-primary-foreground'
+                          : 'border border-border text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {subjectOptions.length > 0 && (
+                <select
+                  value={subjectFilter}
+                  onChange={(e) => setSubjectFilter(e.target.value)}
+                  data-testid="memory-subject-filter"
+                  className="ml-auto h-8 px-2 rounded-xl text-xs text-foreground outline-none border border-border bg-card"
+                >
+                  <option value="">All subjects</option>
+                  {subjectOptions.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="flex items-center justify-center py-10 text-muted-foreground">
               <Loader2 size={18} className="animate-spin mr-2" /> Loading…
@@ -239,8 +309,9 @@ export default function MyMemoriesPage() {
               }}
               data-testid="memories-empty"
             >
-              Syra hasn't saved any memories about you yet. Chat with it
-              or confirm flashcards and they'll show up here.
+              {kindFilter !== 'all' || subjectFilter
+                ? "No memories match these filters. Try clearing them."
+                : "Syra hasn't saved any memories about you yet. Chat with it or confirm flashcards and they'll show up here."}
             </div>
           ) : (
             <>
@@ -260,7 +331,7 @@ export default function MyMemoriesPage() {
               {hasMore && (
                 <div className="flex justify-center pt-2">
                   <button
-                    onClick={() => load(offset, true)}
+                    onClick={() => load(offset, true, kindFilter, subjectFilter)}
                     disabled={loadingMore}
                     className="px-4 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted disabled:opacity-50"
                   >
