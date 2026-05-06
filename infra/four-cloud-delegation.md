@@ -28,8 +28,8 @@ This document is the **single canonical map** of which cloud owns which producti
 | Chat fallback chain (post-Azure exhaust) | **Cloudflare Workers AI** Mistral-7B → Llama-3.2-3B → generic | §4 (A9) | Edge-local; never reaches Cerebras / Cohere / Vertex. |
 | Moderation primary | **Llama-Guard-2 self-hosted** on Azure ACA | §1, §4 | Fail-open on transient 5xx, fail-closed on >5 s timeout. |
 | Moderation secondary | **Azure AI Content Safety** | §4 | Runs in parallel. |
-| Content-formatter (long-form English + Assamese, **off the chat hot path**) | **Vertex Gemini** (content pool fallback only) | §4, §15 | Used for `content` long-form overflow + safety/validation. **Not** a chat primary. Sibling task #494 wires the formatter role explicitly. |
-| Batch RAI review (`exam_model_paper`) | **Vertex Gemini RAI** (async only) | §1, §4 | Never per-turn synchronous. |
+| Content-formatter (long-form English + Assamese, **off the chat hot path**) | **Vertex Gemini** (content pool fallback only) | §4, §15 | Used for `content` long-form overflow + safety/validation. **Not** a chat primary. **Out of #489 scope** — sibling task #494 owns the formatter wiring + the matching `aiplatform.googleapis.com` API enablement + `roles/aiplatform.user` IAM binding. #489's GCP Terraform (`artifacts/syrabit/infra/gcp/`) intentionally omits both so the lock-in PR remains audit-clean. |
+| Batch RAI review (`exam_model_paper`) | **Vertex Gemini RAI** (async only) | §1, §4 | Never per-turn synchronous. **Out of #489 scope** — also added by sibling #494. |
 | Primary transactional email | **Azure Marketplace SendGrid** | §0, §10 | `EMAIL_PROVIDER=sendgrid`. |
 | Fallback transactional email | **AWS SES** (`us-east-1`) | §0, §10 | `EMAIL_FALLBACK=ses`, activated when SendGrid burn-threshold tripped (§10 Rule C). DKIM/SPF/DMARC published on Cloudflare DNS for both. |
 | Secrets source-of-truth | **Azure Key Vault** (`syrabit-prod-kv`) | §6 | AWS Secrets Manager + Cloudflare Secrets are read-only replicas, hash-validated nightly. |

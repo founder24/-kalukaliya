@@ -4078,6 +4078,34 @@ async def call_embed_with_dispatch(
     if _cached_vec:
         return _cached_vec
 
+    # Task #489 — V4 §15 cache-only degraded-mode gate. When the
+    # operator flips `EMBED_DEGRADED_MODE=true` (matrix §A row
+    # "Embed-failover behaviour"): no third-party embedder is invoked;
+    # this chunk is enqueued onto `syrabit-reembed-queue` so the
+    # AWS Lambda consumer (`sqs_consumers/reembed.py`) can replay it
+    # against `embed.syrabit.ai` once the flag is cleared. Cache hits
+    # above still return; everything else raises `EmbedDeferredError`
+    # so callers fail loud instead of getting a silent zero-vector.
+    if os.environ.get("EMBED_DEGRADED_MODE", "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            from sqs_fanout import enqueue as _sqs_enqueue
+            await _sqs_enqueue(
+                "reembed",
+                {
+                    "text": text,
+                    "task_type": task_type,
+                    "lang": lang,
+                    "namespace": os.environ.get("PINECONE_NAMESPACE", "cached_gemma_today"),
+                },
+            )
+        except Exception:
+            log.exception("EMBED_DEGRADED_MODE: reembed enqueue failed (will be retried by caller)")
+        raise RuntimeError(
+            "embed: EMBED_DEGRADED_MODE=true — chunk enqueued to "
+            "syrabit-reembed-queue for deferred replay; caller should "
+            "serve from Vectorize cache only (V4 §15)"
+        )
+
     def _persist_early(_vec):
         if _embed_cache_set is None or not _vec:
             return

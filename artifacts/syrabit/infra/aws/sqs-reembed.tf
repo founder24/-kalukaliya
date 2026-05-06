@@ -181,3 +181,20 @@ output "reembed_queue_arn" {
   description = "ARN of the deferred-embed replay queue (V4 §15 cache-only Option D)."
   value       = aws_sqs_queue.reembed.arn
 }
+
+# ─── SSM publishing for sqs_fanout producer ──────────────────────────────
+# Backend `sqs_fanout._queue_url_map()` reads a single SSM parameter
+# whose JSON body maps queue_key → queue_url. The base map ships from
+# `sqs.tf`; this resource layers the deferred-embed `reembed` key on top
+# so `await sqs_fanout.enqueue("reembed", payload)` resolves at runtime.
+resource "aws_ssm_parameter" "reembed_queue_url" {
+  name  = "/syrabit/prod/sqs-worker-queue-urls/reembed"
+  type  = "String"
+  value = aws_sqs_queue.reembed.url
+  tags  = local.lz_common_tags
+}
+
+output "sqs_reembed_queue_url" {
+  description = "URL of the deferred-embed replay queue. Layered into the SSM map read by `sqs_fanout`."
+  value       = aws_sqs_queue.reembed.url
+}
