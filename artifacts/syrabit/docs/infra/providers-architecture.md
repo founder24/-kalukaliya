@@ -1,14 +1,19 @@
 # Providers & Architecture
 
-> ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
-> overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
+> ⚠️ **V4 cross-reference (2026-05-06; updated post-B3 user-lock).** The
+> locked source of truth for the overall Syrabit architecture is
+> [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
 > If anything below disagrees with V4, V4 wins. This doc is preserved as the
-> v3 four-cloud rebalance map (ADR-0001). The V4 chat dispatch order
-> (token-length + risk-score router → Workers-AI Qwen3-0.6B / Vertex Gemini
-> 2.5 Flash co-primary / Azure OpenAI gpt-4.1-mini / Workers-AI fallbacks),
-> embedding namespace separation (`cached_gemma_today` vs
-> `fallback_vertex_pending_reembed`), and Pinecone region
-> (`aws-ap-south-1`) override anything implied here.
+> v3 four-cloud rebalance map (ADR-0001). The V4-locked chat dispatch order
+> is **Azure OpenAI `gpt-4.1-nano` SOLE primary → Workers-AI Mistral-7B →
+> Workers-AI Llama-3.2-3B → generic Workers-AI**. The earlier V4-draft
+> "token-length + risk-score router → Workers-AI Qwen3-0.6B / Vertex Gemini
+> 2.5 Flash co-primary" was **explicitly rejected by the founder on
+> 2026-05-06** — no CF Worker dispatch router is built; Vertex is reserved
+> for the long-form `content` pool + safety/validation only. Embedding
+> namespace separation (`cached_gemma_today` vs
+> `fallback_vertex_pending_reembed`) and Pinecone region (`aws-ap-south-1`)
+> override anything implied here.
 
 This is the canonical map of *which provider does what* in the
 four-cloud rebalance under [`ADR-0001-four-way-hosting-rebalance.md`](ADR-0001-four-way-hosting-rebalance.md).
@@ -22,7 +27,7 @@ matching feature runbooks under [`../features/`](../features/).
 | Pillar | Hosts | Key docs |
 |--------|-------|----------|
 | Cloudflare | Edge, DNS, WAF, R2 (object store CDN), Logpush | [`../CLOUDFLARE_OBSERVATORY.md`](../CLOUDFLARE_OBSERVATORY.md) |
-| AWS | SQS + Lambda async fan-out, S3 (sole object store), Textract, Rekognition, Personalize, Bedrock-Cohere | [`aws-landing-zone.md`](aws-landing-zone.md), [`workers-on-aws.md`](workers-on-aws.md) |
+| AWS | SQS + Lambda async fan-out (incl. Vertex re-embed queue worker), S3 (temp dumps; canonical sync to R2), Textract, Rekognition, Personalize | [`aws-landing-zone.md`](aws-landing-zone.md), [`workers-on-aws.md`](workers-on-aws.md) _(Bedrock-Cohere removed Task #347)_ |
 | Azure | Container Apps Jobs (cron), Application Insights + Log Analytics (unified observability sink), Key Vault, Azure OpenAI, Azure AI services | [`azure-landing-zone.md`](azure-landing-zone.md), [`cron-on-azure.md`](cron-on-azure.md), [`../features/azure-native.md`](../features/azure-native.md) |
 | GCP | Vision, Speech-to-Text, Text-to-Speech, Discovery Engine, Web Risk | _legacy provider chain — kept as primary tier for these features pending the Azure A/B results_ |
 | Sarvam | Indic ↔ English translation (primary) | _vendor — see `lang/router.py`_ |
@@ -56,7 +61,7 @@ provider. Selection is router-controlled and feature-flag gated.
 
 | Surface | Service | Wired into | Failure ladder |
 |---------|---------|-----------|----------------|
-| LLM routing | **Azure OpenAI** | `ai_gateway/registry.py` as `llm/azure-openai`; primary for GPT-4.1-mini chat/content roles | Azure OpenAI → direct OpenAI → Bedrock-Cohere → Groq → Gemini |
+| LLM routing | **Azure OpenAI** | `ai_gateway/registry.py` as `llm/azure-openai`; primary for `gpt-4.1-nano` chat role (V4 §4 user-locked 2026-05-06) | Azure OpenAI → Workers-AI Mistral-7B → Workers-AI Llama-3.2-3B → generic Workers-AI (V4 §4 A9). _Direct OpenAI / Bedrock-Cohere / Groq / direct Gemini all removed in Task #347; Vertex retained for `content` pool + safety only._ |
 | TTS / STT | **Azure AI Speech** (incl. Custom Neural Voice "Syra") | `voice/router.py` | Azure Speech ↔ Google STT/TTS |
 | Translation | **Azure AI Translator** | `lang/router.py` | Sarvam → Bhashini → Azure Translator → cached → English passthrough |
 | OCR (layout-aware) | **Azure Document Intelligence** | `ocr/router.py` (past papers + marks sheets) | Doc Intelligence → Textract → AI Vision |
@@ -81,8 +86,11 @@ items live in [`../features/azure-native.md`](../features/azure-native.md).
 - **Endpoint URLs in Key Vault, no API keys.** Wrappers resolve
   endpoints via `services/backend/azure_ai/_resolver.py` which
   caches per-process and uses `DefaultAzureCredential`.
-- **Azure OpenAI does not displace Bedrock for Cohere roles.** The
-  hosting plan reserves Bedrock for Cohere only.
+- ~~**Azure OpenAI does not displace Bedrock for Cohere roles.**~~
+  *(Superseded by Task #347, 2026-05-05: AWS Bedrock direct integration
+  was decommissioned. Cohere is no longer reached via Bedrock; it is
+  retained only as the embed-failover specialist via the Cloudflare AI
+  Gateway BYOK slug `cohere/v1` — see V4 §1 / replit.md.)*
 
 ## 3. Cross-pillar identity boundaries
 

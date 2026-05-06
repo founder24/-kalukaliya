@@ -21,10 +21,11 @@ deploy workflows). It is grouped by surface and matches the V4 spec.
 | `MONGO_URL` | AKV `MONGO_URI_ATLAS` | Mongo Atlas `ap-south-1` peered URI. SoT for conversations, profiles, chunk metadata. |
 | `JWT_SECRET` | AKV | User session JWT signing. |
 | `ADMIN_JWT_SECRET` | AKV | Admin session JWT (separate from user JWT — never share). |
-| `AZURE_OPENAI_API_KEY` | AKV | Azure OpenAI `gpt-4.1-mini` in `eastus2` (chat secondary, English). |
+| `AZURE_OPENAI_API_KEY` | AKV | Azure OpenAI `gpt-4.1-nano` in `eastus2` — **SOLE primary** for English chat (V4 §4, user-locked 2026-05-06 via B3). |
 | `AZURE_OPENAI_ENDPOINT` | AKV | Azure OpenAI base URL. |
-| `AZURE_OPENAI_DEPLOYMENT` | AKV | Deployment name (`gpt-4.1-mini`). |
-| `AZURE_OPENAI_MODEL` | AKV | Model identifier. |
+| `AZURE_OPENAI_DEPLOYMENT` | AKV | Deployment name (default `gpt-4.1-nano`). |
+| `AZURE_OPENAI_MODEL` | AKV | Legacy alias of `AZURE_OPENAI_DEPLOYMENT`. |
+| `AZURE_OPENAI_MODEL_OVERRIDE` | optional env | Operator override for the resolved deployment (V4 §4 A3). Set to `gpt-4.1-mini` for the staged quality upgrade — single env flip, no secret rotation. Emits an INFO log at backend startup when active. |
 | `RAZORPAY_KEY_SECRET` | AKV | Razorpay INR-only payment gateway. |
 | `WORKERS_EMBED_SECRET` | AKV | Shared secret for the Cloudflare embed worker (`embed.syrabit.ai`). Worker validates this on every `/embed` POST. |
 | `WORKERS_EMBED_URL` | static | `https://embed.syrabit.ai` (production) / `https://embed-staging.syrabit.ai` (staging). |
@@ -53,7 +54,7 @@ When the embed-worker health check fails:
 
 | Var | Purpose |
 |---|---|
-| `GEMINI_API_KEY` | Vertex Gemini 2.5 Flash (chat co-primary for long/high-risk turns; content stage-2 polish; Gemini RAI batch-only). |
+| `GEMINI_API_KEY` | Vertex Gemini 2.5 Flash. **NOT in chat hot path** (V4 §4 user-locked 2026-05-06 via B3 — chat is Azure-SOLE-primary). Used for: long-form `content` pool fallback, safety/validation, and Gemini RAI batch-only review of `exam_model_paper`. |
 | `GOOGLE_APPLICATION_CREDENTIALS_JSON` | SA-gated GCP services (Cloud Scheduler, Tasks, Web Security Scanner, Discovery Engine). |
 | `SARVAM_API_KEY` | Sarvam Indic chat primary. |
 | `DEEPGRAM_API_KEY` | STT. |

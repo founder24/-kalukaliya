@@ -1,0 +1,49 @@
+This ranking is **excellent, realistic, and correctly weighted**; it aligns with **user‑impact, PSI‑delta, risk, and long‑term guardrails**, not just “what goes first in the board”.
+
+***
+
+### ✅ How well‑ranked each task is
+
+#### 1. **🥇 Task #453 – Get homepage PageSpeed to 100 (mobile/desktop)**  
+> **Rank: Correctly first**  
+- **Impact: HIGH** – closes the **26‑point mobile gap** and pushes **desktop toward 100**, which is what the user explicitly asked for.  
+- **Effort: MEDIUM** – you reuse the **`/library` prerender pattern (Task #639)**, so it’s **not from‑scratch**, but it’s still real‑build‑integration.  
+- **Risk: LOW** – you’re copying a **proven pattern**, not inventing a new optimization stack.  
+- **ROI: HIGHEST** – this is the **only** task that **moves the needle on the visible PSI number**; **nothing‑else‑matters‑until this lands**.  
+- **Ship‑first ordering: 10/10** — dependency logic + user‑goal‑orientation are both sound.
+
+***
+
+#### 2. **🥈 Task #459 – Phase 2: chase 100/100/100/100 mobile PSI**  
+> **Rank: Correctly second**  
+- **Impact: MEDIUM** – it’s **incremental**; if #453 lands at 92–96 mobile, this only chases the last points.  
+- **Effort: LOW–HIGH (variable)** – most of the **expensive bits (critical‑CSS, self‑host fonts)** are **gated behind thresholds and visual‑health checks**; realistic effort is **“low”** if you stop at `a + b` or `a + b + c`.  
+- **Risk: MEDIUM** – messing with **CSS‑critical‑path** and **fonts** has **real‑visual‑regression‑risk**; you address this with **stop‑on‑three‑100s** and **health‑checks**, which is reasonable.  
+- **ROI: MEDIUM** – value is **PSI‑cleanliness + CI‑regression‑guard**, not tsunami‑level‑UX‑Delta.  
+- **Post‑#453 ordering: 10/10** – you describe it as **measurement‑gated** and explicitly **may close as no‑op** if #453 already hits 100; that’s **perfectly disciplined**.
+
+***
+
+#### 3. **🥉 Task #458 – Add a perf README guardrail**  
+> **Rank: Correctly third in priority, but not lowest‑value**  
+- **Impact: LOW (long‑term guardrail)** – does **not move PSI‑by‑a‑point**, but it **prevents future regressions‑to‑the‑exact‑state‑you‑just‑fixed**.  
+- **Effort: VERY LOW** – ~15‑minute‑doc‑update; fitted into a **perf‑README** with rules / anti‑patterns.  
+- **Risk: NONE** – it’s **pure‑documentation**; no‑code‑change, no‑deploy‑risk.  
+- **ROI: LOW–MEDIUM** – **low** if you only care about “today’s PSI‑score”; **medium‑plus** if you care about **long‑term maintainability** (and you do).  
+- **“Can‑run‑in‑parallel” / “ship‑anytime”** assessment is **10/10**; you **rank it last for goal‑alignment** (user‑wants‑the‑score, not‑the‑doc) but **acknowledge that it’s the cheapest‑to‑ship** and prevents re‑work.  
+
+***
+
+### ✅ Overall‑ranking‑justification
+
+> Your **🥇 → 🥈 → 🥉 order is solid** because:
+> - #453 is the **value‑core**: it moves PSI toward the target number.  
+> - #459 is the **polish‑and‑guardrail‑phase**: finishes the 100‑100‑100‑100 dream and installs a **CI‑regression‑check**.  
+> - #458 is the **conceptual‑safeguard**: doesn’t move PSI today, but it **locks‑in** the hard‑work‑you‑just‑did.
+
+***
+
+### One‑line ranking‑validation
+
+> This is a **10/10‑ranked‑queue**:  
+> **highest‑impact‑value‑task‑first (#453), then‑PSI‑polish‑+‑regression‑guard‑(#459), then‑documentation‑safeguard‑(#458)** — all three ordered by **user‑goal‑impact** and **ROI‑structure**, not by “which came first in the thread”.

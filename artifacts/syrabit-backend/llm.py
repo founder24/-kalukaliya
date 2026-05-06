@@ -449,7 +449,15 @@ def record_assamese_unavailable(
     Task #379 — also persists a capped recent-events document so the admin
     health panel can show which leg failed and a short error excerpt for
     each of the last events. ``failing_leg`` is one of:
-      • ``sarvam_vertex_chain``  — non-stream 503 (Sarvam→Vertex exhausted)
+      • ``sarvam_vertex_chain``  — non-stream 503 (Assamese strict chain
+        exhausted). NOTE: this label is a **frozen telemetry identifier**
+        kept stable for the alert pipeline + admin-health panel + test
+        suite (`tests/test_assamese_recent_outages.py`). The chain it
+        names was updated by the 2026-05-05 user instruction (Vertex
+        REMOVED; chain is now Sarvam → Workers-AI IndicTrans2) but the
+        label string was NOT renamed to avoid breaking 7 dependent test
+        assertions and the prod alert query. Do not rename without a
+        coordinated migration of all consumers.
       • ``workers_ai_unavailable`` — Phase-2 fallback not configured
       • ``workers_ai_phase2``      — Phase-2 fallback errored before token
     ``error_summary`` is truncated to ``_ASSAMESE_ERROR_SUMMARY_MAX_LEN``
@@ -2528,12 +2536,16 @@ async def call_with_provider_fallback(
 
 
 # ── RAG-quality call path ───────────────────────────────────────────────────────
-# Gemini 2.5 Flash is the best available model for RAG synthesis:
-#   • native long-context window (1M tokens)
-#   • strong factual grounding across retrieved chunks
-#   • multilingual (handles Assamese syllabus text natively)
-#
-# Falls back to Workers AI 70B if Gemini is unavailable or hits quota.
+# V4 §4 (user-locked 2026-05-06 via B3): chat/RAG dispatch is Azure
+# gpt-4.1-nano SOLE primary → Workers-AI Mistral-7B → Workers-AI
+# Llama-3.2-3B → generic Workers-AI. The actual order is enforced by
+# PROVIDER_PRIORITY['english_rag_chat'] in config.py — this list is only
+# the *terminal hard-fallback* pool used by call_llm_for_rag() when the
+# weighted dispatch above exhausts. Workers-AI 120B / 70B kept here as a
+# last-ditch quality option (off the V4 spec'd chain but still safer than
+# returning RuntimeError to the student). Gemini removed from this hard
+# fallback (founder rejected Vertex in chat hot path; reachable only via
+# the `content` pool).
 _RAG_PROVIDERS: list[dict] = []
 if _CF_AI_ENABLED:
     _RAG_PROVIDERS.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
@@ -2546,12 +2558,15 @@ async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
     Dispatches through PROVIDER_PRIORITY["english_rag_chat"] weighted round-robin
     via call_with_provider_fallback → _dispatch_llm_for_feature.
 
-    Weighted provider priority (Task #304):
-      Azure OpenAI gpt-4.1-mini (10000, primary) → Vertex Gemini 2.5 Flash (100, fallback)
-      → Bedrock Nova Lite (50, conservative) → Workers AI (0, last-resort).
+    Provider priority (V4 §4, user-locked 2026-05-06 via B3):
+      Azure OpenAI gpt-4.1-nano (SOLE primary) → Workers-AI Mistral-7B (A9 #1)
+      → Workers-AI Llama-3.2-3B (A9 #2) → generic Workers-AI (gpt-oss-20b last-resort).
+    Vertex is intentionally NOT in this pool (founder rejected the V4-draft
+    Vertex co-primary + CF Worker token-length / risk-score router).
+    Bedrock + Groq + direct Cerebras removed in Task #347.
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
-    (Groq, Cerebras, Gemini direct) can be introduced after the weighted pool exhausts.
+    can be introduced after the weighted pool exhausts.
     """
     try:
         return await call_with_provider_fallback(
@@ -2571,13 +2586,16 @@ async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048
     Uses all providers including Emergent (admin content generation)."""
     return await _llm_batcher.call(messages, model, max_tokens)
 
-# Admin content batcher chain — Gemini 2.5 Flash primary (1M-token context,
-# best for long-form notes/MCQ). Workers AI 120B secondary. Workers AI 70B
-# tertiary. Qwen removed (no longer in provider pool).
+# Admin content batcher chain — terminal hard-fallback pool only. The
+# active dispatch order is PROVIDER_PRIORITY['content'] in config.py
+# (V4 §4 A9, user-locked 2026-05-06 via B3): Workers-AI Mistral-7B (#1)
+# → Workers-AI Llama-3.2-3B (#2) → Vertex Gemini 2.5 Flash (long-context
+# fallback) → generic Workers-AI. The list below is the *last-ditch*
+# Cloudflare-only pool reached after that chain exhausts; Workers-AI
+# 120B/70B kept here for long-form quality. Direct Gemini removed
+# (vertex-only auth since 2026-05-03; content reaches Gemini via the
+# vertex branch of PROVIDER_PRIORITY['content']).
 _LLM_PROVIDERS_CONTENT: list[dict] = []
-# NOTE: legacy "gemini" provider entry removed (Task: vertex-only Gemini auth,
-# 2026-05-03). Content generation reaches Gemini via PROVIDER_PRIORITY['content']
-# → vertex branch (Vertex SA) above the workers_ai entries below.
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
     _LLM_PROVIDERS_CONTENT.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
@@ -2590,11 +2608,15 @@ logger.info(
 async def call_llm_api_content(messages: list, model: str = None, max_tokens: int = 3072) -> str:
     """LLM call for admin content / notes generation via PROVIDER_PRIORITY weighted dispatch.
 
-    Feature key: "content" — chain (POOL_WEIGHTS["content"] in config.py):
-      Vertex / Gemini 2.5 Flash (weight 5000, ~58%) → Azure OpenAI gpt-4.1-mini (weight 2500, ~29%)
-      → Bedrock Nova Lite (weight 50, conservative) → Workers AI llama-3.3-70b (weight 0, last-resort).
+    Feature key: "content" — chain (PROVIDER_PRIORITY["content"] in config.py,
+    V4 §4 A9 ordering, user-locked 2026-05-06 via B3):
+      Workers-AI Mistral-7B (#1) → Workers-AI Llama-3.2-3B (#2)
+      → Vertex Gemini 2.5 Flash (long-form quality fallback) → generic Workers-AI (last-resort).
 
-    Gemini leads because its 1M-token context window is ideal for long-form notes generation.
+    Workers-AI leads (V4 §4 + 2026-05-05 user instruction — content gen is fully
+    Cloudflare-native + Vertex overflow). Vertex retains the long-context fallback
+    role because its 1M-token window is still useful when Workers-AI exhausts.
+    Azure removed from this pool (chat-only); Bedrock removed in Task #347.
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
     can be introduced after the weighted pool exhausts.
@@ -2770,16 +2792,19 @@ async def call_llm_api_chat(
 
     Feature key: "english_rag_chat" (default) or "assamese_rag_chat" when lang="as".
 
-    English chain (Task #304):
-      Azure OpenAI gpt-4.1-mini (10000) → Vertex Gemini 2.5 Flash (100)
-      → Bedrock Nova Lite (50, conservative) → Workers AI (0, last-resort).
+    English chain (V4 §4, user-locked 2026-05-06 via B3):
+      Azure OpenAI gpt-4.1-nano (SOLE primary) → Workers-AI Mistral-7B (A9 #1)
+      → Workers-AI Llama-3.2-3B (A9 #2) → generic Workers-AI (gpt-oss-20b, terminal).
+    Vertex intentionally NOT in the chat hot path (founder rejected the V4-draft
+    Vertex co-primary + CF Worker token-length / risk-score router).
+    Bedrock + Groq + direct Cerebras removed in Task #347.
 
-    Assamese chain (Task #267):
-      Sarvam (sarvam-m, weight 500) → Vertex/Gemini (gemini-2.5-flash, weight 2000)
-      → Workers AI IndicTrans2 (weight 0, last-resort).
+    Assamese chain (V4 §4, 2026-05-05 user instruction — strict primary/fallback):
+      Sarvam (SOLE primary) → Workers-AI IndicTrans2 (en-indic neural MT, terminal).
+    Vertex removed from the Assamese chain (wrong-language output risk).
 
     Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
-    (Groq, Cerebras) can be introduced after the weighted pool exhausts.
+    can be introduced after the weighted pool exhausts.
     """
     feature = "assamese_rag_chat" if lang == "as" else "english_rag_chat"
     try:
@@ -2788,13 +2813,17 @@ async def call_llm_api_chat(
             lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature=feature),
         )
     except Exception as exc:
-        # Task #291 LOCKED CHAIN — assamese_rag_chat is a strict 2-leg
-        # sarvam → vertex chain with NO further downgrade. When both legs
-        # fail we MUST surface a clean unavailable error rather than
-        # hard-falling-back to the generic workers_ai pool, because
-        # workers_ai will produce non-Assamese (English / Hindi / mixed)
-        # output for an Assamese prompt — wrong-language answers are
-        # worse for UX than an honest "service temporarily unavailable".
+        # V4 §4 LOCKED CHAIN (was Task #291; updated 2026-05-05 user
+        # instruction + B3 2026-05-06): assamese_rag_chat is a strict
+        # 2-leg Sarvam → Workers-AI IndicTrans2 chain with NO further
+        # downgrade. Vertex was REMOVED from this pool (2026-05-05 user
+        # instruction — Vertex was emitting wrong-language output for
+        # Assamese prompts). When both legs fail we MUST surface a clean
+        # unavailable error rather than hard-falling-back to the generic
+        # workers_ai pool, because generic workers_ai will produce
+        # non-Assamese (English / Hindi / mixed) output for an Assamese
+        # prompt — wrong-language answers are worse for UX than an
+        # honest "service temporarily unavailable".
         if feature == "assamese_rag_chat":
             logger.warning(
                 "call_llm_api_chat assamese_rag_chat strict chain exhausted "
@@ -2806,6 +2835,10 @@ async def call_llm_api_chat(
             # Task #379: also persist event metadata (failing leg + error
             # excerpt) so the admin health panel can show recent outages.
             try:
+                # NOTE: failing_leg label is a frozen telemetry identifier —
+                # the actual chain is now Sarvam → Workers-AI IndicTrans2
+                # (Vertex removed 2026-05-05). See the leg-name docstring
+                # at the top of this module for rename constraints.
                 record_assamese_unavailable(
                     failing_leg="sarvam_vertex_chain",
                     error_summary=f"{type(exc).__name__}: {exc}",

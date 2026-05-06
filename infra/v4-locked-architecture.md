@@ -16,7 +16,7 @@
 | **Cloudflare** | Edge front-end + AI dispatch + edge caching + WAF | Pages-SSR (`syrabit.ai`, `chat.syrabit.ai`); Workers-AI **EmbeddingGemma-300M** (mean-pooled to 1024-dim to match Pinecone) → `/embed`; Workers-AI Indic translation (IndicTrans2); R2 (chapter PDFs, audio, exports, backups); KV (chapter index, syllabus map, flags, allowlists); Cache-Reserve (long-TTL assets); Vectorize (edge RAG cache); D1 (SEO meta, audit logs, syllabus-map read-before-Mongo); AI Gateway (BYOK to Gemini + Azure OpenAI + Cerebras); WAF + RateLimiter DO. | **40 %** |
 | **Azure** | HTTP backend + auth + AI safety + primary email | Azure Container Apps `syrabit-backend` in `eastus2` (Python FastAPI hot path) + `rust-core` (async batch); **Llama-Guard-2 self-hosted** as moderation-primary on the same ACA compute; **Azure AI Content Safety** as moderation-secondary; **SendGrid (Pro 100k via Azure Marketplace)** as primary transactional email (`EMAIL_PROVIDER=sendgrid`); orchestrates Pinecone, MongoDB Atlas, Deepgram, ElevenLabs, Sarvam-AI, Azure Translator. **Azure Key Vault is the source of truth for all secrets.** | **30 %** |
 | **AWS** | Event backbone + durable data/backups + fallback email | Lambda / Step-Functions / SQS / EventBridge / CloudWatch (batch embed ops, Pinecone index maintenance, shard rebalancing, `lambda-otel`, `lambda-workers`, **Vertex re-embed queue worker**); Atlas-peered VPC connectivity (Mongo Atlas in `ap-south-1`); S3 (dumps, temp exports; final backups sync to R2); **SES fallback email** (`EMAIL_FALLBACK=ses`, activated when SendGrid burn-threshold exceeded). | **20 %** |
-| **GCP / Vertex** | Gen-AI validation + safety + observability | **Vertex Gemini 2.5 Flash** = default content-validation model + **co-primary English chat** for **long/high-risk turns** (token-length + risk-score router); short/low-risk turns → **Qwen3-0.6B** on Workers AI. **Gemini RAI** = batch/async-only for `exam_model_paper` review (never blocks live chat). Web Risk API for malicious-URL checks. Cloud Trace for OTEL spans. **Vertex multilingual embedding** = embed-failover only, writes to a separate Pinecone namespace with a re-embed queue (see §3). | **10 %** |
+| **GCP / Vertex** | Gen-AI validation + safety + observability | **Vertex Gemini 2.5 Flash** = default content-validation model + long-form `content` pool fallback (sits behind Workers-AI Mistral-7B / Llama-3.2-3B). **NOT in the chat hot path** (founder choice 2026-05-06, see §4). **Gemini RAI** = batch/async-only for `exam_model_paper` review (never blocks live chat). Web Risk API for malicious-URL checks. Cloud Trace for OTEL spans. **Vertex multilingual embedding** = embed-failover only, writes to a separate Pinecone namespace with a re-embed queue (see §3). | **10 %** |
 
 ✅ **Cost-share sum: 40 + 30 + 20 + 10 = 100 %** (single integers, no ranges).
 
@@ -74,21 +74,19 @@ When `embed.syrabit.ai` is down or returning 5xx:
 ## §4 — Per-turn dispatch order (chat hot path, locked)
 
 ```
-Cloudflare Worker (edge)
-  ├─ token-length + risk-score router
-  │
-  ├─ short/low-risk turn  ──▶  Workers-AI Qwen3-0.6B (edge)
-  │
-  └─ long/high-risk turn  ──▶  Vertex Gemini 2.5 Flash (eastus2 via AI Gateway BYOK)
-                                  ↓ on 429/exhaust
-                                Azure OpenAI gpt-4.1-mini (eastus2)        ← see SKU table below
-                                  ↓ on 5xx
-                                Workers-AI Mistral-7B (edge, ordered #1)   ← A9
-                                  ↓ on 5xx
-                                Workers-AI Llama-3.2-3B (edge, ordered #2) ← A9
-                                  ↓ on 5xx
-                                Cerebras (CF-Gateway-only, BYOK)           ← A2 footnote
+English chat (single chain, no edge router)
+  Azure OpenAI gpt-4.1-nano (eastus2)        ← SOLE primary; see A3 SKU table below
+    ↓ on 5xx / exhaust
+  Workers-AI Mistral-7B (edge, ordered #1)   ← A9
+    ↓ on 5xx
+  Workers-AI Llama-3.2-3B (edge, ordered #2) ← A9
+    ↓ on 5xx
+  Workers-AI generic (gpt-oss-20b, last-resort, terminal)
 ```
+
+**Cerebras note (A2):** Cerebras is retained as a CF-AI-Gateway-BYOK destination for telemetry parity (V4 §1) but is **NOT** wired into `PROVIDER_PRIORITY["english_rag_chat"]` — direct (non-gateway) Cerebras was decommissioned in Task #347 and the chat dispatch path terminates at generic Workers-AI. Reaching Cerebras requires an explicit CF AI Gateway opt-in route, never the per-turn fallback chain.
+
+**Founder choice (user-locked 2026-05-06, B3):** Vertex Gemini 2.5 Flash is **NOT** in the chat hot path and **Workers-AI Qwen3-0.6B is NOT** wired as a chat primary. An earlier V4 draft proposed a token-length + risk-score router on the Cloudflare Worker that would split short/low-risk → Qwen3-0.6B and long/high-risk → Vertex Gemini 2.5 Flash co-primary; that design was explicitly rejected in favour of the simpler Azure-SOLE-primary chain above. Vertex stays reserved for the §1 content-validation / safety role and the `content` long-form pool (where it sits behind Workers-AI as a quality fallback). Qwen3-0.6B remains in §2 (embedding) only. **No CF Worker dispatch router is built.**
 
 - **Llama-Guard-2** runs as a pre-filter on the Azure ACA compute (moderation-primary). **Fail-open on transient 5xx, fail-closed on >5 s timeout** (see §1 row).
 - **Azure AI Content Safety** runs in parallel as moderation-secondary.
@@ -99,7 +97,7 @@ Cloudflare Worker (edge)
 
 | SKU | Context | Approx $/1M in / $/1M out | Why this SKU? |
 |---|---|---|---|
-| **`gpt-4.1-nano`** *(V4 default — founder choice 2026-05-06)* | 1 M tokens | **~$0.10 / ~$0.40** | Cheapest 1 M-context Azure SKU. Founder explicitly picked nano over mini after the initial draft to minimise burn on the long-turn fallback path (which already trails Vertex Gemini 2.5 Flash). Quality trade-off is accepted; mini is the staged upgrade if long-turn quality degrades unacceptably. |
+| **`gpt-4.1-nano`** *(V4 default — founder choice 2026-05-06)* | 1 M tokens | **~$0.10 / ~$0.40** | Cheapest 1 M-context Azure SKU. Founder explicitly picked nano over mini after the initial draft to minimise burn on the SOLE-primary chat path (Azure-only; Vertex is intentionally not in the chat pool — see §4 chain above). Quality trade-off is accepted; mini is the staged upgrade if long-turn quality degrades unacceptably. |
 | `gpt-4.1-mini` | 1 M tokens | ~$0.40 / ~$1.60 | **Not the V4 default** — quality-upgrade candidate. Reachable via `AZURE_OPENAI_MODEL_OVERRIDE=gpt-4.1-mini` (single env flip, no secret rotation). |
 
 Runtime logs `gpt-4.1-nano` and code default in `artifacts/syrabit-backend/config.py:689` is now `gpt-4.1-nano` — drift closed by **B3** (2026-05-06). Operator override pattern wired at the same site.
@@ -178,11 +176,11 @@ Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before 
 
 | Hop | Budget | Notes |
 |---|---|---|
-| CF Edge → Azure ACA `eastus2` | ~120 ms | Cross-Atlantic cost accepted; Vertex co-primary keeps long turns close to Azure. |
+| CF Edge → Azure ACA `eastus2` | ~120 ms | Cross-Atlantic cost accepted; Azure is SOLE chat primary so this hop is on the critical path for every chat turn. |
 | Azure ACA → Mongo Atlas `ap-south-1` | <10 ms | After Atlas-peered VPC. |
 | Azure ACA → Pinecone `aws-ap-south-1` | <50 ms | Resolves the v3 latency conflict (Pinecone was us-east-1). |
-| Workers-AI inference (Qwen3-0.6B) | <200 ms | Edge-local. |
-| Vertex Gemini 2.5 Flash (long turn) | <800 ms | Acceptable for high-risk / long-context turns. |
+| Workers-AI inference (Mistral-7B / Llama-3.2-3B fallback) | <300 ms | Edge-local; only on Azure-exhaust path. |
+| Vertex Gemini 2.5 Flash (content pool fallback only) | <800 ms | Off the chat critical path; reached only by long-form `content` overflow. |
 | **Total p95 chat turn** | **<2.5 s** | Budget for the full chat hot path including moderation. |
 
 ---

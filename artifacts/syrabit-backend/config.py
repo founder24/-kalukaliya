@@ -1195,20 +1195,20 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG.
-    #
-    # PARTIAL B3 STATE (2026-05-06): the V4 §4 hot-path spec calls for
-    # **Vertex Gemini 2.5 Flash co-primary for long/high-risk turns** and
-    # **Workers-AI Qwen3-0.6B for short/low-risk turns**, with a
-    # token-length + risk-score router on the Cloudflare worker. The
-    # 2026-05-05 user instruction baked into this comment said "Azure SOLE
-    # primary, Vertex REMOVED from chat" — that is in DIRECT CONFLICT with
-    # V4 §4. The conflict is unresolved until the founder explicitly picks
-    # one; until then we keep the conservative Azure-primary chain and
-    # only land the V4 §4 A9 fallback-ordering fix below (Mistral-7B #1,
-    # Llama-3.2-3B #2 — was reversed). Workers AI tail order is now:
-    #   workers_ai_mistral_7b → workers_ai_llama32_3b → generic workers_ai.
-    # Bedrock + OpenAI/xAI removed in Task #347.
+    # English chat + RAG (V4 §4, user-locked 2026-05-06 via B3 conflict
+    # resolution). Azure gpt-4.1-nano is the SOLE primary; Workers AI
+    # variants are pure fallbacks (weight 0 — only reached when Azure is
+    # exhausted/throttled). Vertex is intentionally NOT in this pool — an
+    # earlier V4 draft proposed Vertex Gemini 2.5 Flash as a co-primary
+    # behind a CF-Worker token-length + risk-score router; the founder
+    # rejected that design in favour of the simpler chain below (no edge
+    # router built; Vertex stays in the `content` pool only). Workers AI
+    # tail order matches V4 §4 A9: Mistral-7B (better English instruction-
+    # following at this size) then Llama-3.2-3B (smaller/faster) then
+    # generic workers_ai (last-resort gpt-oss-20b). Sarvam reserved for
+    # `assamese_rag_chat`. Bedrock + OpenAI/xAI removed in Task #347.
+    # Cerebras is reachable only through CF AI Gateway BYOK; not listed
+    # here because direct cerebras provider was decommissioned (V4 §4 A2).
     "english_rag_chat":  [
         "azure_openai",
         "workers_ai_mistral_7b", "workers_ai_llama32_3b", "workers_ai",

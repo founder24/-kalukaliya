@@ -39,13 +39,17 @@ Browser
               └─▶ Azure ACA syrabit-backend (eastus2)
                     │
                     ├─ Llama-Guard-2 pre-filter (on ACA compute)
-                    ├─ token-length + risk-score router
-                    │   ├─ short/low-risk ──▶ Workers-AI Qwen3-0.6B (edge)
-                    │   └─ long/high-risk  ──▶ Vertex Gemini 2.5 Flash (BYOK via AI Gateway)
-                    │                           ↓ on 429/exhaust
-                    │                         Azure OpenAI gpt-4.1-mini
-                    │                           ↓ on 5xx
-                    │                         Workers-AI Mistral-7B / Llama-3.2-3B
+                    ├─ Chat dispatch (V4 §4, user-locked 2026-05-06 via B3):
+                    │   Azure OpenAI gpt-4.1-nano (SOLE primary)
+                    │     ↓ on 5xx / exhaust
+                    │   Workers-AI Mistral-7B (A9 #1)
+                    │     ↓ on 5xx
+                    │   Workers-AI Llama-3.2-3B (A9 #2)
+                    │     ↓ on 5xx
+                    │   generic Workers-AI gpt-oss-20b (terminal)
+                    │   (No CF Worker token-length/risk router built;
+                    │    Vertex co-primary + Qwen3-0.6B short-turn path
+                    │    explicitly rejected by founder.)
                     │
                     ├─ embed call ──▶ embed.syrabit.ai (Worker: syrabit-embed-worker)
                     │                    ├─ EmbeddingGemma-300M + Qwen3-0.6B (mean-pool 1024-dim)
