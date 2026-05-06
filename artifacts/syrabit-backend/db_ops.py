@@ -9,7 +9,11 @@ from cache import (
     _invalidate_conv_cache, _redis_get_conversation,
     _redis_invalidate_conversation, _redis_cache_conversation,
 )
-from db_dualwrite import mirror_user_write, clamped_decrement_pipeline
+from db_dualwrite import (
+    mirror_user_write,
+    mirror_conversation_write,
+    clamped_decrement_pipeline,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -882,6 +886,28 @@ async def supa_upsert_conversation(conv: dict):
                 else:
                     _mirror_data[k] = v
             _supa_mirror(lambda d=_mirror_data: supa.table("conversations").upsert(d).execute())
+            # ADR-0001 Phase 2: mirror to Mongo (best-effort; PG is SoT).
+            # Match the pre-existing fallback shape at line ~897 — pass
+            # the full ``conv`` dict (with ``messages`` as a list, the
+            # native form Mongo prefers; the PG branch above coerced
+            # messages to a JSON string, but that's a PG-storage detail).
+            _conv_id = (conv.get("id") or "").strip()
+            if _conv_id:
+                _mongo_conv = dict(conv)  # shallow copy; do not mutate caller
+                await mirror_conversation_write(
+                    "upsert",
+                    lambda: _deps_mod.db.conversations.replace_one(
+                        {"id": _conv_id},
+                        _mongo_conv,
+                        upsert=True,
+                    ),
+                )
+            else:
+                logger.warning(
+                    "dualwrite conversations.upsert skipped: empty 'id' on payload "
+                    "(user_id=%r) — mirror would corrupt collection",
+                    conv.get("user_id", ""),
+                )
             return
         except Exception as e:
             logger.warning(f"pg supa_upsert_conversation failed: {e}")
@@ -921,6 +947,23 @@ async def supa_update_conversation(conv_id: str, uid: str, updates: dict):
                 if isinstance(_su.get("messages"), list): _su["messages"] = json.dumps(_su["messages"])
                 if _su:
                     _supa_mirror(lambda d=_su, cid=conv_id, u=uid: supa.table("conversations").update(d).eq("id", cid).eq("user_id", u).execute())
+            # ADR-0001 Phase 2: mirror to Mongo (best-effort; PG is SoT).
+            # Use the caller's original ``updates`` dict so list-typed
+            # ``messages`` stays as a list in Mongo — this matches the
+            # pre-existing fallback at line ~938 that PG-failure already
+            # used. The PG-side ``u`` is JSON-stringified for asyncpg
+            # binding and would corrupt the Mongo document if mirrored.
+            _cid = conv_id
+            _uid = uid
+            _u_mongo = dict(updates)
+            if _u_mongo:
+                await mirror_conversation_write(
+                    "update",
+                    lambda: _deps_mod.db.conversations.update_one(
+                        {"id": _cid, "user_id": _uid},
+                        {"$set": _u_mongo},
+                    ),
+                )
             return
         except Exception as e:
             logger.warning(f"pg supa_update_conversation failed: {e}")
@@ -945,6 +988,15 @@ async def supa_delete_conversation(conv_id: str, uid: str):
             async with _deps_mod.pg_pool.acquire() as conn:
                 await conn.execute("DELETE FROM conversations WHERE id = $1 AND user_id = $2", conv_id, uid)
             _supa_mirror(lambda: supa.table("conversations").delete().eq("id", conv_id).eq("user_id", uid).execute())
+            # ADR-0001 Phase 2: mirror delete to Mongo (best-effort; PG is SoT).
+            _cid = conv_id
+            _uid = uid
+            await mirror_conversation_write(
+                "delete",
+                lambda: _deps_mod.db.conversations.delete_one(
+                    {"id": _cid, "user_id": _uid},
+                ),
+            )
             return
         except Exception: pass
     if supa:

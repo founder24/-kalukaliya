@@ -125,6 +125,24 @@ print('V4 §13 acceptance: PASS')
 
 - **2026-05-06**: ADR proposed (Phase 1 of V4 §13). Awaiting approval
   before opening Phase 2 dual-write PRs.
+- **2026-05-06**: **Phase 2 (conversations collection) merged.** Generalised
+  the dual-write helper to take a per-collection name (counters now keyed
+  `<collection>.{success,fail,skipped_disabled,skipped_no_db}`; per-collection
+  env flag `MONGO_<NAME>_WRITES`, default ON). Added
+  `mirror_conversation_write()` shim and wired it into the three PG-success
+  paths in `db_ops.py`: `supa_upsert_conversation` (mirrors `replace_one(...,
+  upsert=True)` with empty-id guard), `supa_update_conversation` (mirrors
+  `update_one({"id":..., "user_id":...}, {"$set": updates})` using the
+  caller's *original* dict so `messages` stays as a Python list — the
+  PG-coerced JSON-stringified `u` would corrupt the Mongo doc), and
+  `supa_delete_conversation` (mirrors `delete_one({"id":..., "user_id":...}`).
+  All three sites already had a Mongo *fallback* write on PG-failure (lines
+  897/938/954 pre-edit); the new mirrors fire on the PG-success path inside
+  the same request, so no double-write occurs. B4 callers
+  (`mirror_user_write`, `mongo_user_writes_enabled`) keep working via thin
+  shims over the new generic helper. Test suite grew 9 → 16 (added
+  conversations env-flag, namespaced counter, error-swallow, per-collection
+  flag isolation, and back-compat shim cases).
 - **2026-05-06**: **Phase 2 (users collection only) merged.** Helper
   module `artifacts/syrabit-backend/db_dualwrite.py` added with
   `MONGO_USER_WRITES` rollback flag (default ON), per-process counters

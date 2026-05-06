@@ -42,6 +42,7 @@ deploy workflows). It is grouped by surface and matches the V4 spec.
 | `PINECONE_NAMESPACE_FALLBACK` | static | `fallback_vertex_pending_reembed` (Vertex multilingual; queued for re-embed by SQS Lambda). **Never read on the live chat path.** |
 | `RAG_EMBEDDING_PROVIDER` | runtime flag | `cf_gemma` (default) or `fallback_vertex` (set by health-check controller on CF embed-worker outage). |
 | `MONGO_USER_WRITES` | optional env (default `1`) | V4 §13 / ADR-0001 Phase 2 rollback switch. `1`/unset = best-effort Mongo mirror enabled for every PG `users` write; `0` = disable all mirrors (PG-only, single env flip, no deploy). Counter snapshot: `db_dualwrite.get_dualwrite_counters()` → `users.{success,fail,skipped_disabled,skipped_no_db}`. |
+| `MONGO_CONVERSATION_WRITES` | optional env (default `1`) | V4 §13 / ADR-0001 Phase 2 rollback switch for the `conversations` collection (independent of `MONGO_USER_WRITES`). `1`/unset = best-effort Mongo mirror on every PG `conversations` upsert/update/delete; `0` = disable. Counter keys: `conversations.{success,fail,skipped_disabled,skipped_no_db}`. |
 
 ### Embedding-failover topology (V4 §3)
 
