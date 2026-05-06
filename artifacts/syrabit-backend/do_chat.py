@@ -37,16 +37,57 @@ _counters: dict[str, int] = {
     "fallback_requests_total": 0,
 }
 
+# Task #430 — per-prefix breakdown of rate_check traffic. Keys match
+# the prefix segment of the rate-check key (the part before the first
+# ``:``), so callers using ``"signup:ip:..."`` flow into the
+# ``"signup"`` bucket and chat callers using ``"chat:..."`` flow into
+# ``"chat"``. Surfaced separately in ``snapshot()`` so on-call can
+# tell a bot-signup wave apart from chat throttling on the same
+# aggregate counter.
+_counters_by_prefix_total: dict[str, int] = {}
+_counters_by_prefix_blocked: dict[str, int] = {}
+
 
 def _bump(name: str, n: int = 1) -> None:
     with _counters_lock:
         _counters[name] = _counters.get(name, 0) + n
 
 
+def _prefix_of(key: str) -> str:
+    """Extract the leading scope segment from a rate-check key.
+
+    ``"signup:ip:1.2.3.4"`` → ``"signup"``;
+    ``"chat:user:abc"``     → ``"chat"``;
+    a bare key with no ``:`` separator becomes itself, so an
+    accidentally-unscoped call still shows up rather than silently
+    landing in a generic bucket.
+    """
+    if not key:
+        return ""
+    head, _sep, _rest = key.partition(":")
+    return head or key
+
+
+def _bump_prefix(key: str, *, blocked: bool) -> None:
+    prefix = _prefix_of(key)
+    if not prefix:
+        return
+    with _counters_lock:
+        _counters_by_prefix_total[prefix] = (
+            _counters_by_prefix_total.get(prefix, 0) + 1
+        )
+        if blocked:
+            _counters_by_prefix_blocked[prefix] = (
+                _counters_by_prefix_blocked.get(prefix, 0) + 1
+            )
+
+
 def snapshot() -> dict[str, Any]:
     """Counter snapshot for the cf-health route."""
     with _counters_lock:
         out = {"enabled": is_enabled(), **_counters}
+        out["rate_check_total_by_prefix"] = dict(_counters_by_prefix_total)
+        out["rate_check_blocked_by_prefix"] = dict(_counters_by_prefix_blocked)
     out["block_ratio"] = (
         out["rate_check_blocked"] / out["rate_check_total"]
         if out["rate_check_total"] else 0.0
@@ -62,6 +103,8 @@ def reset() -> None:
     with _counters_lock:
         for k in list(_counters.keys()):
             _counters[k] = 0
+        _counters_by_prefix_total.clear()
+        _counters_by_prefix_blocked.clear()
     _local_sessions.clear()
     _local_buckets.clear()
 
@@ -280,9 +323,11 @@ async def rate_check(key: str, limit: int, window_s: int = 60) -> tuple[bool, in
             remaining = int(data.get("remaining") or 0)
             if not allowed:
                 _bump("rate_check_blocked")
+            _bump_prefix(key, blocked=not allowed)
             return allowed, remaining
     _bump("fallback_requests_total")
     allowed, remaining = _local_rate_check(key, limit, window_s)
     if not allowed:
         _bump("rate_check_blocked")
+    _bump_prefix(key, blocked=not allowed)
     return allowed, remaining

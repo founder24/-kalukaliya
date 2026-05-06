@@ -3594,6 +3594,108 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         />
         </SectionErrorBoundary>
 
+        <SectionErrorBoundary name="Signup Throttle">
+        {/*
+          Task #430 — Task #407 added a per-IP signup rate gate on
+          /auth/signup that flows through do_chat.rate_check, but
+          blocked attempts only bumped the shared
+          do_chat.rate_check_blocked counter. That counter mixes
+          chat throttling and signup throttling on the same number,
+          so on-call had no way to tell whether a spike was a
+          bot-signup wave or normal chat traffic. The backend now
+          exposes per-prefix breakdowns
+          (rate_check_blocked_by_prefix / rate_check_total_by_prefix)
+          and this tile renders the "signup" slice — process-lifetime
+          counts that reset on pod restart, the same lifecycle as the
+          rest of do_chat's counters.
+        */}
+        {(() => {
+          const doChat = cfHealthData?.do_chat;
+          if (!doChat || doChat.error) return null;
+          const blockedByPrefix = doChat.rate_check_blocked_by_prefix || {};
+          const totalByPrefix = doChat.rate_check_total_by_prefix || {};
+          const signupBlocked = blockedByPrefix.signup || 0;
+          const signupTotal = totalByPrefix.signup || 0;
+          const ratio = signupTotal > 0 ? signupBlocked / signupTotal : 0;
+          const tone = signupBlocked > 0 ? 'amber' : 'emerald';
+          const colors = tone === 'amber'
+            ? { tile: 'bg-amber-50 border-amber-200', icon: 'bg-amber-100 text-amber-500', heading: 'text-amber-600' }
+            : { tile: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-100 text-emerald-500', heading: 'text-emerald-600' };
+          return (
+            <div
+              className={`rounded-2xl p-4 border ${colors.tile}`}
+              data-testid="signup-throttle-tile"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${colors.icon}`}>
+                  <ShieldCheck size={17} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold ${colors.heading}`}>
+                    Signup throttle (do_chat)
+                  </p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Per-IP signup rate gate · /auth/signup · Task #407
+                  </p>
+                </div>
+                <button
+                  onClick={loadCfHealth}
+                  disabled={cfHealthLoading}
+                  className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-white"
+                  data-testid="button-refresh-signup-throttle"
+                >
+                  <RefreshCw size={14} className={cfHealthLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl p-3 border border-gray-200 bg-white">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                    Blocked signups
+                  </p>
+                  <p
+                    className="text-2xl font-bold font-mono text-gray-900"
+                    data-testid="signup-throttle-blocked"
+                  >
+                    {signupBlocked}
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    since pod start
+                  </p>
+                </div>
+                <div className="rounded-xl p-3 border border-gray-200 bg-white">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                    Total checks
+                  </p>
+                  <p
+                    className="text-2xl font-bold font-mono text-gray-900"
+                    data-testid="signup-throttle-total"
+                  >
+                    {signupTotal}
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    signup-scoped only
+                  </p>
+                </div>
+                <div className="rounded-xl p-3 border border-gray-200 bg-white">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                    Block ratio
+                  </p>
+                  <p
+                    className="text-2xl font-bold font-mono text-gray-900"
+                    data-testid="signup-throttle-ratio"
+                  >
+                    {signupTotal > 0 ? `${Math.round(ratio * 100)}%` : '—'}
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    blocked ÷ total
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        </SectionErrorBoundary>
+
         <SectionErrorBoundary name="GCP Credit Panel">
         {(() => {
           const gc = gcpCredits && !gcpCredits._error ? gcpCredits : null;

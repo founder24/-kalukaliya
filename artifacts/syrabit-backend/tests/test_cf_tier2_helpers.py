@@ -188,10 +188,22 @@ async def test_do_chat_falls_back_to_in_process_when_flag_off(monkeypatch):
     assert allowed3 is False
     assert rem3 == 0
 
+    # Task #430 — per-prefix breakdown lets the admin panel split
+    # signup-vs-chat throttle traffic on /admin/cf-health.do_chat.
+    # The "signup" prefix on auth.py uses ``signup:ip:<ip>`` keys,
+    # so a blocked attempt must increment ``signup`` not ``chat``.
+    await rate_check("signup:ip:9.9.9.9", limit=1, window_s=60)
+    await rate_check("signup:ip:9.9.9.9", limit=1, window_s=60)  # blocked
+    await rate_check("chat:user:abc", limit=10, window_s=60)
+
     snap = snapshot()
     assert snap["enabled"] is False
     assert snap["fallback_requests_total"] >= 1
     assert snap["rate_check_blocked"] >= 1
+    assert snap["rate_check_total_by_prefix"]["signup"] == 2
+    assert snap["rate_check_blocked_by_prefix"]["signup"] == 1
+    assert snap["rate_check_total_by_prefix"]["chat"] == 1
+    assert snap["rate_check_blocked_by_prefix"].get("chat", 0) == 0
     reset()
 
 
