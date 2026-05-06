@@ -58,12 +58,14 @@ Route catalog (all paths have the ``/api`` prefix added by server.py):
     GET    /admin/workers-ai/status
     POST   /admin/workers-ai/kill-switch
 
-  SARVAM (TTS / Translate / Transliterate / Status) ── 4 routes ─────
-    GET    /sarvam/status
-    POST   /sarvam/translate
-    POST   /sarvam/tts
-    POST   /sarvam/transliterate
-    GET    /admin/translation/languages
+  SARVAM (V4 §15 / Task #492 — retired, return HTTP 410 GONE) ────────
+    GET    /sarvam/status              → 410 GONE (use /admin/system-health)
+    POST   /sarvam/translate           → 410 GONE (use call_translate_with_dispatch)
+    POST   /sarvam/tts                 → 410 GONE (use providers.elevenlabs / deepgram)
+    POST   /sarvam/transliterate       → 410 GONE (no replacement)
+    GET    /admin/translation/languages   (still live; Workers-AI IndicTrans2 backed)
+    TODO(#495): rename this module to `cms_health.py` once the admin
+    UI panel labelled "Sarvam Health" is renamed in lock-step.
 
   ASSAMESE PURITY (admin) ── 8 routes ───────────────────────────────
     GET    /admin/assamese-purity

@@ -1,4 +1,11 @@
-"""Task #421 — /sarvam/status must expose live assamese_purity config."""
+"""Task #421 / #492 — /sarvam/status now returns HTTP 410 GONE.
+
+The endpoint historically exposed the live `assamese_purity` block, but
+V4 §15 (Task #492) retired the Sarvam admin HTTP surface. Live purity
+config is now read from `GET /admin/assamese-purity` (auth-gated). This
+test pins the replacement contract: 410 status + V4 §15 citation in the
+JSON body.
+"""
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -20,18 +27,15 @@ def app_client():
     return TestClient(app)
 
 
-def test_sarvam_status_exposes_assamese_purity_block(app_client):
-    from lang_sanitizer import _VALID_BEHAVIOURS
-
+def test_sarvam_status_returns_410_gone_with_v4_s15_citation(app_client):
     r = app_client.get("/sarvam/status")
-    assert r.status_code == 200
+    assert r.status_code == 410, (
+        "Task #492 (V4 §15) retired /sarvam/status; expected 410 GONE"
+    )
     body = r.json()
-
-    assert "assamese_purity" in body
-    ap = body["assamese_purity"]
-    assert "behaviour" in ap
-    assert "threshold" in ap
-    assert "valid_behaviours" in ap
-    assert ap["behaviour"] in ap["valid_behaviours"]
-    assert ap["behaviour"] in _VALID_BEHAVIOURS
-    assert isinstance(ap["threshold"], (int, float))
+    detail = body.get("detail") or {}
+    assert detail.get("error") == "gone"
+    assert "V4 §15" in (detail.get("policy") or ""), (
+        "410 body must cite V4 §15 so external integrators see the policy "
+        "that retired the route"
+    )

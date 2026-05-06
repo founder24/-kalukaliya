@@ -4078,10 +4078,12 @@ async def call_translate_with_dispatch(
     """Translate *text* via the weighted provider selected for 'translate'.
 
     Priority (PROVIDER_PRIORITY['translate']):
-      workers_ai_indic (800, IndicTrans2 en→indic-1b, primary)
-      → sarvam (500, translate REST API)
-      → vertex (2000, Gemini 2.5 Flash, last resort)
+      workers_ai_indic (IndicTrans2 en→indic-1b, sole primary)
+      → azure_openai (Azure Translator REST, fallback when admin toggle on)
+      → workers_ai (generic translate prompt, last resort)
 
+    Sarvam was removed by Task #492 (V4 §15 amendment); the Sarvam
+    translate REST branch below is gone. Vertex was removed by Task #490.
     Returns the translated string or raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP, TRANSLATE_PROVIDER as _TP
@@ -4107,30 +4109,18 @@ async def call_translate_with_dispatch(
         else:
             provider = select_provider("translate", lang=lang, exclude=exclude)
         try:
+            # Task #492: sarvam translate branch removed (V4 §15 amendment —
+            # Sarvam scoped to assamese_rag_chat LLM only). Should select_provider
+            # ever return "sarvam" (e.g. an admin re-adds it to the translate
+            # pool by mistake) we fail loud rather than silently revive it.
             if provider == "sarvam":
-                sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
-                if not sarvam_slot:
-                    raise RuntimeError("sarvam translate: no API key configured")
-                import httpx as _hx
-                resp = await _hx.AsyncClient(timeout=20).post(
-                    "https://api.sarvam.ai/translate",
-                    headers={"API-Subscription-Key": sarvam_slot["key"]},
-                    json={
-                        "input": text,
-                        "source_language_code": source_lang,
-                        "target_language_code": target_lang,
-                        "speaker_gender": "Female",
-                        "mode": "formal",
-                        "enable_preprocessing": True,
-                    },
+                raise RuntimeError(
+                    "sarvam translate: removed by V4 §15 (Task #492); "
+                    "Sarvam is scoped to assamese_rag_chat LLM only"
                 )
-                resp.raise_for_status()
-                return resp.json().get("translated_text") or ""
-            # Task #490: vertex translate branch removed. Translate now flows
-            # through Sarvam → Workers-AI IndicTrans2 → Azure (V4 §4 / §15).
-            # Task #347: bedrock translate branch removed (Amazon Translate via
-            # bedrock-proxy Worker decommissioned together with providers/bedrock.py).
-            elif provider == "azure_openai":
+            # Task #490: vertex translate branch removed.
+            # Task #347: bedrock translate branch removed.
+            if provider == "azure_openai":
                 # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
                 # Task #338: gated by the azure.translator.enabled admin
                 # toggle so ops can drop the Azure path without a redeploy
