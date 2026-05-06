@@ -70,12 +70,21 @@ resource "aws_lambda_function" "s3_to_r2_sync" {
   image_uri     = local.sqs_consumer_image_uri
   architectures = ["arm64"]
 
+  # Multi-entrypoint container image (matches `lambda-workers.tf`):
+  # handler dispatch is via `image_config.command`. `HANDLER_NAME` env
+  # alone is NOT sufficient — without `command` the Lambda runtime
+  # falls back to the image's default CMD.
+  image_config {
+    command = ["s3_to_r2_sync.handler"]
+  }
+
   role        = aws_iam_role.s3_to_r2.arn
   memory_size = 1024
   timeout     = 600 # 10 min — enough headroom for a day's promotions
 
   environment {
     variables = {
+      # Kept for in-image observability/parity; dispatch is via `image_config.command`.
       HANDLER_NAME             = "s3_to_r2_sync.handler"
       S3_FINALS_BUCKET         = var.s3_finals_bucket
       R2_ENDPOINT_URL          = var.r2_endpoint_url

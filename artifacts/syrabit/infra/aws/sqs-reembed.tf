@@ -72,6 +72,14 @@ resource "aws_lambda_function" "reembed_consumer" {
   image_uri     = local.sqs_consumer_image_uri
   architectures = ["arm64"]
 
+  # Multi-entrypoint container image (matches `lambda-workers.tf`):
+  # the Lambda runtime resolves the handler from `image_config.command`,
+  # NOT from env. Setting only `HANDLER_NAME` would silently fall back
+  # to the image's default CMD and never invoke the reembed handler.
+  image_config {
+    command = ["sqs_consumers.reembed.handler"]
+  }
+
   role        = aws_iam_role.sqs_consumer.arn
   memory_size = 512
   timeout     = 120
@@ -80,9 +88,8 @@ resource "aws_lambda_function" "reembed_consumer" {
 
   environment {
     variables = {
-      # Multi-entrypoint container image (matches `lambda-workers.tf`)
-      # dispatches to `sqs_consumers.reembed.handler` — see
-      # `artifacts/syrabit/services/backend/sqs_consumers/reembed.py`.
+      # Kept for in-image observability/parity with `lambda-workers.tf`;
+      # actual handler dispatch is via `image_config.command` above.
       HANDLER_NAME             = "sqs_consumers.reembed.handler"
       EMBED_WORKER_URL         = "https://embed.syrabit.ai"
       PINECONE_INDEX           = "syrabit-prod"
