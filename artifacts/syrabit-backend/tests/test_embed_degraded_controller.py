@@ -101,6 +101,69 @@ def test_env_override_forces_degraded(monkeypatch):
     assert edc.is_degraded() is True
 
 
+def test_real_traffic_failures_auto_trip_via_dispatch(monkeypatch):
+    """End-to-end wiring: failed primary embed attempts going through
+    `call_embed_with_dispatch` must feed `record_probe(False, ...)` so
+    the controller auto-trips after 3/5 failures WITHOUT any test code
+    calling `record_probe` directly. This is the acceptance probe for
+    "outage trips automatically before on-call flips the env var".
+    """
+    import asyncio
+    import llm
+    import sqs_fanout
+    from vertex_services import EmbedDegradedMode
+    import config as _cfg
+
+    monkeypatch.delenv("EMBED_DEGRADED_MODE", raising=False)
+    monkeypatch.setattr(_cfg, "EMBED_PROVIDER_PRIMARY", "workers_ai_custom", raising=False)
+
+    enqueued: list[dict] = []
+
+    async def _fake_enqueue(queue: str, payload: dict) -> str:
+        enqueued.append({"queue": queue, "payload": payload})
+        return "msg-id-stub"
+
+    monkeypatch.setattr(sqs_fanout, "enqueue", _fake_enqueue, raising=False)
+
+    from providers import workers_embed as _we_prov
+
+    monkeypatch.setattr(_we_prov, "is_enabled", lambda: True, raising=False)
+
+    call_count = {"n": 0}
+
+    async def _failing_embed(_texts, input_type=None):
+        call_count["n"] += 1
+        raise RuntimeError("simulated workers_ai_custom outage")
+
+    monkeypatch.setattr(_we_prov, "embed", _failing_embed, raising=False)
+
+    async def _attempt_one(i: int):
+        try:
+            await llm.call_embed_with_dispatch(f"probe-{i}", lang="en")
+        except Exception:
+            pass
+
+    assert edc.is_degraded() is False
+
+    async def _drive_five():
+        for i in range(5):
+            await _attempt_one(i)
+
+    asyncio.run(_drive_five())
+    assert edc.is_degraded() is True, (
+        "5 real-traffic primary failures must auto-trip the controller "
+        "without any test code calling record_probe directly"
+    )
+    assert call_count["n"] >= 3, "primary must have actually been called"
+
+    async def _go_after_trip():
+        return await llm.call_embed_with_dispatch("post-trip", lang="en")
+
+    with pytest.raises(EmbedDegradedMode):
+        asyncio.run(_go_after_trip())
+    assert any(e["queue"] == "reembed" for e in enqueued)
+
+
 def test_dispatch_uses_controller_for_auto_trip(monkeypatch):
     """End-to-end: tripping the controller (no env var) must route
     `call_embed_with_dispatch` through the SQS deferred-replay path

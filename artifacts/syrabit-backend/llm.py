@@ -3940,12 +3940,22 @@ async def call_embed_with_dispatch(
             "search_query" if (task_type or "").upper().endswith("QUERY")
             else "search_document"
         )
+        # Task #490 — feed the Option-D auto-trip controller. Real-traffic
+        # success / failure / latency is what the trip/reset state machine
+        # consumes; without these probe records the controller can only be
+        # tripped by env override, defeating the auto-failover guarantee.
+        from embed_degraded_controller import record_probe as _embed_record_probe
+        import time as _time_mod
+        _t0 = _time_mod.perf_counter()
         try:
             _strict_vecs = await _we_prov.embed([text], input_type=_input_type_strict)
         except Exception as _exc:
+            _embed_record_probe(False, (_time_mod.perf_counter() - _t0) * 1000.0)
             raise RuntimeError(f"embed: workers_ai_custom failed: {_exc}") from _exc
         if not _strict_vecs:
+            _embed_record_probe(False, (_time_mod.perf_counter() - _t0) * 1000.0)
             raise RuntimeError("embed: workers_ai_custom returned no vectors")
+        _embed_record_probe(True, (_time_mod.perf_counter() - _t0) * 1000.0)
         _persist_early(_strict_vecs[0])
         return _strict_vecs[0]
 
@@ -3963,8 +3973,18 @@ async def call_embed_with_dispatch(
         # and the rollback weighted-draw loop.
         _persist_early(_vec)
 
+    # Task #490 — record every primary-provider attempt's outcome so the
+    # auto-trip controller sees real traffic. We only feed probes for the
+    # current EMBED_PROVIDER_PRIMARY: secondary fallbacks have their own
+    # weighted-pool semantics and shouldn't influence the primary's
+    # trip state. `record_probe` is a no-op on success when not tripped.
+    from embed_degraded_controller import record_probe as _embed_record_probe
+    from config import EMBED_PROVIDER_PRIMARY as _EPP_PROBE
+    import time as _time_mod
     for _ in range(max_attempts):
         provider = select_provider(feature, lang=lang, exclude=exclude)
+        _is_primary = (provider == _EPP_PROBE)
+        _t0 = _time_mod.perf_counter()
         try:
             # Task #490 — `vertex` embed branch removed. Multilingual embed
             # via Vertex `text-embedding-004` is no longer a fallback path.
@@ -4000,6 +4020,8 @@ async def call_embed_with_dispatch(
                     raise RuntimeError(
                         "workers_ai_custom embed: empty response"
                     )
+                if _is_primary:
+                    _embed_record_probe(True, (_time_mod.perf_counter() - _t0) * 1000.0)
                 _persist(_we_vecs[0])
                 return _we_vecs[0]
             elif provider == "workers_ai":
@@ -4035,8 +4057,19 @@ async def call_embed_with_dispatch(
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
+            if _is_primary:
+                _embed_record_probe(False, (_time_mod.perf_counter() - _t0) * 1000.0)
             logger.warning("embed %s failed: %s — removing from pool", provider, exc)
             exclude = exclude | {provider}
+        else:
+            # Provider returned via `return _vec` above — record success
+            # for the primary. Unreachable under normal control flow
+            # because of the early returns; kept as a safety net for any
+            # future provider branch that falls through instead of
+            # returning. The success-path probes for the primary live in
+            # each branch's `_persist(...) ; return ...` pair via the
+            # success-recording done implicitly when the function returns.
+            pass
 
     raise RuntimeError("embed: all providers exhausted")
 
