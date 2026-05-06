@@ -120,7 +120,7 @@ def _schedule_indexnow_for_chapter(chapter_doc: dict):
         loop.create_task(_do())
     except Exception:
         pass
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime, timezone
 from fastapi import (
     APIRouter, HTTPException, Depends, Query, Body, File, UploadFile, Request, BackgroundTasks,
@@ -361,12 +361,22 @@ async def admin_trigger_d1_sync(admin: dict = Depends(get_admin_user), tables: O
         # sync_full so the nightly scheduler that hits this endpoint
         # keeps the Pages SSR layer fresh. Wrapped so a failure of
         # the extended mirror never aborts the primary sync result.
+        # Task #428 — surface the extended-mirror summary in the
+        # response so a manual dry-run shows success + row_counts
+        # without a separate /admin/cf-health round-trip.
+        ext_summary: dict[str, Any]
         try:
             import d1_mirror as _d1_mirror
             ext_result = await _d1_mirror.sync_extended(db)
             logger.info(f"d1_mirror.sync_extended result: {ext_result}")
+            ext_summary = ext_result if isinstance(ext_result, dict) else {"success": False, "reason": "non_dict_result"}
         except Exception as _ext_exc:
             logger.warning(f"d1_mirror.sync_extended failed (non-blocking): {_ext_exc}")
+            ext_summary = {"success": False, "reason": f"{type(_ext_exc).__name__}: {_ext_exc}"}
+        if isinstance(result, dict):
+            result = {**result, "extended_mirror": ext_summary}
+        else:
+            result = {"primary": result, "extended_mirror": ext_summary}
     # Task #795: after MongoDB → D1 sync the worker's edge cache may still
     # serve responses backed by stale D1 reads until each key's TTL
     # expires. Force a worker-cache purge_all so the next read repopulates

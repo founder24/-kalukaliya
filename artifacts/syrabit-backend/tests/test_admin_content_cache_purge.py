@@ -128,7 +128,13 @@ def test_chunk_create_purges_chapters():
 
 
 def test_d1_sync_purges_worker_cache():
-    """After admin_trigger_d1_sync we expect a worker purge_all call."""
+    """After admin_trigger_d1_sync we expect a worker purge_all call.
+
+    Task #428 — the response also includes an ``extended_mirror`` block
+    summarizing the post-sync extended mirror run so a manual dry-run
+    can verify success + row_counts without a separate /admin/cf-health
+    round-trip.
+    """
     async def run():
         from routes import admin_content
 
@@ -138,6 +144,17 @@ def test_d1_sync_purges_worker_cache():
         d1_stub.sync_full = AsyncMock(return_value={"ok": True, "tables": 5})
         d1_stub.sync_tables = AsyncMock(return_value={"ok": True})
         sys.modules["d1_sync"] = d1_stub
+
+        # Stub the d1_mirror.sync_extended call so the route's
+        # post-sync_full extended-mirror hook returns a deterministic
+        # summary we can assert on.
+        mirror_stub = MagicMock()
+        mirror_stub.sync_extended = AsyncMock(return_value={
+            "success": True,
+            "tables": ["seo_meta", "audit_log", "syllabus_map"],
+            "row_counts": {"seo_meta": 12, "audit_log": 7, "syllabus_map": 3},
+        })
+        sys.modules["d1_mirror"] = mirror_stub
 
         # Capture worker purge calls
         cf_stub = MagicMock()
@@ -149,7 +166,15 @@ def test_d1_sync_purges_worker_cache():
         )
         await _drain()
 
-        assert result == {"ok": True, "tables": 5}
+        assert result["ok"] is True
+        assert result["tables"] == 5
+        ext = result["extended_mirror"]
+        assert ext["success"] is True
+        assert ext["row_counts"] == {
+            "seo_meta": 12, "audit_log": 7, "syllabus_map": 3,
+        }
+        assert ext["tables"] == ["seo_meta", "audit_log", "syllabus_map"]
+        mirror_stub.sync_extended.assert_awaited_once()
         cf_stub.purge_worker_cache.assert_awaited_once()
         kwargs = cf_stub.purge_worker_cache.await_args.kwargs
         assert kwargs.get("purge_all") is True
