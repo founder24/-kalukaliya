@@ -1728,7 +1728,10 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
     )
     from config import PROVIDER_PRIORITY, POOL_WEIGHTS, PROVIDER_CREDITS
 
-    _FEATURE_KEYS = ["english_rag_chat", "assamese_rag_chat"]
+    # Task #490: `content_format` exposed as its own routing-chain row so
+    # operators see the formatter-only Vertex surface alongside the chat
+    # pools (was previously only described in the trailing `note` string).
+    _FEATURE_KEYS = ["english_rag_chat", "assamese_rag_chat", "content_format"]
 
     def _build_chain(feature: str) -> list[dict]:
         providers = PROVIDER_PRIORITY.get(feature, [])

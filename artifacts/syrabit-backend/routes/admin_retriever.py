@@ -32,7 +32,14 @@ logger = logging.getLogger("admin_retriever")
 
 
 class RetrieverSwitchPayload(BaseModel):
-    active: str = Field(..., description="Backend name (e.g. 'vectorize' | 'vertex')")
+    active: str = Field(
+        ...,
+        description=(
+            "Backend name (e.g. 'pinecone' | 'vectorize'). "
+            "Task #490: 'vertex' is no longer accepted (the Vertex Vector "
+            "Search retriever was deleted) — submitting it returns HTTP 400."
+        ),
+    )
 
 
 def _safe_status(name: str) -> dict[str, Any]:
