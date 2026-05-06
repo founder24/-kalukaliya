@@ -31,8 +31,8 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 ## Architecture decisions
 
 - **Cost split:** 40% Cloudflare, 30% Azure, 20% AWS, 10% GCP.
-- **Embedding strategy:** Primary is Gemma-300M + Qwen3-0.6B on Cloudflare Workers AI (1024-dim, mean-pooled) to Pinecone (`aws-ap-south-1`, `cached_gemma_today`). Failover uses Vertex multilingual embedding to a separate Pinecone namespace (`fallback_vertex_pending_reembed`) with re-embedding back to primary via AWS SQS Lambda.
-- **Chat dispatch:** Azure `gpt-4.1-nano` is the sole primary, falling back to Workers-AI Mistral-7B, then Llama-3.2-3B, then generic Workers-AI. Vertex is used for `content` pool and safety/validation, not the chat hot path.
+- **Embedding strategy:** Primary is Gemma-300M + Qwen3-0.6B on Cloudflare Workers AI (1024-dim, mean-pooled) to Pinecone (`aws-ap-south-1`, `cached_gemma_today`). On primary outage the system enters **Option-D cache-only degraded mode** (Task #490): cached vectors continue to serve, fresh content raises `EmbedDegradedMode` and is queued to the AWS SQS deferred-embed consumer for replay once primary recovers. There is no second Pinecone namespace and no silent Vertex fallback.
+- **Chat dispatch:** Azure `gpt-4.1-nano` is the sole primary, falling back to Workers-AI Mistral-7B, then Llama-3.2-3B, then generic Workers-AI. Vertex is **not** in the chat hot path (Task #490 scope-down — Vertex is `content_format` only).
 - **Vectorless RAG:** A three-tier router (`artifacts/syrabit-backend/rag.py`) performs tree-walk on D1 syllabus, then BM25 on Mongo, then a vector pass. Results are fused with RRF before Pinecone rerank to reduce embed calls.
 - **Secrets management:** Azure Key Vault is the source of truth, with AWS Secrets Manager and Cloudflare Secrets as read-only replicas synced daily.
 - **Observability:** Sentry Performance for end-to-end tracing, with `traceparent`/`baggage` propagation. OTEL to GCP Cloud Trace for long-term retention.
@@ -62,7 +62,7 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 - **Backend import check:** Always run `python -c "import server"` from `artifacts/syrabit-backend/` before pushing to prevent silent missing-file deployment issues.
 - **ACA Deploy config:** Bicep ARM PATCH must include `properties.configuration.ingress.traffic = [{latestRevision: true, weight: 100}]` and `targetPort: 8000`. Missing these strands traffic on fallback.
 - **Bicep template drift:** The Bicep template (`infra/azure/aca-syrabit-backend.bicep`) must precisely mirror the runtime contract (e.g., probe path, env vars) to avoid deployment regressions.
-- **Pinecone dimension incompatibility:** Pinecone embedding dimension is 1024. Vertex `text-embedding-004` (768-dim) is incompatible and must be used in a separate namespace for fallbacks.
+- **Pinecone dimension incompatibility:** Pinecone embedding dimension is 1024. The historical Vertex `text-embedding-004` (768-dim) fallback was removed in Task #490 (Option-D cache-only degraded mode); any future embed provider added to the failover chain must match 1024-dim or be quarantined to its own namespace.
 - **`OriginGate` lock-step rotation:** `ORIGIN_SHARED_SECRET` (ACA env, sourced from KV `ORIGIN-SHARED-SECRET`) MUST equal the syrabitworker `BACKEND_ORIGIN_SECRET` binding — the worker injects it as `X-Origin-Auth` on every backend fetch. Rotating one side without the other 403s every proxied request. Same rule for `D1_SYNC_SECRET` ↔ worker `D1_SYNC_SECRET`. Verified active 2026-05-06: direct ACA hits to gated paths return 403 "Direct origin access denied".
 
 ## Pointers
