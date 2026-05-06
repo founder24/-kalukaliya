@@ -96,6 +96,10 @@ if [ "${#TF_ROOTS[@]}" -gt 0 ]; then
   scan "GCP IAM grant of Cloud Run / Tasks / Scheduler / Build / Functions roles forbidden" \
        '"roles/(run\.|cloudtasks\.|cloudscheduler\.|cloudbuild\.|cloudfunctions\.)' \
        --type tf "${TF_ROOTS[@]}"
+  # GCS static-site hosting (`google_storage_bucket` with a `website {…}`
+  # block) is forbidden — Cloudflare Pages owns SSR per V4 §0.
+  scan "GCS static-site hosting forbidden — Cloudflare Pages owns SSR (V4 §0)" \
+       'website\s*=\s*\{|^\s*website\s*\{' --type tf "${TF_ROOTS[@]}"
 fi
 
 # ─── AWS FastAPI hosting in Terraform ────────────────────────────────────
@@ -152,6 +156,23 @@ if [ "${#PY_ROOT[@]}" -gt 0 ]; then
        '^\s*(from|import)\s+voyageai\b|api\.voyageai\.com' \
        --type py "${PY_ROOT[@]}" \
        --allow "artifacts/syrabit-backend/providers/voyage_ai.py,artifacts/syrabit-backend/config.py"
+
+  # Cerebras must never appear as a chat-primary slot. The CF AI Gateway
+  # `cerebras` slug exists for telemetry parity (matrix §A "Edge AI
+  # dispatch / BYOK gateway"), but new code MUST NOT pin the chat hot
+  # path to it. Catch the obvious patterns: `provider="cerebras"` /
+  # `cerebras_chat(`. Allow-list the existing pre-#491 provider
+  # adapter file and config.py.
+  # Cerebras as chat-primary is forbidden, but the matrix §A "Edge AI
+  # dispatch / BYOK gateway" row explicitly permits the `cerebras` slug
+  # for AI-Gateway telemetry parity. `llm.py` carries the recording
+  # helpers (`_record_aig_from_raw/stream`) and is allow-listed; the
+  # gate still catches NEW chat-primary pins anywhere else (e.g. a new
+  # route or dispatcher module).
+  scan "Cerebras forbidden as chat-primary — Azure OpenAI is sole primary (V4 §4 + §15)" \
+       'cerebras_chat\(|"cerebras"\s*:\s*\{[^}]*"primary"\s*:\s*true' \
+       --type py "${PY_ROOT[@]}" \
+       --allow "artifacts/syrabit-backend/providers/cerebras.py,artifacts/syrabit-backend/config.py,artifacts/syrabit-backend/llm.py"
 fi
 
 # Same retired-providers checks against TS edge code (no pre-existing

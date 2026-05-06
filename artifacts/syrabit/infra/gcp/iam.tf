@@ -40,14 +40,12 @@ resource "google_project_iam_member" "discovery_engine_editor" {
   member  = "serviceAccount:${google_service_account.ai_apis.email}"
 }
 
-# Vertex Gemini — content-formatter role only (sibling task #494 wires
-# the actual call site). NEVER use this SA on the chat hot path; chat is
-# Azure OpenAI per V4 §4 founder lock.
-resource "google_project_iam_member" "aiplatform_user" {
-  project = var.gcp_project_id
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.ai_apis.email}"
-}
+# NOTE — `roles/aiplatform.user` is intentionally NOT bound here. Sibling
+# task #494 owns the Vertex Gemini content-formatter wiring (NOT chat —
+# chat is Azure OpenAI per V4 §4 founder lock) and will add both the API
+# enablement (in main.tf) and this IAM binding in its own PR. Keeping the
+# role out of #489 makes the lock-in cleanly auditable: this SA has zero
+# Vertex/AI-Platform reach until #494 explicitly grants it.
 
 # ─── Billing-account-scope role ─────────────────────────────────────────────
 

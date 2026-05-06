@@ -79,8 +79,12 @@ locals {
     "translate.googleapis.com",
     "vision.googleapis.com",
     "discoveryengine.googleapis.com",
-    # Vertex Gemini — content-formatter role only (sibling #494). NOT chat.
-    "aiplatform.googleapis.com",
+    # NOTE — `aiplatform.googleapis.com` (Vertex Gemini content-formatter
+    # surface) is intentionally NOT enabled here. Sibling task #494 owns
+    # the formatter wiring and will append the API + the matching IAM
+    # binding in its own PR. Keeping it out of #489 makes the lock-in
+    # cleanly auditable: only AI APIs explicitly approved by V4 §0
+    # auxiliaries + the Web-Risk row of the matrix are turned on.
     # Observability + billing telemetry
     "cloudtrace.googleapis.com",
     "billingbudgets.googleapis.com",

@@ -65,61 +65,48 @@ resource "aws_iam_role_policy" "sqs_consumer_reembed" {
   })
 }
 
-# TASK-489-FOLLOWUP: the consumer Lambda + event-source mapping are
-# intentionally commented out until the handler lands.
-#
-# Status: see `infra/four-cloud-delegation.md` §D row "Deferred-embed
-# reembed Lambda handler". The Python module
-# `services/backend/sqs_consumers/reembed.py` does not yet exist, so
-# provisioning the Lambda here would create a function whose every
-# invocation fails at HANDLER_NAME resolution. The producer-side
-# enqueue path + queue/DLQ/alarms (above + below) ARE live so the
-# follow-up PR only needs to:
-#   1. Add `services/backend/sqs_consumers/reembed.py` to the consumer
-#      multi-entrypoint container image (matches the pattern in
-#      `lambda-workers.tf`).
-#   2. Uncomment the two blocks below.
-#   3. Run `terraform apply` — alarms are already wired to ops_alerts.
-#
-# resource "aws_lambda_function" "reembed_consumer" {
-#   function_name = "${local.lz_project}-reembed-${local.lz_env}"
-#
-#   package_type  = "Image"
-#   image_uri     = local.sqs_consumer_image_uri
-#   architectures = ["arm64"]
-#
-#   role        = aws_iam_role.sqs_consumer.arn
-#   memory_size = 512
-#   timeout     = 120
-#
-#   reserved_concurrent_executions = 5
-#
-#   environment {
-#     variables = {
-#       HANDLER_NAME             = "sqs_consumers.reembed.handler"
-#       EMBED_WORKER_URL         = "https://embed.syrabit.ai"
-#       PINECONE_INDEX           = "syrabit-prod"
-#       PINECONE_NAMESPACE       = "cached_gemma_today"
-#       WORKERS_EMBED_SECRET_ARN = data.aws_secretsmanager_secret.workers_embed.arn
-#       PINECONE_API_KEY_ARN     = data.aws_secretsmanager_secret.pinecone.arn
-#     }
-#   }
-#
-#   tracing_config { mode = "Active" }
-#
-#   tags = merge(local.lz_common_tags, {
-#     purpose = "deferred-embed-replay"
-#   })
-# }
-#
-# resource "aws_lambda_event_source_mapping" "reembed" {
-#   event_source_arn                   = aws_sqs_queue.reembed.arn
-#   function_name                      = aws_lambda_function.reembed_consumer.arn
-#   batch_size                         = 5
-#   maximum_batching_window_in_seconds = 5
-#
-#   function_response_types = ["ReportBatchItemFailures"]
-# }
+resource "aws_lambda_function" "reembed_consumer" {
+  function_name = "${local.lz_project}-reembed-${local.lz_env}"
+
+  package_type  = "Image"
+  image_uri     = local.sqs_consumer_image_uri
+  architectures = ["arm64"]
+
+  role        = aws_iam_role.sqs_consumer.arn
+  memory_size = 512
+  timeout     = 120
+
+  reserved_concurrent_executions = 5
+
+  environment {
+    variables = {
+      # Multi-entrypoint container image (matches `lambda-workers.tf`)
+      # dispatches to `sqs_consumers.reembed.handler` — see
+      # `artifacts/syrabit/services/backend/sqs_consumers/reembed.py`.
+      HANDLER_NAME             = "sqs_consumers.reembed.handler"
+      EMBED_WORKER_URL         = "https://embed.syrabit.ai"
+      PINECONE_INDEX           = "syrabit-prod"
+      PINECONE_NAMESPACE       = "cached_gemma_today"
+      WORKERS_EMBED_SECRET_ARN = data.aws_secretsmanager_secret.workers_embed.arn
+      PINECONE_API_KEY_ARN     = data.aws_secretsmanager_secret.pinecone.arn
+    }
+  }
+
+  tracing_config { mode = "Active" }
+
+  tags = merge(local.lz_common_tags, {
+    purpose = "deferred-embed-replay"
+  })
+}
+
+resource "aws_lambda_event_source_mapping" "reembed" {
+  event_source_arn                   = aws_sqs_queue.reembed.arn
+  function_name                      = aws_lambda_function.reembed_consumer.arn
+  batch_size                         = 5
+  maximum_batching_window_in_seconds = 5
+
+  function_response_types = ["ReportBatchItemFailures"]
+}
 
 # ─── CloudWatch alarms ─────────────────────────────────────────────────────
 # The matrix's acceptance criterion C5 (deferred-embed replay) requires
