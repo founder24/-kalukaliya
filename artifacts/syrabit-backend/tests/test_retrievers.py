@@ -1,11 +1,11 @@
 """
 test_retrievers — exercise the retriever interface, the Vectorize
-adapter (with a stubbed `vectorize_client`), the Vertex adapter's
-configuration gating, and the factory's selection precedence.
+adapter (with a stubbed `vectorize_client`), and the factory's
+selection precedence.
 
-The Vertex adapter does not run any HTTP traffic in these tests —
-we only assert that `is_configured()`, batching helpers, and the
-factory select-by-env behaviour work without GCP credentials.
+Task #490 removed `retrievers/vertex.py` (`VertexVectorSearchRetriever`)
+along with the Vertex chat / multilingual-embed surface; only Vectorize,
+MongoVectorRetriever, and PineconeVectorRetriever remain.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from retrievers import (
     list_available_retrievers,
 )
 from retrievers.vectorize import VectorizeRetriever
-from retrievers.vertex import VertexVectorSearchRetriever
 from retrievers import factory as _factory
 
 
@@ -99,12 +98,17 @@ def patched_vectorize(monkeypatch):
 def test_default_and_listing():
     assert DEFAULT_RETRIEVER == "vectorize"
     names = list_available_retrievers()
-    assert {"vectorize", "vertex"}.issubset(names)
+    assert "vectorize" in names
+    assert "vertex" not in names  # Task #490 — vertex retriever deleted
 
 
 def test_get_by_name_returns_correct_class():
     assert isinstance(get_retriever_by_name("vectorize"), VectorizeRetriever)
-    assert isinstance(get_retriever_by_name("vertex"), VertexVectorSearchRetriever)
+
+
+def test_get_by_name_vertex_raises_after_task_490():
+    with pytest.raises(ValueError):
+        get_retriever_by_name("vertex")
 
 
 def test_get_by_name_memoises():
@@ -119,8 +123,8 @@ def test_get_by_name_unknown_raises():
 
 
 def test_env_override(monkeypatch):
-    monkeypatch.setenv("RAG_RETRIEVER", "vertex")
-    assert _factory.get_active_retriever_name() == "vertex"
+    monkeypatch.setenv("RAG_RETRIEVER", "mongodb_vector")
+    assert _factory.get_active_retriever_name() == "mongodb_vector"
     monkeypatch.setenv("RAG_RETRIEVER", "garbage")
     assert _factory.get_active_retriever_name() == DEFAULT_RETRIEVER
 
@@ -137,9 +141,9 @@ async def test_get_retriever_falls_back_to_env(monkeypatch):
     async def _no_override():
         return None
     monkeypatch.setattr(_factory, "_read_db_override", _no_override)
-    monkeypatch.setenv("RAG_RETRIEVER", "vertex")
+    monkeypatch.delenv("RAG_RETRIEVER", raising=False)
     r = await get_retriever()
-    assert isinstance(r, VertexVectorSearchRetriever)
+    assert isinstance(r, VectorizeRetriever)
 
 
 # ── Vectorize adapter (delegation correctness) ──────────────────────────────
@@ -180,100 +184,11 @@ async def test_vectorize_unconfigured_short_circuits_via_is_configured(patched_v
     assert r.is_configured() is False
 
 
-# ── Vertex adapter (no GCP creds — just gating + helpers) ───────────────────
-
-def test_vertex_unconfigured_when_env_missing(monkeypatch):
-    for var in (
-        "VERTEX_PROJECT_ID", "VERTEX_INDEX_ID", "VERTEX_INDEX_ENDPOINT_ID",
-        "VERTEX_DEPLOYED_INDEX_ID", "VERTEX_SERVICE_ACCOUNT",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    r = VertexVectorSearchRetriever()
-    assert not r.is_configured()
-
-
-def test_vertex_to_datapoint_strips_empties():
-    r = VertexVectorSearchRetriever()
-    dp = r._to_datapoint({
-        "id": "v1",
-        "values": [0.1, 0.2],
-        "metadata": {"chapter_id": "c1", "subject_id": "", "blank": None, "level": "chapter"},
-    })
-    assert dp["datapointId"] == "v1"
-    namespaces = {r["namespace"] for r in dp["restricts"]}
-    assert namespaces == {"chapter_id", "level"}  # "" and None dropped
-
-
-@pytest.mark.anyio
-async def test_vertex_query_short_circuits_when_unconfigured(monkeypatch):
-    for var in (
-        "VERTEX_PROJECT_ID", "VERTEX_INDEX_ID", "VERTEX_INDEX_ENDPOINT_ID",
-        "VERTEX_DEPLOYED_INDEX_ID", "VERTEX_SERVICE_ACCOUNT",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    r = VertexVectorSearchRetriever()
-    assert await r.query([0.0] * 8) == []
-    assert await r.delete(["a"]) == 0
-    assert await r.get_by_ids(["a"]) == []
-    upsert = await r.upsert([{"id": "x", "values": [0.0], "metadata": {}}])
-    assert upsert.get("upserted") == 0
-    assert "vertex_not_configured" in (upsert.get("errors") or [])
-
-
-@pytest.mark.anyio
-async def test_db_override_takes_precedence_over_env(monkeypatch):
-    monkeypatch.setenv("RAG_RETRIEVER", "vectorize")
-
-    async def _override():
-        return "vertex"
-    monkeypatch.setattr(_factory, "_read_db_override", _override)
-    r = await get_retriever()
-    assert isinstance(r, VertexVectorSearchRetriever)
-
-
-@pytest.mark.anyio
-async def test_db_override_db_failure_falls_back_to_env(monkeypatch):
-    """Regression: a DB hiccup must not poison the override cache."""
-    monkeypatch.setenv("RAG_RETRIEVER", "vectorize")
-    # Simulate a transient DB error → real factory uses the cache TTL,
-    # but a failed read must clear the cache so the *next* call retries.
-    invalidate_retriever_cache()
-    fake_db = type("FakeDB", (), {})()
-    class _Settings:
-        async def find_one(self, *a, **k):
-            raise RuntimeError("simulated DB outage")
-    fake_db.settings = _Settings()
-    import deps as _deps
-    monkeypatch.setattr(_deps, "db", fake_db, raising=False)
-    r1 = await get_retriever()
-    assert isinstance(r1, VectorizeRetriever), "must fall back to env on DB error"
-    # And the cache must NOT keep the stale empty value — confirm the
-    # next call still does the right thing if the DB recovers.
-    class _SettingsOK:
-        async def find_one(self, *a, **k):
-            return {"active": "vertex"}
-    fake_db.settings = _SettingsOK()
-    r2 = await get_retriever()
-    assert isinstance(r2, VertexVectorSearchRetriever), "cache must allow recovery"
-
-
-@pytest.mark.anyio
-async def test_admin_toggle_refuses_unconfigured(monkeypatch):
-    """`PUT /admin/retriever/config` must refuse switching to a backend
-    whose `is_configured()` returns False."""
-    from routes import admin_retriever as ar
-    from fastapi import HTTPException
-    # Force vertex to look unconfigured.
-    invalidate_retriever_cache()
-    for var in (
-        "VERTEX_PROJECT_ID", "VERTEX_INDEX_ID", "VERTEX_INDEX_ENDPOINT_ID",
-        "VERTEX_DEPLOYED_INDEX_ID", "VERTEX_SERVICE_ACCOUNT",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    payload = ar.RetrieverSwitchPayload(active="vertex")
-    with pytest.raises(HTTPException) as exc:
-        await ar.update_retriever_config(payload, _admin={"id": "admin"})
-    assert exc.value.status_code == 400
+# ── Vertex adapter — REMOVED Task #490 ──────────────────────────────────────
+# `retrievers/vertex.py` and the entire VertexVectorSearchRetriever surface
+# were deleted alongside the Vertex chat / multilingual-embed paths. The
+# admin retriever-toggle test below stays — it now uses the Pinecone
+# entry to exercise the "unknown backend" rejection path.
 
 
 @pytest.mark.anyio
@@ -286,47 +201,13 @@ async def test_admin_toggle_rejects_unknown_name():
     assert exc.value.status_code == 400
 
 
-def test_vertex_url_construction_matches_google_rest_shape(monkeypatch):
-    """Pin the Vertex REST URL templates so a refactor that breaks one
-    of them gets caught immediately. URLs must match Google's
-    documented `aiplatform.googleapis.com` shape."""
-    monkeypatch.setenv("VERTEX_PROJECT_ID", "p")
-    monkeypatch.setenv("VERTEX_LOCATION", "us-central1")
-    monkeypatch.setenv("VERTEX_INDEX_ID", "111")
-    monkeypatch.setenv("VERTEX_INDEX_ENDPOINT_ID", "222")
-    monkeypatch.setenv("VERTEX_DEPLOYED_INDEX_ID", "deployed1")
-    monkeypatch.setenv("VERTEX_SERVICE_ACCOUNT", '{"type":"service_account"}')
-    monkeypatch.delenv("VERTEX_PUBLIC_DOMAIN_ENDPOINT", raising=False)
-    r = VertexVectorSearchRetriever()
-    base = "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1"
-    assert r._find_neighbors_url() == f"{base}/indexEndpoints/222:findNeighbors"
-    assert r._read_datapoints_url() == f"{base}/indexEndpoints/222:readIndexDatapoints"
-    assert r._upsert_url() == f"{base}/indexes/111:upsertDatapoints"
-    assert r._remove_url() == f"{base}/indexes/111:removeDatapoints"
-
-
-def test_vertex_url_uses_public_domain_when_set(monkeypatch):
-    monkeypatch.setenv("VERTEX_PROJECT_ID", "p")
-    monkeypatch.setenv("VERTEX_LOCATION", "us-central1")
-    monkeypatch.setenv("VERTEX_INDEX_ID", "111")
-    monkeypatch.setenv("VERTEX_INDEX_ENDPOINT_ID", "222")
-    monkeypatch.setenv("VERTEX_DEPLOYED_INDEX_ID", "deployed1")
-    monkeypatch.setenv("VERTEX_SERVICE_ACCOUNT", '{"type":"service_account"}')
-    monkeypatch.setenv("VERTEX_PUBLIC_DOMAIN_ENDPOINT", "https://abc.us-central1-aiplatform.googleapis.com")
-    r = VertexVectorSearchRetriever()
-    assert r._find_neighbors_url().startswith(
-        "https://abc.us-central1-aiplatform.googleapis.com/v1/projects/p/"
-    )
-
-
 @pytest.mark.anyio
-async def test_vertex_index_config_unconfigured_returns_static_shape(monkeypatch):
-    for var in (
-        "VERTEX_PROJECT_ID", "VERTEX_INDEX_ID", "VERTEX_INDEX_ENDPOINT_ID",
-        "VERTEX_DEPLOYED_INDEX_ID", "VERTEX_SERVICE_ACCOUNT",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    r = VertexVectorSearchRetriever()
-    cfg = await r.index_config()
-    assert cfg["metric"] == "cosine"
-    assert cfg["dimensions"] >= 1
+async def test_admin_toggle_rejects_vertex_after_task_490():
+    """`PUT /admin/retriever/config` must refuse `vertex` because the
+    backend was deleted in Task #490."""
+    from routes import admin_retriever as ar
+    from fastapi import HTTPException
+    payload = ar.RetrieverSwitchPayload(active="vertex")
+    with pytest.raises(HTTPException) as exc:
+        await ar.update_retriever_config(payload, _admin={"id": "admin"})
+    assert exc.value.status_code == 400

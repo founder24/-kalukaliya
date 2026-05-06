@@ -322,26 +322,21 @@ async def _assamese_translate_gemini_main_sarvam_polish(
                     src[:60])
         return ""
 
-    # ── Step 2 (polish, ALWAYS): Vertex / Gemini polishes IndicTrans2 ──────
-    # Strict translate-then-polish contract — Vertex polishes every
-    # non-empty IndicTrans2 output (no length gating). Polish failure
-    # returns the un-polished IndicTrans2 string so the user still gets
-    # a translation.
+    # ── Step 2 (polish, ALWAYS): vertex_format polishes IndicTrans2 ───────
+    # Task #490 — Vertex chat dispatch removed; polish now goes through
+    # `vertex_format.format_with_vertex` (the single Vertex surface).
+    # Polish failure returns the un-polished IndicTrans2 string so the
+    # user still gets a translation.
     try:
-        from llm import _call_vertex_chat
-        # `_call_vertex_chat` uses Vertex SA (GOOGLE_APPLICATION_CREDENTIALS_JSON);
-        # do NOT gate on `vertex_chat.is_configured()` (that symbol gates the
-        # streaming wrapper on Cloudflare creds, not on the SA needed here).
         if not (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "") or "").strip():
             return _tr_cache_store(translate_out)
+        from vertex_format import format_with_vertex as _vertex_format
         polished = await asyncio.wait_for(
-            _call_vertex_chat(
-                [
-                    {"role": "system", "content": _POLISH_SYSTEM_PROMPT},
-                    {"role": "user", "content": translate_out[:4000]},
-                ],
-                "gemini-2.5-flash",
-                min(1200, len(translate_out) * 3 + 200),
+            _vertex_format(
+                f"{_POLISH_SYSTEM_PROMPT}\n\n---\n{translate_out[:4000]}",
+                style="notebook_lm",
+                lang="as",
+                max_tokens=min(1200, len(translate_out) * 3 + 200),
             ),
             timeout=_SARVAM_POLISH_TIMEOUT_SEC,
         )

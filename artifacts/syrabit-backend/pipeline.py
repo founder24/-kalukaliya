@@ -461,7 +461,7 @@ async def stage3_polish(
     user_info: dict = None,
     max_tokens: int = 4096,
 ) -> Optional[str]:
-    from llm import _call_llm_raw, _LLM_PROVIDERS_CHAT, _call_vertex_chat
+    from llm import _call_llm_raw, _LLM_PROVIDERS_CHAT
     t0 = time.perf_counter()
 
     prompt = _build_stage3_prompt(query, factual_draft, context, user_info)
@@ -470,32 +470,11 @@ async def stage3_polish(
         {"role": "user", "content": query},
     ]
 
-    # Vertex SA (Gemini 2.5 Flash) is the primary polisher when configured.
-    # `_call_vertex_chat` only needs GOOGLE_APPLICATION_CREDENTIALS_JSON +
-    # a project id; do NOT gate on `vertex_chat.is_configured()` (that
-    # symbol checks Cloudflare creds for the streaming wrapper).
-    _vertex_sa_ready = bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip())
-    if _vertex_sa_ready:
-        try:
-            result = await asyncio.wait_for(
-                _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens),
-                timeout=15.0,
-            )
-            dur = (time.perf_counter() - t0) * 1000
-            _record_pipeline_stage("response_polisher", "gemini-2.5-flash", "vertex", dur, True)
-            logger.info(
-                f"[PIPELINE][S3] Polish done in {dur:.0f}ms: "
-                f"{len(result)} chars | provider=vertex/gemini-2.5-flash"
-            )
-            return result
-        except asyncio.TimeoutError:
-            dur = (time.perf_counter() - t0) * 1000
-            _record_pipeline_stage("response_polisher", "gemini-2.5-flash", "vertex", dur, False, "timeout")
-            logger.warning(f"[PIPELINE][S3] Vertex polish timed out after {dur:.0f}ms — falling through to workers-ai")
-        except Exception as e:
-            dur = (time.perf_counter() - t0) * 1000
-            _record_pipeline_stage("response_polisher", "gemini-2.5-flash", "vertex", dur, False, type(e).__name__)
-            logger.warning(f"[PIPELINE][S3] Vertex polish failed ({type(e).__name__}: {str(e)[:120]}) — falling through to workers-ai")
+    # Task #490 — Vertex chat hot-path removed. Stage-3 polish for the
+    # chat pipeline now goes straight to the workers-AI / Azure chat
+    # pool. The dedicated `vertex_format` content-formatter is reserved
+    # for offline notes polish (`polish_notes_with_vertex`), not for
+    # the streaming chat hot-path (TTFT-critical).
 
     if not _LLM_PROVIDERS_CHAT:
         logger.warning("[PIPELINE][S3] No providers available for polishing")
@@ -538,7 +517,6 @@ async def stage3_polish_stream(
     intent: str = "",
 ) -> AsyncGenerator[str, None]:
     from llm import call_llm_api_stream
-    import vertex_chat as _vchat
     t0 = time.perf_counter()
 
     prompt = _build_stage3_prompt(query, factual_draft, context, user_info)
@@ -547,11 +525,12 @@ async def stage3_polish_stream(
         {"role": "user", "content": query},
     ]
 
-    # Route via the dispatcher's vertex fast-path when SA creds are available;
-    # the dispatcher itself falls back to the workers-AI pool on failure.
-    _vertex_ready = _vchat.is_configured()
-    stream_model = "vertex/gemini-flash" if _vertex_ready else "openai/gpt-oss-20b"
-    bucket = "vertex" if _vertex_ready else "slm_pool"
+    # Task #490 — Vertex chat hot-path removed. Stream polish now uses
+    # the SLM pool directly (Workers-AI gpt-oss-20b primary; the
+    # call_llm_api_stream dispatcher walks Azure / Workers-AI
+    # / Sarvam from there).
+    stream_model = "openai/gpt-oss-20b"
+    bucket = "slm_pool"
 
     first_token = False
     try:

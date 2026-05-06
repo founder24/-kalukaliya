@@ -379,11 +379,11 @@ _CF_PROVIDER_SLUGS = {
 
 _DIRECT_PROVIDER_URLS = {
     # openai / xai entries removed (Task #347 — providers decommissioned).
-    # NOTE: "gemini" entry removed (Task: vertex-only Gemini auth, 2026-05-03).
-    # All Gemini calls now route through Vertex AI service-account auth via
-    # `_call_vertex_chat` / `vertex_chat.stream_chat`. The direct
-    # generativelanguage.googleapis.com endpoint is no longer reachable from
-    # the backend; do NOT re-add unless you are deliberately rolling back.
+    # NOTE: "gemini" entry removed (vertex-only Gemini auth, 2026-05-03).
+    # Task #490 then scoped Vertex to `content_format` only — Gemini is
+    # now reachable solely via `vertex_format.format_with_vertex` for
+    # NotebookLM-style polish. The direct generativelanguage.googleapis.com
+    # endpoint is not reachable from the backend; do NOT re-add it.
     # Sarvam direct URL has NO /v1 — callers already supply /v1/chat/completions
     # and non-LLM endpoints like /translate, /text-to-speech live at root.
     "sarvam":      "https://api.sarvam.ai",
@@ -486,11 +486,11 @@ else:
     _cfg_log.info("Cloudflare AI Gateway DISABLED — using direct provider URLs")
 
 # ── LLM Configuration ─────────────────────────────────────────────────────────
-# Gemini auth migrated to Vertex AI service-account (2026-05-03).
+# Gemini auth migrated to Vertex AI service-account (2026-05-03), then
+# scoped to `content_format` only by Task #490.
 # GEMINI_API_KEY / GEMINI_API_KEY_2 are NO LONGER read from the environment —
-# all Gemini calls route through `vertex_chat.stream_chat` and
-# `_call_vertex_chat` (llm.py), which authenticate via
-# GOOGLE_APPLICATION_CREDENTIALS_JSON → OAuth bearer for cloud-platform scope.
+# the only remaining Gemini caller is `vertex_format.format_with_vertex`,
+# which authenticates via GOOGLE_APPLICATION_CREDENTIALS_JSON → OAuth bearer.
 # These symbols stay bound to "" so any in-flight `from config import _GEMINI_KEY`
 # imports degrade gracefully (the `if _GEMINI_KEY:` guards become False and the
 # legacy gemini code paths short-circuit). Safe to delete from Railway.
@@ -587,11 +587,10 @@ MEMORY_BRAIN_COLLECTION = os.environ.get(
 WORKERS_EMBED_URL = os.environ.get('WORKERS_EMBED_URL', '').strip()
 WORKERS_EMBED_SECRET = os.environ.get('WORKERS_EMBED_SECRET', '').strip()
 
-# ── Vertex AI Gemini Flash chat (Task #607) ─────────────────────────────────
-# When VERTEX_PROJECT_ID is set, the chat path can route through Vertex AI's
-# Gemini Flash streaming endpoint for lower TTFT. Auth is via Application
-# Default Credentials (GOOGLE_APPLICATION_CREDENTIALS pointing at a SA JSON)
-# or the inline VERTEX_SERVICE_ACCOUNT_JSON blob. See vertex_chat.py.
+# ── Vertex AI Gemini 2.5 Flash content-formatter ONLY (Task #490) ───────────
+# Vertex is no longer a chat / vision / translate / embed provider. The
+# remaining Vertex surface is `vertex_format.format_with_vertex`, which
+# uses these env vars for SA-OAuth + project + region + model selection.
 VERTEX_PROJECT_ID = os.environ.get('VERTEX_PROJECT_ID', '').strip()
 VERTEX_LOCATION = os.environ.get('VERTEX_LOCATION', 'us-central1').strip() or 'us-central1'
 VERTEX_GEMINI_MODEL = os.environ.get('VERTEX_GEMINI_MODEL', 'gemini-2.5-flash').strip() or 'gemini-2.5-flash'
@@ -1229,22 +1228,23 @@ PROVIDER_PRIORITY: dict = {
     # Bedrock removed (Task #347 — provider decommissioned).
     "content":           [
         "workers_ai_mistral_7b", "workers_ai_llama32_3b",
-        "vertex",
         "workers_ai",
     ],
-    # Assamese content generation (Task #281): IndicTrans2 dominant primary
-    # (purpose-built Indic neural MT), Gemini reserved at low weight strictly
-    # for note-formatting / structuring fallback. Sarvam removed from this
-    # pool — Sarvam stays on the conversational `assamese_rag_chat` path
-    # where its native conversational tone matters most.
-    "assamese_content":  ["workers_ai_indic", "vertex"],
-    # Text-to-speech: ElevenLabs (primary) → Deepgram → Vertex → Workers AI.
-    # All via CF AI Gateway; rotational so no single provider is exhausted.
-    "tts":               ["elevenlabs", "deepgram", "vertex", "workers_ai"],
-    # Speech-to-text: Deepgram (primary) → AssemblyAI → Vertex → Workers AI.
-    "stt":               ["deepgram", "assemblyai", "vertex", "workers_ai"],
-    # Combined voice pipeline: Deepgram → ElevenLabs → Vertex → Workers AI.
-    "voice":             ["deepgram", "elevenlabs", "vertex", "workers_ai"],
+    # Task #490 — Vertex moved to its own `content_format` pool below.
+    # Assamese content generation (Task #281): IndicTrans2 only — Vertex
+    # is no longer in the chat / content pool. Polish is `content_format`.
+    "assamese_content":  ["workers_ai_indic"],
+    # Stage-2 polish / NotebookLM-style formatter — Task #490 dedicated
+    # pool. Vertex Gemini 2.5 Flash is the SOLE entry; this is the only
+    # remaining Vertex surface in syrabit-backend.
+    "content_format":    ["vertex"],
+    # Text-to-speech: ElevenLabs (primary) → Deepgram → Workers AI.
+    # Vertex removed (Task #490 — Vertex is content_format only).
+    "tts":               ["elevenlabs", "deepgram", "workers_ai"],
+    # Speech-to-text: Deepgram (primary) → AssemblyAI → Workers AI.
+    "stt":               ["deepgram", "assemblyai", "workers_ai"],
+    # Combined voice pipeline: Deepgram → ElevenLabs → Workers AI.
+    "voice":             ["deepgram", "elevenlabs", "workers_ai"],
     # Embeddings: Workers AI (@cf/baai/bge-m3, 1024-dim) only.
     # Direct Cohere and Voyage AI providers were removed per user
     # instruction (2026-05-04 rollback) — both required externally-hosted
@@ -1262,9 +1262,13 @@ PROVIDER_PRIORITY: dict = {
     # listed here so the exclusion-redraw loop can advance through
     # them. The exact non-zero weights come from POOL_WEIGHTS["embed"]
     # below, which is rebuilt from EMBED_PROVIDER_PRIMARY at import.
-    "embed":             ["workers_ai_custom", "cohere", "voyage_ai", "vertex", "azure_openai", "workers_ai"],
-    "embed_en":          ["workers_ai_custom", "cohere", "voyage_ai", "vertex", "azure_openai", "workers_ai"],
-    "embed_indic":       ["workers_ai_custom", "cohere", "voyage_ai", "vertex", "azure_openai", "workers_ai"],
+    # Task #490 — Vertex `text-embedding-004` removed from every embed
+    # pool. On Workers-AI custom embed outage the controller flips into
+    # Option-D cache-only degraded mode and enqueues misses on the AWS
+    # SQS deferred-embed queue (V4 §15). No second Pinecone namespace.
+    "embed":             ["workers_ai_custom", "cohere", "voyage_ai", "azure_openai", "workers_ai"],
+    "embed_en":          ["workers_ai_custom", "cohere", "voyage_ai", "azure_openai", "workers_ai"],
+    "embed_indic":       ["workers_ai_custom", "cohere", "voyage_ai", "azure_openai", "workers_ai"],
     # Reranking: Task #382 collapses this to Pinecone-only when
     # RERANK_PROVIDER=pinecone_only. Workers AI remains in the list as
     # a dormant fallback the dispatcher can advance to if the flag is
@@ -1272,17 +1276,16 @@ PROVIDER_PRIORITY: dict = {
     # pinecone_ai under the new default.
     "rerank":            ["pinecone_ai", "workers_ai"],
     # Vector search: Pinecone (500) → MongoDB Atlas (0, weight-0 fallback) → Vertex → Workers AI.
-    "vector_search":     ["pinecone_ai", "mongodb_atlas", "vertex", "workers_ai"],
-    # Translation (English→Assamese):
-    #   Workers AI IndicTrans2 (primary, dedicated neural MT) → Gemini (fallback).
-    #   POOL_WEIGHTS gives workers_ai_indic=3000, vertex=100.
-    "translate":         ["workers_ai_indic", "vertex"],
-    # Vision / OCR: Vertex (Gemini 2.5 Flash multimodal) → Azure OpenAI →
-    # Workers AI. Bedrock removed.
-    "vision":            ["vertex", "azure_openai", "workers_ai"],
-    # Safety checks: Vertex (Gemini safety classifier) → Workers AI.
-    # Bedrock removed.
-    "safety":            ["vertex", "workers_ai"],
+    # Task #490 — Vertex Vector Search removed. Pinecone is the canonical
+    # vector store; Atlas remains as a weight-0 disaster fallback.
+    "vector_search":     ["pinecone_ai", "mongodb_atlas", "workers_ai"],
+    # Translation (English→Assamese): Workers AI IndicTrans2 only.
+    # Vertex translate branch removed Task #490.
+    "translate":         ["workers_ai_indic"],
+    # Vision / OCR: Azure OpenAI GPT-4o → Workers AI. Vertex removed (Task #490).
+    "vision":            ["azure_openai", "workers_ai"],
+    # Safety checks: Workers AI. Vertex safety branch removed (Task #490).
+    "safety":            ["workers_ai"],
     # RAG search with external web results: Exa neural search → Workers AI.
     "search_rag":        ["exa_ai", "workers_ai"],
     # Live / real-time search: Exa → Tavily → Workers AI.
@@ -1346,16 +1349,21 @@ PROVIDER_MAX_CONCURRENT: dict[str, int] = {
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "content": {
         # English content generation — STAGE 1 (GENERATE) (2026-05-05).
-        # Worker AI variants generate raw notes (each weight 10000);
-        # Vertex/Gemini is RESERVED for STAGE 2 polish (NotebookLM-style
-        # formatting via `polish_notes_with_vertex`) and therefore
-        # stays in this pool only as a weight-0 emergency last-resort
-        # so a total Workers-AI outage can still serve content.
-        # Sarvam + Azure are not in this pool.
+        # Worker AI variants generate raw notes (each weight 10000).
+        # Task #490 — Vertex removed from this pool entirely; the polish
+        # stage now lives in its own `content_format` pool below.
         "workers_ai_mistral_7b":  10000,
         "workers_ai_llama32_3b":  10000,
-        "vertex":                     0,  # reserved for stage-2 polish; emergency-only here
         "workers_ai":                 0,  # last-resort safety net — see WORKERS_AI_FALLBACK_MODELS
+    },
+    "content_format": {
+        # Task #490 — STAGE 2 (POLISH) — NotebookLM-style formatter pool.
+        # Vertex Gemini 2.5 Flash is the SOLE entry, weight 10000 so the
+        # weighted-draw deterministically selects it. This is the only
+        # remaining Vertex surface in syrabit-backend; if Vertex is down
+        # callers MUST handle the polish failure themselves (V4 §12 — no
+        # silent fallback).
+        "vertex": 10000,
     },
     "english_rag_chat": {
         # Strict primary/fallback (2026-05-05 user instruction): Azure
@@ -1384,16 +1392,12 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "assamese_content": {
         # Assamese content generation — STAGE 1 (GENERATE) (2026-05-05).
         # workers_ai_indic (IndicTrans2) generates the raw Assamese
-        # output. Vertex/Gemini is RESERVED for STAGE 2 polish
-        # (NotebookLM-style formatting via `polish_notes_with_vertex`)
-        # and stays in this pool only as a weight-0 emergency last-
-        # resort so an IndicTrans2 outage can still serve content.
+        # output. Task #490 — Vertex removed; polish goes through the
+        # `content_format` pool above.
         "workers_ai_indic": 10000,
-        "vertex":               0,  # reserved for stage-2 polish; emergency-only here
     },
     "translate": {
         "workers_ai_indic": 1000,
-        "vertex":           1000,
     },
     # embed/tts/stt explicit overrides so the established primaries
     # (ElevenLabs/Deepgram) keep deterministic priority over generic
@@ -1407,27 +1411,18 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "tts": {
         "elevenlabs": 1000,   # equal weight — eleven_multilingual_v2
         "deepgram":   1000,   # equal weight — Aura-2
-        # Vertex TTS endpoint is intentionally not wired (see routes/voice.py
-        # _synthesize_with_fallback); it stays in PROVIDER_PRIORITY['tts'] only
-        # as a placeholder so the "graceful exclusion" path is exercised. Weight
-        # MUST be 0 — any positive weight makes the weighted draw pick a known-
-        # failing provider on a sizeable fraction of requests, burning a
-        # dispatch attempt + log line per voice call before redrawing.
-        "vertex":       0,
         "workers_ai":   0,   # last-resort
     },
     "stt": {
         "deepgram":   1000,   # equal weight — Deepgram Nova-3
         "assemblyai": 1000,   # equal weight — AssemblyAI best
-        # Vertex STT endpoint is intentionally not wired — see the tts note
-        # above; same rationale for pinning to weight 0.
-        "vertex":       0,
         "workers_ai":   0,   # last-resort
     },
-    # vector_search: round-robin between Pinecone curated index and Atlas/Vertex.
+    # vector_search: Pinecone primary; Atlas weight-0 disaster fallback.
+    # Task #490 — Vertex Vector Search removed.
     "vector_search": {
         "pinecone_ai": 1000,
-        "vertex":      1000,
+        "mongodb_atlas": 0,
     },
 }
 
@@ -1444,7 +1439,7 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
 _LEGACY_EMBED_WEIGHTS = {
     "cohere":       1000,
     "voyage_ai":    1000,
-    "vertex":        500,
+    # Task #490 — vertex removed from legacy embed weights.
     "azure_openai":  500,
     "workers_ai":    100,
 }
@@ -1458,7 +1453,6 @@ def _build_embed_pool(primary: str) -> dict[str, int]:
             "workers_ai_custom": 10000,
             "cohere":                0,
             "voyage_ai":             0,
-            "vertex":                0,
             "azure_openai":          0,
             "workers_ai":            0,
         }

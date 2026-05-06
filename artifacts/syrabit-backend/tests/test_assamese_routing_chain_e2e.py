@@ -842,7 +842,7 @@ class TestAssameseTranslatePipelineIndicTrans2Path:
 
         gemini_calls: list = []
 
-        # Vertex-only Gemini auth (2026-05-03): stub `_call_vertex_chat` (signature
+        # Vertex-only Gemini auth (2026-05-03): stub `format_with_vertex` (signature
         # `messages, model, max_tokens` — no api_key arg) instead of the deleted
         # `_call_gemini`.
         async def _fake_gemini(messages, model, max_tokens):
@@ -850,7 +850,7 @@ class TestAssameseTranslatePipelineIndicTrans2Path:
             return gemini_assamese
 
         import llm as _llm
-        monkeypatch.setattr(_llm, "_call_vertex_chat", _fake_gemini, raising=False)
+        monkeypatch.setattr(_llm, "format_with_vertex", _fake_gemini, raising=False)
 
         import deps
         monkeypatch.setattr(deps, "sarvam_translate_client", None, raising=False)
@@ -1149,14 +1149,14 @@ class TestLiveIndicTrans2:
         original_sarvam_c   = getattr(deps, "sarvam_client", None)
         original_sarvam_llm = getattr(deps, "sarvam_llm_client", None)
         original_redis      = chat_mod.redis_client
-        original_vertex_fn  = getattr(_llm, "_call_vertex_chat", None)
+        original_vertex_fn  = getattr(_llm, "format_with_vertex", None)
         try:
             deps.sarvam_translate_client = None
             deps.sarvam_client           = None
             deps.sarvam_llm_client       = None
             chat_mod.redis_client        = None
-            # Vertex-only Gemini auth (2026-05-03): patch `_call_vertex_chat`.
-            _llm._call_vertex_chat       = _fake_gemini
+            # Vertex-only Gemini auth (2026-05-03): patch `format_with_vertex`.
+            _llm.format_with_vertex       = _fake_gemini
 
             result = asyncio.run(
                 chat_mod._assamese_translate_gemini_main_sarvam_polish(
@@ -1170,7 +1170,7 @@ class TestLiveIndicTrans2:
             deps.sarvam_llm_client       = original_sarvam_llm
             chat_mod.redis_client        = original_redis
             if original_vertex_fn is not None:
-                _llm._call_vertex_chat = original_vertex_fn
+                _llm.format_with_vertex = original_vertex_fn
 
         # IndicTrans2 was invoked live (providers/workers_indic.py log confirms:
         # "en-indic returned no Assamese script — CF endpoint returning Devanagari").
@@ -1290,14 +1290,14 @@ class TestLiveIndicTrans2:
         original_sarvam_c   = getattr(deps, "sarvam_client", None)
         original_sarvam_llm = getattr(deps, "sarvam_llm_client", None)
         original_redis      = chat_mod.redis_client
-        original_vertex_fn  = getattr(_llm, "_call_vertex_chat", None)
+        original_vertex_fn  = getattr(_llm, "format_with_vertex", None)
         try:
             deps.sarvam_translate_client = None
             deps.sarvam_client           = None
             deps.sarvam_llm_client       = None
             chat_mod.redis_client        = None
-            # Vertex-only Gemini auth (2026-05-03): patch `_call_vertex_chat`.
-            _llm._call_vertex_chat       = _fake_gemini
+            # Vertex-only Gemini auth (2026-05-03): patch `format_with_vertex`.
+            _llm.format_with_vertex       = _fake_gemini
 
             result = asyncio.run(
                 chat_mod._assamese_translate_gemini_main_sarvam_polish(
@@ -1311,7 +1311,7 @@ class TestLiveIndicTrans2:
             deps.sarvam_llm_client       = original_sarvam_llm
             chat_mod.redis_client        = original_redis
             if original_vertex_fn is not None:
-                _llm._call_vertex_chat = original_vertex_fn
+                _llm.format_with_vertex = original_vertex_fn
 
         assert len(gemini_calls) == 1, (
             "Gemini (Tier B) must be triggered as fallback when IndicTrans2 raises "

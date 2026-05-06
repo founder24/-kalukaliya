@@ -267,3 +267,26 @@ print('V4 §13 acceptance: PASS')
 9. ✅ *(2026-05-06, A1–A9)* Cohere status declared (§1); Cerebras CF-Gateway-only path declared (§1, §4); Azure OpenAI SKU table (§4); embed-failover trigger spec (§3); eval-set pinning (§5); Llama-Guard-2 hosting + fail-mode (§1, §4); DR-runbook references (§8); Workers-AI fallback ordering clarified (§4); §13 data-migration plan added with hard Supabase blocker noted.
 
 **This V4 plan is locked as "approved with conditions met". No further infra renegotiation without a V5 doc.**
+
+---
+
+## §15 — Amendment: Vertex scope-down to content-format only (Task #490, 2026-05-06)
+
+**Trigger:** the four-cloud delegation lock-in (#489) declared Vertex chat / multilingual-embed / Vector Search out of scope. This amendment makes the code match.
+
+### Changes vs V4 §1–§4
+
+1. **Vertex chat / vision / translate — REMOVED.** `vertex_chat.py`, `_call_vertex_chat`, `_stream_vertex_gemini`, and the SA-OAuth chat helper inside `llm.py` are deleted. Vertex no longer participates in `english_chat`, `assamese_chat`, `long_context`, `casual_chat`, `vision`, `translate`, or `safety` pools. The §4 dispatch chain is now Azure `gpt-4.1-nano` → Workers-AI Mistral-7B → Workers-AI Llama-3.2-3B → generic Workers-AI (no Vertex leg).
+2. **Vertex multilingual embed — REMOVED.** `providers/vertex_embed.py` is deleted. `embed_doc` / `embed_query` pools no longer include Vertex.
+3. **Vertex Vector Search retriever — REMOVED.** `retrievers/vertex.py` and the `VertexVectorSearchRetriever` adapter are deleted. The retriever factory now exposes only `vectorize`, `mongodb_vector`, and `pinecone`. The admin retriever-toggle endpoint refuses `active="vertex"` with HTTP 400.
+4. **Embed failover → Option D (cache-only degraded mode).** The §3 second-Pinecone-namespace fallback (`fallback_vertex_pending_reembed`) is **abandoned**. When primary Workers-AI embed is unavailable the system serves cached vectors when present and enqueues a deferred-embed job to AWS SQS (`sqs-reembed.tf` consumer at `services/backend/sqs_consumers/reembed.py`). Fresh content with no cached vector is **not** embedded by Vertex — it is queued for re-embed once primary recovers. There is **no second Pinecone namespace** and **no silent fallback** (V4 §12 "fail loud" rule).
+5. **Only remaining Vertex surface — `content_format`.** Vertex Gemini 2.5 Flash is kept as a **NotebookLM-style content formatter** via `vertex_format.format_with_vertex(text, *, style, lang)`. A new pool `content_format=["vertex"]` with weight `10000` is added to `config.PROVIDER_PRIORITY` / `POOL_WEIGHTS`. Wiring the formatter into routes is **out of scope** for #490 and tracked separately as #494.
+6. **Config trim.** `config.py` drops every legacy `("<pool>", "vertex")` entry from `POOL_WEIGHTS` and removes `"vertex"` from every `PROVIDER_PRIORITY` list except `content_format`. The legacy `_LEGACY_EMBED_WEIGHTS` Vertex row is removed.
+7. **Acceptance gate.** `rg "_call_vertex_chat|_stream_vertex_gemini|VertexVectorSearchRetriever|VERTEX_INDEX_ID|VERTEX_DEPLOYED_INDEX_ID|fallback_vertex_pending_reembed|RAG_EMBEDDING_PROVIDER=fallback_vertex"` returns zero hits in `artifacts/syrabit-backend/` outside this §15 changelog. Contract tests `tests/test_vertex_format_contract.py` and `tests/test_embed_failover_degraded_mode.py` lock the new shape.
+
+### Out of scope (tracked separately)
+
+- **#494** — wire `vertex_format.format_with_vertex` into the actual notes / RAG / SEO render paths (today the formatter exists but is invoked only by `polish_notes_with_vertex`).
+- **#489** — Cloud Run / GCP-leftover module deletes (already shipped).
+- Cohere / Cerebras provider removal (separate amendment).
+- `routes/admin_vertex.py` admin diagnostics surface (kept for ops visibility into the surviving formatter quota).

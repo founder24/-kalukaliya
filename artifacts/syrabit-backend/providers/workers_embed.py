@@ -64,8 +64,9 @@ if _URL and _SECRET:
 elif _URL or _SECRET:
     logger.warning(
         "workers_embed: partial config (URL set=%s, SECRET set=%s) — "
-        "primary embed path will fail until both are set; "
-        "V4 §3 failover to Vertex requires RAG_EMBEDDING_PROVIDER=fallback_vertex",
+        "primary embed path will fail until both are set; Task #490 "
+        "removed the Vertex embed-failover, so misses now flip into "
+        "Option-D cache-only degraded mode + AWS SQS deferred-embed.",
         bool(_URL), bool(_SECRET),
     )
 else:

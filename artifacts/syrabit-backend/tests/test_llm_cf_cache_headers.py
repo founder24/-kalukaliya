@@ -183,7 +183,7 @@ def _patched_oai_response():
 # NOTE: The two `test_call_gemini_*` regression tests were removed in the
 # 2026-05-03 vertex-only Gemini migration. `_call_gemini` (direct
 # generativelanguage.googleapis.com client) no longer exists; all Gemini
-# calls now route through `_call_vertex_chat` / `vertex_chat.stream_chat`
+# calls now route through `vertex_format.format_with_vertex` (Task #490 — Vertex is content_format only)
 # which use SA-minted OAuth bearers and bypass the CF AI Gateway BYOK path
 # entirely, so the cache-header forwarding contract is no longer applicable
 # to Gemini. The generic `_call_openai_compat` BYOK-forwarding test below

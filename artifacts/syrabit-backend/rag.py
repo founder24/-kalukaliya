@@ -546,12 +546,6 @@ async def _try_vector_provider(
             raise RuntimeError(f"{provider}: Cohere embeddings not configured (VOYAGE_API_KEY missing?)")
         q_vec = await asyncio.wait_for(_cohere_embed(query), timeout=2.0)
 
-    elif provider == "vertex":
-        import vertex_services as _vtx_svc
-        q_vec = await asyncio.wait_for(
-            _vtx_svc.embed_text(query, task_type="RETRIEVAL_QUERY"), timeout=5.0
-        )
-
     elif provider == "workers_ai":
         raise RuntimeError("workers_ai: no vector search endpoint available")
 

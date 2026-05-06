@@ -162,7 +162,7 @@ _DEFAULT_THRESHOLD = 0.05
 # configured or the pre-first-token call fails. The leak sanitiser
 # still runs on Vertex output because stray English is a risk on any
 # provider.
-_VALID_INDIC_PROVIDERS = ("sarvam", "vertex")
+_VALID_INDIC_PROVIDERS = ("sarvam",)  # Task #490 — vertex no longer Indic-eligible
 _DEFAULT_INDIC_PROVIDER = "sarvam"
 
 # Per-Task #422: in-memory runtime override layer. Admins PATCH the

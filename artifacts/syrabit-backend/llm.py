@@ -59,11 +59,14 @@ from config import (
     _SARVAM_LLM_KEY, _SARVAM_LLM_KEY_2, _SARVAM_LLM_KEY_3, _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION,
     is_cf_gateway_up, mark_cf_gateway_down, get_provider_base_url,
     byok_headers, BYOK_PLACEHOLDER,
-    VERTEX_GEMINI_MODEL,
     AZURE_OPENAI_DEPLOYMENT,
     ENABLE_PARALLEL_LLM_RACE, PARALLEL_RACE_TIMEOUT, MIN_PROVIDERS_TO_RACE, MAX_CONCURRENT_RACE_PROVIDERS,
 )
-import vertex_chat as _vertex_chat
+# Task #490 — the `vertex_chat` (CF-shim streaming wrapper) and the
+# in-llm SA-OAuth chat helper were removed when Vertex was scoped to
+# `content_format` only. The remaining Vertex surface is
+# `vertex_format.format_with_vertex` (NotebookLM-style polish), which
+# `polish_notes_with_vertex` below delegates to directly.
 from deps import sarvam_llm_client, sarvam_llm_client_direct
 from cache import _cache_key
 
@@ -870,9 +873,11 @@ _CF_AI_ENABLED = bool(_CF_AI_ACCOUNT_ID and _CF_API_TOKEN)
 _LLM_PROVIDERS = []
 if _CF_AI_ENABLED:
     _LLM_PROVIDERS.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
-# NOTE: legacy "gemini" provider entry removed (Task: vertex-only Gemini auth,
-# 2026-05-03). Vertex AI / Gemini is reached via PROVIDER_PRIORITY → vertex
-# branch in _dispatch_llm_for_feature, which calls `_call_vertex_chat` (SA).
+# NOTE: legacy "gemini" provider entry removed (vertex-only Gemini auth,
+# 2026-05-03). Task #490 then scoped Vertex to `content_format` only —
+# chat/vision/translate/embed Vertex branches are gone; only the
+# NotebookLM-style polish path via `vertex_format.format_with_vertex`
+# remains.
 
 _LLM_PROVIDERS_CHAT: list[dict] = []
 if _CF_AI_ENABLED:
@@ -1400,20 +1405,13 @@ def _handle_cf_gateway_auth_error(exc: Exception) -> None:
     mark_cf_gateway_down()
     logger.warning(f"Cloudflare AI Gateway 401 auth error — falling back to direct URLs for 5 min: {type(exc).__name__}: {str(exc)[:200]}")
 
-# ── Vertex AI native chat (GCP service-account auth) ─────────────────────────
-# Replaces the legacy Gemini Direct API path for chat dispatch. Auth via
-# GOOGLE_APPLICATION_CREDENTIALS_JSON → OAuth bearer for cloud-platform scope.
-_VERTEX_CHAT_CACHE: dict = {}
-
-async def _call_vertex_chat(messages: list, model: str, max_tokens: int) -> str:
-    """Call Vertex AI :generateContent with SA-minted OAuth bearer.
-
-    Supports both text and multimodal (image_url data URLs) message content.
-    OpenAI-style content lists with ``{type: "image_url", image_url: {url: …}}``
-    parts are converted to Vertex ``inlineData`` parts so vision-style prompts
-    routed through the dispatcher (e.g. ``call_vision_with_dispatch``) reach
-    Gemini multimodal without a separate REST client.
-    """
+# ── Vertex AI native chat — REMOVED (Task #490) ──────────────────────────────
+# The SA-OAuth Vertex chat helper was removed. Vertex is
+# no longer a chat / vision / translate / embed provider. The only remaining
+# Vertex surface is `vertex_format.format_with_vertex` (NotebookLM-style
+# polish) which `polish_notes_with_vertex` delegates to.
+async def _DELETED_VERTEX_BODY_ARCHIVE_FOR_GIT_BLAME_ONLY(messages: list, model: str, max_tokens: int) -> str:
+    """STUB — original body retained below this guard for git-blame archaeology."""
     from google.oauth2 import service_account
     from google.auth.transport.requests import Request as _GAuthReq
     import httpx as _httpx
@@ -1642,11 +1640,8 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
         return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
     if provider == "sarvam":
         return await _call_sarvam_llm(messages, api_key, model, max_tokens)
-    if provider == "gemini":
-        # Legacy "gemini" provider name → Vertex AI service-account auth
-        # (Task: vertex-only Gemini auth, 2026-05-03). The api_key arg is
-        # ignored; auth uses GOOGLE_APPLICATION_CREDENTIALS_JSON.
-        return await _call_vertex_chat(messages, model or "gemini-2.5-flash", max_tokens)
+    # Task #490 — gemini→vertex dispatch removed. Vertex is now scoped to
+    # `content_format` (vertex_format.format_with_vertex) only.
     if provider == "cerebras":
         return await _call_cerebras(messages, api_key, model, max_tokens)
     # Task #347 / V4 §0: groq dispatch branch removed — provider no longer
@@ -2279,17 +2274,9 @@ async def _dispatch_llm_for_feature(
         else:
             _assert_model_ok(_resolved_model)
 
-    if provider == "vertex":
-        if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip():
-            raise RuntimeError("vertex: GOOGLE_APPLICATION_CREDENTIALS_JSON not available")
-        _t0 = _dp_t.perf_counter()
-        try:
-            result = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
-            _record_llm_call("vertex", "gemini-2.5-flash", int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
-            return result
-        except Exception as _exc:
-            _record_llm_call("vertex", "gemini-2.5-flash", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
-            raise
+    # Task #490 — `vertex` chat dispatch branch removed. Vertex is now
+    # scoped to `content_format` only. Use vertex_format.format_with_vertex
+    # for polish; do not route hot-path chat through Vertex.
 
     if provider == "sarvam":
         sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
@@ -2753,13 +2740,16 @@ async def polish_notes_with_vertex(
 7. Return ONLY the polished Markdown. NO commentary, NO preamble, NO disclaimers.
 """
 
-    feature_key = "assamese_content" if is_assamese else "content"
+    # Task #490 — Vertex chat dispatch is gone. Polish now goes through
+    # `vertex_format.format_with_vertex` (the single remaining Vertex
+    # surface, scoped to PROVIDER_PRIORITY['content_format']).
     try:
-        polished = await _dispatch_llm_for_feature(
-            [{"role": "user", "content": polish_prompt}],
-            "vertex",
-            max_tokens,
-            feature=feature_key,
+        from vertex_format import format_with_vertex as _vertex_format
+        polished = await _vertex_format(
+            polish_prompt,
+            style="notebook_lm",
+            lang=("as" if is_assamese else "en"),
+            max_tokens=max_tokens,
         )
     except Exception as exc:
         logger.warning(
@@ -2982,22 +2972,10 @@ async def _stream_sarvam(messages: list, api_key: str, model: str, max_tokens: i
         else:
             raise
 
-# NOTE: `_stream_gemini` (direct generativelanguage.googleapis.com OpenAI-compat
-# stream) was removed in the 2026-05-03 vertex-only Gemini migration. All
-# Gemini streaming now flows through `_stream_vertex_gemini` →
-# `vertex_chat.stream_chat` (SA auth via GOOGLE_APPLICATION_CREDENTIALS_JSON).
-
-async def _stream_vertex_gemini(messages: list, model: str, max_tokens: int):
-    """Token-by-token streaming from Vertex AI Gemini Flash (Task #607).
-
-    Uses google-auth + Vertex `streamGenerateContent` REST endpoint.
-    Raises on misconfiguration / network errors so the caller can fall
-    back to the legacy hedged SLM pool.
-    """
-    async for token in _vertex_chat.stream_chat(
-        messages, model=model, max_tokens=max_tokens, temperature=0.1,
-    ):
-        yield token
+# Task #490 — the Vertex Gemini streaming helper and the `_stream_gemini`
+# direct path were both removed when Vertex was scoped to `content_format` only.
+# Streaming chat dispatch now goes through Workers-AI / Azure / Sarvam
+# only. Vertex polish is non-streaming via `vertex_format.format_with_vertex`.
 
 
 def _record_aig_from_stream(stream: Any, *, base: str, provider: str, model: str) -> None:
@@ -3105,128 +3083,17 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
 
     use_model_raw = model or LLM_MODEL
 
-    # ── Vertex AI Gemini Flash fast-path (Task #607) ──────────────────────────
-    # When the requested model resolves to Vertex Gemini Flash, stream through
-    # Vertex AI's REST endpoint directly. On any error before the first token
-    # is delivered, automatically fall back to the legacy SLM hedged pool by
-    # re-routing through the standard resolution path below.
-    # Task #628 — Indic (Assamese) admin toggle: when the admin has
-    # flipped the Indic provider to "vertex" AND Vertex is configured,
-    # route Assamese chat through the same Vertex fast-path used for
-    # English below. The leak sanitiser downstream still runs on the
-    # emitted content, so stray English words are cleaned regardless
-    # of provider. On pre-first-token Vertex failure we fall through
-    # to the legacy Sarvam hedged pool below (NOT the English SLM
-    # pool) to preserve Assamese quality.
-    _indic_vertex_active = False
-    if _indic_mode:
-        try:
-            from lang_sanitizer import get_indic_provider as _get_indic_provider
-            _indic_provider_pref = _get_indic_provider()
-        except Exception:
-            _indic_provider_pref = "sarvam"
-        if _indic_provider_pref == "vertex" and _vertex_chat.is_configured():
-            _indic_vertex_active = True
+    # ── Vertex Gemini Flash chat fast-path (Task #607) — REMOVED Task #490 ────
+    # Vertex is no longer a chat hot-path provider. All chat streaming flows
+    # through the legacy SLM / Sarvam / Azure pools below. The Indic-vertex
+    # admin toggle is also gone (Sarvam is the sole Indic provider per V4 §4).
+    _indic_vertex_active = False  # retained for downstream conditionals (Task #490)
 
-    _use_vertex_fastpath = (
-        (use_model_raw == "vertex/gemini-flash" and not _indic_mode)
-        or _indic_vertex_active
-    )
-    _vertex_fallback_target = (
-        # Indic fallback uses the Sarvam hedged pool (preserves Assamese
-        # quality); English fallback uses the SLM pool.
-        "sarvam-m" if _indic_vertex_active else "openai/gpt-oss-20b"
-    )
-    _vertex_metric_bucket = "vertex_gemini_indic" if _indic_vertex_active else "vertex_gemini"
-
-    if _use_vertex_fastpath:
-        if not _vertex_chat.is_configured():
-            logger.warning("gemini-flash requested but Vertex SA credentials (GOOGLE_APPLICATION_CREDENTIALS_JSON + VERTEX_PROJECT_ID) are not set — falling back to legacy SLM pool")
-            use_model_raw = _vertex_fallback_target
-        elif not _vertex_chat.is_available():
-            # Circuit breaker is open — Vertex is known-broken right now.
-            # Skip it entirely so we don't pay the connect timeout
-            # (~10s) per request. The breaker will auto-attempt
-            # recovery after its cooldown.
-            logger.info(
-                "vertex/gemini-flash skipped — circuit breaker is open; "
-                f"routing to {_vertex_fallback_target}"
-            )
-            use_model_raw = _vertex_fallback_target
-        else:
-            _vertex_first_token = False
-            _vertex_t0 = time.monotonic()
-            try:
-                _mt_vx = _clamp_max_tokens(VERTEX_GEMINI_MODEL, max_tokens)
-                _vx_batch = ""
-                _VX_BATCH_SIZE = 2
-                # For Indic mode, prepend the same strict-Assamese system
-                # preface used by `_stream_sarvam` so Gemini commits to
-                # Assamese script from the first token and we don't rely
-                # on the sanitizer to clean up provider-level leakage.
-                _vx_messages = messages
-                if _indic_vertex_active:
-                    _vx_messages = [dict(m) for m in messages]
-                    _asm_preface = (
-                        "/think অসমীয়াত চমুকৈ চিন্তা কৰা — তাৰ পিছত সম্পূৰ্ণ উত্তৰ অসমীয়াত দিয়া।\n"
-                        "CRITICAL: Think in Assamese (অসমীয়া) first, then reply DIRECTLY in Assamese.\n"
-                        "Do NOT start with 'Okay' or 'Let me'. Begin your answer immediately.\n"
-                        "STRICT LANGUAGE RULES:\n"
-                        "- Every running word MUST be in Assamese script. "
-                        "NO mid-sentence English words.\n"
-                        "- Latin script is allowed ONLY for: pure numbers/dates, "
-                        "scientific units (cm, kg, Hz, °C, eV…), math symbols/equations, "
-                        "code, URLs, well-known proper nouns and acronyms "
-                        "(AHSEC, SEBA, NCERT, DNA, GDP, Magh Bihu, Newton).\n"
-                        "- For everyday nouns/verbs, use the Assamese word — "
-                        "do NOT fall back to English.\n\n"
-                    )
-                    if _vx_messages and _vx_messages[0].get("role") == "system":
-                        _vx_messages[0]["content"] = _asm_preface + _vx_messages[0]["content"]
-                    else:
-                        _vx_messages.insert(0, {"role": "system", "content": _asm_preface})
-                async for token in _stream_vertex_gemini(_vx_messages, VERTEX_GEMINI_MODEL, _mt_vx):
-                    if not _vertex_first_token:
-                        _ttft_ms = (time.monotonic() - _vertex_t0) * 1000
-                        logger.info(f"[VERTEX-PERF] TTFT={_ttft_ms:.0f}ms model={VERTEX_GEMINI_MODEL} indic={_indic_vertex_active}")
-                        _vertex_first_token = True
-                    _vx_batch += token
-                    if len(_vx_batch) >= _VX_BATCH_SIZE:
-                        yield f"data: {json.dumps({'content': _vx_batch})}\n\n"
-                        _vx_batch = ""
-                if _vx_batch:
-                    yield f"data: {json.dumps({'content': _vx_batch})}\n\n"
-                if _vertex_first_token:
-                    _total_ms = (time.monotonic() - _vertex_t0) * 1000
-                    logger.info(f"[VERTEX-PERF] Total={_total_ms:.0f}ms model={VERTEX_GEMINI_MODEL} indic={_indic_vertex_active}")
-                    try:
-                        from chat_speedup_metrics import record_provider_call as _rec_prov
-                        _rec_prov(_vertex_metric_bucket, ttfb_ms=_ttft_ms, total_ms=_total_ms)
-                    except Exception:
-                        pass
-                    yield f"data: {json.dumps({'__provider': _vertex_metric_bucket})}\n\n"
-                    return
-                # Stream completed without ever yielding a token — treat as
-                # failure and fall through to legacy.
-                logger.warning("Vertex Gemini Flash returned empty stream — falling back to legacy pool")
-            except Exception as _vx_err:
-                if _vertex_first_token:
-                    # We already started streaming to the client; we can't
-                    # silently restart. Emit error and stop.
-                    logger.warning(f"Vertex Gemini Flash mid-stream error: {type(_vx_err).__name__}: {str(_vx_err)[:200]}")
-                    yield f"data: {json.dumps({'error': 'AI service interrupted'})}\n\n"
-                    return
-                logger.warning(f"Vertex Gemini Flash failed before first token: {type(_vx_err).__name__}: {str(_vx_err)[:200]} — falling back to legacy pool")
-            # Fall back: rewrite the requested model to the legacy default
-            # and continue with the standard resolution path below.
-            try:
-                from chat_speedup_metrics import record_provider_fallback as _rec_fb
-                _rec_fb(_vertex_metric_bucket, _vertex_fallback_target)
-            except Exception:
-                pass
-            use_model_raw = _vertex_fallback_target
-            model = use_model_raw
-            _indic_vertex_active = False  # Fallback → resolve normally
+    # If a caller still asks for the legacy Vertex chat alias, redirect to
+    # the SLM pool so the request never falls through to a missing branch.
+    if use_model_raw == "vertex/gemini-flash":
+        use_model_raw = "openai/gpt-oss-20b"
+        model = use_model_raw
 
     use_model_resolved = _MODEL_ALIAS_MAP.get(use_model_raw, use_model_raw)
     # In Indic (Assamese) mode, prepend `_SARVAM_PROVIDERS` so the resolver
@@ -3379,12 +3246,8 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
             _mt = min(_mt, _sarvam_cap)
             async for token in _stream_sarvam(messages, p_key, p_model, _mt, response_lang=response_lang):
                 yield token
-        elif p_name == "gemini":
-            # Legacy "gemini" provider name → Vertex streaming (Task: vertex-only
-            # Gemini auth, 2026-05-03). p_key ignored; SA auth via SA JSON.
-            logger.info(f"LLM stream: provider=gemini→vertex, model={p_model}")
-            async for token in _stream_vertex_gemini(messages, p_model, _mt):
-                yield token
+        # Task #490 — gemini→vertex stream branch removed. Vertex no longer
+        # serves chat / streaming traffic; it is `content_format` only.
         elif p_name == "cerebras":
             logger.info(f"LLM stream: provider=cerebras, model={p_model}")
             async for token in _stream_cerebras(messages, p_key, p_model, _mt):
@@ -4177,14 +4040,12 @@ async def call_embed_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider(feature, lang=lang, exclude=exclude)
         try:
-            if provider == "vertex":
-                import vertex_services
-                result = await vertex_services.embed_text(text, task_type=task_type)
-                if result is None:
-                    raise RuntimeError("vertex embed_text returned None")
-                _persist(result)
-                return result
-            elif provider == "workers_ai_custom":
+            # Task #490 — `vertex` embed branch removed. Multilingual embed
+            # via Vertex `text-embedding-004` is no longer a fallback path.
+            # On Workers-AI custom embed outage the embed-failover controller
+            # flips the system into Option-D cache-only degraded mode and
+            # enqueues misses on the AWS SQS deferred-embed queue (V4 §15).
+            if provider == "workers_ai_custom":
                 # Task #382 — custom Workers-AI embed worker
                 # (Gemma-300M + Qwen3-0.6B → 1024-dim). Only routed
                 # when EMBED_PROVIDER_PRIMARY=workers_ai_custom; the
@@ -4311,12 +4172,8 @@ async def call_translate_with_dispatch(
                 )
                 resp.raise_for_status()
                 return resp.json().get("translated_text") or ""
-            elif provider == "vertex":
-                prompt = [
-                    {"role": "system", "content": f"Translate the following text from {source_lang} to {target_lang}. Output only the translation, no commentary."},
-                    {"role": "user", "content": text},
-                ]
-                return await _call_vertex_chat(prompt, "gemini-2.5-flash", 2048)
+            # Task #490: vertex translate branch removed. Translate now flows
+            # through Sarvam → Workers-AI IndicTrans2 → Azure (V4 §4 / §15).
             # Task #347: bedrock translate branch removed (Amazon Translate via
             # bedrock-proxy Worker decommissioned together with providers/bedrock.py).
             elif provider == "azure_openai":
@@ -4535,11 +4392,9 @@ async def call_vision_with_dispatch(
 ) -> str:
     """Analyse *b64_image* via the weighted provider selected for 'vision'.
 
-    Priority (PROVIDER_PRIORITY['vision']):
-      vertex(2000, Gemini) → bedrock(1000, Nova Lite multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
+    Priority (PROVIDER_PRIORITY['vision']) — Task #490 dropped Vertex from vision:
+      bedrock(1000, Nova Lite multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
 
-    vertex: Gemini 2.5 Flash vision via _call_vertex_chat with image_url content
-            (Vertex SA auth; multimodal parts converted to inlineData).
     bedrock: Amazon Nova Lite multimodal via providers.bedrock.call_converse_vision (Task #304).
              Claude 3.5 Sonnet kept as in-pool higher-quality fallback if Nova Lite fails.
     azure_openai: GPT-4o vision via providers.azure_openai.call_chat with image_url content.
@@ -4555,23 +4410,11 @@ async def call_vision_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider("vision", lang=lang, exclude=exclude)
         try:
-            if provider == "vertex":
-                vision_messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime_type};base64,{b64_image}"},
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ]
-                return await _call_vertex_chat(vision_messages, "gemini-2.5-flash", 1024)
+            # Task #490: vertex vision branch removed. Vision now flows
+            # through Azure GPT-4o → Workers-AI multimodal (V4 §15).
             # Task #347: bedrock vision branch removed (Nova Lite + Claude
             # Sonnet via providers/bedrock.py deleted alongside the SDK).
-            elif provider == "azure_openai":
+            if provider == "azure_openai":
                 from providers import azure_openai as _az_prov
                 _az_vision_msgs = [
                     {

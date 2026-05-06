@@ -930,12 +930,15 @@ async def admin_diagnostics(admin: dict = Depends(get_admin_user)) -> dict[str, 
     # LLM Provider Status
     try:
         import vertex_services
-        import vertex_chat as _vc
+        # Task #490 — `vertex_chat` module deleted; `vertex_format` now
+        # exposes `auth_mode()` for parity. Vertex is `content_format`
+        # only (NotebookLM-style polish).
+        import vertex_format as _vc
         vertex_health = await vertex_services.health_check()
         ai_entry = {
             "status": "healthy" if vertex_health.get("ok") else "unhealthy",
             "auth_mode": vertex_health.get("auth_mode"),
-            "chat_auth_mode": _vc.auth_mode(),
+            "format_auth_mode": _vc.auth_mode(),
             "via_gateway": vertex_health.get("via_cf_gateway"),
             "embeddings": vertex_health.get("embeddings"),
             "generation": vertex_health.get("generation"),

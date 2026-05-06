@@ -51,12 +51,14 @@ from db_dualwrite import (
     mirror_edu_notes_write,
     mirror_edu_study_settings_write,
 )
-from llm import call_llm_api, _call_vertex_chat
+from llm import call_llm_api
 from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
 import deps
 from deps import sarvam_client
-import vertex_chat as _vchat
+# Task #490 — Vertex chat helpers were removed. Quiz / notes now run
+# through Azure-primary chat with Workers-AI fallback. Vertex is
+# `content_format` only (NotebookLM-style polish via vertex_format).
 from db_ops import supa_get_conversation, atomic_deduct_credit
 
 logger = logging.getLogger(__name__)
@@ -648,22 +650,15 @@ async def _generate_and_clean_quiz(
         {"role": "system", "content": _QUIZ_SYS},
         {"role": "user",   "content": "\n".join([p for p in user_msg_parts if p])},
     ]
-    # Vertex Gemini PRIMARY (English generation) → Azure FALLBACK.
-    # This is the same order regardless of `prefer_vertex` since
-    # 2026-05-06 — the kwarg is a no-op kept for source-level
-    # back-compat with the polish-stage pre-gen wiring.
+    # Task #490 — Vertex chat hot-path removed. Quiz generation now runs
+    # Azure GPT-4.1-mini as PRIMARY (matches the V4 §4 english_rag_chat
+    # chain). The `prefer_vertex` kwarg is kept as a no-op for source-
+    # level back-compat with older callers.
     try:
-        raw = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
+        raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
     except Exception as e:
-        logger.warning(
-            f"[edu_quiz] Vertex Gemini quiz LLM call failed: {e} — "
-            f"falling back to Azure GPT-4.1-mini"
-        )
-        try:
-            raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
-        except Exception as e2:
-            logger.warning(f"[edu_quiz] Azure quiz fallback also failed: {e2}")
-            raise HTTPException(status_code=502, detail="quiz_llm_failed")
+        logger.warning(f"[edu_quiz] Azure GPT-4.1-mini quiz LLM call failed: {e}")
+        raise HTTPException(status_code=502, detail="quiz_llm_failed")
     payload = _coerce_quiz_payload(raw)
     questions = payload.get("questions") or []
     cleaned: list[dict] = []
@@ -1927,18 +1922,9 @@ async def _call_gemini_strict(messages: list, max_tokens: int = 2200) -> str:
             errors.append(f"vertex:{type(e).__name__}:{str(e)[:140]}")
             logger.warning(f"[notes-gen] Vertex Gemini failed: {e}")
 
-    # 2) Vertex non-streaming fallback (separate from the streaming primary
-    # above): tries the same Vertex SA path via :generateContent in case the
-    # stream returned empty / failed mid-stream. The legacy direct GEMINI_API_KEY
-    # loop was removed in the 2026-05-03 vertex-only Gemini migration.
-    try:
-        txt = await _call_vertex_chat(messages, "gemini-2.5-flash", max_tokens)
-        if (txt or "").strip():
-            return txt
-        errors.append("vertex_nonstream_empty_response")
-    except Exception as e:
-        errors.append(f"vertex_nonstream:{type(e).__name__}:{str(e)[:140]}")
-        logger.warning(f"[notes-gen] Vertex non-stream fallback failed: {e}")
+    # Task #490 — Vertex non-stream notes-gen fallback removed. Vertex is
+    # now `content_format` only (post-generation polish). Notes generation
+    # falls through to the Workers-AI / Azure chat pool below.
 
     if not errors:
         raise HTTPException(

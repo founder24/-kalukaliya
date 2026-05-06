@@ -1,25 +1,22 @@
 """
 retrievers — pluggable vector-retrieval backend for Syrabit RAG.
 
-Four implementations live behind a tiny ABC (`base.Retriever`):
+Three implementations live behind a tiny ABC (`base.Retriever`):
 
   * VectorizeRetriever          — Cloudflare Vectorize (production default)
-  * VertexVectorSearchRetriever — Google Vertex AI Vector Search (A/B)
   * MongoVectorRetriever        — MongoDB Atlas Vector Search (Flex tier, 2026-04)
   * PineconeVectorRetriever     — Pinecone serverless (AHSEC/SEBA chunks, 2026-05)
+
+Task #490 removed the Vertex Vector Search backend along with the
+multilingual-embed and chat hot-path Vertex surfaces.
 
 Selection happens via `factory.get_retriever()` which inspects (in order):
 
   1. The runtime override set through the admin UI / API
      (db.settings document `id="retriever_config"`, field `active`).
   2. The `RAG_RETRIEVER` environment variable
-     (`vectorize` | `vertex` | `mongodb_vector`).
+     (`vectorize` | `mongodb_vector` | `pinecone_vector`).
   3. Default: `vectorize`.
-
-Callers (currently `syllabus_embedder.py`, `routes/admin_advanced.py`,
-`scripts/ingest_vertex_index.py`, `bench/retriever_bench.py`) MUST go
-through `get_retriever()` rather than importing `vectorize_client`
-directly so the swap is single-pointed.
 """
 
 from .base import Retriever

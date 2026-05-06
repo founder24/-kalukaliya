@@ -14,10 +14,11 @@ Mixed semantics across pools:
                        reachable only after Sarvam exhausts)
 
   CONTENT / TRANSLATE pools — round-robin equal-weight draw remains in
-  effect for the generate stage:
+  effect for the generate stage. Task #490: Vertex was scoped to the
+  separate `content_format` pool, so it is no longer in `content` /
+  `translate`:
     content             workers_ai_mistral_7b, workers_ai_llama32_3b
-                        (vertex weight 0 — polish-reserved)
-    translate           workers_ai_indic, vertex
+    translate           workers_ai_indic
 
 Run::
 
@@ -136,19 +137,21 @@ def test_english_rag_chat_azure_primary_workers_fallback():
 
 
 def test_content_workers_ai_primary():
-    """content + assamese_content pools (2026-05-05 user instruction):
-    Stage-1 GENERATE is owned by Workers AI exclusively. Vertex sits at
-    weight 0 in BOTH pools because it is reserved for the Stage-2 polish
-    helper (`llm.polish_notes_with_vertex` — NotebookLM-style formatting).
-    The weight-0 Vertex slot is kept as an emergency last-resort so a
-    total Workers-AI outage can still serve content.
+    """content + assamese_content pools — Task #490 (2026-05-06):
+    Stage-1 GENERATE is owned by Workers AI exclusively. Vertex was
+    scoped out of the `content` and `assamese_content` pools entirely
+    and now lives in its own `content_format` pool (Stage-2 polish via
+    `vertex_format.format_with_vertex`).
 
     English `content` pool:
       workers_ai_mistral_7b (10000), workers_ai_llama32_3b (10000),
-      vertex (0 — polish-reserved), workers_ai (0 — emergency safety net).
+      workers_ai (0 — emergency safety net).
 
     Assamese `assamese_content` pool:
-      workers_ai_indic (10000), vertex (0 — polish-reserved).
+      workers_ai_indic (10000).
+
+    Stage-2 polish pool:
+      content_format → vertex (10000).
     """
     from llm import select_provider, polish_notes_with_vertex
     from collections import Counter
@@ -161,25 +164,16 @@ def test_content_workers_ai_primary():
         assert weights[p] == 10000, (
             f"content: workers-AI primary {p} must carry weight 10000, got {weights[p]}"
         )
-    assert weights.get("vertex", 0) == 0, (
-        "content: vertex must be weight-0 (reserved for stage-2 polish via "
-        "polish_notes_with_vertex), got " + str(weights.get("vertex"))
+    assert "vertex" not in weights, (
+        "content: vertex must NOT be in the English content pool (Task #490 — "
+        "Vertex moved to the dedicated content_format pool); got " + str(weights)
     )
     assert weights.get("workers_ai", 0) == 0, (
         "content: generic workers_ai must remain weight-0 (last-resort safety net)"
     )
-    assert "sarvam" not in weights, (
-        "content: sarvam must NOT be in the English content pool — it is "
-        "reserved for the Assamese conversational chain only"
-    )
-    assert "azure_openai" not in weights, (
-        "content: azure_openai must NOT be in the English content pool — "
-        "content generation is Cloudflare-native (Workers AI) only"
-    )
+    assert "sarvam" not in weights
+    assert "azure_openai" not in weights
 
-    # Across 600 draws every selection must be a workers-AI primary —
-    # Vertex (weight 0) must never be drawn except via the emergency
-    # exhaustion path which a healthy pool never enters.
     draws = 600
     counts = Counter(select_provider("content", lang="en") for _ in range(draws))
     primary_share = sum(counts[p] for p in primaries) / draws
@@ -187,42 +181,40 @@ def test_content_workers_ai_primary():
         f"content: stage-1 generate must route 100% to Workers AI primaries; "
         f"counts={dict(counts)}"
     )
-    assert counts.get("vertex", 0) == 0, (
-        f"content: vertex must NOT be drawn for stage-1 generate (it is "
-        f"polish-reserved); counts={dict(counts)}"
-    )
+    assert counts.get("vertex", 0) == 0
 
     # ---- Assamese content pool -----------------------------------------
     as_weights = POOL_WEIGHTS["assamese_content"]
-    assert as_weights["workers_ai_indic"] == 10000, (
-        f"assamese_content: workers_ai_indic must carry weight 10000, got "
-        f"{as_weights['workers_ai_indic']}"
-    )
-    assert as_weights.get("vertex", 0) == 0, (
-        "assamese_content: vertex must be weight-0 (reserved for stage-2 "
-        "polish via polish_notes_with_vertex), got "
-        + str(as_weights.get("vertex"))
+    assert as_weights["workers_ai_indic"] == 10000
+    assert "vertex" not in as_weights, (
+        "assamese_content: vertex must NOT be in the Assamese content pool "
+        "(Task #490 — Vertex moved to dedicated content_format pool)"
     )
 
     as_counts = Counter(select_provider("assamese_content", lang="as") for _ in range(draws))
-    assert as_counts.get("workers_ai_indic", 0) == draws, (
-        f"assamese_content: stage-1 generate must route 100% to "
-        f"workers_ai_indic (IndicTrans2); counts={dict(as_counts)}"
+    assert as_counts.get("workers_ai_indic", 0) == draws
+    assert as_counts.get("vertex", 0) == 0
+
+    # ---- Stage-2 polish pool (`content_format`) — Vertex-only ----------
+    polish_weights = POOL_WEIGHTS["content_format"]
+    assert polish_weights == {"vertex": 10000}, (
+        f"content_format must be {{'vertex': 10000}} (Task #490 V4 §15); "
+        f"got {polish_weights}"
     )
-    assert as_counts.get("vertex", 0) == 0, (
-        f"assamese_content: vertex must NOT be drawn for stage-1 generate "
-        f"(it is polish-reserved); counts={dict(as_counts)}"
+    polish_counts = Counter(select_provider("content_format") for _ in range(200))
+    assert polish_counts.get("vertex", 0) == 200, (
+        f"content_format: every draw must select vertex; got {dict(polish_counts)}"
     )
 
     # ---- Stage-2 polish helper exists and is callable -----------------
     assert callable(polish_notes_with_vertex), (
-        "llm.polish_notes_with_vertex must exist as a callable — it is the "
-        "Stage-2 NotebookLM-style polish helper pinned to Vertex / Gemini"
+        "llm.polish_notes_with_vertex must exist as a callable — it now "
+        "delegates to vertex_format.format_with_vertex"
     )
 
     print(
-        "  PASS: content + assamese_content stage-1 generate is workers-only; "
-        "vertex is polish-reserved (weight 0); polish_notes_with_vertex callable"
+        "  PASS: content + assamese_content stage-1 is workers-only; "
+        "content_format stage-2 is vertex-only (Task #490)"
     )
 
 
@@ -279,11 +271,26 @@ def test_assamese_rag_chat_sarvam_primary_indic_fallback():
     print("  PASS: assamese_rag_chat sarvam-primary, workers_ai_indic-fallback (vertex removed)")
 
 
-def test_translate_round_robin():
-    expected = {"workers_ai_indic", "vertex"}
-    _assert_equal_weights("translate", expected)
-    _expect_round_robin("translate", expected, lang="as")
-    print("  PASS: translate round-robin across workers_ai_indic / vertex")
+def test_translate_workers_ai_indic_only():
+    """Task #490: Vertex was removed from the `translate` pool. Only
+    workers_ai_indic (IndicTrans2) remains as the translate provider."""
+    from llm import select_provider
+    from collections import Counter
+
+    weights = POOL_WEIGHTS["translate"]
+    assert "vertex" not in weights, (
+        "translate: vertex must NOT be in the translate pool (Task #490 — "
+        "Vertex is content_format only); got " + str(weights)
+    )
+    assert weights.get("workers_ai_indic", 0) > 0, (
+        f"translate: workers_ai_indic must carry positive weight; got {weights}"
+    )
+
+    counts = Counter(select_provider("translate", lang="as") for _ in range(200))
+    assert counts.get("workers_ai_indic", 0) == 200, (
+        f"translate: every draw must select workers_ai_indic; counts={dict(counts)}"
+    )
+    print("  PASS: translate routes 100% to workers_ai_indic (vertex removed)")
 
 
 def test_workers_ai_fallback_uses_gpt_oss_20b():
@@ -309,14 +316,16 @@ def test_priority_lists_contain_every_active_member():
         # azure_openai (primary) → workers_ai variants (fallbacks).
         "english_rag_chat":  {"azure_openai",
                               "workers_ai_llama32_3b", "workers_ai_mistral_7b"},
-        # Vertex is in PROVIDER_PRIORITY["content"] for stage-2 polish
-        # routing (POOL_WEIGHTS sets it to 0 for stage-1 generate).
-        "content":           {"vertex",
-                              "workers_ai_mistral_7b", "workers_ai_llama32_3b"},
+        # Task #490: vertex REMOVED from `content`; it now lives only
+        # in the `content_format` pool.
+        "content":           {"workers_ai_mistral_7b", "workers_ai_llama32_3b"},
         # assamese_rag_chat (2026-05-05): vertex REMOVED. Strict 2-leg
         # chain — sarvam (primary) → workers_ai_indic (fallback).
         "assamese_rag_chat": {"sarvam", "workers_ai_indic"},
-        "translate":         {"workers_ai_indic", "vertex"},
+        # Task #490: vertex REMOVED from `translate`.
+        "translate":         {"workers_ai_indic"},
+        # Task #490: dedicated polish pool — vertex-only.
+        "content_format":    {"vertex"},
     }
     for feature, members in expectations.items():
         chain = set(PROVIDER_PRIORITY[feature])
@@ -342,7 +351,7 @@ if __name__ == "__main__":
     test_english_rag_chat_azure_primary_workers_fallback()
     test_content_workers_ai_primary()
     test_assamese_rag_chat_sarvam_primary_indic_fallback()
-    test_translate_round_robin()
+    test_translate_workers_ai_indic_only()
     test_workers_ai_fallback_uses_gpt_oss_20b()
     test_priority_lists_contain_every_active_member()
     print("\nAll POOL_WEIGHTS / PROVIDER_PRIORITY assertions verified.")
