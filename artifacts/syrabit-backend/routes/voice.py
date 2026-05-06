@@ -12,7 +12,8 @@ POST /api/voice/tts
 
 POST /api/voice/stt
   Speech-to-text via PROVIDER_PRIORITY weighted round-robin with fallback-without-
-  replacement. Weighted pool: Deepgram(primary) → AssemblyAI → Vertex → Workers AI.
+  replacement. Weighted pool (post-Task-#490): Deepgram(primary) → AssemblyAI → Workers AI.
+  (Vertex was removed from voice pools — it is now `content_format` only.)
   Accepts multipart/form-data with an 'audio' file field.
 
 POST /api/voice/voice
@@ -212,10 +213,12 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"]: elevenlabs(primary) → deepgram → vertex(skip) → workers_ai.
-
-    vertex TTS endpoint not wired; raises RuntimeError which the fallback loop
-    catches, excludes from pool, and redraws.
+    PROVIDER_PRIORITY["tts"]: elevenlabs(primary) → deepgram → workers_ai.
+    (Task #490: vertex was removed from the TTS pool entirely — it is now
+    `content_format` only. The unreachable `vertex` dispatch branch below
+    is retained as a defensive guard so a future re-introduction without
+    a wired Cloud TTS client raises immediately rather than silently
+    selecting a missing backend.)
     elevenlabs, deepgram, and workers_ai are the actively synthesizing providers.
     """
     from llm import select_provider
@@ -233,7 +236,12 @@ async def _synthesize_with_fallback(
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
             elif provider == "vertex":
-                raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired")
+                # Task #490: vertex is no longer in PROVIDER_PRIORITY['tts'];
+                # this branch is unreachable in normal operation. Kept as a
+                # defensive guard — fail loud (per V4 §12 no-silent-fallback
+                # rule) if vertex is ever re-added to the TTS pool without
+                # a wired Cloud TTS client.
+                raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired (Task #490: vertex removed from tts pool)")
             # Task #347: bedrock TTS branch removed (providers/bedrock.py deleted).
             # AWS Polly survives via the explicit ``_tts_aws_polly`` fallback below.
             elif provider == "azure_openai":
@@ -282,11 +290,12 @@ async def _synthesize_with_fallback(
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    PROVIDER_PRIORITY["stt"]: deepgram(primary) → assemblyai → vertex(skip) →
-      workers_ai
-
-    vertex STT endpoint not wired; raises RuntimeError which the fallback loop
-    catches, excludes from pool, and redraws.
+    PROVIDER_PRIORITY["stt"]: deepgram(primary) → assemblyai → workers_ai.
+    (Task #490: vertex was removed from the STT pool entirely — it is now
+    `content_format` only. The unreachable `vertex` dispatch branch below
+    is retained as a defensive guard so a future re-introduction without
+    a wired Cloud STT client raises immediately rather than silently
+    selecting a missing backend.)
     deepgram, assemblyai, and workers_ai are the actively transcribing providers.
     """
     from llm import select_provider
@@ -304,7 +313,12 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)
             elif provider == "vertex":
-                raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired")
+                # Task #490: vertex is no longer in PROVIDER_PRIORITY['stt'];
+                # this branch is unreachable in normal operation. Kept as a
+                # defensive guard — fail loud (per V4 §12 no-silent-fallback
+                # rule) if vertex is ever re-added to the STT pool without
+                # a wired Cloud STT client.
+                raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired (Task #490: vertex removed from stt pool)")
             # Task #347: bedrock STT branch removed (providers/bedrock.py deleted).
             # AWS Transcribe survives via the explicit fallback below.
             elif provider == "azure_openai":
@@ -484,8 +498,9 @@ async def voice_pipeline(
     # The LLM step between the two legs is serial (requires the STT transcript).
     #
     # Dispatch pools:
-    #   STT leg: assemblyai(1000) → vertex(2k,skip) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
-    #   TTS leg: google_neural2(Indic first) → elevenlabs → deepgram → vertex(skip) → workers_ai(0)
+    #   STT leg: assemblyai(1000) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
+    #   TTS leg: google_neural2(Indic first) → elevenlabs → deepgram → workers_ai(0)
+    #   (Task #490: vertex removed from both STT and TTS legs — content_format only.)
 
     from llm import select_provider as _sp
 
