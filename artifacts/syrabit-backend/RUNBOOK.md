@@ -651,3 +651,70 @@ pytest tests/test_translate_provider_gate.py \
        tests/test_admin_cf_health_route.py
 ```
 
+
+---
+
+## Cloudflare Worker secret + KV namespace registry (Task #426)
+
+Single source of truth for the IDs and shared secrets the
+`syrabit-edge-proxy` Worker (`artifacts/syrabit/workers/edge-proxy/`)
+needs at deploy time. When `wrangler.toml` points here, the next
+operator does **not** have to chase down the previous deployer to
+recover an ID or rotate a secret.
+
+### CF_EDGE_CACHE KV namespace IDs
+
+Provisioned in Task #405 (one namespace per env). The IDs below are
+the canonical record — `artifacts/syrabit/workers/edge-proxy/wrangler.toml`
+inlines them for `wrangler deploy`, but if a future provisioning run
+mints new IDs (e.g. account migration, accidental delete + recreate),
+update **both** this table and the `[[env.<env>.kv_namespaces]]`
+blocks in that file in the same PR.
+
+| Env        | Wrangler title                       | Namespace ID                          |
+|------------|--------------------------------------|---------------------------------------|
+| production | `syrabit-edge-CF_EDGE_CACHE`         | `a672a5c8f6604db3ae07526bb30da72a`    |
+| staging    | `syrabit-edge-CF_EDGE_CACHE_preview` | `c8cdd4710c23460caf4d6fa526d76d2e`    |
+
+Cloudflare account: `d66e40eac539fff1db270fddf384a5ec`. List from the
+CLI to verify drift:
+
+```bash
+wrangler kv:namespace list | jq '.[] | select(.title | startswith("syrabit-edge-CF_EDGE_CACHE"))'
+```
+
+### Wrangler secrets — where the live values live
+
+The Worker reads these via `env.<NAME>`; they are **not** in
+`wrangler.toml` and **not** in this repo. The canonical store is
+**Azure Key Vault** (`syrabit-prod-kv`, same vault that backs the ACA
+backend — see the env var list at the top of `replit.md`). Each entry
+below names the KV secret holding the value so a rotation only has to
+touch one place.
+
+| Wrangler secret                          | Azure KV secret name                   | Used by                                                                 |
+|------------------------------------------|----------------------------------------|-------------------------------------------------------------------------|
+| `AZURE_BACKEND_URL`                      | `edge-proxy-azure-backend-url`         | Origin selector when `ORIGIN_TARGET=azure`                              |
+| `DISPATCH_SHARED_SECRET`                 | `edge-proxy-dispatch-shared-secret`    | `X-Dispatch-Auth` header on backend dispatch calls                      |
+| `D1_SYNC_SECRET`                         | `edge-proxy-d1-sync-secret`            | `X-Edge-Admin-Secret` bearer for `/api/edge/kv-cache/*` + `/kv-usage`   |
+
+The same Azure KV value MUST be mirrored into the matching backend env
+var on the ACA app (see `replit.md` → "Required env vars"). Mirroring
+is handled by the daily Terraform-CI sync described in `replit.md` →
+"Architecture decisions" → Secrets.
+
+To set / rotate a secret on the Worker:
+
+```bash
+# Pull the current value out of Azure KV (requires `az login` with
+# Reader on syrabit-prod-kv) and pipe it into wrangler so the value
+# never lands in shell history or the local FS.
+az keyvault secret show --vault-name syrabit-prod-kv \
+    --name edge-proxy-d1-sync-secret --query value -o tsv \
+  | wrangler secret put D1_SYNC_SECRET --env production
+```
+
+Repeat with `--env staging` against the staging KV entry. Rotations
+must be done in this order: Azure KV → Worker secret → backend env
+var, otherwise the `X-Edge-Admin-Secret` check 401s the cache routes
+mid-rotation.

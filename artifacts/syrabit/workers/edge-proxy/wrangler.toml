@@ -55,6 +55,12 @@ ORIGIN_TARGET = "azure"
 #   wrangler kv:namespace create CF_EDGE_CACHE --env staging
 # The binding name is asserted by the worker (returns 503 if missing) so
 # any future id swap surfaces clearly instead of silently corrupting traffic.
+#
+# Canonical registry for these IDs (Task #426): see
+#   artifacts/syrabit-backend/RUNBOOK.md → "Cloudflare Worker secret +
+#   KV namespace registry (Task #426)"
+# If a namespace is recreated and the ID below changes, update both
+# this file AND the runbook table in the same PR.
 [[env.production.kv_namespaces]]
 binding = "CF_EDGE_CACHE"
 # title: syrabit-edge-CF_EDGE_CACHE
@@ -74,7 +80,12 @@ binding = "CF_EDGE_CACHE"
 # title: syrabit-edge-CF_EDGE_CACHE_preview
 id = "c8cdd4710c23460caf4d6fa526d76d2e"
 
-# Actual secrets — set with `wrangler secret put <NAME> --env <env>`:
+# Actual secrets — set with `wrangler secret put <NAME> --env <env>`.
+# Live values are stored in Azure Key Vault (`syrabit-prod-kv`) — see
+#   artifacts/syrabit-backend/RUNBOOK.md → "Cloudflare Worker secret +
+#   KV namespace registry (Task #426)"
+# for the KV secret name mapped to each Wrangler secret and the
+# rotation procedure (Task #426).
 #   AZURE_BACKEND_URL        — https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io
 #   DISPATCH_SHARED_SECRET   — 256-bit hex shared secret
 #   D1_SYNC_SECRET           — 256-bit hex shared secret matching the
