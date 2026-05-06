@@ -9,6 +9,7 @@ from cache import (
     _invalidate_conv_cache, _redis_get_conversation,
     _redis_invalidate_conversation, _redis_cache_conversation,
 )
+from db_dualwrite import mirror_user_write, clamped_decrement_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,29 @@ async def supa_insert_user(user: dict):
                     user.get("google_id"), user.get("auth_provider"),
                 )
             _supa_mirror(lambda: supa.table("users").upsert(user).execute())
+            # ADR-0001 Phase 2: mirror to Mongo (best-effort; PG is SoT).
+            # upsert via $set so an existing Supabase-mirrored doc is
+            # converged rather than colliding on the unique id index.
+            # Architect-flagged 2026-05-06: empty/missing id would
+            # collapse the filter to {"id": ""} and create a malformed
+            # mirror doc shared by every id-less caller — skip the
+            # mirror in that case rather than corrupt the collection.
+            _new_id = (user.get("id") or "").strip()
+            if _new_id:
+                await mirror_user_write(
+                    "insert",
+                    lambda: _deps_mod.db.users.update_one(
+                        {"id": _new_id},
+                        {"$set": user},
+                        upsert=True,
+                    ),
+                )
+            else:
+                logger.warning(
+                    "dualwrite users.insert skipped: empty 'id' on payload "
+                    "(email=%r) — mirror would corrupt collection",
+                    user.get("email", ""),
+                )
             return
         except Exception as e:
             logger.warning(f"pg supa_insert_user failed: {e}")
@@ -254,6 +278,14 @@ async def supa_update_user(uid: str, updates: dict):
             async with _deps_mod.pg_pool.acquire() as conn:
                 await conn.execute(sql, *vals)
             _supa_mirror(lambda: supa.table("users").update(updates).eq("id", uid).execute())
+            # ADR-0001 Phase 2: mirror to Mongo (best-effort; PG is SoT).
+            await mirror_user_write(
+                "update",
+                lambda: _deps_mod.db.users.update_one(
+                    {"id": uid},
+                    {"$set": updates},
+                ),
+            )
             return
         except Exception as e:
             logger.warning(f"pg supa_update_user failed: {e}")
@@ -502,6 +534,24 @@ async def atomic_deduct_credit(uid: str, current_used: int, current_limit: int) 
                     uid, current_limit,
                 )
             if result and result.split()[-1] != '0':
+                # ADR-0001 Phase 2 invariant #3: counter columns must NOT
+                # be lost across cutover — mirror the $inc to Mongo
+                # (best-effort; PG remains SoT). Today_str carried so the
+                # Phase 3 read-shadow can diff per-day buckets.
+                _today_str = today_str
+                await mirror_user_write(
+                    "atomic_deduct_credit",
+                    lambda: _deps_mod.db.users.update_one(
+                        {"id": uid},
+                        {
+                            "$inc": {
+                                "credits_used_today": 1,
+                                "credits_used": 1,
+                            },
+                            "$set": {"credits_reset_date": _today_str},
+                        },
+                    ),
+                )
                 return True
             return False
         except Exception as e:
@@ -619,6 +669,16 @@ async def supa_update_user_password(email: str, password_hash: str):
             async with _deps_mod.pg_pool.acquire() as conn:
                 await conn.execute("UPDATE users SET password_hash = $1 WHERE email = $2", password_hash, email.lower())
             _supa_mirror(lambda: supa.table("users").update({"password_hash": password_hash}).eq("email", email.lower()).execute())
+            # ADR-0001 Phase 2: mirror to Mongo (best-effort; PG is SoT).
+            _email_lower = email.lower()
+            _ph = password_hash
+            await mirror_user_write(
+                "update_password",
+                lambda: _deps_mod.db.users.update_one(
+                    {"email": _email_lower},
+                    {"$set": {"password_hash": _ph}},
+                ),
+            )
             return
         except Exception as e:
             logger.warning(f"pg supa_update_user_password failed: {e}")

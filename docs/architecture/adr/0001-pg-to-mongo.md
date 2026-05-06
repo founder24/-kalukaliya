@@ -125,6 +125,28 @@ print('V4 §13 acceptance: PASS')
 
 - **2026-05-06**: ADR proposed (Phase 1 of V4 §13). Awaiting approval
   before opening Phase 2 dual-write PRs.
+- **2026-05-06**: **Phase 2 (users collection only) merged.** Helper
+  module `artifacts/syrabit-backend/db_dualwrite.py` added with
+  `MONGO_USER_WRITES` rollback flag (default ON), per-process counters
+  `users.{success,fail,skipped_disabled,skipped_no_db}`, and a
+  best-effort `mirror_user_write(op_label, fn)` that never raises (PG
+  remains SoT during Phase 2). Wired into `db_ops.supa_insert_user`,
+  `supa_update_user`, `supa_update_user_password`, and the
+  `atomic_deduct_credit` PG path (counter `$inc` per ADR §3 invariant
+  #3). Added the three previously-missing route mirrors:
+  `routes/ai_chat.py:_refund_credit`, `routes/edu_study.py` partial
+  refund (race-loss path), and `routes/edu_study.py` full refund
+  (`_refund_credits` finally-block). 7-case unit test suite added
+  (`tests/test_db_dualwrite.py`). **Carve-out:** the 8 paired
+  PG↔Mongo writes in `routes/admin_monetization.py` were intentionally
+  NOT migrated to the helper because they have transactional
+  compensating-rollback semantics (the Mongo write *must* raise so
+  the PG side can be undone); a best-effort helper would silently
+  swallow the Mongo error and break the rollback contract. Phase 2
+  for the remaining 9 collections (`conversations`, `app_settings`,
+  `password_resets`, `chat_feedback`, `activity_log`, `notifications`,
+  `edu_notes`, `edu_flashcards`, `edu_study_settings`) NOT STARTED —
+  separate sessions per the ADR's per-table contract.
 
 ## References
 

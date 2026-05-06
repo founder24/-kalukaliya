@@ -1952,6 +1952,23 @@ async def generate_notes(req: NotesGenReq, request: Request,
                            WHERE id=$2""",
                         deducted, user["id"],
                     )
+                # ADR-0001 Phase 2: mirror refund to Mongo (best-effort).
+                # Pipeline-update floor matches PG GREATEST(0, ...) so
+                # a duplicate refund cannot drive Mongo counters negative.
+                from db_dualwrite import (
+                    mirror_user_write as _muw,
+                    clamped_decrement_pipeline as _clamp,
+                )
+                _refund_n = deducted
+                _uid = user["id"]
+                await _muw(
+                    "refund_credit_partial",
+                    lambda: deps.db.users.update_one(
+                        {"id": _uid},
+                        _clamp({"credits_used_today": _refund_n,
+                                "credits_used": _refund_n}),
+                    ),
+                )
             except Exception as e:
                 logger.warning(f"[notes-gen] credit refund failed: {e}")
         raise HTTPException(
@@ -1970,6 +1987,22 @@ async def generate_notes(req: NotesGenReq, request: Request,
                        WHERE id=$2""",
                     NOTES_GEN_CREDIT_COST, user["id"],
                 )
+            # ADR-0001 Phase 2: mirror refund to Mongo (best-effort).
+            # Pipeline-update floor matches PG GREATEST(0, ...) so
+            # a duplicate refund cannot drive Mongo counters negative.
+            from db_dualwrite import (
+                mirror_user_write as _muw,
+                clamped_decrement_pipeline as _clamp,
+            )
+            _uid = user["id"]
+            _n = NOTES_GEN_CREDIT_COST
+            await _muw(
+                "refund_credit_full",
+                lambda: deps.db.users.update_one(
+                    {"id": _uid},
+                    _clamp({"credits_used_today": _n, "credits_used": _n}),
+                ),
+            )
         except Exception as e:
             logger.warning(f"[notes-gen] credit refund failed: {e}")
 

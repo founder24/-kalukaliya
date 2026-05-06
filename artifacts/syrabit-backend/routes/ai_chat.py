@@ -1308,6 +1308,22 @@ async def _refund_credit(uid: str, credits_used: int) -> None:
                     "UPDATE users SET credits_used_today = GREATEST(0, credits_used_today - 1), credits_used = GREATEST(0, credits_used - 1) WHERE id = $1",
                     uid,
                 )
+            # ADR-0001 Phase 2: mirror refund to Mongo (best-effort).
+            # Pipeline update with $max-0 floor mirrors the PG-side
+            # GREATEST(0, col-1) clamp — raw $inc with a negative delta
+            # could otherwise drive the counter below zero on duplicate
+            # refund and break PG↔Mongo convergence.
+            from db_dualwrite import (
+                mirror_user_write as _muw,
+                clamped_decrement_pipeline as _clamp,
+            )
+            await _muw(
+                "refund_credit",
+                lambda: deps.db.users.update_one(
+                    {"id": uid},
+                    _clamp({"credits_used_today": 1, "credits_used": 1}),
+                ),
+            )
             return
         if redis_client:
             redis_key = f"daily_credits:{uid}:{today_str}"
