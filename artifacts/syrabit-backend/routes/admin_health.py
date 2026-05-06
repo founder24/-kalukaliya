@@ -958,12 +958,13 @@ async def admin_diagnostics(admin: dict = Depends(get_admin_user)) -> dict[str, 
     # client, so we report the chat client readiness as the single signal.
     try:
         from deps import sarvam_llm_client
-        result["llm_providers"]["sarvam"] = {
+        result["llm_providers"]["sarvam_llm_client"] = {
             "client_ready": sarvam_llm_client is not None,
             "scope": "assamese_rag_chat",
+            "policy": "V4 §15 / Task #492 — single surviving Sarvam surface",
         }
     except Exception as e:
-        result["llm_providers"]["sarvam"] = {"status": "error", "error": str(e)}
+        result["llm_providers"]["sarvam_llm_client"] = {"status": "error", "error": str(e)}
 
     # Azure OpenAI (Task #290) — report candidate chain so operators can see at
     # a glance whether CF BYOK + KEY_1 + KEY_2 are all configured. The provider

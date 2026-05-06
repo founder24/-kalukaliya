@@ -286,8 +286,10 @@ def get_indic_provider() -> str:
 def _effective_source(field: str) -> str:
     """Reports whether the live `field` value came from the override
     layer, env var, or the hard-coded default. Surfaced via
-    `/sarvam/status` so admins can see at a glance why a value is in
-    effect (e.g. did my PATCH stick? am I still on env vars?)."""
+    `GET /admin/assamese-purity` (the V4 §15 / Task #492 replacement
+    for the retired `/sarvam/status`) so admins can see at a glance
+    why a value is in effect (e.g. did my PATCH stick? am I still
+    on env vars?)."""
     if _RUNTIME_OVERRIDE and field in _RUNTIME_OVERRIDE:
         return "override"
     env_name = {
@@ -299,7 +301,9 @@ def _effective_source(field: str) -> str:
 
 
 def get_runtime_config() -> dict:
-    """Snapshot of the live Assamese-purity config for /sarvam/status."""
+    """Snapshot of the live Assamese-purity config (surfaced via
+    `GET /admin/assamese-purity`; the legacy `/sarvam/status` host was
+    retired by V4 §15 / Task #492 and now returns 410 GONE)."""
     return {
         "threshold": get_threshold(),
         "behaviour": get_behaviour(),
