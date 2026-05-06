@@ -65,9 +65,18 @@ def test_route_returns_expected_shape_and_reflects_recorded_events(app_client_au
     body = res.json()
 
     # Top-level shape contract the AdminMemoryBrainTile depends on.
-    for key in ("ok", "stats", "buckets", "worker_pid", "feature_enabled",
-                "alert_threshold"):
+    # Task #446 added fleet_stats / fleet_buckets alongside the per-
+    # worker view; both are required so the frontend can offer the
+    # scope toggle without conditional-key juggling.
+    for key in ("ok", "stats", "buckets", "fleet_stats", "fleet_buckets",
+                "worker_pid", "feature_enabled", "alert_threshold"):
         assert key in body, f"missing top-level key: {key}"
+    # Fleet payload always carries the availability flag so the
+    # frontend can disable the toggle when Upstash isn't wired
+    # (e.g. in this test, where redis_client is None).
+    assert "fleet_available" in body["fleet_stats"]
+    assert body["fleet_stats"]["scope"] == "fleet"
+    assert isinstance(body["fleet_buckets"], list) and len(body["fleet_buckets"]) == 24
     assert body["ok"] is True
     assert isinstance(body["worker_pid"], int)
 

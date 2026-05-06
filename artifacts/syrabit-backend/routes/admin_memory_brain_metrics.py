@@ -85,10 +85,20 @@ async def admin_memory_brain_metrics(
         failure_rate_pct = 25.0
         failure_min_sample = 20
 
+    # Task #446 — fleet rollup. We always return the per-worker view
+    # (existing contract used by the AdminMemoryBrainTile sparkline)
+    # and additionally the fleet-wide aggregate when Upstash is
+    # wired. ``fleet_stats.fleet_available`` tells the frontend
+    # whether to enable the fleet/per-worker toggle or hide it.
+    fleet_stats = _mbm.get_fleet_stats(window_seconds=window_seconds)
+    fleet_buckets = _mbm.get_fleet_hourly_buckets(hours=hours)
+
     return {
         "ok": True,
         "stats": _mbm.get_stats(window_seconds=window_seconds),
         "buckets": _mbm.get_hourly_buckets(hours=hours),
+        "fleet_stats": fleet_stats,
+        "fleet_buckets": fleet_buckets,
         "worker_pid": os.getpid(),
         "feature_enabled": feature_enabled,
         "alert_threshold": {

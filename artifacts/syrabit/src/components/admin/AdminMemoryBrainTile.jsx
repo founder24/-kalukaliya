@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { RefreshCw, AlertTriangle, ShieldCheck, Brain } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ShieldCheck, Brain, Network, Cpu } from 'lucide-react';
 import { API_BASE } from '@/utils/api';
 // Default banner threshold + min sample. The backend response also
 // carries the live operator-tuned values under `alert_threshold` so
@@ -33,6 +33,10 @@ export default function AdminMemoryBrainTile({ adminToken }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  // Task #446 — default to fleet view so the on-call sees the whole
+  // deploy at once. Per-worker stays one click away for partial-
+  // outage debugging (e.g. one worker's Voyage key revoked).
+  const [scope, setScope] = useState('fleet');
 
   const load = useCallback(async () => {
     if (!adminToken) return;
@@ -59,8 +63,16 @@ export default function AdminMemoryBrainTile({ adminToken }) {
     return () => clearInterval(t);
   }, [load, adminToken]);
 
-  const stats = data?.stats || {};
-  const buckets = data?.buckets || [];
+  // Fleet view requires Upstash to be wired AND currently readable
+  // on the backend. When either is false, force the per-worker view
+  // so the tile never shows a misleading all-zero state during a
+  // Redis outage. ``fleet_status`` distinguishes the two cases for
+  // the operator-facing footer ("not wired" vs. "Redis read failed").
+  const fleetAvailable = data?.fleet_stats?.fleet_available === true;
+  const fleetStatus = data?.fleet_stats?.fleet_status || 'unconfigured';
+  const effectiveScope = scope === 'fleet' && fleetAvailable ? 'fleet' : 'worker';
+  const stats = (effectiveScope === 'fleet' ? data?.fleet_stats : data?.stats) || {};
+  const buckets = (effectiveScope === 'fleet' ? data?.fleet_buckets : data?.buckets) || [];
   const enabled = data?.feature_enabled !== false;
   const failPct = Number(stats.failure_rate_pct || 0);
   const bannerPct = Number(data?.alert_threshold?.failure_rate_pct ?? DEFAULT_FAILURE_RATE_PCT);
@@ -106,10 +118,45 @@ export default function AdminMemoryBrainTile({ adminToken }) {
             <ShieldCheck size={11} /> healthy
           </span>
         )}
+        {/* Task #446 — fleet/per-worker scope toggle. The toggle is
+            disabled (and hidden as "fleet n/a") when Upstash isn't
+            wired so the operator isn't lied to about coverage. */}
+        <div
+          className="ml-auto inline-flex rounded-lg border border-gray-200 overflow-hidden text-[10px]"
+          data-testid="memory-brain-scope-toggle"
+        >
+          <button
+            type="button"
+            onClick={() => setScope('fleet')}
+            disabled={!fleetAvailable}
+            className={`px-2 py-1 inline-flex items-center gap-1 ${
+              effectiveScope === 'fleet'
+                ? 'bg-violet-100 text-violet-700 font-semibold'
+                : 'bg-white text-gray-500 hover:bg-gray-50'
+            } ${!fleetAvailable ? 'opacity-40 cursor-not-allowed' : ''}`}
+            data-testid="memory-brain-scope-fleet"
+            title={fleetAvailable ? 'Fleet-wide aggregate (all workers)' : 'Fleet rollup unavailable — Upstash not wired'}
+          >
+            <Network size={10} /> fleet
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope('worker')}
+            className={`px-2 py-1 inline-flex items-center gap-1 ${
+              effectiveScope === 'worker'
+                ? 'bg-violet-100 text-violet-700 font-semibold'
+                : 'bg-white text-gray-500 hover:bg-gray-50'
+            }`}
+            data-testid="memory-brain-scope-worker"
+            title="This gunicorn worker only"
+          >
+            <Cpu size={10} /> worker
+          </button>
+        </div>
         <button
           onClick={load}
           disabled={loading}
-          className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
           data-testid="memory-brain-tile-refresh"
         >
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -194,10 +241,22 @@ export default function AdminMemoryBrainTile({ adminToken }) {
         </div>
       )}
 
-      <p className="text-[10px] text-gray-400 mt-3">
-        worker pid {data?.worker_pid ?? '—'} · per-worker counts ·
-        last ok {_fmtTs(stats.last_success_ts)} ·
-        last fail {_fmtTs(stats.last_failure_ts)}
+      <p className="text-[10px] text-gray-400 mt-3" data-testid="memory-brain-tile-footer">
+        {effectiveScope === 'fleet'
+          ? `fleet aggregate · all workers via Upstash`
+          : `worker pid ${data?.worker_pid ?? '—'} · this worker only`}
+        {' · '}last ok {_fmtTs(stats.last_success_ts)}
+        {' · '}last fail {_fmtTs(stats.last_failure_ts)}
+        {!fleetAvailable && fleetStatus === 'read_failed' && (
+          <span className="ml-1 text-amber-600" data-testid="memory-brain-fleet-status">
+            · fleet read failed (Upstash unreachable — falling back to worker)
+          </span>
+        )}
+        {!fleetAvailable && fleetStatus === 'unconfigured' && (
+          <span className="ml-1 text-amber-600" data-testid="memory-brain-fleet-status">
+            · fleet n/a (Upstash not wired)
+          </span>
+        )}
       </p>
     </div>
   );
