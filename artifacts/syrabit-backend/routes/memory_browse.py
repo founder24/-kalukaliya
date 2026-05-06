@@ -121,6 +121,41 @@ async def list_my_memories(
     }
 
 
+@router.delete("/user/memories")
+async def delete_all_my_memories(
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Task #443 — "Forget everything" privacy control.
+
+    Bulk-deletes every ``memory_brain`` entry owned by the calling
+    student. Hard-scoped on ``user_id`` so it can never affect another
+    user's data. Returns the number of documents removed so the UI can
+    surface a precise toast.
+    """
+    user_id = user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        from deps import db
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("memory_browse: deps import failed: %s", exc)
+        raise HTTPException(status_code=503, detail="memory store unavailable")
+    if db is None:
+        raise HTTPException(status_code=503, detail="memory store unavailable")
+
+    col = db[_MB_COLLECTION]
+    try:
+        result = await col.delete_many({"user_id": user_id})
+    except Exception as exc:
+        logger.warning("memory_browse: Mongo delete_many failed: %s", exc)
+        raise HTTPException(status_code=503, detail="memory store unavailable")
+
+    deleted = int(getattr(result, "deleted_count", 0) or 0)
+    logger.info("memory_browse: forget-all user=%s deleted=%d", user_id, deleted)
+    return {"ok": True, "deleted": deleted}
+
+
 @router.delete("/user/memories/{memory_id}")
 async def delete_my_memory(
     memory_id: str,

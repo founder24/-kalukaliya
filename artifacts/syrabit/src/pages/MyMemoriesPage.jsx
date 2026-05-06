@@ -9,7 +9,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, Loader2, Brain, ChevronLeft } from 'lucide-react';
+import { Trash2, Loader2, Brain, ChevronLeft, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -92,6 +92,9 @@ export default function MyMemoriesPage() {
   const [hasMore, setHasMore] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [showForgetAll, setShowForgetAll] = useState(false);
+  const [forgetText, setForgetText] = useState('');
+  const [forgetting, setForgetting] = useState(false);
 
   const load = useCallback(async (off, append) => {
     if (off === 0) setLoading(true);
@@ -121,6 +124,30 @@ export default function MyMemoriesPage() {
 
   const handleDelete = (memory) => {
     setPendingDelete(memory);
+  };
+
+  const confirmForgetAll = async () => {
+    if (forgetText !== 'FORGET') return;
+    setForgetting(true);
+    try {
+      const res = await apiClient().delete('/user/memories');
+      const deleted = Number(res?.data?.deleted || 0);
+      setItems([]);
+      setOffset(0);
+      setTotal(0);
+      setHasMore(false);
+      setShowForgetAll(false);
+      setForgetText('');
+      toast.success(
+        deleted === 0
+          ? 'Nothing to forget'
+          : `Forgot ${deleted} ${deleted === 1 ? 'memory' : 'memories'}`,
+      );
+    } catch (err) {
+      toast.error('Failed to forget your memories');
+    } finally {
+      setForgetting(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -185,6 +212,18 @@ export default function MyMemoriesPage() {
               Things Syra has remembered from your chats and flashcards.
               Delete anything you'd rather it forget.
             </p>
+            {total > 0 && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => { setForgetText(''); setShowForgetAll(true); }}
+                  data-testid="forget-all-memories"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 size={13} /> Forget everything
+                </button>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -273,6 +312,80 @@ export default function MyMemoriesPage() {
                 data-testid="confirm-delete-memory"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showForgetAll && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={() => { if (!forgetting) { setShowForgetAll(false); setForgetText(''); } }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-5 space-y-4"
+            style={{
+              background: 'hsl(var(--card))',
+              border: '1px solid rgba(239,68,68,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            data-testid="forget-all-dialog"
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.20)' }}
+              >
+                <AlertTriangle size={18} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Forget everything?</h3>
+                <p className="text-xs text-muted-foreground">
+                  Permanently deletes all {total} saved {total === 1 ? 'memory' : 'memories'}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Syra will lose every fact and chat takeaway it has remembered
+              about you. This can't be undone.
+            </p>
+
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">
+                Type <span className="font-mono font-bold text-red-600">FORGET</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={forgetText}
+                onChange={(e) => setForgetText(e.target.value)}
+                placeholder="FORGET"
+                autoFocus
+                data-testid="forget-all-input"
+                className="w-full h-10 px-3 rounded-xl text-sm text-foreground outline-none"
+                style={{ background: 'hsl(var(--input))', border: '1px solid rgba(239,68,68,0.30)' }}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowForgetAll(false); setForgetText(''); }}
+                disabled={forgetting}
+                className="flex-1 h-9 rounded-xl text-sm font-medium text-muted-foreground border border-border hover:bg-accent/40 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmForgetAll}
+                disabled={forgetText !== 'FORGET' || forgetting}
+                data-testid="confirm-forget-all"
+                className="flex-1 h-9 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-1.5 transition-all disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#ef4444)' }}
+              >
+                {forgetting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                Forget all
               </button>
             </div>
           </div>
