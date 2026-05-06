@@ -114,6 +114,15 @@ VERTEX_FORMAT_DIRECT_CALLERS = {
     "artifacts/syrabit-backend/content_formatter.py",
     "artifacts/syrabit-backend/vertex_format.py",
     "artifacts/syrabit-backend/tests/test_vertex_format_contract.py",
+    # Task #494 — chat hot-path exemption. The Assamese translate-polish
+    # in routes/ai_chat.py is TTFT-critical and intentionally bypasses
+    # the dispatcher: routing it through `format_content` would add
+    # Llama-70b fallback latency + formatter telemetry to a streaming
+    # request where the correct degradation is to ship the un-polished
+    # IndicTrans2 output immediately. The dispatcher remains the only
+    # path for store-time content (notes / chapters / Assamese bulk
+    # translate), see `routes/admin_pipeline.py` and `admin_advanced.py`.
+    "artifacts/syrabit-backend/routes/ai_chat.py",
 }
 
 ALLOWLIST_PARTS = {

@@ -472,9 +472,12 @@ async def stage3_polish(
 
     # Task #490 — Vertex chat hot-path removed. Stage-3 polish for the
     # chat pipeline now goes straight to the workers-AI / Azure chat
-    # pool. The dedicated `vertex_format` content-formatter is reserved
-    # for offline notes polish (`polish_notes_with_vertex`), not for
-    # the streaming chat hot-path (TTFT-critical).
+    # pool. The dedicated `content_formatter.format_content` dispatcher
+    # (Task #494: Vertex primary → Workers-AI Llama-3.3-70b fallback)
+    # is reserved for offline / store-time notes polish, not for the
+    # streaming chat hot-path (TTFT-critical). This module therefore
+    # does NOT import or call `format_content` — the invariant is
+    # asserted in `tests/test_content_formatter_wiring_invariants.py`.
 
     if not _LLM_PROVIDERS_CHAT:
         logger.warning("[PIPELINE][S3] No providers available for polishing")
