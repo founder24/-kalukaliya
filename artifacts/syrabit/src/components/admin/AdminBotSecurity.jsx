@@ -165,9 +165,66 @@ function ChannelStatusPanel({ status, testing, testResult, testError, onTest }) 
   );
 }
 
+// Task #447 — config-driven extra threshold fields exposed in the
+// Alert Settings panel. Defining them as a list (vs. hand-coded inputs
+// like the legacy spoof_rpm / auto_block_* fields) keeps adding new
+// tunable thresholds cheap: just append a row here and the UI, form
+// state, validator, save payload, and reset-to-defaults all pick it
+// up automatically. The keys must match `_ALERT_THRESHOLDS_DEFAULT`
+// in `artifacts/syrabit-backend/metrics.py`.
+export const ALERT_THRESHOLD_FIELDS = [
+  {
+    key: 'memory_brain_failure_rate_pct',
+    label: 'Memory-Brain Failure Rate',
+    help: 'Pages on-call when the per-worker memory_brain rolling-window failure rate exceeds this percentage (Voyage embed/upsert path). Set to 0 to disable.',
+    unit: '% failures',
+    default: 25.0,
+    integer: false,
+    min: 0,
+    max: 100,
+    step: 0.5,
+    width: 'w-32',
+  },
+  {
+    key: 'memory_brain_failure_min_sample',
+    label: 'Memory-Brain Min Sample',
+    help: 'Minimum number of memory_brain attempts in the rolling window before the failure-rate alert can fire — guards against tiny samples flipping the alert on a single bad write.',
+    unit: 'attempts',
+    default: 20,
+    integer: true,
+    min: 1,
+    max: 10000,
+    step: 1,
+    width: 'w-32',
+  },
+];
+
+function _validateThresholdFieldValue(field, value) {
+  if (value === '' || value === null || value === undefined) {
+    return `${field.label} is required`;
+  }
+  const num = Number(value);
+  if (Number.isNaN(num)) return 'Must be a number';
+  if (num < field.min) return `Must be ≥ ${field.min}`;
+  if (num > field.max) return `Must be ≤ ${field.max}`;
+  if (field.integer && !Number.isInteger(num)) return 'Must be a whole number';
+  return null;
+}
+
 function AlertThresholdPanel({ adminToken, navContext }) {
   const [settings, setSettings] = useState(null);
-  const [form, setForm] = useState({ spoof_rpm: 50, auto_block_threshold: 100, auto_block_expiry_hours: 168, collection_growth_per_day: 500, email: '', webhook_url: '', seo_slack_enabled: true, hydrate_slack_enabled: true, review_prompt_digest_emails: '' });
+  const [form, setForm] = useState({
+    spoof_rpm: 50,
+    auto_block_threshold: 100,
+    auto_block_expiry_hours: 168,
+    collection_growth_per_day: 500,
+    email: '',
+    webhook_url: '',
+    seo_slack_enabled: true,
+    hydrate_slack_enabled: true,
+    review_prompt_digest_emails: '',
+    ...Object.fromEntries(ALERT_THRESHOLD_FIELDS.map(f => [f.key, f.default])),
+  });
   // Task #660: dedicated "send me a test" state for the weekly
   // review-prompt digest, distinct from the synthetic-alert
   // test-delivery flow above so admins can verify the digest send path
@@ -261,6 +318,14 @@ function AlertThresholdPanel({ adminToken, navContext }) {
           review_prompt_digest_emails: Array.isArray(d.notification_channels?.review_prompt_digest_emails)
             ? d.notification_channels.review_prompt_digest_emails.join(', ')
             : (d.notification_channels?.review_prompt_digest_emails ?? ''),
+          // Task #447 — config-driven extra thresholds (e.g.
+          // memory_brain_failure_*). Falls back to defaults from the
+          // backend payload, then to the field's hard-coded default so
+          // a brand-new install with no api_config row still renders.
+          ...Object.fromEntries(ALERT_THRESHOLD_FIELDS.map(f => [
+            f.key,
+            d.thresholds?.[f.key] ?? d.defaults?.thresholds?.[f.key] ?? f.default,
+          ])),
         });
       } catch {
         setSettingsError('Failed to load alert settings');
@@ -313,6 +378,9 @@ function AlertThresholdPanel({ adminToken, navContext }) {
       try { new URL(value); } catch { return 'Enter a valid URL'; }
       return null;
     }
+    // Task #447 — validate config-driven extra threshold fields.
+    const cfg = ALERT_THRESHOLD_FIELDS.find(f => f.key === field);
+    if (cfg) return _validateThresholdFieldValue(cfg, value);
     if (field === 'review_prompt_digest_emails') {
       if (!value) return null;
       const parts = String(value).split(',').map(p => p.trim()).filter(Boolean);
@@ -376,6 +444,10 @@ function AlertThresholdPanel({ adminToken, navContext }) {
     errors.email = validateField('email', form.email);
     errors.webhook_url = validateField('webhook_url', form.webhook_url);
     errors.review_prompt_digest_emails = validateField('review_prompt_digest_emails', form.review_prompt_digest_emails);
+    // Task #447 — validate config-driven extra threshold fields.
+    for (const f of ALERT_THRESHOLD_FIELDS) {
+      errors[f.key] = validateField(f.key, form[f.key]);
+    }
     const cleaned = {};
     for (const [k, v] of Object.entries(errors)) { if (v) cleaned[k] = v; }
     setFieldErrors(cleaned);
@@ -395,6 +467,8 @@ function AlertThresholdPanel({ adminToken, navContext }) {
           auto_block_threshold: Number(form.auto_block_threshold),
           auto_block_expiry_hours: Number(form.auto_block_expiry_hours),
           collection_growth_per_day: Number(form.collection_growth_per_day),
+          // Task #447 — persist config-driven extra thresholds.
+          ...Object.fromEntries(ALERT_THRESHOLD_FIELDS.map(f => [f.key, Number(form[f.key])])),
         },
         expiration: settings?.expiration || {},
         notification_channels: {
@@ -476,6 +550,13 @@ function AlertThresholdPanel({ adminToken, navContext }) {
         review_prompt_digest_emails: Array.isArray(defaults.notification_channels?.review_prompt_digest_emails)
           ? defaults.notification_channels.review_prompt_digest_emails.join(', ')
           : '',
+        // Task #447 — reset config-driven extra thresholds back to
+        // either the backend-supplied default (preferred) or the
+        // field's hard-coded default.
+        ...Object.fromEntries(ALERT_THRESHOLD_FIELDS.map(f => [
+          f.key,
+          defaults.thresholds?.[f.key] ?? f.default,
+        ])),
       });
       setFieldErrors({});
       setSettingsError(null);
@@ -624,6 +705,43 @@ function AlertThresholdPanel({ adminToken, navContext }) {
               <p className="text-[11px] text-red-500 mt-1">{fieldErrors.collection_growth_per_day}</p>
             )}
           </div>
+
+          {/* Task #447 — config-driven extra threshold rows
+              (memory_brain_failure_*). Iterates ALERT_THRESHOLD_FIELDS so
+              new tunables only need a config entry. */}
+          {ALERT_THRESHOLD_FIELDS.map((f) => {
+            const backendDefault = defaults?.thresholds?.[f.key] ?? f.default;
+            return (
+              <div key={f.key}>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  {f.label}
+                </label>
+                <p className="text-[10px] text-gray-400 mb-2">
+                  {f.help} (default: {backendDefault}{f.unit ? ` ${f.unit}` : ''})
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min={f.min}
+                    max={f.max}
+                    step={f.step}
+                    value={form[f.key]}
+                    onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                    data-testid={`alert-threshold-${f.key}`}
+                    className={`${f.width || 'w-32'} text-sm border rounded-lg px-3 py-2 bg-white text-gray-900 focus:outline-none focus:ring-2 ${
+                      fieldErrors[f.key]
+                        ? 'border-red-300 focus:ring-red-200 focus:border-red-300'
+                        : 'border-gray-200 focus:ring-violet-200 focus:border-violet-300'
+                    }`}
+                  />
+                  {f.unit && <span className="text-xs text-gray-400">{f.unit}</span>}
+                </div>
+                {fieldErrors[f.key] && (
+                  <p className="text-[11px] text-red-500 mt-1">{fieldErrors[f.key]}</p>
+                )}
+              </div>
+            );
+          })}
 
           <div className="border-t border-gray-100 pt-5">
             <h4 className="text-xs font-medium text-gray-700 mb-3 flex items-center gap-1.5">
