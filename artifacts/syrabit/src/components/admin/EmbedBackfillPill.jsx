@@ -26,6 +26,32 @@ const fmtNum = (n) => {
   return n.toLocaleString();
 };
 
+// Task #466 — render an ETA in a human-friendly form. The backend gives
+// us seconds; we collapse to "Xd Yh", "Xh Ym", "Xm", or "<1m" depending
+// on magnitude so the pill stays compact even when the backlog is days
+// out.
+const fmtEta = (seconds) => {
+  if (seconds == null || !isFinite(seconds) || seconds < 0) return null;
+  if (seconds === 0) return 'done';
+  if (seconds < 60) return '<1m';
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours < 24) {
+    return remMins ? `${hours}h ${remMins}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
+};
+
+const fmtRate = (cpm) => {
+  if (typeof cpm !== 'number' || !isFinite(cpm) || cpm <= 0) return null;
+  if (cpm >= 100) return `${Math.round(cpm).toLocaleString()} chunks/min`;
+  return `${cpm.toFixed(1)} chunks/min`;
+};
+
 export default function EmbedBackfillPill({ adminToken }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -55,6 +81,9 @@ export default function EmbedBackfillPill({ adminToken }) {
   const remaining = data?.remaining ?? 0;
   const total = data?.total_chunks ?? 0;
   const pct = typeof data?.percent === 'number' ? data.percent : 0;
+  const cpm = data?.throughput?.chunks_per_min;
+  const rateLabel = fmtRate(cpm);
+  const etaLabel = fmtEta(data?.eta_seconds);
   const tone = remaining === 0 && total > 0 ? 'emerald' : 'sky';
   const colors = tone === 'emerald'
     ? { tile: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-100 text-emerald-500', heading: 'text-emerald-600' }
@@ -95,19 +124,44 @@ export default function EmbedBackfillPill({ adminToken }) {
 
       {!error && (
         <>
-          <div className="flex items-baseline gap-3">
+          <div className="flex items-baseline gap-3 flex-wrap">
             <span
               className="text-2xl font-semibold text-gray-900"
               data-testid="embed-backfill-percent"
             >
               {pct.toFixed(1)}%
             </span>
-            <span className="text-xs text-gray-500">
-              {fmtNum(data?.re_embedded ?? 0)} / {fmtNum(total)} chunks re-embedded
-              {' · '}
-              <span data-testid="embed-backfill-remaining">{fmtNum(remaining)}</span> pending
-            </span>
+            {(rateLabel || etaLabel) && (
+              <span
+                className="text-xs font-medium text-gray-700"
+                data-testid="embed-backfill-throughput"
+              >
+                {rateLabel && (
+                  <span data-testid="embed-backfill-rate">{rateLabel}</span>
+                )}
+                {rateLabel && etaLabel && ' · '}
+                {etaLabel && (
+                  <>
+                    ETA{' '}
+                    <span data-testid="embed-backfill-eta">{etaLabel}</span>
+                  </>
+                )}
+              </span>
+            )}
+            {!rateLabel && !etaLabel && remaining > 0 && (
+              <span
+                className="text-xs text-gray-400 italic"
+                data-testid="embed-backfill-throughput-pending"
+              >
+                throughput pending…
+              </span>
+            )}
           </div>
+          <p className="text-xs text-gray-500 mt-1">
+            {fmtNum(data?.re_embedded ?? 0)} / {fmtNum(total)} chunks re-embedded
+            {' · '}
+            <span data-testid="embed-backfill-remaining">{fmtNum(remaining)}</span> pending
+          </p>
 
           <div className="mt-3" data-testid="embed-backfill-by-source">
             <p className="text-[11px] uppercase tracking-wider text-gray-500 mb-1">

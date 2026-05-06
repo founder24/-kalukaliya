@@ -65,6 +65,20 @@ STATE_COLLECTION = "embed_backfill_state"
 STATE_DOC_ID = "global"
 TARGET_SOURCE_TAG = "workers_ai_custom"
 
+# Task #466 — sliding window (seconds) over which we compute the
+# "chunks per minute" throughput estimate surfaced on the admin pill.
+# One hour by default: long enough that a single slow batch doesn't
+# tank the rate, short enough that an admin reading the pill sees
+# *recent* progress rather than a lifetime average.
+THROUGHPUT_WINDOW_S = max(
+    60, int(os.environ.get("EMBED_BACKFILL_THROUGHPUT_WINDOW_S", "3600") or 3600)
+)
+# Cap the per-state-doc sample list so a long-running job can't
+# unbounded-grow the state doc. With one sample per batch and the
+# default 600 RPM ceiling that's at most ~10/sec; capping at 720
+# covers a 1h window with headroom.
+THROUGHPUT_SAMPLE_CAP = 720
+
 # Concurrency guard so the admin endpoint can't kick off a second run
 # on top of an in-flight one.
 _run_lock = asyncio.Lock()
@@ -201,6 +215,90 @@ def _embed_text_for(chunk: dict) -> Optional[str]:
     return text[:2048]
 
 
+def _coerce_dt(value: Any) -> Optional[_dt.datetime]:
+    """Normalise a stored timestamp (datetime or ISO str) to naive UTC."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, _dt.datetime):
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _compute_throughput(
+    samples: list[dict] | None,
+    *,
+    now: Optional[_dt.datetime] = None,
+    window_s: int = THROUGHPUT_WINDOW_S,
+) -> dict:
+    """Task #466 — derive a chunks/min rate from per-batch samples.
+
+    ``samples`` is the ``throughput_samples`` list persisted in
+    ``embed_backfill_state`` — each entry is ``{"at": datetime,
+    "delta": int}`` recording how many chunks were re-embedded in that
+    batch. We sum the deltas inside the trailing ``window_s`` and
+    divide by the actual elapsed seconds (clamped so a fresh run that
+    only has 30s of history doesn't get its rate inflated by treating
+    it as a full hour).
+
+    Returns ``{"chunks_per_min": float|None, "window_s": int,
+    "samples": int, "elapsed_s": float}``. ``chunks_per_min`` is
+    ``None`` when there isn't enough signal to compute a rate
+    (no samples in window, or only a single point with zero elapsed).
+    """
+    now = now or _dt.datetime.utcnow()
+    cutoff = now - _dt.timedelta(seconds=window_s)
+    in_window: list[tuple[_dt.datetime, int]] = []
+    for s in samples or []:
+        at = _coerce_dt(s.get("at"))
+        if at is None or at < cutoff:
+            continue
+        try:
+            delta = int(s.get("delta", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if delta < 0:
+            continue
+        in_window.append((at, delta))
+
+    if not in_window:
+        return {"chunks_per_min": None, "window_s": window_s,
+                "samples": 0, "elapsed_s": 0.0}
+
+    in_window.sort(key=lambda x: x[0])
+    earliest = in_window[0][0]
+    # Use "now" as the right edge so a long quiet stretch correctly
+    # *lowers* the rate instead of pinning it at the last batch's value.
+    elapsed_s = max(1.0, (now - earliest).total_seconds())
+    total_delta = sum(d for _, d in in_window)
+    chunks_per_min = (total_delta / elapsed_s) * 60.0
+    return {
+        "chunks_per_min": round(chunks_per_min, 2),
+        "window_s":       window_s,
+        "samples":        len(in_window),
+        "elapsed_s":      round(elapsed_s, 1),
+    }
+
+
+def _eta_seconds(remaining: int, chunks_per_min: Optional[float]) -> Optional[int]:
+    """Return ETA in seconds for ``remaining`` chunks at the given rate.
+
+    ``None`` when we can't compute one (no rate, zero rate, or nothing
+    left to do). The admin pill renders this as "~Xh Ym remaining".
+    """
+    if remaining <= 0:
+        return 0
+    if not chunks_per_min or chunks_per_min <= 0:
+        return None
+    return int(round((remaining / chunks_per_min) * 60.0))
+
+
 async def get_progress(db: Any) -> dict:
     """Return the admin-facing backfill progress payload."""
     state = await _load_state(db)
@@ -209,6 +307,8 @@ async def get_progress(db: Any) -> dict:
     done = max(total - remaining, 0)
     pct = round((done / total) * 100.0, 2) if total else 0.0
     by_source = await _remaining_by_source(db)
+    throughput = _compute_throughput(state.get("throughput_samples"))
+    eta_s = _eta_seconds(remaining, throughput.get("chunks_per_min"))
     return {
         "target_source":   TARGET_SOURCE_TAG,
         "total_chunks":    total,
@@ -224,6 +324,16 @@ async def get_progress(db: Any) -> dict:
         "last_run":        state.get("last_run"),
         "batch_size":      BATCH_SIZE,
         "max_rpm":         MAX_RPM,
+        # Task #466 — recent progress signal so admins can predict
+        # completion instead of staring at a percent number that may
+        # or may not be moving.
+        "throughput": {
+            "chunks_per_min": throughput["chunks_per_min"],
+            "window_s":       throughput["window_s"],
+            "samples":        throughput["samples"],
+            "elapsed_s":      throughput["elapsed_s"],
+        },
+        "eta_seconds": eta_s,
     }
 
 
@@ -263,6 +373,28 @@ async def run_backfill(
         processed = succeeded = failed = skipped = 0
         gap = _sleep_between_batches()
         budget = max_chunks if max_chunks is not None else 10**12
+        # Task #466 — carry the trailing throughput samples forward
+        # across runs so the admin pill keeps showing chunks/min even
+        # when the per-call budget exhausts and the loop sleeps before
+        # the next pass. Trim entries older than the window up front so
+        # the state doc doesn't accumulate indefinitely.
+        prior_samples = state.get("throughput_samples") or []
+        cutoff = _dt.datetime.utcnow() - _dt.timedelta(seconds=THROUGHPUT_WINDOW_S)
+        throughput_samples: list[dict] = []
+        for s in prior_samples:
+            if not isinstance(s, dict):
+                continue
+            at = _coerce_dt(s.get("at"))
+            if at is None or at < cutoff:
+                continue
+            try:
+                delta = int(s.get("delta", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if delta < 0:
+                continue
+            throughput_samples.append({"at": at, "delta": delta})
+        last_succeeded_total = 0
 
         try:
             from pymongo import UpdateOne
@@ -434,6 +566,29 @@ async def run_backfill(
                     failed += len(mongo_ops)
                     succeeded -= len(mongo_ops)
 
+            # Task #466 — record this batch's contribution to the
+            # rolling throughput window. We use ``succeeded`` deltas
+            # (not ``processed``) so a batch that was 100% Pinecone
+            # failures correctly reports 0 chunks/min instead of
+            # claiming progress that didn't actually land.
+            batch_delta = max(0, succeeded - last_succeeded_total)
+            last_succeeded_total = succeeded
+            if batch_delta > 0:
+                throughput_samples.append({
+                    "at": _dt.datetime.utcnow(),
+                    "delta": batch_delta,
+                })
+                # Trim by both age and absolute count so the state doc
+                # stays small even on a very long catch-up burn.
+                cutoff = _dt.datetime.utcnow() - _dt.timedelta(
+                    seconds=THROUGHPUT_WINDOW_S
+                )
+                throughput_samples = [
+                    s for s in throughput_samples
+                    if isinstance(s.get("at"), _dt.datetime)
+                    and s["at"] >= cutoff
+                ][-THROUGHPUT_SAMPLE_CAP:]
+
             await _write_state(db, {
                 "running":            True,
                 "last_processed_id":  last_id,
@@ -441,6 +596,7 @@ async def run_backfill(
                 "last_run_succeeded": succeeded,
                 "last_run_failed":    failed,
                 "last_run_skipped":   skipped,
+                "throughput_samples": throughput_samples,
             })
 
             logger.info(

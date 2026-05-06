@@ -468,3 +468,162 @@ async def test_get_progress_breaks_remaining_down_by_source():
     assert sum(by_source.values()) == progress["remaining"]
     # Already-migrated chunks are excluded from the breakdown.
     assert "workers_ai_custom" not in by_source
+
+
+# ── Task #466 — throughput + ETA ─────────────────────────────────────────────
+
+
+def test_compute_throughput_with_recent_samples():
+    """Recent batch deltas in the trailing window must produce a sensible
+    chunks/min rate so the admin pill can predict completion."""
+    import datetime as _dt
+    from aca_jobs import embed_backfill
+
+    now = _dt.datetime(2026, 5, 6, 12, 0, 0)
+    samples = [
+        {"at": now - _dt.timedelta(minutes=10), "delta": 100},
+        {"at": now - _dt.timedelta(minutes=5),  "delta": 200},
+        {"at": now - _dt.timedelta(minutes=1),  "delta": 100},
+    ]
+    out = embed_backfill._compute_throughput(samples, now=now)
+    # 400 chunks across the 10-minute earliest→now span = 40 chunks/min.
+    assert out["samples"] == 3
+    assert out["elapsed_s"] == 600.0
+    assert out["chunks_per_min"] == 40.0
+
+
+def test_compute_throughput_drops_stale_samples():
+    """Anything older than the window must be ignored, so a once-busy
+    job that's been idle for hours doesn't keep claiming progress."""
+    import datetime as _dt
+    from aca_jobs import embed_backfill
+
+    now = _dt.datetime(2026, 5, 6, 12, 0, 0)
+    samples = [
+        {"at": now - _dt.timedelta(hours=5), "delta": 9999},  # outside window
+        {"at": now - _dt.timedelta(minutes=2), "delta": 60},
+    ]
+    out = embed_backfill._compute_throughput(samples, now=now, window_s=3600)
+    assert out["samples"] == 1
+    # 60 chunks across ~120s → 30 chunks/min.
+    assert out["chunks_per_min"] == 30.0
+
+
+def test_compute_throughput_empty_samples():
+    from aca_jobs import embed_backfill
+    out = embed_backfill._compute_throughput([])
+    assert out["chunks_per_min"] is None
+    assert out["samples"] == 0
+
+
+def test_eta_seconds_from_rate():
+    from aca_jobs import embed_backfill
+    # 600 chunks at 60/min ⇒ 600s.
+    assert embed_backfill._eta_seconds(600, 60.0) == 600
+    # No remaining work ⇒ 0 (admin pill renders 'done').
+    assert embed_backfill._eta_seconds(0, 60.0) == 0
+    # No rate ⇒ unknown (None).
+    assert embed_backfill._eta_seconds(100, None) is None
+    assert embed_backfill._eta_seconds(100, 0) is None
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_records_throughput_samples():
+    """A successful pass must persist per-batch deltas into
+    ``throughput_samples`` so ``get_progress`` can derive a rate
+    without recomputing it from chunk timestamps."""
+    from aca_jobs import embed_backfill
+
+    db, _, state_state, _ = _make_db([
+        {"_id": f"chunk-{i:02d}", "content": f"x{i}",
+         "embedding_source": "cohere"}
+        for i in range(6)
+    ])
+    await embed_backfill.run_backfill(db, max_chunks=6, batch_size=2)
+
+    samples = state_state.get("throughput_samples") or []
+    # 6 chunks in batches of 2 → 3 batches → 3 samples, each delta=2.
+    assert len(samples) == 3
+    assert all(s["delta"] == 2 for s in samples)
+    assert all(isinstance(s["at"], __import__("datetime").datetime)
+               for s in samples)
+
+
+@pytest.mark.asyncio
+async def test_get_progress_exposes_throughput_and_eta():
+    """The admin endpoint payload must include a throughput block + ETA
+    so the frontend can render '40 chunks/min · ETA 2h' next to the
+    percent number."""
+    import datetime as _dt
+    from aca_jobs import embed_backfill
+
+    db, _, state_state, _ = _make_db([
+        {"_id": f"r{i}", "content": "x", "embedding_source": "cohere"}
+        for i in range(120)
+    ])
+    # Pre-seed state with a synthetic 10-min, 400-chunk burst.
+    now = _dt.datetime.utcnow()
+    state_state.update({
+        "_id": "global",
+        "throughput_samples": [
+            {"at": now - _dt.timedelta(minutes=10), "delta": 100},
+            {"at": now - _dt.timedelta(minutes=5),  "delta": 200},
+            {"at": now - _dt.timedelta(minutes=1),  "delta": 100},
+        ],
+    })
+
+    progress = await embed_backfill.get_progress(db)
+    tput = progress["throughput"]
+    assert tput["chunks_per_min"] is not None
+    assert tput["chunks_per_min"] > 0
+    assert tput["samples"] == 3
+    # ETA = remaining (120) / rate (~40/min) * 60 → ~180s.
+    assert progress["eta_seconds"] is not None
+    assert 150 <= progress["eta_seconds"] <= 250
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_drops_malformed_prior_samples(monkeypatch):
+    """Historical state docs may contain garbage entries (wrong types,
+    missing fields) from older code revs. The run loader must skip
+    them silently instead of crashing the whole pass."""
+    import datetime as _dt
+    from aca_jobs import embed_backfill
+
+    db, _, state_state, _ = _make_db([
+        {"_id": "g1", "content": "x", "embedding_source": "cohere"},
+        {"_id": "g2", "content": "y", "embedding_source": "cohere"},
+    ])
+    now = _dt.datetime.utcnow()
+    state_state.update({
+        "_id": "global",
+        "throughput_samples": [
+            "not a dict",                                # malformed
+            {"at": "garbage", "delta": 5},               # bad timestamp
+            {"at": now - _dt.timedelta(minutes=2), "delta": "nope"},  # bad delta
+            {"at": now - _dt.timedelta(minutes=1), "delta": -3},      # negative
+            {"at": now - _dt.timedelta(minutes=1), "delta": 7},       # good
+        ],
+    })
+
+    summary = await embed_backfill.run_backfill(db, max_chunks=2, batch_size=2)
+    assert summary["succeeded"] == 2
+    samples = state_state.get("throughput_samples") or []
+    # Only the one good prior sample + the new batch sample survive.
+    assert len(samples) == 2
+    assert all(isinstance(s["at"], _dt.datetime) for s in samples)
+    assert all(s["delta"] > 0 for s in samples)
+
+
+@pytest.mark.asyncio
+async def test_get_progress_eta_none_without_samples():
+    """No samples ⇒ no rate ⇒ no ETA. Frontend renders 'throughput
+    pending…' instead of a misleading number."""
+    from aca_jobs import embed_backfill
+
+    db, _, _, _ = _make_db([
+        {"_id": "p1", "content": "x", "embedding_source": "cohere"},
+    ])
+    progress = await embed_backfill.get_progress(db)
+    assert progress["throughput"]["chunks_per_min"] is None
+    assert progress["eta_seconds"] is None
