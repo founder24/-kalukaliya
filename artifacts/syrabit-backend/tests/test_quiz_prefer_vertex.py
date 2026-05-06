@@ -101,11 +101,14 @@ async def test_prefer_vertex_true_falls_back_to_azure_on_vertex_failure():
 
 
 @pytest.mark.asyncio
-async def test_prefer_vertex_false_keeps_azure_primary():
-    """Default (prefer_vertex=False) must preserve the historical
-    Azure-PRIMARY → Vertex-FALLBACK order used by lazy on-click
-    quiz_generate. Regressing this would silently swap the provider
-    used by every student-facing quiz click."""
+async def test_default_english_quiz_now_uses_vertex_primary():
+    """2026-05-06 user instruction — English quiz generation MUST
+    route through Vertex / Gemini as the unconditional primary
+    regardless of the legacy ``prefer_vertex`` kwarg. The kwarg is
+    retained for source-level back-compat with the polish-stage
+    pre-gen wiring but is now a no-op for English. Regressing this
+    would silently flip every student-facing quiz click back onto
+    Azure as the primary."""
     from routes import edu_study
 
     az_mock = AsyncMock(return_value=_FAKE_QUIZ_PAYLOAD)
@@ -120,12 +123,124 @@ async def test_prefer_vertex_false_keeps_azure_primary():
             subject_name="Science",
             count=3,
             response_lang="en",
-            # prefer_vertex omitted — defaults to False
+            # prefer_vertex omitted — must STILL go Vertex-first now.
         )
 
     assert len(out) == 3
+    assert vx_mock.await_count == 1, (
+        "Vertex must be the primary even when prefer_vertex is omitted "
+        "(2026-05-06 instruction — English quiz routes through vertex_chat)"
+    )
+    assert az_mock.await_count == 0, (
+        "Azure must NOT be called when Vertex succeeds — Vertex is the "
+        "unconditional primary for English quiz now"
+    )
+    args, _ = vx_mock.call_args
+    assert args[1] == "gemini-2.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_default_english_quiz_falls_back_to_azure_on_vertex_failure():
+    """When Vertex fails on the default (no prefer_vertex) path, Azure
+    must still be tried as the fallback so the lazy on-click quiz
+    surface never collapses on a Gemini outage."""
+    from routes import edu_study
+
+    az_mock = AsyncMock(return_value=_FAKE_QUIZ_PAYLOAD)
+    vx_mock = AsyncMock(side_effect=RuntimeError("simulated vertex outage"))
+
+    with patch.object(edu_study, "_az_quiz_chat", az_mock), \
+         patch.object(edu_study, "_call_vertex_chat", vx_mock):
+        out = await edu_study._generate_and_clean_quiz(
+            context="A long enough source text " * 30,
+            topic="Test topic",
+            chapter_ref="seba/class-10/sci/test",
+            subject_name="Science",
+            count=3,
+            response_lang="en",
+        )
+
+    assert len(out) == 3
+    assert vx_mock.await_count == 1
     assert az_mock.await_count == 1
-    assert vx_mock.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_assamese_quiz_translates_via_indictrans2():
+    """2026-05-06 user instruction — Assamese quiz generation MUST
+    generate the MCQs in English via Vertex first, then translate
+    each MCQ's question / 4 choices / explanation through Workers-AI
+    IndicTrans2 (``providers.workers_indic.call_indic_trans``,
+    ``@cf/ai4bharat/indictrans2-en-indic-1b``). We stopped asking the
+    general LLM to write Assamese directly because purpose-built
+    Indic translators produce materially better Assamese (correct
+    Bengali script, no English residue)."""
+    from routes import edu_study
+    import providers.workers_indic as _wi
+
+    vx_mock = AsyncMock(return_value=_FAKE_QUIZ_PAYLOAD)
+    az_mock = AsyncMock(return_value=_FAKE_QUIZ_PAYLOAD)
+    indic_mock = AsyncMock(side_effect=lambda s, **kw: f"AS:{s}")
+
+    with patch.object(edu_study, "_call_vertex_chat", vx_mock), \
+         patch.object(edu_study, "_az_quiz_chat", az_mock), \
+         patch.object(_wi, "call_indic_trans", indic_mock):
+        out = await edu_study._generate_and_clean_quiz(
+            context="A long enough source text " * 30,
+            topic="Test topic",
+            chapter_ref="seba/class-10/sci/test",
+            subject_name="Science",
+            count=3,
+            response_lang="as",
+        )
+
+    # Vertex was the English generation primary.
+    assert vx_mock.await_count == 1
+    assert az_mock.await_count == 0
+    # IndicTrans2 was invoked once per translatable field per card:
+    # 3 cards × (1 question + 4 choices + 1 explanation) = 18 calls.
+    assert indic_mock.await_count == 3 * (1 + 4 + 1)
+    # Direction must be the en→indic model.
+    for call in indic_mock.await_args_list:
+        assert call.kwargs.get("direction") == "en-indic"
+    # Output fields are translated (prefixed by the fake translator).
+    for q in out:
+        assert q["q"].startswith("AS:")
+        for c in q["choices"]:
+            assert c.startswith("AS:")
+        assert q["explanation"].startswith("AS:")
+
+
+@pytest.mark.asyncio
+async def test_assamese_quiz_keeps_english_when_indictrans2_fails():
+    """IndicTrans2 failures (CF outage, non-Assamese-script regression)
+    must NOT 502 the quiz — the per-field fallback returns the
+    English string for that one field so the user still gets a
+    usable card. The polish pipeline can re-translate later."""
+    from routes import edu_study
+    import providers.workers_indic as _wi
+
+    vx_mock = AsyncMock(return_value=_FAKE_QUIZ_PAYLOAD)
+    indic_mock = AsyncMock(side_effect=RuntimeError("CF down"))
+
+    with patch.object(edu_study, "_call_vertex_chat", vx_mock), \
+         patch.object(_wi, "call_indic_trans", indic_mock):
+        out = await edu_study._generate_and_clean_quiz(
+            context="A long enough source text " * 30,
+            topic="Test topic",
+            chapter_ref="seba/class-10/sci/test",
+            subject_name="Science",
+            count=3,
+            response_lang="as",
+        )
+
+    assert len(out) == 3
+    # Translator was attempted for each field but every call raised;
+    # the helper swallowed the exceptions and kept the English text.
+    assert indic_mock.await_count == 3 * (1 + 4 + 1)
+    for q in out:
+        assert q["q"].startswith("Sample question")
+        assert q["choices"] == ["A", "B", "C", "D"]
 
 
 def test_pregenerate_chapter_quiz_accepts_prefer_vertex():
