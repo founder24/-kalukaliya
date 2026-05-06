@@ -233,3 +233,72 @@ def test_back_compat_user_shims_still_work(fresh_module):
     assert fresh_module.mongo_user_writes_enabled() is True
     # The shim wires through to mirror_collection_write('users', ...).
     assert fresh_module._flag_env_for("users") == "MONGO_USER_WRITES"
+
+
+# ── edu_notes collection (third Phase 2 rollout) ──
+
+@pytest.fixture
+def fake_edu_notes_db(monkeypatch, fresh_module):
+    import deps
+    fake = MagicMock()
+    fake.edu_notes = MagicMock()
+    fake.edu_notes.insert_one = AsyncMock(return_value=None)
+    fake.edu_notes.replace_one = AsyncMock(return_value=None)
+    fake.edu_notes.delete_one = AsyncMock(return_value=None)
+    fake.edu_notes.update_many = AsyncMock(return_value=None)
+    monkeypatch.setattr(deps, "db", fake)
+    return fake
+
+
+def test_edu_notes_flag_env_name(fresh_module):
+    """edu_notes must use MONGO_EDU_NOTE_WRITES (singular form)."""
+    assert fresh_module._flag_env_for("edu_notes") == "MONGO_EDU_NOTE_WRITES"
+
+
+def test_edu_notes_flag_default_enabled(fresh_module):
+    assert fresh_module.mongo_collection_writes_enabled("edu_notes") is True
+
+
+def test_edu_notes_flag_disable_independent(reset_env, fresh_module):
+    reset_env.setenv("MONGO_EDU_NOTE_WRITES", "0")
+    assert fresh_module.mongo_collection_writes_enabled("edu_notes") is False
+    # Other collections must NOT be affected.
+    assert fresh_module.mongo_collection_writes_enabled("users") is True
+    assert fresh_module.mongo_collection_writes_enabled("conversations") is True
+
+
+def test_edu_notes_mirror_success_increments_namespaced_counter(
+    fresh_module, fake_edu_notes_db
+):
+    async def go():
+        await fresh_module.mirror_edu_notes_write(
+            "insert",
+            lambda: fake_edu_notes_db.edu_notes.insert_one(
+                {"id": "n1", "actor_kind": "user", "actor": "u1", "text": "hi"}
+            ),
+        )
+    _run(go())
+    fake_edu_notes_db.edu_notes.insert_one.assert_awaited_once()
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_notes.success"] == 1
+    assert counters["edu_notes.fail"] == 0
+    # Other namespaces untouched.
+    assert counters.get("users.success", 0) == 0
+    assert counters.get("conversations.success", 0) == 0
+
+
+def test_edu_notes_mirror_swallows_exception(fresh_module, fake_edu_notes_db):
+    fake_edu_notes_db.edu_notes.update_many.side_effect = RuntimeError("boom")
+
+    async def go():
+        await fresh_module.mirror_edu_notes_write(
+            "claim_bulk",
+            lambda: fake_edu_notes_db.edu_notes.update_many(
+                {"actor_kind": "anon", "actor": "a1"},
+                {"$set": {"actor_kind": "user", "actor": "u1"}},
+            ),
+        )
+    _run(go())  # must NOT raise
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_notes.fail"] == 1
+    assert counters["edu_notes.success"] == 0

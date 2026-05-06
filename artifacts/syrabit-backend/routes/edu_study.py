@@ -46,6 +46,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from auth_deps import get_current_user, get_current_user_optional, check_rate_limit, get_user_credits
+from db_dualwrite import mirror_edu_notes_write
 from llm import call_llm_api, _call_vertex_chat
 from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
@@ -185,6 +186,30 @@ def _note_row_to_dict(row) -> dict:
         "source_kind": row["source_kind"] if "source_kind" in row.keys() else None,
         "source_ref": row["source_ref"] if "source_ref" in row.keys() else None,
     }
+
+
+def _note_row_for_mongo(row) -> dict:
+    """Convert an asyncpg ``edu_notes`` Record into a Mongo document.
+
+    ADR-0001 §50 — greenfield collection. Composite key is
+    ``{actor_kind, actor, id}``; we keep ``id`` as a plain field (not
+    Mongo's reserved ``_id``) to match the users/conversations rollout
+    pattern. JSONB columns ``structured`` / ``citations`` may surface as
+    ``str`` *or* native dict/list depending on asyncpg's codec setup
+    (see ``_note_row_to_dict`` for the read-side equivalent); normalize
+    to native types so future Phase 3 read-shadow diffs aren't tripped
+    by string-vs-dict noise.
+    """
+    d = dict(row)
+    for k in ("structured", "citations"):
+        v = d.get(k)
+        if isinstance(v, str):
+            try:
+                d[k] = json.loads(v)
+            except Exception:
+                d[k] = None
+    d["tags"] = list(d.get("tags") or [])
+    return d
 
 
 # ───────────────────────── Quiz generator ─────────────────────────
@@ -993,6 +1018,12 @@ async def create_note(req: NoteCreateReq, request: Request,
             nid, kind, actor, req.text.strip(), req.source_url.strip(),
             req.source_title.strip(), req.chapter_ref.strip(), tags,
         )
+    # ADR-0001 Phase 2 (V4 §13): mirror to Mongo (best-effort; PG is SoT).
+    _mongo_doc = _note_row_for_mongo(row)
+    await mirror_edu_notes_write(
+        "insert",
+        lambda: deps.db.edu_notes.insert_one(_mongo_doc),
+    )
     return {"ok": True, "note": _note_row_to_dict(row)}
 
 
@@ -1044,6 +1075,22 @@ async def patch_note(note_id: str, req: NotePatchReq, request: Request,
         )
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
+    # ADR-0001 Phase 2: mirror full row to Mongo via replace_one(upsert=True).
+    # Greenfield collection — pre-Phase-2 PG rows have no Mongo twin yet, so
+    # ``upsert=True`` lets the first patch *create* the Mongo doc instead of
+    # silently no-op'ing on a missing match.
+    _mongo_doc = _note_row_for_mongo(row)
+    _nid = note_id
+    _kind = kind
+    _actor = actor
+    await mirror_edu_notes_write(
+        "update",
+        lambda: deps.db.edu_notes.replace_one(
+            {"id": _nid, "actor_kind": _kind, "actor": _actor},
+            _mongo_doc,
+            upsert=True,
+        ),
+    )
     return {"ok": True, "note": _note_row_to_dict(row)}
 
 
@@ -1057,6 +1104,16 @@ async def delete_note(note_id: str, request: Request,
             "DELETE FROM edu_notes WHERE id=$1 AND actor_kind=$2 AND actor=$3",
             note_id, kind, actor,
         )
+    # ADR-0001 Phase 2: mirror delete to Mongo (best-effort; PG is SoT).
+    _nid = note_id
+    _kind = kind
+    _actor = actor
+    await mirror_edu_notes_write(
+        "delete",
+        lambda: deps.db.edu_notes.delete_one(
+            {"id": _nid, "actor_kind": _kind, "actor": _actor},
+        ),
+    )
     return {"ok": True, "deleted": result.endswith(" 1")}
 
 
@@ -2122,6 +2179,12 @@ async def generate_notes(req: NotesGenReq, request: Request,
                 json.dumps(structured), json.dumps(citations_out),
                 sk, source_ref[:300],
             )
+        # ADR-0001 Phase 2: mirror autogen note to Mongo (best-effort).
+        _mongo_doc = _note_row_for_mongo(row)
+        await mirror_edu_notes_write(
+            "insert_autogen",
+            lambda: deps.db.edu_notes.insert_one(_mongo_doc),
+        )
         success = True
         return {"ok": True, "note": _note_row_to_dict(row)}
     finally:
@@ -2636,6 +2699,26 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
         cards_count = int(cards_res.split()[-1])
     except Exception:
         cards_count = 0
+    # ADR-0001 Phase 2: mirror the bulk anon→user reassignment to Mongo
+    # (best-effort; PG is SoT). This fires AFTER the PG transaction has
+    # committed (we are outside both ``async with`` blocks here), so a
+    # rollback on the PG side cannot leave a phantom Mongo write. Skip
+    # when PG moved zero rows to keep the counter honest about real work.
+    if notes_count > 0:
+        _anon = anon
+        _uid = user_id
+        _claimed_at = datetime.now(timezone.utc)
+        await mirror_edu_notes_write(
+            "claim_bulk",
+            lambda: deps.db.edu_notes.update_many(
+                {"actor_kind": "anon", "actor": _anon},
+                {"$set": {
+                    "actor_kind": "user",
+                    "actor": _uid,
+                    "claimed_at": _claimed_at,
+                }},
+            ),
+        )
     return {"ok": True, "notes": notes_count, "flashcards": cards_count,
             "settings_merged": settings_merged, "pin_dropped": pin_dropped}
 

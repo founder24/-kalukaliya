@@ -125,6 +125,26 @@ print('V4 §13 acceptance: PASS')
 
 - **2026-05-06**: ADR proposed (Phase 1 of V4 §13). Awaiting approval
   before opening Phase 2 dual-write PRs.
+- **2026-05-06**: **Phase 2 (edu_notes collection) merged.** Greenfield
+  Mongo target per §50; added `mirror_edu_notes_write()` shim and
+  `_FLAG_NAME_OVERRIDES["edu_notes"] = "EDU_NOTE"` so the rollback flag
+  is `MONGO_EDU_NOTE_WRITES`. Wired all 5 PG write sites in
+  `routes/edu_study.py`: (1) `create_note` → `insert_one`; (2)
+  `patch_note` → `replace_one(upsert=True)` (greenfield-safe — pre-Phase-2
+  PG rows have no Mongo twin yet); (3) `delete_note` → `delete_one`;
+  (4) AI-autogen note INSERT → `insert_one`; (5) `claim_anon_data` bulk
+  reassignment → `update_many({actor_kind:"anon", actor:anon}, {$set:{
+  actor_kind:"user", actor:user_id, claimed_at:now}})`. The claim mirror
+  fires AFTER the PG `async with conn.transaction()` block exits, so a
+  PG rollback cannot leave a phantom Mongo write; gated on
+  `notes_count > 0` to keep counters honest. New `_note_row_for_mongo()`
+  helper normalizes `structured`/`citations` JSONB (asyncpg may surface
+  either str or dict depending on codec) so future Phase-3 read-shadow
+  diffs aren't tripped by string-vs-dict noise. Test suite grew 16 → 21
+  (added 5 edu_notes cases: env-flag name, default enabled, per-collection
+  flag isolation across users+conversations+edu_notes, success counter,
+  swallows-exception). `routes/edu_study.py` ships with
+  `from db_dualwrite import mirror_edu_notes_write` at the top.
 - **2026-05-06**: **Phase 2 (conversations collection) merged.** Generalised
   the dual-write helper to take a per-collection name (counters now keyed
   `<collection>.{success,fail,skipped_disabled,skipped_no_db}`; per-collection

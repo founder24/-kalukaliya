@@ -18,8 +18,10 @@ Contract (locked by ADR-0001):
 
 Per-collection rollout (Phase 2):
 - ``users`` ............... SHIPPED 2026-05-06 (B4)
-- ``conversations`` ....... SHIPPED 2026-05-06 (this module)
-- 8 remaining collections . NOT STARTED — separate sessions per the
+- ``conversations`` ....... SHIPPED 2026-05-06
+- ``edu_notes`` ........... SHIPPED 2026-05-06 (greenfield Mongo target;
+  see ADR-0001 §50 — five PG write sites in ``routes/edu_study.py``).
+- 7 remaining collections . NOT STARTED — separate sessions per the
   ADR's per-table contract.
 
 Carve-outs (do NOT migrate to this helper):
@@ -53,6 +55,7 @@ _DUALWRITE_COUNTERS: dict[str, int] = {}
 _FLAG_NAME_OVERRIDES: dict[str, str] = {
     "users": "USER",
     "conversations": "CONVERSATION",
+    "edu_notes": "EDU_NOTE",
 }
 
 
@@ -191,3 +194,16 @@ async def mirror_conversation_write(
 ) -> None:
     """Mirror a write to the ``conversations`` collection (best-effort)."""
     await mirror_collection_write("conversations", op_label, fn)
+
+
+async def mirror_edu_notes_write(
+    op_label: str,
+    fn: Callable[[], Awaitable[Any]],
+) -> None:
+    """Mirror a write to the ``edu_notes`` collection (best-effort).
+
+    Greenfield collection per ADR-0001 §50 — the Mongo target does not
+    exist until Phase 2 starts populating it. Read paths still hit PG
+    until Phase 4 cutover, so every mirror miss is safe.
+    """
+    await mirror_collection_write("edu_notes", op_label, fn)
