@@ -228,6 +228,61 @@ def _aggregate_cache_by_model(samples: list[dict[str, Any]]) -> list[dict[str, A
     return out
 
 
+def _aggregate_guardrail_by_model(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Task #448 — bucket the rolling sample window by ``(provider, model)``
+    so the admin CF Health tile can show on-call which model is most
+    often tripped by the AI Gateway guardrails layer (Llama-Guard /
+    AI Content Safety).
+
+    Mirrors the shape produced by :func:`_aggregate_cache_by_model` so
+    the sibling tile on the frontend stays trivially symmetric. A
+    bucket whose samples carried no ``guardrail_action`` at all (e.g.
+    every sample was a cache-only event with no
+    ``cf-aig-guardrail-action`` header) reports ``block_ratio = None``.
+    The frontend renders that as "—" rather than 0% so a model with no
+    guardrail telemetry is not painted as a "0% blocked" outlier.
+    """
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for s in samples:
+        provider = s.get("provider") or "unknown"
+        model = s.get("model") or "unknown"
+        bucket = by_key.setdefault((provider, model), {
+            "provider": provider,
+            "model": model,
+            "samples": 0,
+            "allows": 0,
+            "rewrites": 0,
+            "blocks": 0,
+        })
+        bucket["samples"] += 1
+        action = s.get("guardrail_action")
+        if action == "allow":
+            bucket["allows"] += 1
+        elif action == "rewrite":
+            bucket["rewrites"] += 1
+        elif action == "block":
+            bucket["blocks"] += 1
+    out: list[dict[str, Any]] = []
+    for bucket in by_key.values():
+        guardrail_total = bucket["allows"] + bucket["rewrites"] + bucket["blocks"]
+        bucket["guardrail_total"] = guardrail_total
+        bucket["block_ratio"] = (
+            round(bucket["blocks"] / guardrail_total, 4)
+            if guardrail_total else None
+        )
+        out.append(bucket)
+    # Sort: rows with a ratio first (highest block_ratio, then most
+    # blocks), rows with no guardrail telemetry (ratio is None) last
+    # so on-call's eye lands on the worst offender first.
+    out.sort(key=lambda b: (
+        0 if b["block_ratio"] is not None else 1,
+        -(b["block_ratio"] or 0.0),
+        -b["blocks"],
+        b["model"],
+    ))
+    return out
+
+
 def snapshot() -> dict[str, Any]:
     """Return a JSON-serialisable snapshot for the admin health route."""
     with _LOCK:
@@ -250,6 +305,11 @@ def snapshot() -> dict[str, Any]:
         # tile and the raw sample list cannot disagree about what
         # "in the current window" means.
         "cache_by_model": _aggregate_cache_by_model(recent_samples),
+        # Task #448 — sibling per-model breakdown for guardrail blocks,
+        # built from the same ``recent_samples`` window so the cache and
+        # guardrail tiles cannot disagree about what "in the current
+        # window" means.
+        "guardrail_by_model": _aggregate_guardrail_by_model(recent_samples),
     }
 
 

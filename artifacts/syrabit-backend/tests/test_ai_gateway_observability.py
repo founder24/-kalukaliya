@@ -156,6 +156,93 @@ def test_cache_by_model_empty_when_no_samples(monkeypatch):
     assert snap["cache_by_model"] == []
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Task #448 — per-model guardrail aggregation surfaced via snapshot()
+# so the admin CF Health tile can show "models by guardrail block
+# ratio" without re-slicing recent_samples on the frontend. Mirrors
+# the cache_by_model contract above.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_guardrail_by_model_aggregates_per_model_block_ratio(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # llama: 1 allow, 1 rewrite, 2 blocks → 2/4 = 0.5
+    record_aig_response({"cf-aig-cache-status": "MISS",
+                         "cf-aig-guardrail-action": "allow"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({"cf-aig-cache-status": "MISS",
+                         "cf-aig-guardrail-action": "rewrite"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({"cf-aig-cache-status": "MISS",
+                         "cf-aig-guardrail-action": "block"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({"cf-aig-cache-status": "MISS",
+                         "cf-aig-guardrail-action": "block"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    # gpt-oss: 1 allow only → 0.0 block ratio
+    record_aig_response({"cf-aig-cache-status": "MISS",
+                         "cf-aig-guardrail-action": "allow"},
+                        provider="workers_ai", model="gpt-oss-120b")
+    rows = snapshot()["guardrail_by_model"]
+    by_model = {r["model"]: r for r in rows}
+    assert by_model["llama-3.3-70b"]["blocks"] == 2
+    assert by_model["llama-3.3-70b"]["rewrites"] == 1
+    assert by_model["llama-3.3-70b"]["allows"] == 1
+    assert by_model["llama-3.3-70b"]["block_ratio"] == pytest.approx(0.5, rel=1e-3)
+    assert by_model["gpt-oss-120b"]["block_ratio"] == 0.0
+    # llama (highest block ratio) sorts before gpt-oss so on-call's
+    # eye lands on the worst offender first.
+    assert rows[0]["model"] == "llama-3.3-70b"
+
+
+def test_guardrail_by_model_renders_dash_when_no_guardrail_action(monkeypatch):
+    """A model whose samples carried no cf-aig-guardrail-action (e.g.
+    only cache events) must report block_ratio=None so the frontend can
+    render '—' instead of misleadingly painting it as 0% blocked."""
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # Cache-only event: cf-aig-* present, but no guardrail-action header.
+    record_aig_response({
+        "cf-aig-cache-status": "HIT",
+        "cf-aig-log-id": "log-x",
+    }, provider="vertex", model="gemini-2.5-flash")
+    rows = snapshot()["guardrail_by_model"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["provider"] == "vertex"
+    assert row["model"] == "gemini-2.5-flash"
+    assert row["samples"] == 1
+    assert row["guardrail_total"] == 0
+    assert row["block_ratio"] is None
+
+
+def test_guardrail_by_model_empty_when_no_samples(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import snapshot
+    snap = snapshot()
+    assert snap["guardrail_by_model"] == []
+
+
+def test_guardrail_by_model_ratio_rows_sort_before_dash_rows(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # Model A: has guardrail telemetry (1 allow → 0.0 block ratio).
+    record_aig_response({"cf-aig-cache-status": "MISS",
+                         "cf-aig-guardrail-action": "allow"},
+                        provider="azure", model="model-a")
+    # Model B: only cache telemetry → block_ratio is None ("—").
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="azure", model="model-b")
+    rows = snapshot()["guardrail_by_model"]
+    # Even though A's block_ratio is 0.0 and B's is None, A must sort
+    # first so the frontend's "models by block ratio" view does not
+    # bury a real 0% under rows with no guardrail telemetry at all.
+    assert [r["model"] for r in rows] == ["model-a", "model-b"]
+    assert rows[0]["block_ratio"] == 0.0
+    assert rows[1]["block_ratio"] is None
+
+
 def test_cache_by_model_ratio_rows_sort_before_dash_rows(monkeypatch):
     monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
     from ai_gateway_observability import record_aig_response, snapshot

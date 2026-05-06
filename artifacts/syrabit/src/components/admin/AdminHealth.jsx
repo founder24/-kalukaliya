@@ -9,6 +9,7 @@ import EmbedBackfillPill from './EmbedBackfillPill';
 import EmbedStackHealthPill from './EmbedStackHealthPill';
 import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
+import AiGatewayGuardrailByModelTile from './AiGatewayGuardrailByModelTile';
 // Phase 4 — Task #332. SQS+Lambda worker tier health (replaces the
 // GCP Cloud Tasks tile inside AdminGcpPanel) and the Azure Container
 // Apps Jobs cron health table (replaces the Cloud Scheduler source
@@ -3616,6 +3617,25 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           100% miss outlier.
         */}
         <AiGatewayCacheByModelTile
+          data={cfHealthData?.ai_gateway}
+          loading={cfHealthLoading}
+          onRefresh={loadCfHealth}
+        />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="AI Gateway Guardrail by Model">
+        {/*
+          Task #448 — sibling of the cache-by-model tile above. The
+          AI Gateway already counted aggregate guardrail allow/rewrite/
+          block totals, but on-call had no way to tell *which* model
+          was disproportionately tripping the Llama-Guard / AI Content
+          Safety layer without slicing ai_gateway.recent_samples by
+          hand. This tile renders the same recent-samples window
+          bucketed by (provider, model) → block ratio, with "—" for
+          rows that carry no guardrail telemetry so a quiet model is
+          not painted as a 0%-blocked outlier.
+        */}
+        <AiGatewayGuardrailByModelTile
           data={cfHealthData?.ai_gateway}
           loading={cfHealthLoading}
           onRefresh={loadCfHealth}
