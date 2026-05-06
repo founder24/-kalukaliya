@@ -1,14 +1,19 @@
 name: cross-cloud-trace-canary
 
-# Task #489 — V4 §7 cross-cloud trace canary.
+# Task #489 — V4 §7 cross-cloud trace canary (Sentry-side assertion).
 #
 # Fires a single canary HTTP request at the ACA backend with a known
-# `traceparent` header, then queries the OTEL backstop (Sentry + GCP
-# Cloud Trace) to assert that BOTH the ACA span and the downstream
-# AWS Lambda span (reembed_consumer / s3_to_r2_sync) landed under the
-# same trace-id. This is the end-to-end check the architect feedback
-# called out — it locks in that the Lambda OTEL env vars in
-# `infra/aws/sqs-reembed.tf` + `s3-to-r2-sync.tf` actually export.
+# `traceparent` header, then queries Sentry's events-trace API to
+# assert that BOTH the ACA span and the downstream AWS Lambda span
+# (reembed_consumer / s3_to_r2_sync) landed under the same trace-id.
+#
+# Scope note: Sentry is the live correlator per V4 §7; GCP Cloud
+# Trace is the long-retention backstop and is verified out-of-band
+# via the GCP landing-zone runbook §9 weekly drill (operator runs
+# `gcloud trace traces describe` against the same trace-id). A
+# Cloud-Trace-side assertion here would require minting a SA-keyed
+# token in CI which the four-cloud delegation matrix forbids
+# (no GCP CI-mint surface in #489).
 
 on:
   schedule:
