@@ -57,7 +57,7 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 - **ACA Deploy config:** Bicep ARM PATCH must include `properties.configuration.ingress.traffic = [{latestRevision: true, weight: 100}]` and `targetPort: 8000`. Missing these strands traffic on fallback.
 - **Bicep template drift:** The Bicep template (`infra/azure/aca-syrabit-backend.bicep`) must precisely mirror the runtime contract (e.g., probe path, env vars) to avoid deployment regressions.
 - **Pinecone dimension incompatibility:** Pinecone embedding dimension is 1024. Vertex `text-embedding-004` (768-dim) is incompatible and must be used in a separate namespace for fallbacks.
-- **`OriginGate` middleware issue:** The `OriginGate` middleware is currently non-operational in production due to missing `ORIGIN_SHARED_SECRET` in ACA env vars, allowing direct backend access. This needs to be remediated.
+- **`OriginGate` lock-step rotation:** `ORIGIN_SHARED_SECRET` (ACA env, sourced from KV `ORIGIN-SHARED-SECRET`) MUST equal the syrabitworker `BACKEND_ORIGIN_SECRET` binding — the worker injects it as `X-Origin-Auth` on every backend fetch. Rotating one side without the other 403s every proxied request. Same rule for `D1_SYNC_SECRET` ↔ worker `D1_SYNC_SECRET`. Verified active 2026-05-06: direct ACA hits to gated paths return 403 "Direct origin access denied".
 
 ## Pointers
 

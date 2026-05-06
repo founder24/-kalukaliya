@@ -88,6 +88,16 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // Cloudflare embed worker (`embed.syrabit.ai`). Same value as the worker's
         // `EMBED_SHARED_SECRET` binding; keep them in lock-step on rotation.
         { name: 'workers-embed-secret', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/WORKERS-EMBED-SECRET', identity: 'system' }
+        // Task #472 follow-up — closes the OriginGate gap. ORIGIN-SHARED-SECRET
+        // value MUST equal the syrabitworker `BACKEND_ORIGIN_SECRET` binding;
+        // the worker injects it as `X-Origin-Auth` on every backend fetch and
+        // `OriginSharedSecretMiddleware` (artifacts/syrabit-backend/middleware.py)
+        // 403s any request that is missing or has a stale value. Rotate both
+        // sides in lock-step. D1-SYNC-SECRET is the matching secret read by
+        // the D1 sync handler when the worker mirrors edge writes back to the
+        // Cloudflare D1 syllabus DB.
+        { name: 'origin-shared-secret', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/ORIGIN-SHARED-SECRET', identity: 'system' }
+        { name: 'd1-sync-secret',       keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/D1-SYNC-SECRET',       identity: 'system' }
       ]
     }
     template: {
@@ -122,6 +132,14 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'WORKERS_EMBED_URL',     value: 'https://embed.syrabit.ai' }
             { name: 'WORKERS_EMBED_SECRET',  secretRef: 'workers-embed-secret' }
             { name: 'EMBED_PROVIDER_PRIMARY', value: 'workers_ai_custom' }
+            // Task #472 follow-up — see secrets[] block above for context.
+            // Setting ORIGIN_SHARED_SECRET activates OriginSharedSecretMiddleware:
+            // requests without a matching X-Origin-Auth header (besides the
+            // small open-paths allow-list in middleware.py) get a 403. The
+            // syrabitworker `BACKEND_ORIGIN_SECRET` binding MUST hold the same
+            // value or all proxied traffic breaks.
+            { name: 'ORIGIN_SHARED_SECRET',  secretRef: 'origin-shared-secret' }
+            { name: 'D1_SYNC_SECRET',        secretRef: 'd1-sync-secret' }
           ]
           probes: [
             {

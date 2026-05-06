@@ -130,7 +130,11 @@ class OriginSharedSecretMiddleware:
             await self.app(scope, receive, send)
             return
         path = scope.get("path", "")
-        if any(path == p or path.startswith(p) for p in _ORIGIN_AUTH_OPEN_PATHS):
+        # Architect review 2026-05-06: use segment-bounded matching so a
+        # future route like ``/api/healthz`` or ``/api/ready-bypass`` does
+        # not silently inherit the open-path bypass from ``/api/health`` /
+        # ``/api/ready`` just because of a prefix collision.
+        if any(path == p or path.startswith(p + "/") for p in _ORIGIN_AUTH_OPEN_PATHS):
             await self.app(scope, receive, send)
             return
         # Header lookup: scope["headers"] is a list of (bytes, bytes) tuples.
