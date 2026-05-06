@@ -92,7 +92,7 @@ Terraform (`infra/gcp/iam.tf`):
 | `roles/bigquery.jobUser` | project | `gcp_billing.py` runs the Billing Export query. |
 | `roles/bigquery.dataViewer` | billing-export dataset | Same — reads the export table. |
 | `roles/discoveryengine.editor` | data store | `discovery_engine_ingest.py` upserts topics. |
-| `roles/aiplatform.user` | project | Sibling task #494 wires Vertex Gemini as **content-formatter only** (no chat role). |
+| ~~`roles/aiplatform.user`~~ | — | **NOT granted by this Terraform root** (see §1 Vertex retirement). Re-introduction is sibling #494's TF module only. |
 
 **Roles intentionally NOT granted (and forbidden):**
 
@@ -124,7 +124,7 @@ fails the merge.
 | `translate.googleapis.com` | SA | Google Translate v3. |
 | `vision.googleapis.com` | SA | Google Vision OCR. |
 | `discoveryengine.googleapis.com` | SA | `discovery_engine_client` + `discovery_engine_ingest`. |
-| `aiplatform.googleapis.com` | SA | Vertex Gemini content-formatter only (sibling #494). |
+| ~~`aiplatform.googleapis.com`~~ | — | **NOT enabled by this Terraform root** (see §1 Vertex retirement). Re-enablement is sibling #494's TF module only. |
 | `cloudtrace.googleapis.com` | SA | OTEL exporter from ACA + AWS Lambda (V4 §7). |
 | `billingbudgets.googleapis.com` | SA | `gcp_billing.fetch_budgets`. |
 | `cloudbilling.googleapis.com` | SA | `gcp_billing.fetch_billing_account`. |
@@ -165,9 +165,11 @@ Quotas are project-scoped. The request flow:
 4. After grant: re-check `gcp_billing` Meter A burn for the affected
    service so the new ceiling is reflected in the credit projection.
 
-**Note:** Vertex AI quotas only need to cover the **content-formatter**
-role (sibling task #494). Chat-hot-path quota is on Azure OpenAI, not
-Vertex (V4 §4).
+**Note:** Vertex AI quotas are **out of scope** for this Terraform
+root — the API is not enabled here (see §1). When sibling task #494
+brings the formatter pool back online, the quota request lives in
+that task's runbook, not this one. Chat-hot-path quota is on Azure
+OpenAI per V4 §4 and never on Vertex.
 
 ## 7. Web Risk integration on `edu_browser`
 
@@ -204,10 +206,11 @@ existing meter pipeline (`credit_burn_meter.py` /
 - **Trigger:** 80 % of the credit pool (V4 §10 Rule C). Notify-only —
   no auto-flip.
 - **Sink:** `#syrabit-oncall` Slack alert via `slack_notifier`.
-- **Post-cleanup pool:** drops `cerebras`, `cohere`, `voyage_ai`, and
-  `vertex_embed` rows because sibling tasks #490/#491 retire them.
-  Vertex Gemini (content-formatter only) and Web Risk remain on the
-  pool.
+- **Post-cleanup pool:** drops `cerebras`, `cohere`, `voyage_ai`,
+  `vertex_embed`, and `vertex_gemini` rows — all five retired from
+  this Terraform root by the sibling task fan-out (#490/#491 for the
+  failover providers; #489 for Vertex itself, see §1). Web Risk +
+  Discovery Engine + STT/TTS/Translate/Vision remain on the pool.
 - **Test:** `python scripts/credit_burn_smoke.py --force-pct 0.81`
   triggers the alert path without waiting for real burn.
 
