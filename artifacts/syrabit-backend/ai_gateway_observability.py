@@ -33,6 +33,7 @@ Header reference (Cloudflare AI Gateway, 2025-Q4 docs):
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -42,6 +43,85 @@ from typing import Any, Mapping, Optional
 from config import CF_AIGW_OBS_ON
 
 logger = logging.getLogger(__name__)
+
+
+# ── Redis-backed shared sample store (Task #449) ─────────────────────────────
+# The local ``_SAMPLES`` deque resets on every container restart and is
+# private to one ACA replica. The admin "cache by model" tile therefore
+# loses its rolling view on every deploy / scale-to-zero, and shows a
+# different slice depending on which pod the request lands on. We mirror
+# every recorded sample into a shared Redis list so ``snapshot()`` can
+# return the union across replicas and survive restarts.
+#
+# Layout: a single capped list (LPUSH + LTRIM) under one key with a 1h
+# TTL — same pattern ``chat_speedup_metrics`` uses for warm-run history.
+# Failures are swallowed; the local deque is the fallback so a Redis
+# outage degrades the tile to single-replica behaviour but never breaks
+# the chat hot path that calls ``record_aig_response()``.
+_REDIS_SAMPLES_KEY = "aig_obs:samples"
+_REDIS_SAMPLES_MAX = 1024
+_REDIS_SAMPLES_TTL_S = 3600  # 1h rolling window
+
+
+def _get_redis():
+    """Resolve the Upstash REST client lazily so this module imports
+    cleanly even when ``deps`` (and therefore Redis init) is not ready
+    yet — e.g. in unit tests that import us before ``server.py``."""
+    try:
+        from deps import redis_client  # type: ignore
+        return redis_client
+    except Exception:
+        return None
+
+
+def _push_sample_to_shared_store(sample: dict[str, Any]) -> None:
+    rc = _get_redis()
+    if rc is None:
+        return
+    try:
+        payload = json.dumps(sample, default=str)
+        rc.lpush(_REDIS_SAMPLES_KEY, payload)
+        rc.ltrim(_REDIS_SAMPLES_KEY, 0, _REDIS_SAMPLES_MAX - 1)
+        rc.expire(_REDIS_SAMPLES_KEY, _REDIS_SAMPLES_TTL_S)
+    except Exception as exc:  # best-effort — local deque still holds it
+        logger.debug("[ai-gateway] shared sample push failed: %s", exc)
+
+
+def _read_shared_samples() -> Optional[list[dict[str, Any]]]:
+    """Return the union of all replicas' recorded samples in chronological
+    order, or ``None`` if the shared store is unavailable so the caller
+    can fall back to the local deque."""
+    rc = _get_redis()
+    if rc is None:
+        return None
+    try:
+        raw = rc.lrange(_REDIS_SAMPLES_KEY, 0, _REDIS_SAMPLES_MAX - 1)
+    except Exception as exc:
+        logger.debug("[ai-gateway] shared sample read failed: %s", exc)
+        return None
+    if not raw:
+        return []
+    out: list[dict[str, Any]] = []
+    for entry in raw:
+        try:
+            out.append(json.loads(entry))
+        except Exception:
+            continue
+    # Upstash LPUSH puts newest at head; flip so the snapshot's
+    # ``samples[-32:]`` slice returns the *most recent* 32 entries
+    # like the local-deque path does.
+    out.reverse()
+    return out
+
+
+def _reset_shared_store() -> None:
+    rc = _get_redis()
+    if rc is None:
+        return
+    try:
+        rc.delete(_REDIS_SAMPLES_KEY)
+    except Exception:
+        pass
 
 
 # ── In-memory counters (reset on process restart; admin route reads them) ────
@@ -152,14 +232,19 @@ def record_aig_response(headers: Any, *, provider: str = "",
             _COUNTERS["aig_guardrails_rewrote"] += 1
         elif action == "block":
             _COUNTERS["aig_guardrails_blocked"] += 1
-        _SAMPLES.append({
+        sample = {
             "ts": time.time(),
             "provider": provider or None,
             "model": model or None,
             "cache_status": cs,
             "guardrail_action": action,
             "log_id": summary.get("log_id"),
-        })
+        }
+        _SAMPLES.append(sample)
+    # Mirror to the shared store *outside* the local lock — Upstash REST
+    # calls are sync HTTP and we don't want to serialise every recorder
+    # behind one in-process lock just to talk to Redis.
+    _push_sample_to_shared_store(sample)
     # Structured guardrail-block log so on-call sees blocks in real time
     # (counters are eventually-consistent with logs, but a single block
     # event in production deserves to surface immediately, not when the
@@ -287,7 +372,12 @@ def snapshot() -> dict[str, Any]:
     """Return a JSON-serialisable snapshot for the admin health route."""
     with _LOCK:
         counters = dict(_COUNTERS)
-        samples = list(_SAMPLES)
+        local_samples = list(_SAMPLES)
+    # Task #449 — prefer the shared Redis store so the admin tile shows
+    # the union across replicas and survives container restarts. Falls
+    # back to this replica's local deque when Redis is unavailable.
+    shared_samples = _read_shared_samples()
+    samples = shared_samples if shared_samples is not None else local_samples
     total = counters["aig_responses_total"] or 0
     cache_total = (counters["aig_cache_hits"] + counters["aig_cache_misses"]
                    + counters["aig_cache_bypass"])
@@ -319,6 +409,7 @@ def reset_for_tests() -> None:
         for k in _COUNTERS:
             _COUNTERS[k] = 0
         _SAMPLES.clear()
+    _reset_shared_store()
 
 
 __all__ = [

@@ -12,6 +12,37 @@ def _reset_counters():
     reset_for_tests()
 
 
+class _FakeRedisList:
+    """Tiny in-process stand-in for the Upstash REST client — only the
+    list ops ai_gateway_observability calls (lpush / ltrim / expire /
+    lrange / delete). LPUSH puts newest at the head, like the real
+    client, so we exercise the chronological-order flip in
+    ``_read_shared_samples``."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, list[str]] = {}
+        self.expiries: dict[str, int] = {}
+
+    def lpush(self, key: str, value: str) -> int:
+        self.store.setdefault(key, []).insert(0, value)
+        return len(self.store[key])
+
+    def ltrim(self, key: str, start: int, end: int) -> str:
+        if key in self.store:
+            self.store[key] = self.store[key][start:end + 1]
+        return "OK"
+
+    def expire(self, key: str, ttl: int) -> int:
+        self.expiries[key] = ttl
+        return 1
+
+    def lrange(self, key: str, start: int, end: int) -> list[str]:
+        return list(self.store.get(key, [])[start:end + 1])
+
+    def delete(self, key: str) -> int:
+        return 1 if self.store.pop(key, None) is not None else 0
+
+
 def test_parses_cache_hit_headers():
     from ai_gateway_observability import parse_aig_response_headers
     out = parse_aig_response_headers({
@@ -708,3 +739,132 @@ def test_oai_compat_stream_does_not_record_when_routed_direct(monkeypatch):
     snap = snapshot()
     assert snap["counters"]["aig_cache_hits"] == 0, snap
     assert snap["counters"]["aig_responses_total"] == 0, snap
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Task #449 — samples are mirrored to a shared Redis store so the
+# admin "cache by model" tile survives container restarts and shows
+# the union across all ACA replicas (not just whichever pod the
+# request landed on).
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_snapshot_reads_samples_from_shared_store(monkeypatch):
+    """Regression: snapshot() must surface samples from the shared
+    Redis store, not just the local in-process deque. We simulate a
+    container restart by recording into a shared store, clearing the
+    local deque, and asserting snapshot() still returns the samples
+    (and the per-model breakdowns derived from them)."""
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    fake = _FakeRedisList()
+    monkeypatch.setattr("ai_gateway_observability._get_redis", lambda: fake)
+
+    from ai_gateway_observability import (
+        _SAMPLES,
+        record_aig_response,
+        snapshot,
+    )
+
+    # Replica A records two samples — they go into both the local
+    # deque and the shared store.
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({"cf-aig-cache-status": "MISS"},
+                        provider="workers_ai", model="llama-3.3-70b")
+
+    # The shared store actually received them via lpush (newest at head).
+    assert len(fake.store["aig_obs:samples"]) == 2
+    assert fake.expiries["aig_obs:samples"] == 3600
+
+    # Simulate a container restart: wipe the local deque so the only
+    # surviving copy lives in the shared store.
+    _SAMPLES.clear()
+
+    snap = snapshot()
+    # snapshot() pulled them back from the shared store.
+    assert len(snap["recent_samples"]) == 2
+    # Chronological order preserved (oldest first), not LPUSH order.
+    assert snap["recent_samples"][0]["cache_status"] == "hit"
+    assert snap["recent_samples"][1]["cache_status"] == "miss"
+    # Per-model aggregation derived from the shared samples works too.
+    rows = snap["cache_by_model"]
+    assert len(rows) == 1 and rows[0]["model"] == "llama-3.3-70b"
+    assert rows[0]["hits"] == 1 and rows[0]["misses"] == 1
+
+
+def test_snapshot_unions_samples_across_replicas(monkeypatch):
+    """When two replicas write to the same shared list, snapshot() on
+    either one returns the *union* — not just the slice this pod
+    happened to record locally."""
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    fake = _FakeRedisList()
+    monkeypatch.setattr("ai_gateway_observability._get_redis", lambda: fake)
+
+    from ai_gateway_observability import (
+        _SAMPLES,
+        record_aig_response,
+        snapshot,
+    )
+
+    # Replica A records one sample.
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="azure", model="gpt-4.1-nano")
+    # Replica B records another sample directly into the shared store
+    # (we can't run two processes here, but the shared list is the
+    # only thing they share, so writing straight to it is equivalent).
+    import json as _json, time as _time
+    fake.lpush("aig_obs:samples", _json.dumps({
+        "ts": _time.time(),
+        "provider": "vertex",
+        "model": "gemini-2.5-flash",
+        "cache_status": "miss",
+        "guardrail_action": None,
+        "log_id": "log-replica-b",
+    }))
+
+    # Replica A's local deque only knows about its own sample…
+    assert len(_SAMPLES) == 1
+    # …but snapshot() returns both, because it reads from the shared store.
+    snap = snapshot()
+    models = sorted(r["model"] for r in snap["cache_by_model"])
+    assert models == ["gemini-2.5-flash", "gpt-4.1-nano"]
+
+
+def test_snapshot_falls_back_to_local_deque_when_redis_unavailable(monkeypatch):
+    """A Redis outage must degrade the tile to single-replica behaviour,
+    not break it. snapshot() returns the local deque when the shared
+    store is unreachable."""
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    monkeypatch.setattr("ai_gateway_observability._get_redis", lambda: None)
+
+    from ai_gateway_observability import record_aig_response, snapshot
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="azure", model="gpt-4.1-nano")
+    snap = snapshot()
+    assert len(snap["recent_samples"]) == 1
+    assert snap["recent_samples"][0]["cache_status"] == "hit"
+
+
+def test_record_swallows_shared_store_errors(monkeypatch):
+    """A misbehaving Redis client must never break the chat hot path.
+    record_aig_response() still bumps local counters even when every
+    shared-store call raises."""
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+
+    class _BoomRedis:
+        def lpush(self, *a, **kw):  raise RuntimeError("boom")
+        def ltrim(self, *a, **kw):  raise RuntimeError("boom")
+        def expire(self, *a, **kw): raise RuntimeError("boom")
+        def lrange(self, *a, **kw): raise RuntimeError("boom")
+        def delete(self, *a, **kw): raise RuntimeError("boom")
+
+    monkeypatch.setattr("ai_gateway_observability._get_redis",
+                        lambda: _BoomRedis())
+
+    from ai_gateway_observability import record_aig_response, snapshot
+    record_aig_response({"cf-aig-cache-status": "HIT"},
+                        provider="azure", model="gpt-4.1-nano")
+    snap = snapshot()
+    assert snap["counters"]["aig_cache_hits"] == 1
+    # Shared read also failed → falls back to local deque, which has it.
+    assert len(snap["recent_samples"]) == 1
