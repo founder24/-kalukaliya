@@ -47,6 +47,19 @@ export interface Env {
   // /api/edge/kv-cache/* (and the existing /api/edge/kv-usage probe).
   // Mirrors the backend env var of the same name.
   D1_SYNC_SECRET?: string;
+  // Task #424 — shared secret used when this worker POSTs a KV-quota
+  // alert to the backend's /admin/kv-alerts endpoint. Mirrors the
+  // backend env var of the same name. When unset the worker still
+  // counts ops but skips the alert dispatch.
+  KV_ALERT_SECRET?: string;
+  // Task #424 — optional override of the per-op daily quota used when
+  // computing CF_EDGE_CACHE percentages. Same JSON shape the
+  // workers/edge-proxy kv-monitor accepts: {"read":100000,"write":1000,
+  // "list":1000,"delete":1000}. Unset → DEFAULT_KV_QUOTA below.
+  KV_QUOTA?: string;
+  // Task #424 — warning threshold (percent of quota) at which the
+  // worker fires the first alert for a binding/op pair. Defaults to 80.
+  KV_WARNING_PCT?: string;
 }
 
 // Re-export DO classes so wrangler can find them at the worker entrypoint.
@@ -109,6 +122,245 @@ async function dispatchDurableObject(
 }
 
 /**
+ * Task #424 — KV usage counters for the CF_EDGE_CACHE binding.
+ *
+ * `dispatchKvCache` (Task #405) was wired in isolation: every read /
+ * write / delete that lands on `CF_EDGE_CACHE` succeeded but never
+ * incremented the per-binding tally that the admin "KV usage" panel
+ * (`/admin/kv-health` → `/api/edge/kv-usage`) relies on. Once the
+ * backend's `CF_EDGE_CACHE_ON` flag flips, the new namespace will absorb
+ * a meaningful share of the daily KV op quota and operators need to see
+ * that burn alongside RATE_LIMIT / BOT_HTML_CACHE — both for the
+ * dashboard percentages and so the existing kv-alerts pipeline can page
+ * before the quota is exhausted.
+ *
+ * The counters live in module-scoped memory (per-isolate, per-UTC-day)
+ * — same shape and quota defaults the workers/edge-proxy `kv-monitor`
+ * uses so the admin route can render the new row identically. A more
+ * elaborate cross-isolate aggregation (the workers/edge-proxy
+ * `__kv_usage:*` shared key trick) is intentionally NOT replicated here:
+ * a single isolate's counter is enough to surface a quota burn within
+ * one snapshot poll, and the alert dispatch is per-isolate idempotent
+ * via `_kvAlertedToday`.
+ */
+type KvOpName = 'read' | 'write' | 'delete' | 'list';
+
+interface KvUsageQuota {
+  read: number;
+  write: number;
+  list: number;
+  delete: number;
+}
+
+const DEFAULT_KV_QUOTA: KvUsageQuota = {
+  read: 100_000,
+  write: 1_000,
+  list: 1_000,
+  delete: 1_000,
+};
+
+const DEFAULT_WARNING_PCT = 80;
+
+interface KvBindingState {
+  counters: Record<KvOpName, number>;
+  // "<op>:<severity>" — fired-once-per-day-per-pair so warning AND
+  // exhausted both surface (escalation) but neither floods the inbox.
+  alertedToday: Set<string>;
+}
+
+const _kvState: Map<string, KvBindingState> = new Map();
+let _kvCurrentDay = utcDayKey();
+
+function utcDayKey(d: Date = new Date()): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function _rollKvDayIfNeeded(): void {
+  const today = utcDayKey();
+  if (today !== _kvCurrentDay) {
+    _kvCurrentDay = today;
+    for (const s of _kvState.values()) {
+      s.counters = { read: 0, write: 0, list: 0, delete: 0 };
+      s.alertedToday = new Set();
+    }
+  }
+}
+
+function _kvBindingState(binding: string): KvBindingState {
+  _rollKvDayIfNeeded();
+  let s = _kvState.get(binding);
+  if (!s) {
+    s = {
+      counters: { read: 0, write: 0, list: 0, delete: 0 },
+      alertedToday: new Set(),
+    };
+    _kvState.set(binding, s);
+  }
+  return s;
+}
+
+function _resolveKvQuota(env: Env): KvUsageQuota {
+  if (!env.KV_QUOTA) return DEFAULT_KV_QUOTA;
+  try {
+    const parsed = JSON.parse(env.KV_QUOTA) as Partial<KvUsageQuota>;
+    return { ...DEFAULT_KV_QUOTA, ...parsed };
+  } catch {
+    return DEFAULT_KV_QUOTA;
+  }
+}
+
+function _resolveKvWarningPct(env: Env): number {
+  const raw = Number(env.KV_WARNING_PCT ?? '');
+  if (Number.isFinite(raw) && raw > 0 && raw <= 100) return raw;
+  return DEFAULT_WARNING_PCT;
+}
+
+interface KvBindingSnapshot {
+  binding: string;
+  utcDay: string;
+  counters: Record<KvOpName, number>;
+  quota: KvUsageQuota;
+  percentages: Record<KvOpName, number>;
+  status: 'healthy' | 'warning' | 'exhausted';
+  fallbackActive: boolean;
+}
+
+function _kvSnapshotFor(binding: string, env: Env): KvBindingSnapshot {
+  const s = _kvBindingState(binding);
+  const quota = _resolveKvQuota(env);
+  const warningPct = _resolveKvWarningPct(env);
+  const ops: KvOpName[] = ['read', 'write', 'list', 'delete'];
+  const percentages = {} as Record<KvOpName, number>;
+  let status: 'healthy' | 'warning' | 'exhausted' = 'healthy';
+  for (const op of ops) {
+    const used = s.counters[op] ?? 0;
+    const cap = quota[op] || 1;
+    const pct = Math.round((used / cap) * 1000) / 10;
+    percentages[op] = pct;
+    if (pct >= 100 && status !== 'exhausted') status = 'exhausted';
+    else if (pct >= warningPct && status === 'healthy') status = 'warning';
+  }
+  return {
+    binding,
+    utcDay: _kvCurrentDay,
+    counters: { ...s.counters },
+    quota,
+    percentages,
+    status,
+    fallbackActive: false,
+  };
+}
+
+/** Test-only reset hook so unit tests can start from a clean slate. */
+export function _resetKvCountersForTests(): void {
+  _kvState.clear();
+  _kvCurrentDay = utcDayKey();
+}
+
+function _backendUrlForAlert(env: Env): string | null {
+  const raw = (env.AZURE_BACKEND_URL ?? '').trim().replace(/\/$/, '');
+  return raw || null;
+}
+
+async function _maybeFireKvAlert(
+  binding: string,
+  op: KvOpName,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<void> {
+  const s = _kvBindingState(binding);
+  const quota = _resolveKvQuota(env);
+  const warningPct = _resolveKvWarningPct(env);
+  const used = s.counters[op] ?? 0;
+  const cap = quota[op] || 1;
+  const pct = (used / cap) * 100;
+  if (pct < warningPct) return;
+  const severity: 'warning' | 'exhausted' = pct >= 100 ? 'exhausted' : 'warning';
+  const dedupeKey = `${op}:${severity}`;
+  if (s.alertedToday.has(dedupeKey)) return;
+  // Validate config BEFORE marking the dedupe key so a temporary
+  // misconfig (e.g. KV_ALERT_SECRET unset at the start of the UTC day)
+  // doesn't permanently suppress the alert for the rest of the day —
+  // once the secret is set the next op past the threshold will fire.
+  const backendUrl = _backendUrlForAlert(env);
+  const alertSecret = (env.KV_ALERT_SECRET ?? '').trim();
+  if (!backendUrl || !alertSecret) return;
+  s.alertedToday.add(dedupeKey);
+  const body = JSON.stringify({
+    binding,
+    op,
+    used,
+    quota: cap,
+    percentage: Math.round(pct * 10) / 10,
+    utc_day: _kvCurrentDay,
+    severity,
+  });
+  const fire = fetch(`${backendUrl}/admin/kv-alerts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-KV-Alert-Secret': alertSecret,
+    },
+    body,
+  })
+    .then(() => undefined)
+    .catch((err) => {
+      console.warn('[edge-proxy] kv-alert dispatch failed', { binding, op, err });
+    });
+  ctx.waitUntil(fire);
+}
+
+function _bumpKvCounter(
+  binding: string,
+  op: KvOpName,
+  env: Env,
+  ctx: ExecutionContext,
+): void {
+  const s = _kvBindingState(binding);
+  s.counters[op] = (s.counters[op] ?? 0) + 1;
+  // Fire-and-forget: alert dispatch is dedupe-guarded so calling it on
+  // every op is safe; the actual POST happens at most twice per
+  // (binding,op) per UTC day (warning + exhausted).
+  void _maybeFireKvAlert(binding, op, env, ctx);
+}
+
+/**
+ * Task #424 — `/api/edge/kv-usage` exposed by the artifacts edge worker.
+ * Returns the same per-binding snapshot shape the workers/edge-proxy
+ * `/api/edge/kv-usage` endpoint emits, restricted to the bindings this
+ * worker actually owns (CF_EDGE_CACHE today). The admin /kv-health
+ * route merges this snapshot into its primary one so the dashboard sees
+ * a CF_EDGE_CACHE row alongside RATE_LIMIT / BOT_HTML_CACHE.
+ *
+ * Auth: same X-Edge-Admin-Secret = D1_SYNC_SECRET handshake the
+ * dispatchKvCache routes use.
+ */
+async function dispatchKvUsage(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response | null> {
+  if (url.pathname !== '/api/edge/kv-usage' || request.method !== 'GET') {
+    return null;
+  }
+  const expected = env.D1_SYNC_SECRET ?? '';
+  const provided = request.headers.get('x-edge-admin-secret') ?? '';
+  if (!expected || !constantTimeEqual(provided, expected)) {
+    return new Response('unauthorised', { status: 401 });
+  }
+  _rollKvDayIfNeeded();
+  const bindings: KvBindingSnapshot[] = [];
+  if (env.CF_EDGE_CACHE) {
+    bindings.push(_kvSnapshotFor('CF_EDGE_CACHE', env));
+  }
+  return jsonResponse({
+    utcDay: _kvCurrentDay,
+    warningPct: _resolveKvWarningPct(env),
+    bindings,
+  });
+}
+
+/**
  * Task #405 — KV write-through cache routes.
  *
  *   GET    /api/edge/kv-cache/<key>     → 200 { value, ttl_s } | 404
@@ -126,6 +378,7 @@ async function dispatchKvCache(
   request: Request,
   env: Env,
   url: URL,
+  ctx: ExecutionContext,
 ): Promise<Response | null> {
   const prefix = '/api/edge/kv-cache/';
   if (!url.pathname.startsWith(prefix)) {
@@ -156,6 +409,10 @@ async function dispatchKvCache(
       key,
       { type: 'json' },
     );
+    // Task #424 — every CF_EDGE_CACHE op (hit OR miss) consumes one
+    // KV read against the daily quota, so the counter is bumped before
+    // we branch on the lookup result.
+    _bumpKvCounter('CF_EDGE_CACHE', 'read', env, ctx);
     if (stored.value === null) {
       return new Response('not found', { status: 404 });
     }
@@ -182,6 +439,10 @@ async function dispatchKvCache(
       console.warn('[edge-proxy] kv-cache put failed', { key, err });
       return new Response('kv put failed', { status: 502 });
     }
+    // Task #424 — only count a write once we know KV accepted it; a
+    // failed put is reported back to the caller and shouldn't inflate
+    // the quota tally that drives the alert pipeline.
+    _bumpKvCounter('CF_EDGE_CACHE', 'write', env, ctx);
     return jsonResponse({ ok: true, ttl_s: ttl });
   }
 
@@ -192,6 +453,7 @@ async function dispatchKvCache(
       console.warn('[edge-proxy] kv-cache delete failed', { key, err });
       return new Response('kv delete failed', { status: 502 });
     }
+    _bumpKvCounter('CF_EDGE_CACHE', 'delete', env, ctx);
     return jsonResponse({ ok: true });
   }
 
@@ -241,10 +503,22 @@ export default {
       return doResponse;
     }
 
+    // Task #424 — admin KV-usage probe. Returns the per-binding
+    // counters this worker maintains (CF_EDGE_CACHE today) so the
+    // /admin/kv-health panel can render a CF_EDGE_CACHE row alongside
+    // the workers/edge-proxy RATE_LIMIT / BOT_HTML_CACHE rows. Must
+    // come BEFORE dispatchKvCache so the snapshot path is never
+    // counted as a CF_EDGE_CACHE op.
+    const kvUsageResponse = await dispatchKvUsage(request, env, url);
+    if (kvUsageResponse) {
+      return kvUsageResponse;
+    }
+
     // Task #405 — KV write-through cache routes. Handled at the edge
     // so the in-process LRU on a sibling pod can hydrate without an
-    // origin round-trip.
-    const kvResponse = await dispatchKvCache(request, env, url);
+    // origin round-trip. Task #424 — `ctx` is passed through so
+    // counter-bump alerts can `waitUntil` the POST to /admin/kv-alerts.
+    const kvResponse = await dispatchKvCache(request, env, url, ctx);
     if (kvResponse) {
       return kvResponse;
     }

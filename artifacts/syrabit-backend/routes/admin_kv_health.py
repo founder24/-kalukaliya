@@ -39,6 +39,25 @@ def _edge_url() -> str:
     return (os.environ.get("CF_EDGE_PROXY_URL") or _DEFAULT_EDGE_URL).strip().rstrip("/")
 
 
+def _kv_cache_edge_url() -> str:
+    """Task #424 — secondary edge worker that owns the CF_EDGE_CACHE
+    binding (artifacts/syrabit/workers/edge-proxy at dispatch.syrabit.ai).
+    Its `/api/edge/kv-usage` snapshot only contains the CF_EDGE_CACHE
+    row, which we merge into the primary snapshot's `bindings` list so
+    the admin dashboard sees one unified panel.
+
+    When unset OR equal to ``CF_EDGE_PROXY_URL`` the secondary fetch is
+    skipped — either the dispatchKvCache routes were folded into the
+    primary worker, or the operator hasn't wired the secondary up yet.
+    """
+    raw = (os.environ.get("CF_EDGE_KV_CACHE_URL") or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if raw == _edge_url():
+        return ""
+    return raw
+
+
 def _edge_secret() -> str:
     """Reuse ``D1_SYNC_SECRET`` — already shared with the worker for the
     D1 sync endpoints. No new secret to provision/leak."""
@@ -78,7 +97,7 @@ async def admin_kv_health(admin: dict = Depends(get_admin_user)):
                 "reason": f"edge returned {resp.status_code}",
                 "snapshot": None,
             }
-        return {"configured": True, "snapshot": resp.json()}
+        snapshot = resp.json()
     except Exception as exc:
         logger.warning(f"[kv-health] edge fetch failed: {exc}")
         return {
@@ -86,6 +105,56 @@ async def admin_kv_health(admin: dict = Depends(get_admin_user)):
             "reason": f"edge unreachable: {type(exc).__name__}",
             "snapshot": None,
         }
+
+    # Task #424 — merge the CF_EDGE_CACHE snapshot from the secondary
+    # worker (artifacts/syrabit/workers/edge-proxy) when wired. The
+    # secondary fetch is best-effort: a failure must not blank out the
+    # primary RATE_LIMIT / BOT_HTML_CACHE rows the dashboard already
+    # depends on.
+    sec_url = _kv_cache_edge_url()
+    if sec_url:
+        try:
+            async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_S) as client:
+                sec_resp = await client.get(
+                    f"{sec_url}/api/edge/kv-usage",
+                    headers={"X-Edge-Admin-Secret": secret},
+                )
+            if sec_resp.status_code == 200:
+                _merge_kv_snapshot(snapshot, sec_resp.json())
+            else:
+                logger.warning(
+                    f"[kv-health] kv-cache edge returned {sec_resp.status_code}"
+                )
+        except Exception as exc:
+            logger.warning(f"[kv-health] kv-cache edge fetch failed: {exc}")
+
+    return {"configured": True, "snapshot": snapshot}
+
+
+def _merge_kv_snapshot(primary: dict, secondary: dict) -> None:
+    """Merge ``secondary['bindings']`` into ``primary['bindings']`` in
+    place. Bindings already present in the primary snapshot are NOT
+    overwritten (the worker that owns the binding is the source of
+    truth for its counters — there is no scenario today where the same
+    binding is wrapped by both workers, but the guard keeps the merge
+    safe if one is added later)."""
+    if not isinstance(primary, dict) or not isinstance(secondary, dict):
+        return
+    sec_bindings = secondary.get("bindings") or []
+    if not isinstance(sec_bindings, list) or not sec_bindings:
+        return
+    primary_bindings = primary.setdefault("bindings", [])
+    if not isinstance(primary_bindings, list):
+        return
+    seen = {b.get("binding") for b in primary_bindings if isinstance(b, dict)}
+    for entry in sec_bindings:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("binding")
+        if not name or name in seen:
+            continue
+        primary_bindings.append(entry)
+        seen.add(name)
 
 
 @router.post("/admin/kv-alerts")

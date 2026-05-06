@@ -104,6 +104,210 @@ def test_kv_health_proxies_worker_snapshot(app_client_authed):
     assert captured["headers"].get("X-Edge-Admin-Secret") == "topsecret"
 
 
+def test_kv_health_merges_secondary_kv_cache_snapshot(app_client_authed):
+    """Task #424 — when ``CF_EDGE_KV_CACHE_URL`` is wired, the route
+    must fetch the secondary worker's `/api/edge/kv-usage` and merge its
+    ``CF_EDGE_CACHE`` row into the primary snapshot's ``bindings`` list
+    so the dashboard shows one unified panel."""
+    primary_snapshot = {
+        "utcDay": "2026-05-06",
+        "warningPct": 80,
+        "bindings": [
+            {"binding": "RATE_LIMIT", "utcDay": "2026-05-06",
+             "counters": {"read": 10, "write": 2, "list": 0, "delete": 0},
+             "quota": {"read": 100000, "write": 1000, "list": 1000, "delete": 1000},
+             "percentages": {"read": 0.0, "write": 0.2, "list": 0.0, "delete": 0.0},
+             "status": "healthy", "fallbackActive": False},
+        ],
+    }
+    secondary_snapshot = {
+        "utcDay": "2026-05-06",
+        "warningPct": 80,
+        "bindings": [
+            {"binding": "CF_EDGE_CACHE", "utcDay": "2026-05-06",
+             "counters": {"read": 850, "write": 12, "list": 0, "delete": 1},
+             "quota": {"read": 100000, "write": 1000, "list": 1000, "delete": 1000},
+             "percentages": {"read": 0.9, "write": 1.2, "list": 0.0, "delete": 0.1},
+             "status": "healthy", "fallbackActive": False},
+        ],
+    }
+    captured_urls: list[str] = []
+
+    class _FakeResp:
+        def __init__(self, body): self._body = body; self.status_code = 200
+        def json(self): return self._body
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None):
+            captured_urls.append(url)
+            if "kv-cache-edge" in url:
+                return _FakeResp(secondary_snapshot)
+            return _FakeResp(primary_snapshot)
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com",
+            "CF_EDGE_KV_CACHE_URL": "https://kv-cache-edge.example.com"},
+            clear=False):
+        with patch("routes.admin_kv_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.get("/admin/kv-health")
+
+    assert res.status_code == 200
+    body = res.json()
+    bindings = body["snapshot"]["bindings"]
+    names = [b["binding"] for b in bindings]
+    assert "RATE_LIMIT" in names
+    assert "CF_EDGE_CACHE" in names
+    cf = next(b for b in bindings if b["binding"] == "CF_EDGE_CACHE")
+    assert cf["counters"]["read"] == 850
+    # Both edge URLs were probed.
+    assert any("api.example.com" in u for u in captured_urls)
+    assert any("kv-cache-edge.example.com" in u for u in captured_urls)
+
+
+def test_kv_health_secondary_failure_does_not_break_primary(app_client_authed):
+    """Task #424 — the secondary fetch is best-effort. A 5xx / unreachable
+    secondary worker must not blank out the primary RATE_LIMIT /
+    BOT_HTML_CACHE rows the dashboard already depends on."""
+    primary_snapshot = {
+        "utcDay": "2026-05-06",
+        "warningPct": 80,
+        "bindings": [
+            {"binding": "RATE_LIMIT", "utcDay": "2026-05-06",
+             "counters": {"read": 10, "write": 2, "list": 0, "delete": 0},
+             "quota": {"read": 100000, "write": 1000, "list": 1000, "delete": 1000},
+             "percentages": {"read": 0.0, "write": 0.2, "list": 0.0, "delete": 0.0},
+             "status": "healthy", "fallbackActive": False},
+        ],
+    }
+
+    class _FakeResp:
+        status_code = 200
+        def json(self): return primary_snapshot
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None):
+            if "kv-cache-edge" in url:
+                raise RuntimeError("connection refused")
+            return _FakeResp()
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com",
+            "CF_EDGE_KV_CACHE_URL": "https://kv-cache-edge.example.com"},
+            clear=False):
+        with patch("routes.admin_kv_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.get("/admin/kv-health")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["configured"] is True
+    names = [b["binding"] for b in body["snapshot"]["bindings"]]
+    assert names == ["RATE_LIMIT"]
+
+
+def test_kv_health_skips_secondary_when_url_matches_primary(app_client_authed):
+    """When the secondary URL equals the primary, no second probe must
+    fire (the primary worker would already own both bindings) — avoids
+    a redundant round-trip and a duplicate row in the merged snapshot."""
+    primary_snapshot = {
+        "utcDay": "2026-05-06",
+        "warningPct": 80,
+        "bindings": [
+            {"binding": "CF_EDGE_CACHE", "utcDay": "2026-05-06",
+             "counters": {"read": 5, "write": 1, "list": 0, "delete": 0},
+             "quota": {"read": 100000, "write": 1000, "list": 1000, "delete": 1000},
+             "percentages": {"read": 0.0, "write": 0.1, "list": 0.0, "delete": 0.0},
+             "status": "healthy", "fallbackActive": False},
+        ],
+    }
+    call_count = {"n": 0}
+
+    class _FakeResp:
+        status_code = 200
+        def json(self): return primary_snapshot
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None):
+            call_count["n"] += 1
+            return _FakeResp()
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com",
+            "CF_EDGE_KV_CACHE_URL": "https://api.example.com"},
+            clear=False):
+        with patch("routes.admin_kv_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.get("/admin/kv-health")
+
+    assert res.status_code == 200
+    assert call_count["n"] == 1
+
+
+def test_kv_health_merge_does_not_overwrite_primary_binding(app_client_authed):
+    """If a binding name appears in both snapshots, the primary wins —
+    the worker that owns the binding is the source of truth for its
+    counters."""
+    primary_snapshot = {
+        "utcDay": "2026-05-06",
+        "warningPct": 80,
+        "bindings": [
+            {"binding": "CF_EDGE_CACHE", "utcDay": "2026-05-06",
+             "counters": {"read": 999, "write": 9, "list": 0, "delete": 0},
+             "quota": {"read": 100000, "write": 1000, "list": 1000, "delete": 1000},
+             "percentages": {"read": 1.0, "write": 0.9, "list": 0.0, "delete": 0.0},
+             "status": "healthy", "fallbackActive": False},
+        ],
+    }
+    secondary_snapshot = {
+        "utcDay": "2026-05-06",
+        "warningPct": 80,
+        "bindings": [
+            {"binding": "CF_EDGE_CACHE", "utcDay": "2026-05-06",
+             "counters": {"read": 1, "write": 1, "list": 0, "delete": 0},
+             "quota": {"read": 100000, "write": 1000, "list": 1000, "delete": 1000},
+             "percentages": {"read": 0.0, "write": 0.1, "list": 0.0, "delete": 0.0},
+             "status": "healthy", "fallbackActive": False},
+        ],
+    }
+
+    class _FakeResp:
+        def __init__(self, body): self._body = body; self.status_code = 200
+        def json(self): return self._body
+
+    class _FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None):
+            if "kv-cache-edge" in url:
+                return _FakeResp(secondary_snapshot)
+            return _FakeResp(primary_snapshot)
+
+    with patch.dict(os.environ, {
+            "D1_SYNC_SECRET": "topsecret",
+            "CF_EDGE_PROXY_URL": "https://api.example.com",
+            "CF_EDGE_KV_CACHE_URL": "https://kv-cache-edge.example.com"},
+            clear=False):
+        with patch("routes.admin_kv_health.httpx.AsyncClient", _FakeClient):
+            res = app_client_authed.get("/admin/kv-health")
+
+    assert res.status_code == 200
+    bindings = res.json()["snapshot"]["bindings"]
+    cfs = [b for b in bindings if b["binding"] == "CF_EDGE_CACHE"]
+    assert len(cfs) == 1
+    assert cfs[0]["counters"]["read"] == 999  # primary value preserved
+
+
 def test_kv_health_handles_worker_error_gracefully(app_client_authed):
     """If the edge worker is unreachable the route must still respond
     200 with a structured ``reason`` so the UI can render a degraded
