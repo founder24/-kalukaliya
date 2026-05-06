@@ -76,6 +76,16 @@ def ssr_client(monkeypatch):
         "quality_score": 0.92,
         "answer_html": "<p>An object at rest…</p>",
         "rewritten_summary": "Newton's three laws explained.",
+        # Per-locale (`*_as`) fields exercise the `_localized()` lookup
+        # in seo_engine. Required so the Task #432 test can assert that
+        # the JSON-LD `name` / `description` / breadcrumb / about / FAQ
+        # nodes render with Assamese values, not just the framework
+        # labels.
+        "topic_title_as": "নিউটনৰ গতিৰ সূত্ৰসমূহ",
+        "subject_name_as": "পদাৰ্থ বিজ্ঞান",
+        "chapter_title_as": "গতিৰ সূত্ৰসমূহ",
+        "meta_description_as": "নিউটনৰ তিনিটা সূত্ৰৰ সম্পূৰ্ণ টোকা।",
+        "title_as": "নিউটনৰ গতিৰ সূত্ৰসমূহ — অধ্যয়ন টোকা",
     }
     subject_doc = {
         "id": "subj-physics",
@@ -293,6 +303,81 @@ def test_subject_route_accepts_lang_as_and_flips_html_lang(ssr_client):
     )
     assert res.status_code == 200
     assert '<html lang="as-IN">' in res.text
+
+
+def test_lang_as_renders_assamese_strings_in_body(ssr_client):
+    """Task #432 — every SSR family must surface visible Assamese
+    when ``?lang=as`` is sent. We assert specific glyph strings
+    (breadcrumbs, section headings, JSON-LD ``inLanguage``) — flipping
+    only ``<html lang>`` is no longer sufficient."""
+    families = [
+        # subject landing
+        ("/api/seo/html/subject/ahsec/class-12/physics", ["ঘৰ", "পুথিভঁৰাল", "পাঠ্যক্ৰম পৰিচয়"]),
+        # default topic notes
+        ("/api/seo/html/ahsec/class-12/physics/newton-laws", ["ঘৰ", "পুথিভঁৰাল", "এই অধ্যয়ন সামগ্ৰীৰ বিষয়ে"]),
+        # typed topic page (mcqs)
+        ("/api/seo/html/ahsec/class-12/physics/newton-laws/mcqs", ["ঘৰ", "পুথিভঁৰাল", "এই অধ্যয়ন সামগ্ৰীৰ বিষয়ে"]),
+        # board-scoped chapter landing
+        ("/api/seo/html/ahsec/class-12/physics/chapter/laws-of-motion", ["ঘৰ", "এই অধ্যায়ৰ বিষয়সমূহ"]),
+        # slug-only chapter
+        ("/api/seo/html/chapter/laws-of-motion", ["ঘৰ", "এই অধ্যায়ৰ বিষয়সমূহ"]),
+        # slug-only topic
+        ("/api/seo/html/topic/newton-laws", ["ঘৰ", "এই অধ্যয়ন সামগ্ৰীৰ বিষয়ে"]),
+        # slug-only subject
+        ("/api/seo/html/subject/physics", ["ঘৰ", "পাঠ্যক্ৰম পৰিচয়"]),
+        # PYQ year+paper landing
+        ("/api/seo/html/pyq/2024/major", ["ঘৰ", "বিগত বছৰৰ প্ৰশ্ন"]),
+    ]
+    for url, expected_strings in families:
+        res = ssr_client.get(url, params={"lang": "as"})
+        assert res.status_code == 200, f"{url} → {res.status_code}"
+        body = res.text
+        assert '<html lang="as-IN">' in body, f"{url} missing as-IN html lang"
+        # Hreflang must continue to point as-IN at the same URL the
+        # reader is on (and en-IN at the canonical English URL).
+        assert 'hreflang="as-IN"' in body, f"{url} missing as-IN hreflang"
+        assert 'hreflang="en-IN"' in body, f"{url} missing en-IN hreflang"
+        # JSON-LD must declare the page as Assamese so structured-data
+        # consumers don't tag the page as English.
+        assert '"inLanguage": "as-IN"' in body, f"{url} missing inLanguage as-IN in JSON-LD"
+        # og:locale + content-language must flip too.
+        assert 'content="as_IN"' in body, f"{url} missing og:locale as_IN"
+        assert 'content-language" content="as-IN"' in body, f"{url} missing content-language as-IN"
+        # Body strings — the actual visible-text assertion the task
+        # spec requires (must not just be the <html lang> attribute).
+        for needle in expected_strings:
+            assert needle in body, f"{url} missing Assamese string {needle!r}"
+
+    # Topic-family JSON-LD must surface Assamese values from the
+    # `*_as` sibling fields (Article.headline / .description /
+    # .about.name / .educationalAlignment.targetName, LearningResource
+    # .description / .teaches, BreadcrumbList item names, WebPage
+    # .name / .description). The fallback FAQ Question.name / Answer
+    # .text are likewise generated in Assamese when the doc resolves
+    # to ``lang=as``.
+    res = ssr_client.get(
+        "/api/seo/html/ahsec/class-12/physics/newton-laws",
+        params={"lang": "as"},
+    )
+    assert res.status_code == 200
+    body = res.text
+    # Pull the Article + LearningResource + BreadcrumbList + WebPage
+    # node from the @graph and check Assamese values are inside.
+    assert '"name": "নিউটনৰ গতিৰ সূত্ৰসমূহ"' in body, "JSON-LD name missing Assamese topic title"
+    assert '"headline": "নিউটনৰ গতিৰ সূত্ৰসমূহ — অধ্যয়ন টোকা"' in body, "Article.headline not Assamese"
+    assert '"description": "নিউটনৰ তিনিটা সূত্ৰৰ সম্পূৰ্ণ টোকা।"' in body, "JSON-LD description not Assamese"
+    assert '"targetName": "পদাৰ্থ বিজ্ঞান"' in body, "educationalAlignment.targetName not Assamese"
+    assert '"teaches": "নিউটনৰ গতিৰ সূত্ৰসমূহ"' in body, "LearningResource.teaches not Assamese"
+    # The auto-generated FAQ fallback question must read in Assamese.
+    assert "পদাৰ্থ বিজ্ঞানত নিউটনৰ গতিৰ সূত্ৰসমূহ কি?" in body, "Auto-FAQ Question.name not Assamese"
+
+    # Sanity: the *English* run of the same URL must keep English
+    # JSON-LD values, so we know the localization is gated on `lang`
+    # and not a global rewrite.
+    res_en = ssr_client.get("/api/seo/html/ahsec/class-12/physics/newton-laws")
+    assert res_en.status_code == 200
+    assert "Newton's Laws of Motion" in res_en.text
+    assert '"inLanguage": "en-IN"' in res_en.text
 
 
 def test_homepage_about_and_subject_record_ssr_render(ssr_client):

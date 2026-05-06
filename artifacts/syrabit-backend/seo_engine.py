@@ -11,7 +11,7 @@ URL pattern (4-segment):
   /{board}/{class}/{subject}/{topic}/{page_type}
 """
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Cookie, Request
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Cookie, Request, Query
 from fastapi.responses import Response, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -2741,6 +2741,121 @@ _PAGE_TYPE_METHODOLOGY = {
     "examples": "solved examples following the problem → approach → step-by-step solution → exam tip format",
 }
 
+# ── Task #432 — Assamese SSR localisation ───────────────────────────────
+# The Pages middleware rewrites ``/as/...`` URLs to the backend with
+# ``?lang=as``. Task #408 flipped ``<html lang>`` only; Task #432 also
+# translates breadcrumbs, meta description, section headings, and
+# JSON-LD ``inLanguage``/``name`` fields so users landing on /as/...
+# actually see Assamese content (not just an Assamese language tag on
+# English body text). When a per-locale field exists on the doc
+# (``topic_title_as``, ``meta_description_as``, ``content_as``, …) we
+# use it; otherwise framework labels translate via the static
+# dictionary below and content fields fall back to English.
+def _is_as(lang) -> bool:
+    return bool(lang) and str(lang).lower().startswith("as")
+
+
+_AS_LABELS = {
+    "Home": "ঘৰ",
+    "Library": "পুথিভঁৰাল",
+    "PYQ": "বিগত বছৰৰ প্ৰশ্ন",
+    "Notes": "টোকা",
+    "Chapters": "অধ্যায়",
+    "Topics": "বিষয়সমূহ",
+    "MCQ Sets": "MCQ ছেট",
+    "PYQ Sets": "PYQ ছেট",
+    "Course Overview": "পাঠ্যক্ৰম পৰিচয়",
+    "Syllabus Structure": "পাঠ্যক্ৰম গঠন",
+    "Learning Outcomes": "শিকাৰ ফলাফল",
+    "Topic-wise Study Material": "বিষয় অনুসৰি অধ্যয়ন সামগ্ৰী",
+    "Topic-wise Previous Year Questions": "বিষয় অনুসৰি বিগত বছৰৰ প্ৰশ্ন",
+    "About This Study Guide": "এই অধ্যয়ন গাইডৰ বিষয়ে",
+    "About This Study Material": "এই অধ্যয়ন সামগ্ৰীৰ বিষয়ে",
+    "Topics in this chapter": "এই অধ্যায়ৰ বিষয়সমূহ",
+    "No topics published yet.": "এতিয়াও কোনো বিষয় প্ৰকাশ কৰা হোৱা নাই।",
+    "No PYQ papers indexed yet.": "এতিয়াও কোনো বিগত বছৰৰ প্ৰশ্ন পত্ৰ অন্তৰ্ভুক্ত কৰা হোৱা নাই।",
+    "PYQ Papers": "বিগত বছৰৰ প্ৰশ্ন পত্ৰসমূহ",
+    "Quick answer": "সংক্ষিপ্ত উত্তৰ",
+    "Key facts": "মূল তথ্য",
+    "Subject": "বিষয়",
+    "Chapter": "অধ্যায়",
+    "Topic": "বিষয়",
+    "Class": "শ্ৰেণী",
+    "Board": "বৰ্ড",
+    "Source": "উৎস",
+    "Syllabus Source": "পাঠ্যক্ৰমৰ উৎস",
+    "Content Type": "বিষয়বস্তুৰ প্ৰকাৰ",
+    "Editorial Process": "সম্পাদকীয় প্ৰক্ৰিয়া",
+    "Last Updated": "শেষ আপডেট",
+    "Publisher": "প্ৰকাশক",
+    "Complete Study Guide": "সম্পূৰ্ণ অধ্যয়ন গাইড",
+    "Previous Year Questions (PYQ)": "বিগত বছৰৰ প্ৰশ্ন (PYQ)",
+    "Related Topics in": "ৰ সম্পৰ্কীয় বিষয়সমূহ —",
+    "Previous": "পূৰ্বৱৰ্তী",
+    "Next": "পৰৱৰ্তী",
+    "Reviewed by the Syrabit.ai editorial team": "Syrabit.ai সম্পাদকীয় দলৰ দ্বাৰা পৰ্যালোচিত",
+    "Last updated": "শেষ আপডেট",
+    "Open in Syrabit.ai": "Syrabit.ai-ত খোলক",
+}
+
+
+def _t(en: str, lang) -> str:
+    """Translate a framework label for the active locale. Unknown labels
+    fall through to English so callers can pass any string safely."""
+    return _AS_LABELS.get(en, en) if _is_as(lang) else en
+
+
+def _localized(doc: dict, base: str, lang) -> str:
+    """Return ``doc[base + '_as']`` when lang=as and the field is
+    populated, otherwise the English ``doc[base]`` (or ``""``)."""
+    if doc and _is_as(lang):
+        v = (doc.get(f"{base}_as") or "")
+        if isinstance(v, str) and v.strip():
+            return v
+    return (doc or {}).get(base, "") if doc else ""
+
+
+def _lang_attrs(lang) -> dict:
+    """Per-locale attribute bundle for HTML/meta tags + JSON-LD."""
+    if _is_as(lang):
+        return {
+            "html_lang": "as-IN",
+            "content_language": "as-IN",
+            "og_locale": "as_IN",
+            "in_language": "as-IN",
+            "dc_language": "as-IN",
+        }
+    return {
+        "html_lang": "en-IN",
+        "content_language": "en-IN",
+        "og_locale": "en_IN",
+        "in_language": "en-IN",
+        "dc_language": "en-IN",
+    }
+
+
+def _hreflang_alt(page_url: str, lang) -> str:
+    """Emit the locale-alternate link block for an SSR page.
+
+    The output is intentionally **static across locales**: ``en-IN``
+    always points at the canonical ``page_url`` and ``as-IN`` always
+    points at ``page_url?lang=as`` (which the Pages middleware in
+    ``functions/_middleware.js`` rewrites to the ``/as/...`` URL the
+    reader sees). The ``lang`` argument is accepted for call-site
+    symmetry with other helpers in this module — it is not consulted
+    here because Google requires the alternate set to be reciprocal
+    on both the English and Assamese variants of the page.
+    """
+    del lang  # signature kept for call-site parity; see docstring.
+    sep = "&amp;" if "?" in page_url else "?"
+    as_url = f"{html_mod.escape(page_url)}{sep}lang=as"
+    en_url = html_mod.escape(page_url)
+    return (
+        f'<link rel="alternate" hreflang="en-IN" href="{en_url}">\n'
+        f'<link rel="alternate" hreflang="as-IN" href="{as_url}">\n'
+        f'<link rel="alternate" hreflang="x-default" href="{en_url}">'
+    )
+
 _EXAM_KEYWORD_SUFFIXES = [
     "notes", "study notes", "class notes", "exam notes",
     "definition", "meaning", "what is", "explain",
@@ -2811,16 +2926,28 @@ def _render_seo_html(
     prev_topic: dict = None,
     next_topic: dict = None,
     og_image_url: str = "https://syrabit.ai/opengraph.jpg",
+    lang: Optional[str] = None,
 ) -> str:
-    title = html_mod.escape(page.get("title", ""))
-    desc = html_mod.escape(page.get("meta_description", ""))
-    topic = html_mod.escape(page.get("topic_title", ""))
-    subject = html_mod.escape(page.get("subject_name", ""))
-    board = html_mod.escape(page.get("board_name", ""))
-    cls = html_mod.escape(page.get("class_name", ""))
-    chapter = html_mod.escape(page.get("chapter_title", ""))
+    is_as = _is_as(lang)
+    _lattrs = _lang_attrs(lang)
+    # Per-locale field selection: when ``lang=as`` and the doc carries
+    # an Assamese sibling field (e.g. ``topic_title_as``) we use it;
+    # otherwise we fall back to the English copy so the page still
+    # renders cleanly while the Assamese backfill catches up.
+    title = html_mod.escape(_localized(page, "title", lang) or page.get("title", ""))
+    desc = html_mod.escape(_localized(page, "meta_description", lang) or page.get("meta_description", ""))
+    topic = html_mod.escape(_localized(page, "topic_title", lang) or page.get("topic_title", ""))
+    subject = html_mod.escape(_localized(page, "subject_name", lang) or page.get("subject_name", ""))
+    board = html_mod.escape(_localized(page, "board_name", lang) or page.get("board_name", ""))
+    cls = html_mod.escape(_localized(page, "class_name", lang) or page.get("class_name", ""))
+    chapter = html_mod.escape(_localized(page, "chapter_title", lang) or page.get("chapter_title", ""))
     page_type = page.get("page_type", "notes")
-    content_html = page.get("content_html") or _format_content_html(page.get("content", ""))
+    _content_raw = (
+        (_localized(page, "content_html", lang) if is_as else "")
+        or page.get("content_html")
+        or _format_content_html(_localized(page, "content", lang) or page.get("content", ""))
+    )
+    content_html = _content_raw
     generated = page.get("generated_at", "")
     updated = page.get("updated_at", generated)
     kw = page.get("primary_keyword", f"{topic} {board} {cls}")
@@ -2844,12 +2971,25 @@ def _render_seo_html(
         page.get("chapter_title", ""), page_type,
     )
 
+    # Localized text values for JSON-LD nodes — when ``lang=as`` and the
+    # doc carries a per-locale ``<base>_as`` field, prefer it; otherwise
+    # fall back to English so structured data still validates.
+    _ld_title = _localized(page, "title", lang) or page.get("title", "")
+    _ld_desc = _localized(page, "meta_description", lang) or page.get("meta_description", "")
+    _ld_topic = _localized(page, "topic_title", lang) or page.get("topic_title", "")
+    _ld_subject = _localized(page, "subject_name", lang) or page.get("subject_name", "")
+    _ld_chapter = _localized(page, "chapter_title", lang) or page.get("chapter_title", "")
+    _ld_competency = (
+        f"{_ld_subject}ৰ মৌলিক জ্ঞান" if is_as
+        else f"Basic understanding of {_ld_subject}"
+    )
+
     # ── Schema.org graph ────────────────────────────────────────────────────
     graph_nodes = [
         {
             "@type": "Article",
-            "headline": page.get("title", ""),
-            "description": page.get("meta_description", ""),
+            "headline": _ld_title,
+            "description": _ld_desc,
             "keywords": expanded_kw,
             "author": _ORG_NODE,
             "publisher": _ORG_NODE,
@@ -2858,9 +2998,9 @@ def _render_seo_html(
             "image": og_image_url,
             "mainEntityOfPage": {"@type": "WebPage", "@id": page_url},
             "educationalLevel": edu_level,
-            "about": {"@type": "Thing", "name": page.get("topic_title", "")},
+            "about": {"@type": "Thing", "name": _ld_topic},
             "isPartOf": {"@type": "WebSite", "@id": "https://syrabit.ai", "name": "Syrabit.ai"},
-            "inLanguage": "en-IN",
+            "inLanguage": _lattrs["in_language"],
             "spatialCoverage": _ASSAM_GEO,
             "locationCreated": _ASSAM_GEO,
             "audience": {
@@ -2872,38 +3012,46 @@ def _render_seo_html(
                 "@type": "AlignmentObject",
                 "alignmentType": "educationalSubject",
                 "educationalFramework": syllabus_source,
-                "targetName": page.get("subject_name", ""),
-                "targetDescription": f"{page.get('chapter_title', '')} — {page.get('topic_title', '')}",
+                "targetName": _ld_subject,
+                "targetDescription": f"{_ld_chapter} — {_ld_topic}",
             },
             "sourceOrganization": _ORG_NODE,
         },
         {
             "@type": "LearningResource",
             "name": f"{topic} — {edu_level}".strip(),
-            "description": page.get("meta_description", ""),
+            "description": _ld_desc,
             "provider": _ORG_NODE,
             "educationalLevel": edu_level,
             "url": page_url,
-            "inLanguage": "en-IN",
-            "learningResourceType": {"notes": "Study Notes", "definition": "Definitions", "important-questions": "Practice Questions", "mcqs": "Multiple Choice Questions", "examples": "Examples"}.get(page_type, "Study Material"),
+            "inLanguage": _lattrs["in_language"],
+            "learningResourceType": (
+                {"notes": "অধ্যয়ন টোকা", "definition": "সংজ্ঞা",
+                 "important-questions": "অনুশীলন প্ৰশ্ন",
+                 "mcqs": "বহু-বিকল্পীয় প্ৰশ্ন", "examples": "উদাহৰণ"}.get(page_type, "অধ্যয়ন সামগ্ৰী")
+                if is_as else
+                {"notes": "Study Notes", "definition": "Definitions",
+                 "important-questions": "Practice Questions",
+                 "mcqs": "Multiple Choice Questions", "examples": "Examples"}.get(page_type, "Study Material")
+            ),
             "isAccessibleForFree": True,
             "educationalAlignment": {
                 "@type": "AlignmentObject",
                 "alignmentType": "educationalSubject",
                 "educationalFramework": syllabus_source,
-                "targetName": page.get("subject_name", ""),
+                "targetName": _ld_subject,
             },
-            "teaches": page.get("topic_title", ""),
-            "assesses": page.get("topic_title", "") if page_type in ("mcqs", "important-questions") else None,
-            "competencyRequired": f"Basic understanding of {page.get('subject_name', '')}",
+            "teaches": _ld_topic,
+            "assesses": _ld_topic if page_type in ("mcqs", "important-questions") else None,
+            "competencyRequired": _ld_competency,
         },
         {
             "@type": "BreadcrumbList",
             "itemListElement": [
-                {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://syrabit.ai"},
-                {"@type": "ListItem", "position": 2, "name": "Library", "item": "https://syrabit.ai/library"},
-                {"@type": "ListItem", "position": 3, "name": page.get("subject_name", ""), "item": subject_url},
-                {"@type": "ListItem", "position": 4, "name": page.get("topic_title", ""), "item": page_url},
+                {"@type": "ListItem", "position": 1, "name": _t("Home", lang), "item": "https://syrabit.ai"},
+                {"@type": "ListItem", "position": 2, "name": _t("Library", lang), "item": "https://syrabit.ai/library"},
+                {"@type": "ListItem", "position": 3, "name": _ld_subject, "item": subject_url},
+                {"@type": "ListItem", "position": 4, "name": _ld_topic, "item": page_url},
             ],
         },
     ]
@@ -2912,14 +3060,15 @@ def _render_seo_html(
     if page_type == "definition":
         graph_nodes.append({
             "@type": "DefinedTerm",
-            "name": page.get("topic_title", ""),
-            "description": page.get("meta_description", ""),
+            "name": _ld_topic,
+            "description": _ld_desc,
             "inDefinedTermSet": {
                 "@type": "DefinedTermSet",
-                "name": f"{page.get('subject_name', '')} — {board} {cls}",
+                "name": f"{_ld_subject} — {board} {cls}",
                 "url": f"https://syrabit.ai/{page.get('board_slug','')}/{page.get('class_slug','')}/{page.get('subject_slug','')}",
             },
             "url": page_url,
+            "inLanguage": _lattrs["in_language"],
         })
 
     # Task #457: QAPage schema for important-questions improves AI engine
@@ -2946,8 +3095,9 @@ def _render_seo_html(
             graph_nodes.append({
                 "@type": "QAPage",
                 "mainEntity": qa_items[0],
-                "about": {"@type": "Thing", "name": page.get("topic_title", "")},
+                "about": {"@type": "Thing", "name": _ld_topic},
                 "additionalProperty": [{"@type": "PropertyValue", "name": "questionCount", "value": len(qa_items)}],
+                "inLanguage": _lattrs["in_language"],
             })
 
     if page_type == "mcqs":
@@ -2970,10 +3120,12 @@ def _render_seo_html(
         if mcq_questions:
             graph_nodes.append({
                 "@type": "Quiz",
-                "name": f"{page.get('topic_title', '')} MCQs — {board} {cls}",
+                "name": (f"{_ld_topic} MCQ — {board} {cls}" if is_as
+                         else f"{_ld_topic} MCQs — {board} {cls}"),
                 "educationalLevel": f"{cls} {board}".strip(),
-                "about": {"@type": "Thing", "name": page.get("topic_title", "")},
+                "about": {"@type": "Thing", "name": _ld_topic},
                 "hasPart": mcq_questions,
+                "inLanguage": _lattrs["in_language"],
             })
 
     # ── FAQ extraction for all page types ───────────────────────────────────
@@ -3005,13 +3157,26 @@ def _render_seo_html(
                     break
 
     if not faq_items and topic:
+        if is_as:
+            _faq_q = f"{_ld_subject}ত {_ld_topic} কি?"
+            _faq_a = (
+                f"{_ld_topic} হৈছে {_ld_subject}ৰ এটা বিষয় যিটো "
+                f"{page.get('board_name', '')} {page.get('class_name', '')} "
+                f"শিক্ষাৰ্থীৰ বাবে {_ld_chapter}ৰ অন্তৰ্গত আছে। "
+                f"বিশদ অধ্যয়ন টোকা, উদাহৰণ আৰু অনুশীলন প্ৰশ্নৰ বাবে Syrabit.ai চাওক।"
+            )
+        else:
+            _faq_q = f"What is {_ld_topic} in {_ld_subject}?"
+            _faq_a = (
+                f"{_ld_topic} is a topic in {_ld_subject} covered under "
+                f"{_ld_chapter} for {page.get('board_name', '')} "
+                f"{page.get('class_name', '')} students. Visit Syrabit.ai "
+                f"for detailed study notes, examples, and practice questions."
+            )
         faq_items.append({
             "@type": "Question",
-            "name": f"What is {page.get('topic_title', '')} in {page.get('subject_name', '')}?",
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": f"{page.get('topic_title', '')} is a topic in {page.get('subject_name', '')} covered under {page.get('chapter_title', '')} for {page.get('board_name', '')} {page.get('class_name', '')} students. Visit Syrabit.ai for detailed study notes, examples, and practice questions.",
-            },
+            "name": _faq_q,
+            "acceptedAnswer": {"@type": "Answer", "text": _faq_a},
         })
 
     if faq_items:
@@ -3023,8 +3188,9 @@ def _render_seo_html(
     graph_nodes.append({
         "@type": "WebPage",
         "@id": page_url,
-        "name": page.get("title", ""),
-        "description": page.get("meta_description", ""),
+        "name": _ld_title,
+        "description": _ld_desc,
+        "inLanguage": _lattrs["in_language"],
         "speakable": {
             "@type": "SpeakableSpecification",
             "cssSelector": ["article h1", "article > p:first-of-type", "article h2"],
@@ -3069,7 +3235,13 @@ def _render_seo_html(
             rt_path = html_mod.escape(rt.get("seo_path", "#"))
             rt_title = html_mod.escape(rt.get("title", ""))
             items += f'<li><a href="https://syrabit.ai{rt_path}">{rt_title}</a></li>'
-        related_html = f'<section class="related"><h2>Related Topics in {html_mod.escape(page.get("subject_name",""))}</h2><ul>{items}</ul></section>'
+        _rel_subj = _localized(page, "subject_name", lang) or page.get("subject_name", "")
+        _rel_heading = (
+            f'{_t("Related Topics in", lang)} {html_mod.escape(_rel_subj)}'
+            if is_as
+            else f'Related Topics in {html_mod.escape(_rel_subj)}'
+        )
+        related_html = f'<section class="related"><h2>{_rel_heading}</h2><ul>{items}</ul></section>'
 
     # ── Prev / Next navigation HTML + link tags ─────────────────────────────
     prevnext_html = ""
@@ -3078,11 +3250,17 @@ def _render_seo_html(
     parts = []
     if prev_topic and prev_topic.get("seo_path"):
         prev_url = f"https://syrabit.ai{html_mod.escape(prev_topic['seo_path'])}"
-        parts.append(f'<a class="pn-prev" href="{prev_url}">&larr; {html_mod.escape(prev_topic.get("title","Previous"))}</a>')
+        _prev_label = (
+            _localized(prev_topic, "title", lang) or prev_topic.get("title") or _t("Previous", lang)
+        )
+        parts.append(f'<a class="pn-prev" href="{prev_url}">&larr; {html_mod.escape(_prev_label)}</a>')
         _prev_link = f'<link rel="prev" href="{prev_url}">\n'
     if next_topic and next_topic.get("seo_path"):
         next_url = f"https://syrabit.ai{html_mod.escape(next_topic['seo_path'])}"
-        parts.append(f'<a class="pn-next" href="{next_url}">{html_mod.escape(next_topic.get("title","Next"))} &rarr;</a>')
+        _next_label = (
+            _localized(next_topic, "title", lang) or next_topic.get("title") or _t("Next", lang)
+        )
+        parts.append(f'<a class="pn-next" href="{next_url}">{html_mod.escape(_next_label)} &rarr;</a>')
         _next_link = f'<link rel="next" href="{next_url}">\n'
     if parts:
         prevnext_html = f'<nav class="pn-nav" aria-label="Topic navigation">{"".join(parts)}</nav>'
@@ -3114,8 +3292,8 @@ def _render_seo_html(
     answer_html = ""
     if answer_summary:
         answer_html = (
-            f'<aside class="answer-first" aria-label="Quick answer">'
-            f'<h2>Quick answer</h2>'
+            f'<aside class="answer-first" aria-label="{_t("Quick answer", lang)}">'
+            f'<h2>{_t("Quick answer", lang)}</h2>'
             f'<p>{html_mod.escape(answer_summary)}</p>'
             f'</aside>'
         )
@@ -3125,20 +3303,20 @@ def _render_seo_html(
             f'<li>{html_mod.escape(str(f))}</li>' for f in key_facts[:6]
         )
         facts_html = (
-            f'<aside class="key-facts" aria-label="Key facts">'
-            f'<h2>Key facts</h2><ul>{items}</ul>'
+            f'<aside class="key-facts" aria-label="{_t("Key facts", lang)}">'
+            f'<h2>{_t("Key facts", lang)}</h2><ul>{items}</ul>'
             f'</aside>'
         )
     attribution_html = (
         f'<p class="byline">'
-        f'Reviewed by the Syrabit.ai editorial team · '
-        f'Last updated {html_mod.escape(updated[:10] if updated else "")}'
+        f'{_t("Reviewed by the Syrabit.ai editorial team", lang)} · '
+        f'{_t("Last updated", lang)} {html_mod.escape(updated[:10] if updated else "")}'
         f'</p>'
     )
     geo_top_html = answer_html + facts_html + attribution_html
 
     return f"""<!DOCTYPE html>
-<html lang="en-IN">
+<html lang="{_lattrs['html_lang']}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -3146,7 +3324,7 @@ def _render_seo_html(
 <meta name="description" content="{desc}">
 <link rel="canonical" href="{html_mod.escape(page_url)}">
 <meta property="og:site_name" content="Syrabit.ai">
-<meta property="og:locale" content="en_IN">
+<meta property="og:locale" content="{_lattrs['og_locale']}">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{desc}">
 <meta property="og:type" content="article">
@@ -3181,15 +3359,13 @@ def _render_seo_html(
 <meta name="dc.description" content="{desc}">
 <meta name="dc.publisher" content="Syrabit.ai">
 <meta name="dc.type" content="Text">
-<meta name="dc.language" content="en-IN">
+<meta name="dc.language" content="{_lattrs['dc_language']}">
 <meta name="dc.source" content="https://syrabit.ai">
 <meta name="geo.region" content="IN-AS">
 <meta name="geo.placename" content="Assam, India">
 <meta name="geo.position" content="26.2006;92.9376">
-<meta http-equiv="content-language" content="en-IN">
-<link rel="alternate" hreflang="en-IN" href="{html_mod.escape(page_url)}">
-<link rel="alternate" hreflang="as-IN" href="{html_mod.escape(page_url)}{'&amp;' if '?' in page_url else '?'}lang=as">
-<link rel="alternate" hreflang="x-default" href="{html_mod.escape(page_url)}">
+<meta http-equiv="content-language" content="{_lattrs['content_language']}">
+{_hreflang_alt(page_url, lang)}
 <meta name="ICBM" content="26.2006, 92.9376">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 {_prev_link}{_next_link}<script type="application/ld+json">{ld_json}</script>
@@ -3227,8 +3403,8 @@ footer{{color:#6b7280;font-size:.85rem;margin-top:2rem;padding-top:1rem;border-t
 <body>
 <header>
 <nav aria-label="Breadcrumb">
-<a href="https://syrabit.ai">Home</a> &rsaquo;
-<a href="https://syrabit.ai/library">Library</a> &rsaquo;
+<a href="https://syrabit.ai">{_t("Home", lang)}</a> &rsaquo;
+<a href="https://syrabit.ai/library">{_t("Library", lang)}</a> &rsaquo;
 <span>{subject}</span> &rsaquo;
 <span>{topic}</span>
 </nav>
@@ -3245,20 +3421,20 @@ footer{{color:#6b7280;font-size:.85rem;margin-top:2rem;padding-top:1rem;border-t
 {related_html}
 {prevnext_html}
 <section class="content-info">
-<h2>About This Study Material</h2>
+<h2>{_t("About This Study Material", lang)}</h2>
 <dl>
-<dt>Syllabus Source</dt><dd>{html_mod.escape(syllabus_source)}</dd>
-<dt>Content Type</dt><dd>This page contains {html_mod.escape(content_methodology)}.</dd>
-<dt>Subject</dt><dd>{subject} — {board} {cls}</dd>
-<dt>Chapter</dt><dd>{chapter}</dd>
-<dt>Topic</dt><dd>{topic}</dd>
-<dt>Editorial Process</dt><dd>Content is prepared by subject-matter contributors, cross-referenced with the official {html_mod.escape(board)} syllabus, and editorially reviewed for factual accuracy, exam relevance, and completeness. Each page follows a structured academic format: formal definitions, detailed explanations, solved examples, exam tips, and practice questions with model answers.</dd>
-<dt>Last Updated</dt><dd>{html_mod.escape(updated[:10] if updated else '')}</dd>
-<dt>Publisher</dt><dd>Syrabit.ai — Academic content platform for Assam students</dd>
+<dt>{_t("Syllabus Source", lang)}</dt><dd>{html_mod.escape(syllabus_source)}</dd>
+<dt>{_t("Content Type", lang)}</dt><dd>{("এই পৃষ্ঠাত " + html_mod.escape(content_methodology) + " আছে।") if is_as else ("This page contains " + html_mod.escape(content_methodology) + ".")}</dd>
+<dt>{_t("Subject", lang)}</dt><dd>{subject} — {board} {cls}</dd>
+<dt>{_t("Chapter", lang)}</dt><dd>{chapter}</dd>
+<dt>{_t("Topic", lang)}</dt><dd>{topic}</dd>
+<dt>{_t("Editorial Process", lang)}</dt><dd>{("বিষয়ভিত্তিক অৱদানকাৰীয়ে বিষয়বস্তু প্ৰস্তুত কৰে, আনুষ্ঠানিক " + html_mod.escape(board) + " পাঠ্যক্ৰমৰ সৈতে মিলোৱা হয় আৰু তথ্যৰ সঠিকতা, পৰীক্ষাৰ প্ৰাসংগিকতা আৰু সম্পূৰ্ণতাৰ বাবে সম্পাদকীয়ভাৱে পৰ্যালোচনা কৰা হয়।") if is_as else ("Content is prepared by subject-matter contributors, cross-referenced with the official " + html_mod.escape(board) + " syllabus, and editorially reviewed for factual accuracy, exam relevance, and completeness. Each page follows a structured academic format: formal definitions, detailed explanations, solved examples, exam tips, and practice questions with model answers.")}</dd>
+<dt>{_t("Last Updated", lang)}</dt><dd>{html_mod.escape(updated[:10] if updated else '')}</dd>
+<dt>{_t("Publisher", lang)}</dt><dd>{"Syrabit.ai — অসমৰ ছাত্ৰ-ছাত্ৰীৰ বাবে শৈক্ষিক বিষয়বস্তু প্লেটফৰ্ম" if is_as else "Syrabit.ai — Academic content platform for Assam students"}</dd>
 </dl>
 </section>
 <footer>
-<p>Source: <a href="{html_mod.escape(page_url)}">Syrabit.ai — {topic}</a></p>
+<p>{_t("Source", lang)}: <a href="{html_mod.escape(page_url)}">Syrabit.ai — {topic}</a></p>
 <p>&copy; Syrabit.ai — Syllabus-aligned study material for {html_mod.escape(board)} ({html_mod.escape(cls)}) students</p>
 <p>Content follows the official {html_mod.escape(board)} curriculum. For the latest syllabus, refer to your board/university website.</p>
 <p class="geo-footer">Serving students across Assam, India — Guwahati, Jorhat, Dibrugarh, Dhemaji, Tezpur, Silchar, Nagaon, Barpeta, and more.</p>
@@ -4036,7 +4212,9 @@ async def get_subject_landing_html(
     # behaviour (no param) is unchanged.
     is_pyq = (page_type or "").lower() == "pyq"
     list_page_type = "important-questions" if is_pyq else "notes"
-    _lang_attr = "as-IN" if (lang or "").lower().startswith("as") else "en-IN"
+    is_as = _is_as(lang)
+    _lattrs = _lang_attrs(lang)
+    _lang_attr = _lattrs["html_lang"]
     pages = await _db.seo_pages.find(
         {"board_slug": board, "class_slug": class_slug, "subject_slug": subject_slug,
          "status": "published", "page_type": list_page_type},
@@ -4059,8 +4237,14 @@ async def get_subject_landing_html(
         )
     if not subject_doc and not pages:
         raise HTTPException(status_code=404, detail="Subject not found")
-    subject_name = subject_doc["name"] if subject_doc else subject_slug.replace("-", " ").title()
-    subject_desc_raw = subject_doc.get("description", "") if subject_doc else ""
+    subject_name = (
+        (_localized(subject_doc, "name", lang) if is_as else None)
+        or (subject_doc["name"] if subject_doc else subject_slug.replace("-", " ").title())
+    )
+    subject_desc_raw = (
+        (_localized(subject_doc, "description", lang) if is_as else "")
+        or (subject_doc.get("description", "") if subject_doc else "")
+    )
     subject_id = subject_doc.get("id", "") if subject_doc else ""
     _has_thumb = bool(subject_doc and (subject_doc.get("thumbnailUrl") or subject_doc.get("thumbnail_url")))
     if not _has_thumb and subject_id:
@@ -4095,21 +4279,39 @@ async def get_subject_landing_html(
 
     if is_pyq:
         page_url = f"https://syrabit.ai/pyq/{board}/{class_slug}/{subject_slug}"
-        title = f"{subject_name} Previous Year Questions (PYQ) — {board_label} {class_label} | Syrabit.ai"
-        desc = (
-            f"Previous year questions (PYQ) for {subject_name}, {board_label} {class_label}. "
-            f"Topic-wise PYQ sets with mark-wise answers (1-mark to 5-mark) curated from past "
-            f"{board_label} papers, mapped to the official syllabus."
-        )
+        if is_as:
+            title = f"{subject_name} বিগত বছৰৰ প্ৰশ্ন (PYQ) — {board_label} {class_label} | Syrabit.ai"
+            desc = (
+                f"{board_label} {class_label} ছাত্ৰ-ছাত্ৰীৰ বাবে {subject_name}ৰ "
+                f"বিগত বছৰৰ প্ৰশ্ন (PYQ)। বিষয় অনুসৰি, মাৰ্ক অনুসৰি উত্তৰৰ সৈতে "
+                f"আনুষ্ঠানিক পাঠ্যক্ৰমৰ সৈতে মিলোৱা প্ৰশ্ন পত্ৰৰ সংকলন।"
+            )
+        else:
+            title = f"{subject_name} Previous Year Questions (PYQ) — {board_label} {class_label} | Syrabit.ai"
+            desc = (
+                f"Previous year questions (PYQ) for {subject_name}, {board_label} {class_label}. "
+                f"Topic-wise PYQ sets with mark-wise answers (1-mark to 5-mark) curated from past "
+                f"{board_label} papers, mapped to the official syllabus."
+            )
     else:
         page_url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}"
-        title = f"{subject_name} — {board_label} {class_label} Complete Study Guide | Syrabit.ai"
-        desc = (
-            f"Complete {subject_name} study guide for {board_label} {class_label} students. "
-            f"Covers {len(chapters_docs) or len(set(p.get('chapter_title','') for p in pages))} chapters with "
-            f"topic-wise notes, solved examples, MCQs, important questions, and previous year questions "
-            f"aligned to the official syllabus."
-        )
+        _chap_count = len(chapters_docs) or len(set(p.get('chapter_title','') for p in pages))
+        if is_as:
+            title = f"{subject_name} — {board_label} {class_label} সম্পূৰ্ণ অধ্যয়ন গাইড | Syrabit.ai"
+            desc = (
+                f"{board_label} {class_label} ছাত্ৰ-ছাত্ৰীৰ বাবে সম্পূৰ্ণ {subject_name} "
+                f"অধ্যয়ন গাইড। আনুষ্ঠানিক পাঠ্যক্ৰমৰ সৈতে মিলোৱা {_chap_count}টা "
+                f"অধ্যায়ত বিষয় অনুসৰি টোকা, সমাধান কৰা উদাহৰণ, MCQ, গুৰুত্বপূৰ্ণ "
+                f"প্ৰশ্ন আৰু বিগত বছৰৰ প্ৰশ্ন সামৰি লোৱা হৈছে।"
+            )
+        else:
+            title = f"{subject_name} — {board_label} {class_label} Complete Study Guide | Syrabit.ai"
+            desc = (
+                f"Complete {subject_name} study guide for {board_label} {class_label} students. "
+                f"Covers {_chap_count} chapters with "
+                f"topic-wise notes, solved examples, MCQs, important questions, and previous year questions "
+                f"aligned to the official syllabus."
+            )
 
     syllabus_source = ""
     for bkey in _BOARD_SYLLABUS_SOURCE:
@@ -4133,20 +4335,38 @@ async def get_subject_landing_html(
         chapter_names = [c.get("title", "") for c in chapters_docs]
 
     overview_parts = []
-    overview_parts.append(f"<h2>Course Overview</h2>")
+    overview_parts.append(f"<h2>{_t('Course Overview', lang)}</h2>")
     if subject_intro_html:
         overview_parts.append(subject_intro_html)
-    overview_parts.append(f"<p>This {html_mod.escape(subject_name)} course for {html_mod.escape(board_label)} {html_mod.escape(class_label)} students covers <strong>{len(chapter_names)} chapters</strong> and <strong>{len(pages)} topics</strong>. Content is prepared following the {html_mod.escape(syllabus_source)}.</p>")
+    if is_as:
+        overview_parts.append(
+            f"<p>{html_mod.escape(board_label)} {html_mod.escape(class_label)} ছাত্ৰ-ছাত্ৰীৰ বাবে এই "
+            f"{html_mod.escape(subject_name)} পাঠ্যক্ৰমে <strong>{len(chapter_names)}টা অধ্যায়</strong> আৰু "
+            f"<strong>{len(pages)}টা বিষয়</strong> সামৰি লয়। বিষয়বস্তু "
+            f"{html_mod.escape(syllabus_source)}ৰ অনুসৰি প্ৰস্তুত কৰা হৈছে।</p>"
+        )
+    else:
+        overview_parts.append(
+            f"<p>This {html_mod.escape(subject_name)} course for {html_mod.escape(board_label)} {html_mod.escape(class_label)} students covers <strong>{len(chapter_names)} chapters</strong> and <strong>{len(pages)} topics</strong>. Content is prepared following the {html_mod.escape(syllabus_source)}.</p>"
+        )
 
-    stats_parts = [f"<strong>{total_notes}</strong> study notes"]
-    if total_mcqs:
-        stats_parts.append(f"<strong>{total_mcqs}</strong> MCQ sets")
-    if total_pyqs:
-        stats_parts.append(f"<strong>{total_pyqs}</strong> PYQ sets")
-    overview_parts.append(f'<p>Available resources: {", ".join(stats_parts)}.</p>')
+    if is_as:
+        stats_parts = [f"<strong>{total_notes}</strong>টা টোকা"]
+        if total_mcqs:
+            stats_parts.append(f"<strong>{total_mcqs}</strong>টা MCQ ছেট")
+        if total_pyqs:
+            stats_parts.append(f"<strong>{total_pyqs}</strong>টা PYQ ছেট")
+        overview_parts.append(f'<p>উপলব্ধ সম্পদ: {", ".join(stats_parts)}।</p>')
+    else:
+        stats_parts = [f"<strong>{total_notes}</strong> study notes"]
+        if total_mcqs:
+            stats_parts.append(f"<strong>{total_mcqs}</strong> MCQ sets")
+        if total_pyqs:
+            stats_parts.append(f"<strong>{total_pyqs}</strong> PYQ sets")
+        overview_parts.append(f'<p>Available resources: {", ".join(stats_parts)}.</p>')
 
     if chapters_docs:
-        overview_parts.append("<h2>Syllabus Structure</h2>")
+        overview_parts.append(f"<h2>{_t('Syllabus Structure', lang)}</h2>")
         overview_parts.append("<ol>")
         for ch in chapters_docs:
             ch_title = html_mod.escape(ch.get("title", ""))
@@ -4165,8 +4385,8 @@ async def get_subject_landing_html(
 
     topics_html_parts = []
     topics_html_parts.append(
-        "<h2>Topic-wise Previous Year Questions</h2>" if is_pyq
-        else "<h2>Topic-wise Study Material</h2>"
+        f"<h2>{_t('Topic-wise Previous Year Questions', lang)}</h2>" if is_pyq
+        else f"<h2>{_t('Topic-wise Study Material', lang)}</h2>"
     )
     for ch, ch_pages in by_chapter.items():
         topics_html_parts.append(f'<h3>{html_mod.escape(ch)}</h3><ul>')
@@ -4187,13 +4407,21 @@ async def get_subject_landing_html(
         topics_html_parts.append("</ul>")
     topics_html = "\n".join(topics_html_parts)
 
-    learning_outcomes = [
-        f"Understand core concepts of {subject_name} as prescribed in the {board_label} {class_label} syllabus",
-        f"Apply theoretical knowledge to solve exam-style problems and case studies",
-        f"Review previous year questions and understand marking patterns",
-        f"Build exam confidence through topic-wise MCQs and practice questions",
-    ]
-    lo_html = "<h2>Learning Outcomes</h2><ul class='lo-list'>" + "".join(f"<li>{html_mod.escape(lo)}</li>" for lo in learning_outcomes) + "</ul>"
+    if is_as:
+        learning_outcomes = [
+            f"{board_label} {class_label} পাঠ্যক্ৰমত নিৰ্ধাৰিত {subject_name}ৰ মূল ধাৰণাসমূহ বুজিব",
+            "তত্ত্বীয় জ্ঞান প্ৰয়োগ কৰি পৰীক্ষাৰ ধৰণৰ সমস্যা আৰু কেছ ষ্টাডি সমাধান কৰিব",
+            "বিগত বছৰৰ প্ৰশ্ন পৰ্যালোচনা কৰি মাৰ্কৰ আৰ্হি বুজিব",
+            "বিষয় অনুসৰি MCQ আৰু অনুশীলনৰ প্ৰশ্নৰে পৰীক্ষাৰ আত্মবিশ্বাস গঢ়িব",
+        ]
+    else:
+        learning_outcomes = [
+            f"Understand core concepts of {subject_name} as prescribed in the {board_label} {class_label} syllabus",
+            "Apply theoretical knowledge to solve exam-style problems and case studies",
+            "Review previous year questions and understand marking patterns",
+            "Build exam confidence through topic-wise MCQs and practice questions",
+        ]
+    lo_html = f"<h2>{_t('Learning Outcomes', lang)}</h2><ul class='lo-list'>" + "".join(f"<li>{html_mod.escape(lo)}</li>" for lo in learning_outcomes) + "</ul>"
 
     _item_suffix = "/important-questions" if is_pyq else ""
     items_ld = [
@@ -4210,7 +4438,7 @@ async def get_subject_landing_html(
         "provider": _ORG_NODE,
         "url": page_url,
         "educationalLevel": f"{board_label} {class_label}",
-        "inLanguage": "en-IN",
+        "inLanguage": _lattrs["in_language"],
         "isAccessibleForFree": True,
         "numberOfCredits": len(chapters_docs) or len(by_chapter),
         "hasCourseInstance": {
@@ -4236,6 +4464,7 @@ async def get_subject_landing_html(
         {"@type": "CollectionPage", "name": title, "description": desc, "url": page_url,
          "isPartOf": {"@type": "WebSite", "@id": "https://syrabit.ai", "name": "Syrabit.ai"},
          "provider": _ORG_NODE,
+         "inLanguage": _lattrs["in_language"],
          "spatialCoverage": _ASSAM_GEO,
          "audience": {"@type": "EducationalAudience", "educationalRole": "student",
                       "geographicArea": "Assam, India"},
@@ -4243,8 +4472,8 @@ async def get_subject_landing_html(
         course_node,
         {"@type": "ItemList", "itemListElement": items_ld},
         {"@type": "BreadcrumbList", "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://syrabit.ai"},
-            {"@type": "ListItem", "position": 2, "name": "Library", "item": "https://syrabit.ai/library"},
+            {"@type": "ListItem", "position": 1, "name": _t("Home", lang), "item": "https://syrabit.ai"},
+            {"@type": "ListItem", "position": 2, "name": _t("Library", lang), "item": "https://syrabit.ai/library"},
             {"@type": "ListItem", "position": 3, "name": subject_name, "item": page_url},
         ]},
     ]}, ensure_ascii=False)
@@ -4274,11 +4503,9 @@ async def get_subject_landing_html(
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:image" content="{f'https://syrabit.ai/api/content/subjects/{html_mod.escape(subject_id)}/og-image.png' if subject_id and (subject_doc.get('thumbnailUrl') or subject_doc.get('thumbnail_url')) else 'https://syrabit.ai/opengraph.jpg'}">
-<meta property="og:locale" content="en_IN">
-<meta http-equiv="content-language" content="en-IN">
-<link rel="alternate" hreflang="en-IN" href="{html_mod.escape(page_url)}">
-<link rel="alternate" hreflang="as-IN" href="{html_mod.escape(page_url)}{'&amp;' if '?' in page_url else '?'}lang=as">
-<link rel="alternate" hreflang="x-default" href="{html_mod.escape(page_url)}">
+<meta property="og:locale" content="{_lattrs['og_locale']}">
+<meta http-equiv="content-language" content="{_lattrs['content_language']}">
+{_hreflang_alt(page_url, lang)}
 <meta name="citation_title" content="{html_mod.escape(title)}">
 <meta name="citation_author" content="Syrabit.ai">
 <meta name="citation_publisher" content="Syrabit.ai">
@@ -4303,19 +4530,19 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 </head>
 <body>
 <nav aria-label="Breadcrumb">
-<a href="https://syrabit.ai">Home</a> &rsaquo;
-<a href="https://syrabit.ai/library">Library</a> &rsaquo;
+<a href="https://syrabit.ai">{_t("Home", lang)}</a> &rsaquo;
+<a href="https://syrabit.ai/library">{_t("Library", lang)}</a> &rsaquo;
 <span>{html_mod.escape(subject_name)}</span>
 </nav>
 <header>
 <h1>{html_mod.escape(subject_name)} — {html_mod.escape(board_label)} {html_mod.escape(class_label)}</h1>
 <p>{html_mod.escape(desc)}</p>
 <div class="stats-row">
-<span class="stat-badge">{len(chapters_docs) or len(by_chapter)} Chapters</span>
-<span class="stat-badge">{len(pages)} Topics</span>
-<span class="stat-badge">{total_notes} Notes</span>
-{"<span class='stat-badge'>" + str(total_mcqs) + " MCQ Sets</span>" if total_mcqs else ""}
-{"<span class='stat-badge'>" + str(total_pyqs) + " PYQ Sets</span>" if total_pyqs else ""}
+<span class="stat-badge">{len(chapters_docs) or len(by_chapter)} {_t("Chapters", lang)}</span>
+<span class="stat-badge">{len(pages)} {_t("Topics", lang)}</span>
+<span class="stat-badge">{total_notes} {_t("Notes", lang)}</span>
+{"<span class='stat-badge'>" + str(total_mcqs) + " " + _t("MCQ Sets", lang) + "</span>" if total_mcqs else ""}
+{"<span class='stat-badge'>" + str(total_pyqs) + " " + _t("PYQ Sets", lang) + "</span>" if total_pyqs else ""}
 </div>
 </header>
 <main>
@@ -4323,12 +4550,12 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 {lo_html}
 {topics_html}
 <section class="content-info">
-<h2>About This Study Guide</h2>
+<h2>{_t("About This Study Guide", lang)}</h2>
 <dl>
-<dt>Syllabus Source</dt><dd>{html_mod.escape(syllabus_source)}</dd>
-<dt>Board</dt><dd>{html_mod.escape(board_label)} — {html_mod.escape(class_label)}</dd>
-<dt>Editorial Process</dt><dd>Content is prepared by subject-matter contributors, cross-referenced with the official {html_mod.escape(board_label)} syllabus, and editorially reviewed for factual accuracy, exam relevance, and completeness.</dd>
-<dt>Publisher</dt><dd>Syrabit.ai — Academic content platform for Assam students</dd>
+<dt>{_t("Syllabus Source", lang)}</dt><dd>{html_mod.escape(syllabus_source)}</dd>
+<dt>{_t("Board", lang)}</dt><dd>{html_mod.escape(board_label)} — {html_mod.escape(class_label)}</dd>
+<dt>{_t("Editorial Process", lang)}</dt><dd>{"বিষয়ভিত্তিক অৱদানকাৰীয়ে বিষয়বস্তু প্ৰস্তুত কৰে, আনুষ্ঠানিক " + html_mod.escape(board_label) + " পাঠ্যক্ৰমৰ সৈতে মিলোৱা হয় আৰু তথ্যৰ সঠিকতা, পৰীক্ষাৰ প্ৰাসংগিকতা আৰু সম্পূৰ্ণতাৰ বাবে সম্পাদকীয়ভাৱে পৰ্যালোচনা কৰা হয়।" if is_as else "Content is prepared by subject-matter contributors, cross-referenced with the official " + html_mod.escape(board_label) + " syllabus, and editorially reviewed for factual accuracy, exam relevance, and completeness."}</dd>
+<dt>{_t("Publisher", lang)}</dt><dd>{"Syrabit.ai — অসমৰ ছাত্ৰ-ছাত্ৰীৰ বাবে শৈক্ষিক বিষয়বস্তু প্লেটফৰ্ম" if is_as else "Syrabit.ai — Academic content platform for Assam students"}</dd>
 </dl>
 </section>
 </main>
@@ -4362,7 +4589,7 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 
 
 @router.get("/html/{board}/{class_slug}/{subject_slug}/{topic_slug}", response_class=HTMLResponse)
-async def get_seo_html_default(board: str, class_slug: str, subject_slug: str, topic_slug: str):
+async def get_seo_html_default(board: str, class_slug: str, subject_slug: str, topic_slug: str, lang: Optional[str] = Query(None)):
     # D1-first read with Mongo fallback (no-op when D1_MIRROR_ON is off).
     async def _mongo_load_page():
         return await _db.seo_pages.find_one(
@@ -4395,7 +4622,7 @@ async def get_seo_html_default(board: str, class_slug: str, subject_slug: str, t
         _build_related_data(page, board, class_slug, subject_slug, topic_slug),
         _resolve_og_image(subject_slug),
     )
-    html_content = _render_seo_html(page, page_url, pt_links, related, prev_t, next_t, og_image_url=og_img)
+    html_content = _render_seo_html(page, page_url, pt_links, related, prev_t, next_t, og_image_url=og_img, lang=lang)
     kw_header = _build_expanded_keywords(
         page.get("topic_title", ""), page.get("subject_name", ""),
         page.get("board_name", ""), page.get("class_name", ""),
@@ -4446,6 +4673,7 @@ async def get_seo_html_default(board: str, class_slug: str, subject_slug: str, t
 )
 async def get_chapter_by_board_html(
     board: str, class_slug: str, subject_slug: str, chapter_slug: str,
+    lang: Optional[str] = Query(None),
 ):
     """Board-scoped chapter landing — delegates to the slug renderer
     after asserting the chapter actually belongs to the requested
@@ -4473,11 +4701,11 @@ async def get_chapter_by_board_html(
         or subj.get("slug") != subject_slug
     ):
         raise HTTPException(status_code=404, detail="Chapter chain mismatch")
-    return await get_chapter_by_slug_html(chapter_slug)
+    return await get_chapter_by_slug_html(chapter_slug, lang=lang)
 
 
 @router.get("/html/{board}/{class_slug}/{subject_slug}/{topic_slug}/{page_type}", response_class=HTMLResponse)
-async def get_seo_html_typed(board: str, class_slug: str, subject_slug: str, topic_slug: str, page_type: str):
+async def get_seo_html_typed(board: str, class_slug: str, subject_slug: str, topic_slug: str, page_type: str, lang: Optional[str] = Query(None)):
     if page_type not in ALL_PAGE_TYPES:
         raise HTTPException(status_code=404, detail="Invalid page type")
     page = await _db.seo_pages.find_one(
@@ -4494,7 +4722,7 @@ async def get_seo_html_typed(board: str, class_slug: str, subject_slug: str, top
         _build_related_data(page, board, class_slug, subject_slug, topic_slug),
         _resolve_og_image(subject_slug),
     )
-    html_content = _render_seo_html(page, page_url, pt_links, related, prev_t, next_t, og_image_url=og_img)
+    html_content = _render_seo_html(page, page_url, pt_links, related, prev_t, next_t, og_image_url=og_img, lang=lang)
     kw_header = _build_expanded_keywords(
         page.get("topic_title", ""), page.get("subject_name", ""),
         page.get("board_name", ""), page.get("class_name", ""),
@@ -8121,7 +8349,7 @@ async def _resolve_topic_chain(topic_slug: str) -> dict | None:
 
 
 @router.get("/html/topic/{topic_slug}", response_class=HTMLResponse)
-async def get_topic_by_slug_html(topic_slug: str):
+async def get_topic_by_slug_html(topic_slug: str, lang: Optional[str] = Query(None)):
     chain = await _resolve_topic_chain(topic_slug)
     if not chain:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -8130,30 +8358,33 @@ async def get_topic_by_slug_html(topic_slug: str):
     subj_slug = chain.get("subject_slug", "")
     if not (board and cls_slug and subj_slug):
         raise HTTPException(status_code=404, detail="Topic chain incomplete")
-    return await get_seo_html_default(board, cls_slug, subj_slug, topic_slug)
+    return await get_seo_html_default(board, cls_slug, subj_slug, topic_slug, lang=lang)
 
 
 @router.get("/html/chapter/{chapter_slug}", response_class=HTMLResponse)
-async def get_chapter_by_slug_html(chapter_slug: str):
+async def get_chapter_by_slug_html(chapter_slug: str, lang: Optional[str] = Query(None)):
     """Render a chapter landing page that lists every published topic
     in the chapter. This is a real chapter page — not a redirect to
     the subject landing — so /chapter/<slug> is independently
     indexable and emits its own ``syrabit-chapter-<slug>`` Cache-Tag."""
+    is_as = _is_as(lang)
+    _lattrs = _lang_attrs(lang)
     chap = await _db.chapters.find_one(
         {"slug": chapter_slug},
-        {"_id": 0, "id": 1, "slug": 1, "title": 1, "subject_id": 1, "description": 1},
+        {"_id": 0, "id": 1, "slug": 1, "title": 1, "title_as": 1,
+         "subject_id": 1, "description": 1, "description_as": 1},
     )
     if not chap:
         raise HTTPException(status_code=404, detail="Chapter not found")
     subj = await _db.subjects.find_one(
         {"id": chap.get("subject_id", "")},
-        {"_id": 0, "slug": 1, "name": 1, "class_id": 1, "board_id": 1},
+        {"_id": 0, "slug": 1, "name": 1, "name_as": 1, "class_id": 1, "board_id": 1},
     ) or {}
     cls = await _db.classes.find_one(
-        {"id": subj.get("class_id", "")}, {"_id": 0, "slug": 1, "name": 1},
+        {"id": subj.get("class_id", "")}, {"_id": 0, "slug": 1, "name": 1, "name_as": 1},
     ) if subj.get("class_id") else {}
     brd = await _db.boards.find_one(
-        {"id": subj.get("board_id", "")}, {"_id": 0, "slug": 1, "name": 1},
+        {"id": subj.get("board_id", "")}, {"_id": 0, "slug": 1, "name": 1, "name_as": 1},
     ) if subj.get("board_id") else {}
     board_slug = (brd or {}).get("slug", "")
     class_slug = (cls or {}).get("slug", "")
@@ -8168,16 +8399,21 @@ async def get_chapter_by_slug_html(chapter_slug: str):
             "chapter_slug": chap.get("slug", chapter_slug),
             "status": "published", "page_type": "notes",
         },
-        {"_id": 0, "topic_title": 1, "topic_slug": 1,
-         "meta_description": 1, "quality_score": 1},
+        {"_id": 0, "topic_title": 1, "topic_title_as": 1, "topic_slug": 1,
+         "meta_description": 1, "meta_description_as": 1, "quality_score": 1},
     ).to_list(500)
 
-    chapter_title = html_mod.escape(chap.get("title", chapter_slug))
-    subject_name = html_mod.escape(subj.get("name", subject_slug))
-    board_name = html_mod.escape((brd or {}).get("name", board_slug))
-    class_name = html_mod.escape((cls or {}).get("name", class_slug))
-    description = html_mod.escape(chap.get("description", "") or
-                                  f"Topics in {chap.get('title', chapter_slug)}.")
+    chapter_title = html_mod.escape(_localized(chap, "title", lang) or chap.get("title", chapter_slug))
+    subject_name = html_mod.escape(_localized(subj, "name", lang) or subj.get("name", subject_slug))
+    board_name = html_mod.escape(_localized(brd or {}, "name", lang) or (brd or {}).get("name", board_slug))
+    class_name = html_mod.escape(_localized(cls or {}, "name", lang) or (cls or {}).get("name", class_slug))
+    _desc_raw = _localized(chap, "description", lang) or chap.get("description", "")
+    if not _desc_raw:
+        _desc_raw = (
+            f"{chap.get('title', chapter_slug)}ৰ বিষয়সমূহ।" if is_as
+            else f"Topics in {chap.get('title', chapter_slug)}."
+        )
+    description = html_mod.escape(_desc_raw)
 
     page_url = f"https://syrabit.ai/chapter/{chapter_slug}"
     canonical = f"https://syrabit.ai/{board_slug}/{class_slug}/{subject_slug}"
@@ -8185,19 +8421,19 @@ async def get_chapter_by_slug_html(chapter_slug: str):
     items = []
     for t in sorted(pages, key=lambda p: -float(p.get("quality_score", 0))):
         ts = html_mod.escape(t.get("topic_slug", ""))
-        tt = html_mod.escape(t.get("topic_title", ""))
-        td = html_mod.escape(t.get("meta_description", ""))
+        tt = html_mod.escape(_localized(t, "topic_title", lang) or t.get("topic_title", ""))
+        td = html_mod.escape(_localized(t, "meta_description", lang) or t.get("meta_description", ""))
         items.append(
             f'<li><a href="/{board_slug}/{class_slug}/{subject_slug}/{ts}">'
             f'<strong>{tt}</strong></a><p>{td}</p></li>'
         )
-    items_html = "\n".join(items) or "<li>No topics published yet.</li>"
+    items_html = "\n".join(items) or f"<li>{_t('No topics published yet.', lang)}</li>"
 
     # Task #408 — every SSR family must emit BreadcrumbList JSON-LD so
     # the SSR-coverage probe can assert structured data on every match.
     bc_schema = json.dumps({"@context": "https://schema.org", "@graph": [
         {"@type": "BreadcrumbList", "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "Home",
+            {"@type": "ListItem", "position": 1, "name": _t("Home", lang),
              "item": "https://syrabit.ai"},
             {"@type": "ListItem", "position": 2, "name": board_name,
              "item": f"https://syrabit.ai/{board_slug}"},
@@ -8208,11 +8444,16 @@ async def get_chapter_by_slug_html(chapter_slug: str):
         ]},
         {"@type": "CollectionPage", "name": chapter_title,
          "description": description, "url": page_url,
+         "inLanguage": _lattrs["in_language"],
          "isPartOf": {"@type": "WebSite", "@id": "https://syrabit.ai",
                       "name": "Syrabit.ai"}},
     ]}, ensure_ascii=False)
 
-    html_out = f"""<!doctype html><html lang="en"><head>
+    _all_chap_label = (
+        f"{subject_name}ৰ সকলো অধ্যায়" if is_as
+        else f"All chapters in {subject_name}"
+    )
+    html_out = f"""<!doctype html><html lang="{_lattrs['html_lang']}"><head>
 <meta charset="utf-8"/>
 <title>{chapter_title} — {subject_name} ({board_name} {class_name}) | Syrabit</title>
 <meta name="description" content="{description}"/>
@@ -8220,10 +8461,13 @@ async def get_chapter_by_slug_html(chapter_slug: str):
 <meta property="og:title" content="{chapter_title} — {subject_name}"/>
 <meta property="og:url" content="{page_url}"/>
 <meta property="og:type" content="article"/>
+<meta property="og:locale" content="{_lattrs['og_locale']}"/>
+<meta http-equiv="content-language" content="{_lattrs['content_language']}"/>
+{_hreflang_alt(page_url, lang)}
 <script type="application/ld+json">{bc_schema}</script>
 </head><body>
 <nav aria-label="Breadcrumb">
-<a href="https://syrabit.ai">Home</a> &rsaquo;
+<a href="https://syrabit.ai">{_t("Home", lang)}</a> &rsaquo;
 <a href="{canonical}">{subject_name}</a> &rsaquo;
 <span>{chapter_title}</span>
 </nav>
@@ -8231,10 +8475,10 @@ async def get_chapter_by_slug_html(chapter_slug: str):
 <p>{subject_name} · {board_name} {class_name}</p></header>
 <main>
 <p>{description}</p>
-<h2>Topics in this chapter</h2>
+<h2>{_t("Topics in this chapter", lang)}</h2>
 <ol>{items_html}</ol>
 </main>
-<footer><p><a href="{canonical}">All chapters in {subject_name}</a></p></footer>
+<footer><p><a href="{canonical}">{_all_chap_label}</a></p></footer>
 </body></html>"""
 
     resp = HTMLResponse(content=html_out)
@@ -8261,18 +8505,23 @@ async def get_chapter_by_slug_html(chapter_slug: str):
 
 
 @router.get("/html/pyq/{year}/{paper}", response_class=HTMLResponse)
-async def get_pyq_year_paper_html(year: int, paper: str):
+async def get_pyq_year_paper_html(year: int, paper: str, lang: Optional[str] = Query(None)):
     """Year + paper-type PYQ landing — lists every PYQ paper that
     matches (e.g. ``/pyq/2024/major``). Independent SSR family so
     the URL is indexable on its own and emits a dedicated
     ``syrabit-pyq-<year>-<paper>`` Cache-Tag."""
+    is_as = _is_as(lang)
+    _lattrs = _lang_attrs(lang)
     paper_slug = (paper or "").strip().lower()
     if not (1900 < int(year) < 2100) or not paper_slug:
         raise HTTPException(status_code=404, detail="Invalid PYQ year/paper")
     docs = await _db.pyq_html_pages.find(
         {"exam_year": int(year), "paper_type": paper_slug},
-        {"_id": 0, "slug": 1, "title": 1, "subject_name": 1,
-         "board_name": 1, "exam_title": 1, "meta_description": 1},
+        {"_id": 0, "slug": 1, "title": 1, "title_as": 1,
+         "subject_name": 1, "subject_name_as": 1,
+         "board_name": 1, "board_name_as": 1,
+         "exam_title": 1, "exam_title_as": 1,
+         "meta_description": 1, "meta_description_as": 1},
     ).sort("subject_name", 1).to_list(500)
 
     py = html_mod.escape(str(year))
@@ -8281,38 +8530,60 @@ async def get_pyq_year_paper_html(year: int, paper: str):
     items = []
     for d in docs:
         slug = html_mod.escape(d.get("slug", ""))
-        title = html_mod.escape(d.get("title") or d.get("exam_title") or slug)
-        subj = html_mod.escape(d.get("subject_name", ""))
-        board = html_mod.escape(d.get("board_name", ""))
-        desc = html_mod.escape(d.get("meta_description", ""))
+        _t_raw = (
+            _localized(d, "title", lang)
+            or _localized(d, "exam_title", lang)
+            or d.get("title")
+            or d.get("exam_title")
+            or slug
+        )
+        title = html_mod.escape(_t_raw)
+        subj = html_mod.escape(_localized(d, "subject_name", lang) or d.get("subject_name", ""))
+        board = html_mod.escape(_localized(d, "board_name", lang) or d.get("board_name", ""))
+        desc = html_mod.escape(_localized(d, "meta_description", lang) or d.get("meta_description", ""))
         items.append(
             f'<li><a href="/pyq/{slug}"><strong>{title}</strong></a>'
             f' — {subj} ({board})<p>{desc}</p></li>'
         )
-    items_html = "\n".join(items) or "<li>No PYQ papers indexed yet.</li>"
-    title = f"{py} {pp} Previous Year Question Papers | Syrabit"
-    desc = (f"All {pp} previous year question papers from {py} indexed by "
-            "Syrabit — AHSEC, SEBA, CBSE and university board papers.")
+    items_html = "\n".join(items) or f"<li>{_t('No PYQ papers indexed yet.', lang)}</li>"
+    if is_as:
+        title = f"{py} {pp} বিগত বছৰৰ প্ৰশ্ন পত্ৰ | Syrabit"
+        desc = (
+            f"Syrabit-এ অন্তৰ্ভুক্ত কৰা {py} চনৰ সকলো {pp} বিগত বছৰৰ "
+            "প্ৰশ্ন পত্ৰ — AHSEC, SEBA, CBSE আৰু বিশ্ববিদ্যালয়ৰ বৰ্ডৰ পত্ৰসমূহ।"
+        )
+    else:
+        title = f"{py} {pp} Previous Year Question Papers | Syrabit"
+        desc = (f"All {pp} previous year question papers from {py} indexed by "
+                "Syrabit — AHSEC, SEBA, CBSE and university board papers.")
 
     # Task #408 — BreadcrumbList JSON-LD so the PYQ year+paper family
     # carries the same structured-data contract as the topic / chapter
     # families (the SSR-coverage probe asserts this on every match).
     bc_schema = json.dumps({"@context": "https://schema.org", "@graph": [
         {"@type": "BreadcrumbList", "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "Home",
+            {"@type": "ListItem", "position": 1, "name": _t("Home", lang),
              "item": "https://syrabit.ai"},
-            {"@type": "ListItem", "position": 2, "name": "PYQ",
+            {"@type": "ListItem", "position": 2, "name": _t("PYQ", lang),
              "item": "https://syrabit.ai/pyq"},
             {"@type": "ListItem", "position": 3, "name": f"{py} {pp}",
              "item": page_url},
         ]},
         {"@type": "CollectionPage", "name": title, "description": desc,
-         "url": page_url,
+         "url": page_url, "inLanguage": _lattrs["in_language"],
          "isPartOf": {"@type": "WebSite", "@id": "https://syrabit.ai",
                       "name": "Syrabit.ai"}},
     ]}, ensure_ascii=False)
 
-    html_out = f"""<!doctype html><html lang="en"><head>
+    _papers_heading = (
+        f"{py} {pp} {_t('PYQ Papers', lang)}" if is_as
+        else f"{py} {pp} PYQ Papers"
+    )
+    _count_line = (
+        f"{len(docs)}টা পত্ৰ অন্তৰ্ভুক্ত কৰা হৈছে।" if is_as
+        else f"{len(docs)} paper(s) indexed."
+    )
+    html_out = f"""<!doctype html><html lang="{_lattrs['html_lang']}"><head>
 <meta charset="utf-8"/>
 <title>{title}</title>
 <meta name="description" content="{desc}"/>
@@ -8320,15 +8591,18 @@ async def get_pyq_year_paper_html(year: int, paper: str):
 <meta property="og:title" content="{title}"/>
 <meta property="og:url" content="{page_url}"/>
 <meta property="og:type" content="website"/>
+<meta property="og:locale" content="{_lattrs['og_locale']}"/>
+<meta http-equiv="content-language" content="{_lattrs['content_language']}"/>
+{_hreflang_alt(page_url, lang)}
 <script type="application/ld+json">{bc_schema}</script>
 </head><body>
 <nav aria-label="Breadcrumb">
-<a href="https://syrabit.ai">Home</a> &rsaquo;
-<a href="https://syrabit.ai/pyq">PYQ</a> &rsaquo;
+<a href="https://syrabit.ai">{_t("Home", lang)}</a> &rsaquo;
+<a href="https://syrabit.ai/pyq">{_t("PYQ", lang)}</a> &rsaquo;
 <span>{py} {pp}</span>
 </nav>
-<header><h1>{py} {pp} PYQ Papers</h1>
-<p>{len(docs)} paper(s) indexed.</p></header>
+<header><h1>{_papers_heading}</h1>
+<p>{_count_line}</p></header>
 <main><ol>{items_html}</ol></main>
 </body></html>"""
     resp = HTMLResponse(content=html_out)
@@ -8347,7 +8621,7 @@ async def get_pyq_year_paper_html(year: int, paper: str):
 
 
 @router.get("/html/subject/{subject_slug}", response_class=HTMLResponse)
-async def get_subject_by_slug_html(subject_slug: str):
+async def get_subject_by_slug_html(subject_slug: str, lang: Optional[str] = Query(None)):
     subj = await _db.subjects.find_one(
         {"slug": subject_slug, "status": "published"},
         {"_id": 0, "id": 1, "class_id": 1, "board_id": 1},
@@ -8364,4 +8638,4 @@ async def get_subject_by_slug_html(subject_slug: str):
     cls_slug = (cls or {}).get("slug", "")
     if not (board and cls_slug):
         raise HTTPException(status_code=404, detail="Subject chain incomplete")
-    return await get_subject_landing_html(board, cls_slug, subject_slug)
+    return await get_subject_landing_html(board, cls_slug, subject_slug, lang=lang)
