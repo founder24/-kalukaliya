@@ -46,7 +46,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from auth_deps import get_current_user, get_current_user_optional, check_rate_limit, get_user_credits
-from db_dualwrite import mirror_edu_notes_write
+from db_dualwrite import mirror_edu_flashcards_write, mirror_edu_notes_write
 from llm import call_llm_api, _call_vertex_chat
 from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
@@ -2213,6 +2213,71 @@ def _flashcard_row_to_dict(row) -> dict:
     }
 
 
+def _flashcard_doc_for_mongo(
+    *, card_id: str, kind: str, actor: str, note_id: str,
+    front: str, back: str, now_utc: datetime,
+) -> dict:
+    """Construct a Mongo doc for an edu_flashcards INSERT.
+
+    ADR-0001 §50 — greenfield collection. Composite key is
+    ``{actor_kind, actor, id}``; ``id`` is kept as a plain field (not
+    Mongo's reserved ``_id``) to match the users / conversations /
+    edu_notes rollout pattern.
+
+    The PG INSERT uses ``DEFAULT 2.5`` / ``0`` / ``NOW()`` for the SM-2
+    state columns; we replicate those defaults client-side rather than
+    round-tripping a ``RETURNING *`` because:
+      1. The build endpoint fans out up to ~2.4 k inserts per request
+         and ``execute`` (no return) is materially faster than
+         ``fetchrow``.
+      2. Sub-millisecond clock skew between PG ``NOW()`` and
+         ``datetime.now(timezone.utc)`` is irrelevant for SR scheduling
+         (intervals are measured in days).
+      3. Phase 3 read-shadow will detect any drift > 0.1 % anyway.
+    """
+    return {
+        "id": card_id,
+        "actor_kind": kind,
+        "actor": actor,
+        "note_id": note_id,
+        "front": front,
+        "back": back,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "due_at": now_utc,
+        "last_reviewed": None,
+        "claimed_at": None,
+        "created_at": now_utc,
+    }
+
+
+def _flashcard_row_for_mongo(row) -> dict:
+    """Convert an asyncpg edu_flashcards Record (post-review UPDATE
+    with ``RETURNING *``) into a Mongo doc.
+
+    All edu_flashcards columns are scalar types — no JSONB normalisation
+    needed. We still defensively copy timestamps as native datetimes
+    (asyncpg already does this) so future Phase-3 read-shadow diffs
+    aren't tripped by string-vs-datetime noise.
+    """
+    return {
+        "id": row["id"],
+        "actor_kind": row["actor_kind"],
+        "actor": row["actor"],
+        "note_id": row["note_id"],
+        "front": row["front"],
+        "back": row["back"],
+        "ef": float(row["ef"]),
+        "interval_days": int(row["interval_days"]),
+        "repetitions": int(row["repetitions"]),
+        "due_at": row["due_at"],
+        "last_reviewed": row["last_reviewed"],
+        "claimed_at": row["claimed_at"] if "claimed_at" in row.keys() else None,
+        "created_at": row["created_at"],
+    }
+
+
 def _split_front_back(text: str) -> tuple[str, str]:
     """Heuristic: turn a note into (front, back). Definition lines like
     `X — Y` or `X: Y` give a Q/A split; otherwise we make a cloze-style
@@ -2231,6 +2296,12 @@ async def build_flashcards(req: CardBuildReq, request: Request,
                            user=Depends(get_current_user_optional)):
     await _ensure_schema()
     kind, actor = _actor(request, user)
+    # ADR-0001 Phase 2: collect Mongo docs for every PG INSERT and bulk-
+    # mirror them in one ``insert_many`` after the PG block exits. This
+    # avoids a serial mirror round-trip per card (build can fan-out
+    # ≤2.4 k cards per request).
+    _mongo_docs: list[dict] = []
+    _now_utc = datetime.now(timezone.utc)
     async with deps.pg_pool.acquire() as conn:
         if req.note_ids:
             rows = await conn.fetch(
@@ -2271,12 +2342,17 @@ async def build_flashcards(req: CardBuildReq, request: Request,
                     q = str(qa_item.get("q") or "").strip()[:400]
                     a = str(qa_item.get("a") or "").strip()[:800]
                     if q and a:
+                        _cid = str(uuid.uuid4())
                         await conn.execute(
                             """INSERT INTO edu_flashcards (id, actor_kind, actor, note_id,
                                    front, back, due_at)
                                VALUES ($1,$2,$3,$4,$5,$6,NOW())""",
-                            str(uuid.uuid4()), kind, actor, note_id, q, a,
+                            _cid, kind, actor, note_id, q, a,
                         )
+                        _mongo_docs.append(_flashcard_doc_for_mongo(
+                            card_id=_cid, kind=kind, actor=actor,
+                            note_id=note_id, front=q, back=a, now_utc=_now_utc,
+                        ))
                         created += 1
 
                 # Mnemonic cards — front = "Mnemonic for <topic>?", back = phrase + explanation
@@ -2290,23 +2366,44 @@ async def build_flashcards(req: CardBuildReq, request: Request,
                         if explanation:
                             back_mn += f"\n\n{explanation}"
                         back_mn = back_mn[:800]
+                        _cid = str(uuid.uuid4())
                         await conn.execute(
                             """INSERT INTO edu_flashcards (id, actor_kind, actor, note_id,
                                    front, back, due_at)
                                VALUES ($1,$2,$3,$4,$5,$6,NOW())""",
-                            str(uuid.uuid4()), kind, actor, note_id, front_mn, back_mn,
+                            _cid, kind, actor, note_id, front_mn, back_mn,
                         )
+                        _mongo_docs.append(_flashcard_doc_for_mongo(
+                            card_id=_cid, kind=kind, actor=actor,
+                            note_id=note_id, front=front_mn, back=back_mn,
+                            now_utc=_now_utc,
+                        ))
                         created += 1
             else:
                 # Manual highlight notes: split the raw text heuristically.
                 front, back = _split_front_back(n["text"])
+                _cid = str(uuid.uuid4())
                 await conn.execute(
                     """INSERT INTO edu_flashcards (id, actor_kind, actor, note_id,
                            front, back, due_at)
                        VALUES ($1,$2,$3,$4,$5,$6,NOW())""",
-                    str(uuid.uuid4()), kind, actor, note_id, front, back,
+                    _cid, kind, actor, note_id, front, back,
                 )
+                _mongo_docs.append(_flashcard_doc_for_mongo(
+                    card_id=_cid, kind=kind, actor=actor, note_id=note_id,
+                    front=front, back=back, now_utc=_now_utc,
+                ))
                 created += 1
+    # ADR-0001 Phase 2: bulk-mirror every freshly-inserted card to Mongo
+    # in one round-trip (best-effort; PG is SoT). Fired AFTER the PG
+    # block exits so the connection is released first. Skip when the
+    # build produced zero cards (no notes / all corrupt JSON).
+    if _mongo_docs:
+        _docs = _mongo_docs
+        await mirror_edu_flashcards_write(
+            "build_bulk",
+            lambda: deps.db.edu_flashcards.insert_many(_docs, ordered=False),
+        )
     return {"ok": True, "created": created}
 
 
@@ -2377,6 +2474,25 @@ async def review_flashcard(req: CardReviewReq, request: Request,
                WHERE id=$5 RETURNING *""",
             ef, reps, interval, due_at, req.card_id,
         )
+    # ADR-0001 Phase 2: mirror the SM-2-updated card to Mongo via
+    # replace_one(upsert=True). Greenfield-safe — pre-Phase-2 PG cards
+    # have no Mongo twin yet, so an update_one $set would silently
+    # no-op; upsert lets the first review materialise the doc. Filter
+    # is scoped to {id, actor_kind, actor} per architect-hardening
+    # pattern from edu_notes.
+    _mongo_doc = _flashcard_row_for_mongo(updated)
+    _cid = req.card_id
+    _kind = kind
+    _actor = actor
+    await mirror_edu_flashcards_write(
+        "review",
+        lambda: deps.db.edu_flashcards.replace_one(
+            {"id": _cid, "actor_kind": _kind, "actor": _actor},
+            _mongo_doc,
+            upsert=True,
+        ),
+    )
+    async with deps.pg_pool.acquire() as conn:
         # Streak update
         today = date.today()
         s = await conn.fetchrow(
@@ -2704,13 +2820,27 @@ async def claim_anon_data(request: Request, user=Depends(get_current_user)):
     # committed (we are outside both ``async with`` blocks here), so a
     # rollback on the PG side cannot leave a phantom Mongo write. Skip
     # when PG moved zero rows to keep the counter honest about real work.
+    _anon = anon
+    _uid = user_id
+    _claimed_at = datetime.now(timezone.utc)
     if notes_count > 0:
-        _anon = anon
-        _uid = user_id
-        _claimed_at = datetime.now(timezone.utc)
         await mirror_edu_notes_write(
             "claim_bulk",
             lambda: deps.db.edu_notes.update_many(
+                {"actor_kind": "anon", "actor": _anon},
+                {"$set": {
+                    "actor_kind": "user",
+                    "actor": _uid,
+                    "claimed_at": _claimed_at,
+                }},
+            ),
+        )
+    # ADR-0001 Phase 2 (edu_flashcards): same post-transaction mirror
+    # pattern. Gated on cards_count > 0 to keep the counter honest.
+    if cards_count > 0:
+        await mirror_edu_flashcards_write(
+            "claim_bulk",
+            lambda: deps.db.edu_flashcards.update_many(
                 {"actor_kind": "anon", "actor": _anon},
                 {"$set": {
                     "actor_kind": "user",

@@ -125,6 +125,38 @@ print('V4 §13 acceptance: PASS')
 
 - **2026-05-06**: ADR proposed (Phase 1 of V4 §13). Awaiting approval
   before opening Phase 2 dual-write PRs.
+- **2026-05-06**: **Phase 2 (edu_flashcards collection) merged.** Greenfield
+  Mongo target per §50; FK child of edu_notes (one note → many cards via
+  SM-2 spaced-repetition expansion). Added `mirror_edu_flashcards_write()`
+  shim and `_FLAG_NAME_OVERRIDES["edu_flashcards"] = "EDU_FLASHCARD"`
+  (rollback flag `MONGO_EDU_FLASHCARD_WRITES`). Wired all 5 PG write
+  sites in `routes/edu_study.py`: (1-3) the three INSERT branches in
+  `build_flashcards` (Q&A pairs, mnemonics, manual-highlight split) are
+  collected into a single `_mongo_docs` list and bulk-mirrored as one
+  `insert_many(..., ordered=False)` AFTER the `async with deps.pg_pool.acquire()`
+  block exits — amortising the ≤2.4 k-card fan-out (≤12 cards/note × 200
+  notes) into one Mongo round-trip and releasing the PG conn first;
+  (4) `review_flashcard` SM-2 UPDATE → `replace_one({id, actor_kind, actor},
+  _flashcard_row_for_mongo(updated), upsert=True)` (greenfield-safe; the
+  PG `async with` was split so the mirror runs between the UPDATE and
+  the streak-update block, freeing the PG conn during the Mongo
+  round-trip); (5) `claim_anon_data` bulk reassign → `update_many(
+  {actor_kind:"anon", actor:_anon}, {$set:{actor_kind:"user", actor:_uid,
+  claimed_at:_claimed_at}})` placed in the same post-transaction block
+  as the edu_notes claim mirror, gated on `cards_count > 0` so the
+  counter only increments when PG actually moved rows. Two new helpers:
+  `_flashcard_doc_for_mongo()` constructs the INSERT-side doc from the
+  parameters we passed PG (replicates `DEFAULT 2.5 / 0 / NOW()` SM-2
+  state client-side rather than round-tripping `RETURNING *` because
+  `execute` is materially faster for the bulk-insert hot path; clock
+  skew vs PG `NOW()` is sub-ms and irrelevant for day-granularity
+  scheduling); `_flashcard_row_for_mongo()` converts the post-review
+  `RETURNING *` Record into a Mongo doc (no JSONB columns to normalise).
+  Test suite grew 21 → 26 (5 new edu_flashcards cases — env-flag name,
+  default enabled, per-collection isolation across users + conversations
+  + edu_notes + edu_flashcards, bulk insert_many success counter,
+  swallows-exception). `routes/edu_study.py` import line updated to
+  `from db_dualwrite import mirror_edu_flashcards_write, mirror_edu_notes_write`.
 - **2026-05-06**: **Phase 2 (edu_notes collection) merged.** Greenfield
   Mongo target per §50; added `mirror_edu_notes_write()` shim and
   `_FLAG_NAME_OVERRIDES["edu_notes"] = "EDU_NOTE"` so the rollback flag

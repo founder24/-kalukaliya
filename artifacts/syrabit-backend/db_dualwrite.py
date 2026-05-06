@@ -21,7 +21,12 @@ Per-collection rollout (Phase 2):
 - ``conversations`` ....... SHIPPED 2026-05-06
 - ``edu_notes`` ........... SHIPPED 2026-05-06 (greenfield Mongo target;
   see ADR-0001 §50 — five PG write sites in ``routes/edu_study.py``).
-- 7 remaining collections . NOT STARTED — separate sessions per the
+- ``edu_flashcards`` ...... SHIPPED 2026-05-06 (greenfield; FK child
+  of edu_notes; 5 PG write sites in ``routes/edu_study.py`` —
+  build_flashcards uses bulk ``insert_many`` to amortise the
+  ≤2.4 k-card fan-out, review uses ``replace_one(upsert=True)``,
+  claim mirror fires post-transaction with ``cards_count > 0`` gate).
+- 6 remaining collections . NOT STARTED — separate sessions per the
   ADR's per-table contract.
 
 Carve-outs (do NOT migrate to this helper):
@@ -56,6 +61,7 @@ _FLAG_NAME_OVERRIDES: dict[str, str] = {
     "users": "USER",
     "conversations": "CONVERSATION",
     "edu_notes": "EDU_NOTE",
+    "edu_flashcards": "EDU_FLASHCARD",
 }
 
 
@@ -207,3 +213,22 @@ async def mirror_edu_notes_write(
     until Phase 4 cutover, so every mirror miss is safe.
     """
     await mirror_collection_write("edu_notes", op_label, fn)
+
+
+async def mirror_edu_flashcards_write(
+    op_label: str,
+    fn: Callable[[], Awaitable[Any]],
+) -> None:
+    """Mirror a write to the ``edu_flashcards`` collection (best-effort).
+
+    Greenfield collection per ADR-0001 §50 — Phase 2 starts populating
+    Mongo on every PG flashcard write, but PG remains read-of-record
+    until Phase 4 cutover. Rollback flag: ``MONGO_EDU_FLASHCARD_WRITES=0``.
+
+    edu_flashcards is the FK child of edu_notes (one note → many cards
+    via SM-2 spaced-repetition expansion). The build endpoint can
+    fan-out up to ~12 cards per note × 200 notes = 2.4 k inserts in a
+    single request, so callers should batch into ``insert_many`` rather
+    than per-card mirror calls to avoid serial round-trip latency.
+    """
+    await mirror_collection_write("edu_flashcards", op_label, fn)

@@ -287,6 +287,83 @@ def test_edu_notes_mirror_success_increments_namespaced_counter(
     assert counters.get("conversations.success", 0) == 0
 
 
+# ── edu_flashcards collection (fourth Phase 2 rollout) ──
+
+@pytest.fixture
+def fake_edu_flashcards_db(monkeypatch, fresh_module):
+    import deps
+    fake = MagicMock()
+    fake.edu_flashcards = MagicMock()
+    fake.edu_flashcards.insert_many = AsyncMock(return_value=None)
+    fake.edu_flashcards.replace_one = AsyncMock(return_value=None)
+    fake.edu_flashcards.update_many = AsyncMock(return_value=None)
+    monkeypatch.setattr(deps, "db", fake)
+    return fake
+
+
+def test_edu_flashcards_flag_env_name(fresh_module):
+    """edu_flashcards must use MONGO_EDU_FLASHCARD_WRITES (singular)."""
+    assert fresh_module._flag_env_for("edu_flashcards") == "MONGO_EDU_FLASHCARD_WRITES"
+
+
+def test_edu_flashcards_flag_default_enabled(fresh_module):
+    assert fresh_module.mongo_collection_writes_enabled("edu_flashcards") is True
+
+
+def test_edu_flashcards_flag_disable_independent(reset_env, fresh_module):
+    reset_env.setenv("MONGO_EDU_FLASHCARD_WRITES", "0")
+    assert fresh_module.mongo_collection_writes_enabled("edu_flashcards") is False
+    # Sibling collections must NOT be affected.
+    assert fresh_module.mongo_collection_writes_enabled("users") is True
+    assert fresh_module.mongo_collection_writes_enabled("conversations") is True
+    assert fresh_module.mongo_collection_writes_enabled("edu_notes") is True
+
+
+def test_edu_flashcards_bulk_insert_success(
+    fresh_module, fake_edu_flashcards_db
+):
+    """Mirror an insert_many bulk build (the build_flashcards hot path)."""
+    docs = [
+        {"id": f"c{i}", "actor_kind": "user", "actor": "u1",
+         "front": f"q{i}", "back": f"a{i}"}
+        for i in range(3)
+    ]
+
+    async def go():
+        await fresh_module.mirror_edu_flashcards_write(
+            "build_bulk",
+            lambda: fake_edu_flashcards_db.edu_flashcards.insert_many(
+                docs, ordered=False
+            ),
+        )
+    _run(go())
+    fake_edu_flashcards_db.edu_flashcards.insert_many.assert_awaited_once()
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_flashcards.success"] == 1
+    assert counters["edu_flashcards.fail"] == 0
+    # Sibling counters untouched.
+    assert counters.get("edu_notes.success", 0) == 0
+
+
+def test_edu_flashcards_mirror_swallows_exception(
+    fresh_module, fake_edu_flashcards_db
+):
+    fake_edu_flashcards_db.edu_flashcards.replace_one.side_effect = (
+        RuntimeError("boom")
+    )
+
+    async def go():
+        await fresh_module.mirror_edu_flashcards_write(
+            "review",
+            lambda: fake_edu_flashcards_db.edu_flashcards.replace_one(
+                {"id": "c1"}, {"id": "c1", "ef": 2.6}, upsert=True,
+            ),
+        )
+    _run(go())  # must NOT raise
+    counters = fresh_module.get_dualwrite_counters()
+    assert counters["edu_flashcards.fail"] == 1
+
+
 def test_edu_notes_mirror_swallows_exception(fresh_module, fake_edu_notes_db):
     fake_edu_notes_db.edu_notes.update_many.side_effect = RuntimeError("boom")
 
