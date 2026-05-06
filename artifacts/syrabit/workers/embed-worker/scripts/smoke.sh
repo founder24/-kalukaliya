@@ -86,23 +86,37 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$host/embed" \
 [[ "$code" == "401" ]] || fail "unauth /embed returned $code (want 401)"
 pass "401 enforced"
 
-# 4. POST /embed with auth — must return 1024-long vectors.
+# 4. POST /embed with auth — must return 1024-long vectors AND a
+#    model_version that (a) is non-empty, (b) matches the version /health
+#    + /version reported, and (c) carries the env-appropriate suffix
+#    (i.e. ends with `-staging` on staging). The suffix check is the
+#    canary that catches the "we accidentally promoted prod's worker
+#    code under the staging route" failure mode — without it a bad
+#    staging build could still pass CI (Task #437 review).
 echo "[4/4] POST /embed (authed, expect 1024-dim vectors)"
 body='{"texts":["the mitochondria is the powerhouse of the cell","photosynthesis"]}'
 resp="$(curl -fsS -X POST "$host/embed" \
         -H 'content-type: application/json' \
         -H "X-Embed-Secret: $secret" \
         -d "$body")"
+EXPECT_SUFFIX="$expect_version_suffix" HEALTH_VERSION="$version" \
 python3 - <<PY
-import json, sys
+import json, os, sys
 d = json.loads('''$resp''')
 v = d["vectors"]
 assert d["dims"] == 1024, f"dims={d['dims']} want 1024"
 assert d["count"] == 2, f"count={d['count']} want 2"
 assert len(v) == 2 and all(len(x) == 1024 for x in v), \
     f"vector lengths={[len(x) for x in v]} want [1024,1024]"
-assert d["model_version"], "model_version empty"
-print(f"  ok  — count=2, each vector len=1024, model_version={d['model_version']}")
+mv = d.get("model_version") or ""
+assert mv, "model_version empty"
+hv = os.environ.get("HEALTH_VERSION", "")
+assert mv == hv, f"/embed model_version={mv!r} disagrees with /health version={hv!r}"
+suffix = os.environ.get("EXPECT_SUFFIX", "")
+if suffix:
+    assert mv.endswith(suffix), \
+        f"/embed model_version={mv!r} missing required suffix {suffix!r} — wrong worker answered?"
+print(f"  ok  — count=2, each vector len=1024, model_version={mv}")
 PY
 
 echo
