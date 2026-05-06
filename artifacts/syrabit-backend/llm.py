@@ -1410,115 +1410,6 @@ def _handle_cf_gateway_auth_error(exc: Exception) -> None:
 # no longer a chat / vision / translate / embed provider. The only remaining
 # Vertex surface is `vertex_format.format_with_vertex` (NotebookLM-style
 # polish) which `polish_notes_with_vertex` delegates to.
-async def _DELETED_VERTEX_BODY_ARCHIVE_FOR_GIT_BLAME_ONLY(messages: list, model: str, max_tokens: int) -> str:
-    """STUB — original body retained below this guard for git-blame archaeology."""
-    from google.oauth2 import service_account
-    from google.auth.transport.requests import Request as _GAuthReq
-    import httpx as _httpx
-    import base64 as _b64
-    import re as _re_local
-
-    if "creds" not in _VERTEX_CHAT_CACHE:
-        sa_raw = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
-        if not sa_raw:
-            raise RuntimeError("vertex: GOOGLE_APPLICATION_CREDENTIALS_JSON not set")
-        sa_info = json.loads(sa_raw)
-        creds = service_account.Credentials.from_service_account_info(
-            sa_info, scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        _VERTEX_CHAT_CACHE["creds"]   = creds
-        _VERTEX_CHAT_CACHE["project"] = (
-            os.environ.get("GCP_PROJECT_ID")
-            or os.environ.get("GOOGLE_CLOUD_PROJECT")
-            or os.environ.get("VERTEX_PROJECT_ID")
-            or sa_info.get("project_id")
-        )
-    creds   = _VERTEX_CHAT_CACHE["creds"]
-    project = _VERTEX_CHAT_CACHE["project"]
-    if not project:
-        raise RuntimeError("vertex: project_id missing from SA JSON / env")
-    if not creds.valid:
-        await asyncio.to_thread(creds.refresh, _GAuthReq())
-
-    location = os.environ.get("VERTEX_LOCATION", "us-central1").strip() or "us-central1"
-    url = (f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
-           f"/locations/{location}/publishers/google/models/{model}:generateContent")
-
-    def _parts_for(content) -> list:
-        """OpenAI-style content (str | list[part]) → Vertex parts list."""
-        if isinstance(content, str):
-            return [{"text": content}] if content else []
-        out: list = []
-        if not isinstance(content, list):
-            return out
-        for p in content:
-            if not isinstance(p, dict):
-                continue
-            ptype = p.get("type")
-            if ptype == "text":
-                t = p.get("text", "")
-                if t:
-                    out.append({"text": t})
-            elif ptype == "image_url":
-                url_obj = p.get("image_url") or {}
-                src = url_obj.get("url") if isinstance(url_obj, dict) else url_obj
-                if not isinstance(src, str):
-                    continue
-                m = _re_local.match(r"^data:([^;]+);base64,(.+)$", src)
-                if m:
-                    out.append({"inlineData": {"mimeType": m.group(1), "data": m.group(2)}})
-                else:  # remote URL — Vertex prefers fileData with gs:// or https:// (Cloud Storage)
-                    out.append({"fileData": {"mimeType": "image/jpeg", "fileUri": src}})
-            elif ptype == "input_audio":  # passthrough for completeness
-                audio = p.get("input_audio") or {}
-                data = audio.get("data") if isinstance(audio, dict) else None
-                fmt  = audio.get("format", "wav") if isinstance(audio, dict) else "wav"
-                if data:
-                    out.append({"inlineData": {"mimeType": f"audio/{fmt}", "data": data}})
-        return out
-
-    # Convert OpenAI-style messages → Vertex contents + systemInstruction
-    sys_parts: list = []
-    contents: list  = []
-    for m in messages:
-        role = (m.get("role") or "user").lower()
-        parts = _parts_for(m.get("content"))
-        if not parts:
-            continue
-        if role == "system":
-            # systemInstruction takes only text parts; flatten any inline parts
-            # to text where possible (multimodal in system role is unusual).
-            sys_parts.extend([p for p in parts if "text" in p])
-        elif role == "assistant":
-            contents.append({"role": "model", "parts": parts})
-        else:
-            contents.append({"role": "user", "parts": parts})
-    if not contents:
-        contents = [{"role": "user", "parts": [{"text": ""}]}]
-
-    payload: dict = {
-        "contents": contents,
-        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.1},
-    }
-    if sys_parts:
-        payload["systemInstruction"] = {"parts": sys_parts}
-
-    async with _httpx.AsyncClient(timeout=30) as c:
-        r = await c.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {creds.token}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-    r.raise_for_status()
-    data  = r.json()
-    parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
-    text  = "".join(p.get("text", "") for p in parts).strip()
-    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
-
-
 def _is_cf_gateway_base(base: str) -> bool:
     """True iff ``base`` is a Cloudflare AI Gateway URL (so cf-aig-* response
     headers are expected). When the gateway is down we fall back to
@@ -3949,6 +3840,7 @@ async def call_embed_with_dispatch(
     # against `embed.syrabit.ai` once the flag is cleared. Cache hits
     # above still return; everything else raises `EmbedDeferredError`
     # so callers fail loud instead of getting a silent zero-vector.
+    from vertex_services import EmbedDegradedMode as _EmbedDegradedMode
     if os.environ.get("EMBED_DEGRADED_MODE", "").strip().lower() in {"1", "true", "yes"}:
         # Deterministic chunk_id so replay upserts into the same Pinecone
         # vector slot as the original embed would have. Matches the
@@ -3972,14 +3864,16 @@ async def call_embed_with_dispatch(
         except Exception as _enqueue_exc:
             # Fail loud — do NOT claim the chunk was enqueued when it
             # wasn't. Caller decides whether to surface or retry.
-            log.exception("EMBED_DEGRADED_MODE: reembed enqueue failed for chunk_id=%s", _chunk_id)
-            raise RuntimeError(
-                f"embed: EMBED_DEGRADED_MODE=true and reembed enqueue failed: {_enqueue_exc}"
+            logger.exception("EMBED_DEGRADED_MODE: reembed enqueue failed for chunk_id=%s", _chunk_id)
+            raise _EmbedDegradedMode(
+                f"embed: EMBED_DEGRADED_MODE=true and reembed enqueue failed: {_enqueue_exc}",
+                chunk_id=_chunk_id,
             ) from _enqueue_exc
-        raise RuntimeError(
+        raise _EmbedDegradedMode(
             f"embed: EMBED_DEGRADED_MODE=true — chunk_id={_chunk_id} enqueued to "
             "syrabit-reembed-queue for deferred replay; caller should "
-            "serve from Vectorize cache only (V4 §15)"
+            "serve from Vectorize cache only (V4 §15)",
+            chunk_id=_chunk_id,
         )
 
     def _persist_early(_vec):

@@ -10,7 +10,7 @@ needed from the backend.
 the *custom* Workers-AI worker at `embed.syrabit.ai` (Gemma-300M +
 Qwen3-0.6B mean-pooled), NOT `@cf/baai/bge-large-en-v1.5` from this
 catalog. The catalog entry below is retained as a *failover-failover*
-target — only reachable when both `workers_ai_custom` AND `vertex_embed`
+target — only reachable when `workers_ai_custom`
 have been excluded by the dispatcher. See `providers/workers_embed.py`
 for the active primary client.
 

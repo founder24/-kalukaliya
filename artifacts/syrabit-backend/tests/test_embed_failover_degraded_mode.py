@@ -71,6 +71,44 @@ def test_content_format_pool_priority_is_vertex_only():
     )
 
 
+def test_degraded_mode_raises_embed_degraded_mode_and_enqueues_sqs(monkeypatch):
+    """Behavioral pin: when ``EMBED_DEGRADED_MODE=true`` is set, the
+    embed dispatcher MUST (1) enqueue the chunk on the AWS SQS
+    ``reembed`` queue with a deterministic ``chunk_id`` and (2) raise
+    ``EmbedDegradedMode`` so the caller falls through to the vectorless
+    RAG router. It MUST NOT silently return a zero-vector or invoke any
+    Workers-AI / Cohere / Voyage / Vertex embed path."""
+    import asyncio
+    import llm
+    import sqs_fanout
+    from vertex_services import EmbedDegradedMode
+
+    monkeypatch.setenv("EMBED_DEGRADED_MODE", "true")
+
+    enqueued: list[dict] = []
+
+    async def _fake_enqueue(queue: str, payload: dict) -> str:
+        enqueued.append({"queue": queue, "payload": payload})
+        return "msg-id-stub"
+
+    monkeypatch.setattr(sqs_fanout, "enqueue", _fake_enqueue, raising=False)
+
+    async def _go():
+        return await llm.call_embed_with_dispatch("hello world", lang="en")
+
+    with pytest.raises(EmbedDegradedMode) as ei:
+        asyncio.run(_go())
+
+    assert enqueued, "degraded mode must enqueue at least one reembed job"
+    assert enqueued[0]["queue"] == "reembed"
+    payload = enqueued[0]["payload"]
+    assert payload.get("chunk_id"), "reembed payload must carry deterministic chunk_id"
+    assert payload.get("text") == "hello world"
+    assert ei.value.chunk_id == payload["chunk_id"], (
+        "EmbedDegradedMode.chunk_id must match the SQS payload chunk_id"
+    )
+
+
 def test_vertex_is_absent_from_chat_pools():
     """No Vertex entries in any chat / embed / vector_search / vision pool."""
     import config

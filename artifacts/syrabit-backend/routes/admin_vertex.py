@@ -652,7 +652,7 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     import datetime as _dt
     import os
     import gcp_billing
-    from providers import google_stt, google_tts, google_translate, google_vision, vertex_embed
+    from providers import google_stt, google_tts, google_translate, google_vision
     from providers.gcp_counters import snapshot as _counters_snapshot
     from config import (
         GCP_CREDIT_GRANT_USD,
@@ -682,11 +682,11 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     _check(google_tts, "tts_neural2")
     _check(google_translate, "translation_v3")
     _check(google_vision, "vision_ocr")
-    _check(vertex_embed, "vertex_embed")
 
-    # Gemini is reachable only through Vertex SA now (2026-05-03 vertex-only
-    # migration); SA presence is reported via the `vertex_embed`/`vertex_chat`
-    # cards above. The standalone `gemini_fallback` row was removed.
+    # Task #490 — Vertex `vertex_embed` and standalone `gemini_fallback`
+    # rows were removed; Vertex is now scoped to the content-format
+    # polish surface (`vertex_format`) only. SA presence is tracked via
+    # GOOGLE_APPLICATION_CREDENTIALS_JSON below.
 
     sa_configured = bool(
         GOOGLE_APPLICATION_CREDENTIALS_JSON
@@ -705,8 +705,9 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
         "tts_neural2":     3.0,
         "translation_v3":  6.0,
         "vision_ocr":      2.0,
-        "gemini_fallback": 3.0,
-        "vertex_embed":    1.0,
+        # Task #490 — `vertex_embed` and `gemini_fallback` rows removed;
+        # `vertex_format` is the only Vertex burn line that remains.
+        "vertex_format":   3.0,
     }
     _TOTAL_WEIGHT = sum(_SERVICE_BURN_WEIGHTS.values())
     _BASE_MONTHLY_BURN_USD = 19.0
@@ -768,8 +769,7 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
     _tts_spend, _tts_live = _svc_spend_mtd("tts_neural2")
     _tr_spend, _tr_live = _svc_spend_mtd("translation_v3")
     _vis_spend, _vis_live = _svc_spend_mtd("vision_ocr")
-    _gem_spend, _gem_live = _svc_spend_mtd("gemini_fallback")
-    _vx_spend, _vx_live = _svc_spend_mtd("vertex_embed")
+    _vxfmt_spend, _vxfmt_live = _svc_spend_mtd("vertex_format")
 
     if live_spend_data:
         spend_note = (
@@ -888,30 +888,17 @@ async def gcp_credit_burn_panel(admin: dict = Depends(get_admin_user)):
                 "spend_is_live": _vis_live,
                 "configured": "vision_ocr" in configured_services,
             },
-            "gemini_fallback": {
+            "vertex_format": {
                 "model": "gemini-2.5-flash",
-                "role": "chat fallback position-2 (workers_ai → gemini → groq)",
-                "trigger": "workers_ai load > 0.80",
+                "role": "content-format polish (NotebookLM-style); only "
+                        "remaining Vertex surface (Task #490, V4 §15)",
+                "trigger": "stage-2 polish for notes / RAG answers / SEO pages",
                 "pricing": "$0.075/1M tokens",
-                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["gemini_fallback"],
+                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["vertex_format"],
                 "note": "Token counters not tracked in-process (Gemini billed via GCP Console)",
-                "spend_mtd_usd": _gem_spend,
-                "spend_is_live": _gem_live,
-                "configured": has_gemini,
-            },
-            "vertex_embed": {
-                "model": "text-embedding-004",
-                "dimensions": 768,
-                "role": "embed fallback for long-form > 2048 tokens or cooldown",
-                "warning": "768-dim — do NOT mix with 1024-dim bge-large index",
-                "pricing": "$0.00013/1K chars",
-                "monthly_est_usd": _SERVICE_BURN_WEIGHTS["vertex_embed"],
-                "calls_this_month": svc_counters["embed"]["calls"],
-                "chars_this_month": svc_counters["embed"].get("chars", 0),
-                "spend_this_month_usd": svc_counters["embed"]["estimated_spend_usd"],
-                "spend_mtd_usd": _vx_spend,
-                "spend_is_live": _vx_live,
-                "configured": "vertex_embed" in configured_services,
+                "spend_mtd_usd": _vxfmt_spend,
+                "spend_is_live": _vxfmt_live,
+                "configured": sa_configured,
             },
         },
         "note": spend_note,

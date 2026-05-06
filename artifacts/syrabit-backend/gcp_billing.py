@@ -68,11 +68,14 @@ _GCP_SERVICE_NAME_MAP: dict[str, str] = {
     "Cloud Translation": "translation_v3",
     "Cloud Vision API": "vision_ocr",
     "Cloud Vision": "vision_ocr",
-    "Vertex AI": "vertex_embed",
-    "AI Platform": "vertex_embed",
-    "Generative AI on Vertex AI": "gemini_fallback",
-    "Vertex AI (Gemini)": "gemini_fallback",
-    "Google AI Studio": "gemini_fallback",
+    # Task #490 (V4 §15): Vertex is scoped to the content-format polish
+    # surface only (`vertex_format.format_with_vertex`). All Vertex SKUs
+    # roll up under the single `vertex_format` bucket.
+    "Vertex AI": "vertex_format",
+    "AI Platform": "vertex_format",
+    "Generative AI on Vertex AI": "vertex_format",
+    "Vertex AI (Gemini)": "vertex_format",
+    "Google AI Studio": "vertex_format",
 }
 
 

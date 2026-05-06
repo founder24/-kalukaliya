@@ -39,6 +39,21 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+class EmbedDegradedMode(RuntimeError):
+    """Raised by the embed dispatcher when EMBED_DEGRADED_MODE is active
+    and the request could not be served from the `cached_gemma_today`
+    Pinecone cache. Carries the deterministic ``chunk_id`` that was
+    enqueued onto the AWS SQS deferred-embed queue (`reembed`) so the
+    caller can correlate the replay (V4 §15 / Task #490). Callers MUST
+    handle this exception by skipping vector recall and leaning on the
+    vectorless RAG router (BM25 + tree-walk); they MUST NOT silently
+    return a zero-vector or fall back to a different embedding space."""
+
+    def __init__(self, message: str, *, chunk_id: str | None = None):
+        super().__init__(message)
+        self.chunk_id = chunk_id
+
 # ── Model identifiers ──────────────────────────────────────────────────────────
 # Kept as module constants so syllabus_embedder.py / ingest scripts can read
 # them without importing config.py.

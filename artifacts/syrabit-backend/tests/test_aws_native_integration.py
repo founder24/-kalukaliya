@@ -79,9 +79,8 @@ def test_embed_text_falls_back_to_bedrock_cohere(monkeypatch):
         return None
     monkeypatch.setattr(vs, "_cohere_primary_embed", _none_primary)
     monkeypatch.setattr(vs, "_workers_ai_primary_embed", _none_primary)
-    # Vertex embed off so the bedrock branch is the only remaining path.
-    from providers import vertex_embed
-    monkeypatch.setattr(vertex_embed, "is_configured", lambda: False)
+    # Task #490: providers/vertex_embed.py was deleted entirely; no
+    # patch needed — the Vertex embed branch is gone from the dispatcher.
 
     monkeypatch.setattr(aws_native, "_HAS_BOTO3", True, raising=False)
     fake_embed = MagicMock(return_value=[[0.1] * 1024])
