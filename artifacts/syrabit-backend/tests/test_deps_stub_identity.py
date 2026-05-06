@@ -33,7 +33,7 @@ _TRACKED_ATTRS = (
     "is_mongo_available",
     "mark_mongo_down",
     "_create_supa",
-    "sarvam_client",
+    "sarvam_llm_client",
     "_assert_not_cms_context",
 )
 

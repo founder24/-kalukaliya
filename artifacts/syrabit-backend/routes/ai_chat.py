@@ -20,7 +20,6 @@ from config import (
 from deps import (
     db,
     redis_client,
-    sarvam_client,
     supa,
 )
 import deps

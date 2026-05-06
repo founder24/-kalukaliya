@@ -8,7 +8,7 @@
  *
  * Pinning here matters because:
  *   • The leg-label mapping is the only place an operator learns which
- *     fallback failed first (sarvam_vertex_chain vs. workers_ai_phase2
+ *     fallback failed first (sarvam_workers_indic_chain vs. workers_ai_phase2
  *     vs. workers_ai_unavailable).
  *   • The error-summary truncation guards screen real-estate when a
  *     provider returns a multi-KB stack trace.
@@ -53,7 +53,7 @@ function AssameseRecentPanel({ recent, expanded }) {
                   ? ts.toLocaleTimeString([], { hour12: false })
                   : '—';
                 const legLabels = {
-                  sarvam_vertex_chain: 'Sarvam → Vertex/Gemini',
+                  sarvam_workers_indic_chain: 'Sarvam → Workers-AI IndicTrans2',
                   workers_ai_unavailable: 'Workers-AI Phase-2 unavailable',
                   workers_ai_phase2: 'Workers-AI Phase-2 errored',
                 };
@@ -89,7 +89,7 @@ describe('Task #379 — Assamese recent-outages panel', () => {
   it('shows the collapsed toggle with an event count when not expanded', () => {
     const out = html({
       recent: [
-        { ts: 1700000000, failing_leg: 'sarvam_vertex_chain', error_summary: '', conversation_id_hash: '' },
+        { ts: 1700000000, failing_leg: 'sarvam_workers_indic_chain', error_summary: '', conversation_id_hash: '' },
         { ts: 1700000001, failing_leg: 'workers_ai_phase2', error_summary: '', conversation_id_hash: '' },
       ],
       expanded: false,
@@ -111,11 +111,11 @@ describe('Task #379 — Assamese recent-outages panel', () => {
     expect(out).toContain('calm for the last 180 s');
   });
 
-  it('translates the sarvam_vertex_chain leg key into a friendly label', () => {
+  it('translates the sarvam_workers_indic_chain leg key into a friendly label', () => {
     const out = html({
       recent: [{
         ts: 1700000000,
-        failing_leg: 'sarvam_vertex_chain',
+        failing_leg: 'sarvam_workers_indic_chain',
         error_summary: 'HTTPException: chain exhausted',
         conversation_id_hash: '',
       }],
@@ -168,7 +168,7 @@ describe('Task #379 — Assamese recent-outages panel', () => {
     const withHash = html({
       recent: [{
         ts: 1700000000,
-        failing_leg: 'sarvam_vertex_chain',
+        failing_leg: 'sarvam_workers_indic_chain',
         error_summary: '',
         conversation_id_hash: 'abc123def456',
       }],
@@ -179,7 +179,7 @@ describe('Task #379 — Assamese recent-outages panel', () => {
     const withoutHash = html({
       recent: [{
         ts: 1700000000,
-        failing_leg: 'sarvam_vertex_chain',
+        failing_leg: 'sarvam_workers_indic_chain',
         error_summary: '',
         conversation_id_hash: '',
       }],
@@ -225,7 +225,7 @@ describe('Task #379 — Assamese recent-outages panel', () => {
     const out = html({
       recent: [{
         ts: null,
-        failing_leg: 'sarvam_vertex_chain',
+        failing_leg: 'sarvam_workers_indic_chain',
         error_summary: '',
         conversation_id_hash: '',
       }],

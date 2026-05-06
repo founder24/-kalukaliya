@@ -41,12 +41,12 @@ def _reset_state():
 class TestRecordPersistsEvent:
     def test_event_appended_to_inprocess_buffer(self):
         llm_mod.record_assamese_unavailable(
-            failing_leg="sarvam_vertex_chain",
+            failing_leg="sarvam_workers_indic_chain",
             error_summary="HTTPException: chain exhausted",
         )
         assert len(llm_mod._ASSAMESE_RECENT_OUTAGES) == 1
         ev = llm_mod._ASSAMESE_RECENT_OUTAGES[0]
-        assert ev["failing_leg"] == "sarvam_vertex_chain"
+        assert ev["failing_leg"] == "sarvam_workers_indic_chain"
         assert "chain exhausted" in ev["error_summary"]
         assert isinstance(ev["ts"], float)
 
@@ -186,7 +186,7 @@ class TestRecordWritesRedisList:
     def test_lpush_and_ltrim_called_when_redis_available(self):
         mock_rc = MagicMock()
         with patch("deps.redis_client", mock_rc):
-            llm_mod.record_assamese_unavailable(failing_leg="sarvam_vertex_chain")
+            llm_mod.record_assamese_unavailable(failing_leg="sarvam_workers_indic_chain")
         # Burst counter still incremented (back-compat with Task #374).
         mock_rc.incr.assert_called_once_with(llm_mod._ASSAMESE_UNAVAILABLE_REDIS_KEY)
         # Event log persisted via LPUSH + LTRIM + EXPIRE (Task #379).
@@ -194,7 +194,7 @@ class TestRecordWritesRedisList:
         args = mock_rc.lpush.call_args.args
         assert args[0] == llm_mod._ASSAMESE_RECENT_OUTAGES_REDIS_KEY
         # Payload is JSON-encoded with the failing_leg.
-        assert "sarvam_vertex_chain" in args[1]
+        assert "sarvam_workers_indic_chain" in args[1]
         mock_rc.ltrim.assert_called_once_with(
             llm_mod._ASSAMESE_RECENT_OUTAGES_REDIS_KEY,
             0,
@@ -317,7 +317,7 @@ async def test_metrics_payload_recent_array_lists_recorded_events(
     cms = stub_admin_dependencies
     # Record three events end-to-end through the production helper.
     llm_mod.record_assamese_unavailable(
-        failing_leg="sarvam_vertex_chain",
+        failing_leg="sarvam_workers_indic_chain",
         error_summary="HTTPException: chain exhausted",
     )
     llm_mod.record_assamese_unavailable(
@@ -334,7 +334,7 @@ async def test_metrics_payload_recent_array_lists_recorded_events(
     legs = [e["failing_leg"] for e in recent]
     # Newest first (workers_ai_phase2 was recorded last).
     assert legs[0] == "workers_ai_phase2"
-    assert legs[-1] == "sarvam_vertex_chain"
+    assert legs[-1] == "sarvam_workers_indic_chain"
     for ev in recent:
         assert "ts" in ev
         assert "failing_leg" in ev

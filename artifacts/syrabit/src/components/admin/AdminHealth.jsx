@@ -2036,7 +2036,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                         onChange={(e) => setAsmDraft(d => ({ ...d, indic_provider: e.target.value }))}
                         className="w-full text-sm font-mono px-3 py-2 rounded-lg border border-gray-200 focus:border-violet-300 focus:ring-1 focus:ring-violet-200 outline-none"
                         data-testid="select-asm-indic-provider"
-                        title="sarvam = existing hedged Sarvam pool · vertex = Gemini Flash fast-path (auto-falls back to sarvam on Vertex failure)"
+                        title="sarvam = Sarvam-m chat (assamese_rag_chat); falls back to Workers-AI IndicTrans2 (V4 §15 / Task #492)"
                       >
                         {(asmCfg.config?.valid_indic_providers || ['sarvam', 'vertex']).map(p => (
                           <option key={p} value={p}>{p}</option>
@@ -2756,7 +2756,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                                         ? ts.toLocaleTimeString([], { hour12: false })
                                         : '—';
                                       const legLabels = {
-                                        sarvam_vertex_chain: 'Sarvam → Vertex/Gemini',
+                                        sarvam_workers_indic_chain: 'Sarvam → Workers-AI IndicTrans2',
                                         workers_ai_unavailable: 'Workers-AI Phase-2 unavailable',
                                         workers_ai_phase2: 'Workers-AI Phase-2 errored',
                                       };

@@ -22,7 +22,6 @@ __all__ = [
     "REDIS_AI_CACHE_CONNECT_TIMEOUT_MS", "REDIS_AI_CACHE_OP_TIMEOUT_MS",
     "ROOT_DIR",
     "SARVAM_API_KEY", "SARVAM_BASE_URL", "SARVAM_THINK_BUFFER",
-    "SARVAM_TRANSLATE_KEY",
     "SECURE_COOKIES", "SEED_DATA", "SLOW_QUERY_THRESHOLD_MS",
     "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_URL",
     "_ASSEMBLYAI_KEY", "ASSEMBLYAI_STT_MODEL",
@@ -827,10 +826,11 @@ else:
     LLM_MODEL = os.environ.get('LLM_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast')
 OPENAI_API_KEY = LLM_API_KEY
 
-# ── Sarvam AI Configuration ──────────────────────────────────────────────────
+# ── Sarvam AI Configuration (V4 §15, Task #492 — chat LLM only) ──────────────
+# Sarvam is scoped to the `assamese_rag_chat` LLM dispatch only. The legacy
+# translate / TTS / transliterate keys were removed.
 SARVAM_API_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 SARVAM_API_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
-SARVAM_TRANSLATE_KEY = SARVAM_API_KEY or SARVAM_API_KEY_2
 SARVAM_BASE_URL = 'https://api.sarvam.ai'
 
 # Alias: CLOUDFLARE_ACCOUNT_ID → CF_AI_GATEWAY_ACCOUNT_ID when not set.

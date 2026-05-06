@@ -452,15 +452,11 @@ def record_assamese_unavailable(
     Task #379 — also persists a capped recent-events document so the admin
     health panel can show which leg failed and a short error excerpt for
     each of the last events. ``failing_leg`` is one of:
-      • ``sarvam_vertex_chain``  — non-stream 503 (Assamese strict chain
-        exhausted). NOTE: this label is a **frozen telemetry identifier**
-        kept stable for the alert pipeline + admin-health panel + test
-        suite (`tests/test_assamese_recent_outages.py`). The chain it
-        names was updated by the 2026-05-05 user instruction (Vertex
-        REMOVED; chain is now Sarvam → Workers-AI IndicTrans2) but the
-        label string was NOT renamed to avoid breaking 7 dependent test
-        assertions and the prod alert query. Do not rename without a
-        coordinated migration of all consumers.
+      • ``sarvam_workers_indic_chain`` — non-stream 503 (Assamese strict
+        chain exhausted). Renamed from ``sarvam_vertex_chain`` by Task
+        #492 (V4 §15 Sarvam scope-down) in coordination with the admin
+        health panel + 7 dependent test assertions + prod alert query;
+        all consumers were migrated together.
       • ``workers_ai_unavailable`` — Phase-2 fallback not configured
       • ``workers_ai_phase2``      — Phase-2 fallback errored before token
     ``error_summary`` is truncated to ``_ASSAMESE_ERROR_SUMMARY_MAX_LEN``
@@ -2727,12 +2723,11 @@ async def call_llm_api_chat(
             # Task #379: also persist event metadata (failing leg + error
             # excerpt) so the admin health panel can show recent outages.
             try:
-                # NOTE: failing_leg label is a frozen telemetry identifier —
-                # the actual chain is now Sarvam → Workers-AI IndicTrans2
-                # (Vertex removed 2026-05-05). See the leg-name docstring
-                # at the top of this module for rename constraints.
+                # Task #492 — label is `sarvam_workers_indic_chain` (renamed
+                # from `sarvam_vertex_chain` in coordination with the admin
+                # panel, alert pipeline, and outage test suite).
                 record_assamese_unavailable(
-                    failing_leg="sarvam_vertex_chain",
+                    failing_leg="sarvam_workers_indic_chain",
                     error_summary=f"{type(exc).__name__}: {exc}",
                 )
             except Exception:

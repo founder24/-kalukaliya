@@ -953,12 +953,14 @@ async def admin_diagnostics(admin: dict = Depends(get_admin_user)) -> dict[str, 
         result["llm_providers"]["gemini"] = err_entry
         result["llm_providers"]["vertex_gemini"] = err_entry
     
-    # Check Sarvam status
+    # Check Sarvam status — V4 §15 / Task #492 scopes Sarvam to the
+    # `assamese_rag_chat` LLM client only. There is no longer a translate
+    # client, so we report the chat client readiness as the single signal.
     try:
-        from deps import sarvam_client, sarvam_translate_client
+        from deps import sarvam_llm_client
         result["llm_providers"]["sarvam"] = {
-            "client_ready": sarvam_client is not None,
-            "translate_ready": sarvam_translate_client is not None,
+            "client_ready": sarvam_llm_client is not None,
+            "scope": "assamese_rag_chat",
         }
     except Exception as e:
         result["llm_providers"]["sarvam"] = {"status": "error", "error": str(e)}

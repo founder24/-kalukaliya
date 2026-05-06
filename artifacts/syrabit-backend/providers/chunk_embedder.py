@@ -420,9 +420,10 @@ async def translate_chapters_to_assamese(
     total = len(chapters)
     translated = failed = skipped = 0
 
-    sarvam_tc = getattr(deps, "sarvam_translate_client", None) or getattr(deps, "sarvam_client", None)
-    if not sarvam_tc:
-        return {"error": "Sarvam translate client not configured", "total": total}
+    # Task #492 — translate via the unified weighted dispatch (Workers-AI
+    # IndicTrans2 primary). The Sarvam-specific HTTP loop was removed
+    # along with `sarvam_translate_client`.
+    from llm import call_translate_with_dispatch
 
     logger.info("[chunk_embedder] Translating %d chapters to Assamese", total)
 
@@ -432,7 +433,7 @@ async def translate_chapters_to_assamese(
             skipped += 1
             continue
 
-        # Chunk into 1800-char pieces (Sarvam limit)
+        # Chunk into 1800-char pieces (matches translate dispatch limits).
         parts = []
         for i in range(0, len(content), 1800):
             parts.append(content[i:i + 1800])
@@ -441,22 +442,14 @@ async def translate_chapters_to_assamese(
         ok = True
         for part in parts:
             try:
-                resp = await asyncio.wait_for(
-                    sarvam_tc.post("/translate", json={
-                        "input": part,
-                        "source_language_code": "en-IN",
-                        "target_language_code": "as-IN",
-                        "speaker_gender": "Female",
-                        "mode": "formal",
-                        "model": "sarvam-translate:v1",
-                        "enable_preprocessing": False,
-                    }),
+                translated = await asyncio.wait_for(
+                    call_translate_with_dispatch(part, "en-IN", "as-IN", lang="as"),
                     timeout=8.0,
                 )
-                if resp.status_code == 200:
-                    translated_parts.append((resp.json().get("translated_text") or "").strip())
+                if translated:
+                    translated_parts.append(translated.strip())
                 else:
-                    logger.warning("[chunk_embedder] Sarvam translate HTTP %d for chapter %s", resp.status_code, ch["id"])
+                    logger.warning("[chunk_embedder] Empty translation for chapter %s", ch["id"])
                     ok = False
                     break
             except Exception as exc:
@@ -472,7 +465,7 @@ async def translate_chapters_to_assamese(
         await db.chapters.update_one(
             {"id": ch["id"]},
             {"$set": {"content_as": content_as, "content_as_lang": "as-IN",
-                      "content_as_model": "sarvam-translate:v1"}},
+                      "content_as_model": "workers_ai_indictrans2"}},
         )
 
         # Re-embed the chapter's chunks bilingually

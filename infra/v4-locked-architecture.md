@@ -290,3 +290,26 @@ print('V4 §13 acceptance: PASS')
 - **#489** — Cloud Run / GCP-leftover module deletes (already shipped).
 - Cohere / Cerebras provider removal (separate amendment).
 - `routes/admin_vertex.py` admin diagnostics surface (kept for ops visibility into the surviving formatter quota).
+
+---
+
+## §15 — Amendment: Sarvam scope-down to Assamese chat LLM only (Task #492, 2026-05-06)
+
+**Trigger:** Sibling to #490 (Vertex scope-down) and #491 (Cohere/Cerebras removal). Sarvam was historically wired into translate, TTS, transliterate, STT, and a polish helper. Audit shows none of those are on the live hot path post-V4 (Workers-AI IndicTrans2 owns translate; ElevenLabs/Deepgram own TTS; Google Chirp_2 + Workers-AI Whisper own STT; Vertex owns polish). The chat-LLM surface (`assamese_rag_chat` → `sarvam-m`) is the only Sarvam call still earning its keep.
+
+### Changes vs V4 §1 / §4
+
+1. **Sarvam HTTP surfaces — REMOVED.** `routes/cms_sarvam_health.py` no longer exposes `POST /sarvam/translate`, `POST /sarvam/tts`, `POST /sarvam/transliterate`, or `GET /sarvam/status` as live endpoints — they now return **HTTP 410 GONE** with a JSON body citing this amendment so external integrators see a loud failure. `_normalise_lang`, `_sarvam_cache_key`, and `_sarvam_tts_direct_fallback` are deleted; `_SARVAM_LANG_CODES` is renamed to `_SUPPORTED_TRANSLATE_LANGS`.
+2. **Sarvam non-LLM clients — REMOVED.** `deps.sarvam_client`, `deps.sarvam_translate_client`, and `deps.sarvam_client_direct` (and their lifespan `aclose` blocks in `server.py`) are deleted. `config.SARVAM_TRANSLATE_KEY` is removed. Only `deps.sarvam_llm_client` and `deps.sarvam_llm_client_direct` (chat LLM, `Accept: text/event-stream`) survive.
+3. **Polish helper — RENAMED.** `_polish_notes_with_sarvam` in `routes/admin_pipeline.py` (already a thin wrapper over `polish_notes_with_vertex`) is renamed to `_polish_notes_with_vertex_safely` to remove the misleading Sarvam name. Both call sites (notes generate + reflow) updated.
+4. **Translate helper — RENAMED + tightened.** `_translate_text_sarvam` is renamed to `_translate_text_chunked` and its in-line Sarvam HTTP fallback (lines 813–831) is deleted; on dispatch failure it now raises `503` directly instead of silently revivng Sarvam translate. `providers/chunk_embedder.py` Assamese backfill loop swaps the direct Sarvam HTTP loop for `call_translate_with_dispatch` (Workers-AI IndicTrans2 primary).
+5. **STT — Sarvam Saaras REMOVED.** `routes/edu_study.py /edu/stt` drops the Sarvam Saaras leg; the chain is now Google Chirp_2 (Indic) → Workers-AI Whisper. `/edu/voice/status` probes the surviving providers (ElevenLabs/Deepgram for TTS, Google STT/Workers-AI for STT) instead of `sarvam_client`.
+6. **Indic provider toggle — locked.** `lang_sanitizer._VALID_INDIC_PROVIDERS = ("sarvam",)` documented as the V4 §15 lock — no Vertex, no other Indic chat provider is admissible.
+7. **Telemetry rename — coordinated.** `failing_leg="sarvam_vertex_chain"` (assamese-unavailable counter) is renamed to `failing_leg="sarvam_workers_indic_chain"`. The label name was a frozen telemetry id; this amendment migrates it together with the admin health panel (`AdminHealth.jsx` legLabels), the test pin (`AdminHealth.assameseRecent.test.jsx`), and the outage test suite (`tests/test_assamese_recent_outages.py`) in lock-step. The chain it names is unchanged: `sarvam-m → Workers-AI IndicTrans2`.
+8. **Acceptance gate.** `rg "sarvam_client|sarvam_translate_client|sarvam_client_direct|SARVAM_TRANSLATE_KEY|_translate_text_sarvam|_polish_notes_with_sarvam|sarvam_vertex_chain" artifacts/syrabit-backend/{routes,providers,deps.py,config.py,server.py,llm.py}` returns **zero** production hits (only changelog comments remain); `cd artifacts/syrabit-backend && python -c "import server"` succeeds.
+
+### Out of scope (tracked separately)
+
+- **#491** — Cohere/Cerebras provider removal.
+- **#494** — wire `vertex_format` into render paths (no overlap with Sarvam).
+- Sarvam admin UI removal (frontend `/admin/sarvam-health` panel kept as a stub showing the surviving chat client until #495).

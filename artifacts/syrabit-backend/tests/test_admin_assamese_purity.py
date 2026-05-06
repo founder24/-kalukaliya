@@ -190,10 +190,14 @@ class TestDeleteAssamesePurity:
 class TestTestFireRoute:
     def test_test_fire_runs_sanitiser_against_default_sample(self, app_client):
         db, _ = _mock_db()
-        # Disable sarvam_client so the translate callable returns "" and the
-        # strip fallback handles cleanup deterministically (no network).
+        # Force the dispatch translator to return "" so the strip fallback
+        # handles cleanup deterministically (no network). Task #492 retired
+        # the direct sarvam_client patch — translate now flows through
+        # llm.call_translate_with_dispatch.
+        async def _empty_translate(*_a, **_kw):
+            return ""
         with _patch_db(db), \
-             patch("routes.cms_sarvam_health.sarvam_client", None):
+             patch("llm.call_translate_with_dispatch", new=_empty_translate):
             r = app_client.post("/admin/assamese-purity/test", json={})
         assert r.status_code == 200
         body = r.json()
@@ -210,8 +214,10 @@ class TestTestFireRoute:
 
     def test_test_fire_rejects_empty_sample(self, app_client):
         db, _ = _mock_db()
+        async def _empty_translate(*_a, **_kw):
+            return ""
         with _patch_db(db), \
-             patch("routes.cms_sarvam_health.sarvam_client", None):
+             patch("llm.call_translate_with_dispatch", new=_empty_translate):
             r = app_client.post("/admin/assamese-purity/test", json={"sample": "   "})
         assert r.status_code == 400
 

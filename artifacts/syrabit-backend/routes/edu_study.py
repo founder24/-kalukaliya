@@ -55,7 +55,9 @@ from llm import call_llm_api
 from providers.azure_openai import call_chat as _az_quiz_chat
 from guardrails.prompt_safety import validate_llm_output
 import deps
-from deps import sarvam_client
+# Task #492 — Sarvam translate/TTS/STT clients removed (V4 §15). Indic
+# voice paths now resolve through Google Chirp_2 (STT) and the
+# ElevenLabs / Deepgram providers (TTS).
 # Task #490 — Vertex chat helpers were removed. Quiz / notes now run
 # through Azure-primary chat with Workers-AI fallback. Vertex is
 # `content_format` only (NotebookLM-style polish via vertex_format).
@@ -3142,10 +3144,26 @@ async def edu_recommendations(
 
 @router.get("/edu/voice/status")
 async def voice_status():
+    # Task #492 — Sarvam clients removed. Probe the surviving providers
+    # so the admin/UI shield can still display capability flags.
+    tts_enabled = False
+    stt_enabled = False
+    try:
+        from providers import elevenlabs as _el
+        from providers import deepgram as _dg
+        tts_enabled = bool(getattr(_el, "ENABLED", False) or getattr(_dg, "ENABLED", False))
+    except Exception:
+        pass
+    try:
+        from providers import google_stt as _gstt
+        from providers import workers_ai as _wai
+        stt_enabled = bool(_gstt.is_configured() or _wai.is_enabled("stt"))
+    except Exception:
+        pass
     return {
         "ok": True,
-        "tts_enabled": sarvam_client is not None,
-        "stt_enabled": sarvam_client is not None,
+        "tts_enabled": tts_enabled,
+        "stt_enabled": stt_enabled,
         "languages": ["en-IN", "as-IN", "hi-IN", "bn-IN"],
         "browser_stt_recommended": True,
     }
@@ -3159,10 +3177,11 @@ async def edu_stt(audio: UploadFile = File(...), language: str = Form("en-IN"),
                   request: Request = None, user=Depends(get_current_user_optional)):
     """Server-side fallback STT.
 
-    Priority:
-    - Indic (hi, bn, as): Google Cloud Chirp_2 STT (Task #247) → Sarvam Saaras → Workers AI Whisper
-    - English/other: Sarvam Saaras → Workers AI Whisper
-    Browser SpeechRecognition is preferred on the client; this endpoint is the server-side fallback.
+    Priority (post Task #492):
+    - Indic (hi, bn, as): Google Cloud Chirp_2 STT (Task #247) → Workers-AI Whisper
+    - English/other:      Workers-AI Whisper
+    Browser SpeechRecognition is preferred on the client; this endpoint
+    is the server-side fallback. Sarvam Saaras was removed by V4 §15.
     """
     import time as _t_stt
     _stt_t0 = _t_stt.perf_counter()
@@ -3194,49 +3213,19 @@ async def edu_stt(audio: UploadFile = File(...), language: str = Form("en-IN"),
         except Exception as _gstt_err:
             logger.warning("[edu_stt] Google Chirp_2 failed for %s: %s", lang_key, str(_gstt_err)[:150])
 
-    if sarvam_client is None:
-        raise HTTPException(status_code=503, detail="stt_unavailable")
-
-    files = {"file": (audio.filename or "speech.wav",
-                      body, audio.content_type or "audio/wav")}
-    data = {"language_code": language or "en-IN", "model": "saaras:v2"}
-    primary_err: Exception | None = None
-    resp = None
+    # Workers-AI Whisper is now the sole STT fallback after Task #492.
     try:
-        resp = await sarvam_client.post("/speech-to-text", files=files, data=data)
-    except Exception as e:
-        logger.warning(f"[edu_stt] sarvam call failed: {e}")
-        primary_err = e
-    if resp is not None and resp.status_code >= 400:
-        logger.warning(f"[edu_stt] provider {resp.status_code}: {resp.text[:300]}")
-        try:
-            resp.raise_for_status()
-        except Exception as e:
-            primary_err = e
-
-    if primary_err is not None:
-        # Task #636 — Workers AI Whisper fallback for retryable failures.
-        try:
-            from providers import workers_ai as _wai
-            if _wai.is_enabled("stt") and _wai.should_fallback(primary_err):
-                import base64 as _b64
-                audio_b64 = _b64.b64encode(body).decode("ascii")
-                _primary_ms = int((_t_stt.perf_counter() - _stt_t0) * 1000)
-                ok, val, _ = await _wai.attempt_fallback(
-                    "stt", primary_err, _primary_ms,
-                    lambda: _wai.call_stt(audio_b64),
-                )
-                if ok and isinstance(val, str):
-                    return {"ok": True, "text": val, "language": language,
-                            "provider": "workers-ai"}
-        except Exception as _wai_err:  # noqa: BLE001
-            logger.warning(f"[workers-ai] stt fallback skipped: {type(_wai_err).__name__}: {str(_wai_err)[:150]}")
-        raise HTTPException(status_code=502,
-                            detail="stt_provider_failed" if resp is None else "stt_provider_error")
-
-    payload = resp.json()
-    text = payload.get("transcript") or payload.get("text") or ""
-    return {"ok": True, "text": text, "language": payload.get("language_code", language), "provider": "sarvam"}
+        from providers import workers_ai as _wai
+        if _wai.is_enabled("stt"):
+            import base64 as _b64
+            audio_b64 = _b64.b64encode(body).decode("ascii")
+            transcript = await _wai.call_stt(audio_b64)
+            if isinstance(transcript, str) and transcript:
+                return {"ok": True, "text": transcript, "language": language,
+                        "provider": "workers-ai"}
+    except Exception as _wai_err:  # noqa: BLE001
+        logger.warning(f"[edu_stt] workers-ai whisper failed: {type(_wai_err).__name__}: {str(_wai_err)[:150]}")
+    raise HTTPException(status_code=503, detail="stt_unavailable")
 
 
 __all__ = ["router"]

@@ -131,7 +131,6 @@ from deps import (
     is_mongo_available,
     mark_mongo_down,
     redis_client,
-    sarvam_client,
     supa,
 )
 import deps
@@ -2048,40 +2047,36 @@ async def metrics_history(minutes: int = 60, admin: dict = Depends(get_admin_use
 # SARVAM AI — Translate, TTS, Transliterate
 # ─────────────────────────────────────────────
 
-_SARVAM_LANG_CODES = {
+# Task #492 — Indic language codes the admin translation UI exposes.
+# Previously named `_SARVAM_LANG_CODES`; renamed when the Sarvam-backed
+# /sarvam/* HTTP routes were retired (V4 §15 amendment). The actual
+# translation provider is now `call_translate_with_dispatch` which routes
+# via Workers-AI IndicTrans2.
+_SUPPORTED_TRANSLATE_LANGS = {
     "en", "en-IN", "as", "as-IN", "bn", "bn-IN",
     "hi", "hi-IN", "gu", "gu-IN", "kn", "kn-IN",
     "ml", "ml-IN", "mr", "mr-IN", "od", "od-IN",
     "pa", "pa-IN", "ta", "ta-IN", "te", "te-IN",
 }
 
-def _normalise_lang(code: str) -> str:
-    """Ensure language code has -IN suffix (sarvam requires it)."""
-    code = code.strip()
-    if '-' not in code:
-        return f"{code}-IN"
-    return code
 
-def _sarvam_cache_key(op: str, payload: dict) -> str:
-    import json
-    raw = json.dumps(payload, sort_keys=True)
-    return f"sarvam:{op}:{hashlib.md5(raw.encode()).hexdigest()}"
+def _v4_s15_gone(detail: str) -> HTTPException:
+    """Build a 410 GONE for retired Sarvam HTTP surfaces (Task #492)."""
+    return HTTPException(
+        status_code=410,
+        detail={
+            "error": "gone",
+            "message": detail,
+            "policy": "V4 §15 amendment (Task #492) — Sarvam is scoped to "
+                      "the assamese_rag_chat LLM dispatch only.",
+        },
+    )
+
 
 @router.get("/sarvam/status")
 async def sarvam_status():
-    # Surface live Assamese-purity config so admins can verify which
-    # behaviour and threshold are in effect without grep'ing the api log
-    # (Task #419).
-    try:
-        from lang_sanitizer import get_runtime_config as _asm_cfg
-        assamese_purity = _asm_cfg()
-    except Exception:
-        assamese_purity = {}
-    return {
-        "enabled": sarvam_client is not None,
-        "supported_languages": sorted(_SARVAM_LANG_CODES),
-        "assamese_purity": assamese_purity,
-    }
+    """Retired by Task #492 — Sarvam admin surface removed."""
+    raise _v4_s15_gone("/sarvam/status was removed; use /admin/system-health.")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -2993,25 +2988,17 @@ async def admin_test_assamese_purity(
             detail=f"sample too long (max {_ASM_TEST_MAX_CHARS} chars)",
         )
 
-    # Build a translate callable that hits the same Sarvam route the
-    # live chat path uses, so admins are testing the actual production
-    # pipeline (not a mock).
+    # Build a translate callable that mirrors the live Assamese chat
+    # translation path. Task #492 retired the Sarvam /translate HTTP
+    # surface; the production translator is now Workers-AI IndicTrans2
+    # via `call_translate_with_dispatch`, so admins are testing the
+    # actual production pipeline (not a mock).
     async def _translate_callable(fragment: str) -> str:
         try:
-            if not sarvam_client:
-                return ""
-            payload = {
-                "input": fragment,
-                "source_language_code": "en-IN",
-                "target_language_code": "as-IN",
-                "speaker_gender": "Female",
-                "mode": "formal",
-                "model": "sarvam-translate:v1",
-                "enable_preprocessing": False,
-            }
-            resp = await sarvam_client.post("/translate", json=payload)
-            resp.raise_for_status()
-            return (resp.json() or {}).get("translated_text", "") or ""
+            from llm import call_translate_with_dispatch
+            return await call_translate_with_dispatch(
+                fragment, "en-IN", "as-IN", lang="as",
+            ) or ""
         except Exception as e:
             logger.warning(f"[INDIC-SANITIZE] test-fire translate failed: {e}")
             return ""
@@ -3055,7 +3042,7 @@ async def admin_translation_languages(admin: dict = Depends(get_admin_user)):
     """Return supported translation languages as {code, label} list."""
     seen_base = set()
     result = []
-    for code in sorted(_SARVAM_LANG_CODES):
+    for code in sorted(_SUPPORTED_TRANSLATE_LANGS):
         base = code.split("-")[0]
         if base in seen_base:
             continue
@@ -3064,203 +3051,40 @@ async def admin_translation_languages(admin: dict = Depends(get_admin_user)):
         result.append({"code": base, "label": label})
     return result
 
+
+# ──────────────────────────────────────────────────────────────────────
+# Task #492 — Sarvam HTTP surfaces retired (V4 §15 amendment).
+# `/sarvam/translate`, `/sarvam/tts`, and `/sarvam/transliterate` were
+# Sarvam-specific endpoints. They now return 410 GONE pointing callers
+# at the surviving translation path (`call_translate_with_dispatch` →
+# Workers-AI IndicTrans2) and the Indic voice providers (Deepgram /
+# ElevenLabs). Any frontend or external caller hitting these paths
+# should migrate to `/admin/content/chapters/{id}/translate` for
+# translation and the `providers.elevenlabs` / `providers.deepgram`
+# voice paths for TTS.
+# ──────────────────────────────────────────────────────────────────────
 @router.post("/sarvam/translate")
 async def sarvam_translate(data: dict):
-    """Translate text between Indian languages via Sarvam AI."""
-    if not sarvam_client:
-        raise HTTPException(status_code=503, detail="Sarvam AI not configured")
-    text = (data.get("text") or data.get("input") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    src = _normalise_lang(data.get("source_language_code", "en-IN"))
-    tgt = _normalise_lang(data.get("target_language_code", "as-IN"))
-
-    # Check cache first
-    cache_key = _sarvam_cache_key("translate", {"text": text, "src": src, "tgt": tgt})
-    cached = _get_content_cache(cache_key)
-    if cached:
-        return {**cached, "cached": True}
-
-    # mayura:v1 supports: hi, bn, mr, te, kn, ml, ta, gu, pa
-    # sarvam-translate:v1 supports all Indic langs including as, od
-    _MAYURA_LANGS = {"hi-IN", "bn-IN", "mr-IN", "te-IN", "kn-IN", "ml-IN", "ta-IN", "gu-IN", "pa-IN"}
-    model = "mayura:v1" if (src in _MAYURA_LANGS and tgt in _MAYURA_LANGS) else "sarvam-translate:v1"
-    payload = {
-        "input": text,
-        "source_language_code": src,
-        "target_language_code": tgt,
-        "speaker_gender": data.get("speaker_gender", "Female"),
-        "mode": data.get("mode", "formal"),
-        "model": model,
-        "enable_preprocessing": False,
-    }
-    try:
-        resp = await sarvam_client.post("/translate", json=payload)
-        resp.raise_for_status()
-        result = resp.json()
-        out = {"translated_text": result.get("translated_text", ""), "source": src, "target": tgt}
-        _set_content_cache(cache_key, out)
-        return out
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Sarvam translate error {e.response.status_code} [{src}->{tgt}]")
-        raise HTTPException(status_code=e.response.status_code, detail="Sarvam translation failed")
-    except Exception as e:
-        logger.error(f"Sarvam translate exception: {type(e).__name__} [{src}->{tgt}]")
-        raise HTTPException(status_code=502, detail="Sarvam AI unreachable")
-
-async def _sarvam_tts_direct_fallback(text: str, lang: str, sample_rate: int) -> dict | None:
-    """Try ElevenLabs → Deepgram in sequence when Sarvam TTS fails.
-
-    Returns a response dict compatible with the sarvam_tts response schema
-    (audio_base64, language, format, sample_rate, provider) or None if both
-    fallback providers are also unavailable.
-    """
-    import base64 as _b64
-    try:
-        from providers import elevenlabs as _el
-        if _el.ENABLED:
-            try:
-                mp3 = await _el.synthesize(text, language_code=lang.split("-")[0] if lang else "en")
-                return {
-                    "audio_base64": _b64.b64encode(mp3).decode("ascii"),
-                    "language": lang,
-                    "format": "mp3",
-                    "sample_rate": sample_rate,
-                    "provider": "elevenlabs",
-                }
-            except Exception as _el_err:
-                logger.warning(f"[sarvam-tts] ElevenLabs fallback failed: {_el_err}")
-    except Exception:
-        pass
-    try:
-        from providers import deepgram as _dg
-        if _dg.ENABLED:
-            try:
-                mp3 = await _dg.synthesize(text, language=lang.split("-")[0] if lang else "en")
-                return {
-                    "audio_base64": _b64.b64encode(mp3).decode("ascii"),
-                    "language": lang,
-                    "format": "mp3",
-                    "sample_rate": sample_rate,
-                    "provider": "deepgram",
-                }
-            except Exception as _dg_err:
-                logger.warning(f"[sarvam-tts] Deepgram fallback failed: {_dg_err}")
-    except Exception:
-        pass
-    return None
+    raise _v4_s15_gone(
+        "/sarvam/translate retired. Translation now routes through "
+        "call_translate_with_dispatch (Workers-AI IndicTrans2)."
+    )
 
 
 @router.post("/sarvam/tts")
 async def sarvam_tts(data: dict):
-    """Convert text to speech in Indian languages via Sarvam AI (Bulbul model)."""
-    if not sarvam_client:
-        raise HTTPException(status_code=503, detail="Sarvam AI not configured")
-    text = (data.get("text") or data.get("input") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    # Sarvam TTS max input ~500 chars per request
-    if len(text) > 500:
-        text = text[:500]
-    lang = _normalise_lang(data.get("target_language_code", "en-IN"))
+    raise _v4_s15_gone(
+        "/sarvam/tts retired. Use the ElevenLabs / Deepgram voice "
+        "providers for Indic TTS."
+    )
 
-    # Cache audio as base64
-    cache_key = _sarvam_cache_key("tts", {"text": text, "lang": lang,
-        "speaker": data.get("speaker", "meera"), "pace": data.get("pace", 1.0)})
-    cached = _get_content_cache(cache_key)
-    if cached:
-        return {**cached, "cached": True}
-
-    # Valid Sarvam TTS speakers (updated list)
-    _VALID_SPEAKERS = {
-        "anushka", "abhilash", "manisha", "vidya", "arya", "karun", "hitesh",
-        "aditya", "ritu", "priya", "neha", "rahul", "pooja", "rohan", "simran",
-        "kavya", "amit", "dev", "ishita", "shreya", "ratan", "varun", "manan",
-        "sumit", "roopa", "kabir", "aayan", "shubh", "ashutosh", "advait",
-        "amelia", "sophia", "anand", "tanya", "tarun", "sunny", "mani", "gokul",
-        "vijay", "shruti", "suhani", "mohit", "kavitha", "rehan", "soham", "rupali",
-    }
-    speaker = data.get("speaker", "anushka")
-    if speaker not in _VALID_SPEAKERS:
-        speaker = "anushka"
-    payload = {
-        "inputs": [text],
-        "target_language_code": lang,
-        "speaker": speaker,
-        "model": data.get("model", "bulbul:v2"),
-        "pitch": data.get("pitch", 0),
-        "pace": data.get("pace", 1.0),
-        "loudness": data.get("loudness", 1.5),
-        "speech_sample_rate": data.get("speech_sample_rate", 22050),
-        "enable_preprocessing": False,
-    }
-    import time as _t_tts
-    _tts_t0 = _t_tts.perf_counter()
-    try:
-        resp = await sarvam_client.post("/text-to-speech", json=payload)
-        resp.raise_for_status()
-        result = resp.json()
-        audios = result.get("audios", [])
-        if not audios:
-            raise HTTPException(status_code=502, detail="Sarvam TTS returned no audio")
-        out = {
-            "audio_base64": audios[0],
-            "language": lang,
-            "format": "wav",
-            "sample_rate": payload["speech_sample_rate"],
-        }
-        _set_content_cache(cache_key, out)
-        return out
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Sarvam TTS error {e.response.status_code} [{lang}]")
-        out = await _sarvam_tts_direct_fallback(text, lang, payload["speech_sample_rate"])
-        if out:
-            return out
-        raise HTTPException(status_code=e.response.status_code, detail="Sarvam TTS failed")
-    except Exception as e:
-        logger.error(f"Sarvam TTS exception: {type(e).__name__} [{lang}]")
-        out = await _sarvam_tts_direct_fallback(text, lang, payload["speech_sample_rate"])
-        if out:
-            return out
-        raise HTTPException(status_code=502, detail="Sarvam AI unreachable")
 
 @router.post("/sarvam/transliterate")
 async def sarvam_transliterate(data: dict):
-    """Transliterate text between scripts via Sarvam AI."""
-    if not sarvam_client:
-        raise HTTPException(status_code=503, detail="Sarvam AI not configured")
-    text = (data.get("text") or data.get("input") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    src = _normalise_lang(data.get("source_language_code", "en-IN"))
-    tgt = _normalise_lang(data.get("target_language_code", "as-IN"))
-
-    cache_key = _sarvam_cache_key("transliterate", {"text": text, "src": src, "tgt": tgt})
-    cached = _get_content_cache(cache_key)
-    if cached:
-        return {**cached, "cached": True}
-
-    payload = {
-        "input": text,
-        "source_language_code": src,
-        "target_language_code": tgt,
-        "spoken_language_code": src,
-        "with_timestamps": False,
-        "numerals_format": "international",
-    }
-    try:
-        resp = await sarvam_client.post("/transliterate", json=payload)
-        resp.raise_for_status()
-        result = resp.json()
-        out = {"transliterated_text": result.get("transliterated_text", ""), "source": src, "target": tgt}
-        _set_content_cache(cache_key, out)
-        return out
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Sarvam transliterate error {e.response.status_code} [{src}->{tgt}]")
-        raise HTTPException(status_code=e.response.status_code, detail="Sarvam transliteration failed")
-    except Exception as e:
-        logger.error(f"Sarvam transliterate exception: {type(e).__name__} [{src}->{tgt}]")
-        raise HTTPException(status_code=502, detail="Sarvam AI unreachable")
+    raise _v4_s15_gone(
+        "/sarvam/transliterate retired. No replacement is shipped — "
+        "transliteration was unused outside the legacy admin tooling."
+    )
 
 # ─────────────────────────────────────────────
 # BOT RENDER MIDDLEWARE (production SSR for AI crawlers)

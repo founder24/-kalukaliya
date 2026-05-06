@@ -155,14 +155,11 @@ _VALID_BEHAVIOURS = ("off", "strip", "translate", "regenerate", "translate+regen
 _DEFAULT_BEHAVIOUR = "translate"
 _DEFAULT_THRESHOLD = 0.05
 
-# Task #628 — Indic chat provider toggle. `sarvam` keeps the existing
-# hedged Sarvam pool; `vertex` routes Assamese chat through Vertex AI
-# Gemini Flash (same fast-path used for English in Task #607) for
-# faster TTFT. Falls back to Sarvam automatically if Vertex is not
-# configured or the pre-first-token call fails. The leak sanitiser
-# still runs on Vertex output because stray English is a risk on any
-# provider.
-_VALID_INDIC_PROVIDERS = ("sarvam",)  # Task #490 — vertex no longer Indic-eligible
+# Task #492 — Indic chat is locked to the Sarvam → Workers-AI IndicTrans2
+# chain (V4 §15 amendment). Vertex was removed by #490; the runtime
+# `indic_provider` knob is kept for backwards-compatible admin UI but only
+# accepts the single value "sarvam". Any other value is rejected upstream.
+_VALID_INDIC_PROVIDERS = ("sarvam",)
 _DEFAULT_INDIC_PROVIDER = "sarvam"
 
 # Per-Task #422: in-memory runtime override layer. Admins PATCH the

@@ -10,8 +10,6 @@ from deps import (
     db,
     is_mongo_available,
     mark_mongo_down,
-    sarvam_client,
-    sarvam_translate_client,
     supa,
 )
 from cache import _invalidate_content_cache
@@ -104,20 +102,15 @@ def _trim_long_intro(content: str, max_intro_lines: int = 4) -> str:
     return "\n".join(lines[first_heading_idx:]).strip()
 
 
-async def _polish_notes_with_sarvam(raw_notes: str, title: str, subject_name: str) -> str:
+async def _polish_notes_with_vertex_safely(raw_notes: str, title: str, subject_name: str) -> str:
     """Stage-2 NotebookLM-style polish — pinned to Vertex / Gemini.
 
-    Despite the legacy ``_with_sarvam`` name (kept so existing callers don't
-    break), this helper now routes through ``llm.polish_notes_with_vertex``
-    per the 2026-05-05 user instruction:
-
-      * Stage 1 (GENERATE): Workers AI variants produce the raw notes.
-      * Stage 2 (POLISH):   Vertex / Gemini 2.5 Flash re-formats the raw
-                            notes into NotebookLM-style study notes.
-
-    The previous Sarvam pin was broken — ``call_llm_api_content`` ignores
-    the ``model=`` parameter and routes via the ``content`` POOL_WEIGHTS
-    pool, which no longer contains Sarvam at all.
+    Renamed from ``_polish_notes_with_sarvam`` by Task #492 (V4 §15 Sarvam
+    scope-down) so the helper name matches reality. Stage 1 (GENERATE)
+    Workers-AI variants produce raw notes; Stage 2 (POLISH) Vertex /
+    Gemini 2.5 Flash re-formats them into NotebookLM-style study notes.
+    Wrapped in the pipeline semaphore + soft-fail to keep the raw notes
+    on Vertex outage.
     """
     try:
         async with _pipeline_sem:
@@ -329,7 +322,7 @@ Generate **topic-wise study notes** for the chapter below.
         if notes_raw and len(notes_raw.split()) >= 200:
             notes_text = _normalize_headings(notes_raw).strip()
             notes_text = _trim_long_intro(notes_text)
-            notes_text = await _polish_notes_with_sarvam(notes_text, title, subject_name or "")
+            notes_text = await _polish_notes_with_vertex_safely(notes_text, title, subject_name or "")
             notes_text = _normalize_headings(notes_text).strip()
             notes_text = _trim_long_intro(notes_text)
             wc = len(notes_text.split())
@@ -747,21 +740,20 @@ Goal: cover the **maximum number of high-yield exam concepts** in the **minimum 
         pass
 
     content_as_words = 0
-    if sarvam_translate_client or sarvam_client:
-        try:
-            translated = await _translate_text_sarvam(notes_text, "en-IN", "as-IN")
-            if translated and len(translated.strip()) >= 50:
-                await db.chapters.update_one(
-                    {"id": chapter_id},
-                    {"$set": {
-                        "content_as": translated,
-                        "content_as_generated_at": datetime.now(timezone.utc).isoformat(),
-                    }}
-                )
-                content_as_words = len(translated.split())
-                logger.info(f"Auto-translated chapter {chapter_id} to Assamese ({content_as_words} words)")
-        except Exception as e:
-            logger.warning(f"Auto-translate to Assamese failed for {chapter_id}: {e}")
+    try:
+        translated = await _translate_text_chunked(notes_text, "en-IN", "as-IN")
+        if translated and len(translated.strip()) >= 50:
+            await db.chapters.update_one(
+                {"id": chapter_id},
+                {"$set": {
+                    "content_as": translated,
+                    "content_as_generated_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            content_as_words = len(translated.split())
+            logger.info(f"Auto-translated chapter {chapter_id} to Assamese ({content_as_words} words)")
+    except Exception as e:
+        logger.warning(f"Auto-translate to Assamese failed for {chapter_id}: {e}")
 
     return {
         "chapter_id": chapter_id,
@@ -773,12 +765,15 @@ Goal: cover the **maximum number of high-yield exam concepts** in the **minimum 
     }
 
 
-async def _translate_text_sarvam(text: str, source_lang: str = "en-IN", target_lang: str = "as-IN") -> str:
+async def _translate_text_chunked(text: str, source_lang: str = "en-IN", target_lang: str = "as-IN") -> str:
     """Translate text via PROVIDER_PRIORITY["translate"] weighted dispatch.
 
-    Routes through call_translate_with_dispatch (sarvam → vertex → workers_ai)
-    with chunking to stay under Sarvam's 1 800-char per-request limit.
-    Falls back to legacy sarvam_translate_client if dispatch exhausts all providers.
+    Renamed from ``_translate_text_sarvam`` by Task #492 (V4 §15 Sarvam
+    scope-down). Routes exclusively through ``call_translate_with_dispatch``
+    (Workers-AI IndicTrans2 primary). The legacy in-line Sarvam HTTP
+    fallback was removed alongside the ``sarvam_translate_client`` —
+    dispatch failures now raise 503 directly so callers see a loud
+    no-provider error instead of a silent Sarvam revival.
     """
     if not text or not text.strip():
         return ""
@@ -810,25 +805,7 @@ async def _translate_text_sarvam(text: str, source_lang: str = "en-IN", target_l
             translated_parts.append(translated)
         except Exception as e:
             logger.warning(f"Translate dispatch failed for chunk ({source_lang}→{target_lang}): {e}")
-            _client = sarvam_translate_client or sarvam_client
-            if not _client:
-                raise HTTPException(status_code=503, detail="Translation failed — no provider available")
-            try:
-                payload = {
-                    "input": chunk[:1950],
-                    "source_language_code": source_lang,
-                    "target_language_code": target_lang,
-                    "speaker_gender": "Female",
-                    "mode": "formal",
-                    "model": "sarvam-translate:v1",
-                    "enable_preprocessing": False,
-                }
-                resp = await _client.post("/translate", json=payload)
-                resp.raise_for_status()
-                translated_parts.append(resp.json().get("translated_text", ""))
-            except Exception as e2:
-                logger.warning(f"Sarvam translate fallback chunk failed: {e2}")
-                raise
+            raise HTTPException(status_code=503, detail="Translation failed — no provider available")
     return "\n".join(translated_parts)
 
 
@@ -843,7 +820,7 @@ async def admin_translate_chapter(chapter_id: str, data: dict = Body(default={})
     if not source_content or not source_content.strip():
         raise HTTPException(status_code=400, detail="No English content to translate. Generate notes first.")
 
-    translated = await _translate_text_sarvam(source_content, "en-IN", target_lang)
+    translated = await _translate_text_chunked(source_content, "en-IN", target_lang)
     if not translated or len(translated.strip()) < 50:
         raise HTTPException(status_code=502, detail="Translation returned empty or too short")
 
@@ -884,7 +861,7 @@ async def admin_bulk_translate_subject(data: dict = Body(...), admin: dict = Dep
             results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "skipped", "reason": "already translated"})
             continue
         try:
-            translated = await _translate_text_sarvam(ch["content"], "en-IN", target_lang)
+            translated = await _translate_text_chunked(ch["content"], "en-IN", target_lang)
             if translated and len(translated.strip()) >= 50:
                 field_name = "content_as"
                 await db.chapters.update_one(
@@ -943,7 +920,7 @@ async def admin_bulk_translate_all(data: dict = Body(default={}), admin: dict = 
             results.append({"chapter_id": ch["id"], "title": ch.get("title", ""), "status": "skipped", "reason": "content too short"})
             continue
         try:
-            translated = await _translate_text_sarvam(content, "en-IN", target_lang)
+            translated = await _translate_text_chunked(content, "en-IN", target_lang)
             if translated and len(translated.strip()) >= 50:
                 await db.chapters.update_one(
                     {"id": ch["id"]},
@@ -1267,7 +1244,7 @@ Generate topic-wise study notes for:
         if generated and len(generated.split()) >= 200:
             generated = _normalize_headings(generated).strip()
             generated = _trim_long_intro(generated)
-            generated = await _polish_notes_with_sarvam(generated, title, subject_name or "")
+            generated = await _polish_notes_with_vertex_safely(generated, title, subject_name or "")
             generated = _normalize_headings(generated).strip()
             generated = _trim_long_intro(generated)
             wc = len(generated.split())

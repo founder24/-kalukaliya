@@ -240,11 +240,9 @@ def install_deps_stub(*, force: bool = False, db: Any = None,
 
     _set("logger", logging.getLogger("tests.deps_stub"))
 
-    # Sarvam clients — present so `from deps import sarvam_*` imports work.
-    _set("sarvam_client", None)
-    _set("sarvam_translate_client", None)
+    # Sarvam chat client — only the `assamese_rag_chat` LLM client and its
+    # CF-gateway-bypass twin survive (V4 §15 / Task #492).
     _set("sarvam_llm_client", None)
-    _set("sarvam_client_direct", None)
     _set("sarvam_llm_client_direct", None)
 
     # Misc helpers production code occasionally pulls.

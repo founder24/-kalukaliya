@@ -43,7 +43,7 @@ _RUNBOOK_ANCHORS: Dict[str, str] = {
     "textract":        "34-textract--structured-document-ocr",
     "rekognition":     "35-rekognition--image-moderation",
     "comprehend":      "36-comprehend--sampled-nlp-analytics",
-    "translate":       "37-translate--sarvam-fallback",
+    "translate":       "37-translate--fallback",
     "personalize":     "38-personalize--home-rail-recommendations",
     "fraud_detector":  "39-fraud-detector--risk-score-on-signup--payment",
 }

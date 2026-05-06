@@ -308,8 +308,7 @@ _validate_env()
 
 from config import ROOT_DIR, CORS_ORIGINS, CORS_ORIGIN_REGEX, _CORS_ALLOW_CREDENTIALS, Configurator
 from deps import (
-    db, sarvam_client, sarvam_translate_client, sarvam_llm_client,
-    sarvam_client_direct, sarvam_llm_client_direct,
+    db, sarvam_llm_client, sarvam_llm_client_direct,
     mongo_client, logger, _init_pg_pool,
 )
 from auth_deps import _rate_limiter_cleanup
@@ -1874,8 +1873,8 @@ async def lifespan(app):
         logger.warning(f"[unified_logs] startup wiring failed: {_ulogs_boot_err}")
 
     logger.info("Syrabit.ai API started")
-    if sarvam_client:
-        logger.info("Sarvam AI client ready")
+    if sarvam_llm_client:
+        logger.info("Sarvam-m chat client ready (assamese_rag_chat only)")
     yield
     # Task #310 — final flush of speed-up metrics before shutting down so the
     # most recent counters survive the restart.
@@ -1920,14 +1919,8 @@ async def lifespan(app):
             await _unified_logs_cf_task
         except (asyncio.CancelledError, Exception):
             pass
-    if sarvam_client:
-        await sarvam_client.aclose()
-    if sarvam_translate_client:
-        await sarvam_translate_client.aclose()
     if sarvam_llm_client:
         await sarvam_llm_client.aclose()
-    if sarvam_client_direct:
-        await sarvam_client_direct.aclose()
     if sarvam_llm_client_direct:
         await sarvam_llm_client_direct.aclose()
     try:
