@@ -87,7 +87,13 @@ resource "aws_lambda_function" "reembed_consumer" {
   reserved_concurrent_executions = 5
 
   environment {
-    variables = {
+    # Task #489 — OTEL_* matches the canonical map in `lambda-otel.tf`
+    # so the in-image ADOT collector exports spans to App Insights +
+    # Axiom + Cloud Trace (the long-retention backstop wired in §0/§7).
+    # Per-function vars overlay the shared `local.otel_env` map.
+    variables = merge(local.otel_env, {
+      OTEL_SERVICE_NAME = "${local.lz_project}-reembed-consumer"
+
       # Kept for in-image observability/parity with `lambda-workers.tf`;
       # actual handler dispatch is via `image_config.command` above.
       HANDLER_NAME             = "sqs_consumers.reembed.handler"
@@ -96,7 +102,7 @@ resource "aws_lambda_function" "reembed_consumer" {
       PINECONE_NAMESPACE       = "cached_gemma_today"
       WORKERS_EMBED_SECRET_ARN = data.aws_secretsmanager_secret.workers_embed.arn
       PINECONE_API_KEY_ARN     = data.aws_secretsmanager_secret.pinecone.arn
-    }
+    })
   }
 
   tracing_config { mode = "Active" }

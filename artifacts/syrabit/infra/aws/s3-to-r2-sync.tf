@@ -83,14 +83,19 @@ resource "aws_lambda_function" "s3_to_r2_sync" {
   timeout     = 600 # 10 min — enough headroom for a day's promotions
 
   environment {
-    variables = {
+    # Task #489 — OTEL_* matches `lambda-otel.tf` so cross-cloud trace
+    # canary (`.github/workflows/cross-cloud-trace-canary.yml`) sees
+    # AWS spans land alongside ACA spans for the same `traceparent`.
+    variables = merge(local.otel_env, {
+      OTEL_SERVICE_NAME = "${local.lz_project}-s3-to-r2-sync"
+
       # Kept for in-image observability/parity; dispatch is via `image_config.command`.
       HANDLER_NAME             = "s3_to_r2_sync.handler"
       S3_FINALS_BUCKET         = var.s3_finals_bucket
       R2_ENDPOINT_URL          = var.r2_endpoint_url
       R2_FINALS_BUCKET         = var.r2_finals_bucket
       R2_ACCESS_KEY_SECRET_ARN = data.aws_secretsmanager_secret.r2_access_key.arn
-    }
+    })
   }
 
   tracing_config { mode = "Active" }

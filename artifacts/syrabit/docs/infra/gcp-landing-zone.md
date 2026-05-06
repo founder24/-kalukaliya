@@ -22,10 +22,19 @@ auxiliary AI-API + observability surface. After the post-cleanup pass:
   Insights, Fact Check Tools, Cloud Natural Language, **Web Risk**
   (admin + `edu_browser`), Books, GA4, GSC + Indexing API.
 - **AI APIs (SA-gated):** Google STT (Chirp 2), Google TTS (Neural2),
-  Google Translate v3, Google Vision OCR, Discovery Engine ingest,
-  **Vertex Gemini content-formatter** (long-form English + Assamese
-  overflow only — wired by sibling task #494), **Vertex Gemini RAI**
-  (batch only).
+  Google Translate v3, Google Vision OCR, Discovery Engine ingest.
+- **Vertex AI (`aiplatform.googleapis.com`) — RETIRED from the #489
+  post-cleanup surface.** The API is intentionally NOT enabled and
+  no `roles/aiplatform.*` IAM binding ships in `infra/gcp/` (the
+  drift guard at `.github/scripts/four_cloud_delegation_drift.sh`
+  blocks it from being re-added inside this Terraform root). Sibling
+  task #494 will reintroduce **only** the content-formatter
+  long-form overflow path + the batch RAI reviewer behind its own
+  TF module when the pool is reactivated; both remain off the chat
+  hot path per V4 §4 + §15. If you see anything in this project
+  calling `vertex_services.embed_text` / Vector Search / chat
+  primary, it is a regression and the drift guard should have
+  blocked it.
 - **OAuth surface:** Google OAuth 2.0 client (used by the live
   `/api/auth/supabase-session` Google login handler — kept until V4
   §13 Phase 4 completes).

@@ -732,3 +732,99 @@ async def admin_billing_sentry(
 
     await _cache_set(cache_key, result)
     return result
+
+
+# ─── Task #489 — Cloud Billing → Meter A/B/C runtime hookup ─────────────
+#
+# V4 §10 Rule C requires the GCP `google_billing_budget` thresholds
+# (50 / 80 / 100 % current-spend + 100 % forecast — see
+# `artifacts/syrabit/infra/gcp/budget.tf`) to feed the in-process
+# `credit_burn_meter` so the same alert sink that pages on Meter A/B/C
+# trips also pages on cross-cloud spend overrun.
+#
+# GCP Billing emits a JSON payload to a Pub/Sub topic; the Pub/Sub
+# subscription forwards via push to this webhook. We translate the
+# threshold breach into the meter's `_alert_sink(severity, msg, ctx)`
+# contract so SES + Slack are both wired without duplicating notifier
+# code.
+#
+# Wire:
+#   GCP Billing budget → Pub/Sub topic →
+#     push subscription → POST /api/admin/billing/cloud-billing-alert
+#     → credit_burn_meter_runtime._alert_sink (notify-only, no auto-flip).
+#
+# Authentication: the push subscription is configured with an OIDC
+# token whose audience MUST equal `BILLING_WEBHOOK_AUDIENCE`. We verify
+# that here so a leaked URL alone cannot fire fake alerts.
+
+import base64 as _b64
+import json as _json
+from fastapi import Header, HTTPException, Request
+
+
+@router.post(
+    "/admin/billing/cloud-billing-alert",
+    summary="GCP Cloud Billing → Meter A/B/C notify-only webhook (Task #489)",
+)
+async def cloud_billing_alert_webhook(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    expected_audience = os.environ.get("BILLING_WEBHOOK_AUDIENCE", "").strip()
+    if not expected_audience:
+        # Fail loud per V4 §12 — never accept the webhook if the audience
+        # check is unconfigured (no silent open-door fallback).
+        raise HTTPException(status_code=503, detail="BILLING_WEBHOOK_AUDIENCE unset")
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = authorization.split(None, 1)[1].strip()
+    try:
+        # Lazy import — google-auth is only present in production images.
+        from google.oauth2 import id_token  # type: ignore
+        from google.auth.transport import requests as _g_requests  # type: ignore
+        claims = id_token.verify_oauth2_token(token, _g_requests.Request(), expected_audience)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"oidc verify failed: {exc}") from exc
+    issuer = claims.get("iss", "")
+    if issuer not in {"https://accounts.google.com", "accounts.google.com"}:
+        raise HTTPException(status_code=401, detail=f"unexpected oidc issuer {issuer!r}")
+
+    body = await request.json()
+    # Pub/Sub push envelope: {"message": {"data": <b64-json>, "attributes": {...}}}
+    message = (body or {}).get("message") or {}
+    raw = message.get("data") or ""
+    try:
+        decoded = _json.loads(_b64.b64decode(raw).decode("utf-8")) if raw else {}
+    except Exception:
+        decoded = {}
+
+    cost = float(decoded.get("costAmount") or 0)
+    budget = float(decoded.get("budgetAmount") or 0)
+    pct = (cost / budget) if budget > 0 else 0.0
+    threshold_pct = float(decoded.get("alertThresholdExceeded") or 0)
+
+    severity = "critical" if pct >= 1.0 else ("warning" if pct >= 0.8 else "info")
+    msg = (
+        f"GCP Cloud Billing alert: spend={cost:.2f} {decoded.get('currencyCode','USD')} "
+        f"of budget={budget:.2f} ({pct:.0%}); threshold={threshold_pct:.0%}"
+    )
+
+    try:
+        from credit_burn_meter_runtime import _ALERT_SINK as _meter_sink  # type: ignore
+        _meter_sink(
+            severity,
+            msg,
+            {
+                "source": "gcp_cloud_billing",
+                "cost": cost,
+                "budget": budget,
+                "pct": pct,
+                "threshold_pct": threshold_pct,
+                "budget_display_name": decoded.get("budgetDisplayName"),
+            },
+        )
+    except Exception as exc:
+        # Don't 5xx Pub/Sub — that triggers retry storms. Log and ack.
+        logger.exception("cloud_billing_alert_webhook: meter sink dispatch failed: %s", exc)
+
+    return {"ok": True, "severity": severity, "pct": pct}
