@@ -1811,7 +1811,12 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 # pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    "vertex":           "gemini-2.5-flash",                          # Vertex AI Gemini 2.5 Flash — highest TPS
+    # Task #490: `vertex` removed from chat/embed/vector pools entirely.
+    # The remaining Vertex surface (`content_format` formatter) goes
+    # through `vertex_format.format_with_vertex`, which uses its own
+    # model-id constant (`VERTEX_GEMINI_MODEL`) — not this dispatch
+    # default-model map. Re-adding `vertex` here would silently put
+    # Vertex back into the round-robin chat pool.
     # bedrock removed in Task #347
     "azure_openai":     AZURE_OPENAI_DEPLOYMENT,                     # Azure OpenAI deployment from config (Task #290 — env-driven, no hard-coded model drift)
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
@@ -1838,7 +1843,9 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
 # Maps provider names to the canonical provider string used by _call_single_provider.
 # This bridges Task #250's semantic provider names to llm.py's internal strings.
 _PROVIDER_CANONICAL: dict[str, str] = {
-    "vertex":           "gemini",           # Vertex Gemini = gemini provider
+    # Task #490: `vertex` → `gemini` mapping removed; the chat/vision
+    # Gemini dispatch branch was deleted along with the Vertex chat
+    # hot-path. The formatter goes through `vertex_format` directly.
     # bedrock removed in Task #347
     "azure_openai":     "azure_openai",     # Task #290 — own branch w/ failover chain
     "sarvam":           "sarvam",
@@ -1959,13 +1966,13 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
     candidates = PROVIDER_PRIORITY.get(feature, ["workers_ai"])
     _is_assamese_feature = feature in ("assamese_rag_chat", "assamese_content")
 
-    # 3-leg allowlist for assamese_rag_chat (re-widened 2026-05-05 per user
-    # instruction): sarvam → workers_ai_indic → vertex. workers_ai_llama31_8b
-    # is still excluded because it produces non-Assamese (English/Hindi)
-    # output for Assamese prompts; only the IndicTrans2 neural-MT path is
-    # whitelisted as a third leg.
+    # 2-leg allowlist for assamese_rag_chat (Task #490 — Vertex was removed
+    # from the chat hot path and dropped from this third leg): sarvam →
+    # workers_ai_indic. workers_ai_llama31_8b is still excluded because it
+    # produces non-Assamese (English/Hindi) output for Assamese prompts;
+    # only the IndicTrans2 neural-MT path is whitelisted as a fallback.
     if feature == "assamese_rag_chat":
-        candidates = [p for p in candidates if p in ("sarvam", "workers_ai_indic", "vertex")]
+        candidates = [p for p in candidates if p in ("sarvam", "workers_ai_indic")]
 
     # Per-pool weight overrides take precedence over global PROVIDER_CREDITS.
     # Providers not listed in the override fall back to PROVIDER_CREDITS as usual.
@@ -2026,10 +2033,11 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
         return p
 
     # Task #291 — strict-chain features must NOT silently downgrade to a
-    # global workers_ai default. assamese_rag_chat is reasoning-only (Sarvam
-    # / Vertex); falling through to llama/gpt-oss for an Assamese answer
-    # would produce English/garbled output. Return None so the caller errors
-    # out cleanly instead of serving a wrong-language response.
+    # global workers_ai default. assamese_rag_chat is reasoning-only
+    # (Sarvam → IndicTrans2 fallback after Task #490); falling through
+    # to llama/gpt-oss for an Assamese answer would produce
+    # English/garbled output. Return None so the caller errors out
+    # cleanly instead of serving a wrong-language response.
     _STRICT_CHAIN_FEATURES = ("assamese_rag_chat",)
     if feature in _STRICT_CHAIN_FEATURES:
         logger.warning("select_provider: feature=%s — strict chain exhausted, returning None (no silent downgrade)", feature)
@@ -2047,8 +2055,9 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
     Example::
 
         provider, model = route_for_feature("english_rag_chat")
-        # → ("gemini", "gemini-2.5-flash") when vertex is selected, or
+        # → ("azure_openai", AZURE_OPENAI_DEPLOYMENT) when azure is selected, or
         #   ("workers-ai", "@cf/meta/llama-3.3-70b-instruct-fp8-fast") as fallback.
+        # (Task #490: the prior ("gemini", "gemini-2.5-flash") branch is gone.)
     """
     provider_name = select_provider(feature, lang=lang)
     canonical = _PROVIDER_CANONICAL.get(provider_name, provider_name)
@@ -2062,11 +2071,13 @@ _INDICTRANS_VALID_FEATURES: frozenset = frozenset({
 """Features where workers_ai_indic (IndicTrans2) is a valid provider.
 
 `assamese_rag_chat` was re-added 2026-05-05 per user instruction — IndicTrans2
-sits between Sarvam and Vertex in the 3-leg Assamese chat chain so a Sarvam
-outage hands off to the in-house Cloudflare neural MT before paying for
-Gemini. Note: IndicTrans2 is a translation model (en-indic), not a chat
-model, so when it dispatches for `assamese_rag_chat` it returns a translated
-form of the user's prompt rather than a true conversational answer; this is
+is now the second (and final) leg of the post-Task-#490 Assamese chat chain
+(sarvam → workers_ai_indic), since Vertex was removed from the chat hot path
+entirely. A Sarvam outage hands off to the in-house Cloudflare neural MT
+instead of silently downgrading. Note: IndicTrans2 is a translation model
+(en-indic), not a chat model, so when it dispatches for `assamese_rag_chat`
+it returns a translated form of the user's prompt rather than a true
+conversational answer; this is
 an explicit operator trade-off (cheaper than Vertex, slower-quality than
 Sarvam) chosen by the user.
 
@@ -2141,9 +2152,9 @@ async def _dispatch_llm_for_feature(
     # yet (provider == "workers_ai"), the guard inside the model-level
     # call wins; this branch covers the common explicit cases.
     _resolved_model = None
-    if provider == "vertex":
-        _resolved_model = "gemini-2.5-flash"
-    elif provider == "azure_openai":
+    # Task #490: the `provider == "vertex"` branch was removed (Vertex
+    # is no longer a chat-pool dispatch target). Add new providers here.
+    if provider == "azure_openai":
         try:
             from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL_PEEK
             _resolved_model = _AZ_DEPL_PEEK
