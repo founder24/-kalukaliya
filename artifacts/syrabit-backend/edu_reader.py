@@ -33,6 +33,7 @@ import httpx
 
 from edu_allowlist import is_allowed_url, log_blocked_request
 from deps import redis_client
+import web_risk_client
 from url_safety import (
     resolves_to_public_ip as _resolves_to_public_ip,
     safe_get_with_redirects as _safe_get_with_redirects,
@@ -64,6 +65,8 @@ _reader_metrics = {
     "blocked_allowlist": 0,
     "blocked_robots": 0,
     "blocked_too_large": 0,
+    "blocked_web_risk": 0,
+    "web_risk_disabled_warnings": 0,
 }
 
 
@@ -499,6 +502,49 @@ async def fetch_and_extract(
         _reader_metrics["blocked_robots"] += 1
         await log_blocked_request(final_url, "robots_disallow_redirect", actor=actor, ip_hash=ip_hash)
         return {"ok": False, "error": "robots_disallow", "detail": "robots.txt forbids the redirect destination", "url": final_url}
+
+    # Google Web Risk check on the POST-REDIRECT final URL (Task #489).
+    # Closes the threat_model.md Information Disclosure rule that
+    # publisher-policy + URL safety must be enforced on the page actually
+    # fetched, not just the caller-supplied URL. An open-redirect on an
+    # allowlisted host that walks to MALWARE/SOCIAL_ENGINEERING/UNWANTED
+    # is blocked here, even though the redirect already passed the
+    # allowlist + robots re-checks above.
+    #
+    # Fail-policy:
+    #   * "ok"+matched_threats   → BLOCK, log to log_blocked_request, fail-closed.
+    #   * "ok"+safe              → continue.
+    #   * "disabled"             → fail-OPEN (degraded — same posture as
+    #                              before the integration), but bump a
+    #                              metric so Sentry shows the missing
+    #                              GOOGLE_WEB_RISK_API_KEY.
+    #   * "error" / timeout      → fail-OPEN; we do not want a transient
+    #                              Web Risk outage to deny educational
+    #                              reads on otherwise-allowlisted sites.
+    try:
+        wr = await web_risk_client.check_uri(final_url)
+    except Exception as e:
+        wr = {"status": "error", "safe": True, "matched_threats": [], "error": str(e)[:200]}
+
+    if wr.get("status") == "ok" and not wr.get("safe", True):
+        threats = ",".join(wr.get("matched_threats") or []) or "unspecified"
+        _reader_metrics["blocked_web_risk"] += 1
+        await log_blocked_request(
+            final_url, f"web_risk_{threats}", actor=actor, ip_hash=ip_hash,
+        )
+        return {
+            "ok": False,
+            "error": "web_risk_blocked",
+            "detail": threats,
+            "url": final_url,
+        }
+    if wr.get("status") == "disabled":
+        _reader_metrics["web_risk_disabled_warnings"] += 1
+        logger.warning(
+            "[edu_reader] Web Risk check skipped — GOOGLE_WEB_RISK_API_KEY "
+            "not configured. Reader is fail-open for url=%s. Threat-model "
+            "compliance requires this key in production.", final_url,
+        )
 
     if resp.status_code != 200:
         _reader_metrics["fetches_failed"] += 1

@@ -1,38 +1,31 @@
 """
-sqs_fanout — drop-in replacement for `cloud_tasks_client.send`.
+sqs_fanout — sole producer-side enqueue helper for the AWS event backbone.
 
-Phase 4 — Async worker port (Task #332).
+Phase 4 — Async worker port (Task #332). GCP Cloud Tasks producer client
+was deleted by Task #489 (four-cloud delegation lock-in); this module is
+now the single source of truth for "enqueue async work to the AWS event
+backbone" per V4 §0 + §3 + the four-cloud delegation matrix
+(`infra/four-cloud-delegation.md` row "Async event backbone").
 
 Background
 ----------
 The existing producers in artifacts/syrabit-backend/ (seo_engine.py,
 seo_internal_linker.py, bing_*.py, cf_bot_crosscheck.py,
-unified_logs_dao.py, notify.py, etc.) all reach for
-`cloud_tasks_client.send(queue, payload)` to enqueue async work.
-That helper builds a Cloud Tasks HTTP target pointing at the FastAPI
-backend and counts on the consumer route to do the work.
+unified_logs_dao.py, notify.py, etc.) call `enqueue(queue_key, payload)`
+to put a JSON payload onto the matching SQS queue. The queue URL is
+read from SSM (populated by Terraform — see `infra/aws/sqs.tf` output
+`sqs_worker_queue_urls`) so producer config has zero hard-coded ARNs
+and rotates automatically when the queue is recreated in a different
+region. Periodic ticks that previously lived on Cloud Scheduler are
+handed to AWS EventBridge schedules (see `infra/aws/eventbridge.tf`).
 
-After the cutover the consumer side is an AWS Lambda triggered by
-SQS, so we just need to put the same JSON payload onto the matching
-SQS queue. The queue URL is read from SSM (populated by Terraform —
-see infra/aws/sqs.tf output `sqs_worker_queue_urls`) so producer
-config has zero hard-coded ARNs and rotates automatically when the
-queue is recreated in a different region.
-
-Migration contract
-------------------
-Every call site that today reads:
-
-    from cloud_tasks_client import send as enqueue
-    await enqueue("seo-indexnow", {"page_id": pid})
-
-becomes:
-
+Usage
+-----
     from sqs_fanout import enqueue
     await enqueue("seo-indexnow", {"page_id": pid})
 
-The queue keys are identical to the GCP names listed in
-`docs/infra/inventory/cloud-tasks.json` so no producer-side mapping
+The queue keys match the inventory in
+`docs/infra/inventory/cloud-tasks.json` — no producer-side mapping
 table is needed.
 
 Failure semantics

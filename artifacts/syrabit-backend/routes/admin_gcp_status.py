@@ -23,8 +23,6 @@ import fact_check_client
 import nlp_client
 import web_risk_client
 import books_client
-import cloud_scheduler_client
-import cloud_tasks_client
 import web_security_scanner_client
 import discovery_engine_client
 import slack_notifier
@@ -88,20 +86,10 @@ async def admin_gcp_services_status(admin: dict = Depends(get_admin_user)):
             "key": _api_key_state(["GOOGLE_BOOKS_API_KEY", "GOOGLE_KG_API_KEY"]),
         },
         # SA-required (Phase 3)
-        "cloud_scheduler": {
-            "auth_mode": "service_account",
-            "endpoint": "/api/admin/gcp/scheduler/jobs",
-            "configured": sa_configured,
-            "project": sa_project,
-            "location_env": "GCP_SCHEDULER_LOCATION (default us-central1)",
-        },
-        "cloud_tasks": {
-            "auth_mode": "service_account",
-            "endpoint": "/api/admin/gcp/tasks/queues",
-            "configured": sa_configured,
-            "project": sa_project,
-            "location_env": "GCP_TASKS_LOCATION (default us-central1)",
-        },
+        # Cloud Scheduler + Cloud Tasks intentionally OMITTED — Task #489
+        # deleted both client modules. Periodic ticks live on AWS
+        # EventBridge (`infra/aws/eventbridge.tf`); async enqueueing
+        # goes through `sqs_fanout.enqueue` to AWS SQS.
         "web_security_scanner": {
             "auth_mode": "service_account",
             "endpoint": "/api/admin/gcp/wss/configs",
@@ -130,14 +118,6 @@ async def admin_gcp_services_status(admin: dict = Depends(get_admin_user)):
         "endpoint": "/api/admin/gcp/wss/notify-slack",
         "configured": slack_notifier.is_configured(),
         "key": _api_key_state(["SLACK_WEBHOOK_URL"]),
-    }
-
-    # Cutover flag for the in-process → Cloud Scheduler migration.
-    services["scheduler_takeover_flag"] = {
-        "auth_mode": "env_flag",
-        "configured": (os.environ.get("GCP_SCHEDULER_TAKEOVER") or "").strip()
-            in {"1", "true", "yes"},
-        "env": "GCP_SCHEDULER_TAKEOVER (set to 1 once Cloud Scheduler jobs are running)",
     }
 
     # Aggregate counts so the dashboard can render a single status pill.

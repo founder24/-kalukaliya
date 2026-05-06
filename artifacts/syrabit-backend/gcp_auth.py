@@ -4,8 +4,8 @@ Loads the SA from GOOGLE_APPLICATION_CREDENTIALS_JSON (preferred) or
 GOOGLE_APPLICATION_CREDENTIALS (path), mints OAuth access tokens via
 google-auth, and caches the token in-process for ~50 minutes.
 
-Used by cloud_scheduler_client, cloud_tasks_client,
-web_security_scanner_client, discovery_engine_client. When the SA is
+Used by web_security_scanner_client, discovery_engine_client, gcp_billing,
+and the Vertex content-formatter (sibling task #494). When the SA is
 absent the helpers return None cleanly so callers can return a structured
 "disabled" payload instead of raising.
 
