@@ -18,6 +18,10 @@ name: cf-edge-cache-smoke
 # SHA-pinning hardening if a pinned action were ever compromised.
 #
 # Task #425 — End-to-end smoke for the CF_EDGE_CACHE_ON write-through path.
+# Task #456 — Extended to also fire against PRODUCTION on the same
+# `workflow_run` trigger so a hot-fix or worker-only config change that
+# bypasses staging is still caught within minutes of going live (rather
+# than at the 04:11 UTC nightly cron the next day).
 #
 # What this proves
 # ----------------
@@ -40,34 +44,54 @@ name: cf-edge-cache-smoke
 #
 # Cadence
 # -------
-#   - workflow_dispatch: manual smoke from the Actions tab.
-#   - workflow_run: fires after the staging deploy lane of
+#   - workflow_dispatch: manual smoke from the Actions tab. The
+#     `target` input picks staging (default) or production.
+#   - workflow_run: fires after the ACA deploy lane of
 #     azure-container-apps-deploy.yml so a regression is caught
 #     immediately on the freshly-deployed revision (only when the
 #     upstream workflow actually succeeded — there is no point smoking
-#     a failed deploy).
+#     a failed deploy). The matrix exercises BOTH staging and
+#     production targets on every successful deploy run; matrix
+#     entries whose env/secrets are not configured no-op with a clear
+#     log line so a fresh fork doesn't fail noisily.
 #   - schedule: 04:11 UTC daily as a belt-and-suspenders gate against
 #     drift introduced by an unrelated config change (env var rename,
-#     KV namespace re-bind, etc.).
+#     KV namespace re-bind, etc.). Runs both targets too.
 #
 # Required repo secrets / vars
 # ----------------------------
 #   STAGING_BASE_URL       Repo variable. Backend base URL for the
 #                          staging deploy, e.g.
 #                          https://syrabit-backend-staging.eastus.azurecontainerapps.io
-#                          When unset the job no-ops with a clear log
-#                          line so a fresh fork doesn't fail noisily.
+#                          When unset the staging matrix entry no-ops
+#                          with a clear log line.
 #   STAGING_ADMIN_JWT      Repo secret. Long-lived admin Bearer token
 #                          accepted by `auth_deps.get_admin_user`. Same
 #                          token shape used by the admin dashboard. Must
 #                          ONLY be a staging credential — never wire the
 #                          production admin JWT here.
+#   PROD_BASE_URL          Repo variable. Backend base URL for the
+#                          production deploy, e.g.
+#                          https://api.syrabit.ai. When unset the
+#                          production matrix entry no-ops.
+#   PROD_ADMIN_JWT         Repo secret. Long-lived admin Bearer token
+#                          for production. Distinct from the staging
+#                          token — rotation is independent.
 
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: "Which environment to smoke (staging | production | both)."
+        required: false
+        default: both
+        type: choice
+        options:
+          - staging
+          - production
+          - both
       base_url:
-        description: "Override STAGING_BASE_URL (e.g. https://staging.syrabit.ai)."
+        description: "Override the selected target's BASE_URL (only honoured when a single target is picked)."
         required: false
         default: ""
   workflow_run:
@@ -75,7 +99,7 @@ on:
     # GitHub's `workflow_run` trigger keys off the human-readable name.
     workflows: ["Azure Container Apps deploy (manual)"]
     types: [completed]
-    # No branch filter: the staging deploy lane can be invoked from any
+    # No branch filter: the deploy lane can be invoked from any
     # branch (Replit-agent, main, master, hot-fix branches), and we want
     # the smoke to gate the freshly-deployed revision regardless of
     # which branch shipped it.
@@ -86,29 +110,52 @@ on:
     - cron: "11 4 * * *"
 
 # Read-only token: this job checks out the repo and probes the deployed
-# staging backend over HTTPS. It does not write back to the repo, touch
+# backend(s) over HTTPS. It does not write back to the repo, touch
 # packages, or open PRs.
 permissions:
   contents: read
 
 jobs:
   smoke:
-    name: CF_EDGE_CACHE write-through round trip
+    name: CF_EDGE_CACHE write-through round trip (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # When fired by `workflow_run`, only run if the upstream deploy
     # actually succeeded — smoking a failed deploy would just turn the
     # workflow red for a reason already reported elsewhere.
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    #
+    # On manual dispatch, honour the `target` input so an operator can
+    # smoke just one environment without spinning up an idle matrix leg.
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+      && (github.event_name != 'workflow_dispatch'
+          || github.event.inputs.target == 'both'
+          || github.event.inputs.target == matrix.target)
+
+    strategy:
+      # Staging and production are independent — a flap on one must not
+      # mask a real regression on the other.
+      fail-fast: false
+      matrix:
+        target: [staging, production]
 
     defaults:
       run:
         working-directory: artifacts/syrabit-backend
 
     env:
-      STAGING_BASE_URL: ${{ github.event.inputs.base_url || vars.STAGING_BASE_URL }}
-      STAGING_ADMIN_JWT: ${{ secrets.STAGING_ADMIN_JWT }}
       STAGING_TIMEOUT_S: "20"
+      # All possible source values are exposed to the resolver step so
+      # the matrix entry can pick the correct pair without having to
+      # encode nested ternaries in YAML expressions (those are fragile
+      # and hard to review). Per-target binding happens in
+      # "Resolve target env" below.
+      STAGING_BASE_URL_VAR: ${{ vars.STAGING_BASE_URL }}
+      PROD_BASE_URL_VAR:    ${{ vars.PROD_BASE_URL }}
+      STAGING_ADMIN_JWT_SECRET: ${{ secrets.STAGING_ADMIN_JWT }}
+      PROD_ADMIN_JWT_SECRET:    ${{ secrets.PROD_ADMIN_JWT }}
+      DISPATCH_BASE_URL_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target == matrix.target && github.event.inputs.base_url || '' }}
+      MATRIX_TARGET: ${{ matrix.target }}
 
     steps:
       - name: Checkout
@@ -120,11 +167,37 @@ jobs:
           # artifact upload.
           persist-credentials: false
 
-      - name: Skip when staging not configured
+      - name: Resolve target env
+        # Pick the right BASE_URL / ADMIN_JWT for this matrix leg and
+        # publish them to subsequent steps under the names the smoke
+        # script expects (STAGING_BASE_URL / STAGING_ADMIN_JWT — these
+        # are the script's internal contract; reusing the names for the
+        # production leg is NOT a leak of staging credentials, it just
+        # avoids a script fork).
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "$MATRIX_TARGET" = "production" ]; then
+            BASE="${DISPATCH_BASE_URL_OVERRIDE:-$PROD_BASE_URL_VAR}"
+            JWT="$PROD_ADMIN_JWT_SECRET"
+          else
+            BASE="${DISPATCH_BASE_URL_OVERRIDE:-$STAGING_BASE_URL_VAR}"
+            JWT="$STAGING_ADMIN_JWT_SECRET"
+          fi
+          # Mask the JWT in any later log output. BASE_URL is not a
+          # secret (it's a public hostname) so it is intentionally not
+          # masked — masking it would obscure failure diagnostics.
+          if [ -n "$JWT" ]; then echo "::add-mask::$JWT"; fi
+          {
+            echo "STAGING_BASE_URL=$BASE"
+            echo "STAGING_ADMIN_JWT=$JWT"
+          } >> "$GITHUB_ENV"
+
+      - name: Skip when target not configured
         id: gate
         run: |
-          if [ -z "$STAGING_BASE_URL" ] || [ -z "$STAGING_ADMIN_JWT" ]; then
-            echo "::notice::STAGING_BASE_URL or STAGING_ADMIN_JWT not configured; skipping CF_EDGE_CACHE smoke."
+          if [ -z "${STAGING_BASE_URL:-}" ] || [ -z "${STAGING_ADMIN_JWT:-}" ]; then
+            echo "::notice::${MATRIX_TARGET} BASE_URL or ADMIN_JWT not configured; skipping CF_EDGE_CACHE smoke for this target."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -142,6 +215,6 @@ jobs:
         # avoid pulling the full backend requirements.txt for speed.
         run: pip install "httpx>=0.27,<0.29"
 
-      - name: Run CF_EDGE_CACHE end-to-end smoke
+      - name: Run CF_EDGE_CACHE end-to-end smoke (${{ matrix.target }})
         if: steps.gate.outputs.skip != 'true'
         run: python -m scripts.cf_edge_cache_smoke
