@@ -279,9 +279,14 @@ class TestFetchChunksSemanticFallback:
     (``llm.select_provider("vector_search", …)``) with exclusion-based retry:
 
       pinecone_ai  → Pinecone Inference embed + Pinecone $vectorSearch  [primary]
-      vertex       → Gemini embed + Atlas $vectorSearch                  [fallback]
       mongodb_atlas→ Cohere embed + Atlas $vectorSearch        [weight-0 last resort]
       workers_ai   → no vector endpoint (raises immediately)
+
+    Task #490: the historical ``vertex`` row (Gemini embed + Atlas
+    $vectorSearch) was removed from the pool. The Vertex retriever
+    module is gone and ``vertex_services.embed_text`` is no longer in
+    the vector hot path — the assertions below pin that contract by
+    stubbing the symbol to raise if anything calls it.
 
     These tests pin the safety contract that survived the architectural change:
 
