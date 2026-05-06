@@ -47,6 +47,32 @@ _counters: dict[str, int] = {
 _counters_by_prefix_total: dict[str, int] = {}
 _counters_by_prefix_blocked: dict[str, int] = {}
 
+# Task #462 — rolling 1-hour window of blocked rate-checks per prefix.
+# The lifetime ``_counters_by_prefix_blocked`` map is a process-uptime
+# counter that resets every time an ACA revision rolls, so the admin
+# panel can't tell "spike right now" apart from "pod restarted an hour
+# ago". Ring buffer of 60 per-minute buckets keyed by prefix, each
+# entry ``(minute_index, blocked_count)``. Stale buckets (older than
+# the 60-minute window) are skipped on read and pruned on write so
+# memory stays bounded at ≤60 entries × #prefixes.
+_BLOCKED_WINDOW_MIN = 60
+_blocked_buckets_by_prefix: dict[str, list[tuple[int, int]]] = {}
+
+
+def _current_minute() -> int:
+    return int(time.time() // 60)
+
+
+def _prune_blocked_buckets_locked(prefix: str, now_min: int) -> list[tuple[int, int]]:
+    """Drop buckets older than the rolling window. Caller holds ``_counters_lock``."""
+    cutoff = now_min - _BLOCKED_WINDOW_MIN + 1
+    buckets = [b for b in _blocked_buckets_by_prefix.get(prefix, []) if b[0] >= cutoff]
+    if buckets:
+        _blocked_buckets_by_prefix[prefix] = buckets
+    else:
+        _blocked_buckets_by_prefix.pop(prefix, None)
+    return buckets
+
 
 def _bump(name: str, n: int = 1) -> None:
     with _counters_lock:
@@ -72,6 +98,7 @@ def _bump_prefix(key: str, *, blocked: bool) -> None:
     prefix = _prefix_of(key)
     if not prefix:
         return
+    now_min = _current_minute()
     with _counters_lock:
         _counters_by_prefix_total[prefix] = (
             _counters_by_prefix_total.get(prefix, 0) + 1
@@ -80,14 +107,28 @@ def _bump_prefix(key: str, *, blocked: bool) -> None:
             _counters_by_prefix_blocked[prefix] = (
                 _counters_by_prefix_blocked.get(prefix, 0) + 1
             )
+            buckets = _prune_blocked_buckets_locked(prefix, now_min)
+            if buckets and buckets[-1][0] == now_min:
+                buckets[-1] = (now_min, buckets[-1][1] + 1)
+            else:
+                buckets.append((now_min, 1))
+            _blocked_buckets_by_prefix[prefix] = buckets
 
 
 def snapshot() -> dict[str, Any]:
     """Counter snapshot for the cf-health route."""
+    now_min = _current_minute()
+    cutoff = now_min - _BLOCKED_WINDOW_MIN + 1
     with _counters_lock:
         out = {"enabled": is_enabled(), **_counters}
         out["rate_check_total_by_prefix"] = dict(_counters_by_prefix_total)
         out["rate_check_blocked_by_prefix"] = dict(_counters_by_prefix_blocked)
+        last_hour: dict[str, int] = {}
+        for prefix, buckets in _blocked_buckets_by_prefix.items():
+            total = sum(count for minute, count in buckets if minute >= cutoff)
+            if total:
+                last_hour[prefix] = total
+        out["rate_check_blocked_by_prefix_last_hour"] = last_hour
     out["block_ratio"] = (
         out["rate_check_blocked"] / out["rate_check_total"]
         if out["rate_check_total"] else 0.0
@@ -105,6 +146,7 @@ def reset() -> None:
             _counters[k] = 0
         _counters_by_prefix_total.clear()
         _counters_by_prefix_blocked.clear()
+        _blocked_buckets_by_prefix.clear()
     _local_sessions.clear()
     _local_buckets.clear()
 

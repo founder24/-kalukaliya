@@ -3653,19 +3653,24 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           bot-signup wave or normal chat traffic. The backend now
           exposes per-prefix breakdowns
           (rate_check_blocked_by_prefix / rate_check_total_by_prefix)
-          and this tile renders the "signup" slice — process-lifetime
-          counts that reset on pod restart, the same lifecycle as the
-          rest of do_chat's counters.
+          and this tile renders the "signup" slice. Task #462 — the
+          headline number is now the rolling 1-hour blocked count
+          (``rate_check_blocked_by_prefix_last_hour``) so on-call sees
+          a stable "spike right now" signal that survives ACA revision
+          rolls; the process-lifetime count is kept as a small caption
+          for context.
         */}
         {(() => {
           const doChat = cfHealthData?.do_chat;
           if (!doChat || doChat.error) return null;
           const blockedByPrefix = doChat.rate_check_blocked_by_prefix || {};
+          const blockedLastHour = doChat.rate_check_blocked_by_prefix_last_hour || {};
           const totalByPrefix = doChat.rate_check_total_by_prefix || {};
-          const signupBlocked = blockedByPrefix.signup || 0;
+          const signupBlockedLifetime = blockedByPrefix.signup || 0;
+          const signupBlockedHour = blockedLastHour.signup || 0;
           const signupTotal = totalByPrefix.signup || 0;
-          const ratio = signupTotal > 0 ? signupBlocked / signupTotal : 0;
-          const tone = signupBlocked > 0 ? 'amber' : 'emerald';
+          const ratio = signupTotal > 0 ? signupBlockedLifetime / signupTotal : 0;
+          const tone = signupBlockedHour > 0 ? 'amber' : 'emerald';
           const colors = tone === 'amber'
             ? { tile: 'bg-amber-50 border-amber-200', icon: 'bg-amber-100 text-amber-500', heading: 'text-amber-600' }
             : { tile: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-100 text-emerald-500', heading: 'text-emerald-600' };
@@ -3698,16 +3703,19 @@ export default function AdminHealth({ adminToken, onNavigate }) {
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-xl p-3 border border-gray-200 bg-white">
                   <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
-                    Blocked signups
+                    Blocked signups (last hour)
                   </p>
                   <p
                     className="text-2xl font-bold font-mono text-gray-900"
+                    data-testid="signup-throttle-blocked-hour"
+                  >
+                    {signupBlockedHour}
+                  </p>
+                  <p
+                    className="text-[10px] text-gray-400 mt-0.5"
                     data-testid="signup-throttle-blocked"
                   >
-                    {signupBlocked}
-                  </p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    since pod start
+                    {signupBlockedLifetime} since pod start
                   </p>
                 </div>
                 <div className="rounded-xl p-3 border border-gray-200 bg-white">

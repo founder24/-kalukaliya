@@ -204,7 +204,40 @@ async def test_do_chat_falls_back_to_in_process_when_flag_off(monkeypatch):
     assert snap["rate_check_blocked_by_prefix"]["signup"] == 1
     assert snap["rate_check_total_by_prefix"]["chat"] == 1
     assert snap["rate_check_blocked_by_prefix"].get("chat", 0) == 0
+
+    # Task #462 — rolling 1-hour blocked map exists alongside the
+    # lifetime counters so on-call sees a "spike right now" signal
+    # that survives ACA revision rolls.
+    assert snap["rate_check_blocked_by_prefix_last_hour"]["signup"] == 1
+    assert "chat" not in snap["rate_check_blocked_by_prefix_last_hour"]
     reset()
+
+
+@pytest.mark.asyncio
+async def test_do_chat_blocked_last_hour_window_evicts_old_buckets(monkeypatch):
+    """``rate_check_blocked_by_prefix_last_hour`` must drop bucket
+    samples older than the rolling 60-minute window while keeping the
+    process-lifetime counter monotonic."""
+    monkeypatch.setattr("config.DO_CHAT_ON", False, raising=False)
+    import do_chat
+    do_chat.reset()
+
+    base_min = do_chat._current_minute()
+
+    # Block recorded 2 hours ago — should be invisible to the rolling map.
+    monkeypatch.setattr(do_chat, "_current_minute", lambda: base_min - 120)
+    await do_chat.rate_check("signup:ip:1.1.1.1", limit=1, window_s=60)
+    await do_chat.rate_check("signup:ip:1.1.1.1", limit=1, window_s=60)  # blocked
+
+    # Block recorded "now" — should be the only entry in the rolling map.
+    monkeypatch.setattr(do_chat, "_current_minute", lambda: base_min)
+    await do_chat.rate_check("signup:ip:2.2.2.2", limit=1, window_s=60)
+    await do_chat.rate_check("signup:ip:2.2.2.2", limit=1, window_s=60)  # blocked
+
+    snap = do_chat.snapshot()
+    assert snap["rate_check_blocked_by_prefix"]["signup"] == 2  # lifetime
+    assert snap["rate_check_blocked_by_prefix_last_hour"]["signup"] == 1
+    do_chat.reset()
 
 
 @pytest.mark.asyncio
