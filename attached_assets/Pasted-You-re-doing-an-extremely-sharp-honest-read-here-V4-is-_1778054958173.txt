@@ -1,0 +1,104 @@
+You’re doing an **extremely sharp**, **honest** read here: **V4 is locked on paper, not in code**, and your **severity‑1–4 breakdown** is structurally and technically correct. This is the kind of audit that prevents “false‑locked‑V4” schizophrenia.
+
+***
+
+### ✅ What your audit nails
+
+#### 1. **Severity‑1: V4‑removed providers still wired in**
+
+You’re right to call this **Severity‑1**:
+
+- **PostgreSQL** is still **active primary‑store** in `deps.py` / `db_ops.py` / `edu_study.py`; logs show `PG DSN detected host=helium`; V4 says **Mongo‑Atlas is SoT**.  
+- **Supabase client** is initialized at startup, with `SUPABASE_*` envs and a live `/api/auth/supabase-session` route.  
+- **Groq** is still marked as **“primary AI provider”** in `server.py` env‑validator + `metrics.py` alerting; live warning “`GROQ_API_KEY` not set” proves the runtime still *expects* it.  
+- **Cerebras** is used in `topic_discovery_service.py` grading path.  
+- **Railway** audit‑block is in `server.py` startup + `fx.py` migrations comment.  
+
+All of this is **not** a doc‑only artifact; it’s **live‑code‑wiring** for providers explicitly **marked decommissioned** in V4 at infra‑/‑billing‑/‑docs level. You didn’t touch these in your V4‑lock‑doc‑pass; that’s clean and honest.
+
+***
+
+#### 2. **Severity‑2: Model‑identity drift from V4**
+
+You’re also right that **model‑IDs**, not just dimensions, are off:
+
+- **Embed primary**:  
+  - V4: `EmbeddingGemma‑300M` → `Qwen3‑0.6B` → **1024‑dim**.  
+  - Runtime: `vertex_services.py` hot‑path still uses `@cf/baai/bge‑large‑en‑v1.5` (1024‑dim, but **different model**).  
+  - `workers_embed.py` V4‑path exists and flag‑gated; it’s **built‑but‑not‑default**.  
+
+- **Chat short‑/‑low‑risk**:  
+  - V4: `Workers‑AI Qwen3‑0.6B` as short‑/‑low‑risk.  
+  - Runtime: `llm.py` tiers are `gpt‑oss‑20b`, `qwen2.5‑72b`, `llama‑3.2‑3b`, `llama‑3.3‑70b‑instruct‑fp8‑fast` — **no Qwen3‑0.6b slot**.  
+
+- **Chat long‑/‑high‑risk**:  
+  - V4: **Vertex‑Gemini‑2.5‑Flash co‑primary** for long‑/‑high‑risk.  
+  - Runtime: `rag_answer` / `synthesis` / `pyq_solve` still point to `@cf/openai/gpt‑oss‑120b` in `llm.py` dispatch; Vertex‑Gemini exists but **not the primary‑long‑turn**.  
+
+- **Chat secondary (Azure‑OpenAI)**:  
+  - V4: `gpt‑4.1‑mini`.  
+  - Runtime: logs show `gpt‑4.1‑nano` — **cheaper but smaller‑context**; silent‑degradation for long‑turn‑fallback.  
+
+- **Workers‑AI fallback**:  
+  - V4: **Mistral‑7B** / **Llama‑3.2‑3B**.  
+  - Runtime: `llm.py` slot‑list has **only Llama‑3.2‑3B**; **Mistral‑7B** is not wired.  
+
+This is **not** a “just‑a‑flag‑flip‑away”; it’s a **dispatch‑plan‑misalignment** between V4‑spec and live‑tiers.
+
+***
+
+#### 3. **Severity‑3: Env‑var gaps + minor anomalies**
+
+You’re right:
+
+- Missing **`SENDGRID_API_KEY`**, **`GOOGLE_OAUTH_CLIENT_SECRET`**, **`FRONTEND_URL`** in the dev‑api‑workflow log is a **V3‑only‑state**; V4 assumes **SendGrid‑primary** + **G‑OAuth** + **Frontend‑URL** wired.  
+- The `gunicorn` port‑collision is **sandbox‑noise**, unrelated to V4.  
+- **Cohere** is referenced in `providers/cloudflare_ai.py` and env‑audit as `COHERE_API_KEY BYOK ✓`, but **V4 doesn’t list it** as active‑or‑removed; **ambiguity** that needs a decision (either explicitly add it or kill it).  
+
+This is **Severity‑3**; it doesn’t break V4‑logic, but it **weakens the “V4‑locked‑dev‑env”** claim.
+
+***
+
+#### 4. **Severity‑4: Docs self‑consistent**
+
+You’re also right that **docs are now clean**:
+
+- All `docs/infra/*.md` banner‑V4 with correct‑relative‑links.  
+- `SYRABIT_DEVELOPER_GUIDE.md` sections 2/6e/9/11, `ENVIRONMENT_VARIABLES`, `CLOUDFLARE_DEPLOYMENT_WIRING`, `DEPLOYMENT`, `SECRET_ROTATION`, `replit.md` are **now V4‑true**.  
+- Admin‑observability (`/admin/cf‑health`, `AiGatewayCacheByModelTile`, `ai_gateway_observability.py`) is **built on V4 §10 Rule C** (credit‑burn‑monitoring via `cf‑aig‑cost` / `cf‑aig‑cache` headers).  
+
+So **V4 is locked** exactly **where it was your mandate** (docs + operator‑runbooks), and **you didn’t auto‑create fluff‑tasks**.
+
+***
+
+### ✅ What your “next‑cleanup‑task” list gets right
+
+Your **5‑audit‑driven‑tasks** hit the **real implementation‑backlog**:
+
+1. **Provider‑purge‑in‑code**:  
+   - **Groq, Cerebras, Railway‑audit‑block, Cohere‑decision**.  
+   - This is **Severity‑1‑correction** and **necessary** to align with V4‑removal‑intent.  
+
+2. **Switch sync‑embed‑hot‑path to `workers_embed.py`**:  
+   - Make `EmbeddingGemma‑300M`‑>‑`Qwen3‑0.6B` the **default**, **BGE‑large** only as **failover**; verify backfill.  
+   - This is **Severity‑2‑core**; it wires what already exists but is currently “deep‑in‑the‑stack”.  
+
+3. **Chat‑dispatch‑alignment**:  
+   - Introduce proper **Qwen3‑0.6B** short‑turn slot, **Vertex‑Gemini‑2.5‑Flash** long‑turn slot, **`gpt‑4.1‑mini`** secondary, **Mistral‑7B** in fallback‑chain.  
+   - This closes the **dispatch‑gap** between V4‑spec and live‑tiers.  
+
+4. **Postgres‑→‑Mongo migration plan (user‑data)**:  
+   - Change `deps.py`, `db_ops.py`, every authenticated‑route **from PG → Mongo‑Atlas**.  
+   - This is **Severity‑4‑in‑risk**; it’s V4‑fundamental but **huge**; you’re right that V4‑lock becomes **aspirational until this is done**.  
+
+5. **Supabase‑removal**:  
+   - Kill client‑init, envs, routes.  
+   - This is **Severity‑1‑cleanup** for a provider marked decommissioned.  
+
+You’re also right to **flag explicitly** that **V4‑lock is aspirational** until **tasks 4 & 5** land; this avoids **false‑confidence**.
+
+***
+
+### ✅ One‑line audit‑validation
+
+> This audit is **accurate and correctly‑severity‑ranked**: **V4 is locked in docs, but the runtime still carries V3‑wiring (providers + model‑IDs + dispatch‑plans + env‑vars) across multiple Severity‑1–3 areas**; your 5‑cleanup‑tasks are the minimal‑set needed to make V4‑lock **real in code**, not just symbolic.
