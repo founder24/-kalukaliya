@@ -125,6 +125,41 @@ print('V4 §13 acceptance: PASS')
 
 - **2026-05-06**: ADR proposed (Phase 1 of V4 §13). Awaiting approval
   before opening Phase 2 dual-write PRs.
+- **2026-05-06**: **Phase 2 (activity_log collection) merged.** Soft-join
+  Mongo target — the ``deps.db.activity_log`` collection is *already*
+  populated by the existing 3rd-tier fallback inside
+  ``db_ops.supa_insert_activity_log`` whenever both the PG and the
+  Supabase legacy tier raise. Phase 2 adds the missing piece: a mirror
+  on the **PG-success** branch (and on the ``supa_clear_activity_log``
+  PG-success branch) so Mongo now sees *every* admin audit write, not
+  only PG-failure ones. This is the prerequisite for the Phase-3
+  read-shadow that compares per-day row-counts between the two
+  stores. Added ``mirror_activity_log_write()`` shim — no
+  ``_FLAG_NAME_OVERRIDES`` entry needed because the default
+  ``_flag_env_for("activity_log") = "MONGO_ACTIVITY_LOG_WRITES"``
+  already produces the right name (no trailing 's' to strip).
+  Crucially, only **2 sites in db_ops.py** had to be instrumented
+  (``supa_insert_activity_log`` + ``supa_clear_activity_log``) — the
+  routing layer (``routes/admin_settings.py``,
+  ``routes/admin_logs.py``, ``routes/admin_auth_users.py`` — 8 total
+  call sites) all funnel through the centralised db_ops helpers, so
+  zero route-level edits were required. Mirror placement: AFTER the
+  ``async with pg_pool.acquire()`` block exits (PG conn released
+  first) but BEFORE ``return True`` / ``return len(rows)`` so the
+  mirror call is still in scope of the PG-success branch's exception
+  handler. The existing 3rd-tier Mongo fallback at the bottom of
+  both functions is left untouched — it lives below the helper in
+  the call graph and is independently rollback-flagged off (the
+  fallback never consults ``MONGO_ACTIVITY_LOG_WRITES`` so flipping
+  the mirror off doesn't break the failure-mode safety net). Test
+  suite grew 31 → 38 (5 new activity_log cases — env-flag default
+  name, default enabled, per-collection isolation across all 6
+  collections, insert success counter, delete_many success counter,
+  swallows-exception). Soft-join consideration acknowledged: the
+  mirror-on-PG-success and the fallback-on-PG-failure paths
+  *converge* on the same Mongo doc shape, so post-Phase-2 Mongo
+  contains the union of both — exactly what Phase-3 read-shadow
+  needs to compare against PG.
 - **2026-05-06**: **Phase 2 (edu_study_settings collection) merged.**
   Greenfield Mongo target per §50; fifth collection in the per-collection
   rollout. Distinguishing characteristic: composite primary key

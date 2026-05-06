@@ -12,6 +12,7 @@ from cache import (
 from db_dualwrite import (
     mirror_user_write,
     mirror_conversation_write,
+    mirror_activity_log_write,
     clamped_decrement_pipeline,
 )
 
@@ -1187,6 +1188,10 @@ async def supa_insert_activity_log(entry: dict) -> bool:
                     entry.get("admin_name",""), entry.get("admin_email",""),
                     entry.get("created_at", datetime.now(timezone.utc).isoformat())
                 )
+            await mirror_activity_log_write(
+                "insert",
+                lambda: _deps_mod.db.activity_log.insert_one(dict(entry)),
+            )
             return True
         except Exception as e:
             logger.warning(f"pg supa_insert_activity_log failed: {e}")
@@ -1224,7 +1229,11 @@ async def supa_clear_activity_log() -> int:
                 # than COUNT(*) followed by DELETE and avoids a TOCTOU
                 # race where another admin inserts between the two.
                 rows = await conn.fetch("DELETE FROM activity_log RETURNING id")
-                return len(rows)
+            await mirror_activity_log_write(
+                "clear",
+                lambda: _deps_mod.db.activity_log.delete_many({}),
+            )
+            return len(rows)
         except Exception as e:
             logger.warning(f"pg supa_clear_activity_log failed: {e}")
     if supa:

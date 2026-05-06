@@ -32,7 +32,14 @@ Per-collection rollout (Phase 2):
   3 mutually-exclusive branches collapsed into 1 post-block upsert,
   claim's 3 writes collapsed into 1 user-side upsert + 1 anon-side
   delete after txn commit).
-- 5 remaining collections . NOT STARTED — separate sessions per the
+- ``activity_log`` ......... SHIPPED 2026-05-06 (soft-join — Mongo
+  collection already populated by the existing 3rd-tier fallback in
+  ``db_ops.supa_insert_activity_log``; Phase 2 adds a mirror on the
+  PG-success branch so Mongo now sees *every* write, not only PG
+  failures. Two centralised sites in ``db_ops.py`` cover all 8
+  route-level callers — insert + clear). Rollback:
+  ``MONGO_ACTIVITY_LOG_WRITES=0``.
+- 4 remaining collections . NOT STARTED — separate sessions per the
   ADR's per-table contract.
 
 Carve-outs (do NOT migrate to this helper):
@@ -263,3 +270,31 @@ async def mirror_edu_study_settings_write(
     flows in ``routes/edu_study.py``).
     """
     await mirror_collection_write("edu_study_settings", op_label, fn)
+
+
+async def mirror_activity_log_write(
+    op_label: str,
+    fn: Callable[[], Awaitable[Any]],
+) -> None:
+    """Mirror a write to the ``activity_log`` collection (best-effort).
+
+    Soft-join collection: the Mongo target is *already populated* by
+    the existing 3rd-tier fallback inside
+    :func:`db_ops.supa_insert_activity_log` whenever both PG and the
+    Supabase legacy tier raise. Phase 2 adds a mirror on the
+    **PG-success** branch so Mongo now sees every write, not only the
+    PG-failure ones — this is the prerequisite for the Phase-3
+    read-shadow that compares per-day row-counts between the two
+    stores.
+
+    Two centralised wire-ups in ``db_ops.py`` cover all 8 route-level
+    callers (admin_settings, admin_logs, admin_auth_users) — insert
+    via ``mirror_activity_log_write("insert", ...)`` and the bulk
+    purge via ``mirror_activity_log_write("clear", ...)``. Routes do
+    NOT call this helper directly.
+
+    Rollback flag: ``MONGO_ACTIVITY_LOG_WRITES=0`` — the existing
+    fallback path keeps working unchanged because it lives below this
+    helper in the call graph.
+    """
+    await mirror_collection_write("activity_log", op_label, fn)
