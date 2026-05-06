@@ -1,13 +1,25 @@
 # Syrabit.ai — Complete Developer Handoff Document
 
-> **v3 SUPERSEDES (2026-05-04):** the canonical infra spec is
-> [`infra/per-cloud-feature-delegation.md`](../infra/per-cloud-feature-delegation.md)
-> + [`infra/provider-priority-map.md`](../infra/provider-priority-map.md)
-> + [`infra/credit-burn-runbook.md`](../infra/credit-burn-runbook.md).
+> ⚠️ **V4 LOCKED — 2026-05-05.** The canonical infra spec is
+> [`infra/v4-locked-architecture.md`](../infra/v4-locked-architecture.md).
+> The infra/provider sections below describe the **v3 architecture
+> as a historical baseline** and are wrong on:
+> - Pinecone region (v3 = us-east-1; **V4 = `aws-ap-south-1`**).
+> - Embedding failover (v3 = silent fallback; **V4 = namespace separation + SQS re-embed queue**).
+> - Chat dispatch (v3 = Azure-only English primary; **V4 = Vertex Gemini 2.5 Flash co-primary for long/high-risk turns via token+risk router**).
+> - Moderation primary (v3 = Azure AI Content Safety; **V4 = Llama-Guard-2 self-hosted on ACA**).
+> - Secrets (v3 = AKV-only; **V4 = AKV SoT + AWS SM + CF Secrets, Terraform-CI synced with SHA-256 hash check**).
+> - Hosting (v3 = Railway/DO; **V4 = Azure Container Apps `eastus2` live; DO is 14-day rollback floor only**).
+>
+> If anything below disagrees with V4, **V4 wins**. The
+> product / feature / database-schema / API-contract sections of this
+> guide remain accurate. For operator runbooks see:
+> `docs/DEPLOYMENT.md`, `docs/SECRET_ROTATION.md`,
+> `CLOUDFLARE_DEPLOYMENT_WIRING.md`, `ENVIRONMENT_VARIABLES.md`
+> (all V4-true as of 2026-05-05).
+>
 > Provider removals (OpenAI, Anthropic, Bedrock-direct, Stripe, Quge5,
-> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347 — any
-> references below to Resend, Stripe Checkout, xAI/Grok, Railway, etc.
-> are historical. If anything below disagrees with v3, the v3 docs win.
+> Resend, Grok, Railway, DigitalOcean) are tracked in Task #347.
 
 > **Last Updated:** April 2026
 > **Purpose:** Complete blueprint for rebuilding the Syrabit.ai application from scratch. Covers every feature, workflow, design decision, database schema, and integration.

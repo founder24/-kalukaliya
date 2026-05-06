@@ -1,3 +1,13 @@
+# Features Roadmap — Task #362 (HISTORICAL — v3 era)
+
+> ⚠️ **SUPERSEDED — 2026-05-05.** Source of truth is
+> [`infra/v4-locked-architecture.md`](v4-locked-architecture.md).
+> Recall-intent / sticky-fallback / moderation-mode features below
+> remain valid product behavior, but the underlying provider chain,
+> moderation primary (now Llama-Guard-2 self-hosted on ACA), and
+> embedding namespaces are V4 (see V4 §1 / §3 / §4). Do NOT cite this
+> doc in new PRs without also citing V4.
+
 # Features Roadmap — Task #362
 
 > **Scope:** Layer four feature improvements onto the #360 baseline:

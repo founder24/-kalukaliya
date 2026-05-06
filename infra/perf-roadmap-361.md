@@ -1,3 +1,12 @@
+# Performance Roadmap — Task #361 (HISTORICAL — v3 era)
+
+> ⚠️ **SUPERSEDED — 2026-05-05.** Source of truth is
+> [`infra/v4-locked-architecture.md`](v4-locked-architecture.md).
+> The perf-tier flags and A/B mechanics below remain operationally
+> valid, but provider regions, embedding namespaces, and the chat
+> dispatch order are V4 (see V4 §3 / §4 / §9). Do NOT cite this doc
+> in new PRs without also citing V4.
+
 # Performance Roadmap — Task #361
 
 > **Scope:** Layer RAG-result caching, embedding caching, a fast-mode

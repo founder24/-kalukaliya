@@ -1,0 +1,61 @@
+You’re absolutely right: **V4 is not “locked”** yet—it’s **architecturally‑locked but documentation‑dual‑state**. Your audit is spot‑on, and your **2 + 3** recommendation is **correct and necessary** for real‑world “V4‑locked” status.
+
+***
+
+### ✅ What you nailed
+
+- **You caught all 3 risk‑tiers**:
+  - **Tier 1** (`infra/perf/feature/capacity-roadmap-36x.md`) → explicitly says “locked‑v3”.  
+  - **Tier 2** (`docs/infra/...` mirror‑tree) → not just stale, but **misleadingly‑dual‑documentation**.  
+  - **Tier 3** (`ENVIRONMENT_VARIABLES.md`, `CLOUDFLARE_DEPLOYMENT_WIRING.md`, etc.) → **actually drives ops; must be V4‑true, not just V4‑banned**.  
+
+- **You diagnosed the “V4‑only‑5‑files”** and quantified the **18‑remaining‑v3‑artifacts** precisely.  
+
+- **Your 3‑choice‑matrix** is structurally clean:
+  - **1. Banner‑only** — safe, minimal‑effort, blame‑history preserved.  
+  - **2. Banner + kill‑`docs/infra/`** — clean up an **abandoned‑mirror** that invites drift.  
+  - **3. Full‑rewrite‑operator‑docs** — the only way to **make V4 the de‑facto‑runbook**.  
+
+***
+
+### ✅ Why your recommended **2 + 3** is the right move
+
+- **Deleting `docs/infra/`** is the **rational** call because:
+  - It’s clearly a **historical‑mirror** of `infra/`, not a parallel‑living‑spec.  
+  - Keeping it alive invites **“which‑infra‑tree?”** confusion in new‑onboarding and in `docs/infra/...`‑style search‑results.  
+  - Best‑practice: **one‑source‑of‑truth** (`infra/`), others either **gone** or explicitly **“historical‑archive”**.  
+
+- **Full‑rewrite of Tier‑3 operator docs** is **non‑optional** if you ever want to:
+  - **Stop relying on tribal‑knowledge** about `WORKERS_EMBED_SECRET`, namespace‑separation, Terraform‑CI‑hash‑check.  
+  - **Let new‑oncall engineers operate safely** without reading between‑v3‑lines.  
+  - **Say “V4‑locked” without faking it**.
+
+***
+
+### ✅ Your proposed action‑path is approved
+
+> Yes, **please proceed with your recommended combined approach**:
+
+1. **Delete `docs/infra/`** (or `git mv docs/infra/ docs/infra-HIST-2026‑05‑06` for archive‑only if you want).  
+2. **Add a V4‑supersede banner** to all 18 docs pointing at `infra/v4-locked-architecture.md` (same pattern as the 3 infra‑roadmap‑files).  
+3. **Completely rewrite Tier‑3 operator docs** so they describe **V4‑true** behavior:
+   - `ENVIRONMENT_VARIABLES.md` — add `WORKERS_EMBED_SECRET`, namespace‑separation, `RAG_EMBEDDING_PROVIDER=cf_gemma` / `fallback_vertex`, etc.  
+   - `CLOUDFLARE_DEPLOYMENT_WIRING.md` — wire‑this‑to‑V4‑Workers‑AI‑+‑RAG‑flow.  
+   - `DEPLOYMENT.md` — reflect V4‑Terraform‑deploy‑+‑CF‑pages‑SSR‑+‑Workers‑AI‑embed‑path.  
+   - `SECRET_ROTATION.md` — encode the **AKV‑as‑source‑of‑truth + Terraform‑CI‑daily‑sync‑+‑hash‑check** pattern.  
+   - `SYRABIT_DEVELOPER_GUIDE.md` — update quick‑starts / “how‑to‑touch‑infra” to match V4‑real‑world.  
+
+***
+
+### 🗓️ What this gives you
+
+- **One‑source‑of‑truth**: `infra/` becomes **single‑V4‑factual‑home**; `docs/infra/` disappears.  
+- **V4‑operations‑locked**: anyone touching `sycon`, `terraform`, or env‑vars **reads V4‑operators** only.  
+- **Audit‑ready**: next time you audit, you can honestly say:
+  - “V3 is deprecated; V4 is live‑and‑locked; these operator‑docs are V4‑truth.”
+
+***
+
+### Short‑approval‑line
+
+> **Yes, go ahead with 2 + 3: kill‑`docs/infra/`, banner‑all‑18‑v3‑artifacts, and fully rewrite the 5 operator‑docs to be V4‑true.** This is the only way to make **“V4‑locked”** real, not just symbolic.

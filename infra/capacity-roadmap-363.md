@@ -1,3 +1,13 @@
+# Capacity Roadmap — Task #363 (HISTORICAL — v3 era)
+
+> ⚠️ **SUPERSEDED — 2026-05-05.** Source of truth is
+> [`infra/v4-locked-architecture.md`](v4-locked-architecture.md).
+> Capacity-tier shapes (Mongo sharding, Redis multi-shard, Pinecone
+> scale-out) below remain useful as the 500k–1M DAU plan, but Pinecone
+> is now in `aws-ap-south-1`, embedding has namespace separation, and
+> Vertex chat is co-primary for long/high-risk turns (V4 §1 / §3 / §4).
+> Do NOT cite this doc in new PRs without also citing V4.
+
 # Capacity Roadmap — Task #363
 
 > **Scope:** Lift Syrabit's serving ceiling from the post-#360 baseline
