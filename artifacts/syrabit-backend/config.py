@@ -675,13 +675,31 @@ BEDROCK_POLLY_VOICE = ""
 # one of AZURE_OPENAI_KEY_1 / AZURE_OPENAI_KEY_2. The provider chains them
 # (KEY_1 → KEY_2) on retryable failures so a key rotation/throttle can be
 # absorbed without dropping traffic. CF AI Gateway BYOK still wins when up.
+# V4 §4 A3 (B3, 2026-05-06; user-locked 2026-05-06): default is **gpt-4.1-nano**.
+# Founder explicitly chose nano as the canonical default after V4 §4 A3 was
+# initially drafted with mini. Resolution order (override wins): operator
+# override env → deployment env → legacy model env → V4 default. The
+# override env var exists so the long-turn quality upgrade to gpt-4.1-mini
+# (or any future SKU) can be staged via a single env flip WITHOUT rotating
+# the canonical AZURE_OPENAI_DEPLOYMENT secret. When the override is set
+# we emit an INFO so Sentry / log scrapers see the deviation from default.
+_AZURE_MODEL_OVERRIDE = os.environ.get('AZURE_OPENAI_MODEL_OVERRIDE', '').strip()
 AZURE_OPENAI_DEPLOYMENT = (
-    os.environ.get('AZURE_OPENAI_DEPLOYMENT', '').strip()
+    _AZURE_MODEL_OVERRIDE
+    or os.environ.get('AZURE_OPENAI_DEPLOYMENT', '').strip()
     or os.environ.get('AZURE_OPENAI_MODEL', '').strip()
-    or 'gpt-4o-mini'
+    or 'gpt-4.1-nano'
 )
 # Legacy alias kept for callers that imported AZURE_OPENAI_MODEL directly.
 AZURE_OPENAI_MODEL = AZURE_OPENAI_DEPLOYMENT
+if _AZURE_MODEL_OVERRIDE:
+    import logging as _logging_az_override
+    _logging_az_override.getLogger(__name__).info(
+        "AZURE_OPENAI_MODEL_OVERRIDE active — deployment=%s "
+        "(V4 §4 A3 operator override; clear the env var to revert "
+        "to the gpt-4.1-nano default)",
+        _AZURE_MODEL_OVERRIDE,
+    )
 AZURE_OPENAI_ENDPOINT = (
     os.environ.get('AZURE_OPENAI_ENDPOINT', '').strip()
     or 'https://syrabit-openai.openai.azure.com/'
@@ -1177,18 +1195,23 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG (2026-05-05 user instruction — strict
-    # primary/fallback): Azure GPT-4.1-mini is the SOLE primary; Workers AI
-    # variants are pure fallbacks (weight 0 — only reached when Azure is
-    # exhausted/throttled). Vertex REMOVED from the chat pool entirely
-    # (Vertex stays reserved for the content polish stage and other
-    # non-chat features). Sarvam reserved for the Indic conversational
-    # path (assamese_rag_chat). Bedrock + OpenAI/xAI removed in Task #347.
-    # Workers AI tail order: workers_ai_llama32_3b → workers_ai_mistral_7b
-    # → generic workers_ai (last-resort gpt-oss-20b).
+    # English chat + RAG.
+    #
+    # PARTIAL B3 STATE (2026-05-06): the V4 §4 hot-path spec calls for
+    # **Vertex Gemini 2.5 Flash co-primary for long/high-risk turns** and
+    # **Workers-AI Qwen3-0.6B for short/low-risk turns**, with a
+    # token-length + risk-score router on the Cloudflare worker. The
+    # 2026-05-05 user instruction baked into this comment said "Azure SOLE
+    # primary, Vertex REMOVED from chat" — that is in DIRECT CONFLICT with
+    # V4 §4. The conflict is unresolved until the founder explicitly picks
+    # one; until then we keep the conservative Azure-primary chain and
+    # only land the V4 §4 A9 fallback-ordering fix below (Mistral-7B #1,
+    # Llama-3.2-3B #2 — was reversed). Workers AI tail order is now:
+    #   workers_ai_mistral_7b → workers_ai_llama32_3b → generic workers_ai.
+    # Bedrock + OpenAI/xAI removed in Task #347.
     "english_rag_chat":  [
         "azure_openai",
-        "workers_ai_llama32_3b", "workers_ai_mistral_7b", "workers_ai",
+        "workers_ai_mistral_7b", "workers_ai_llama32_3b", "workers_ai",
     ],
     # Assamese chat (2026-05-05 user instruction — strict primary/fallback):
     # Sarvam is the SOLE primary; Workers AI IndicTrans2 (en-indic neural

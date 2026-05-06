@@ -95,14 +95,14 @@ Cloudflare Worker (edge)
 - **Vertex Gemini RAI** is batch/async-only for `content_type=exam_model_paper` — never per-turn synchronous.
 - **A9 — Workers-AI fallback ordering:** Mistral-7B is tried **first** (better English instruction-following at this size); Llama-3.2-3B is the **second** fallback (lower latency, smaller context). They are NOT parallel.
 
-**A3 — Azure OpenAI SKU table (decided 2026-05-06):**
+**A3 — Azure OpenAI SKU table (decided 2026-05-06; user-locked 2026-05-06):**
 
 | SKU | Context | Approx $/1M in / $/1M out | Why this SKU? |
 |---|---|---|---|
-| **`gpt-4.1-mini`** *(V4 default)* | 1 M tokens | **~$0.40 / ~$1.60** | Long-turn fallback after Vertex Gemini 2.5 Flash exhaust. The 1 M context matches Gemini, so a turn that overflows mini-fallback is a true overflow rather than a context-truncation artefact. Quality acceptable for long-form RAG answers. |
-| `gpt-4.1-nano` | 1 M tokens | ~$0.10 / ~$0.40 | Cheaper, smaller model. **Not the V4 default** — silently degrades long-turn quality; only acceptable as a *cost-emergency* override behind `AZURE_OPENAI_MODEL_OVERRIDE=gpt-4.1-nano` with a Sentry note. |
+| **`gpt-4.1-nano`** *(V4 default — founder choice 2026-05-06)* | 1 M tokens | **~$0.10 / ~$0.40** | Cheapest 1 M-context Azure SKU. Founder explicitly picked nano over mini after the initial draft to minimise burn on the long-turn fallback path (which already trails Vertex Gemini 2.5 Flash). Quality trade-off is accepted; mini is the staged upgrade if long-turn quality degrades unacceptably. |
+| `gpt-4.1-mini` | 1 M tokens | ~$0.40 / ~$1.60 | **Not the V4 default** — quality-upgrade candidate. Reachable via `AZURE_OPENAI_MODEL_OVERRIDE=gpt-4.1-mini` (single env flip, no secret rotation). |
 
-Runtime currently logs `gpt-4.1-nano` (audit 2026-05-06). Cleanup task **B3** will switch to `mini`.
+Runtime logs `gpt-4.1-nano` and code default in `artifacts/syrabit-backend/config.py:689` is now `gpt-4.1-nano` — drift closed by **B3** (2026-05-06). Operator override pattern wired at the same site.
 
 **Assamese Indic path:**
 
