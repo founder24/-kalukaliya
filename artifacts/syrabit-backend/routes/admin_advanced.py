@@ -1708,9 +1708,12 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
                         Bedrock has been REMOVED from every routing pool —
                         AWS account-wide daily token quota is exhausted across
                         every on-demand model in every region. Active chat /
-                        content allowlist: Azure OpenAI, Vertex (Gemini),
-                        Sarvam, Workers AI. Re-add Bedrock only after AWS
-                        Service Quotas are raised.
+                        content allowlist (post Task #490): Azure OpenAI,
+                        Sarvam, Workers AI. Vertex is **formatter-only**
+                        (`content_format` pool, NotebookLM-style polish) and
+                        is NOT in any chat / safety / embed / vector pool.
+                        Re-add Bedrock only after AWS Service Quotas are
+                        raised.
       burst_429       — 180-second sliding-window 429 counters for every tracked
                         provider (the bedrock counter is retained for historical
                         continuity but no longer increments in production).

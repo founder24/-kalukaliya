@@ -2985,6 +2985,16 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     # send the legacy `"vertex/gemini-flash"` alias; transparently
     # rewrite it to the Workers-AI primary so the request lands on a
     # live branch instead of 5xxing.
+    #
+    # COMPATIBILITY POLICY: this rewrite is a transitional shim with a
+    # hard cutoff of **2026-08-01** (≈12 weeks from the Task #490 merge
+    # on 2026-05-06). The cutoff window covers the longest known
+    # CHAT_DEFAULT_MODEL setter (admin UI override, persisted in Mongo)
+    # plus the ACA env-var rotation cadence. After 2026-08-01 this
+    # branch is to be deleted; any remaining `vertex/gemini-flash`
+    # value will fall through to `_resolve_provider_for_model` and
+    # raise the standard "no provider configured" error so the operator
+    # is forced to update their config.
     if use_model_raw == "vertex/gemini-flash":
         use_model_raw = "openai/gpt-oss-20b"
         model = use_model_raw
