@@ -1329,6 +1329,12 @@ async def lifespan(app):
             )
         _aca_create_task(_cf_access_silent_lockout_loop(), key="cf-access-silent-lockout")
     _aca_create_task(_endpoint_health_alert_loop(), key="endpoint-health-alert")
+    # Task #558 §D — weekly observability digest. Leader-gated so a
+    # single replica owns the email send (no duplicate weekly digests
+    # across the ACA replica fleet). Defined just below init_sentry;
+    # see `_observability_weekly_digest_loop` for the cadence rationale.
+    if _is_leader:
+        _aca_create_task(_observability_weekly_digest_loop(), key="observability-weekly-digest")
     # Task #412 — periodically check hydrate_telemetry and fire admin
     # alerts (email + webhook + persisted) when stale-build failures
     # spike or auto-reload recovery rate falls. Leader-gated so we don't
@@ -1982,6 +1988,36 @@ try:
 except Exception as _trc_err:
     logger.warning(f"[tracing] init_tracing failed (non-fatal): {_trc_err}")
 
+# Task #558 — Sentry errors-only sink (Developer free tier; tracing is
+# OWNED BY tracing.py → GCP Cloud Trace). Wired here, immediately after
+# init_tracing, so any FastAPI startup error after this point lands in
+# Sentry. No-op when SENTRY_DSN is unset (dev / smoke).
+try:
+    from observability import init_sentry as _init_sentry
+    _init_sentry()
+except Exception as _sentry_err:
+    logger.warning(f"[sentry] init_sentry failed (non-fatal): {_sentry_err}")
+
+
+# Task #558 §D — weekly observability digest loop. Sleeps 7 days
+# between sends; the first send fires ~10 minutes after boot so an
+# unhealthy exporter / Sentry-init shows up in the founder's inbox
+# before the first business day. The send is a no-op until the SES
+# canonical-transport task (#557) lands the `ses_email.send_email`
+# adapter — `_emit_observability_weekly_digest` already returns the
+# `ses-pending-task-557` reason in that window so the cron stays
+# observable without needing edits at flip time.
+async def _observability_weekly_digest_loop() -> None:
+    import asyncio as _asyncio
+    await _asyncio.sleep(600)  # 10 min — let boot settle.
+    while True:
+        try:
+            from routes.admin_health import _emit_observability_weekly_digest
+            await _emit_observability_weekly_digest(db=None)
+        except Exception as _exc:
+            logger.warning("[observability] weekly digest tick failed: %s", _exc)
+        await _asyncio.sleep(7 * 24 * 3600)
+
 # Task #333 — unified /api/health + /api/readyz endpoints. The legacy
 # /healthz/ai and /healthz/r2 routes below are kept (admin panel cards
 # still call them individually); these new aggregate routes give the
@@ -2134,6 +2170,7 @@ from routes.synthetic_probe_secret_alert import router as synthetic_probe_secret
 # pages on-call via the dashboard they already watch, instead of
 # relying on someone noticing a red badge in the GitHub Actions UI.
 from routes.admin_health import router as admin_health_router
+from routes.health_otel import router as health_otel_router  # Task #558
 from routes.admin_cf_health import router as admin_cf_health_router  # Task #383
 from routes.admin_audit_recent import (  # Task #386
     router as admin_audit_recent_router,
@@ -2307,6 +2344,7 @@ api.include_router(admin_logs_cf_pull_saturation_alerts_router)
 api.include_router(admin_slack_webhook_missing_alerts_router)
 api.include_router(synthetic_probe_secret_alert_router)
 api.include_router(admin_health_router)
+app.include_router(health_otel_router)  # Task #558 — /api/health/otel (no /api prefix; route declares its own)
 api.include_router(admin_cf_health_router)  # Task #383 — unified CF wins panel
 init_admin_audit_recent(db)  # Task #386
 api.include_router(admin_audit_recent_router)  # Task #386 — D1-first audit feed

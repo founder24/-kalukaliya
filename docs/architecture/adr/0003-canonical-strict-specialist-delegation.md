@@ -105,6 +105,43 @@ rg -c '^\| [0-9]+ \|' artifacts/syrabit/docs/infra/canonical-delegation-cutover.
 # expected: 10
 ```
 
+## Alternatives considered
+
+### Observability errors-only sink — GlitchTip self-hosted on Hetzner (rejected)
+
+Captured here per Task #558's "document the rejected option" requirement.
+
+We considered standing up a Hetzner CX11 VM (~$5/mo) running the
+official `glitchtip/glitchtip` Docker Compose stack (PostgreSQL +
+Redis), fronted by a Cloudflare Tunnel so the Hetzner box never
+exposes a public port. Backups would be a nightly Postgres dump
+shipped to AWS S3 via a small `cron` script. The DSN would land in
+Azure Key Vault as `GLITCHTIP_DSN` and replicate to AWS + Cloudflare.
+The Sentry SDK is wire-compatible with GlitchTip, so no client code
+would have changed.
+
+**Rejected because:**
+
+1. **Cost ceiling pressure.** $5/mo cash + the implicit ops time to
+   maintain a Compose stack pushes against the perpetual `$100/mo`
+   cap (Task #549). Sentry Developer free is `$0/mo` cash with the
+   same errors-only signal up to 5k events / month. A Sentry
+   inbound-data-filter alert at 4k/mo gives the runway warning.
+2. **DR runbook overhead.** Self-hosting buys a backup-restore drill,
+   a TLS-tunnel rotation drill, and a "GlitchTip 1.x → 2.x upgrade"
+   responsibility we do not have head-count for. The "one throat to
+   choke" principle from §"Why strict specialist" applies to
+   observability too: with Sentry-free the throat is the vendor.
+3. **Reversibility is cheap.** If 5k events / month becomes binding
+   we can re-stand the GlitchTip VM and swap a single env var
+   (`SENTRY_DSN` → `GLITCHTIP_DSN`); the SDK init shape in
+   `observability/sentry_setup.py` is identical for both back-ends.
+
+The decision is reviewed at the same quarterly cadence as the credit
+runway memo (Task #550) — next review **2026-08-07**, sooner if
+monthly events cross 4k.
+
 ## Decision log
 
 - **2026-05-07 (Task #559)** — ADR accepted. Umbrella + shim + per-feature map + cutover runbook + V4 §17 lock all merged in the same PR. SES / web-push / observability rows TODO-gated (deferred to Tasks #557 + #558).
+- **2026-05-07 (Task #558)** — Observability narrowing landed: errors-only Sentry Developer free + OTEL → GCP Cloud Trace as sole exporter. `TODO_558_PATTERN` activated in the umbrella (bans multi-exporter `OTEL_TRACES_EXPORTER=…,…`, positive `traces_sample_rate`, `enable_tracing=True`, `sentry_sdk.start_transaction`, `@sentry_sdk.trace`). GlitchTip self-hosted captured above as the rejected alternative.

@@ -74,4 +74,13 @@ opentelemetry-instrumentation-httpx==0.48b0
 # exporter (used to ship to Axiom). See `tracing.py`.
 azure-monitor-opentelemetry-exporter==1.0.0b30
 opentelemetry-exporter-otlp-proto-http==1.27.0
+# Task #558 — GCP Cloud Trace is the SOLE OTEL trace destination
+# (`infra/four-cloud-delegation.md` row "Tracing"). The Azure App
+# Insights + Axiom dual-export (Task #333) is retired.
+opentelemetry-exporter-gcp-trace==1.7.0
+# Task #558 — Sentry Developer free tier (errors-only sink). Tracing
+# is OFF by contract (`traces_sample_rate=0`); see
+# `observability/sentry_setup.py` for the init shape and the
+# `before_send` noise filter.
+sentry-sdk[fastapi]==2.18.0
 pydantic-settings>=2.0.0

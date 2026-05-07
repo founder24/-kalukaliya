@@ -100,6 +100,10 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // Cloudflare D1 syllabus DB.
         { name: 'origin-shared-secret', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/ORIGIN-SHARED-SECRET', identity: 'system' }
         { name: 'd1-sync-secret',       keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/D1-SYNC-SECRET',       identity: 'system' }
+        // Task #558 — Sentry Developer free tier DSN (errors-only sink).
+        // Tracing lives in OTEL → GCP Cloud Trace; this DSN is what the
+        // FastAPI `observability/sentry_setup.py` initializer consumes.
+        { name: 'sentry-dsn',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SENTRY-DSN',           identity: 'system' }
       ]
     }
     template: {
@@ -154,18 +158,21 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // value or all proxied traffic breaks.
             { name: 'ORIGIN_SHARED_SECRET',  secretRef: 'origin-shared-secret' }
             { name: 'D1_SYNC_SECRET',        secretRef: 'd1-sync-secret' }
-            // Task #489 — OTEL → Cloud Trace exporter wiring.
-            // `OTEL_TRACES_EXPORTER=googlecloud,sentry` activates the
-            // Cloud Trace exporter (long-retention backstop per V4 §7
-            // + matrix row "End-to-end tracing") in parallel with the
-            // existing Sentry primary. The GCP IAM grant
-            // (roles/cloudtrace.agent) lives in
-            // `artifacts/syrabit/infra/gcp/iam.tf`. Set
-            // `OTEL_TRACES_EXPORTER=sentry` to roll back without code
-            // changes.
-            { name: 'OTEL_TRACES_EXPORTER',           value: 'googlecloud,sentry' }
+            // Task #489 / Task #558 — OTEL → Cloud Trace exporter wiring.
+            // Task #558 — observability narrowing: GCP Cloud Trace is
+            // now the SOLE OTEL trace destination. The previous
+            // `googlecloud,sentry` dual-export was retired (Sentry
+            // Performance / tracing is fully removed; Sentry stays
+            // only as the errors-only sink wired via SENTRY_DSN). Per
+            // V4 §12 there is no silent fallback: if the GCP exporter
+            // fails the backend leaves tracing disabled instead of
+            // silently routing through a second sink.
+            { name: 'OTEL_TRACES_EXPORTER',           value: 'googlecloud' }
             { name: 'OTEL_EXPORTER_GCP_PROJECT_ID',   value: 'syrabit-prod' }
             { name: 'OTEL_SERVICE_NAME',              value: 'syrabit-backend' }
+            // Task #558 — Sentry Developer free tier (errors-only).
+            { name: 'SENTRY_DSN',                     secretRef: 'sentry-dsn' }
+            { name: 'SENTRY_ENVIRONMENT',             value: 'production' }
           ]
           probes: [
             {

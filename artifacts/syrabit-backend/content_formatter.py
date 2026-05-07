@@ -116,9 +116,16 @@ def _emit_sentry_span(
     lang: str,
     style: str,
 ) -> None:
-    """Best-effort Sentry tag emission so the new content_format panel can
-    plot vertex-success / wai-fallback / passthrough counts and p50/p95
-    duration. Never raises."""
+    """Best-effort Sentry tag emission so the content_format panel can
+    plot vertex-success / wai-fallback / passthrough counts. Never raises.
+
+    Task #558 — the prior ``with sentry_sdk.start_span(...)`` wrapper was
+    removed: tracing now lives exclusively in OTEL → GCP Cloud Trace
+    (see ``tracing.emit_phase_span``). Sentry stays as the errors-only
+    sink, so we keep the tag emission so 5xx events from the formatter
+    still carry the per-call context, but no transaction/span is opened
+    on the Sentry side.
+    """
     try:
         import sentry_sdk  # type: ignore
 
@@ -129,8 +136,29 @@ def _emit_sentry_span(
         sentry_sdk.set_tag("content_format.lang", lang)
         sentry_sdk.set_tag("content_format.style", style)
         sentry_sdk.set_tag("content_format.trace_id", trace_id)
-        with sentry_sdk.start_span(op="content_format", description=formatted_by) as span:
-            span.set_data("duration_ms", duration_ms)
+        sentry_sdk.set_tag("content_format.duration_ms", str(duration_ms))
+    except Exception:
+        pass
+
+    # Task #558 — emit the per-call duration as an OTEL phase span so the
+    # signal moves to the canonical tracing destination (GCP Cloud Trace).
+    try:
+        import time as _time
+        from tracing import emit_phase_span as _emit_phase_span
+        end = _time.time()
+        start = end - (max(0, int(duration_ms)) / 1000.0)
+        _emit_phase_span(
+            "content_format",
+            start, end,
+            **{
+                "content_format.primary": primary,
+                "content_format.fallback_used": fallback_used,
+                "content_format.formatted_by": formatted_by,
+                "content_format.lang": lang,
+                "content_format.style": style,
+                "content_format.trace_id": trace_id,
+            },
+        )
     except Exception:
         pass
 

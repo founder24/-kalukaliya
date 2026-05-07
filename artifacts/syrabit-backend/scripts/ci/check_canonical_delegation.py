@@ -187,6 +187,9 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/tests/test_session_fallback.py",
     "artifacts/syrabit-backend/tests/test_slo_emitter.py",
     "artifacts/syrabit-backend/tests/test_credit_burn_meters.py",
+    "artifacts/syrabit-backend/tests/observability/test_todo_558_regex.py",
+    "artifacts/syrabit-backend/tests/observability/test_no_sentry_tracing.py",
+    "artifacts/syrabit-backend/tests/observability/test_otel_exporter_locked.py",
     "artifacts/syrabit-backend/providers/azure_speech.py",
     "artifacts/syrabit-backend/azure_ai_metrics.py",
     "artifacts/syrabit-backend/RUNBOOK.md",
@@ -416,10 +419,28 @@ TODO_557_PATTERN = (
     r"firebase_admin|FCM_SERVER_KEY|FIREBASE_SERVICE_ACCOUNT"
 )
 # Task #558 — observability narrowing to a single GCP Cloud Trace exporter.
-# When that task lands, ban duplicate OTEL exporters + Sentry tracing literals.
+# Bans:
+#   * `OTEL_TRACES_EXPORTER=<value>,` (multi-exporter env — anything with a
+#     trailing comma signals more than one sink).
+#   * `traces_sample_rate=<positive number>` (Sentry Performance / tracing).
+#     The literal `traces_sample_rate=0` is allowed and is what
+#     `observability/sentry_setup.py` ships.
+#   * `enable_tracing=True` Sentry-SDK kwarg.
+#   * Live use of the Sentry transaction / decorator APIs.
 TODO_558_PATTERN = (
-    r"OTEL_TRACES_EXPORTER\s*=\s*[\"']?[a-z]+,|"
-    r"sentry_sdk\.init\([^)]*traces_sample_rate"
+    r"OTEL_TRACES_EXPORTER\s*=\s*[\"']?[a-z_]+[\"']?\s*,|"
+    # Match any positive numeric literal: 1, 0.1, 0.05, 0.001, .25, 1e-3, etc.
+    # Allowed (literal zero or zero-only floats): =0, =0.0, =0.00. The negative
+    # lookahead on the integer side rules out "=0" / "=0." / "=0.0" / "=0.00";
+    # the explicit `0*\.0*[1-9]` arm rules in any positive sub-1.0 fraction.
+    r"traces_sample_rate\s*=\s*(?:"
+    r"[1-9][0-9]*(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
+    r"|0*\.0*[1-9][0-9]*(?:[eE][+-]?[0-9]+)?"
+    r"|\.[0-9]*[1-9][0-9]*(?:[eE][+-]?[0-9]+)?"
+    r")|"
+    r"enable_tracing\s*=\s*True|"
+    r"sentry_sdk\.start_transaction|"
+    r"@sentry_sdk\.trace\b"
 )
 
 
@@ -432,10 +453,10 @@ def _check_canonical_bank() -> list[str]:
     # self-hosted web-push PRs merge:
     # failures.extend(_scan_pattern_global(re.compile(TODO_557_PATTERN, re.IGNORECASE),
     #                                      tag="Task #557 (canonical email/web-push)"))
-    # TODO Task #558 — uncomment the block below once the observability
-    # narrowing (GCP Cloud Trace single exporter) merges:
-    # failures.extend(_scan_pattern_global(re.compile(TODO_558_PATTERN),
-    #                                      tag="Task #558 (canonical observability)"))
+    # Task #558 — observability narrowing has shipped; the umbrella now
+    # bans Sentry tracing literals and multi-exporter OTEL configs.
+    failures.extend(_scan_pattern_global(re.compile(TODO_558_PATTERN),
+                                         tag="Task #558 (canonical observability)"))
     return failures
 
 

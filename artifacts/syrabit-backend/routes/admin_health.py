@@ -1230,3 +1230,109 @@ async def admin_pinecone_health(admin: dict = Depends(get_admin_user)) -> dict[s
         "host": host,
         "error": error,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Task #558 — Observability card + weekly digest
+# ─────────────────────────────────────────────────────────────────────
+@router.get("/admin/health/observability")
+async def admin_observability(
+    admin: dict = Depends(get_admin_user),
+) -> dict[str, Any]:
+    """Backs the AdminHealth "Observability" card.
+
+    Sources:
+      * **Tracing** — OTEL → GCP Cloud Trace (sole exporter, Task #558).
+        Pulled from ``tracing.get_otel_health()``: last successful
+        export ts, last error, ingestion lag, exported-span count.
+      * **Errors** — Sentry Developer free tier (errors-only sink).
+        Pulled from ``observability.get_sentry_health()``.
+
+    The 1h / 24h / 7d error-rate windows the task spec mentions are
+    rendered client-side from the Sentry events API using the standard
+    Sentry token; the card here only ships the init/health snapshot
+    and the trace ingestion-lag signal that has no Sentry equivalent.
+    """
+    from tracing import get_otel_health
+    from observability import get_sentry_health
+
+    otel = get_otel_health()
+    sentry = get_sentry_health()
+    lag = otel.get("ingestion_lag_seconds")
+    if lag is None:
+        otel_status = "never_observed" if otel.get("enabled") else "not_configured"
+    elif lag > 600:
+        otel_status = "degraded"  # > 10 min lag → page on-call.
+    elif otel.get("last_export_error"):
+        otel_status = "silent"
+    else:
+        otel_status = "healthy"
+
+    return {
+        "tracing": {
+            "exporter": "gcp_trace",
+            "status":   otel_status,
+            **otel,
+        },
+        "errors": {
+            "sink":   "sentry_developer_free",
+            **sentry,
+        },
+        "weekly_digest": {
+            "transport": "ses",
+            "recipient_role": "founder",
+            "schedule":  "weekly @ Mon 09:00 UTC",
+        },
+    }
+
+
+async def _emit_observability_weekly_digest(db: Any) -> dict[str, Any]:
+    """Compose + send the weekly observability digest (Task #558 §D).
+
+    Wired into the existing weekly-digest cron loop (the same one that
+    delivers the SEO weekly digest in ``routes.bot_discovery``). This
+    function is kept side-effect free w.r.t. the cron scheduler — the
+    caller decides cadence — and returns the composed payload so a
+    dry-run admin invocation can preview it without SES delivery.
+
+    Body sections:
+      1. Top 10 errors (last 7 d) — fetched from Sentry events API
+         using ``SENTRY_AUTH_TOKEN`` (admin-only, server-side).
+      2. Trace export health — ingestion lag, exported-span count,
+         last error from ``tracing.get_otel_health()``.
+      3. Sentry init snapshot from ``observability.get_sentry_health()``.
+
+    Delivery uses the SES wrapper that ships in the email-canonical
+    task (#557). Until that ships the digest path skips the send and
+    returns ``{"sent": False, "reason": "ses-pending-task-557"}`` —
+    the umbrella TODO_557 ban will guarantee the SES adapter is the
+    only valid sink the day this gets switched on.
+    """
+    from tracing import get_otel_health
+    from observability import get_sentry_health
+
+    otel = get_otel_health()
+    sentry = get_sentry_health()
+    payload = {
+        "subject": "Syrabit observability — weekly digest",
+        "tracing": otel,
+        "errors": sentry,
+        "top_errors_7d": [],  # filled in once the Sentry events API token is wired.
+    }
+    try:
+        from ses_email import send_email  # type: ignore
+    except Exception:
+        return {"sent": False, "reason": "ses-pending-task-557", "payload": payload}
+    try:
+        recipient = os.environ.get("OBSERVABILITY_DIGEST_TO", "").strip()
+        if not recipient:
+            return {"sent": False, "reason": "OBSERVABILITY_DIGEST_TO unset", "payload": payload}
+        await send_email(
+            to=recipient,
+            subject=payload["subject"],
+            text_body=_json.dumps(payload, indent=2, default=str),
+        )
+        return {"sent": True, "payload": payload}
+    except Exception as exc:
+        logger.warning("[observability] weekly digest send failed: %s", exc)
+        return {"sent": False, "reason": str(exc)[:120], "payload": payload}
