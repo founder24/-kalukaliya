@@ -546,10 +546,10 @@ async def _try_vector_provider(
 
     elif provider == "mongodb_atlas":
         # Task #491 — Atlas vector_index is now workers_ai_custom 1024-dim.
-        from providers.workers_embed import embed_one as _wai_embed_one, ENABLED as _wai_on
-        if not _wai_on:
+        from providers.workers_embed import embed_query as _wai_embed_query, is_enabled as _wai_is_enabled
+        if not _wai_is_enabled():
             raise RuntimeError(f"{provider}: workers_ai_custom embed worker not configured (WORKERS_EMBED_URL missing)")
-        q_vec = await asyncio.wait_for(_wai_embed_one(query), timeout=4.0)
+        q_vec = await asyncio.wait_for(_wai_embed_query(query), timeout=4.0)
 
     elif provider == "workers_ai":
         raise RuntimeError("workers_ai: no vector search endpoint available")
