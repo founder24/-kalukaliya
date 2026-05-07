@@ -111,6 +111,54 @@ function EmbedEnvRow({ envInfo }) {
   );
 }
 
+// Task #523 — staging-vs-production drift watchdog badge. Surfaces the
+// in-memory consecutive-drift counter from `metrics.get_embed_stack_
+// drift_snapshot()` so on-call sees "we're 2/3 ticks into a drift"
+// before the Slack alert fires. Tones:
+//   • clean (consecutive=0, not firing)              → slate
+//   • warm-up window (1..threshold-1, not firing)    → amber
+//   • firing (>=threshold or `firing` latched)       → red
+function DriftBadge({ drift }) {
+  if (!drift || typeof drift !== 'object') return null;
+  const threshold = Number(drift.threshold || 3);
+  const consecutive = Number(drift.consecutive || 0);
+  const firing = !!drift.firing;
+  const fields = drift.last_payload?.drift_fields;
+
+  let tone = 'bg-slate-100 text-slate-600 border-slate-200';
+  let label = 'no drift';
+  if (firing) {
+    tone = 'bg-rose-100 text-rose-700 border-rose-300';
+    label = `${consecutive}/${threshold} drift probes — firing`;
+  } else if (consecutive > 0) {
+    tone = 'bg-amber-100 text-amber-700 border-amber-300';
+    label = `${consecutive}/${threshold} drift probes`;
+  } else {
+    label = `0/${threshold} drift probes`;
+  }
+
+  const titleParts = [
+    firing
+      ? `Drift watchdog is firing — ${consecutive} consecutive divergent probes (threshold ${threshold}). Slack alert has been dispatched.`
+      : consecutive > 0
+        ? `Staging has drifted from production for ${consecutive} of ${threshold} consecutive probes. Slack alert fires at ${threshold}.`
+        : `Staging matches production. Slack alert fires after ${threshold} consecutive divergent probes.`,
+  ];
+  if (Array.isArray(fields) && fields.length > 0) {
+    titleParts.push(`Diverging fields: ${fields.join(', ')}.`);
+  }
+
+  return (
+    <span
+      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border tabular-nums shrink-0 ${tone}`}
+      data-testid="embed-stack-drift-badge"
+      title={titleParts.join(' ')}
+    >
+      {label}
+    </span>
+  );
+}
+
 function LegPill({ leg, pill }) {
   const ok = !!pill?.ok;
   const failures = Number(pill?.consecutive_failures || 0);
@@ -318,12 +366,15 @@ export default function EmbedStackHealthPill({ adminToken }) {
           className="mt-3 pt-3 border-t border-white/60"
           data-testid="embed-stack-environments"
         >
-          <p className="text-[11px] font-semibold text-gray-700 mb-2">
-            Embed workers — by environment
-            <span className="ml-2 text-[10px] font-normal text-gray-500">
-              (Task #438 — staging canary visible alongside production)
-            </span>
-          </p>
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <p className="text-[11px] font-semibold text-gray-700">
+              Embed workers — by environment
+              <span className="ml-2 text-[10px] font-normal text-gray-500">
+                (Task #438 — staging canary visible alongside production)
+              </span>
+            </p>
+            <DriftBadge drift={data?.drift_state} />
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {embedEnvs.map((envInfo) => (
               <EmbedEnvRow key={envInfo.env || envInfo.label} envInfo={envInfo} />

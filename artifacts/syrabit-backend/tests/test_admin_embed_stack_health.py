@@ -502,3 +502,105 @@ def test_admin_embed_stack_health_surfaces_alert_state_per_leg(
     for leg_state in alert_state["legs"].values():
         for key in ("consecutive_failures", "firing"):
             assert key in leg_state
+
+
+# ── Task #523 — staging-vs-production drift watchdog snapshot ───────────
+# Task #476 added the watchdog + accessor (`get_embed_stack_drift_snapshot`)
+# but the route never surfaced it, so the dashboard couldn't render the
+# "N/3 drift probes" badge. These tests pin the new top-level
+# ``drift_state`` field shape AND prove that mutations to the in-memory
+# watchdog counter actually reach the route response — that's the
+# data path the dashboard badge depends on.
+
+def _reset_drift_state():
+    import metrics as _m
+    _m._embed_stack_drift_consecutive = 0
+    _m._embed_stack_drift_was_firing = False
+    _m._embed_stack_drift_last_payload = None
+
+
+@pytest.fixture
+def reset_drift_state():
+    _reset_drift_state()
+    yield
+    _reset_drift_state()
+
+
+def _stub_health_probes(monkeypatch):
+    from providers import workers_embed as _we
+    from providers import pinecone_ai as _pc
+    from providers import memory_brain as _mb
+
+    async def _envs():
+        return [{"env": "production", "label": "Production", "ok": True,
+                 "configured": True, "pages": True, "dims": 1024,
+                 "model_version": "1.0.0", "latency_ms": 42,
+                 "status_code": 200, "url": "https://embed.test"}]
+
+    async def _embed_health():
+        return {"ok": True, "configured": True, "dims": 1024,
+                "model_version": "1.0.0", "latency_ms": 42}
+
+    async def _rerank_health():
+        return {"ok": True}
+
+    async def _memory_health():
+        return {"ok": True}
+
+    monkeypatch.setattr(_we, "health_check_environments", _envs)
+    monkeypatch.setattr(_we, "health_check", _embed_health)
+    monkeypatch.setattr(_pc, "rerank_health_check", _rerank_health,
+                        raising=False)
+    monkeypatch.setattr(_mb, "health_check", _memory_health, raising=False)
+
+
+def test_admin_embed_stack_health_surfaces_drift_state(
+        app_client_authed, patched_backfill, monkeypatch, reset_drift_state):
+    """The route must expose ``drift_state`` with the four keys the
+    dashboard "N/3 drift probes" badge consumes. A silent rename of any
+    of these fields blanks out the badge."""
+    _stub_health_probes(monkeypatch)
+
+    res = app_client_authed.get("/admin/health/embed-stack")
+    assert res.status_code == 200
+    body = res.json()
+
+    drift = body.get("drift_state")
+    assert isinstance(drift, dict), "drift_state missing from response"
+    for key in ("threshold", "consecutive", "firing", "last_payload"):
+        assert key in drift, f"drift_state missing {key}"
+    assert isinstance(drift["threshold"], int)
+    assert drift["threshold"] >= 1
+    assert drift["consecutive"] == 0
+    assert drift["firing"] is False
+    assert drift["last_payload"] is None
+
+
+def test_admin_embed_stack_health_drift_state_reflects_warmup_window(
+        app_client_authed, patched_backfill, monkeypatch, reset_drift_state):
+    """Mutating the in-memory watchdog counter must show through the
+    route response — that's the watchdog -> dashboard data path the
+    amber "warm-up" badge depends on (turns yellow before the Slack
+    alert fires)."""
+    import metrics as _m
+    _m._embed_stack_drift_consecutive = 2
+    _m._embed_stack_drift_was_firing = False
+    _m._embed_stack_drift_last_payload = {
+        "production": {"model_version": "1.0.0", "dims": 1024,
+                       "url": "https://embed.test"},
+        "staging": {"model_version": "1.1.0-rc1", "dims": 1024,
+                    "url": "https://embed-staging.test"},
+        "drift_fields": ["model_version"],
+    }
+
+    _stub_health_probes(monkeypatch)
+
+    res = app_client_authed.get("/admin/health/embed-stack")
+    assert res.status_code == 200
+    body = res.json()
+
+    drift = body["drift_state"]
+    assert drift["consecutive"] == 2
+    assert drift["firing"] is False
+    assert drift["last_payload"]["drift_fields"] == ["model_version"]
+    assert drift["last_payload"]["staging"]["model_version"] == "1.1.0-rc1"

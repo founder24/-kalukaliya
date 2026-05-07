@@ -83,6 +83,18 @@ async def admin_embed_stack_health(
         _alert_snapshot = _metrics.get_embed_stack_alert_snapshot()
     except Exception as exc:  # pragma: no cover - defensive
         _alert_snapshot = {"threshold": 3, "legs": {}, "error": str(exc)[:200]}
+
+    # ── Task #523 — staging-vs-production drift watchdog snapshot ──────────
+    # Surface the Task #476 watchdog state so the dashboard can render an
+    # "N/3 drift probes" badge that turns yellow before the Slack alert
+    # fires. Default snapshot keeps the dashboard rendering even if the
+    # accessor explodes (e.g. metrics module import error).
+    try:
+        import metrics as _metrics
+        _drift_snapshot = _metrics.get_embed_stack_drift_snapshot()
+    except Exception as exc:  # pragma: no cover - defensive
+        _drift_snapshot = {"threshold": 3, "consecutive": 0, "firing": False,
+                           "last_payload": None, "error": str(exc)[:200]}
     _alert_threshold = _alert_snapshot.get("threshold", 3)
     _alert_legs = _alert_snapshot.get("legs", {}) or {}
 
@@ -152,6 +164,10 @@ async def admin_embed_stack_health(
         # Task #436 — full per-leg watchdog snapshot for the dashboard
         # badge ("N/3 consecutive failures", red when firing).
         "alert_state": _alert_snapshot,
+        # Task #523 — staging-vs-production drift watchdog snapshot for the
+        # dashboard badge ("N/3 drift probes", amber in the warm-up
+        # window, red once the Slack alert fires).
+        "drift_state": _drift_snapshot,
         "flags": {
             "EMBED_PROVIDER_PRIMARY":   EMBED_PROVIDER_PRIMARY,
             "RERANK_PROVIDER":          RERANK_PROVIDER,
