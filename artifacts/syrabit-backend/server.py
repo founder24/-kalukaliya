@@ -2171,6 +2171,7 @@ from routes.synthetic_probe_secret_alert import router as synthetic_probe_secret
 # pages on-call via the dashboard they already watch, instead of
 # relying on someone noticing a red badge in the GitHub Actions UI.
 from routes.admin_health import router as admin_health_router
+from routes.admin_sarvam_health import router as admin_sarvam_health_router  # Task #553
 from routes.health_otel import router as health_otel_router  # Task #558
 from routes.admin_cache import router as admin_cache_router  # Task #571
 from routes.admin_season import router as admin_season_router  # Task #575
@@ -2348,6 +2349,7 @@ api.include_router(admin_logs_cf_pull_saturation_alerts_router)
 api.include_router(admin_slack_webhook_missing_alerts_router)
 api.include_router(synthetic_probe_secret_alert_router)
 api.include_router(admin_health_router)
+api.include_router(admin_sarvam_health_router)  # Task #553 — /api/admin/health/sarvam
 app.include_router(health_otel_router)  # Task #558 — /api/health/otel (no /api prefix; route declares its own)
 app.include_router(admin_cache_router)  # Task #571 — /api/health/cache (admin-only; route declares its own /api prefix)
 app.include_router(admin_season_router)  # Task #575 — /api/health/season (public; route declares its own /api prefix)

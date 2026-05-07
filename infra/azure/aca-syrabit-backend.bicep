@@ -104,6 +104,17 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // Tracing lives in OTEL → GCP Cloud Trace; this DSN is what the
         // FastAPI `observability/sentry_setup.py` initializer consumes.
         { name: 'sentry-dsn',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SENTRY-DSN',           identity: 'system' }
+        // Task #553 — Sarvam AI is the canonical Assamese-chat
+        // primary (`sarvam-m` model, chain `[sarvam, workers_ai_indic]`).
+        // Source of truth lives in Azure Key Vault as `SARVAM-API-KEY`;
+        // the same value MUST be replicated read-only into AWS Secrets
+        // Manager (`syrabit/prod/sarvam-api-key`) and Cloudflare
+        // Secrets (`SARVAM_API_KEY` binding on the embed worker) per
+        // the secrets-management policy in replit.md ("Azure Key Vault
+        // is the source of truth, with AWS Secrets Manager and
+        // Cloudflare Secrets as read-only replicas"). Rotation must
+        // update KV first, then mirror to the two replicas.
+        { name: 'sarvam-api-key',       keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SARVAM-API-KEY',       identity: 'system' }
       ]
     }
     template: {
@@ -175,6 +186,13 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // Task #558 — Sentry Developer free tier (errors-only).
             { name: 'SENTRY_DSN',                     secretRef: 'sentry-dsn' }
             { name: 'SENTRY_ENVIRONMENT',             value: 'production' }
+            // Task #553 — Sarvam AI Assamese-chat key. The
+            // `providers/sarvam.py` facade reads this via
+            // `config.SARVAM_API_KEY`; absence flips
+            // `/api/admin/health/sarvam` to `not_configured` and
+            // the assamese_rag_chat chain falls through to
+            // `workers_ai_indic` immediately (V4 §12 — loud).
+            { name: 'SARVAM_API_KEY',                 secretRef: 'sarvam-api-key' }
           ]
           probes: [
             {

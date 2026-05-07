@@ -8,6 +8,7 @@ import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
 import EmbedBackfillPill from './EmbedBackfillPill';
 import EmbedStackHealthPill from './EmbedStackHealthPill';
+import SarvamHealthCard from './SarvamHealthCard';
 import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
 import AiGatewayGuardrailByModelTile from './AiGatewayGuardrailByModelTile';
@@ -1732,6 +1733,11 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         {healthTab === 'asm' && (
           <SectionErrorBoundary name="Sarvam Purity" resetKeys={[healthTab]}>
           <div className="space-y-4" data-testid="asm-purity-tab">
+            {/* Task #553 — Inference-providers tile for the Sarvam-m
+                Assamese-chat primary. Polls /api/admin/health/sarvam
+                every 30s; surfaces the rolling 1h success-rate that
+                also drives the <95% Sentry alert. */}
+            <SarvamHealthCard token={adminToken} />
             {/* Task #423 — sanitiser-run stats so admins can see whether the
                 override they just set is actually changing live behaviour. */}
             <SectionErrorBoundary name="ASM Cleanup Activity">

@@ -200,4 +200,58 @@ webhook flow below.
 
 ---
 
-*Last updated: May 2026 (Task #551 — AWS row expanded for Glacier Deep Archive + Lambda batch jobs)*
+## Sarvam AI — $500 Startup Credit Grant
+
+**Grant:** $500 USD
+**Credential:** `SARVAM_API_KEY` (Azure Key Vault `SARVAM-API-KEY` →
+mirrored read-only to AWS Secrets Manager `syrabit/prod/sarvam-api-key`
++ Cloudflare Secrets binding `SARVAM_API_KEY`).
+**Endpoint:** `https://api.sarvam.ai/v1/chat/completions` (OpenAI-compatible
+schema; auth header is `api-subscription-key`, NOT `Authorization: Bearer`).
+
+### Services in Use
+
+| Service | Model | Use Case | Pricing | Est. Monthly Burn |
+|---------|-------|----------|---------|-------------------|
+| **Sarvam Chat** | `sarvam-m` | Locked primary for `assamese_rag_chat` (chain `[sarvam, workers_ai_indic]`). The only LLM with native Assamese reasoning quality at AHSEC-grade educational depth — IndicTrans2 covers translation but not free-form chat. | included in $500 credit | ~$8–12 / month |
+
+### Why Sarvam for Assamese Chat?
+
+- **`sarvam-m`** is the only production-grade chat model that thinks
+  *in* Assamese (via the `<think>...</think>` reasoning channel) rather
+  than translating from English — preserves idiom + cultural framing
+  in Assamese tutoring responses.
+- Workers-AI IndicTrans2 (the locked fallback) is a translation model,
+  not a chat model — when Sarvam is unavailable we fall through to it,
+  but answer fidelity drops noticeably (no multi-turn coherence, no
+  reasoning channel). The chain is strict by design (V4 §12 — no
+  silent downgrade): chain exhaustion surfaces 503.
+
+### Facade & Caps (Task #553)
+
+- **Facade module:** `artifacts/syrabit-backend/providers/sarvam.py`
+  exposes async `chat()`, typed `SarvamUnavailable` / `SarvamRateLimited`
+  exceptions, and a `ChatResponse` dataclass.
+- **Per-user monthly cap:** `SARVAM_PER_USER_MONTHLY_CAP=30` (default).
+  Defensive backstop for the edge worker's `CHAT_CAP_MONTHLY=30`
+  enforcement; cap exhaustion raises
+  `SarvamRateLimited("per_user_monthly_cap")`. Set to `0` to disable
+  (operator override — leaves the edge as sole enforcer).
+- **Admin health card:** `GET /api/admin/health/sarvam` returns the
+  rolling 1 h success-rate snapshot powering the AdminHealth tile.
+- **Sentry alert:** fires when success-rate drops below 95 % over the
+  trailing hour with ≥ 20 samples (per-replica sensitivity).
+
+### Credentials Required
+
+| Env Var | Description |
+|---------|-------------|
+| `SARVAM_API_KEY` | Sarvam AI subscription key (sent as `api-subscription-key` header). Without it, `assamese_rag_chat` falls through to `workers_ai_indic` immediately. |
+| `SARVAM_API_KEY_2` / `_3` | Optional rotation slots (`llm._SARVAM_PROVIDERS` round-robins). |
+| `SARVAM_PER_USER_MONTHLY_CAP` | Optional override; defaults to `30`. |
+
+**Total estimated monthly burn: ~$8–12/month → ~3–5 years runway at current scale.**
+
+---
+
+*Last updated: May 2026 (Task #553 — Sarvam AI grant row added)*
