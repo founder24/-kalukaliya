@@ -52,8 +52,8 @@ Chat:        english_rag_chat:  azure_openai(10000) → vertex(100) → workers_
              assamese_rag_chat: sarvam(10000) → vertex(100)             [no workers fallback]
              content:           vertex(10000) → azure_openai(100) → workers_ai(0)
 
-Embeddings:  cohere(embed-multilingual-v3.0) [primary]
-             → voyage_ai [secondary]
+Embeddings:  workers_ai_custom (Gemma-300M + Qwen3-0.6B, 1024-dim) [primary]
+             → pinecone_ai (multilingual-e5-large) [secondary]
              → workers_ai(bge-large-en-v1.5, 1024-dim) [last-resort]
 ```
 

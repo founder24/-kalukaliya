@@ -46,7 +46,7 @@ _EMBED_MODEL_WORKERS = "workers_ai_custom@gemma+qwen3-meanpool-1024"
 def _embed_source_for_primary() -> tuple[str, str]:
     """Return (model_string, source_tag) for the active primary.
 
-    Task #491 retired Cohere/Voyage; the chunk path is single-source
+    Task #491 retired the legacy embed providers; the chunk path is single-source
     workers_ai_custom. The function is kept for diagnostics callers.
     """
     return (_EMBED_MODEL_WORKERS, "workers_ai_custom")
@@ -101,7 +101,7 @@ async def _embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
     chunk path is single-source workers_ai_custom. A worker failure
     surfaces as None slots so ``embed_chunks_bulk`` can mark those
     chunks as failed and retry them on the next run; there is NO
-    silent fallback to retired providers (Cohere, Voyage, Bedrock).
+    silent fallback to retired legacy embed providers.
     """
     return await _workers_custom_embed_batch(texts)
 
@@ -293,7 +293,7 @@ async def embed_chunks_bulk(
 
     duration = round(time.perf_counter() - t0, 2)
     # Report the model/source actually used for this run so admin
-    # diagnostics don't mis-label a workers_ai_custom run as Cohere.
+    # diagnostics don't mis-label a workers_ai_custom run as a legacy provider.
     _active_model_tag, _active_source_tag = _embed_source_for_primary()
     result = {
         "total":            total,

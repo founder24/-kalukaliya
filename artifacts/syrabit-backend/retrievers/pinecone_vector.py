@@ -284,7 +284,7 @@ class PineconeVectorRetriever(Retriever):
         namespace-correct idempotency lookups. Without this parameter,
         ``get_by_ids`` would always read the default namespace and the
         ``as``/``en`` corpus runs would re-embed every chapter on every
-        invocation (false-miss → wasted Cohere/Pinecone Inference quota).
+        invocation (false-miss → wasted Pinecone Inference quota).
         """
         if not ids:
             return []

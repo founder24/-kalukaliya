@@ -27,10 +27,10 @@ logger = logging.getLogger("routes.admin_aws_native")
 
 router = APIRouter(tags=["admin", "aws-native"])
 
-# Cohere-only guardrail surfaced verbatim in the admin tile per
+# Bedrock guardrail surfaced verbatim in the admin tile per
 # cloud-allocation-plan §6 + §9.
 _BEDROCK_GUARDRAIL = (
-    "Cohere-only — Anthropic Claude / Meta Llama / Mistral / Amazon "
+    "All Bedrock LLM model families (Anthropic Claude / Meta Llama / Mistral / Amazon "
     "Titan / Amazon Nova on Bedrock are explicitly excluded. Azure "
     "OpenAI + Vertex Gemini cover those LLM roles."
 )

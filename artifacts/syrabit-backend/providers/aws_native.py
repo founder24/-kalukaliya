@@ -15,7 +15,7 @@ Modules
 ``aws_translate``   Indic ↔ EN translate fallback when Sarvam returns 429/5xx.
 ``aws_personalize`` Recs surface (home + Continue Learning) with deterministic fallback.
 ``aws_fraud``       Risk score on signup + payment intent.
-(Task #491 — Bedrock-Cohere embed/rerank module removed.)
+(Task #491 — legacy AWS embed/rerank module removed.)
 
 Calling pattern
 ---------------
@@ -551,6 +551,6 @@ def get_fraud_score(
     return _timed("fraud_detector", _call)
 
 
-# Task #491 — 3.1 Bedrock-Cohere embed + rerank module removed.
+# Task #491 — 3.1 legacy AWS embed + rerank module removed.
 # Embedding stack collapsed to workers_ai_custom (Gemma-300M + Qwen3-0.6B
 # mean-pool, 1024-dim). Rerank is Pinecone-only.

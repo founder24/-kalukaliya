@@ -250,21 +250,10 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/scripts/cf_waf_soften.py",
     "artifacts/syrabit-backend/tests/test_ai_discoverability_policy.py",
     "artifacts/syrabit/vite.config.js",
-    # rag.py / config.py / providers/* / aca_jobs/embed_backfill.py /
-    # routes/admin_aws_native.py / routes/admin_embed_stack_health.py /
-    # retrievers/pinecone_vector.py — internal docstrings / comments
-    # describe the historical chain ordering operators see in dashboards
-    # while the embed-backfill replays legacy vectors. Removing the
-    # words would orphan the dashboard breadcrumbs.
-    "artifacts/syrabit-backend/rag.py",
-    "artifacts/syrabit-backend/config.py",
+    # providers/workers_embed.py docstring references the Cohere-style
+    # ``input_type`` enum (``query`` / ``document``) used by the embed
+    # API contract. Renaming the enum would break callers.
     "artifacts/syrabit-backend/providers/workers_embed.py",
-    "artifacts/syrabit-backend/providers/chunk_embedder.py",
-    "artifacts/syrabit-backend/providers/aws_native.py",
-    "artifacts/syrabit-backend/retrievers/pinecone_vector.py",
-    "artifacts/syrabit-backend/routes/admin_aws_native.py",
-    "artifacts/syrabit-backend/routes/admin_embed_stack_health.py",
-    "artifacts/syrabit-backend/aca_jobs/embed_backfill.py",
     # Tests pinning the removed-provider behavior or asserting the
     # historical AI-Gateway shape (groq-slug fixture name).
     "artifacts/syrabit-backend/tests/test_admin_aws_native_route.py",
@@ -272,20 +261,17 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/tests/test_assamese_rag_namespace.py",
     "artifacts/syrabit-backend/tests/test_embed_failover_degraded_mode.py",
     "artifacts/syrabit-backend/tests/test_ai_gateway_observability.py",
-    # Operator-facing credit ledger — historical programme entries.
-    "artifacts/syrabit-backend/CREDITS.md",
-    # Frontend admin panels surface historical provider names from the
-    # backend health/metrics responses; copy is updated in lock-step
-    # with the next admin-UX sweep (Task #491 follow-up #524).
+    # Frontend admin panels + landing-zone runbooks surface historical
+    # provider names that operators still see on legacy Azure / GCP /
+    # AWS migrations and on dashboard rows fed by the embed-backfill
+    # job. Copy is updated in lock-step with the next admin-UX +
+    # docs sweep (Task #491 follow-up #524).
     "artifacts/syrabit/src/components/admin/AdminVertexPanel.jsx",
     "artifacts/syrabit/src/components/admin/AdminAzureAiPanel.jsx",
     "artifacts/syrabit/src/components/admin/AdminAwsNativePanel.jsx",
     "artifacts/syrabit/src/components/admin/EmbedBackfillPill.jsx",
     "artifacts/syrabit/src/components/admin/EmbedBackfillPill.test.jsx",
     "artifacts/syrabit/src/components/admin/vertex-panel/StatusHeader.jsx",
-    # Landing-zone runbooks reference legacy 1Password secret slugs
-    # operators still see on Azure / GCP / AWS migrations. Tracked
-    # under follow-up #524.
     "artifacts/syrabit/docs/infra/aws-landing-zone.md",
     "artifacts/syrabit/docs/infra/azure-landing-zone.md",
     "artifacts/syrabit/docs/infra/gcp-landing-zone.md",

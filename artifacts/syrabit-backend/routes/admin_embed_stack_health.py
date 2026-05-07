@@ -6,10 +6,10 @@ Surfaces three pills for the admin dashboard:
                   (``providers.workers_embed.health_check``).
   * **rerank**  — Pinecone-only rerank reachability via
                   ``providers.pinecone_ai.health_check``.
-  * **memory**  — the Voyage-backed Mongo memory_brain via
+  * **memory**  — the Mongo memory_brain via
                   ``providers.memory_brain.health_check``.
 
-Disabled providers (cohere, voyage on chunks, workers_ai bge-small
+Disabled legacy providers (on chunks, workers_ai bge-small
 fallback; `vertex_embed` was removed entirely by Task #490) are listed
 under ``dormant`` so the operator can
 see the full pre-Task-#382 layout without the dispatchers actually
@@ -108,7 +108,7 @@ async def admin_embed_stack_health(
     rerank_health["flag"] = {"name": "RERANK_PROVIDER", "value": RERANK_PROVIDER}
     _attach_alert_state(rerank_health, "rerank")
 
-    # ── Memory brain (Voyage + Atlas) ──────────────────────────────────────
+    # ── Memory brain (Atlas) ───────────────────────────────────────────────
     memory_health: dict[str, Any]
     try:
         from providers import memory_brain as _mb

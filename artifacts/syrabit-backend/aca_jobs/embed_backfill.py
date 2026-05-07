@@ -1,6 +1,6 @@
 """aca_jobs.embed_backfill — Task #411 re-embed every legacy chunk through
 the new Workers-AI custom embed worker so retrieval stops mixing old
-Cohere/Voyage vectors with new Gemma+Qwen3 ones.
+legacy-embed vectors with new Gemma+Qwen3 ones.
 
 Background
 ----------
@@ -8,7 +8,7 @@ Task #382 / #400 cut the live embed path over to the custom Workers-AI
 worker (Gemma-300M + Qwen3-0.6B fused to 1024 dims) and tagged every
 *new* chunk with ``embedding_source=workers_ai_custom``. Every chunk
 that was indexed before the cutover still carries the legacy tag
-(``cohere`` / ``voyage`` / etc.) and a vector produced by a different
+(legacy provider tags) and a vector produced by a different
 model. Cosine similarity between an old vector and a new query vector
 is no longer apples-to-apples, so retrieval drifts silently for any
 book that was indexed pre-cutover.
@@ -143,9 +143,9 @@ async def _remaining_by_source(db: Any) -> dict:
     Task #433 — admins need to know which *old* provider produced the
     vectors still waiting to be re-embedded. The job flips every legacy
     chunk to ``workers_ai_custom`` while in flight, so without a per-tag
-    breakdown the dashboard treats Cohere/Voyage/(missing) as one
-    opaque bucket. Returns a dict like ``{"cohere": 12000,
-    "voyage": 800, "(missing)": 50}``. Missing/null tags are bucketed
+    breakdown the dashboard treats legacy/(missing) as one
+    opaque bucket. Returns a dict like ``{"legacy_a": 12000,
+    "legacy_b": 800, "(missing)": 50}``. Missing/null tags are bucketed
     under the ``"(missing)"`` key so the breakdown surfaces *every*
     pending chunk (not just the ones with an explicit source).
 

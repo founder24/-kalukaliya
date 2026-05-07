@@ -514,8 +514,8 @@ async def _try_vector_provider(
       - pinecone_ai   →
           • lang=="as": Pinecone Inference multilingual-e5-large (1024-dim)
                         against namespace="as" — Task #291 cross-language RAG.
-          • else      : Cohere embed (1024-dim, matches syrabit-ahsec default ns).
-      - mongodb_atlas → Cohere embed (1024-dim, matches Atlas embedding space)
+          • else      : workers_ai_custom embed (1024-dim, matches syrabit-ahsec default ns).
+      - mongodb_atlas → workers_ai_custom embed (1024-dim, matches Atlas embedding space)
       - workers_ai    → raises immediately (no vector endpoint available)
 
     Task #490: the `vertex` provider branch (Vertex `embed_text` +
@@ -679,8 +679,8 @@ async def _fetch_chunks_semantic(
     Each failed or zero-result attempt excludes that provider and redraws from the
     remaining weighted pool — identical fallback semantics to all other dispatch functions.
 
-      - pinecone_ai   → Cohere embed + Pinecone syrabit-ahsec $vectorSearch  [primary]
-      - mongodb_atlas → Cohere embed + Atlas $vectorSearch (weight-0, last resort)
+      - pinecone_ai   → workers_ai_custom embed + Pinecone syrabit-ahsec $vectorSearch  [primary]
+      - mongodb_atlas → workers_ai_custom embed + Atlas $vectorSearch (weight-0, last resort)
       - workers_ai    → no vector endpoint; excluded immediately
 
     hyde_task: optional pre-started asyncio.Task for _generate_hyde_passage. When provided
@@ -714,7 +714,7 @@ async def _fetch_chunks_semantic(
     # — the only embedding space that contains the Assamese corpus written by
     # scripts/embed_assamese_corpus.py. We deliberately do NOT fall back to
     # Atlas vector search on miss/error: that index is English-only
-    # (Cohere) and would silently surface English chapters as "Assamese
+    # (English-only embed) and would silently surface English chapters as "Assamese
     # context", breaking the spec's Assamese-first guarantee. A miss here
     # returns []; the chat layer then performs the Sarvam answer-only
     # fallback over the same (empty) Assamese context instead of crossing
@@ -921,7 +921,7 @@ async def _fetch_internal_chapters(
             })
 
         # ── 5. Reranking — Pinecone-only (Task #491) ──────────────────────────
-        # Task #491 retired Bedrock-Cohere; rerank is now Pinecone-only
+        # Task #491 retired the legacy AWS rerank module; rerank is now Pinecone-only
         # via providers.pinecone_ai (bge-reranker-v2-m3, multilingual).
         if len(candidates) > 1:
             def _rerank_text(c: dict) -> str:

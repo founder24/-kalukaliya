@@ -337,3 +337,24 @@ print('V4 §13 acceptance: PASS')
 - Backfill of `formatted_by` on pre-#494 chapters (treated as `"vertex"` by the admin readout — no historical data loss).
 - Replacing Llama-3.3-70b with a future Workers-AI formatter (e.g. gpt-oss-120b) — requires its own purity-gate validation pass against Assamese content.
 - The `routes/admin_vertex.py` diagnostics surface (kept intact; reads Vertex quota directly, not via the dispatcher).
+
+---
+
+## §16 — Amendment: Cerebras / Cohere / Voyage-AI provider removal (Task #491, 2026-05-07)
+
+**Trigger:** sibling to #490 (Vertex scope-down) and #494 (content_format dispatcher). Cohere, Voyage-AI, and Cerebras carry no production traffic post-V4 (workers_ai_custom owns embed; Pinecone owns rerank; Azure `gpt-4.1-nano` + Workers-AI Mistral/Llama own chat). The dispatch chains, BYOK secret-audit lifecycle, admin readouts, and credit ledger are now collapsed to the surviving providers.
+
+### Changes vs V4 §1, §3, §4, §15
+
+1. **Cerebras dispatch — REMOVED.** `_call_cerebras` / `_stream_cerebras` deleted from `llm.py` and `emergentintegrations/llm/chat.py`. `cerebras` removed from `_PROVIDER_429`, `_PROVIDER_DEFAULT_MODELS`, `_PROVIDER_CANONICAL`, `_SLM_PROVIDER_MAX_INPUT_CHARS`, and every `PROVIDER_PRIORITY` chain. `CEREBRAS_API_KEY` removed from `.env.example` and from the BYOK primary/legacy maps in `server.py`.
+2. **Cohere + Voyage-AI embed/rerank — REMOVED.** `providers/cohere.py` and `providers/voyage_ai.py` deleted. The mongodb_atlas vector-search branch in `rag.py` now uses `providers.workers_embed.embed_query` (workers_ai_custom). `vertex_services.embed_text` is single-source workers_ai_custom — no Cohere or Bedrock-Cohere primary. `COHERE_API_KEY` and `VOYAGE_API_KEY` deleted from `_BYOK_PRIMARY` / `_SUPABASE_MANAGED_LEGACY`.
+3. **Bedrock-Cohere — REMOVED.** `providers/aws_native.py` drops `bedrock_cohere` from `FEATURE_KEYS`, `_FEATURE_REGIONS`, `_COST_EXPLORER_SERVICE_MAP`, plus `bedrock_embed` / `bedrock_rerank` / `BEDROCK_COHERE_MODELS`.
+4. **syllabus_embedder — single-source contract.** `embed_chapter()` and `classify()` both call `vertex_services.embed_text` (workers_ai_custom). The previous `classify` Pinecone-Inference-first query path created cross-embedding-space contamination against vertex-indexed vectors and is gone.
+5. **Admin surfaces.** `routes/admin_credits.py` `_CREDIT_REFERENCE`, `_PROGRAMME_NAMES`, smoke-test docstring, and endpoint description drop the Cohere row. `routes/admin_aws_native.py`, `routes/admin_embed_stack_health.py`, `routes/admin_advanced.py`, `routes/admin_vertex.py`, `routes/admin_routing_config.py`, and `chat_speedup_metrics.py` rephrased to neutral "legacy embed/SLM provider" wording. `CREDITS.md` updated to the Workers-AI custom embed primary.
+6. **CI guard.** `scripts/check_dead_providers.py` `BANNED_LITERAL` extended to include `cerebras|cohere|voyage_ai` (alongside the pre-existing `cartesia|groq|openrouter|quge5`). The wider token set listed in the original task spec (`baseten|bedrock|gemini|xai|openai_direct`) is **not** enforced because those literals still appear as legitimate operator/brand strings (Bedrock IAM ARNs, Gemini model aliases, xAI crawler UAs); re-enabling is tracked under follow-up #524.
+7. **Acceptance gate.** `rg "cerebras|CEREBRAS_API_KEY|CEREBRAS_RPM|providers\.cohere|bedrock_cohere|COHERE_API_KEY|voyage_ai|VOYAGE_" --type py` returns zero hits outside `scripts/check_dead_providers.py` + this changelog. `python -c "import server"` succeeds.
+
+### Out of scope (tracked separately)
+
+- **#524** — wider banned-token sweep across docs / frontend / admin panels so the CI guard can ban `bedrock|gemini|xai|baseten|openai_direct` as bare tokens without breaking legitimate brand copy.
+- **#525** — pytest contract pinning that index-time and query-time syllabus embeddings share the same provider/model.

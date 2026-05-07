@@ -39,6 +39,7 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 - **Secrets management:** Azure Key Vault is the source of truth, with AWS Secrets Manager and Cloudflare Secrets as read-only replicas.
 - **Observability:** Sentry Performance for tracing, OTEL to GCP Cloud Trace for long-term retention.
 - **PG to Mongo Migration:** Phase 2 complete for key user data; Phase 3 (read-shadow) and 4 (cutover) are pending.
+- **Provider chain (Task #491, 2026-05-07):** Cerebras, Cohere, and Voyage-AI fully retired. Embedding stack is single-source `workers_ai_custom` (Gemma-300M + Qwen3-0.6B, 1024-dim) with Azure OpenAI / Workers-AI as fallback; rerank is Pinecone-only. CI guard: `artifacts/syrabit-backend/scripts/check_dead_providers.py` bans `cerebras|cohere|voyage_ai` (plus the pre-existing `cartesia|groq|openrouter|quge5`).
 - **Assamese content backfill:** A resumable driver translates English content fields into Assamese using Workers-AI IndicTrans2 primary → Vertex/Gemini polish.
 
 ## Product
