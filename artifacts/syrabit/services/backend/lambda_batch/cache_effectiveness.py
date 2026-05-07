@@ -82,7 +82,9 @@ def _fetch_snapshot() -> dict[str, Any]:
 def _emit(cw, dims_ct: str, *, hits: int, misses: int, sets: int,
           hit_ratio: float, unique_keys: int,
           miss_reasons: dict[str, int],
-          miss_reasons_24h: dict[str, int] | None = None) -> None:
+          miss_reasons_24h: dict[str, int] | None = None,
+          hits_24h: int = 0, misses_24h: int = 0,
+          hit_ratio_24h: float = 0.0) -> None:
     """Publish one ContentType row to CloudWatch.
 
     Emits both the lifetime `MissReason` series (kept for backwards
@@ -98,6 +100,14 @@ def _emit(cw, dims_ct: str, *, hits: int, misses: int, sets: int,
         {"MetricName": "Sets",          "Value": float(sets),          "Unit": "Count",   "Dimensions": base},
         {"MetricName": "HitRatio",      "Value": float(hit_ratio),     "Unit": "None",    "Dimensions": base},
         {"MetricName": "UniqueKeys24h", "Value": float(unique_keys),   "Unit": "Count",   "Dimensions": base},
+        # Round-8 — fleet-wide 24h rolling counters from Redis hourly
+        # buckets. `HitRatio24h` is what `cache-ai-hitratio-low` alarms
+        # on — the lifetime `HitRatio` above is retained for backwards
+        # compat with historical dashboards but cannot be alarmed on
+        # because cumulative ratios never cross a threshold once warm.
+        {"MetricName": "Hits24h",       "Value": float(hits_24h),      "Unit": "Count",   "Dimensions": base},
+        {"MetricName": "Misses24h",     "Value": float(misses_24h),    "Unit": "Count",   "Dimensions": base},
+        {"MetricName": "HitRatio24h",   "Value": float(hit_ratio_24h), "Unit": "None",    "Dimensions": base},
     ]
     for reason, n in (miss_reasons or {}).items():
         metrics.append({
@@ -267,6 +277,9 @@ def handler(event, context):  # noqa: ARG001
         unique_keys=int(totals.get("unique_keys_24h", 0)),
         miss_reasons={},
         miss_reasons_24h=totals.get("miss_reasons_24h") or {},
+        hits_24h=int(totals.get("hits_24h", 0)),
+        misses_24h=int(totals.get("misses_24h", 0)),
+        hit_ratio_24h=float(totals.get("hit_ratio_24h", 0.0)),
     )
     for ct, row in cts.items():
         _emit(
@@ -278,6 +291,9 @@ def handler(event, context):  # noqa: ARG001
             unique_keys=int(row.get("unique_keys_24h", 0)),
             miss_reasons=row.get("miss_reasons") or {},
             miss_reasons_24h=row.get("miss_reasons_24h") or {},
+            hits_24h=int(row.get("hits_24h", 0)),
+            misses_24h=int(row.get("misses_24h", 0)),
+            hit_ratio_24h=float(row.get("hit_ratio_24h", 0.0)),
         )
 
     # ── 2. Other backend layers (Layer dimension) ───────────────────

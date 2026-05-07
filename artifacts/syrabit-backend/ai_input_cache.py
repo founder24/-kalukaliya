@@ -174,6 +174,83 @@ def _bump_unique_key(ct: str, key: str) -> None:
         bucket.pop(0)
 
 
+# ── Round-8: fleet-wide 24h rolling hit/miss aggregation ────────────────
+# Per-process counters are not fleet-representative AND a HitRatio alarm
+# computed off lifetime totals can mask a fresh regression. Fix: every
+# get_response hit/miss writes a single INCR into Redis under an hourly
+# bucket key with a 25h TTL. The snapshot endpoint reads back the last
+# 24 buckets and reports `hits_24h` / `misses_24h` / `hit_ratio_24h`
+# per content-type AND in totals. Best-effort — if Redis is down the
+# 24h fields fall back to 0/0/0.0 (the lifetime fields are unaffected).
+_HR24_PREFIX = "aic:hr24"
+_HR24_TTL_SEC = 25 * 3600
+
+
+def _hr24_bucket() -> int:
+    """Current UTC hour bucket (epoch hour)."""
+    return int(time.time()) // 3600
+
+
+def _record_24h_event(ct: str, kind: str) -> None:
+    """Best-effort Redis INCR for a single hit/miss event. `kind` is
+    one of "hits" | "misses". Failures are swallowed — the cache hot
+    path must never raise from telemetry."""
+    rc = _redis_client()
+    if rc is None:
+        return
+    try:
+        bucket = _hr24_bucket()
+        key = f"{_HR24_PREFIX}:{ct}:{bucket}:{kind}"
+        rc.incr(key)
+        # Pipeline-style would be better but the redis-py / upstash
+        # clients have inconsistent pipeline support; a separate EXPIRE
+        # is safe (idempotent).
+        try:
+            rc.expire(key, _HR24_TTL_SEC)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.debug("[ai_input_cache] hr24 record failed: %s", e)
+
+
+def _read_24h_totals() -> dict:
+    """Return `{ct: {hits, misses}}` summed over the last 24 buckets.
+    Returns `{}` on Redis outage — caller falls back to lifetime
+    counters with explicit `_24h: 0` fields so the alarm cannot
+    silently invert direction."""
+    rc = _redis_client()
+    if rc is None:
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    try:
+        now_b = _hr24_bucket()
+        buckets = [now_b - i for i in range(24)]
+        for ct in _KNOWN_CONTENT_TYPES:
+            h_total = 0
+            m_total = 0
+            for b in buckets:
+                try:
+                    rh = rc.get(f"{_HR24_PREFIX}:{ct}:{b}:hits")
+                    rm = rc.get(f"{_HR24_PREFIX}:{ct}:{b}:misses")
+                except Exception:
+                    rh = rm = None
+                if rh:
+                    try:
+                        h_total += int(rh.decode() if isinstance(rh, (bytes, bytearray)) else rh)
+                    except Exception:
+                        pass
+                if rm:
+                    try:
+                        m_total += int(rm.decode() if isinstance(rm, (bytes, bytearray)) else rm)
+                    except Exception:
+                        pass
+            out[ct] = {"hits": h_total, "misses": m_total}
+    except Exception as e:
+        logger.debug("[ai_input_cache] hr24 read failed: %s", e)
+        return {}
+    return out
+
+
 def _bump_miss_reason_24h(ct: str, reason: str) -> None:
     """Append a (now, reason) tuple to the per-CT 24h ring + age out
     entries older than 24 h. Round-7 fix — the lifetime `miss_reasons`
@@ -216,6 +293,11 @@ def snapshot() -> dict:
     Consumed by `/api/health/cache` (admin-only) and by the nightly
     `lambda_batch.cache_effectiveness` shipper.
     """
+    # Read fleet-wide 24h totals from Redis OUTSIDE the lock — Redis
+    # round-trips can take milliseconds and we don't want to block
+    # writers. Round-8 — addresses the architect's "per-process, not
+    # fleet-wide" finding by reading shared hourly buckets.
+    hr24 = _read_24h_totals()
     with _COUNTERS_LOCK:
         out: dict = {"content_types": {}, "totals": {"hits": 0, "misses": 0, "sets": 0}}
         for ct, c in _COUNTERS.items():
@@ -234,11 +316,23 @@ def snapshot() -> dict:
             for ts, reason in ring:
                 if ts >= cutoff_local and reason in mr24:
                     mr24[reason] += 1
+            # Round-8 — fleet-wide 24h rolling counters from Redis.
+            # `hits_24h + misses_24h` is the rolling 24h volume and
+            # `hit_ratio_24h` is the alarm-grade signal (NOT the
+            # lifetime ratio).
+            ct_hr24 = hr24.get(ct) or {"hits": 0, "misses": 0}
+            h24 = int(ct_hr24.get("hits", 0))
+            m24 = int(ct_hr24.get("misses", 0))
+            t24 = h24 + m24
+            hr24_ratio = round(h24 / t24, 4) if t24 else 0.0
             out["content_types"][ct] = {
                 "hits": c["hits"],
                 "misses": c["misses"],
                 "sets": c["sets"],
                 "hit_ratio": hr,
+                "hits_24h": h24,
+                "misses_24h": m24,
+                "hit_ratio_24h": hr24_ratio,
                 "unique_keys_24h": len({k for _, k in c["unique_keys_24h"]}),
                 "miss_reasons": dict(c["miss_reasons"]),
                 "miss_reasons_24h": mr24,
@@ -250,6 +344,14 @@ def snapshot() -> dict:
             out["totals"]["sets"] += c["sets"]
         gt = out["totals"]["hits"] + out["totals"]["misses"]
         out["totals"]["hit_ratio"] = round(out["totals"]["hits"] / gt, 4) if gt else 0.0
+        # Round-8 — totals.hit_ratio_24h is what the alarm uses.
+        h24_total = sum(int(e.get("hits_24h", 0)) for e in out["content_types"].values())
+        m24_total = sum(int(e.get("misses_24h", 0)) for e in out["content_types"].values())
+        t24_total = h24_total + m24_total
+        out["totals"]["hits_24h"] = h24_total
+        out["totals"]["misses_24h"] = m24_total
+        out["totals"]["hit_ratio_24h"] = round(h24_total / t24_total, 4) if t24_total else 0.0
+        out["totals"]["hr24_source"] = "redis_hourly_buckets" if hr24 else "redis_unavailable"
         out["totals"]["unique_keys_24h"] = sum(
             entry["unique_keys_24h"] for entry in out["content_types"].values()
         )
@@ -443,6 +545,7 @@ def get_response(
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
             _COUNTERS[ct]["tier_hits"]["inproc"] += 1
+        _record_24h_event(ct, "hits")
         return val
     # Tier 2: Cloudflare KV (canonical per V4 §K.2 — same namespace
     # the edge worker reads from). Tried before Redis so a worker-
@@ -453,6 +556,7 @@ def get_response(
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
             _COUNTERS[ct]["tier_hits"]["cf_kv"] += 1
+        _record_24h_event(ct, "hits")
         return cf_val
     rc = _redis_client()
     if rc is not None:
@@ -464,6 +568,7 @@ def get_response(
                 with _COUNTERS_LOCK:
                     _COUNTERS[ct]["hits"] += 1
                     _COUNTERS[ct]["tier_hits"]["redis"] += 1
+                _record_24h_event(ct, "hits")
                 return text
         except Exception as e:
             logger.debug("[ai_input_cache] redis get failed: %s", e)
@@ -487,6 +592,7 @@ def get_response(
         _COUNTERS[ct]["misses"] += 1
         _COUNTERS[ct]["miss_reasons"][reason] += 1
         _bump_miss_reason_24h(ct, reason)
+    _record_24h_event(ct, "misses")
     return None
 
 

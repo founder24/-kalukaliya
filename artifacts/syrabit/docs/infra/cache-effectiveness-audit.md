@@ -170,6 +170,33 @@ returns `ai_response_cache` (legacy LLM-response cache stats),
 `rag_cache` (Redis hits/misses counter), and `l1_inproc` (cardinality
 and saturation for every `cachetools.TTLCache` ring in `cache.py`).
 
+### 4b. Fleet-wide rolling 24h hit-ratio (round-8)
+
+The `hits` / `misses` / `hit_ratio` columns above are **process-
+lifetime cumulative counters** — useful for absolute volume but
+useless as an alarm signal because once a pod warms up the ratio
+stops moving. They also double-count nothing across replicas and
+the snapshot only sees its own pod.
+
+Round-8 fix: every `get_response` hit/miss does a single Redis
+`INCR` on a per-content-type per-hour bucket key
+(`aic:hr24:<ct>:<epoch_hour>:<hits|misses>`) with a 25-hour TTL.
+`snapshot()` reads the last 24 buckets per content-type and reports
+`hits_24h` / `misses_24h` / `hit_ratio_24h` per CT plus a
+`totals.hit_ratio_24h` rollup. Because Redis is shared across all
+backend replicas the rollup is fleet-wide; per-process counters are
+no longer the source of the alarm signal.
+
+`totals.hr24_source` is set to `"redis_hourly_buckets"` on a normal
+read and `"redis_unavailable"` on a Redis outage — the alarm
+defaults to `treat_missing_data=breaching` so we page rather than
+silently invert direction.
+
+The `cache-ai-hitratio-low` CW alarm now reads `HitRatio24h`
+(emitted by the Lambda from `totals.hit_ratio_24h`) instead of the
+old lifetime `HitRatio` series. The lifetime metric is still emitted
+for backwards compat with historical dashboards.
+
 ### 5. CloudWatch alarms + CF Analytics edge integration
 
 Two new alarms in `infra/aws/lambda-batch-jobs.tf` (Syrabit/Cache

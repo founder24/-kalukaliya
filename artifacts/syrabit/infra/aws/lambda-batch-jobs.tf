@@ -412,17 +412,25 @@ resource "aws_cloudwatch_metric_alarm" "as_backfill_failed_spike" {
 # them; we just don't page on per-row noise.
 
 resource "aws_cloudwatch_metric_alarm" "cache_ai_hitratio_low" {
+  # Round-8 — alarm switched from `HitRatio` (lifetime cumulative) to
+  # `HitRatio24h` (rolling 24h, computed from Redis hourly buckets).
+  # Lifetime ratios warm to a stable value and never cross a threshold
+  # again; the 24h ratio is what actually catches a fresh regression.
+  # Source-of-truth for the underlying counters: Redis `aic:hr24:*`
+  # hourly buckets aggregated across all backend replicas (see
+  # ai_input_cache._record_24h_event). The Lambda only mirrors the
+  # already-aggregated value to CloudWatch.
   alarm_name          = "${local.lz_project}-cache-ai-hitratio-low-${local.lz_env}"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 1
   datapoints_to_alarm = 1
-  metric_name         = "HitRatio"
+  metric_name         = "HitRatio24h"
   namespace           = "Syrabit/Cache"
   period              = 86400
   statistic           = "Average"
   threshold           = 0.30
   treat_missing_data  = "breaching"
-  alarm_description   = "Task #571 — AI-input-cache total HitRatio dropped below 30% over the last 24h. Likely causes: a prompt-template bump that has not yet refilled, a normalizer regression that fragments keys, or a TTL that is too short for the call volume. Inspect /admin/observability cache panel + miss_reasons breakdown."
+  alarm_description   = "Task #571 — AI-input-cache fleet-wide HitRatio24h (rolling 24h, aggregated across all backend replicas via Redis hourly buckets) dropped below 30%. Likely causes: a prompt-template bump that has not yet refilled, a normalizer regression that fragments keys, or a TTL that is too short for the call volume. Inspect /admin/observability cache panel + miss_reasons_24h breakdown."
 
   dimensions = {
     ContentType = "Total"

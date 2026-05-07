@@ -47,6 +47,7 @@ def test_handler_emits_both_lifetime_and_24h_miss_reason_series(monkeypatch) -> 
                 "hits": 100, "misses": 30, "sets": 50,
                 "hit_ratio": 0.769, "unique_keys_24h": 42,
                 "miss_reasons_24h": {"cold": 20, "ttl_expiry": 10},
+                "hits_24h": 40, "misses_24h": 10, "hit_ratio_24h": 0.8,
             },
             "content_types": {
                 "mcq": {
@@ -54,6 +55,7 @@ def test_handler_emits_both_lifetime_and_24h_miss_reason_series(monkeypatch) -> 
                     "hit_ratio": 0.833, "unique_keys_24h": 21,
                     "miss_reasons": {"cold": 100, "ttl_expiry": 50},
                     "miss_reasons_24h": {"cold": 5, "ttl_expiry": 5},
+                    "hits_24h": 18, "misses_24h": 2, "hit_ratio_24h": 0.9,
                 },
             },
         },
@@ -81,6 +83,17 @@ def test_handler_emits_both_lifetime_and_24h_miss_reason_series(monkeypatch) -> 
     names = {m["MetricName"] for m in all_metrics}
     assert "MissReason" in names, "lifetime MissReason series must still ship"
     assert "MissReason24h" in names, "24h MissReason24h series must ship (round-7)"
+    # Round-8 — fleet-wide rolling 24h hit-ratio is what the alarm uses.
+    assert "HitRatio24h" in names, "rolling 24h HitRatio24h must ship (round-8)"
+    assert "Hits24h" in names and "Misses24h" in names
+
+    # The Total row's HitRatio24h must equal the snapshot value.
+    hr24_total = [
+        m for m in all_metrics
+        if m["MetricName"] == "HitRatio24h"
+        and any(d["Name"] == "ContentType" and d["Value"] == "Total" for d in m["Dimensions"])
+    ]
+    assert hr24_total and hr24_total[0]["Value"] == 0.8
 
     # Verify the 24h series carries the expected reasons + counts.
     mr24 = [m for m in all_metrics if m["MetricName"] == "MissReason24h"]
