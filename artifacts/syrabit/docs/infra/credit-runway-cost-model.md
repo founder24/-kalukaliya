@@ -14,14 +14,6 @@ review.
 
 ---
 
-## Revision history
-
-| Version | Date | Author | Change |
-|---|---|---|---|
-| 1.0 | 2026-05-07 | infra | Initial memo. Covers Phases 1–4 (1k → 100k DAU) with credit-drawdown economics, per-provider runway ledger, sensitivity grid, and migration trigger ladder. Reconciles with Task #549 founder-locks ($100 cap, voice paywall, workers_ai chat head pre-#555, 60/80/95 % degradation ladder). |
-
----
-
 ## TL;DR
 
 Syrabit operates with two layered economic surfaces:
@@ -43,6 +35,7 @@ real cash bill under $100 / month until the Phase 3 trigger fires
 | 2 — Launch  | 5k – 10k   | 40k – 80k    | **$300 – $800 / mo**     | $80 – $100 *(at #549 cap)* | $1,500 – $2,800 |
 | 3 — Growth  | 10k – 50k  | 80k – 400k   | **$1,200 – $3,500 / mo** | $300 – $500 *(post-`# COST-CAP-OVERRIDE`)* | $7k – $13k |
 | 4 — Scale   | 50k – 100k | 400k – 800k  | **$4k – $12k / mo**      | $4k – $12k *(credits exhausted; revenue-positive)* | $9k – $14k |
+| **Credits-off summary** *(reference only — what an unsubsidised competitor would pay)* | per-phase | per-phase | n/a | n/a | **P1 $400–$700 · P2 $1.5k–$2.8k · P3 $7k–$13k · P4 $9k–$14k** |
 
 The four-cloud cost-share remains the V4-locked **40 % Cloudflare /
 30 % Azure / 20 % AWS / 10 % GCP** through every phase. Voice (TTS /
@@ -287,10 +280,10 @@ adoption raises **both** cost AND revenue, with revenue scaling
 
 | % of MAU on voice | Voice cost (drawdown + cash) | Voice gross revenue (paid plan ₹100) | Net contribution |
 |---|---|---|---|
-| 2 %  | $20  | $1,920  | **+$1,900** |
+| 1 %  | $9   | $960    | **+$951** |
 | 5 % *(baseline)* | $45  | $4,800  | **+$4,755** |
 | 10 % | $90  | $9,600  | **+$9,510** |
-| 20 % | $180 | $19,200 | **+$19,020** |
+| 25 % | $225 | $24,000 | **+$23,775** |
 
 ### 5.3 Paid-conversion slider — Phase 2 net P&L
 
@@ -298,8 +291,8 @@ adoption raises **both** cost AND revenue, with revenue scaling
 |---|---|---|---|---|
 | 2 % | 1.6k | $1,920  | $90 | **+$1,830** |
 | 5 % *(baseline)* | 4.0k | $4,800 | $92 | **+$4,708** |
-| 7 % | 5.6k | $6,720 | $95 | **+$6,625** |
 | 10 % | 8.0k | $9,600 | $98 | **+$9,502** |
+| 20 % | 16.0k | $19,200 | $100 *(at #549 cap)* | **+$19,100** |
 
 Even at **2 % paid conversion**, the company is gross-margin positive
 at Phase 2. The model only breaks if paid conversion holds at 0 %
@@ -321,6 +314,8 @@ Each row: **alarm → owner → SLA → action**. Pager source is
 | **MongoDB Atlas credits < 6 months runway** | Slack `#syrabit-oncall` (Atlas console webhook) | infra | 1 week | Atlas Startup renewal; if denied, downgrade M20 → M10 (acceptable for ≤ 25k DAU) and accept p99 query degradation. |
 | **Pinecone credits < 6 months runway** | Slack `#syrabit-oncall` (Pinecone billing webhook) | infra | 1 week | Pinecone Startup renewal; if denied, migrate rerank to Workers-AI fallback (acknowledge latency penalty in matrix §2.1). |
 | **Sarvam credits < 3 months runway** | Slack `#syrabit-oncall` (manual cron) | infra | 1 week | Vendor renewal; if denied, shift Assamese chat to `workers_ai_indic` last-resort tier (degraded UX — fail loud per V4 §12). |
+| **Azure for Startups credits < 12 months runway** | Slack `#syrabit-oncall` (Azure Cost Management alert) | infra | 1 week | (a) Apply Microsoft for Startups Pegasus tier renewal; (b) if denied, ACA right-sizing per `aca-cutover.md` (drop min replicas 2 → 1 below 5k DAU, accept cold-start). **#549 interaction:** the Azure pool is reserved for the Vertex chat re-enable (#555/#556) buffer; depleting it before #555 lands forces vertex-fallback decisions earlier than planned. |
+| **Sentry monthly event quota > 80 % twice in 7 days** | Sentry built-in spike-protection alert | infra | 72 h | (a) Tighten OTEL → Cloud Trace sampling rate; (b) raise Sentry plan tier (cash impact: ~$80–300/mo at Phase 3+, modelled in §2). Sentry is the only observability-tier line that scales sub-linearly with DAU; do **not** confuse this trigger with the MeterD ladder. |
 | **Deepgram + ElevenLabs combined < 3 months runway** | Slack `#syrabit-oncall` | infra + product | 72 h | Raise paid voice price OR contract paid commits. Voice paywall (#549) ensures cost < revenue; this trigger is about smoothing not survival. |
 | **Vertex (Google) credit balance < 90 days OR < 20 % of original pool size** | Slack `#syrabit-oncall` (Cloud Billing API; ≥ 20 % delta = quarterly review trigger per top-of-file note) | infra | 72 h | Same as GCP row above. **The 20 % delta is also the standalone trigger that re-derives this entire memo on the next quarterly cycle.** |
 | **MeterD trips ≥ 60 % of monthly cap twice in 7 days** | PagerDuty (Sentry alert on `meter_d.cap_pct ≥ 0.6`) | infra (primary), founder (escalation) | 24 h | **#549 auto-action:** pause-batch ladder fires (#557). Manual: investigate cache-hit drift (5.1); if structural, open `# COST-CAP-OVERRIDE` task for Phase 2 → 3 cap raise. |
@@ -427,3 +422,11 @@ trigger).
 - Edge controls: `workers/edge-proxy/src/index.ts`
 - Provider decommission rationale (#347):
   [`providers-task-347-decommission.md`](providers-task-347-decommission.md)
+
+---
+
+## Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 1.0 | 2026-05-07 | infra | Initial memo. Covers Phases 1–4 (1k → 100k DAU) with credit-drawdown economics, per-provider runway ledger, cache-hit / voice / paid-conversion sensitivity grids, and migration trigger ladder (incl. GCP <90 d, Mongo/Pinecone <6 mo, Sarvam <3 mo, Azure <12 mo, Sentry quota, Vertex ≥ 20 % pool delta, MeterD 60/80/95/100 % auto-flips). Reconciles with Task #549 founder-locks ($100 cap, voice paywall, workers_ai chat head pre-#555, 60/80/95 % degradation ladder, CI guard `check_budget_ceiling.py`). |
