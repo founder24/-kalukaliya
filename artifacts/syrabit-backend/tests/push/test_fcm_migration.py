@@ -64,6 +64,8 @@ class _FakePushColl:
         for d in self.docs:
             if self._matches(d, flt):
                 d.update(upd.get("$set", {}))
+                for k in (upd.get("$unset", {}) or {}):
+                    d.pop(k, None)
                 return
 
     async def delete_one(self, flt):
@@ -176,6 +178,30 @@ def test_dry_run_makes_no_writes():
     assert coll.updates == []
     assert coll.deletes == []
     assert "migration_state" not in coll.docs[0]
+
+
+def test_tombstone_unsets_legacy_firebase_fields():
+    """Decommission step — once a row is tombstoned, the legacy
+    `fcm_token` / `provider` / `kind` fields are dropped so the
+    schema audit is clean and nothing keeps pretending to be a
+    Firebase row."""
+    long_ago = datetime.now(timezone.utc) - timedelta(days=45)
+    coll = _install_db([{
+        "endpoint": "legacy://fcm/cleanup",
+        "provider": "fcm",
+        "kind": "fcm",
+        "fcm_token": "ya29.cleanup",
+        "migration_state": "pending",
+        "migration_first_seen_at": long_ago,
+    }])
+    from scripts.migrate_fcm_to_vapid import run_sweep
+
+    _run(run_sweep(apply=True, purge=False))
+    doc = coll.docs[0]
+    assert doc["migration_state"] == "tombstoned"
+    assert "fcm_token" not in doc
+    assert "provider" not in doc
+    assert "kind" not in doc
 
 
 def test_token_only_legacy_doc_is_classified_via_id():

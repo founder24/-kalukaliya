@@ -17,6 +17,22 @@ script only re-classifies and tombstones the legacy rows so the
 `/admin/push/migration-status` dashboard reads correctly and
 `_dispatch_push` does not fan out to a dead provider.
 
+Why no FCM "reconnect" push?
+----------------------------
+The original Task #557 spec called for a final reconnect notification
+delivered via FCM at window close, before tombstoning. Firebase was
+already fully decommissioned in this codebase before #557 landed —
+there is **no** `firebase_admin` import, no `FCM_SERVER_KEY`, no
+service-account JSON, and the umbrella CI guard's `TODO_557_PATTERN`
+now forbids reintroducing any of them. We therefore have **no
+transport** through which to send a final FCM message, and adding a
+short-lived Firebase project just to fire the reconnect ping would
+violate V4 §12 ("no silent fallbacks") *and* the founder $100/mo cap
+(Task #549). Operators are expected to surface the migration banner
+through the in-app SW + the existing transactional email channel
+(SES, post-Task #556) instead. This rationale is intentional and
+final; do not re-add a Firebase code path here.
+
 Lifecycle
 ---------
 For each `db.push_subscriptions` doc whose `provider in {None, "fcm"}`
@@ -210,14 +226,24 @@ async def run_sweep(apply: bool, purge: bool) -> dict[str, Any]:
 
         if now - first_seen > MIGRATION_WINDOW:
             if apply:
+                # Drop the legacy Firebase fields on tombstone so a
+                # future schema audit doesn't trip over `fcm_token` /
+                # `provider="fcm"` rows that nothing reads any more.
                 await db.push_subscriptions.update_one(
                     addr,
-                    {"$set": {
-                        "active": False,
-                        "deactivated_at": now,
-                        "deactivation_reason": "fcm_migration_window_expired",
-                        "migration_state": "tombstoned",
-                    }},
+                    {
+                        "$set": {
+                            "active": False,
+                            "deactivated_at": now,
+                            "deactivation_reason": "fcm_migration_window_expired",
+                            "migration_state": "tombstoned",
+                        },
+                        "$unset": {
+                            "fcm_token": "",
+                            "provider": "",
+                            "kind": "",
+                        },
+                    },
                 )
             tombstoned += 1
 

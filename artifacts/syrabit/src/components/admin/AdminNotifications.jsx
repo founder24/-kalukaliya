@@ -54,6 +54,7 @@ export default function AdminNotifications({ adminToken, onNavigate }) {
   const [trigLoading, setTrigLoading] = useState(false);
   const [newTrig, setNewTrig]   = useState({ name: '', event: 'signup', channel: 'push', message: '', subject: '', enabled: true });
   const [deliveryStats, setDeliveryStats] = useState(null);
+  const [migrationStatus, setMigrationStatus] = useState(null);
   const [deliveryLogs, setDeliveryLogs] = useState([]);
   const [deliveryLogsTotal, setDeliveryLogsTotal] = useState(0);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
@@ -168,13 +169,15 @@ export default function AdminNotifications({ adminToken, onNavigate }) {
   const loadDeliveryData = useCallback(async () => {
     setDeliveryLoading(true);
     try {
-      const [statsRes, logsRes, subsRes, pruneRes] = await Promise.allSettled([
+      const [statsRes, logsRes, subsRes, pruneRes, migRes] = await Promise.allSettled([
         adminAxios(`${API_BASE}/admin/push/delivery-stats?days=${statsDays}`),
         adminAxios(`${API_BASE}/admin/push/delivery-log?limit=50`),
         adminAxios(`${API_BASE}/admin/push/subscriptions`),
         adminAxios(`${API_BASE}/admin/push/prune-dead`),
+        adminAxios(`${API_BASE}/admin/push/migration-status`),
       ]);
       if (statsRes.status === 'fulfilled') setDeliveryStats(statsRes.value.data);
+      if (migRes.status === 'fulfilled') setMigrationStatus(migRes.value.data);
       if (logsRes.status === 'fulfilled') {
         setDeliveryLogs(logsRes.value.data.logs || []);
         setDeliveryLogsTotal(logsRes.value.data.total || 0);
@@ -538,6 +541,43 @@ export default function AdminNotifications({ adminToken, onNavigate }) {
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
                       <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Expired</p>
                       <p className="text-xl font-bold text-amber-700 mt-1">{deliveryStats.total_expired}</p>
+                    </div>
+                  </div>
+                )}
+
+                {migrationStatus && (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50/40 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">
+                        Web push migration (Task #557)
+                      </p>
+                      <p className="text-[10px] text-gray-500">
+                        Window {migrationStatus.window_days}d · grace {migrationStatus.purge_grace_days}d
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="rounded-lg border border-gray-200 bg-white p-3">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Total</p>
+                        <p className="text-lg font-bold text-gray-900">{migrationStatus.total}</p>
+                      </div>
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                        <p className="text-[10px] font-bold text-emerald-500 uppercase">Migrated</p>
+                        <p className="text-lg font-bold text-emerald-700">
+                          {migrationStatus.migrated} <span className="text-xs text-emerald-500">({migrationStatus.pct_migrated}%)</span>
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-[10px] font-bold text-amber-500 uppercase">Pending</p>
+                        <p className="text-lg font-bold text-amber-700">
+                          {migrationStatus.pending} <span className="text-xs text-amber-500">({migrationStatus.pct_pending}%)</span>
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                        <p className="text-[10px] font-bold text-red-400 uppercase">Tombstoned</p>
+                        <p className="text-lg font-bold text-red-700">
+                          {migrationStatus.tombstoned} <span className="text-xs text-red-500">({migrationStatus.pct_tombstoned}%)</span>
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
