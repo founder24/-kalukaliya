@@ -213,9 +213,8 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
                              "enabled": any(os.environ.get(k, "").strip() for k in ("SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"))},
         "elevenlabs":       {"label": "ElevenLabs",                  "env": ["ELEVENLABS_API_KEY"],
                              "enabled": _flag("providers.elevenlabs")},
-        "assemblyai":       {"label": "AssemblyAI",                  "env": ["ASSEMBLYAI_API_KEY"],
-                             "enabled": _flag("providers.assemblyai")},
-        "deepgram":         {"label": "Deepgram",                    "env": ["DEEPGRAM_API_KEY"],
+        # Task #552 §G — AssemblyAI entry retired (provider decommissioned).
+        "deepgram":         {"label": "Deepgram (STT-only post-Task-#552 §G)", "env": ["DEEPGRAM_API_KEY"],
                              "enabled": _flag("providers.deepgram")},
         "pinecone_ai":      {"label": "Pinecone (Inference + Rerank)", "env": ["PINECONE_API_KEY"],
                              "enabled": _flag("providers.pinecone_ai")},

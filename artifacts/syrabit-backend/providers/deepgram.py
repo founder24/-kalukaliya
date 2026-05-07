@@ -1,17 +1,19 @@
 """
-providers.deepgram — Deepgram Speech-to-Text (STT) and Text-to-Speech (TTS).
+providers.deepgram — Deepgram Speech-to-Text (STT) ONLY.
 
 STT: POST /v1/listen  — synchronous pre-recorded transcription via Nova-3.
-TTS: POST /v1/speak   — Aura-2 synthesis.
 
 Configuration:
   DEEPGRAM_API_KEY — Deepgram API key (required; BYOK via CF gateway optional)
 
 STT language support: Deepgram Nova-3 supports en, hi, as (Assamese), and many others.
-TTS voices: aura-2-en-us (default), aura-2-hi-in, etc.
 
 Typical STT latency: 1-3s for a 1-minute audio clip on Nova-3.
-Typical TTS latency: 300-800ms.
+
+Task #552 §G — The legacy Deepgram Aura-2 TTS surface (synthesize()) was
+retired by Task #552 §G. ElevenLabs eleven_multilingual_v2 is the sole
+English TTS specialist; Google Cloud TTS Neural2 is the sole Indic TTS
+specialist. This module now exposes only the STT primitive.
 """
 from __future__ import annotations
 
@@ -41,15 +43,7 @@ _TIMEOUT_S   = 60.0
 ENABLED: bool = bool(_API_KEY and _API_KEY != BYOK_PLACEHOLDER) or (CF_GATEWAY_ENABLED and bool(_API_KEY))
 
 _STT_MODEL     = os.environ.get("DEEPGRAM_STT_MODEL", "nova-3")
-_TTS_VOICE_EN  = os.environ.get("DEEPGRAM_TTS_VOICE_EN",  "aura-2-en-us")
-_TTS_VOICE_HI  = os.environ.get("DEEPGRAM_TTS_VOICE_HI",  "aura-2-hi-in")
-_TTS_VOICE_AS  = os.environ.get("DEEPGRAM_TTS_VOICE_AS",  "aura-2-hi-in")  # Assamese → Hindi voice
-
-_LANG_TO_TTS_VOICE: dict[str, str] = {
-    "en": _TTS_VOICE_EN,
-    "hi": _TTS_VOICE_HI,
-    "as": _TTS_VOICE_AS,
-}
+# Task #552 §G — Deepgram Aura-2 TTS voices retired (TTS branch removed).
 
 
 def _base_url() -> str:
@@ -74,7 +68,7 @@ def _headers(content_type: str = "application/json") -> dict:
 
 
 if ENABLED:
-    logger.info("Deepgram STT/TTS ready — stt_model=%s byok=%s", _STT_MODEL, (_API_KEY == BYOK_PLACEHOLDER))
+    logger.info("Deepgram STT ready — stt_model=%s byok=%s (TTS branch retired by Task #552 §G)", _STT_MODEL, (_API_KEY == BYOK_PLACEHOLDER))
 else:
     logger.info("Deepgram disabled (DEEPGRAM_API_KEY not set)")
 
@@ -160,56 +154,8 @@ async def transcribe(
         raise RuntimeError(f"Deepgram STT error: {exc}")
 
 
-async def synthesize(
-    text: str,
-    *,
-    voice: Optional[str] = None,
-    language: Optional[str] = None,
-) -> bytes:
-    """Synthesize *text* with Deepgram Aura-2 and return mp3 audio bytes.
-
-    Args:
-        text:     Text to synthesize (max ~2000 chars per call).
-        voice:    Aura-2 voice ID override.  Defaults to language-appropriate voice.
-        language: BCP-47 language code used to select the default voice.
-
-    Returns:
-        MP3 audio bytes.
-
-    Raises:
-        RuntimeError: Deepgram API error.
-    """
-    if not ENABLED:
-        raise RuntimeError("Deepgram TTS is not enabled (DEEPGRAM_API_KEY not set)")
-
-    lang_key = (language or "en")[:2].lower()
-    voice_id = voice or _LANG_TO_TTS_VOICE.get(lang_key, _TTS_VOICE_EN)
-
-    client = _get_client()
-    base = _base_url()
-
-    t0 = time.perf_counter()
-    try:
-        resp = await client.post(
-            f"{base}/speak",
-            headers=_headers("application/json"),
-            params={"model": voice_id, "encoding": "mp3"},
-            json={"text": text},
-        )
-        resp.raise_for_status()
-        audio_bytes = resp.content
-        latency = round((time.perf_counter() - t0) * 1000)
-        logger.info(
-            "Deepgram TTS: %d chars → %d bytes, voice=%s %dms",
-            len(text), len(audio_bytes), voice_id, latency,
-        )
-        return audio_bytes
-    except httpx.HTTPStatusError as exc:
-        logger.error("Deepgram TTS HTTP %d: %s", exc.response.status_code, exc.response.text[:300])
-        raise RuntimeError(f"Deepgram TTS failed: HTTP {exc.response.status_code}")
-    except Exception as exc:
-        logger.error("Deepgram TTS failed: %s", exc)
-        raise RuntimeError(f"Deepgram TTS error: {exc}")
+# Task #552 §G — Deepgram Aura-2 TTS surface (synthesize()) removed.
+# ElevenLabs is the sole English TTS specialist; Google Neural2 owns Indic.
 
 
 async def health_check() -> dict:

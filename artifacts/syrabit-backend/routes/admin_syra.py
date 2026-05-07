@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field
 from auth_deps import get_admin_user
 from llm import call_llm_api_chat
 from providers import deepgram as _deepgram
-from providers import assemblyai as _assemblyai
 from syra_actions import (
     SyraActionError,
     execute as execute_action,
@@ -66,8 +65,9 @@ pronouns ("ban him", "do it for that user").
 - Provider pools: english_rag_chat (Azure GPT-4.1-mini → Vertex/Gemini
   → Workers AI Llama 3.3-70B), assamese_rag_chat (Sarvam-m → Vertex
   → Workers AI IndicTrans2), content (Vertex → Azure → Workers AI),
-  tts (ElevenLabs → Deepgram → Workers AI), stt (Deepgram → AssemblyAI
-  → Workers AI). All routed through Cloudflare AI Gateway with BYOK.
+  tts (ElevenLabs → Workers AI; Task #552 §G — Deepgram Aura-2 retired),
+  stt (Deepgram → Workers AI; Task #552 §G — third-party fallback
+  retired). All routed through Cloudflare AI Gateway with BYOK.
 - Quizzes: Azure generates English master, Sarvam translates to
   Assamese + Hindi, all stored in MongoDB.
 - Dual database: MongoDB Atlas (content, conversations, alerts,
@@ -448,14 +448,14 @@ async def syra_stt(
     language: str = Form("en"),
     admin: dict = Depends(get_admin_user),
 ):
-    # STT requires at least one provider — Deepgram is preferred for
-    # latency, AssemblyAI is used as a middleman fallback when
-    # Deepgram errors OR returns an empty transcript (often happens
-    # for short Indian-accented utterances on Nova-3).
-    if not (_deepgram.ENABLED or _assemblyai.ENABLED):
+    # Task #552 §G — Deepgram Nova-3 is the SOLE English STT primary
+    # for the admin Syra orb. AssemblyAI fallback retired (provider
+    # module deleted). Indic admin commands fall through to the canonical
+    # Google Chirp_2 path via /api/voice/stt — the admin orb is English-only.
+    if not _deepgram.ENABLED:
         raise HTTPException(
             status_code=503,
-            detail="No STT provider configured (Deepgram + AssemblyAI both off).",
+            detail="No STT provider configured (Deepgram off).",
         )
     audio_bytes = await audio.read()
     if not audio_bytes:
@@ -467,34 +467,15 @@ async def syra_stt(
     used_provider = ""
     primary_error: str | None = None
 
-    if _deepgram.ENABLED:
-        try:
-            transcript = await _deepgram.transcribe(audio_bytes, language_code=language)
-            used_provider = "deepgram_nova3"
-        except RuntimeError as exc:
-            primary_error = str(exc)
-            logger.warning("[syra-stt] deepgram failed, will try fallback: %s", exc)
-
-    # Fallback path: empty transcript or Deepgram errored out. Many
-    # short admin commands ("acknowledge alerts", "show signups
-    # today") are missed by Deepgram on accented English — AssemblyAI
-    # universal-2 is more forgiving, just slower.
-    if (not (transcript or "").strip()) and _assemblyai.ENABLED:
-        try:
-            fb = await _assemblyai.transcribe(audio_bytes, language_code=language)
-            if (fb or "").strip():
-                transcript = fb
-                used_provider = "assemblyai"
-        except RuntimeError as exc:
-            logger.error("[syra-stt] assemblyai fallback failed: %s", exc)
-            if primary_error is None:
-                primary_error = str(exc)
+    try:
+        transcript = await _deepgram.transcribe(audio_bytes, language_code=language)
+        used_provider = "deepgram_nova3"
+    except RuntimeError as exc:
+        primary_error = str(exc)
+        logger.warning("[syra-stt] deepgram failed: %s", exc)
 
     if not (transcript or "").strip():
-        # Both providers ran but nothing came back — surface a clear
-        # error rather than a silent empty so the orb shows
-        # "Didn't catch that" instead of executing a phantom command.
-        if primary_error and not _assemblyai.ENABLED:
+        if primary_error:
             raise HTTPException(status_code=502, detail=primary_error)
         raise HTTPException(
             status_code=422,
@@ -518,25 +499,29 @@ class _SyraTtsRequest(BaseModel):
 @router.post(
     "/admin/syra/tts",
     response_class=Response,
-    summary="Syra TTS (Deepgram Aura-2, admin-gated)",
+    summary="Syra TTS (ElevenLabs eleven_multilingual_v2, admin-gated)",
 )
 async def syra_tts(req: _SyraTtsRequest, admin: dict = Depends(get_admin_user)):
-    if not _deepgram.ENABLED:
+    # Task #552 §G — Deepgram Aura-2 TTS branch retired; ElevenLabs is
+    # the SOLE English TTS for the admin Syra orb (canonical specialist).
+    from providers import elevenlabs as _eleven
+    if not _eleven.ENABLED:
         raise HTTPException(
             status_code=503,
-            detail="No TTS provider configured (Deepgram off).",
+            detail="No TTS provider configured (ElevenLabs off).",
         )
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Empty text.")
 
     try:
-        audio_bytes = await _deepgram.synthesize(
-            text, voice=req.voice, language=req.language,
+        audio_bytes = await _eleven.synthesize(
+            text, voice_id=req.voice or None,
+            language_code=(req.language or "en")[:2] if req.language else None,
         )
-        used = "deepgram_aura2"
-    except RuntimeError as exc:
-        logger.error("[syra-tts] deepgram failed: %s", exc)
+        used = "elevenlabs_multilingual_v2"
+    except (RuntimeError, Exception) as exc:
+        logger.error("[syra-tts] elevenlabs failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc))
 
     if not audio_bytes:

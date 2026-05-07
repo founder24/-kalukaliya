@@ -77,8 +77,17 @@ FRONTEND = ROOT / "artifacts" / "syrabit"
 # ──────────────────────────────────────────────────────────────────────
 BANNED_LITERAL = re.compile(
     r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5|"
-    r"azure_openai|AzureOpenAI|gpt-4\.1-nano)\b|"
-    r"\bAZURE_OPENAI_[A-Z0-9_]+\b",
+    r"azure_openai|AzureOpenAI|gpt-4\.1-nano|"
+    # Task #552 §G — AssemblyAI fully retired (provider module deleted)
+    # AND Deepgram Aura-2 TTS branch retired (Deepgram is now STT-only).
+    r"assemblyai|AssemblyAI|ASSEMBLYAI_API_KEY|ASSEMBLYAI_STT_MODEL|"
+    r"_tts_deepgram|deepgram_aura2)\b|"
+    r"\bAZURE_OPENAI_[A-Z0-9_]+\b|"
+    # Task #552 §G — bare-token bans for the Deepgram Aura-2 surface
+    # (the @cf/deepgram/aura-2-* Workers-AI model IDs are allowlisted via
+    # providers/cloudflare_ai.py — they are CF-hosted Aura, NOT the
+    # Deepgram-vendor Aura branch we just retired).
+    r"deepgram\.synthesize\(|aura-2-en-us|aura-2-hi-in",
     re.IGNORECASE,
 )
 BANNED_VENDOR_USES = re.compile(
@@ -259,7 +268,7 @@ def _scan_file(p: Path) -> list[str]:
         )
         is_removal_note = (
             "Task #347" in line or "Task #491" in line or "Task #554" in line
-            or "Task #556" in line or "Task #559" in line
+            or "Task #556" in line or "Task #559" in line or "Task #552" in line
             or "removed" in line.lower() or "deprecated" in line.lower()
             or "retired" in line.lower() or "decommission" in line.lower()
             or "REMOVED" in line or "retired" in line.lower()

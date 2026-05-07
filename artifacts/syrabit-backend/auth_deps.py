@@ -317,7 +317,8 @@ async def require_paid_plan(user: dict = Depends(get_current_user)) -> dict:
 
     Free-plan users hit a hard 402 PAYMENT REQUIRED. Voice synthesis +
     transcription dominate the per-DAU cost envelope ($100/mo budget at
-    10k DAU only works when ElevenLabs / Deepgram / AssemblyAI minutes
+    # Task #552 §G — AssemblyAI minutes line retired alongside the provider.
+    10k DAU only works when ElevenLabs / Deepgram minutes
     are reserved for paying users). Admins and staff bypass this gate
     so internal CMS / QA flows keep working.
     """

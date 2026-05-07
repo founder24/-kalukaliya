@@ -117,7 +117,7 @@ def _RAILWAY_AUDIT_BLOCK_REMOVED_PLACEHOLDER():
     # sends a placeholder; the gateway appends the real key at the edge.
     # Safe to delete from Railway as soon as you've added the key to CF BYOK.
     # Locked provider chain (Task #297): Vertex (google-ai-studio slug),
-    # Azure OpenAI, Sarvam, Cohere, ElevenLabs, Deepgram, AssemblyAI,
+    # Azure OpenAI, Sarvam, Cohere, ElevenLabs, Deepgram, (Task #552 §G — AssemblyAI removed),
     # Voyage, Pinecone, Workers AI / Workers AI · IndicTrans2. xAI/OpenAI kept
     # as optional rare-feature endpoints. Providers removed from the active
     # routing chain are documented in scripts/check_dead_providers.py.

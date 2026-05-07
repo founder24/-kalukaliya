@@ -101,7 +101,7 @@ def test_task_347_every_priority_alias_has_default_model_and_canonical():
     referenced: set[str] = set()
     for pool in PROVIDER_PRIORITY.values():
         referenced.update(pool)
-    # Some providers (assemblyai, deepgram, elevenlabs, mongodb_atlas etc.)
+    # Some providers (deepgram, elevenlabs, mongodb_atlas etc.)  # Task #552 §G — assemblyai removed
     # have their own dispatch surfaces and don't go through the chat
     # dispatch path — only LLM-style providers must have model + canonical.
     chat_like = {

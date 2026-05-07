@@ -23,7 +23,7 @@ GET /admin/credits/smoke-test
   provider-specific minimal real request through the chosen provider's CF
   AI Gateway slug. Each probe exercises BYOK auth and upstream reachability:
 
-    assemblyai  GET  /v2/transcript (list)                (BYOK: Authorization: "")
+    # Task #552 §G — assemblyai probe retired (provider decommissioned).
     elevenlabs  GET  /v1/models (model list)              (BYOK: xi-api-key: "")
     sarvam      POST /v1/chat/completions  max_tokens=1   (BYOK: api-subscription-key: "")
     bedrock     POST /model/amazon.nova-lite-v1:0/converse max_tokens=1  (CF SigV4 BYOK)
@@ -61,7 +61,7 @@ _CREDIT_REFERENCE: dict[str, int] = {
     # credit pool tracked separately via the azure-native runbook.
     "sarvam":         500,
     "elevenlabs":     500,
-    "assemblyai":    1000,
+    # Task #552 §G — assemblyai entry retired (provider decommissioned).
     "pinecone_ai":    500,
     "exa_ai":        1000,
     "tavily":         500,
@@ -78,7 +78,7 @@ _PROGRAMME_NAMES: dict[str, str] = {
     "bedrock":       "AWS Activate",
     "sarvam":        "Sarvam Startup Credits",
     "elevenlabs":    "ElevenLabs Startup Credits",
-    "assemblyai":    "AssemblyAI Startup Credits",
+    # Task #552 §G — AssemblyAI programme entry retired.
     "pinecone_ai":   "Pinecone Startup Credits",
     "exa_ai":        "Exa Startup Credits",
     "tavily":        "Tavily Startup Credits",
@@ -106,18 +106,7 @@ _CREDITS_LOW_THRESHOLD = 0.20   # < 20% of original = "credits_low"
 # mongodb_atlas) are not listed here — they are marked "skip" in the probe loop.
 _PROVIDER_PROBE_SPECS: dict[str, dict] = {
     # Task #491 — Cohere probe spec removed alongside provider retirement.
-    # AssemblyAI STT — GET /v2/transcript.
-    # Lists recent transcript jobs (may be empty list); validates API key, no cost.
-    "assemblyai": {
-        "method": "GET",
-        "path": "/v2/transcript",
-        "body": None,
-        "extra_headers": {
-            # BYOK: empty Authorization → CF substitutes ASSEMBLYAI_API_KEY
-            "Authorization": "",
-        },
-        "description": "transcript list → validates BYOK assemblyai key",
-    },
+    # Task #552 §G — AssemblyAI probe spec retired (provider decommissioned).
     # ElevenLabs TTS — GET /v1/models.
     # Lists available voice models; lightweight, no TTS cost.
     # ElevenLabs uses xi-api-key header; empty value triggers BYOK substitution.
@@ -620,8 +609,8 @@ async def admin_credits_provider_weights(
         "select_provider() to confirm weighted selection works, then makes a "
         "provider-specific minimal real request through the chosen provider's "
         "CF AI Gateway slug to exercise BYOK auth and upstream reachability. "
-        "Probes: assemblyai GET "
-        "/v2/transcript, elevenlabs GET /v1/models, sarvam POST /v1/chat/completions, "
+        "Probes: elevenlabs GET /v1/models, sarvam POST /v1/chat/completions, "
+        # Task #552 §G — assemblyai probe retired (provider decommissioned).
         # Task #554 — azure_openai probe retired alongside the provider.
         "bedrock POST /model/amazon.nova-lite-v1:0/converse. "
         "Providers without a CF slug (vertex, workers_ai, etc.) are marked 'skip'. "

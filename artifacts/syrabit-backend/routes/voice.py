@@ -7,25 +7,33 @@ POST /api/voice/tts
     Falls back to PROVIDER_PRIORITY weighted round-robin on failure.
   - English/other: PROVIDER_PRIORITY weighted round-robin with
     fallback-without-replacement.
-    Weighted pool: ElevenLabs(primary) → Deepgram → Workers AI.
+    Weighted pool (post-Task-#552 §G): ElevenLabs(primary) → Workers AI.
   Returns audio/mpeg bytes (mp3).
 
 POST /api/voice/stt
-  Speech-to-text via PROVIDER_PRIORITY weighted round-robin with fallback-without-
-  replacement. Weighted pool (post-Task-#490): Deepgram(primary) → AssemblyAI → Workers AI.
-  (Vertex was removed from voice pools — it is now `content_format` only.)
+  Speech-to-text. For Indic languages (hi, bn, as) routes through Google
+  Cloud Speech-to-Text Chirp_2 first; on failure (or for English/other)
+  falls back to the PROVIDER_PRIORITY weighted round-robin.
+  Weighted pool (post-Task-#552 §G): Deepgram Nova-3(primary) → Workers AI.
   Accepts multipart/form-data with an 'audio' file field.
 
 POST /api/voice/voice
   Two-leg independent-selection pipeline:
-    Leg 1 (STT) — select_provider("stt") with per-leg fallback-without-replacement
-    Leg 2 (TTS) — Google Neural2 for Indic; select_provider("tts") round-robin for others
+    Leg 1 (STT) — Google Chirp_2 for Indic; select_provider("stt") for others
+    Leg 2 (TTS) — Google Neural2 for Indic; select_provider("tts") for others
   LLM reply generated between the two legs.
   Returns { transcript, reply_text, audio_b64 }.
 
 GET  /api/voice/health
-  Reports readiness of all voice providers (Deepgram, ElevenLabs, AssemblyAI,
+  Reports readiness of all voice providers (Deepgram STT, ElevenLabs,
   Workers AI, Google TTS/STT).
+
+Task #552 §G — the third-party transcription vendor previously listed
+as the STT fallback is fully retired (provider module deleted) and the
+Deepgram Aura-2 TTS branch is removed (Deepgram remains STT-only). The
+canonical specialist map is: ElevenLabs sole English TTS; Google Neural2
+sole Indic TTS; Deepgram Nova-3 sole English STT; Google Chirp_2 sole
+Indic STT. Workers AI is the absolute last-resort tail in both pools.
 """
 from __future__ import annotations
 
@@ -83,14 +91,6 @@ async def _tts_elevenlabs(text: str, voice_id: Optional[str], language: str) -> 
         voice_id=voice_id or None,
         language_code=language[:2] if language else None,
     )
-
-
-async def _tts_deepgram(text: str, voice_id: Optional[str], language: str) -> bytes:
-    """TTS via Deepgram Aura-2. Raises RuntimeError on failure."""
-    from providers import deepgram as _dg
-    if not _dg.ENABLED:
-        raise RuntimeError("Deepgram TTS not available (DEEPGRAM_API_KEY not set)")
-    return await _dg.synthesize(text, voice=voice_id or None, language=language)
 
 
 async def _tts_workers_ai(text: str, language: str) -> bytes:
@@ -199,14 +199,6 @@ async def _stt_deepgram(audio_bytes: bytes, language: str) -> str:
     return await _dg.transcribe(audio_bytes, language_code=language or None)
 
 
-async def _stt_assemblyai(audio_bytes: bytes, language: str) -> str:
-    """STT via AssemblyAI 'best' model. Raises RuntimeError on failure."""
-    from providers import assemblyai
-    if not assemblyai.ENABLED:
-        raise RuntimeError("AssemblyAI STT not available (ASSEMBLYAI_API_KEY not set)")
-    return await assemblyai.transcribe(audio_bytes, language_code=language or None)
-
-
 async def _stt_workers_ai(audio_bytes: bytes) -> str:
     """Last-resort STT via Workers AI Whisper-large-v3-turbo. Raises RuntimeError on failure."""
     from providers.cloudflare_ai import transcribe as _cf_transcribe
@@ -223,13 +215,12 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"]: elevenlabs(primary) → deepgram → workers_ai.
-    (Task #490: vertex was removed from the TTS pool entirely — it is now
-    `content_format` only. The unreachable `vertex` dispatch branch below
-    is retained as a defensive guard so a future re-introduction without
-    a wired Cloud TTS client raises immediately rather than silently
-    selecting a missing backend.)
-    elevenlabs, deepgram, and workers_ai are the actively synthesizing providers.
+    PROVIDER_PRIORITY["tts"] (post-Task-#552 §G): elevenlabs(primary) → workers_ai.
+    Deepgram Aura-2 TTS branch was retired by Task #552 §G — Deepgram is
+    now STT-only on the voice path. The unreachable `vertex` dispatch
+    branch below is retained as a defensive guard so a future
+    re-introduction without a wired Cloud TTS client raises immediately
+    rather than silently selecting a missing backend.
     """
     from llm import select_provider
 
@@ -241,8 +232,6 @@ async def _synthesize_with_fallback(
         try:
             if provider == "elevenlabs":
                 return await _tts_elevenlabs(text, voice_id, language)
-            elif provider == "deepgram":
-                return await _tts_deepgram(text, voice_id, language)
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
             elif provider == "vertex":
@@ -298,26 +287,25 @@ async def _synthesize_with_fallback(
 async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
     """STT: weighted fallback-without-replacement via select_provider("stt").
 
-    PROVIDER_PRIORITY["stt"]: deepgram(primary) → assemblyai → workers_ai.
-    (Task #490: vertex was removed from the STT pool entirely — it is now
-    `content_format` only. The unreachable `vertex` dispatch branch below
-    is retained as a defensive guard so a future re-introduction without
-    a wired Cloud STT client raises immediately rather than silently
-    selecting a missing backend.)
-    deepgram, assemblyai, and workers_ai are the actively transcribing providers.
+    PROVIDER_PRIORITY["stt"] (post-Task-#552 §G): deepgram(primary) → workers_ai.
+    The legacy third-party STT fallback was retired by Task #552 §G
+    (provider module deleted); Deepgram Nova-3 is the SOLE English STT
+    primary, with Workers AI Whisper
+    as the absolute last-resort tail. The unreachable `vertex` dispatch
+    branch below is retained as a defensive guard so a future
+    re-introduction without a wired Cloud STT client raises immediately
+    rather than silently selecting a missing backend.
     """
     from llm import select_provider
 
     exclude: frozenset = frozenset()
-    max_attempts = 7  # covers all providers in stt priority list
+    max_attempts = 6  # covers all providers in stt priority list
 
     for _ in range(max_attempts):
         provider = select_provider("stt", lang=language, exclude=exclude)
         try:
             if provider == "deepgram":
                 return await _stt_deepgram(audio_bytes, language)
-            elif provider == "assemblyai":
-                return await _stt_assemblyai(audio_bytes, language)
             elif provider == "workers_ai":
                 return await _stt_workers_ai(audio_bytes)
             elif provider == "vertex":
@@ -336,7 +324,7 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
             exclude = exclude | {provider}
 
     # Task #337: AWS Transcribe slots in as the third-tier STT fallback
-    # (after Deepgram + AssemblyAI). It runs *before* the workers_ai
+    # (after Deepgram). It runs *before* the workers_ai
     # last-resort so the runbook ordering is honoured. Async job +
     # short poll because Transcribe is not a streaming socket here;
     # the extra ~2s round-trip is acceptable in the fallback path.
@@ -362,12 +350,12 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 @router.post(
     "/voice/tts",
     response_class=Response,
-    summary="Text-to-speech (Indic: Google Neural2; English: ElevenLabs → Deepgram → Workers AI)",
+    summary="Text-to-speech (Indic: Google Neural2; English: ElevenLabs → Workers AI)",
     description=(
         "Convert text to speech. For Indic languages (hi, bn, as) uses "
         "Google Cloud TTS Neural2 before falling back to the "
         "PROVIDER_PRIORITY weighted round-robin with fallback-without-replacement. "
-        "Weighted pool: ElevenLabs(primary) → Deepgram → Workers AI(last-resort). "
+        "Weighted pool (post-Task-#552 §G): ElevenLabs(primary) → Workers AI(last-resort). "
         "Returns mp3 audio bytes."
     ),
 )
@@ -452,11 +440,13 @@ async def text_to_speech(
 
 @router.post(
     "/voice/stt",
-    summary="Speech-to-text (weighted round-robin: AssemblyAI → Workers AI Whisper)",
+    summary="Speech-to-text (Indic: Google Chirp_2; English: Deepgram Nova-3 → Workers AI Whisper)",
     description=(
-        "Transcribe audio using the PROVIDER_PRIORITY weighted round-robin "
-        "with fallback-without-replacement. "
-        "Weighted pool: AssemblyAI(1000) → Workers AI Whisper(last-resort). "
+        "Transcribe audio. For Indic languages (hi, bn, as) routes through "
+        "Google Cloud Speech-to-Text Chirp_2 first; on failure (or for "
+        "English/other) falls back to the PROVIDER_PRIORITY weighted "
+        "round-robin with fallback-without-replacement. "
+        "Weighted pool (post-Task-#552 §G): Deepgram Nova-3(primary) → Workers AI Whisper(last-resort). "
         "Accepts multipart/form-data with an 'audio' file field."
     ),
 )
@@ -471,7 +461,7 @@ async def speech_to_text(
     if len(audio_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB).")
 
-    transcript = await _transcribe_with_fallback(audio_bytes, language)
+    transcript = await _transcribe_with_indic_first(audio_bytes, language)
     return {
         "transcript": transcript,
         "language": language,
@@ -479,16 +469,51 @@ async def speech_to_text(
     }
 
 
+_GOOGLE_STT_LANGS = frozenset({"hi", "bn", "as", "hi-in", "bn-in", "as-in"})
+
+_GOOGLE_STT_LANG_MAP = {
+    "hi": "hi-IN", "bn": "bn-IN", "as": "as-IN",
+    "hi-in": "hi-IN", "bn-in": "bn-IN", "as-in": "as-IN",
+}
+
+
+async def _transcribe_with_indic_first(audio_bytes: bytes, language: str) -> str:
+    """STT dispatch: Indic via Google Chirp_2 (canonical Task #552 §G);
+    English/other via the weighted Deepgram → Workers AI chain.
+    """
+    lang_key = (language or "en").lower().strip()
+    if lang_key in _GOOGLE_STT_LANGS:
+        from providers import google_stt as _gstt
+        if _gstt.is_configured():
+            try:
+                lang_code = _GOOGLE_STT_LANG_MAP.get(lang_key, "hi-IN")
+                transcript = await _gstt.transcribe_indic(
+                    audio_bytes,
+                    language_code=lang_code,
+                    audio_encoding="MP3",
+                )
+                if transcript:
+                    return transcript
+            except Exception as exc:
+                logger.warning(
+                    "[voice-stt] Google Chirp_2 failed for %s: %s — falling back to round-robin",
+                    lang_key, exc,
+                )
+    return await _transcribe_with_fallback(audio_bytes, language)
+
+
 @router.post(
     "/voice/voice",
     summary="Two-leg voice pipeline (STT leg + LLM + TTS leg)",
     description=(
-        "Full voice pipeline with independent per-leg weighted provider selection:\n\n"
-        "**Leg 1 — STT** (select_provider('stt') with fallback-without-replacement):\n"
-        "  AssemblyAI(1000) → Workers AI Whisper(last-resort)\n\n"
+        "Full voice pipeline with independent per-leg provider selection:\n\n"
+        "**Leg 1 — STT** (Indic: Google Chirp_2; English/other: weighted round-robin):\n"
+        "  Indic: Google Chirp_2 → Deepgram Nova-3 → Workers AI Whisper(last-resort)\n"
+        "  English/other: Deepgram Nova-3(primary) → Workers AI Whisper(last-resort)\n\n"
         "**LLM** — generate reply via call_llm_api_chat\n\n"
-        "**Leg 2 — TTS** (Google Neural2 for Indic; select_provider('tts') round-robin for others):\n"
-        "  Indic: Google Neural2 → ElevenLabs → Deepgram → Workers AI(last-resort)\n\n"
+        "**Leg 2 — TTS** (Google Neural2 for Indic; weighted round-robin for others):\n"
+        "  Indic: Google Neural2 → ElevenLabs → Workers AI(last-resort)\n"
+        "  English/other: ElevenLabs(primary) → Workers AI(last-resort)\n\n"
         "Returns { transcript, reply_text, audio_b64, language }."
     ),
 )
@@ -514,15 +539,15 @@ async def voice_pipeline(
     # so it is ready the moment the LLM reply is available, minimising latency.
     # The LLM step between the two legs is serial (requires the STT transcript).
     #
-    # Dispatch pools:
-    #   STT leg: assemblyai(1000) → bedrock(1k,skip) → azure_speech(1,skip) → workers_ai(0)
-    #   TTS leg: google_neural2(Indic first) → elevenlabs → deepgram → workers_ai(0)
+    # Dispatch pools (post-Task-#552 §G):
+    #   STT leg: google_chirp2(Indic) → deepgram(primary) → workers_ai(0)
+    #   TTS leg: google_neural2(Indic) → elevenlabs(primary) → workers_ai(0)
     #   (Task #490: vertex removed from both STT and TTS legs — content_format only.)
 
     from llm import select_provider as _sp
 
     async def _stt_leg() -> str:
-        return await _transcribe_with_fallback(audio_bytes, language)
+        return await _transcribe_with_indic_first(audio_bytes, language)
 
     async def _tts_provider_preselect() -> Optional[str]:
         """Pre-select TTS provider from weighted pool while STT leg runs."""
@@ -586,25 +611,19 @@ async def voice_pipeline(
 @router.get(
     "/voice/health",
     summary="Voice provider health check",
-    description="Reports readiness of ElevenLabs, Deepgram, AssemblyAI, Workers AI, and Google TTS/STT providers.",
+    description="Reports readiness of ElevenLabs, Deepgram (STT-only), Workers AI, and Google TTS/STT providers.",
 )
 async def voice_health():
-    from providers import assemblyai, elevenlabs
+    from providers import elevenlabs
 
-    assemblyai_task = asyncio.create_task(assemblyai.health_check())
-    elevenlabs_task = asyncio.create_task(elevenlabs.health_check())
-
-    assemblyai_health, elevenlabs_health = await asyncio.gather(
-        assemblyai_task, elevenlabs_task, return_exceptions=True
-    )
-    if isinstance(assemblyai_health, Exception):
-        assemblyai_health = {"ok": False, "reason": str(assemblyai_health)}
-    if isinstance(elevenlabs_health, Exception):
-        elevenlabs_health = {"ok": False, "reason": str(elevenlabs_health)}
+    try:
+        elevenlabs_health = await elevenlabs.health_check()
+    except Exception as exc:
+        elevenlabs_health = {"ok": False, "reason": str(exc)}
 
     try:
         from providers import deepgram as _dg
-        deepgram_health = {"ok": _dg.ENABLED, "model": "nova-3"}
+        deepgram_health = {"ok": _dg.ENABLED, "model": "nova-3", "role": "stt-only"}
     except Exception:
         deepgram_health = {"ok": False, "reason": "deepgram module unavailable"}
 
@@ -623,7 +642,6 @@ async def voice_health():
     return {
         "elevenlabs": elevenlabs_health,
         "deepgram":   deepgram_health,
-        "assemblyai": assemblyai_health,
         "workers_ai": {"ok": workers_ai_ok, "model": "@cf/openai/whisper-large-v3-turbo"},
         "google":     google_health,
     }

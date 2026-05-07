@@ -1770,7 +1770,7 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 
 # ── PROVIDER_PRIORITY weighted round-robin dispatch (Task #250) ───────────────
 # Maps provider names (as used in PROVIDER_PRIORITY) to their default LLM
-# model identifiers.  For non-LLM providers (assemblyai,
+# model identifiers.  For non-LLM providers (Task #552 §G assemblyai retired,
 # pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
@@ -1786,9 +1786,9 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     # provider client picks the actual REST route.
     "azure_translator": "azure-translator-rest",
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
-    "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
-    "assemblyai":       "best",                                      # AssemblyAI STT
-    "deepgram":         "nova-3",                                    # Deepgram STT + Aura-2 TTS — primary STT
+    "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — sole English TTS (Task #552 §G)
+    # Task #552 §G — assemblyai entry retired (provider module deleted).
+    "deepgram":         "nova-3",                                    # Deepgram STT — sole English STT primary (Aura-2 TTS branch retired by Task #552 §G)
     "pinecone_ai":      "llama-text-embed-v2",                       # Pinecone embed/rerank — primary rerank
     "exa_ai":           "exa",                                       # Exa neural search
     "tavily":           "tavily-search",                             # Tavily search
@@ -1816,7 +1816,7 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     "azure_translator": "azure_translator",   # Task #554 — translate fallback only
     "sarvam":           "sarvam",
     "elevenlabs":       "elevenlabs",
-    "assemblyai":       "assemblyai",
+    # Task #552 §G — assemblyai canonical entry retired.
     "deepgram":         "deepgram",
     "pinecone_ai":      "pinecone_ai",
     "exa_ai":           "exa_ai",

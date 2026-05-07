@@ -20,7 +20,7 @@ from config import (
     POOL_WEIGHTS,
     MONGO_URL,
     _DEEPGRAM_KEY,
-    _ASSEMBLYAI_KEY,
+    # Task #552 §G — _ASSEMBLYAI_KEY removed (provider decommissioned).
     _ELEVENLABS_KEY,
     _SARVAM_LLM_KEY,
     _XAI_KEY,
@@ -76,8 +76,7 @@ def _key_status_for(name: str) -> dict[str, Any]:
         return {"configured": _present(_DEEPGRAM_KEY), "source": "DEEPGRAM_API_KEY"}
     if name == "elevenlabs":
         return {"configured": _present(_ELEVENLABS_KEY), "source": "ELEVENLABS_API_KEY"}
-    if name == "assemblyai":
-        return {"configured": _present(_ASSEMBLYAI_KEY), "source": "ASSEMBLYAI_API_KEY"}
+    # Task #552 §G — assemblyai branch removed (provider decommissioned).
     if name == "pinecone_ai":
         return {"configured": bool(os.environ.get("PINECONE_API_KEY")), "source": "PINECONE_API_KEY"}
     if name == "mongodb_atlas":

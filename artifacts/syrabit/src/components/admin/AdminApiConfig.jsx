@@ -15,7 +15,7 @@ const adminHeaders = (token) => {
 const SERVICES = [
   { id: 'routing', icon: Layers,     label: 'Routing & Pools',  accent: 'violet', desc: 'Live snapshot of PROVIDER_PRIORITY × POOL_WEIGHTS — locked provider chain' },
   { id: 'chat_model', icon: Cpu,     label: 'Chat Model',       accent: 'violet', desc: 'Active LLM provider for the user-facing chat (Vertex Gemini Flash / Workers AI)' },
-  { id: 'deepgram',icon: Mic,        label: 'Deepgram',         accent: 'emerald',desc: 'STT primary (nova-3) + TTS fallback (aura-2). Speech pipeline backbone.' },
+  { id: 'deepgram',icon: Mic,        label: 'Deepgram',         accent: 'emerald',desc: 'STT primary (nova-3). Speech pipeline backbone (Task #552 §G — TTS branch retired; ElevenLabs is sole English TTS).' },
   { id: 'workers_ai_indic', icon: Languages, label: 'Workers AI · IndicTrans2', accent: 'orange', desc: 'Cloudflare Workers AI dedicated Indic neural MT — primary for translate + assamese_content pools.' },
   { id: 'mongodb_atlas', icon: Database, label: 'MongoDB Atlas',accent: 'emerald',desc: 'Atlas $vectorSearch — weight-0 fallback in vector_search pool (free tier).' },
   { id: 'emergent',icon: Zap,        label: 'Emergent AI',      accent: 'amber',  desc: 'Universal LLM key — admin AI generation' },
@@ -214,13 +214,13 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
             {active === 'deepgram' && (
               <div className="space-y-2 text-xs text-gray-600">
                 <p>
-                  <strong>Deepgram</strong> is the primary STT provider (model <code className="font-mono">nova-3</code>)
-                  and the TTS fallback (Aura-2 voices: <code className="font-mono">aura-2-en-us</code>,
-                  <code className="font-mono">aura-2-hi-in</code>). Wired via CF AI Gateway BYOK; the
-                  <code className="font-mono">DEEPGRAM_API_KEY</code> env var is only required when running
-                  outside the gateway.
+                  <strong>Deepgram</strong> is the sole English STT primary (model <code className="font-mono">nova-3</code>).
+                  Task #552 §G retired the legacy Deepgram TTS branch — ElevenLabs is now the sole
+                  English TTS specialist; Google Cloud TTS Neural2 is the sole Indic TTS specialist.
+                  Wired via CF AI Gateway BYOK; the <code className="font-mono">DEEPGRAM_API_KEY</code>
+                  env var is only required when running outside the gateway.
                 </p>
-                <p>Pools touched: <code className="font-mono">stt</code>, <code className="font-mono">tts</code>, <code className="font-mono">voice</code>.</p>
+                <p>Pools touched: <code className="font-mono">stt</code>, <code className="font-mono">voice</code>.</p>
               </div>
             )}
             {active === 'workers_ai_indic' && (

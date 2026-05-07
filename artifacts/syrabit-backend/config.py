@@ -24,7 +24,6 @@ __all__ = [
     "SARVAM_API_KEY", "SARVAM_BASE_URL", "SARVAM_THINK_BUFFER",
     "SECURE_COOKIES", "SEED_DATA", "SLOW_QUERY_THRESHOLD_MS",
     "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_URL",
-    "_ASSEMBLYAI_KEY", "ASSEMBLYAI_STT_MODEL",
     "_AWS_ACCESS_KEY", "_AWS_REGION", "_AWS_SECRET_KEY",
     "_CF_PROVIDER_SLUGS", "_CORS_ALLOW_CREDENTIALS",
     "_DEEPGRAM_KEY",
@@ -367,9 +366,9 @@ _CF_PROVIDER_SLUGS = {
     "sarvam":      "custom-sarvam",
     # New providers routed through CF AI Gateway
     # Task #491 — legacy embed-provider slugs removed.
-    "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
-    "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
-    "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
+    # Task #552 §G — AssemblyAI fully retired (provider module deleted).
+    "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech (sole English TTS, Task #552 §G)
+    "deepgram":    "deepgram/v1",    # STT-only — Nova-3 (Aura-2 TTS branch retired by Task #552 §G)
     # Task #554 — Azure OpenAI fully removed; English chat is vertex →
     # workers_ai_llama32_3b only. Vertex calls go direct (not via CF AIG).
 }
@@ -504,13 +503,13 @@ _SARVAM_LLM_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 _SARVAM_LLM_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
 _SARVAM_LLM_KEY_3 = os.environ.get('SARVAM_API_KEY_3', '').strip()
 
-# ── New AI provider keys (Deepgram, AssemblyAI, ElevenLabs) ─────────────────
+# ── New AI provider keys (Deepgram, ElevenLabs) ─────────────────────────────
 # All route through CF AI Gateway (BYOK) so local keys are optional once the
 # keys are registered in the CF dashboard. When gateway is enabled and the
 # local env var is missing, BYOK_PLACEHOLDER is substituted so the provider
 # module activates and CF injects the real key on every request.
 # Task #491 — legacy embed-provider keys removed.
-_ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
+# Task #552 §G — AssemblyAI key retired (provider module deleted).
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
 _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
 # Search providers (Task #275): Exa neural search + Tavily live web search.
@@ -520,9 +519,6 @@ _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
 # works under CF AI Gateway.
 _EXA_KEY          = os.environ.get('EXA_API_KEY',          '').strip()
 _TAVILY_KEY       = os.environ.get('TAVILY_API_KEY',       '').strip()
-
-# AssemblyAI STT config
-ASSEMBLYAI_STT_MODEL = os.environ.get('ASSEMBLYAI_STT_MODEL', 'best').strip() or 'best'
 
 # ElevenLabs TTS config
 ELEVENLABS_VOICE_ID = os.environ.get('ELEVENLABS_VOICE_ID', '').strip()
@@ -595,7 +591,6 @@ if CF_GATEWAY_ENABLED:
     # Provider keys — BYOK allows CF gateway to inject keys stored in the
     # CF dashboard, so the local env var is optional in production.
     # Task #491 — legacy embed-provider key substitutions removed.
-    _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
     _DEEPGRAM_KEY    = _DEEPGRAM_KEY    or BYOK_PLACEHOLDER
     _EXA_KEY         = _EXA_KEY         or BYOK_PLACEHOLDER
@@ -1129,7 +1124,7 @@ PLAN_PRICES = {
 #   vertex        Google Cloud for Startups          $2,000
 #   sarvam        Sarvam startup credits             $500
 #   elevenlabs    ElevenLabs startup credits         $500
-#   assemblyai    AssemblyAI startup credits         $1,000
+#   # Task #552 §G — AssemblyAI startup credit row retired (provider decommissioned).
 #   pinecone_ai   Pinecone startup credits           $500
 #   exa_ai        Exa startup credits                $1,000
 #   tavily        Tavily startup credits             $500
@@ -1176,11 +1171,14 @@ PROVIDER_PRIORITY: dict = {
     # the SOLE allowed fallback (V4 §15 §6). No third-party formatter is
     # added. Vertex remains the only direct GCP surface in syrabit-backend.
     "content_format":    ["vertex", "workers_ai_llama33_70b"],
-    # Text-to-speech: ElevenLabs (primary) → Deepgram → Workers AI.
-    # Vertex removed (Task #490 — Vertex is content_format only).
-    "tts":               ["elevenlabs", "deepgram", "workers_ai"],
-    # Speech-to-text: Deepgram (primary) → AssemblyAI → Workers AI.
-    "stt":               ["deepgram", "assemblyai", "workers_ai"],
+    # Text-to-speech (post-Task-#552 §G): ElevenLabs (sole primary) → Workers AI.
+    # Deepgram Aura-2 TTS branch retired; Vertex removed (Task #490).
+    "tts":               ["elevenlabs", "workers_ai"],
+    # Speech-to-text (post-Task-#552 §G): Deepgram Nova-3 (sole primary) → Workers AI.
+    # AssemblyAI fully retired (provider module deleted). Indic STT routes
+    # through Google Chirp_2 directly in routes/voice.py before this pool
+    # is consulted (V4 §12 — no silent downgrade for Indic).
+    "stt":               ["deepgram", "workers_ai"],
     # Combined voice pipeline: Deepgram → ElevenLabs → Workers AI.
     "voice":             ["deepgram", "elevenlabs", "workers_ai"],
     # Embeddings: Workers AI (@cf/baai/bge-m3, 1024-dim) only.
@@ -1238,9 +1236,9 @@ PROVIDER_CREDITS: dict = {
     # azure_openai entry removed in Task #554 (Azure OpenAI tenant decommissioned).
     "azure_translator":    0,   # Azure Translator (separate Azure resource) — paid fallback for `translate`
     "sarvam":            500,   # Sarvam startup credits — $500
-    "elevenlabs":        500,   # ElevenLabs startup credits — $500
-    "assemblyai":       1000,   # AssemblyAI startup credits — $1k
-    "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback
+    "elevenlabs":        500,   # ElevenLabs startup credits — $500; sole English TTS (Task #552 §G)
+    # assemblyai entry retired in Task #552 §G (provider decommissioned).
+    "deepgram":          500,   # Deepgram startup credits — $500; sole English STT primary (Task #552 §G — Aura-2 TTS branch removed)
     "workers_ai_custom":   0,   # Cloudflare custom embed worker — Task #382 primary embed (free tier)
     "pinecone_ai":       500,   # Pinecone startup credits — $500; primary rerank
     "exa_ai":           1000,   # Exa startup credits — $1k
@@ -1362,13 +1360,15 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "embed_en":    {"workers_ai_custom": 10000, "workers_ai": 0},
     "embed_indic": {"workers_ai_custom": 10000, "workers_ai": 0},
     "tts": {
-        "elevenlabs": 1000,   # equal weight — eleven_multilingual_v2
-        "deepgram":   1000,   # equal weight — Aura-2
+        # Task #552 §G — ElevenLabs is sole English TTS primary;
+        # Deepgram Aura-2 branch retired.
+        "elevenlabs": 1000,
         "workers_ai":   0,   # last-resort
     },
     "stt": {
-        "deepgram":   1000,   # equal weight — Deepgram Nova-3
-        "assemblyai": 1000,   # equal weight — AssemblyAI best
+        # Task #552 §G — Deepgram Nova-3 is sole English STT primary;
+        # AssemblyAI fully retired (provider module deleted).
+        "deepgram":   1000,
         "workers_ai":   0,   # last-resort
     },
     # vector_search: Pinecone primary; Atlas weight-0 disaster fallback.
