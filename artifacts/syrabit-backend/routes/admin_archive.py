@@ -51,12 +51,21 @@ def _resolve_allowed_buckets() -> set:
     if raw:
         _allowed_buckets = {b.strip() for b in raw.split(",") if b.strip()}
     else:
-        # Defaults match the Terraform output `glacier_archive_buckets`.
+        # Defaults match the Terraform output `glacier_archive_buckets`
+        # PLUS the live `s3_finals_bucket` (S3 → R2 sync source) which
+        # `glacier-archive.tf` also tags with a Deep Archive lifecycle
+        # under the `finals/` prefix. The bucket name is taken from
+        # `S3_FINALS_BUCKET` env when set (matches the value already
+        # injected into the s3-to-r2-sync Lambda) so DR drills against
+        # the finals tail don't need a `GLACIER_ARCHIVE_BUCKETS` override.
         _allowed_buckets = {
             "syrabit-razorpay-receipts-prod",
             "syrabit-content-snapshots-prod",
             "syrabit-cw-logs-archive-prod",
         }
+        finals_bucket = os.environ.get("S3_FINALS_BUCKET", "").strip()
+        if finals_bucket:
+            _allowed_buckets.add(finals_bucket)
     return _allowed_buckets
 
 

@@ -67,9 +67,15 @@ _SECRET_ENV_MAP: dict[str, tuple[str, ...]] = {
     # All entries resolve via Secrets Manager (`secretsmanager:GetSecretValue`)
     # — non-secret config like `WORKERS_EMBED_URL` is passed through as
     # a plain Lambda env var by `lambda-batch-jobs.tf` and not listed here.
-    "MONGO_URL_SECRET_ARN":     ("MONGO_URL",),
-    "PINECONE_API_KEY_SECRET":  ("PINECONE_API_KEY", "PINECONE_KEY"),
-    "WORKERS_EMBED_SECRET_ARN": ("WORKERS_EMBED_SECRET", "EMBED_SHARED_SECRET"),
+    "MONGO_URL_SECRET_ARN":                            ("MONGO_URL",),
+    "PINECONE_API_KEY_SECRET":                         ("PINECONE_API_KEY", "PINECONE_KEY"),
+    "WORKERS_EMBED_SECRET_ARN":                        ("WORKERS_EMBED_SECRET", "EMBED_SHARED_SECRET"),
+    # Translation-provider creds for `as-translation-backfill`
+    # (round-3 reviewer fix; other handlers harmlessly ignore them).
+    "CLOUDFLARE_API_TOKEN_SECRET_ARN":                 ("CLOUDFLARE_API_TOKEN",),
+    "CF_AI_GATEWAY_ACCOUNT_ID_SECRET":                 ("CF_AI_GATEWAY_ACCOUNT_ID",),
+    "GEMINI_API_KEY_SECRET_ARN":                       ("GEMINI_API_KEY",),
+    "GOOGLE_APPLICATION_CREDENTIALS_JSON_SECRET_ARN":  ("GOOGLE_APPLICATION_CREDENTIALS_JSON",),
 }
 
 _bootstrapped = False

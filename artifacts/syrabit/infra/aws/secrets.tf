@@ -29,6 +29,10 @@ locals {
     "cohere/api-key"            = "Cohere API key (re-rank worker)."
     "workers-embed/secret"      = "Cloudflare Workers-AI embed-worker shared secret (deferred-embed Lambda calls embed.syrabit.ai with this on the X-Origin-Auth header). Task #489."
     "mongo/url"                 = "Mongo Atlas SRV connection string used by the Lambda batch jobs (`lambda_batch/*` per Task #551 §B). Same value as the ACA backend's `MONGO_URL`."
+    "cloudflare/api-token"      = "Cloudflare API token used by Workers-AI translate calls (`providers/workers_indic.py`) inside the `as-translation-backfill` Lambda (Task #551 §B)."
+    "cf-ai-gateway/account-id"  = "Cloudflare AI Gateway account-id used alongside the API token by `providers/workers_indic.py` (Task #551 §B)."
+    "gemini/api-key"            = "Vertex/Gemini polish key used by the Assamese translate chain (`routes/ai_chat._assamese_translate_*`) inside the `as-translation-backfill` Lambda (Task #551 §B)."
+    "gcp/sa-json"               = "GCP service-account JSON for Vertex polish fallback (`GOOGLE_APPLICATION_CREDENTIALS_JSON`) used by `as-translation-backfill` (Task #551 §B)."
   }
 }
 

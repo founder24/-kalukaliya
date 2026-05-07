@@ -23,6 +23,31 @@ data "aws_secretsmanager_secret" "mongo_url" {
   depends_on = [aws_secretsmanager_secret.workers]
 }
 
+# Translation-provider credentials needed by
+# `as-translation-backfill` (the underlying `aca_jobs` module reaches
+# into `providers/workers_indic.py` and the Vertex polish chain).
+# Round-3 reviewer fix: previously omitted, which would have left the
+# translation Lambda no-op-ing in production.
+data "aws_secretsmanager_secret" "cloudflare_api_token" {
+  name       = "${local.lz_project}/${local.lz_env}/cloudflare/api-token"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+data "aws_secretsmanager_secret" "cf_ai_gateway_account_id" {
+  name       = "${local.lz_project}/${local.lz_env}/cf-ai-gateway/account-id"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+data "aws_secretsmanager_secret" "gemini_api_key" {
+  name       = "${local.lz_project}/${local.lz_env}/gemini/api-key"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+data "aws_secretsmanager_secret" "gcp_sa_json" {
+  name       = "${local.lz_project}/${local.lz_env}/gcp/sa-json"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
 # `pinecone` and `workers_embed` data sources are already declared in
 # `sqs-reembed.tf`. We reference them directly below.
 
@@ -164,12 +189,19 @@ resource "aws_lambda_function" "batch_job" {
       # `sqs-reembed.tf` (`pinecone/api-key`, `workers-embed/secret`)
       # rather than introducing a parallel naming convention.
       # `mongo/url` is registered alongside in `secrets.tf`.
-      MONGO_URL_SECRET_ARN     = data.aws_secretsmanager_secret.mongo_url.arn
-      PINECONE_API_KEY_SECRET  = data.aws_secretsmanager_secret.pinecone.arn
-      WORKERS_EMBED_SECRET_ARN = data.aws_secretsmanager_secret.workers_embed.arn
+      MONGO_URL_SECRET_ARN              = data.aws_secretsmanager_secret.mongo_url.arn
+      PINECONE_API_KEY_SECRET           = data.aws_secretsmanager_secret.pinecone.arn
+      WORKERS_EMBED_SECRET_ARN          = data.aws_secretsmanager_secret.workers_embed.arn
+      # Translation-provider creds (consumed by `as-translation-backfill`).
+      # Setting them on every job in the family is harmless — the
+      # other two handlers ignore the env vars.
+      CLOUDFLARE_API_TOKEN_SECRET_ARN   = data.aws_secretsmanager_secret.cloudflare_api_token.arn
+      CF_AI_GATEWAY_ACCOUNT_ID_SECRET   = data.aws_secretsmanager_secret.cf_ai_gateway_account_id.arn
+      GEMINI_API_KEY_SECRET_ARN         = data.aws_secretsmanager_secret.gemini_api_key.arn
+      GOOGLE_APPLICATION_CREDENTIALS_JSON_SECRET_ARN = data.aws_secretsmanager_secret.gcp_sa_json.arn
       # Embed worker URL is not a secret — same value used by the
       # deferred-embed Lambda in `sqs-reembed.tf` (line 122).
-      WORKERS_EMBED_URL        = "https://embed.syrabit.ai"
+      WORKERS_EMBED_URL                 = "https://embed.syrabit.ai"
     })
   }
 
