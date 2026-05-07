@@ -92,7 +92,18 @@ export default function AdminMemoryBrainTile({ adminToken }) {
   // ``fleet_dropped_min`` threshold we surface a small "rollup
   // degraded — N events dropped" badge so the operator sees the
   // dashboard is undercounting *before* they investigate a discrepancy.
-  const droppedEvents = Number(data?.fleet_stats?.dropped_events_local || 0);
+  //
+  // Task #527 — when fleet rollup is wired we prefer the fleet
+  // aggregate (sum of every worker's latest drop snapshot) over the
+  // local per-worker counter, so the badge shows the same number no
+  // matter which gunicorn worker happened to serve the admin poll.
+  // We fall back to the local counter when the fleet aggregate is
+  // unavailable (Upstash unconfigured / read failed) so partial-
+  // outage visibility is preserved.
+  const droppedFleet = Number(data?.fleet_stats?.dropped_events_fleet || 0);
+  const droppedLocal = Number(data?.fleet_stats?.dropped_events_local || 0);
+  const droppedEvents = fleetAvailable ? droppedFleet : droppedLocal;
+  const droppedScope = fleetAvailable ? 'fleet' : 'worker';
   const droppedMin = Number(data?.alert_threshold?.fleet_dropped_min ?? DEFAULT_FLEET_DROPPED_MIN);
   const rollupDegraded = enabled && droppedMin > 0 && droppedEvents >= droppedMin;
 
@@ -134,9 +145,14 @@ export default function AdminMemoryBrainTile({ adminToken }) {
           <span
             className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-600 font-semibold"
             data-testid="memory-brain-rollup-degraded"
-            title={`This worker has dropped ${droppedEvents} fleet-rollup events because the Upstash writer thread fell behind. Fleet aggregate is undercounting until drops stop.`}
+            data-dropped-scope={droppedScope}
+            title={
+              droppedScope === 'fleet'
+                ? `${droppedEvents} fleet-rollup events dropped across all workers (Upstash writer thread is falling behind on at least one worker). Fleet aggregate is undercounting until drops stop.`
+                : `This worker has dropped ${droppedEvents} fleet-rollup events because the Upstash writer thread fell behind. Fleet aggregate is undercounting until drops stop.`
+            }
           >
-            <AlertTriangle size={11} /> rollup degraded — {droppedEvents} events dropped
+            <AlertTriangle size={11} /> rollup degraded — {droppedEvents} events dropped{droppedScope === 'fleet' ? ' (fleet)' : ''}
           </span>
         )}
         {!tripped && enabled && stats.total > 0 && (

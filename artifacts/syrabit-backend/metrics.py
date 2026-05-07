@@ -2767,25 +2767,67 @@ async def _alerting_loop():
                         _fd_delta = 0
                     if _fd_delta >= _fd_threshold:
                         _worker_pid = os.getpid()
-                        await _dispatch_alert(
-                            "memory_brain_fleet_dropped",
-                            "memory_brain fleet rollup queue is dropping events",
-                            f"{_fd_delta} fleet-rollup events dropped on worker "
-                            f"pid={_worker_pid} since last alerting tick "
-                            f"(threshold: {_fd_threshold}, total since boot: {_fd_current}). "
-                            f"The Upstash writer thread is falling behind — the admin "
-                            f"memory_brain tile is silently undercounting until this "
-                            f"clears. Check Upstash health (REST round-trip latency) "
-                            f"and the daemon thread `memory_brain_fleet_writer`. "
-                            f"Per-worker counters in the chat hot path are unaffected.",
-                            threshold_snapshot={
-                                "metric": "memory_brain_fleet_dropped_min",
-                                "value": _fd_threshold,
-                                "actual": _fd_delta,
-                                "total_since_boot": _fd_current,
-                                "worker_pid": _worker_pid,
-                            },
-                        )
+                        # Task #527: cross-worker dedup. The
+                        # in-process ``_mb_fleet_dropped_last_seen``
+                        # high-water mark is per-pid, so on a
+                        # multi-worker deploy a single Upstash stall
+                        # would page N times (once per worker that
+                        # noticed the drop on the same tick). Claim a
+                        # shared Redis lock keyed on the *incident*
+                        # (the alert type, NOT the pid) so only the
+                        # first worker to notice fires. Lock TTL
+                        # mirrors ``_ALERT_COOLDOWN_S`` so the next
+                        # eligible burst after the cooldown can page
+                        # again. The Mongo dedup in ``_dispatch_alert``
+                        # is a defense-in-depth backstop; this
+                        # explicit Redis SETNX is the primary gate
+                        # because Upstash REST is faster and more
+                        # available than Mongo when the system is
+                        # already degraded.
+                        _fd_should_dispatch = True
+                        try:
+                            from deps import redis_client as _fd_rc
+                            if _fd_rc is not None:
+                                _fd_lock_key = "alert:mb_fleet_dropped:lock"
+                                _fd_claimed = _fd_rc.set(
+                                    _fd_lock_key,
+                                    f"pid={_worker_pid}",
+                                    nx=True,
+                                    ex=int(_ALERT_COOLDOWN_S),
+                                )
+                                if not _fd_claimed:
+                                    _fd_should_dispatch = False
+                        except Exception as _fd_lock_exc:
+                            # Redis unavailable: fall back to in-memory
+                            # + Mongo dedup so a real burst still pages.
+                            logger.debug(
+                                "fleet-dropped Redis dedup lock failed: %s",
+                                _fd_lock_exc,
+                            )
+                        if _fd_should_dispatch:
+                            await _dispatch_alert(
+                                "memory_brain_fleet_dropped",
+                                "memory_brain fleet rollup queue is dropping events",
+                                f"{_fd_delta} fleet-rollup events dropped on worker "
+                                f"pid={_worker_pid} since last alerting tick "
+                                f"(threshold: {_fd_threshold}, total since boot: {_fd_current}). "
+                                f"The Upstash writer thread is falling behind — the admin "
+                                f"memory_brain tile is silently undercounting until this "
+                                f"clears. Check Upstash health (REST round-trip latency) "
+                                f"and the daemon thread `memory_brain_fleet_writer`. "
+                                f"Per-worker counters in the chat hot path are unaffected.",
+                                threshold_snapshot={
+                                    "metric": "memory_brain_fleet_dropped_min",
+                                    "value": _fd_threshold,
+                                    "actual": _fd_delta,
+                                    "total_since_boot": _fd_current,
+                                    "worker_pid": _worker_pid,
+                                },
+                            )
+                    # Always advance the high-water mark so a worker
+                    # that lost the cross-worker race doesn't keep
+                    # retrying every tick (and so the next real burst
+                    # is measured from the freshly-acked baseline).
                     _mb_fleet_dropped_last_seen = _fd_current
             except Exception:
                 pass

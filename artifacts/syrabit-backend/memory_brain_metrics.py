@@ -89,6 +89,12 @@ _VALID_OPS = ("write", "read")
 #   kind:<k>:ok / kind:<k>:fail                               (counters)
 #   reason:<r>                                                (counters)
 #   last_ok_ts / last_fail_ts                                 (HSET overwrite)
+#   worker:<pid>:dropped     (Task #527; HSET overwrite of the
+#                             monotonic per-worker drop counter, so
+#                             the admin tile can sum the per-worker
+#                             snapshots into a fleet total instead of
+#                             only seeing the worker that happened to
+#                             serve the request)
 _FLEET_KEY_PREFIX = "mb:fleet:h:"
 _FLEET_BUCKET_TTL_SECONDS = 25 * 3600  # 24h window + 1h slack
 # Task #483 — per-worker fan-out fields live in the same hour-keyed
@@ -177,6 +183,15 @@ def _fleet_writer_loop() -> None:
                 # "last ok / last fail" across the whole fleet.
                 _rc.hset(key, f"last_{outcome}_ts", str(ts))
                 _rc.hset(key, f"worker:{pid}:last_{outcome}_ts", str(ts))
+                # Task #527: piggyback the per-worker dropped-events
+                # counter onto every successful event so the admin
+                # tile can render a *fleet* drop total. HSET (not
+                # HINCRBY) because the counter is monotonic on the
+                # worker — the latest snapshot wins.
+                try:
+                    _rc.hset(key, f"worker:{pid}:dropped", str(int(_fleet_dropped_events)))
+                except Exception:
+                    pass
                 # Refresh TTL on every write so an actively-used hour
                 # bucket can't expire mid-window.
                 _rc.expire(key, _FLEET_BUCKET_TTL_SECONDS)
@@ -186,6 +201,34 @@ def _fleet_writer_loop() -> None:
                 logger.debug("fleet rollup write failed: %s", exc)
         except Exception as exc:  # pragma: no cover — defensive
             logger.debug("fleet writer loop error: %s", exc)
+
+
+def _snapshot_dropped_to_fleet() -> None:
+    """Task #527 — push this worker's current ``_fleet_dropped_events``
+    value into the live hour bucket via a single HSET.
+
+    The writer loop also piggybacks the same field onto every
+    successful event (cheap, no extra round-trip), but a worker that
+    has been quiet for a few minutes — or whose queue is so backed up
+    that no event has drained recently — would otherwise leave the
+    fleet view stale. Calling this from the read-side
+    (``get_fleet_stats``) guarantees the worker handling the admin
+    request always contributes a fresh snapshot before HGETALL.
+
+    Best-effort: any Redis error is swallowed so a transient Upstash
+    blip never breaks the dashboard render.
+    """
+    try:
+        from deps import redis_client as _rc
+        if _rc is None:
+            return
+        ts = _time.time()
+        key = f"{_FLEET_KEY_PREFIX}{_hour_bucket(ts)}"
+        pid = _current_worker_pid()
+        _rc.hset(key, f"worker:{pid}:dropped", str(int(_fleet_dropped_events)))
+        _rc.expire(key, _FLEET_BUCKET_TTL_SECONDS)
+    except Exception as exc:
+        logger.debug("dropped-events snapshot failed: %s", exc)
 
 
 def _ensure_fleet_writer() -> None:
@@ -459,6 +502,11 @@ def get_fleet_stats(window_seconds: int = _WINDOW_SECONDS) -> dict[str, Any]:
 
     fleet_configured = _fleet_enabled()
     if fleet_configured:
+        # Task #527: contribute this worker's latest dropped-events
+        # snapshot BEFORE the HGETALL so the fleet aggregate is never
+        # stale by more than one read tick — even when this worker has
+        # been quiet long enough for the writer-loop piggyback to lag.
+        _snapshot_dropped_to_fleet()
         raw_buckets, fleet_read_ok = _fleet_fetch_buckets(hours)
     else:
         raw_buckets, fleet_read_ok = [], False
@@ -479,6 +527,11 @@ def get_fleet_stats(window_seconds: int = _WINDOW_SECONDS) -> dict[str, Any]:
     last_success_ts: Optional[float] = None
     total = 0
     failures = 0
+    # Task #527 — per-pid latest dropped snapshot. The writer loop and
+    # the read-side both HSET ``worker:<pid>:dropped`` to the worker's
+    # current monotonic counter, so for each pid we take the MAX value
+    # seen across the hour buckets in the window and sum across pids.
+    dropped_by_pid: dict[str, int] = {}
 
     for entry in raw_buckets:
         for field, val in (entry.get("fields") or {}).items():
@@ -514,6 +567,14 @@ def get_fleet_stats(window_seconds: int = _WINDOW_SECONDS) -> dict[str, Any]:
                 # reason can contain ':' so re-join the tail
                 reason = ":".join(parts[1:])
                 reasons[reason] = reasons.get(reason, 0) + n
+            elif len(parts) == 3 and parts[0] == "worker" and parts[2] == "dropped":
+                # Task #527 — ``worker:<pid>:dropped``. Monotonic per
+                # pid, HSET overwrite, so the freshest value within the
+                # window for that pid is the max we've seen.
+                pid = parts[1]
+                cur = dropped_by_pid.get(pid, 0)
+                if n > cur:
+                    dropped_by_pid[pid] = n
 
     failure_rate_pct = round((failures / total) * 100.0, 2) if total else 0.0
     top_reasons = sorted(reasons.items(), key=lambda kv: -kv[1])[:5]
@@ -550,6 +611,18 @@ def get_fleet_stats(window_seconds: int = _WINDOW_SECONDS) -> dict[str, Any]:
         "fleet_read_ok": fleet_read_ok,
         "fleet_status": fleet_status,
         "dropped_events_local": _fleet_dropped_events,
+        # Task #527 — sum of every worker's latest monotonic drop
+        # snapshot in the window. This is the number the admin tile
+        # surfaces in fleet scope so the badge no longer flickers
+        # depending on which worker happened to serve the request.
+        "dropped_events_fleet": sum(dropped_by_pid.values()),
+        "dropped_events_by_pid": [
+            {"pid": (int(p) if p.isdigit() else p), "dropped": v}
+            for p, v in sorted(
+                dropped_by_pid.items(),
+                key=lambda kv: -kv[1],
+            )
+        ],
     }
 
 
@@ -688,6 +761,35 @@ def get_fleet_workers(hours: int = 24) -> list[dict[str, Any]]:
     return out
 
 
+def get_fleet_dropped_events_total(hours: int = 24) -> int:
+    """Task #527 — fleet-wide sum of per-worker drop snapshots.
+
+    Walks the same hour-keyed Upstash hashes used by
+    :func:`get_fleet_stats` and sums the latest ``worker:<pid>:dropped``
+    snapshot per pid. Returns 0 when Upstash isn't wired or every read
+    failed (the alerting / admin caller should fall back to the local
+    per-worker counter in that case).
+    """
+    if hours <= 0 or hours > 24:
+        hours = 24
+    if not _fleet_enabled():
+        return 0
+    raw, read_ok = _fleet_fetch_buckets(hours)
+    if not read_ok:
+        return 0
+    by_pid: dict[str, int] = {}
+    for entry in raw:
+        for field, val in (entry.get("fields") or {}).items():
+            f = field if isinstance(field, str) else field.decode("utf-8", "ignore")
+            parts = f.split(":")
+            if len(parts) == 3 and parts[0] == "worker" and parts[2] == "dropped":
+                n = _coerce_int(val)
+                pid = parts[1]
+                if n > by_pid.get(pid, 0):
+                    by_pid[pid] = n
+    return sum(by_pid.values())
+
+
 def get_fleet_dropped_events() -> int:
     """Return this worker's monotonic count of fleet-rollup queue
     drops (Task #482).
@@ -725,5 +827,6 @@ __all__ = [
     "get_fleet_stats", "get_fleet_hourly_buckets",
     "get_fleet_workers",
     "get_fleet_dropped_events",
+    "get_fleet_dropped_events_total",
     "reset",
 ]
