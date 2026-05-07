@@ -1368,6 +1368,15 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # first successful probe so a single transient blip never pages.
     # Default 3 (≈6 min of sustained failure) — set to 0 to disable.
     "embed_stack_consecutive_failures_threshold": 3,
+    # Task #476: staging embed-worker drift watchdog.  The admin panel
+    # surfaces production + staging probe rows side-by-side (Task #438),
+    # but a divergence in ``model_version`` or ``dims`` only reaches the
+    # team if a human happens to look at the dashboard.  This threshold
+    # is the number of consecutive drift observations (one probe per
+    # 120 s alerting tick) required before a Slack-only canary
+    # notification fires.  Default 3 (≈6 min of sustained drift) so a
+    # single in-flight staging deploy doesn't page; set to 0 to disable.
+    "embed_stack_drift_consecutive_threshold": 3,
 }
 _ALERT_EXPIRATION_DEFAULT = {
     "enabled": False,
@@ -1399,6 +1408,16 @@ _SEO_DASHBOARD_URL = "https://syrabit.ai/admin/seo"
 # Task #414: alert types that get a custom hydrate Slack card.
 _HYDRATE_WEBHOOK_ALERT_TYPES = ("hydrate_failure_spike", "hydrate_recovery_low")
 _HYDRATE_DASHBOARD_URL = "https://syrabit.ai/admin/dashboard?tab=overview#hydrate-health"
+# Task #476: alert types that are *Slack-only* canary signals — they
+# persist to db.alerts (so the admin feed still shows them) and post to
+# the Slack webhook, but they do NOT email anyone and do NOT fire a
+# browser push notification.  Used for staging-vs-production embed
+# worker drift, where the production user-facing path is unaffected
+# but on-call should still hear about a canary regression.
+_SLACK_ONLY_ALERT_TYPES = (
+    "embed_stack_staging_drift",
+    "embed_stack_staging_drift_recovered",
+)
 _notification_channels: dict = dict(_NOTIFICATION_CHANNELS_DEFAULT)
 
 # Task #418: per-channel delivery status surfaced on the Alert Settings page so
@@ -1891,10 +1910,18 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
 
     # 1) Email alert via SendGrid (to admin) — Task #347 migrated from Resend.
     try:
-        admin_email = (_notification_channels.get("email") or os.environ.get("ALERT_EMAIL", "")).strip()
-        # Task #400 — provider gating moved into email_templates.send_admin_email.
-        if not admin_email:
-            outcomes["email"]["skipped_reason"] = "no admin email configured"
+        # Task #476: Slack-only canary alerts skip the email channel
+        # entirely so a non-paging staging drift never lands in the
+        # on-call inbox.  The persisted dashboard row + Slack webhook
+        # carry the signal.
+        if alert_type in _SLACK_ONLY_ALERT_TYPES:
+            outcomes["email"]["skipped_reason"] = "slack-only alert type"
+            admin_email = ""
+        else:
+            admin_email = (_notification_channels.get("email") or os.environ.get("ALERT_EMAIL", "")).strip()
+            # Task #400 — provider gating moved into email_templates.send_admin_email.
+            if not admin_email:
+                outcomes["email"]["skipped_reason"] = "no admin email configured"
         if admin_email:
             outcomes["email"]["attempted"] = True
             from email_templates import send_admin_email as _send_admin_email
@@ -2031,72 +2058,75 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
     # outcomes["push"] entry below is only used as the immediate response
     # signal for the test-delivery flow — the persisted _channel_status["push"]
     # is recomputed from the log via ``_recompute_push_channel_status``.
-    try:
-        outcomes["push"]["attempted"] = True
-        from routes.admin_notifications import _dispatch_push_to_admins
-        push_body = body
-        if threshold_snapshot:
-            metric = threshold_snapshot.get("metric", "N/A")
-            configured = threshold_snapshot.get("value", "N/A")
-            actual = threshold_snapshot.get("actual", "N/A")
-            push_body = f"{body}\n📊 {metric}: {actual} (threshold: {configured})"
-        push_payload = {
-            "title": f"\u26a0\ufe0f {title}",
-            "body": push_body,
-            "icon": "/icons/icon-192.png",
-            "url": "/admin",
-            "tag": f"{'test' if mark_synthetic else 'critical'}-alert-{alert_type}-{int(now)}",
-            "severity": "critical",
-            "alert_type": alert_type,
-        }
-        if mark_synthetic:
-            push_payload["synthetic"] = True
+    if alert_type in _SLACK_ONLY_ALERT_TYPES:
+        # Task #476: Slack-only canary alerts skip the push channel —
+        # only Slack + persisted dashboard row carry the signal.
+        outcomes["push"]["skipped_reason"] = "slack-only alert type"
+    else:
+        try:
+            outcomes["push"]["attempted"] = True
+            from routes.admin_notifications import _dispatch_push_to_admins
+            push_body = body
+            if threshold_snapshot:
+                metric = threshold_snapshot.get("metric", "N/A")
+                configured = threshold_snapshot.get("value", "N/A")
+                actual = threshold_snapshot.get("actual", "N/A")
+                push_body = f"{body}\n📊 {metric}: {actual} (threshold: {configured})"
+            push_payload = {
+                "title": f"\u26a0\ufe0f {title}",
+                "body": push_body,
+                "icon": "/icons/icon-192.png",
+                "url": "/admin",
+                "tag": f"{'test' if mark_synthetic else 'critical'}-alert-{alert_type}-{int(now)}",
+                "severity": "critical",
+                "alert_type": alert_type,
+            }
+            if mark_synthetic:
+                push_payload["synthetic"] = True
 
-        # Task #452 / #453: ``active_admin_subs`` was already counted at the
-        # top of _dispatch_alert (so the email/webhook bodies can carry the
-        # "browser push is silent" warning). Reuse that result here to
-        # short-circuit the push step.
-        if active_admin_subs == 0:
-            skip_reason = "no active push subscribers"
-            try:
-                await db.push_delivery_log.insert_one({
-                    "dispatch_id": str(uuid.uuid4()),
-                    "dispatched_at": datetime.now(timezone.utc).isoformat(),
-                    "target": "admin-only",
-                    "payload_title": push_payload.get("title", ""),
-                    "payload_body": push_payload.get("body", "")[:500],
-                    "alert_type": alert_type,
-                    "total": 0,
-                    "sent": 0,
-                    "failed": 0,
-                    "expired": 0,
-                    "results": [],
-                    "skipped": True,
-                    "error": skip_reason,
-                })
-            except Exception as log_exc:
-                logger.warning(f"Failed to persist push skip log: {log_exc}")
-            outcomes["push"]["skipped_reason"] = skip_reason
-        elif force:
-            # Test deliveries: await so we can surface failures synchronously.
-            try:
-                await _dispatch_push_to_admins(push_payload)
-                outcomes["push"]["ok"] = True
-            except Exception as e:
-                outcomes["push"]["error"] = str(e)
-        else:
-            # Real alerts dispatch fire-and-forget — we cannot await without
-            # blocking the alerting loop. The queued-task signal is no longer
-            # used for _channel_status["push"]; truth is read from
-            # db.push_delivery_log via _recompute_push_channel_status (Task
-            # #427). The outcomes["push"] entry below stays unset (ok=False)
-            # because no synchronous result is available for the immediate
-            # response.
-            asyncio.create_task(_dispatch_push_to_admins(push_payload))
-            outcomes["push"]["skipped_reason"] = "queued — see push delivery log for result"
-    except Exception as e:
-        outcomes["push"]["error"] = str(e)
-        logger.debug(f"Alert push dispatch failed: {e}")
+            # Task #452 / #453: ``active_admin_subs`` was already counted at
+            # the top of _dispatch_alert (so the email/webhook bodies can
+            # carry the "browser push is silent" warning). Reuse that
+            # result here to short-circuit the push step.
+            if active_admin_subs == 0:
+                skip_reason = "no active push subscribers"
+                try:
+                    await db.push_delivery_log.insert_one({
+                        "dispatch_id": str(uuid.uuid4()),
+                        "dispatched_at": datetime.now(timezone.utc).isoformat(),
+                        "target": "admin-only",
+                        "payload_title": push_payload.get("title", ""),
+                        "payload_body": push_payload.get("body", "")[:500],
+                        "alert_type": alert_type,
+                        "total": 0,
+                        "sent": 0,
+                        "failed": 0,
+                        "expired": 0,
+                        "results": [],
+                        "skipped": True,
+                        "error": skip_reason,
+                    })
+                except Exception as log_exc:
+                    logger.warning(f"Failed to persist push skip log: {log_exc}")
+                outcomes["push"]["skipped_reason"] = skip_reason
+            elif force:
+                # Test deliveries: await so failures surface synchronously.
+                try:
+                    await _dispatch_push_to_admins(push_payload)
+                    outcomes["push"]["ok"] = True
+                except Exception as e:
+                    outcomes["push"]["error"] = str(e)
+            else:
+                # Real alerts dispatch fire-and-forget — we cannot await
+                # without blocking the alerting loop. The queued-task signal
+                # is no longer used for _channel_status["push"]; truth is
+                # read from db.push_delivery_log via
+                # ``_recompute_push_channel_status`` (Task #427).
+                asyncio.create_task(_dispatch_push_to_admins(push_payload))
+                outcomes["push"]["skipped_reason"] = "queued — see push delivery log for result"
+        except Exception as e:
+            outcomes["push"]["error"] = str(e)
+            logger.debug(f"Alert push dispatch failed: {e}")
 
     # Record per-channel outcomes to in-memory + persisted status for the
     # Alert Settings UI (Task #418). The push channel is sourced from
@@ -2149,6 +2179,213 @@ _embed_stack_consecutive_failures: dict[str, int] = {leg: 0 for leg in _EMBED_ST
 _embed_stack_was_firing: dict[str, bool] = {leg: False for leg in _EMBED_STACK_LEGS}
 _embed_stack_last_error: dict[str, str | None] = {leg: None for leg in _EMBED_STACK_LEGS}
 _embed_stack_last_latency_ms: dict[str, int | None] = {leg: None for leg in _EMBED_STACK_LEGS}
+
+# ── Task #476: staging-vs-production embed-worker drift watchdog ───────────
+# The admin panel surfaces both rows side-by-side (Task #438) but a divergence
+# in `model_version` or `dims` only reaches the team if a human happens to
+# look at the dashboard. We track consecutive drift observations across
+# ticks of the alerting loop and dispatch a Slack-only notification once
+# we've seen the same drift `embed_stack_drift_consecutive_threshold` times
+# in a row, so a single in-flight staging deploy doesn't false-positive.
+_embed_stack_drift_consecutive: int = 0
+_embed_stack_drift_was_firing: bool = False
+_embed_stack_drift_last_payload: dict | None = None
+
+
+def get_embed_stack_drift_snapshot() -> dict:
+    """Read-only view of the staging-drift watchdog state (Task #476)."""
+    raw = _ALERT_THRESHOLDS.get("embed_stack_drift_consecutive_threshold")
+    try:
+        threshold = int(raw) if raw is not None else 3
+    except (TypeError, ValueError):
+        threshold = 3
+    return {
+        "threshold": threshold,
+        "consecutive": _embed_stack_drift_consecutive,
+        "firing": _embed_stack_drift_was_firing,
+        "last_payload": _embed_stack_drift_last_payload,
+    }
+
+
+def _compare_embed_environments(prod: dict | None, staging: dict | None) -> dict:
+    """Return ``{comparable, drift, reason, production, staging}`` for a
+    single (production, staging) probe pair.
+
+    Pure helper — extracted so the regression test can pin the comparison
+    logic without booting the whole alerting loop. ``comparable`` is False
+    whenever either environment is unconfigured / unhealthy, in which case
+    callers should treat the tick as a no-op and reset the consecutive
+    counter (we cannot say "drift" if we can't even read both sides).
+    """
+    if not prod or not staging:
+        return {"comparable": False, "drift": False, "reason": "missing env entry"}
+    if not prod.get("configured") or not staging.get("configured"):
+        return {"comparable": False, "drift": False, "reason": "env not configured"}
+    if not prod.get("ok") or not staging.get("ok"):
+        return {"comparable": False, "drift": False, "reason": "env not healthy"}
+    prod_mv = (prod.get("model_version") or "").strip()
+    stg_mv = (staging.get("model_version") or "").strip()
+    try:
+        prod_dims = int(prod.get("dims") or 0)
+    except (TypeError, ValueError):
+        prod_dims = 0
+    try:
+        stg_dims = int(staging.get("dims") or 0)
+    except (TypeError, ValueError):
+        stg_dims = 0
+    drift_fields: list[str] = []
+    if prod_mv != stg_mv:
+        drift_fields.append("model_version")
+    if prod_dims != stg_dims:
+        drift_fields.append("dims")
+    return {
+        "comparable": True,
+        "drift": bool(drift_fields),
+        "drift_fields": drift_fields,
+        "production": {
+            "model_version": prod_mv,
+            "dims": prod_dims,
+            "url": prod.get("url"),
+        },
+        "staging": {
+            "model_version": stg_mv,
+            "dims": stg_dims,
+            "url": staging.get("url"),
+        },
+    }
+
+
+async def _check_embed_stack_drift_once(threshold: int | None = None) -> dict:
+    """One tick of the Task #476 staging-drift watchdog.
+
+    Probes production + staging in parallel via
+    :func:`providers.workers_embed.health_check_environments`, compares
+    ``model_version`` and ``dims``, and dispatches a Slack-only
+    notification (no email, no push) once the same drift has been
+    observed for ``threshold`` consecutive ticks. Recovery alerts fire
+    the first tick the two envs realign after a paging incident.
+
+    Returns a snapshot dict so callers / tests can introspect what
+    happened on this tick without scraping logs.
+    """
+    global _embed_stack_drift_consecutive, _embed_stack_drift_was_firing
+    global _embed_stack_drift_last_payload
+
+    if threshold is None:
+        _raw = _ALERT_THRESHOLDS.get("embed_stack_drift_consecutive_threshold")
+        try:
+            threshold = int(_raw) if _raw is not None else 3
+        except (TypeError, ValueError):
+            threshold = 3
+
+    if threshold <= 0:
+        # Watchdog disabled — clear latches so re-enabling later doesn't
+        # surface a stale recovery alert.
+        _embed_stack_drift_consecutive = 0
+        _embed_stack_drift_was_firing = False
+        return {"disabled": True, "drift": False, "consecutive": 0,
+                "threshold": threshold}
+
+    try:
+        from providers import workers_embed as _we
+        envs = await _we.health_check_environments()
+    except Exception as exc:
+        return {"error": str(exc)[:200], "drift": False,
+                "consecutive": _embed_stack_drift_consecutive,
+                "threshold": threshold}
+
+    prod = next((e for e in envs if e.get("env") == "production"), None)
+    staging = next((e for e in envs if e.get("env") == "staging"), None)
+    cmp_result = _compare_embed_environments(prod, staging)
+
+    if not cmp_result.get("comparable"):
+        # Can't compare → reset the streak so an unconfigured/unhealthy
+        # staging window doesn't accidentally clock up to threshold.
+        _embed_stack_drift_consecutive = 0
+        return {
+            "comparable": False,
+            "reason": cmp_result.get("reason"),
+            "drift": False,
+            "consecutive": 0,
+            "firing": _embed_stack_drift_was_firing,
+            "threshold": threshold,
+        }
+
+    if cmp_result["drift"]:
+        _embed_stack_drift_consecutive += 1
+        _embed_stack_drift_last_payload = {
+            "production": cmp_result["production"],
+            "staging": cmp_result["staging"],
+            "drift_fields": cmp_result["drift_fields"],
+        }
+        if (
+            _embed_stack_drift_consecutive >= threshold
+            and not _embed_stack_drift_was_firing
+        ):
+            prod_p = cmp_result["production"]
+            stg_p = cmp_result["staging"]
+            await _dispatch_alert(
+                "embed_stack_staging_drift",
+                "Embed staging canary drifted from production",
+                (
+                    f"The staging embed worker has reported a different "
+                    f"{', '.join(cmp_result['drift_fields'])} than production "
+                    f"for {_embed_stack_drift_consecutive} consecutive probes "
+                    f"(threshold: {threshold}).\n"
+                    f"Production: model_version={prod_p['model_version']!r} "
+                    f"dims={prod_p['dims']} url={prod_p.get('url')}\n"
+                    f"Staging:    model_version={stg_p['model_version']!r} "
+                    f"dims={stg_p['dims']} url={stg_p.get('url')}\n"
+                    f"This is a Slack-only canary signal — production user "
+                    f"traffic is unaffected, but staging will not represent "
+                    f"prod behaviour until the rollout realigns. Inspect "
+                    f"`/admin/health/embed-stack`."
+                ),
+                threshold_snapshot={
+                    "metric": "embed_stack_drift_consecutive_threshold",
+                    "value": threshold,
+                    "actual": _embed_stack_drift_consecutive,
+                    "drift_fields": cmp_result["drift_fields"],
+                    "production": prod_p,
+                    "staging": stg_p,
+                },
+            )
+            _embed_stack_drift_was_firing = True
+    else:
+        prev = _embed_stack_drift_consecutive
+        _embed_stack_drift_consecutive = 0
+        if _embed_stack_drift_was_firing:
+            await _dispatch_alert(
+                "embed_stack_staging_drift_recovered",
+                "Embed staging canary realigned with production",
+                (
+                    f"The staging embed worker now reports the same "
+                    f"model_version ({cmp_result['production']['model_version']}) "
+                    f"and dims ({cmp_result['production']['dims']}) as "
+                    f"production after a previous drift incident "
+                    f"({prev} consecutive drift probes)."
+                ),
+                threshold_snapshot={
+                    "metric": "embed_stack_drift_consecutive_threshold",
+                    "value": threshold,
+                    "actual": 0,
+                    "previous_consecutive": prev,
+                    "production": cmp_result["production"],
+                    "staging": cmp_result["staging"],
+                },
+            )
+            _embed_stack_drift_was_firing = False
+
+    return {
+        "comparable": True,
+        "drift": cmp_result["drift"],
+        "drift_fields": cmp_result.get("drift_fields", []),
+        "consecutive": _embed_stack_drift_consecutive,
+        "firing": _embed_stack_drift_was_firing,
+        "threshold": threshold,
+        "production": cmp_result["production"],
+        "staging": cmp_result["staging"],
+    }
 
 
 def get_embed_stack_alert_snapshot() -> dict:
@@ -2771,6 +3008,18 @@ async def _alerting_loop():
             # single transient blip never pages.
             try:
                 await _check_embed_stack_health_once()
+            except Exception:
+                pass
+
+            # ── 15. Embed staging-vs-prod drift watchdog (Task #476) ─────
+            # Compares the staging embed worker's reported model_version /
+            # dims against production each tick. After N consecutive
+            # drift observations, fires a Slack-only canary notification —
+            # no email, no push, no page-level red banner — so on-call
+            # learns about a canary regression without flipping the
+            # production health pill.
+            try:
+                await _check_embed_stack_drift_once()
             except Exception:
                 pass
 
