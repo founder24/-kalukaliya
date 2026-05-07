@@ -561,6 +561,22 @@ def get_fleet_hourly_buckets(hours: int = 24) -> list[dict[str, Any]]:
     return out
 
 
+def get_fleet_dropped_events() -> int:
+    """Return this worker's monotonic count of fleet-rollup queue
+    drops (Task #482).
+
+    ``record_event`` enqueues the event tuple onto ``_fleet_queue``
+    via ``put_nowait`` so the chat hot path is never coupled to
+    Upstash. When Upstash hangs and the queue fills up, the
+    ``queue.Full`` branch increments ``_fleet_dropped_events`` and
+    silently drops the event. This counter is exposed for the
+    alerting loop in ``metrics._alerting_loop`` to page on-call when
+    drops start accumulating, and surfaced in the admin tile so the
+    operator can see *which* worker is dropping.
+    """
+    return int(_fleet_dropped_events)
+
+
 def reset() -> None:
     """Test-only — drop all recorded events. Also clears the fleet
     queue + drop counter so per-test isolation is total. Does NOT
@@ -580,5 +596,6 @@ def reset() -> None:
 __all__ = [
     "record_event", "get_stats", "get_hourly_buckets",
     "get_fleet_stats", "get_fleet_hourly_buckets",
+    "get_fleet_dropped_events",
     "reset",
 ]

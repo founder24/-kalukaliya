@@ -1220,6 +1220,14 @@ _alert_last_fired: dict = {}   # { "alert_key": timestamp }
 # ``_alert_last_fired`` cooldown bookkeeping above.
 _assamese_unavailable_was_firing: bool = False
 
+# Task #482: per-worker high-water mark of memory_brain fleet-rollup
+# queue drops observed on the previous ``_alerting_loop`` tick.
+# Used to compute the *delta* between ticks so the
+# ``memory_brain_fleet_dropped`` alert fires on a fresh burst rather
+# than on the cumulative count, which would re-page on every tick
+# until the worker recycled.
+_mb_fleet_dropped_last_seen: int = 0
+
 # Cross-worker / cross-restart dedup window. The in-memory ``_alert_last_fired``
 # above resets every time a gunicorn worker recycles (max_requests=5000) and
 # isn't shared between workers, so the same alert can fire 3-N× per real
@@ -1293,6 +1301,21 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # Voyage outage well before the daily aggregate would surface it).
     "memory_brain_failure_rate_pct": 25.0,
     "memory_brain_failure_min_sample": 20,
+    # Task #482: memory_brain fleet-rollup queue drop watcher. Task
+    # #446's fleet rollup uses a non-blocking ``queue.Queue`` between
+    # the chat hot path and the daemon thread that ``HINCRBY``s into
+    # Upstash, so a stalled Upstash never stalls chat. The downside
+    # is silent undercounting: when the queue fills up, the
+    # ``queue.Full`` branch increments ``_fleet_dropped_events`` and
+    # the dashboard quietly stops matching reality. This threshold is
+    # the minimum number of *new* drops observed by a single worker
+    # in one alerting tick before we page on-call. Default 10 is well
+    # above zero (so a single dropped event during a momentary spike
+    # doesn't wake anybody up) and well below the 4096 queue capacity
+    # (so a real stall is caught long before the worker's local view
+    # diverges meaningfully from the fleet aggregate). Set to 0 to
+    # disable the alert.
+    "memory_brain_fleet_dropped_min": 10,
     # Task #707: silent-lockout watcher. Fires
     # `cf_access_admin_silent_lockout` when the CF_ACCESS_* env state has
     # changed but no admin login has succeeded for this many hours since
@@ -2720,6 +2743,55 @@ async def _alerting_loop():
                                 "sample": _mb_stats["total"],
                             },
                         )
+            except Exception:
+                pass
+
+            # ── 6c. memory_brain fleet-rollup queue drops (Task #482) ─
+            # Task #446 added a non-blocking queue between the chat
+            # hot path and the Upstash writer thread. When Upstash
+            # hangs, the queue fills and ``_fleet_dropped_events``
+            # starts incrementing — silently undercounting the
+            # dashboard. The counter is monotonic per worker, so
+            # we track the value seen on the previous tick and page
+            # only when the *delta* (new drops since last tick)
+            # crosses the threshold. This way a long-lived stalled
+            # writer doesn't keep paging on the same accumulated
+            # number after it's already been acked, but a fresh
+            # burst is still caught on the very next tick.
+            try:
+                global _mb_fleet_dropped_last_seen
+                _fd_threshold = int(_ALERT_THRESHOLDS.get("memory_brain_fleet_dropped_min", 0) or 0)
+                if _fd_threshold > 0:
+                    import memory_brain_metrics as _mbm_drop
+                    _fd_current = int(_mbm_drop.get_fleet_dropped_events() or 0)
+                    _fd_prev = int(_mb_fleet_dropped_last_seen or 0)
+                    _fd_delta = _fd_current - _fd_prev
+                    if _fd_delta < 0:
+                        # Counter reset (test isolation, worker
+                        # restart). Re-baseline silently.
+                        _fd_delta = 0
+                    if _fd_delta >= _fd_threshold:
+                        _worker_pid = os.getpid()
+                        await _dispatch_alert(
+                            "memory_brain_fleet_dropped",
+                            "memory_brain fleet rollup queue is dropping events",
+                            f"{_fd_delta} fleet-rollup events dropped on worker "
+                            f"pid={_worker_pid} since last alerting tick "
+                            f"(threshold: {_fd_threshold}, total since boot: {_fd_current}). "
+                            f"The Upstash writer thread is falling behind — the admin "
+                            f"memory_brain tile is silently undercounting until this "
+                            f"clears. Check Upstash health (REST round-trip latency) "
+                            f"and the daemon thread `memory_brain_fleet_writer`. "
+                            f"Per-worker counters in the chat hot path are unaffected.",
+                            threshold_snapshot={
+                                "metric": "memory_brain_fleet_dropped_min",
+                                "value": _fd_threshold,
+                                "actual": _fd_delta,
+                                "total_since_boot": _fd_current,
+                                "worker_pid": _worker_pid,
+                            },
+                        )
+                    _mb_fleet_dropped_last_seen = _fd_current
             except Exception:
                 pass
 

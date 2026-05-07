@@ -81,9 +81,14 @@ async def admin_memory_brain_metrics(
         from metrics import _ALERT_THRESHOLDS as _at
         failure_rate_pct = float(_at.get("memory_brain_failure_rate_pct", 25.0) or 25.0)
         failure_min_sample = int(_at.get("memory_brain_failure_min_sample", 20) or 20)
+        # Task #482: surface the fleet-rollup drop threshold so the
+        # admin tile's "rollup degraded" badge mirrors the live
+        # operator-tuned page-on-call number.
+        fleet_dropped_min = int(_at.get("memory_brain_fleet_dropped_min", 10) or 0)
     except Exception:
         failure_rate_pct = 25.0
         failure_min_sample = 20
+        fleet_dropped_min = 10
 
     # Task #446 — fleet rollup. We always return the per-worker view
     # (existing contract used by the AdminMemoryBrainTile sparkline)
@@ -104,5 +109,6 @@ async def admin_memory_brain_metrics(
         "alert_threshold": {
             "failure_rate_pct":   failure_rate_pct,
             "failure_min_sample": failure_min_sample,
+            "fleet_dropped_min":  fleet_dropped_min,
         },
     }

@@ -22,6 +22,9 @@ import { API_BASE } from '@/utils/api';
 // the banner stays in lockstep with what would actually page on-call.
 const DEFAULT_FAILURE_RATE_PCT = 25;
 const DEFAULT_FAILURE_MIN_SAMPLE = 20;
+// Task #482 — mirrors `_ALERT_THRESHOLDS["memory_brain_fleet_dropped_min"]`
+// so the "rollup degraded" badge tracks the same number that pages on-call.
+const DEFAULT_FLEET_DROPPED_MIN = 10;
 const POLL_MS = 30_000;
 
 function _fmtTs(ts) {
@@ -78,6 +81,16 @@ export default function AdminMemoryBrainTile({ adminToken }) {
   const bannerPct = Number(data?.alert_threshold?.failure_rate_pct ?? DEFAULT_FAILURE_RATE_PCT);
   const minSample = Number(data?.alert_threshold?.failure_min_sample ?? DEFAULT_FAILURE_MIN_SAMPLE);
   const tripped = enabled && stats.total >= minSample && failPct > bannerPct;
+  // Task #482 — fleet-rollup queue drop indicator. The backend tracks
+  // a monotonic per-worker counter of events the chat hot path tried
+  // to enqueue but the fleet writer thread couldn't keep up with
+  // (Upstash REST stall). When it crosses the operator-tuned
+  // ``fleet_dropped_min`` threshold we surface a small "rollup
+  // degraded — N events dropped" badge so the operator sees the
+  // dashboard is undercounting *before* they investigate a discrepancy.
+  const droppedEvents = Number(data?.fleet_stats?.dropped_events_local || 0);
+  const droppedMin = Number(data?.alert_threshold?.fleet_dropped_min ?? DEFAULT_FLEET_DROPPED_MIN);
+  const rollupDegraded = enabled && droppedMin > 0 && droppedEvents >= droppedMin;
 
   const chartData = buckets.map(b => ({
     label: new Date(b.hour_start_ts * 1000).getHours() + 'h',
@@ -111,6 +124,15 @@ export default function AdminMemoryBrainTile({ adminToken }) {
         {tripped && (
           <span className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-red-600 font-semibold">
             <AlertTriangle size={11} /> failure rate high
+          </span>
+        )}
+        {rollupDegraded && (
+          <span
+            className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-600 font-semibold"
+            data-testid="memory-brain-rollup-degraded"
+            title={`This worker has dropped ${droppedEvents} fleet-rollup events because the Upstash writer thread fell behind. Fleet aggregate is undercounting until drops stop.`}
+          >
+            <AlertTriangle size={11} /> rollup degraded — {droppedEvents} events dropped
           </span>
         )}
         {!tripped && enabled && stats.total > 0 && (
