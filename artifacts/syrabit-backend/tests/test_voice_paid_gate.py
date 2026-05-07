@@ -55,14 +55,50 @@ async def test_staff_and_educator_bypass():
 
 def test_voice_routes_wired_to_require_paid_plan():
     """Static check — every /voice/* paid endpoint must declare
-    Depends(require_paid_plan). Mirrors the CI guard so a single
-    pytest run catches a forgotten gate before deploy."""
+    Depends(require_paid_plan) OR Depends(require_paid_plan_or_voice_preview).
+    Mirrors the CI guard so a single pytest run catches a forgotten
+    gate before deploy. Task #581 §L9 added the preview wrapper —
+    it inherits the same admin/staff/educator + paid bypass and only
+    adds a metered 1-call/day free preview that still 402s on the
+    second call (and clamps TTS char count via the route)."""
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "routes" / "voice.py").read_text()
     assert "require_paid_plan" in src
+    accepted_deps = (
+        "Depends(require_paid_plan)",
+        "Depends(require_paid_plan_or_voice_preview)",
+    )
     for route in ("/voice/tts", "/voice/stt", "/voice/voice"):
         idx = src.find(f'"{route}"')
         assert idx >= 0, f"route decorator for {route} missing"
-        assert "Depends(require_paid_plan)" in src[idx: idx + 2000], (
-            f"{route} must use Depends(require_paid_plan)"
+        window = src[idx: idx + 2000]
+        assert any(dep in window for dep in accepted_deps), (
+            f"{route} must use Depends(require_paid_plan) or "
+            f"Depends(require_paid_plan_or_voice_preview)"
         )
+
+
+@pytest.mark.asyncio
+async def test_voice_preview_dep_admin_staff_educator_bypass():
+    """Task #581 §L9 — the preview wrapper MUST inherit the existing
+    require_paid_plan admin/staff/educator unconditional bypass so
+    internal CMS / QA flows keep working even when a user dict has
+    plan=='free'. Regression-locked here."""
+    from auth_deps import require_paid_plan_or_voice_preview
+
+    class _DummyReq:
+        client = type("C", (), {"host": "127.0.0.1"})()
+        headers = {}
+        url = type("U", (), {"path": "/voice/tts"})()
+
+    req = _DummyReq()
+    out = await require_paid_plan_or_voice_preview(req, user={"id": "a1", "is_admin": True, "plan": "free"})
+    assert out["is_admin"] is True
+    assert "__voice_preview" not in out
+    for role in ("admin", "staff", "educator"):
+        out = await require_paid_plan_or_voice_preview(req, user={"id": "x", "role": role, "plan": "free"})
+        assert out["role"] == role
+        assert "__voice_preview" not in out
+    # Paid plans pass through, no preview flag.
+    out = await require_paid_plan_or_voice_preview(req, user={"id": "p1", "plan": "pro"})
+    assert "__voice_preview" not in out

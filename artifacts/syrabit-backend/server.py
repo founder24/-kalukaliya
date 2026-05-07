@@ -2173,6 +2173,7 @@ from routes.admin_health import router as admin_health_router
 from routes.health_otel import router as health_otel_router  # Task #558
 from routes.admin_cache import router as admin_cache_router  # Task #571
 from routes.admin_season import router as admin_season_router  # Task #575
+from routes.admin_free_tier import router as admin_free_tier_router  # Task #581
 from routes.admin_cf_health import router as admin_cf_health_router  # Task #383
 from routes.admin_audit_recent import (  # Task #386
     router as admin_audit_recent_router,
@@ -2349,6 +2350,7 @@ api.include_router(admin_health_router)
 app.include_router(health_otel_router)  # Task #558 — /api/health/otel (no /api prefix; route declares its own)
 app.include_router(admin_cache_router)  # Task #571 — /api/health/cache (admin-only; route declares its own /api prefix)
 app.include_router(admin_season_router)  # Task #575 — /api/health/season (public; route declares its own /api prefix)
+app.include_router(admin_free_tier_router)  # Task #581 — /api/health/free-tier-dispatch (admin-only)
 api.include_router(admin_cf_health_router)  # Task #383 — unified CF wins panel
 init_admin_audit_recent(db)  # Task #386
 api.include_router(admin_audit_recent_router)  # Task #386 — D1-first audit feed

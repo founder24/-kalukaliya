@@ -70,6 +70,11 @@ def _check_cost_caps() -> None:
                     "DEGRADATION_PCT_PAUSE_BATCH",
                     "DEGRADATION_PCT_VOICE_OFF",
                     "DEGRADATION_PCT_FREE_503",
+                    # Task #581 §L10 — free-tier-first ladder.
+                    "DEGRADATION_PCT_FREE_TIGHTEN_1",
+                    "DEGRADATION_PCT_FREE_TIGHTEN_2",
+                    "DEGRADATION_PCT_FREE_TIGHTEN_3",
+                    "DEGRADATION_PCT_FREE_TIGHTEN_4",
                 }:
                     if isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float)):
                         degr_thresholds[tgt.id] = float(node.value.value)
@@ -91,6 +96,34 @@ def _check_cost_caps() -> None:
         _fail(
             f"degradation thresholds must be strictly increasing; "
             f"got pause_batch={a}, voice_off={b}, free_503={c}"
+        )
+
+    # Task #581 §L10 — free-tier-first ladder. All four steps MUST sit
+    # below DEGRADATION_PCT_PAUSE_BATCH (the legacy 60 % step) so the
+    # system sheds free-user load BEFORE touching paid features.
+    free_keys = [
+        "DEGRADATION_PCT_FREE_TIGHTEN_1",
+        "DEGRADATION_PCT_FREE_TIGHTEN_2",
+        "DEGRADATION_PCT_FREE_TIGHTEN_3",
+        "DEGRADATION_PCT_FREE_TIGHTEN_4",
+    ]
+    for k in free_keys:
+        if k not in degr_thresholds:
+            _fail(f"{k} missing from cost_caps.py (Task #581 §L10)")
+        v = degr_thresholds[k]
+        if not (0.0 < v < 1.0):
+            _fail(f"{k}={v} must be in (0.0, 1.0)")
+    f1, f2, f3, f4 = (degr_thresholds[k] for k in free_keys)
+    if not (f1 < f2 < f3 < f4):
+        _fail(
+            f"§L10 free-tier ladder must be strictly increasing; "
+            f"got tighten_1={f1}, tighten_2={f2}, tighten_3={f3}, tighten_4={f4}"
+        )
+    if f4 >= a:
+        _fail(
+            f"§L10 free-tier ladder MUST sit below the legacy "
+            f"DEGRADATION_PCT_PAUSE_BATCH={a} so free load sheds before "
+            f"paid features; got tighten_4={f4} >= pause_batch={a}"
         )
 
 
@@ -154,16 +187,24 @@ def _check_voice_paid_gate() -> None:
     if "require_paid_plan" not in src:
         _fail("routes/voice.py must import + use require_paid_plan (Task #549)")
     # Each paid endpoint declaration must sit above a Depends(require_paid_plan)
+    # OR Depends(require_paid_plan_or_voice_preview) (Task #581 §L9 free-tier
+    # voice preview wrapper — same paid gate, plus a metered 1-call/day free
+    # preview that still 402s on the second call).
+    accepted_deps = (
+        "Depends(require_paid_plan)",
+        "Depends(require_paid_plan_or_voice_preview)",
+    )
     for route in PAID_VOICE_ROUTES:
         # Find the route decorator and check the next ~30 lines for the dep.
         idx = src.find(f'"{route}"')
         if idx < 0:
             _fail(f"routes/voice.py missing route decorator for {route}")
         window = src[idx: idx + 2000]
-        if "Depends(require_paid_plan)" not in window:
+        if not any(dep in window for dep in accepted_deps):
             _fail(
                 f"routes/voice.py: {route} must use Depends(require_paid_plan) "
-                f"to gate free-plan callers with HTTP 402 (Task #549)"
+                f"or Depends(require_paid_plan_or_voice_preview) "
+                f"to gate free-plan callers with HTTP 402 (Task #549/#581)"
             )
 
 

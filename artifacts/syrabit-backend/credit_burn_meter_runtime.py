@@ -267,3 +267,34 @@ def get_meter_d():
     """Test/admin helper — returns the singleton MeterD (or None)."""
     _ensure_meters()
     return _METER_D
+
+
+# ── Task #581 §L10 — month-to-date spend fraction for the free-tier ladder ─
+def monthly_spend_fraction() -> float:
+    """Return ``current_month_usd / monthly_cap_usd`` in [0.0, ~1.0].
+
+    Reads MeterD's monthly Redis bucket (``rule_d:usd:YYYY-MM``) and
+    divides by the configured cap. Returns 0.0 on any failure (Redis
+    down, meter not initialised, cap == 0) so the chat dispatcher
+    never accidentally collapses free-tier traffic to paywall when
+    telemetry is unavailable. Caller passes this into
+    ``cost_caps._select_chat_model(monthly_spend_fraction=...)`` and
+    ``cost_caps.free_tier_dispatch_state(...)``.
+    """
+    _ensure_meters()
+    if _METER_D is None:
+        return 0.0
+    try:
+        from credit_burn_meter import MONTHLY_USD_KEY_PREFIX as _PFX
+        from datetime import datetime, timezone
+        cap = float(_METER_D.cfg.cap_usd or 0.0)
+        if cap <= 0:
+            return 0.0
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        raw = _METER_D.redis.get(f"{_PFX}:{month}")
+        if raw is None:
+            return 0.0
+        cur = float(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+        return max(0.0, cur / cap)
+    except Exception:
+        return 0.0

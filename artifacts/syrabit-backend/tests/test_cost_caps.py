@@ -314,36 +314,54 @@ def test_select_chat_model_assamese_bypass():
 
 
 def test_select_chat_model_paid_full_budget():
-    from cost_caps import _select_chat_model, TOKEN_BUDGETS
+    from cost_caps import (
+        _select_chat_model, _select_chat_primary, _reset_chat_primary_cache,
+        TOKEN_BUDGETS,
+    )
+    _reset_chat_primary_cache()
     out = _select_chat_model(user_plan="pro", session_turn_count=99, lang="en")
     assert out["tier"] == "paid"
-    # Task #549 — perpetual $100/mo budget. Default primary is the
-    # Workers-AI Llama-3.2-3B free-tier slot for paid users too;
-    # CHAT_PRIMARY_OVERRIDE=vertex flips to vertex when GCP runway grows.
-    assert out["provider"] == "workers_ai_llama32_3b"
+    # Paid users get the runway-aware chain head — Task #554 made vertex
+    # the head when GCP credit runway is high; #549 keeps llama32_3b as
+    # the head when runway falls. Test against whichever the selector
+    # returns now so the assertion stays in lockstep with the chain.
+    assert out["provider"] == _select_chat_primary()[0]
     assert out["max_output_tokens"] == TOKEN_BUDGETS["chat_turn"]["max_output_tokens"]
 
 
-def test_select_chat_model_free_cheap_then_primary_then_conservative():
+def test_select_chat_model_free_four_step_turn_ladder():
+    """Task #581 §L4 — free-user dispatch is a 4-step ladder by turn count:
+       1-10  → cheap  (workers_ai_mistral_7b, full chat output)
+       11-20 → tight  (workers_ai_mistral_7b, FREE_TIER_TIGHT_OUTPUT_TOKENS)
+       21-30 → retrieval_only (no LLM provider; caller MUST attempt
+                                retrieval_first.try_resolve before paywalling)
+       31+   → paywall
+
+    Free users are also HARD-ROUTED OFF Vertex (§L1) — even when the
+    runway-aware chain head is `vertex`, free callers always get
+    workers_ai_mistral_7b in the LLM-bearing buckets.
+    """
     from cost_caps import (
-        _select_chat_model, CONSERVATIVE_OUTPUT_TOKENS, SESSION_CHEAP_TURN_LIMIT,
+        _select_chat_model, FREE_TIER_TIGHT_OUTPUT_TOKENS, TOKEN_BUDGETS,
     )
-    cheap = _select_chat_model(user_plan="free", session_turn_count=1, lang="en")
+    cheap = _select_chat_model(user_plan="free", session_turn_count=5, lang="en")
     assert cheap["tier"] == "cheap"
     assert cheap["provider"] == "workers_ai_mistral_7b"
+    assert cheap["max_output_tokens"] == TOKEN_BUDGETS["chat_turn"]["max_output_tokens"]
 
-    primary = _select_chat_model(
-        user_plan="free", session_turn_count=SESSION_CHEAP_TURN_LIMIT + 3, lang="en",
-    )
-    assert primary["tier"] == "primary"
-    # Task #549 — Workers-AI Llama-3.2-3B is the runway-aware default primary.
-    assert primary["provider"] == "workers_ai_llama32_3b"
+    tight = _select_chat_model(user_plan="free", session_turn_count=15, lang="en")
+    assert tight["tier"] == "tight"
+    assert tight["provider"] == "workers_ai_mistral_7b"
+    assert tight["max_output_tokens"] == FREE_TIER_TIGHT_OUTPUT_TOKENS
 
-    conservative = _select_chat_model(
-        user_plan="free", session_turn_count=20, lang="en",
-    )
-    assert conservative["tier"] == "conservative"
-    assert conservative["max_output_tokens"] == CONSERVATIVE_OUTPUT_TOKENS
+    retrieval = _select_chat_model(user_plan="free", session_turn_count=25, lang="en")
+    assert retrieval["tier"] == "retrieval_only"
+    assert retrieval["provider"] is None
+    assert retrieval["max_output_tokens"] == 0
+
+    paywall = _select_chat_model(user_plan="free", session_turn_count=35, lang="en")
+    assert paywall["tier"] == "paywall"
+    assert paywall["provider"] is None
 
 
 def test_max_output_tokens_clamps_request():

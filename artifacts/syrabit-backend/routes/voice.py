@@ -38,7 +38,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Depends, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from auth_deps import get_current_user, get_current_user_optional, require_paid_plan
+from auth_deps import (
+    FREE_VOICE_PREVIEW_TTS_CHAR_LIMIT,
+    get_current_user,
+    get_current_user_optional,
+    require_paid_plan,
+    require_paid_plan_or_voice_preview,
+)
 # Task #513 §B — STT post-summary uses the `stt_post_summary` budget
 # (2000 in / 500 out). Imported here so the cost_caps wiring regression
 # test catches a forgotten clamp on the voice dispatch path.
@@ -367,8 +373,20 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 )
 async def text_to_speech(
     body: TtsRequest,
-    current_user: dict = Depends(require_paid_plan),
+    current_user: dict = Depends(require_paid_plan_or_voice_preview),
 ):
+    # Task #581 §L9 — free-tier voice preview cap (~30s of audio).
+    # The dep stamps `__voice_preview=True` for free callers; paid
+    # callers do not carry the flag and pass through unchanged.
+    if current_user.get("__voice_preview") and len(body.text or "") > FREE_VOICE_PREVIEW_TTS_CHAR_LIMIT:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Free voice preview is capped at ~30s ({FREE_VOICE_PREVIEW_TTS_CHAR_LIMIT} chars). "
+                "Upgrade to Pro for unlimited TTS."
+            ),
+            headers={"X-Paywall-Feature": "voice", "X-Voice-Preview-Char-Limit": str(FREE_VOICE_PREVIEW_TTS_CHAR_LIMIT)},
+        )
     lang_key = body.language.lower().strip()
 
     # Task #247: Google Neural2 dispatch for Indic languages.
@@ -445,7 +463,7 @@ async def text_to_speech(
 async def speech_to_text(
     audio: UploadFile = File(..., description="Audio file (mp3, wav, flac, ogg, m4a, webm)"),
     language: str = Form("en", description="BCP-47 language code (en, hi, as, ...)"),
-    current_user: dict = Depends(require_paid_plan),
+    current_user: dict = Depends(require_paid_plan_or_voice_preview),
 ):
     audio_bytes = await audio.read()
     if not audio_bytes:
@@ -479,7 +497,7 @@ async def voice_pipeline(
     language: str = Form("en", description="BCP-47 language code for both STT and TTS legs"),
     voice_id: Optional[str] = Form(None, description="TTS voice ID (ElevenLabs)"),
     system_prompt: Optional[str] = Form(None, description="System prompt injected before the user transcript"),
-    current_user: dict = Depends(require_paid_plan),
+    current_user: dict = Depends(require_paid_plan_or_voice_preview),
 ):
     audio_bytes = await audio.read()
     if not audio_bytes:

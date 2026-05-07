@@ -70,6 +70,27 @@ DEGRADATION_PCT_PAUSE_BATCH = 0.60
 DEGRADATION_PCT_VOICE_OFF   = 0.80
 DEGRADATION_PCT_FREE_503    = 0.95
 
+# ── Task #581 — free-tier-first MeterD ladder (L10) ────────────────────────
+# These four thresholds run BEFORE the 60/80/95 ladder above so the
+# system sheds free-user load FIRST (the cohort that drives ~80% of cost
+# but contributes <5% of revenue) before touching paid features. Each
+# step is consumed by `free_tier_dispatch_state(spend_fraction)`:
+#   40 % → free output token cap halved (L7 caps tightened further).
+#   55 % → free turns 21-30 collapse to paywall (drop the retrieval-only
+#          bucket — the lambda still answers via the materialized stores
+#          inside `retrieval_first.try_resolve` but no LLM is invoked).
+#   70 % → free turns 11-20 collapse to paywall (drop the tight bucket).
+#   85 % → ALL free chat → paywall (only turns 1-10 cheap survive… no,
+#          this stage is the "all-free-chat-off" stage; turns 1-10 also
+#          paywall here. The 95% DEGRADATION_PCT_FREE_503 stage above
+#          is the last-resort 503 for free users, paid still works.)
+# Strict ordering enforced by `scripts/check_budget_ceiling.py`:
+#   0 < TIGHTEN_1 < TIGHTEN_2 < TIGHTEN_3 < TIGHTEN_4 < PAUSE_BATCH=0.60
+DEGRADATION_PCT_FREE_TIGHTEN_1 = 0.40
+DEGRADATION_PCT_FREE_TIGHTEN_2 = 0.50
+DEGRADATION_PCT_FREE_TIGHTEN_3 = 0.55
+DEGRADATION_PCT_FREE_TIGHTEN_4 = 0.58
+
 
 def _monthly_total_usd_cap() -> float:
     raw = (os.environ.get("MONTHLY_TOTAL_USD_CAP", "") or "").strip()
@@ -226,6 +247,122 @@ TOKEN_BUDGETS: dict[str, dict[str, int]] = {
     "embed":              {"max_input_tokens": 1_500, "max_output_tokens": 0},
 }
 
+# ── Task #581 §L7 — free-tier per-content-type output sub-caps ─────────────
+# These are *additional* per-content-type ceilings applied ONLY to free
+# users — paid users keep the full TOKEN_BUDGETS["chat_turn"] /
+# ["content_generation"] output budget. The dispatcher resolves the
+# effective output cap as min(TOKEN_BUDGETS[call_type], FREE_TIER_OUTPUT_CAPS[content_type])
+# via `effective_free_tier_output_cap(content_type, plan, base_cap)`.
+# Numbers come from a sample-based audit of definition / explanation /
+# MCQ-explanation / PYQ-answer outputs in admin pre-gen — the p95 length
+# of *useful* answers fits comfortably under the cap; longer outputs are
+# almost always model rambling.
+FREE_TIER_OUTPUT_CAPS: dict[str, int] = {
+    "definition":      200,   # one short paragraph
+    "explanation":     400,   # ~3 short paragraphs
+    "mcq_explanation": 200,   # one paragraph + answer
+    "pyq_answer":      500,   # one full board-style answer
+}
+
+
+def effective_free_tier_output_cap(
+    content_type: str,
+    *,
+    user_plan: str = "free",
+    base_cap: int | None = None,
+) -> int:
+    """Return the effective output-token ceiling for a single LLM call.
+
+    Paid plans always get `base_cap` (or the chat_turn budget when
+    base_cap is None). Free plans get the smaller of `base_cap` and the
+    per-content-type cap from `FREE_TIER_OUTPUT_CAPS`. Unknown
+    content_types fall back to base_cap (no extra clamp). Used by L7 to
+    keep "give me a definition" from spending 800 output tokens on
+    free-tier turns.
+    """
+    base = int(base_cap) if base_cap is not None else int(
+        TOKEN_BUDGETS["chat_turn"]["max_output_tokens"]
+    )
+    plan = (user_plan or "free").strip().lower()
+    if plan and plan != "free":
+        return base
+    sub = FREE_TIER_OUTPUT_CAPS.get((content_type or "").strip().lower())
+    if sub is None:
+        return base
+    return max(1, min(base, int(sub)))
+
+
+# ── Task #581 §L9 — long-context >8k paid-only gate ────────────────────────
+# Free callers cannot ship more than `LONG_CONTEXT_FREE_MAX_INPUT_TOKENS`
+# of input to chat / content_generation. The chat dispatcher invokes
+# `assert_input_under_long_context_cap(input_tokens, user_plan)` before
+# the provider call; on violation it raises a 402 with a "long-context
+# is a paid feature" body. Helper is pure — caller is responsible for
+# the HTTPException path so this module stays import-safe in the
+# non-FastAPI Lambda batch jobs.
+LONG_CONTEXT_FREE_MAX_INPUT_TOKENS = 8_000
+
+
+def is_long_context_paid_only(input_tokens: int, user_plan: str = "free") -> bool:
+    """Return True iff this call must be paywalled because it exceeds
+    the free-tier long-context ceiling. Paid plans always return False.
+    """
+    plan = (user_plan or "free").strip().lower()
+    if plan and plan != "free":
+        return False
+    return int(input_tokens or 0) > LONG_CONTEXT_FREE_MAX_INPUT_TOKENS
+
+
+# ── Task #581 §L10 — free-tier-first MeterD ladder evaluator ───────────────
+def free_tier_dispatch_state(spend_fraction: float) -> dict:
+    """Resolve the active free-tier degradation step from a spend ratio.
+
+    `spend_fraction` is `current_month_usd / monthly_cap_usd` in
+    [0.0, 1.0+]. Returns:
+
+        {
+            "level": 0..4,                        # 0 = no degradation
+            "free_output_multiplier": 1.0|0.5,    # halves L7 caps at L1+
+            "free_turns_21_30_paywalled": bool,   # collapse retrieval bucket
+            "free_turns_11_20_paywalled": bool,   # collapse tight bucket
+            "free_chat_paywalled": bool,          # all free chat → 402
+        }
+
+    Pure function — no Redis, no env. The caller computes
+    `spend_fraction` from MeterD's monthly bucket via the runtime
+    helper `credit_burn_meter_runtime.monthly_spend_fraction()`.
+    """
+    try:
+        f = float(spend_fraction or 0.0)
+    except (TypeError, ValueError):
+        f = 0.0
+    if f < 0.0:
+        f = 0.0
+    if f >= DEGRADATION_PCT_FREE_TIGHTEN_4:
+        level = 4
+    elif f >= DEGRADATION_PCT_FREE_TIGHTEN_3:
+        level = 3
+    elif f >= DEGRADATION_PCT_FREE_TIGHTEN_2:
+        level = 2
+    elif f >= DEGRADATION_PCT_FREE_TIGHTEN_1:
+        level = 1
+    else:
+        level = 0
+    return {
+        "level": level,
+        "free_output_multiplier": 0.5 if level >= 1 else 1.0,
+        "free_turns_21_30_paywalled": level >= 2,
+        "free_turns_11_20_paywalled": level >= 3,
+        "free_chat_paywalled": level >= 4,
+    }
+
+
+# ── Task #581 §L4 — free-tier 4-step turn ladder constants ─────────────────
+FREE_TIER_TURN_NORMAL_CEILING = 10        # 1-10  → cheap, full chat output
+FREE_TIER_TURN_TIGHT_CEILING = 20         # 11-20 → cheap + tight output
+FREE_TIER_TURN_RETRIEVAL_ONLY_CEILING = 30  # 21-30 → retrieval_first only
+FREE_TIER_TIGHT_OUTPUT_TOKENS = 400       # smaller than CONSERVATIVE_OUTPUT_TOKENS
+
 
 # ── Token-counting heuristic ───────────────────────────────────────────────
 def _approx_token_count(text: str) -> int:
@@ -365,6 +502,7 @@ def _select_chat_model(
     user_plan: str = "free",
     lang: str = "en",
     cheaponly_active: bool = False,
+    monthly_spend_fraction: float = 0.0,
 ) -> dict:
     """Return the dispatch decision for one English chat turn.
 
@@ -396,6 +534,10 @@ def _select_chat_model(
     """
     plan = (user_plan or "free").strip().lower()
     lang_lc = (lang or "en").strip().lower()
+    is_indic = (
+        lang_lc.startswith("as")
+        or lang_lc in {"hi", "bn", "hi-in", "bn-in", "as-in"}
+    )
 
     # Task #554 — credit-runway-aware 2-position chain. Position 0 is
     # the head we ship; position 1 is the documented fallback that
@@ -406,15 +548,20 @@ def _select_chat_model(
         "gemini-2.5-flash" if primary_provider == "vertex"
         else "@cf/meta/llama-3.2-3b-instruct"
     )
+    # Task #581 §L1 — free users are HARD-ROUTED off Vertex. Even when
+    # the credit-runway-aware chain head is `vertex`, free callers
+    # always get Workers-AI Llama-3.2-3B (or Mistral-7B in the cheap
+    # bucket). Vertex spend is reserved for paid traffic + admin
+    # generation.  Paid users keep the runway-aware primary.
+    free_primary_provider = "workers_ai_llama32_3b"
+    free_primary_model = "@cf/meta/llama-3.2-3b-instruct"
 
     # Rule D LOCKED — global monthly USD cap reached. Force the
     # cheap-tier (Workers-AI Mistral-7B) for English chat regardless of
     # plan / turn count. Assamese still uses Sarvam (the bypass below
     # has higher precedence) because the Indic specialist is the only
     # provider that produces Assamese output.
-    if cheaponly_active and not (
-        lang_lc.startswith("as") or lang_lc in {"hi", "bn", "hi-in", "bn-in", "as-in"}
-    ):
+    if cheaponly_active and not is_indic:
         return {
             "tier": "cheap",
             "provider": "workers_ai_mistral_7b",
@@ -424,7 +571,7 @@ def _select_chat_model(
         }
 
     # Assamese bypass — Sarvam is the locked Assamese-chat primary.
-    if lang_lc.startswith("as") or lang_lc in {"hi", "bn", "hi-in", "bn-in", "as-in"}:
+    if is_indic:
         return {
             "tier": "primary",
             "provider": "sarvam",
@@ -432,7 +579,10 @@ def _select_chat_model(
             "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
         }
 
-    # Paid users — runway-aware primary, full budget.
+    # Paid users — runway-aware primary, full budget. Long-context
+    # paywall (L9) is enforced by the caller via
+    # `is_long_context_paid_only(input_tokens, plan)` BEFORE invoking
+    # this helper.
     if plan and plan != "free":
         return {
             "tier": "paid",
@@ -441,27 +591,90 @@ def _select_chat_model(
             "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
         }
 
-    # Free user — tier on session turn count.
+    # ── Free user dispatch — Task #581 §L4 four-step turn ladder ─────────
+    # Combined with the §L10 free-tier-first MeterD ladder via
+    # `monthly_spend_fraction`. The caller is responsible for honouring
+    # tier=="paywall" / tier=="retrieval_only" by either returning a
+    # 402 or invoking `retrieval_first.try_resolve(...)` before any
+    # LLM call.
     turn = max(0, int(session_turn_count or 0))
-    if turn <= SESSION_CHEAP_TURN_LIMIT:
+    fts = free_tier_dispatch_state(monthly_spend_fraction)
+    out_mult = float(fts["free_output_multiplier"])
+
+    # §L10 stage-4 — all free chat collapsed.
+    if fts["free_chat_paywalled"]:
         return {
-            "tier": "cheap",
+            "tier": "paywall",
+            "provider": None,
+            "model": None,
+            "max_output_tokens": 0,
+            "reason": "meter_d_free_tighten_4",
+            "free_tier_state": fts,
+        }
+
+    # §L4 hard ceiling — turn 31+ → paywall regardless of spend.
+    if turn > FREE_TIER_TURN_RETRIEVAL_ONLY_CEILING:
+        return {
+            "tier": "paywall",
+            "provider": None,
+            "model": None,
+            "max_output_tokens": 0,
+            "reason": "free_tier_turn_ceiling_30",
+            "free_tier_state": fts,
+        }
+
+    # §L4 turns 21-30 — retrieval-only bucket. The caller MUST first
+    # call `retrieval_first.try_resolve(...)`; if that misses, the
+    # bucket collapses to a paywall (no LLM call). At §L10 stage-2+ we
+    # also collapse this bucket directly.
+    if turn > FREE_TIER_TURN_TIGHT_CEILING:
+        if fts["free_turns_21_30_paywalled"]:
+            return {
+                "tier": "paywall",
+                "provider": None,
+                "model": None,
+                "max_output_tokens": 0,
+                "reason": "meter_d_free_tighten_2_collapse_retrieval_only",
+                "free_tier_state": fts,
+            }
+        return {
+            "tier": "retrieval_only",
+            "provider": None,
+            "model": None,
+            "max_output_tokens": 0,
+            "reason": "free_tier_turn_21_30_retrieval_only",
+            "free_tier_state": fts,
+        }
+
+    # §L4 turns 11-20 — tight cheap (workers_ai_mistral_7b at 400 out).
+    # §L10 stage-3+ collapses this bucket to paywall.
+    if turn > FREE_TIER_TURN_NORMAL_CEILING:
+        if fts["free_turns_11_20_paywalled"]:
+            return {
+                "tier": "paywall",
+                "provider": None,
+                "model": None,
+                "max_output_tokens": 0,
+                "reason": "meter_d_free_tighten_3_collapse_tight",
+                "free_tier_state": fts,
+            }
+        return {
+            "tier": "tight",
             "provider": "workers_ai_mistral_7b",
             "model": "@cf/mistral/mistral-7b-instruct-v0.3",
-            "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
+            "max_output_tokens": max(1, int(FREE_TIER_TIGHT_OUTPUT_TOKENS * out_mult)),
+            "free_tier_state": fts,
         }
-    if turn > 15:
-        return {
-            "tier": "conservative",
-            "provider": primary_provider,
-            "model": primary_model,
-            "max_output_tokens": CONSERVATIVE_OUTPUT_TOKENS,
-        }
+
+    # §L4 turns 1-10 — normal cheap. Output cap honours §L10 stage-1
+    # halving when active.
+    base_out = TOKEN_BUDGETS["chat_turn"]["max_output_tokens"]
     return {
-        "tier": "primary",
-        "provider": primary_provider,
-        "model": primary_model,
-        "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
+        "tier": "cheap",
+        "provider": "workers_ai_mistral_7b",
+        "model": "@cf/mistral/mistral-7b-instruct-v0.3",
+        "max_output_tokens": max(1, int(base_out * out_mult)),
+        "free_tier_state": fts,
     }
 
 
@@ -472,6 +685,19 @@ __all__ = [
     "DEGRADATION_PCT_PAUSE_BATCH",
     "DEGRADATION_PCT_VOICE_OFF",
     "DEGRADATION_PCT_FREE_503",
+    "DEGRADATION_PCT_FREE_TIGHTEN_1",
+    "DEGRADATION_PCT_FREE_TIGHTEN_2",
+    "DEGRADATION_PCT_FREE_TIGHTEN_3",
+    "DEGRADATION_PCT_FREE_TIGHTEN_4",
+    "FREE_TIER_OUTPUT_CAPS",
+    "FREE_TIER_TURN_NORMAL_CEILING",
+    "FREE_TIER_TURN_TIGHT_CEILING",
+    "FREE_TIER_TURN_RETRIEVAL_ONLY_CEILING",
+    "FREE_TIER_TIGHT_OUTPUT_TOKENS",
+    "LONG_CONTEXT_FREE_MAX_INPUT_TOKENS",
+    "effective_free_tier_output_cap",
+    "is_long_context_paid_only",
+    "free_tier_dispatch_state",
     "clamp_messages",
     "max_output_tokens_for",
     "_select_chat_model",

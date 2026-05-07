@@ -243,6 +243,57 @@ async def get_current_user_optional(
     except:
         return None
 
+async def require_paid_plan_or_voice_preview(
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Task #581 §L9 — paid-plan gate with a free-tier voice preview escape.
+
+    Same paid-or-better gate as `require_paid_plan`, except free callers
+    get ONE voice-preview budget per UTC day:
+      * 1 STT call per day (any duration up to the existing 25 MB cap)
+      * 1 TTS call per day, capped at ~30 s of audio (≤ 600 chars input)
+
+    The TTS char limit is enforced inside the route (it sees the body
+    text); this dep only manages the once-per-day allowance counter
+    (`voice:free:preview:{user_id}:day`) and stamps the resolved user
+    dict with `__voice_preview=True` so the route knows to apply the
+    char clamp.
+
+    Paid users (plan != "free") pass through unchanged with no flag.
+    Admin / staff / educator bypass unconditionally — same semantics as
+    `require_paid_plan` so internal CMS / QA flows keep working even
+    when an internal user's plan field is "free".
+    """
+    if (user or {}).get("is_admin") or (user or {}).get("role") in {"admin", "staff", "educator"}:
+        return user
+    plan = (user.get("plan") or "free").strip().lower()
+    if plan and plan != "free":
+        return user
+    # Free callers — check the once-per-day preview counter.
+    user_id = user.get("id", "anonymous")
+    if not check_rate_limit(
+        f"voice:free:preview:{user_id}:day",
+        max_requests=1,
+        window_seconds=86400,
+    ):
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                "Free-tier voice preview already used today (1 STT + 1 short TTS/day). "
+                "Upgrade to Pro for unlimited voice features."
+            ),
+            headers={"X-Paywall-Feature": "voice"},
+        )
+    user = dict(user)
+    user["__voice_preview"] = True
+    return user
+
+
+# Task #581 §L9 — TTS preview char limit (~30s @ ~20 chars/sec).
+FREE_VOICE_PREVIEW_TTS_CHAR_LIMIT = 600
+
+
 async def require_paid_plan(user: dict = Depends(get_current_user)) -> dict:
     """Task #549 — gate paid-only routes (currently /api/voice/*).
 
@@ -709,7 +760,17 @@ async def rate_limit_chat_optional(
 
 OCR_PER_MIN_CAP = 10            # per-device or per-IP per-minute cap on OCR calls.
 OCR_DAILY_CAP_ANON = 50         # per-device daily OCR cap for anonymous callers.
-OCR_DAILY_CAP_USER = 100        # per-user daily OCR cap for logged-in callers.
+# Task #581 §L9 — split the per-user daily OCR cap by plan. Free users
+# (the cohort that drives the bulk of Vertex Vision spend) drop to
+# 3/day so a curious user can try the feature but cannot scrape an
+# entire textbook for free. Paid users keep the original 100/day cap.
+OCR_DAILY_CAP_USER_FREE = 3     # per-free-user daily OCR cap.
+OCR_DAILY_CAP_USER_PAID = 100   # per-paid-user daily OCR cap.
+# Back-compat alias — the legacy constant is still imported by some
+# admin tooling. Kept pointing at the paid ceiling so the meaning of
+# "OCR_DAILY_CAP_USER" (the per-USER ceiling, applied to the privileged
+# tier) doesn't change.
+OCR_DAILY_CAP_USER = OCR_DAILY_CAP_USER_PAID
 # Per-IP daily OCR ceiling — separate bucket from the chat coarse cap
 # (``IP_COARSE_DAILY_CAP``) so OCR uploads do NOT eat into the per-IP
 # chat budget. Sized for shared egress IPs (school WiFi, hostel,
@@ -744,14 +805,22 @@ async def rate_limit_ocr_optional(
                 detail=f"OCR rate limit exceeded — {OCR_PER_MIN_CAP} uploads/minute. Try again in a moment.",
                 headers={"Retry-After": "60", "X-RateLimit-Limit": str(OCR_PER_MIN_CAP)},
             )
-        if not check_rate_limit(f"ocr:day:{user_id}", max_requests=OCR_DAILY_CAP_USER, window_seconds=86400):
+        # Task #581 §L9 — split the per-user OCR daily cap by plan.
+        # Free users get 3/day (anti-abuse for Vertex Vision spend);
+        # paid users keep the original 100/day. Admin / staff /
+        # educator bypass via the same path used by other paid-only
+        # gates (their plan resolves to a non-"free" value).
+        plan = (user.get("plan") or "free").strip().lower()
+        daily_cap = OCR_DAILY_CAP_USER_FREE if (not plan or plan == "free") else OCR_DAILY_CAP_USER_PAID
+        if not check_rate_limit(f"ocr:day:{user_id}", max_requests=daily_cap, window_seconds=86400):
             raise HTTPException(
                 status_code=429,
                 detail=(
-                    f"Daily OCR limit reached ({OCR_DAILY_CAP_USER} image uploads/day). "
-                    "Resets at midnight UTC."
-                ),
-                headers={"Retry-After": "3600", "X-RateLimit-Limit": str(OCR_DAILY_CAP_USER)},
+                    f"Daily OCR limit reached ({daily_cap} image uploads/day). "
+                    "Resets at midnight UTC. "
+                    + ("Upgrade to Pro for 100 OCR scans/day." if daily_cap == OCR_DAILY_CAP_USER_FREE else "")
+                ).strip(),
+                headers={"Retry-After": "3600", "X-RateLimit-Limit": str(daily_cap)},
             )
         return user
 
