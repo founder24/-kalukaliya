@@ -77,6 +77,35 @@ name: cf-edge-cache-smoke
 #   PROD_ADMIN_JWT         Repo secret. Long-lived admin Bearer token
 #                          for production. Distinct from the staging
 #                          token — rotation is independent.
+#
+# Optional repo secrets (Task #496 — environment-aware paging)
+# ------------------------------------------------------------
+# Task #456 put PRODUCTION on the same matrix as staging. Without
+# environment-tagged paging, on-call sees "cf-edge-cache-smoke failed"
+# and has to open Actions to find out *which* environment regressed —
+# fine for a staging flap during a deploy, painful when the regression
+# is in prod and minutes matter.
+#
+# To keep that distinction crisp, each matrix leg posts to its own
+# Slack webhook on failure (in addition to GitHub's failed-workflow
+# email which still fires for both):
+#
+#   CF_EDGE_CACHE_SMOKE_PAGE_WEBHOOK   Production failures route here.
+#                                      Wire this to the high-priority
+#                                      on-call page channel (PagerDuty
+#                                      Slack app, #oncall-prod, etc.).
+#                                      Production CF_EDGE_CACHE drift
+#                                      is a user-visible incident.
+#   CF_EDGE_CACHE_SMOKE_SLACK_WEBHOOK  Staging failures route here.
+#                                      Wire this to a lower-priority
+#                                      channel (e.g. #alerts-staging).
+#                                      Staging flaps are common during
+#                                      deploys and should NOT page on-
+#                                      call out of hours.
+#
+# When the appropriate webhook is unset, the alert step is a no-op with
+# a `::warning::` annotation and the workflow still fails so the
+# GitHub failed-workflow email goes out as a fallback signal.
 
 on:
   workflow_dispatch:
@@ -216,5 +245,115 @@ jobs:
         run: pip install "httpx>=0.27,<0.29"
 
       - name: Run CF_EDGE_CACHE end-to-end smoke (${{ matrix.target }})
+        id: smoke
         if: steps.gate.outputs.skip != 'true'
-        run: python -m scripts.cf_edge_cache_smoke
+        # Tee the smoke output to a file so the alert step below can
+        # include the last few lines of failure context in the Slack
+        # payload (otherwise on-call has to open the Actions UI to see
+        # which assertion tripped). `set +o pipefail; PIPESTATUS[0]`
+        # preserves the script's exit code even though tee always
+        # succeeds.
+        run: |
+          set +e
+          python -m scripts.cf_edge_cache_smoke 2>&1 | tee /tmp/cf_edge_cache_smoke.out
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Page on-call with environment name on failure
+        # Task #496 — Route failures to an environment-specific Slack
+        # webhook so on-call sees `staging` vs `production` in the
+        # alert payload itself, without having to open the Actions
+        # tab. Production failures hit the high-priority page channel;
+        # staging stays on the lower-priority alerts channel.
+        #
+        # Runs only when the smoke step itself failed (skipped no-op
+        # legs and earlier setup failures don't page — those surface
+        # via the GitHub failed-workflow email instead).
+        if: ${{ failure() && steps.gate.outputs.skip != 'true' && steps.smoke.conclusion == 'failure' }}
+        env:
+          PAGE_WEBHOOK_URL:  ${{ secrets.CF_EDGE_CACHE_SMOKE_PAGE_WEBHOOK }}
+          SLACK_WEBHOOK_URL: ${{ secrets.CF_EDGE_CACHE_SMOKE_SLACK_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIGGER: ${{ github.event_name }}
+        working-directory: .
+        run: |
+          set +e
+          # Pick the destination webhook AND the urgency framing based
+          # on which matrix leg failed. Production gets a :rotating_light:
+          # + "PAGE" prefix so a PagerDuty-Slack app or channel keyword
+          # router can escalate; staging gets a :warning: so the same
+          # router can leave it as a low-noise FYI.
+          if [ "$MATRIX_TARGET" = "production" ]; then
+            WEBHOOK="$PAGE_WEBHOOK_URL"
+            WEBHOOK_NAME="CF_EDGE_CACHE_SMOKE_PAGE_WEBHOOK"
+            SEVERITY="page"
+            EMOJI=":rotating_light:"
+            HEADER="PAGE — cf-edge-cache-smoke FAILED on PRODUCTION"
+          else
+            WEBHOOK="$SLACK_WEBHOOK_URL"
+            WEBHOOK_NAME="CF_EDGE_CACHE_SMOKE_SLACK_WEBHOOK"
+            SEVERITY="warning"
+            EMOJI=":warning:"
+            HEADER="cf-edge-cache-smoke failed on STAGING"
+          fi
+
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "::warning title=Alert skipped::${WEBHOOK_NAME} not configured for target=${MATRIX_TARGET}; on-call will only see the GitHub failed-workflow email. Configure the webhook to route this to the right Slack channel."
+            exit 0
+          fi
+
+          # Last 1500 chars of the smoke output is plenty for on-call
+          # to see which assertion tripped without blowing past Slack's
+          # 40k-char block limit.
+          smoke_tail=$(tail -c 1500 /tmp/cf_edge_cache_smoke.out 2>/dev/null || echo "(no output captured)")
+
+          payload=$(jq -n \
+            --arg target  "$MATRIX_TARGET" \
+            --arg sev     "$SEVERITY" \
+            --arg emoji   "$EMOJI" \
+            --arg header  "$HEADER" \
+            --arg run     "$RUN_URL" \
+            --arg trigger "$TRIGGER" \
+            --arg tail    "$smoke_tail" \
+            '{
+              text: ($emoji + " " + $header),
+              # Keep environment + severity as top-level fields too so a
+              # downstream router (PagerDuty Events API, custom Lambda,
+              # etc.) can branch on them without parsing the rendered
+              # text.
+              environment: $target,
+              severity: $sev,
+              runUrl: $run,
+              trigger: $trigger,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ($emoji + " *" + $header + "*\n"
+                      + "*environment:* `" + $target + "`\n"
+                      + "*trigger:* `" + $trigger + "`\n"
+                      + "<" + $run + "|GitHub Actions run>")
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("*smoke output (last 1500 chars)*\n```\n" + $tail + "\n```")
+                  }
+                }
+              ]
+            }')
+
+          http_code=$(curl -sS -o /tmp/alert_body -w '%{http_code}' \
+            -X POST "$WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            --max-time 15 --retry 2 --retry-delay 5 \
+            -d "$payload")
+          echo "[alert] target=$MATRIX_TARGET severity=$SEVERITY http=$http_code body=$(cat /tmp/alert_body 2>/dev/null | head -c 200)"
+          if [ "$http_code" != "200" ]; then
+            echo "::warning title=Alert delivery failed::${WEBHOOK_NAME} returned HTTP $http_code (job will still fail so the GitHub failed-workflow email goes out)"
+          fi
+          exit 0
