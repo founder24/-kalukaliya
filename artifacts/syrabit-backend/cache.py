@@ -56,14 +56,19 @@ def l1_counters_reset_for_tests() -> None:
 class _InstrumentedTTLCache(cachetools.TTLCache):
     """`cachetools.TTLCache` subclass that records hits/misses/sets per name.
 
-    Every public read path on the parent class either calls `__getitem__` (raises
-    KeyError on miss) or `__contains__` (returns False on miss). We intercept
-    both. `get(default=None)` calls `__getitem__` internally on cachetools so we
-    do not need a separate override for it.
+    Counting policy (Task #571 round-5 — accuracy fix):
+    Every successful public read = 1 hit, every failed public read = 1 miss.
+    The catch is that `cachetools.Cache.get()` is implemented as roughly
+    ``if key in self: return self[key]`` — which would route a single hit
+    through BOTH `__contains__` and `__getitem__` and double-count it.
+    We therefore override `get()` directly to dispatch through `__getitem__`
+    only, and we leave `__contains__` to count standalone `key in cache`
+    queries (which are independent read attempts and deserve their own
+    accounting). Sets count `__setitem__` only — `pop` of an absent key
+    is silently a no-op for the cardinality counter, matching the parent
+    class semantics.
 
-    Sets count both `__setitem__` and `pop()`-then-set patterns; we only count
-    successful inserts (a `pop` of a non-existent key is silently a no-op for
-    the cardinality counter)."""
+    Verified by `tests/test_cache_l1_instrumentation.py`."""
 
     def __init__(self, *args: Any, name: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -84,9 +89,24 @@ class _InstrumentedTTLCache(cachetools.TTLCache):
         return v
 
     def __contains__(self, key: object) -> bool:  # type: ignore[override]
+        # Standalone `key in cache` query. Counted independently of
+        # `get()` / `__getitem__` so a containment check followed by a
+        # subsequent read counts as two reads (which is what it is — two
+        # public lookups on this ring).
         present = super().__contains__(key)
         _l1_record(self._name, "hits" if present else "misses")
         return present
+
+    def get(self, key, default=None):  # type: ignore[override]
+        # Override the cachetools default `get` (which does `if key in
+        # self: return self[key]`) so a single `get()` does not double-
+        # count through both `__contains__` and `__getitem__`. Routing
+        # through `__getitem__` only means each `get()` call increments
+        # exactly one counter — the hit on success or the miss on KeyError.
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
     def __setitem__(self, key: Any, value: Any) -> None:  # type: ignore[override]
         super().__setitem__(key, value)
