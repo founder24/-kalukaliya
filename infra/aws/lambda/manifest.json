@@ -1,0 +1,48 @@
+{
+  "_doc": "Task #551 §B / §E — registry of ACA Jobs that have been migrated to AWS Lambda + EventBridge. The CI guard `artifacts/syrabit-backend/scripts/check_dead_providers.py` walks `artifacts/syrabit-backend/aca_jobs/*.py` and fails the build for any module not represented here. Adding a new ACA Job without first landing its Lambda counterpart (handler + Terraform + EventBridge schedule) is a CI hard-fail.",
+  "schema_version": 1,
+  "migrated_jobs": [
+    {
+      "aca_module": "aca_jobs.as_translation_backfill",
+      "lambda_function_name": "syrabit-as-translation-backfill",
+      "handler": "lambda_batch.as_translation_backfill.handler",
+      "schedule": "cron(0 3 * * ? *)",
+      "schedule_doc": "daily 03:00 UTC",
+      "memory_mb": 512,
+      "timeout_s": 900,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "shadow_start": "2026-05-07",
+      "shadow_end": "2026-05-14",
+      "cutover_status": "pending_shadow"
+    },
+    {
+      "aca_module": "aca_jobs.embed_backfill",
+      "lambda_function_name": "syrabit-embed-backfill",
+      "handler": "lambda_batch.embed_backfill.handler",
+      "schedule": "cron(0 */6 * * ? *)",
+      "schedule_doc": "every 6 hours",
+      "memory_mb": 512,
+      "timeout_s": 900,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "shadow_start": "2026-05-07",
+      "shadow_end": "2026-05-14",
+      "cutover_status": "pending_shadow"
+    },
+    {
+      "aca_module": "aca_jobs.comprehend_sampler",
+      "lambda_function_name": "syrabit-comprehend-sampler",
+      "handler": "lambda_batch.comprehend_sampler.handler",
+      "schedule": "cron(0 4 ? * SUN *)",
+      "schedule_doc": "weekly Sunday 04:00 UTC",
+      "memory_mb": 128,
+      "timeout_s": 300,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "shadow_start": "2026-05-07",
+      "shadow_end": "2026-05-14",
+      "cutover_status": "pending_shadow"
+    }
+  ],
+  "exempt_modules": [
+    "__init__"
+  ]
+}

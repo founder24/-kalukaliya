@@ -1778,24 +1778,36 @@ async def lifespan(app):
             f"[trustpilot-jsonld] runs index startup failed: {_tp_runs_err}"
         )
 
+    # Task #551 §B — single cutover gate for the three ACA Job loops
+    # that have AWS Lambda counterparts (`as_translation_backfill`,
+    # `embed_backfill`, `comprehend_sampler`). Set
+    # `ACA_JOB_BATCHES_DISABLED=1` once the 7-day shadow window
+    # closes and Lambda becomes the sole driver. Default OFF (loops
+    # still run in-process) so the shadow period is the safe default.
+    _aca_jobs_disabled = os.environ.get("ACA_JOB_BATCHES_DISABLED", "0").strip() in ("1", "true", "yes", "on")
+    if _aca_jobs_disabled:
+        logger.info("[aca-jobs] ACA_JOB_BATCHES_DISABLED=1 — in-process loops skipped (Lambda is sole driver per Task #551 §B)")
+
     # Task #337 — Comprehend sampled PII + sentiment background loop.
     # Wakes once an hour, scores ~25 chapters that haven't been touched
     # in 7 days, persists into ``content_analytics``. Fail-safe: any
     # exception is swallowed so a Comprehend outage cannot wedge the worker.
-    try:
-        from aca_jobs import comprehend_sampler as _csmp
-        _csmp.start(db)
-    except Exception as _csmp_err:
-        logger.warning(f"[aws-native] comprehend sampler start failed: {_csmp_err}")
+    if not _aca_jobs_disabled:
+        try:
+            from aca_jobs import comprehend_sampler as _csmp
+            _csmp.start(db)
+        except Exception as _csmp_err:
+            logger.warning(f"[aws-native] comprehend sampler start failed: {_csmp_err}")
 
     # Task #411 — legacy → workers_ai_custom embedding backfill.
     # Dormant by default (admin endpoint kicks it off); set
     # EMBED_BACKFILL_AUTOSTART=1 to run the periodic loop continuously.
-    try:
-        from aca_jobs import embed_backfill as _ebf
-        _ebf.start(db)
-    except Exception as _ebf_err:
-        logger.warning(f"[embed-backfill] start failed: {_ebf_err}")
+    if not _aca_jobs_disabled:
+        try:
+            from aca_jobs import embed_backfill as _ebf
+            _ebf.start(db)
+        except Exception as _ebf_err:
+            logger.warning(f"[embed-backfill] start failed: {_ebf_err}")
 
     # Task #434 — page on-call when the embed backfill stalls
     # (running=true but state.updated_at hasn't advanced) or starts
@@ -2127,6 +2139,10 @@ from routes.admin_audit_recent import (  # Task #386
     router as admin_audit_recent_router,
     init_admin_audit_recent,
 )
+from routes.admin_archive import (  # Task #551 §A — Glacier restore endpoint
+    router as admin_archive_router,
+    init_admin_archive,
+)
 from routes.admin_vectorize_shadow import router as admin_vectorize_shadow_router  # Task #383
 from routes.cf_web_analytics_config import router as cf_web_analytics_config_router  # Task #383
 from routes.turnstile_config import router as turnstile_config_router  # Task #404
@@ -2294,6 +2310,8 @@ api.include_router(admin_health_router)
 api.include_router(admin_cf_health_router)  # Task #383 — unified CF wins panel
 init_admin_audit_recent(db)  # Task #386
 api.include_router(admin_audit_recent_router)  # Task #386 — D1-first audit feed
+init_admin_archive(db)  # Task #551 §A — Glacier restore audit log
+api.include_router(admin_archive_router)  # Task #551 §A — POST /admin/archive/restore
 api.include_router(admin_vectorize_shadow_router)  # Task #383 — Vectorize parity ops
 api.include_router(cf_web_analytics_config_router)  # Task #383 — public CF beacon config
 api.include_router(turnstile_config_router)  # Task #404 — public Turnstile site-key config

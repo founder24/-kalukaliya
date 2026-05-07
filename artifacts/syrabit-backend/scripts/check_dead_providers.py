@@ -280,6 +280,10 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit/docs/infra/azure-landing-zone.md",
     "artifacts/syrabit/docs/infra/gcp-landing-zone.md",
     "artifacts/syrabit/docs/features/aws-native.md",
+    # Task #550 phased credit-runway memo names the dead-provider set
+    # in a `> banned by …` blockquote so operators can cross-reference
+    # the exclusion list against PROVIDER_PRIORITY. Documentation-only.
+    "artifacts/syrabit/docs/infra/credit-runway-cost-model.md",
 }
 ALLOWLIST_NAME_PREFIXES = ("CHANGELOG",)
 
@@ -341,6 +345,46 @@ def _scan_file(p: Path) -> list[str]:
     return failures
 
 
+def _check_aca_jobs_manifest() -> list[str]:
+    """Task #551 §E — every `aca_jobs/<name>.py` (excluding `__init__`)
+    MUST be represented in `infra/aws/lambda/manifest.json` so the
+    Lambda + EventBridge migration cannot quietly fall behind a new
+    in-process loop. Allowlist the legacy `__init__.py` and any
+    explicit `exempt_modules` entries from the manifest itself.
+    """
+    import json
+    failures: list[str] = []
+    aca_dir = BACKEND / "aca_jobs"
+    manifest_path = ROOT / "infra" / "aws" / "lambda" / "manifest.json"
+    if not aca_dir.exists():
+        return failures
+    if not manifest_path.exists():
+        failures.append(
+            f"{manifest_path.relative_to(ROOT)}: missing — Task #551 §E requires the migrated-jobs manifest."
+        )
+        return failures
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        failures.append(f"{manifest_path.relative_to(ROOT)}: invalid JSON ({exc})")
+        return failures
+    migrated = {
+        entry.get("aca_module", "").split(".", 1)[-1]
+        for entry in manifest.get("migrated_jobs", [])
+    }
+    exempt = set(manifest.get("exempt_modules", [])) | {"__init__"}
+    for path in sorted(aca_dir.glob("*.py")):
+        name = path.stem
+        if name in exempt:
+            continue
+        if name not in migrated:
+            failures.append(
+                f"aca_jobs/{path.name}: not present in infra/aws/lambda/manifest.json — "
+                f"Task #551 §E requires every aca_jobs/* loop to have a Lambda counterpart."
+            )
+    return failures
+
+
 def main() -> int:
     targets: list[Path] = []
     for base in (BACKEND, FRONTEND):
@@ -349,7 +393,7 @@ def main() -> int:
         for ext in ("*.py", "*.jsx", "*.js", "*.ts", "*.tsx", "*.md"):
             targets.extend(base.rglob(ext))
 
-    failures: list[str] = []
+    failures: list[str] = _check_aca_jobs_manifest()
     for p in targets:
         if _is_allowlisted(p):
             # Task #494 — the file-level allowlist exempts legacy banned

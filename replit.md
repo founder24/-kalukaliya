@@ -25,6 +25,8 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 - **Embed worker (Cloudflare):** `artifacts/syrabit/workers/embed-worker/`
 - **Edge proxy (Cloudflare):** `workers/edge-proxy/`
 - **Bicep + ACA deploy:** `infra/azure/aca-syrabit-backend.bicep`, `.github/workflows/azure-container-apps-deploy.yml`
+- **AWS Lambda batch jobs (Task #551):** `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf` + adapters in `artifacts/syrabit/services/backend/lambda_batch/`; migrated-jobs registry at `infra/aws/lambda/manifest.json`. Replaces the in-process `aca_jobs/*` loops on a 7-day shadow → cutover protocol.
+- **AWS S3 Glacier Deep Archive (Task #551):** `artifacts/syrabit/infra/aws/glacier-archive.tf` (3 compliance buckets, 7-year retention) + restore endpoint `routes/admin_archive.py` + runbook `artifacts/syrabit/docs/infra/glacier-restore-runbook.md`.
 - **Threat model:** `threat_model.md`
 - **V4 architecture (source of truth):** `infra/v4-locked-architecture.md`
 - **Four-cloud delegation matrix:** `infra/four-cloud-delegation.md`
@@ -79,4 +81,6 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 - **ACA cutover runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md`
 - **Provider decommission rationale (#347):** `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`
 - **Phased credit-runway cost model (Task #550):** `artifacts/syrabit/docs/infra/credit-runway-cost-model.md`
+- **AWS Glacier restore runbook (Task #551):** `artifacts/syrabit/docs/infra/glacier-restore-runbook.md`
+- **AWS Lambda batch-jobs manifest (Task #551 CI guard):** `infra/aws/lambda/manifest.json`
 - **Skills index:** `.local/skills/`

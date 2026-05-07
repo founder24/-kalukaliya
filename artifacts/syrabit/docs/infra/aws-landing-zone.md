@@ -311,6 +311,63 @@ references the secret ARNs and the SES identity ARN.)
 |                                      | lives in `route53-latency.tf` (and that's not a      |
 |                                      | landing-zone concern)                                |
 
+## 9. Glacier Deep Archive (Task #551 §A)
+
+Three S3 buckets host the never-touched compliance tail at
+~$0.00099 / GB-month — the cheapest legitimate AWS storage tier.
+
+| Bucket                              | Contents                                              | Hot → Deep Archive | Expiry  |
+|-------------------------------------|-------------------------------------------------------|--------------------|---------|
+| `syrabit-razorpay-receipts-prod`    | Razorpay invoices + payment audit trail (DPDP + IT)   | 90 days            | 7 years |
+| `syrabit-content-snapshots-prod`    | Chapter / notes / formatter outputs (canonical copy)  | 180 days           | 7 years |
+| `syrabit-cw-logs-archive-prod`      | CloudWatch Logs export tail (>14 d)                   | 30 days            | 7 years |
+
+Terraform: [`infra/aws/glacier-archive.tf`](../../infra/aws/glacier-archive.tf).
+Restore endpoint: `POST /api/admin/archive/restore` (admin-only,
+audit-logged to `admin_archive_restore_log`; recent requests at
+`GET /api/admin/archive/restore/log`).
+Restore SLA: **12 h Standard tier (~$0.02/GB)** or **48 h Bulk tier
+(~$0.0025/GB)** — Expedited is not supported for Deep Archive.
+Full procedure (restore, poll, download, decommission) lives in
+[`glacier-restore-runbook.md`](glacier-restore-runbook.md).
+
+The bucket allowlist for the restore endpoint is `GLACIER_ARCHIVE_BUCKETS`
+(comma-separated) — defaults to the three buckets above. Operator
+overrides are documented in the runbook.
+
+## 10. Lambda batch jobs (Task #551 §B)
+
+Three EventBridge-scheduled Lambda functions replace the in-process
+ACA Job loops in `artifacts/syrabit-backend/aca_jobs/`. All three
+re-use the same multi-entrypoint container image as
+`lambda-workers.tf` (handler dispatch via `image_config.command`),
+so we ship one image, not four.
+
+| Function                              | Schedule (UTC)              | Memory | Timeout | aca_jobs source                |
+|---------------------------------------|-----------------------------|--------|---------|--------------------------------|
+| `syrabit-as-translation-backfill`     | `cron(0 3 * * ? *)`         | 512 MB | 900 s   | `aca_jobs/as_translation_backfill.py` |
+| `syrabit-embed-backfill`              | `cron(0 */6 * * ? *)`       | 512 MB | 900 s   | `aca_jobs/embed_backfill.py`   |
+| `syrabit-comprehend-sampler`          | `cron(0 4 ? * SUN *)`       | 128 MB | 300 s   | `aca_jobs/comprehend_sampler.py` |
+
+Terraform: [`infra/aws/lambda-batch-jobs.tf`](../../infra/aws/lambda-batch-jobs.tf).
+Lambda adapters (thin wrappers around the existing async API): [`services/backend/lambda_batch/`](../../services/backend/lambda_batch/).
+Migrated-jobs registry (CI-enforced): [`infra/aws/lambda/manifest.json`](../../../../infra/aws/lambda/manifest.json).
+
+Each Lambda runs in `syrabit-workers-vpc` private subnets behind the
+existing `syrabit-workers-egress` SG so Mongo + Pinecone calls re-use
+the interface VPC endpoints and never touch the public NAT. Each has
+a CloudWatch alarm on `Errors > 0` over 1 h routed to the
+`syrabit-ops-alerts` SNS topic (same Slack webhook the rest of the
+landing zone uses).
+
+**Cutover protocol:** 7-day shadow period (Lambda + ACA in-process
+loop run side-by-side); a daily reconciliation report compares
+per-document outcomes (translation hashes, embed vector counts, sampler
+row counts). Cutover only when match-rate ≥ 99 % for 7 consecutive
+days. Once cut over, the in-process loops in `server.py` are turned off
+via `ACA_JOB_BATCHES_DISABLED=1`. **Rollback:** unset the env var; the
+ACA loops resume on the next pod restart.
+
 ## 12. Decommission notes
 
 If this landing zone ever has to be torn down:

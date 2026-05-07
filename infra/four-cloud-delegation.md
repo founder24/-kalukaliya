@@ -234,3 +234,28 @@ The four-cloud lock holds steady (no new providers; no budget shifts inside the 
 ### E5. K.1 — Model-optimization eval
 
 Tracked separately. The eval harness (Workers-AI Mistral-7B vs. Azure `gpt-4.1-nano` on the synthetic Syrabit chat traffic mix) is a follow-up item — it depends on the real cap-shaped traffic this task introduces. Current `_select_chat_model` rules are the founder-locked starting point; eval results refine the SESSION_CHEAP_TURN_LIMIT / CONSERVATIVE_OUTPUT_TOKENS thresholds in a future PR.
+
+---
+
+## §F — AWS utilization expansion (Task #551, 2026-05-07)
+
+The four-cloud lock holds (no new providers; no shift inside the 40/30/20/10 split). This addendum expands the AWS row of §A without breaching any "must NOT" rule from §B.
+
+### F1. S3 Glacier Deep Archive — cold compliance (§A row "Object storage (cold compliance)")
+
+- Three buckets land in `infra/aws/glacier-archive.tf`: `syrabit-razorpay-receipts-prod` (90 d → DA), `syrabit-content-snapshots-prod` (180 d → DA), `syrabit-cw-logs-archive-prod` (30 d → DA). All three expire at 7 years (DPDP + IT audit retention).
+- Restores go through `POST /admin/archive/restore` (admin-only, audit-logged to `admin_archive_restore_log`); 12 h Standard SLA (~$0.02/GB) or 48 h Bulk (~$0.0025/GB). Procedure: [`glacier-restore-runbook.md`](../artifacts/syrabit/docs/infra/glacier-restore-runbook.md).
+- Cost target: ≤ $1 / month at current ~60 GB cold tail. Frees ~$3-5 / mo on Cloudflare R2 by moving the never-read tail off warm storage.
+
+### F2. ACA Jobs → Lambda + EventBridge (§A row "Scheduled batch jobs")
+
+- The three remaining ACA Job in-process loops (`as_translation_backfill`, `embed_backfill`, `comprehend_sampler` — see `artifacts/syrabit-backend/aca_jobs/`) move to AWS Lambda with EventBridge cron triggers (`infra/aws/lambda-batch-jobs.tf`). All three sit inside the Lambda free tier (1 M req/mo + 400 k GB-s) → ~$0/mo cash.
+- Migrated-jobs registry: [`infra/aws/lambda/manifest.json`](../infra/aws/lambda/manifest.json). The CI guard `artifacts/syrabit-backend/scripts/check_dead_providers.py` blocks any new ACA Job under `aca_jobs/` that lacks a manifest entry.
+- Cutover protocol: 7-day shadow period with daily reconciliation; flip in-process loops OFF via `ACA_JOB_BATCHES_DISABLED=1` only after match-rate ≥ 99 % for 7 consecutive days. Rollback = unset the env var.
+
+### F3. AWS row update (no §B "must NOT" change)
+
+- AWS still must NOT host the FastAPI HTTP origin, hold the DNS apex, or hold the secrets source-of-truth. The Glacier + Lambda additions above are inside the existing §A "Async event backbone" and "S3 (temp dumps)" rows — they expand AWS productively without renegotiating the negative space the drift guard enforces.
+- The §A row "Primary transactional email = Azure Marketplace SendGrid" / "Fallback transactional email = AWS SES" remains unchanged in this task. The SES-sole-provider migration (originally section C of #551) was carved out into a dedicated SES task and will update the §A email rows separately.
+
+Tracked separately. The eval harness (Workers-AI Mistral-7B vs. Azure `gpt-4.1-nano` on the synthetic Syrabit chat traffic mix) is a follow-up item — it depends on the real cap-shaped traffic this task introduces. Current `_select_chat_model` rules are the founder-locked starting point; eval results refine the SESSION_CHEAP_TURN_LIMIT / CONSERVATIVE_OUTPUT_TOKENS thresholds in a future PR.

@@ -187,11 +187,17 @@ webhook flow below.
 
 | Service | Use | Est. Monthly Burn |
 |---------|-----|-------------------|
-| App Runner | Backend hosting | ~$30–$80 / month |
-| S3 | Backup storage | ~$2 / month |
+| Lambda + EventBridge | Async workers (SQS consumers) + scheduled batch jobs (Task #551 §B: `as_translation_backfill` daily, `embed_backfill` 6h, `comprehend_sampler` weekly) — all inside the free tier (1M req/mo + 400k GB-s) | ~$0 / month |
+| SQS + DLQ | Async fan-out queue (re-embed, email-fallback, S3→R2 sync) | ~$0 / month |
+| SES | Sole transactional email path (auth, payments, security) — `us-east-1` primary, `ap-south-1` warm secondary | ~$1 / month |
+| S3 (Standard) | Temp dumps + intermediate exports (90/180/30 day hot tier before Glacier transition) | ~$1 / month |
+| S3 Glacier Deep Archive (Task #551 §A) | Cold compliance — Razorpay receipts, content snapshots, CloudWatch log tail (~60 GB cold tail at $0.00099/GB-mo, 7-year DPDP retention) | ~$1 / month |
+| Comprehend (sampled) | Weekly PII + sentiment overlay on `chapters` (25-doc sample, well under free tier) | ~$0 / month |
+| CloudWatch Logs | Worker tier logs (14d hot retention; cold tail goes to Glacier per §A) | ~$1 / month |
+| Bedrock proxy | Retired (Task #347); IAM + ECR shells retained for rollback only | ~$0 / month |
 
-**Total: ~$32–$82/month against $1,000 grant → ~12–30 months runway.**
+**Total: ~$3–$5 / month against $1,000 grant → ~16–18 months runway** (Task #551 update — was App-Runner-heavy; FastAPI now lives on Azure ACA per V4 §0).
 
 ---
 
-*Last updated: May 2026 (Task #247)*
+*Last updated: May 2026 (Task #551 — AWS row expanded for Glacier Deep Archive + Lambda batch jobs)*
