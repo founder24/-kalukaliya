@@ -363,6 +363,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   // seo_meta / audit_log / syllabus_map mirror actually succeeded.
   const [d1SyncRunning, setD1SyncRunning] = useState(false);
   const [d1SyncResult, setD1SyncResult] = useState(null);
+  const [d1SyncDurationMs, setD1SyncDurationMs] = useState(null);
   const [d1SyncError, setD1SyncError] = useState(null);
   // Task #299: which sitemap row is currently expanded to show its
   // failing URL list. Only one is open at a time to keep the card compact.
@@ -2455,12 +2456,27 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                 onClick={async () => {
                   setD1SyncRunning(true);
                   setD1SyncError(null);
+                  setD1SyncDurationMs(null);
+                  // Task #506: time the POST client-side so operators can
+                  // see how long the manual sync actually took. Done in
+                  // the browser to avoid a backend change; covers network
+                  // + primary + extended_mirror combined.
+                  const _started = (typeof performance !== 'undefined' && performance.now)
+                    ? performance.now()
+                    : Date.now();
+                  const _elapsed = () => {
+                    const _now = (typeof performance !== 'undefined' && performance.now)
+                      ? performance.now()
+                      : Date.now();
+                    return Math.max(0, Math.round(_now - _started));
+                  };
                   try {
                     const res = await axios.post(
                       `${API_BASE}/admin/d1-sync`,
                       null,
                       adminHdr(adminToken),
                     );
+                    setD1SyncDurationMs(_elapsed());
                     setD1SyncResult(res?.data ?? {});
                     const data = res?.data || {};
                     const primary = data.primary || data;
@@ -2473,6 +2489,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                       toast.success('D1 sync complete');
                     }
                   } catch (e) {
+                    setD1SyncDurationMs(_elapsed());
                     const detail = e?.response?.data?.detail || e?.message || 'D1 sync failed';
                     setD1SyncResult(null);
                     setD1SyncError(typeof detail === 'string' ? detail : JSON.stringify(detail));
@@ -2519,8 +2536,18 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                     !!d1SyncError
                     || (_primary && _primary.success === false)
                     || (_ext && _ext.success === false);
+                  // Task #506: surface client-measured duration so a slow
+                  // run (e.g. extended_mirror dragging on D1) is visible
+                  // before the freshness alert fires. >10s → amber.
+                  const SLOW_MS = 10000;
+                  const _slow = typeof d1SyncDurationMs === 'number' && d1SyncDurationMs >= SLOW_MS;
+                  const _fmtElapsed = (ms) => (
+                    ms < 1000
+                      ? `${ms}ms`
+                      : `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)}s`
+                  );
                   return (
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-600">
                         Last manual sync
                       </span>
@@ -2534,6 +2561,23 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                       >
                         {overallFailed ? 'failed' : 'ok'}
                       </span>
+                      {typeof d1SyncDurationMs === 'number' && (
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full border font-mono ${
+                            _slow
+                              ? 'bg-amber-50 text-amber-800 border-amber-300'
+                              : 'bg-gray-50 text-gray-600 border-gray-200'
+                          }`}
+                          data-testid="d1-sync-result-elapsed"
+                          title={
+                            _slow
+                              ? `Slow: took ≥ ${SLOW_MS / 1000}s (threshold)`
+                              : 'Client-measured time around POST /admin/d1-sync'
+                          }
+                        >
+                          elapsed: {_fmtElapsed(d1SyncDurationMs)}
+                        </span>
+                      )}
                     </div>
                   );
                 })()}
