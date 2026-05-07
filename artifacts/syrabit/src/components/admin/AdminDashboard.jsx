@@ -3480,13 +3480,29 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                                       const w = iso.counters?.write ?? 0;
                                       const l = iso.counters?.list ?? 0;
                                       const d = iso.counters?.delete ?? 0;
+                                      // Task #543 — shorten the worker-side
+                                      // isolate UUID (e.g. crypto.randomUUID())
+                                      // to "aaaaaaaa…last4" so the row stays
+                                      // legible at the panel's 10px font and
+                                      // doesn't leak the full identifier into
+                                      // a screen-share or screenshot. Short
+                                      // IDs (≤12 chars) render unchanged so
+                                      // dev/test fixtures stay readable.
+                                      const fullId = String(iso.id ?? '');
+                                      const shortId = fullId.length > 12
+                                        ? `${fullId.slice(0, 8)}…${fullId.slice(-4)}`
+                                        : fullId;
                                       return (
                                         <li
                                           key={iso.id}
                                           className="text-[10px] text-gray-600 tabular-nums flex items-center justify-between gap-2"
                                           data-testid={`notif-prefs-kv-health-isolate-${b.binding}-${iso.id}`}
                                         >
-                                          <span className="font-mono text-gray-500">{iso.id}</span>
+                                          <span
+                                            className="font-mono text-gray-500"
+                                            title={fullId}
+                                            data-testid={`notif-prefs-kv-health-isolate-${b.binding}-${iso.id}-id`}
+                                          >{shortId}</span>
                                           <span>
                                             r {r.toLocaleString()} · w {w.toLocaleString()} · l {l.toLocaleString()} · d {d.toLocaleString()}
                                           </span>
