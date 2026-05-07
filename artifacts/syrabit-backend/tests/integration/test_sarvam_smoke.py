@@ -35,14 +35,10 @@ def test_sarvam_live_assamese_reply():
     out = asyncio.run(
         chat(
             [
-                {
-                    "role": "system",
-                    "content": "You are an Assamese tutor. Reply only in Assamese.",
-                },
-                {"role": "user", "content": "Greet me in one short sentence."},
+                {"role": "user", "content": "নমস্কাৰ"},
             ],
+            language="as",
             user_id=None,
-            response_language="as-IN",
             max_tokens=80,
         )
     )
