@@ -137,6 +137,20 @@ resource "aws_iam_role_policy" "batch_job_inline" {
         Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
         Resource = "*"
       },
+      # Task #516 — handlers PutMetricData into `Syrabit/BatchJobs` so the
+      # leftover-doc-count alarm below can detect a stuck pass that the
+      # built-in Lambda `Errors` metric would never see (a clean run that
+      # produces zero translations is silent at the Lambda layer).
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "Syrabit/BatchJobs"
+          }
+        }
+      },
     ]
   })
 }
@@ -283,6 +297,72 @@ resource "aws_cloudwatch_metric_alarm" "batch_job_errors" {
 
   dimensions = {
     FunctionName = aws_lambda_function.batch_job[each.key].function_name
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# ── Task #516 — leftover-doc / failure alarms for as-translation-backfill ────
+# The Lambda Errors alarm above only fires on hard crashes. A clean run
+# that produces zero translations because every translate call returned
+# empty (Workers-AI quota exhausted, Vertex outage, …) leaves Errors=0
+# and the SSR `/as/...` corpus quietly stops getting fresh content.
+# These alarms watch the custom CloudWatch metrics emitted by
+# `lambda_batch.as_translation_backfill._emit_metrics` so on-call gets
+# paged when the leftover-doc count refuses to drain or per-run failures
+# spike. Both target the same `ops_alerts` SNS topic the existing
+# `batch_job_errors` alarm uses.
+
+resource "aws_cloudwatch_metric_alarm" "as_backfill_stuck" {
+  alarm_name          = "${local.lz_project}-as-translation-backfill-stuck-${local.lz_env}"
+  comparison_operator = "GreaterThanThreshold"
+  # Daily cron → one datapoint per day. 3 consecutive days of non-zero
+  # leftover means the job is making no headway across multiple passes;
+  # at the typical IndicTrans2 throughput a healthy backlog drains in
+  # well under 24 h.
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  metric_name         = "RemainingTotal"
+  namespace           = "Syrabit/BatchJobs"
+  period              = 86400
+  statistic           = "Maximum"
+  threshold           = 0
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #516 — as-translation-backfill RemainingTotal > 0 for 3 consecutive daily passes. The /as/... SSR corpus is falling behind English; check IndicTrans2 / Vertex polish health."
+
+  dimensions = {
+    Job = "as-translation-backfill"
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "as_backfill_failed_spike" {
+  alarm_name          = "${local.lz_project}-as-translation-backfill-failed-${local.lz_env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  # Use the Job-only `FailedTotal` rollup (not the per-Collection
+  # `Failed` series) so the alarm metric identity actually exists in
+  # CloudWatch — (MetricName, Dimensions) is the identity key, and a
+  # Job-only alarm cannot resolve a Job+Collection series.
+  metric_name         = "FailedTotal"
+  namespace           = "Syrabit/BatchJobs"
+  period              = 86400
+  statistic           = "Sum"
+  # `Failed` counts docs where every field translation came back empty
+  # or below the Bengali-script ratio. 50/day is a sustained provider
+  # problem rather than the occasional Sarvam blip.
+  threshold           = 50
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Task #516 — as-translation-backfill Failed > 50 in a single daily pass. Likely Workers-AI IndicTrans2 quota exhaustion or a Vertex polish outage; docs auto-retry on next pass but corpus freshness is degraded."
+
+  dimensions = {
+    Job = "as-translation-backfill"
   }
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]
