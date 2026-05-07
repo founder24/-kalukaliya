@@ -77,4 +77,5 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 - **AWS landing zone:** `artifacts/syrabit/docs/infra/aws-landing-zone.md`
 - **ACA cutover runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md`
 - **Provider decommission rationale (#347):** `artifacts/syrabit/docs/infra/providers-task-347-decommission.md`
+- **Phased credit-runway cost model (Task #550):** `artifacts/syrabit/docs/infra/credit-runway-cost-model.md`
 - **Skills index:** `.local/skills/`
