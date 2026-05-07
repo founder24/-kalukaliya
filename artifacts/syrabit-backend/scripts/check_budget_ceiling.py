@@ -27,6 +27,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COST_CAPS = ROOT / "cost_caps.py"
 CREDIT_BURN = ROOT / "credit_burn_meter.py"
+CONFIG_PY  = ROOT / "config.py"
+VOICE_PY   = ROOT / "routes" / "voice.py"
+
+ALLOWED_CHAT_HEADS = {"workers_ai_llama32_3b", "workers_ai_mistral_7b",
+                      "workers_ai", "vertex"}
+PAID_VOICE_ROUTES  = {"/voice/tts", "/voice/stt", "/voice/voice"}
 
 CEILING_USD = 100.0
 OVERRIDE_RE = re.compile(r"#\s*COST-CAP-OVERRIDE\s*:")
@@ -112,10 +118,52 @@ def _check_meter_d() -> None:
         _fail("MeterDConfig.cap_usd default missing from credit_burn_meter.py")
 
 
+def _check_chat_priority_head() -> None:
+    """PROVIDER_PRIORITY['english_rag_chat'][0] must be a workers_ai
+    variant or vertex (Task #549 acceptance criterion)."""
+    src = CONFIG_PY.read_text(encoding="utf-8")
+    # Simple textual check — the dict literal is multi-line so we
+    # locate the english_rag_chat block and grab its first list item.
+    m = re.search(
+        r'"english_rag_chat"\s*:\s*\[\s*"([^"]+)"',
+        src,
+    )
+    if not m:
+        _fail("could not locate PROVIDER_PRIORITY['english_rag_chat'] head in config.py")
+    head = m.group(1)
+    if head not in ALLOWED_CHAT_HEADS:
+        _fail(
+            f"PROVIDER_PRIORITY['english_rag_chat'] head must be one of "
+            f"{sorted(ALLOWED_CHAT_HEADS)} (Task #549); got {head!r}"
+        )
+
+
+def _check_voice_paid_gate() -> None:
+    """All three /voice/* paid routes must depend on require_paid_plan."""
+    src = VOICE_PY.read_text(encoding="utf-8")
+    if "require_paid_plan" not in src:
+        _fail("routes/voice.py must import + use require_paid_plan (Task #549)")
+    # Each paid endpoint declaration must sit above a Depends(require_paid_plan)
+    for route in PAID_VOICE_ROUTES:
+        # Find the route decorator and check the next ~30 lines for the dep.
+        idx = src.find(f'"{route}"')
+        if idx < 0:
+            _fail(f"routes/voice.py missing route decorator for {route}")
+        window = src[idx: idx + 2000]
+        if "Depends(require_paid_plan)" not in window:
+            _fail(
+                f"routes/voice.py: {route} must use Depends(require_paid_plan) "
+                f"to gate free-plan callers with HTTP 402 (Task #549)"
+            )
+
+
 def main() -> int:
     _check_cost_caps()
     _check_meter_d()
-    print(f"[check_budget_ceiling] OK — budget ceiling <= ${CEILING_USD:.0f}/month")
+    _check_chat_priority_head()
+    _check_voice_paid_gate()
+    print(f"[check_budget_ceiling] OK — budget ceiling <= ${CEILING_USD:.0f}/month, "
+          f"chat head ∈ {{workers_ai*, vertex}}, voice routes paid-gated")
     return 0
 
 

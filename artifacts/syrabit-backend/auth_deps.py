@@ -256,9 +256,15 @@ async def require_paid_plan(user: dict = Depends(get_current_user)) -> dict:
         return user
     plan = (user or {}).get("plan", "free")
     if not plan or str(plan).strip().lower() == "free":
+        # Structured payload so the SPA can route the user to /pricing
+        # without parsing a free-text message.
         raise HTTPException(
             status_code=402,
-            detail="Voice features require a paid plan. Upgrade to Starter or Pro.",
+            detail={
+                "error": "voice_requires_paid_plan",
+                "upgrade_url": "/pricing",
+                "message": "Voice features require a paid plan. Upgrade to Starter or Pro.",
+            },
         )
     return user
 
