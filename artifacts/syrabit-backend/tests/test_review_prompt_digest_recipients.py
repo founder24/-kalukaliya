@@ -145,8 +145,9 @@ def test_send_returns_recipients_field_when_no_admin_email(monkeypatch):
     assert result["recipients"] == []
 
 
-def test_send_uses_digest_list_and_passes_all_to_ses(monkeypatch):  # Task #556
+def test_send_uses_digest_list_and_passes_all_to_bulk(monkeypatch):  # Task #556 round-4
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
+    monkeypatch.setenv("BULK_EMAIL_WORKER_URL", "https://bulk.test")
     saved = _with_channels({
         "email": "fallback@example.com",
         "review_prompt_digest_emails": ["ops@example.com", "growth@example.com"],
@@ -154,14 +155,14 @@ def test_send_uses_digest_list_and_passes_all_to_ses(monkeypatch):  # Task #556
 
     captured: dict = {}
 
-    def _fake_send_admin_email(**kwargs):
-        captured["payload"] = kwargs
-        return True
+    def _fake_send_bulk(message):
+        captured["message"] = message
+        return {"sent": len(message.to), "failed": 0, "skipped": 0, "reason": "ok"}
 
-    import email_templates as _et
+    import bulk_email as _bulk
 
     try:
-        with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+        with patch.object(_bulk, "send_bulk", _fake_send_bulk), \
              patch.object(_m, "_load_alert_settings", AsyncMock()):
             result = asyncio.run(
                 arp._send_review_prompt_weekly_digest_email(
@@ -175,14 +176,15 @@ def test_send_uses_digest_list_and_passes_all_to_ses(monkeypatch):  # Task #556
     assert result["sent"] is True
     assert result["recipients"] == ["ops@example.com", "growth@example.com"]
     assert result["to"] == "ops@example.com"
-    assert captured["payload"]["to"] == ["ops@example.com", "growth@example.com"]
-    assert "Syrabit review-prompt weekly" in captured["payload"]["subject"]
+    assert captured["message"].to == ["ops@example.com", "growth@example.com"]
+    assert "Syrabit review-prompt weekly" in captured["message"].subject
 
 
 def test_send_override_to_targets_explicit_recipients(monkeypatch):
     """The admin "send me a test now" path posts the draft list as
     ``to`` so admins can validate a recipient before persisting it."""
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
+    monkeypatch.setenv("BULK_EMAIL_WORKER_URL", "https://bulk.test")
     saved = _with_channels({
         "email": "fallback@example.com",
         "review_prompt_digest_emails": ["persisted@example.com"],
@@ -190,14 +192,14 @@ def test_send_override_to_targets_explicit_recipients(monkeypatch):
 
     captured: dict = {}
 
-    def _fake_send_admin_email(**kwargs):
-        captured["payload"] = kwargs
-        return True
+    def _fake_send_bulk(message):
+        captured["message"] = message
+        return {"sent": len(message.to), "failed": 0, "skipped": 0, "reason": "ok"}
 
-    import email_templates as _et
+    import bulk_email as _bulk
 
     try:
-        with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+        with patch.object(_bulk, "send_bulk", _fake_send_bulk), \
              patch.object(_m, "_load_alert_settings", AsyncMock()):
             result = asyncio.run(
                 arp._send_review_prompt_weekly_digest_email(
@@ -210,8 +212,8 @@ def test_send_override_to_targets_explicit_recipients(monkeypatch):
         _restore_channels(saved)
 
     assert result["sent"] is True
-    assert captured["payload"]["to"] == ["draft@example.com"]
-    assert "persisted@example.com" not in captured["payload"]["to"]
+    assert captured["message"].to == ["draft@example.com"]
+    assert "persisted@example.com" not in captured["message"].to
 
 
 # ── metrics._load_alert_settings parsing ────────────────────────────────────

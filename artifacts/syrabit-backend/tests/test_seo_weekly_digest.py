@@ -103,94 +103,94 @@ def test_send_skipped_when_no_admin_email():
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_uses_ses_when_email_and_aws_creds_present():
-    """Task #556 — SES is the sole transactional path; happy path must
-    invoke ``send_admin_email`` once with the right payload."""
+def test_send_uses_bulk_worker_when_email_and_url_present():
+    """Task #556 round-4 — bulk/digest fan-out goes through the
+    Cloudflare Email Workers bulk path; happy path must invoke
+    ``bulk_email.send_bulk`` once with the right payload."""
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
     )
     sent_calls = []
 
-    def _fake_send_admin_email(**kwargs):
-        sent_calls.append(kwargs)
-        return True
+    def _fake_send_bulk(message):
+        sent_calls.append(message)
+        return {"sent": 1, "failed": 0, "skipped": 0, "reason": "ok"}
 
-    import email_templates as _et
+    import bulk_email as _bulk
     fake_stats = bot_discovery._compose_seo_weekly_digest(
         [_snap("ok", hours_ago=h) for h in (1, 2, 3)]
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.object(_bulk, "send_bulk", _fake_send_bulk), \
          patch.dict("os.environ",
-                    {"AWS_ACCESS_KEY_ID": "AKIA_TEST",
-                     "AWS_SECRET_ACCESS_KEY": "secret_test"},
+                    {"BULK_EMAIL_WORKER_URL": "https://bulk.test"},
                     clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is True
     assert result["to"] == "admin@syrabit.ai"
-    assert sent_calls, "send_admin_email should have been called once"
-    call = sent_calls[0]
-    assert call["to"] == ["admin@syrabit.ai"]
-    assert "weekly digest" in call["subject"].lower()
-    assert "SEO weekly digest" in call["html"]
+    assert sent_calls, "bulk_email.send_bulk should have been called once"
+    msg = sent_calls[0]
+    assert msg.to == ["admin@syrabit.ai"]
+    assert "weekly digest" in msg.subject.lower()
+    assert "SEO weekly digest" in msg.html
 
 
-def test_send_skipped_with_no_aws_creds_reason():
-    """Task #556 — when AWS credentials are absent, the digest sender
-    must short-circuit to ``no_aws_creds`` BEFORE attempting any SES
-    call (V4 §12 — no silent fallbacks)."""
+def test_send_skipped_with_no_worker_url_reason():
+    """Task #556 round-4 — when BULK_EMAIL_WORKER_URL is absent, the
+    digest sender must short-circuit to ``no_worker_url`` BEFORE
+    attempting any bulk call (V4 §12 — no silent fallbacks)."""
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
     )
     invoked = []
 
-    def _should_not_be_called(**kwargs):
-        invoked.append(kwargs)
-        return True
+    def _should_not_be_called(message):
+        invoked.append(message)
+        return {"sent": 1, "failed": 0, "skipped": 0, "reason": "ok"}
 
-    import email_templates as _et
+    import bulk_email as _bulk
     fake_stats = bot_discovery._compose_seo_weekly_digest(
         [_snap("ok", hours_ago=h) for h in (1, 2, 3)]
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.object(_et, "send_admin_email", _should_not_be_called), \
+         patch.object(_bulk, "send_bulk", _should_not_be_called), \
          patch.dict("os.environ",
-                    {"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""},
+                    {"BULK_EMAIL_WORKER_URL": ""},
                     clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is False
-    assert result["reason"] == "no_aws_creds"
+    assert result["reason"] == "no_worker_url"
     assert result["to"] == "admin@syrabit.ai"
-    assert not invoked, "send_admin_email must not be called without AWS creds"
+    assert not invoked, "bulk_email.send_bulk must not be called without worker URL"
 
 
-def test_send_returns_ses_non_2xx_reason_on_provider_failure():
-    """Task #556 — when ``send_admin_email`` returns False (the SES
-    helper recorded a non-2xx), the digest sender must surface
-    ``send_error:ses_non_2xx`` (the legacy provider tag is gone — Task #556)."""
+def test_send_returns_send_error_reason_on_bulk_failure():
+    """Task #556 round-4 — when bulk_email.send_bulk reports failed>0
+    (worker returned non-2xx), the digest sender must surface a
+    ``send_error:<reason>`` shape so the dashboards can group cleanly."""
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
     )
 
-    def _fake_send_admin_email(**kwargs):
-        return False  # SES recorded a non-2xx
+    def _fake_send_bulk(message):
+        return {"sent": 0, "failed": 1, "skipped": 0,
+                "reason": "worker_http_502"}
 
-    import email_templates as _et
+    import bulk_email as _bulk
     fake_stats = bot_discovery._compose_seo_weekly_digest(
         [_snap("ok", hours_ago=h) for h in (1, 2, 3)]
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.object(_bulk, "send_bulk", _fake_send_bulk), \
          patch.dict("os.environ",
-                    {"AWS_ACCESS_KEY_ID": "AKIA_TEST",
-                     "AWS_SECRET_ACCESS_KEY": "secret_test"},
+                    {"BULK_EMAIL_WORKER_URL": "https://bulk.test"},
                     clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is False
-    assert result["reason"] == "send_error:ses_non_2xx"
+    assert result["reason"] == "send_error:worker_http_502"
 
 
 # ── _gather_weekly_digest_inputs ────────────────────────────────────────────

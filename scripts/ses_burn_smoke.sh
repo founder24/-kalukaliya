@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 #
-# SES burn-threshold smoke runbook (Task #489 §D row
-# "SES burn-threshold smoke runbook"). Implements the manual proof
-# referenced from the four-cloud delegation matrix §C.2 acceptance
-# check.
+# SES burn-threshold smoke runbook (Task #556 rewrite — SES is the sole
+# transactional provider; the legacy `EMAIL_PROVIDER=sendgrid|ses` flip
+# is retired).
 #
 # What it does, in order:
-#   1. Records the current `EMAIL_PROVIDER` ACA env var.
-#   2. Flips ACA to `EMAIL_PROVIDER=ses` (forces the SendGrid → SES
-#      fallback path that V4 §10 Rule C names as the burn-threshold
-#      response).
+#   1. Records the current `SES_REGION` ACA env var.
+#   2. Flips ACA to the secondary verified region (us-east-1 ↔ ap-south-1)
+#      so the on-call can prove SES failover works without leaving the
+#      single-provider contract.
 #   3. Sends one synthetic transactional email through the live API
 #      (`POST /api/admin/diagnostics/email-smoke`).
-#   4. Tails the SES `Send` and `email-fallback` SQS queue depth for
-#      60 s to confirm the message went through.
-#   5. Restores the original `EMAIL_PROVIDER` value.
+#   4. Tails the SES `Send` CloudWatch metric for 60 s in the new region
+#      to confirm the message went through.
+#   5. Restores the original `SES_REGION` value.
 #   6. Appends the result to `docs/ops/dr-drills/ses-burn-<date>.log`.
 #
 # Required env:
@@ -22,7 +21,7 @@
 #   PROD_BASE_URL              — public API base, e.g. https://api.syrabit.ai
 #   PROD_ADMIN_JWT             — admin JWT for the diagnostics route
 #   SMOKE_RECIPIENT            — to: address (must be SES-verified)
-#   AWS_REGION                 — defaults to us-east-1
+#   SMOKE_SES_REGION_FLIP_TO   — region to flip to (default: ap-south-1)
 #
 # Usage (manual quarterly DR drill):
 #   bash scripts/ses_burn_smoke.sh
@@ -34,7 +33,7 @@ set -euo pipefail
 : "${PROD_BASE_URL:?PROD_BASE_URL required}"
 : "${PROD_ADMIN_JWT:?PROD_ADMIN_JWT required}"
 : "${SMOKE_RECIPIENT:?SMOKE_RECIPIENT required}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+FLIP_TO="${SMOKE_SES_REGION_FLIP_TO:-ap-south-1}"
 
 DRILL_DIR="docs/ops/dr-drills"
 mkdir -p "$DRILL_DIR"
@@ -45,20 +44,20 @@ exec > >(tee -a "$DRILL_LOG") 2>&1
 
 echo "=== ses-burn-smoke @ $(date -u --iso-8601=seconds) ==="
 
-ORIG_PROVIDER="$(az containerapp show -g "$ACA_RG" -n "$ACA_NAME" \
-  --query 'properties.template.containers[0].env[?name==`EMAIL_PROVIDER`].value | [0]' -o tsv)"
-echo "[ses-burn-smoke] original EMAIL_PROVIDER=$ORIG_PROVIDER"
+ORIG_REGION="$(az containerapp show -g "$ACA_RG" -n "$ACA_NAME" \
+  --query 'properties.template.containers[0].env[?name==`SES_REGION`].value | [0]' -o tsv)"
+echo "[ses-burn-smoke] original SES_REGION=$ORIG_REGION"
 
-restore_provider() {
-  echo "[ses-burn-smoke] restoring EMAIL_PROVIDER=$ORIG_PROVIDER"
+restore_region() {
+  echo "[ses-burn-smoke] restoring SES_REGION=$ORIG_REGION"
   az containerapp update -g "$ACA_RG" -n "$ACA_NAME" \
-    --set-env-vars "EMAIL_PROVIDER=${ORIG_PROVIDER:-sendgrid}" >/dev/null
+    --set-env-vars "SES_REGION=${ORIG_REGION:-us-east-1}" >/dev/null
 }
-trap restore_provider EXIT
+trap restore_region EXIT
 
-echo "[ses-burn-smoke] flipping EMAIL_PROVIDER=ses"
+echo "[ses-burn-smoke] flipping SES_REGION=$FLIP_TO"
 az containerapp update -g "$ACA_RG" -n "$ACA_NAME" \
-  --set-env-vars "EMAIL_PROVIDER=ses" >/dev/null
+  --set-env-vars "SES_REGION=$FLIP_TO" >/dev/null
 
 # Wait for the new revision to settle.
 sleep 15
@@ -70,14 +69,14 @@ SMOKE_RESP="$(curl -fsS -X POST "$PROD_BASE_URL/api/admin/diagnostics/email-smok
   -d "{\"to\":\"$SMOKE_RECIPIENT\",\"subject\":\"[smoke] SES burn-threshold drill\",\"html\":\"<p>drill ok</p>\"}")"
 echo "[ses-burn-smoke] api response: $SMOKE_RESP"
 
-echo "[ses-burn-smoke] tailing SES + SQS metrics for 60s"
-SES_SENDS_BEFORE="$(aws cloudwatch get-metric-statistics --region "$AWS_REGION" \
+echo "[ses-burn-smoke] tailing SES Send metric in $FLIP_TO for 60s"
+SES_SENDS_BEFORE="$(aws cloudwatch get-metric-statistics --region "$FLIP_TO" \
   --namespace AWS/SES --metric-name Send --statistics Sum \
   --start-time "$(date -u -d '-2 minutes' --iso-8601=seconds)" \
   --end-time "$(date -u --iso-8601=seconds)" --period 60 \
   --query 'Datapoints[].Sum' --output text || echo 0)"
 sleep 60
-SES_SENDS_AFTER="$(aws cloudwatch get-metric-statistics --region "$AWS_REGION" \
+SES_SENDS_AFTER="$(aws cloudwatch get-metric-statistics --region "$FLIP_TO" \
   --namespace AWS/SES --metric-name Send --statistics Sum \
   --start-time "$(date -u -d '-2 minutes' --iso-8601=seconds)" \
   --end-time "$(date -u --iso-8601=seconds)" --period 60 \
@@ -86,7 +85,7 @@ SES_SENDS_AFTER="$(aws cloudwatch get-metric-statistics --region "$AWS_REGION" \
 echo "[ses-burn-smoke] SES Send delta: before=$SES_SENDS_BEFORE after=$SES_SENDS_AFTER"
 
 if [ "$SES_SENDS_AFTER" = "0" ] || [ "$SES_SENDS_AFTER" = "$SES_SENDS_BEFORE" ]; then
-  echo "[ses-burn-smoke] FAIL — no SES Send recorded after smoke"
+  echo "[ses-burn-smoke] FAIL — no SES Send recorded in $FLIP_TO after smoke"
   exit 1
 fi
 

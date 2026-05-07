@@ -540,14 +540,14 @@ def test_send_email_skipped_without_admin_email(monkeypatch):
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_email_skipped_without_aws_creds(monkeypatch):
-    """Task #556 — when AWS credentials are absent, the digest sender
-    must short-circuit to ``no_aws_creds`` (no SES call attempted)."""
+def test_send_email_skipped_without_worker_url(monkeypatch):
+    """Task #556 round-4 — when BULK_EMAIL_WORKER_URL is absent, the
+    digest sender must short-circuit to ``no_worker_url`` (no bulk
+    call attempted)."""
     monkeypatch.setenv("ALERT_EMAIL", "ops@example.com")
-    # Hermetic: explicitly clear AWS creds so the test result doesn't
-    # depend on the developer / CI shell environment.
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "")
+    # Hermetic: explicitly clear the bulk worker URL so the test result
+    # doesn't depend on the developer / CI shell environment.
+    monkeypatch.setenv("BULK_EMAIL_WORKER_URL", "")
     # Reset the in-memory ``metrics._notification_channels`` dict — earlier
     # tests in the suite (e.g. ``test_admin_assamese_purity``,
     # ``test_hydrate_slack_payload``) populate this with stub values like
@@ -569,7 +569,7 @@ def test_send_email_skipped_without_aws_creds(monkeypatch):
     )
     assert result["sent"] is False
     assert result["to"] == "ops@example.com"
-    assert result["reason"] == "no_aws_creds"  # Task #556 — SES sole path
+    assert result["reason"] == "no_worker_url"  # Task #556 round-4 — bulk path
 
 
 def test_send_email_returns_no_stats_when_called_with_empty_dict():

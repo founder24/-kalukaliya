@@ -447,15 +447,13 @@ async def _send_bot_traffic_report_email(
 
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
-    # Task #556 — SES is the sole transactional path; no AWS creds = no send.
-    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
-            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
-        return {"sent": False, "to": admin_email, "reason": "no_aws_creds"}
+    # Task #556 round-4 — bulk/digest fan-out goes through the
+    # Cloudflare Email Workers bulk path (NOT SES transactional).
+    # Preflight: BULK_EMAIL_WORKER_URL must be configured.
+    if not os.environ.get("BULK_EMAIL_WORKER_URL", "").strip():
+        return {"sent": False, "to": admin_email, "reason": "no_worker_url"}
 
-    try:
-        from email_templates import EMAIL_FROM  # type: ignore
-    except Exception:
-        EMAIL_FROM = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
+    sender = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
 
     html = _format_bot_traffic_report_html(stats)
     total_cur = stats.get("bot_total_current", 0)
@@ -468,21 +466,19 @@ async def _send_bot_traffic_report_email(
         f"{stats.get('iso_week','')}"
     )
     try:
-        from email_templates import send_admin_email  # type: ignore
-        ok = send_admin_email(
-            to=[admin_email],
-            subject=subject,
-            html=html,
-            sender=EMAIL_FROM,
-        )
-        if not ok:
-            # Task #556 — was sendgrid_non_2xx; SES is now the sole path.
+        from bulk_email import BulkEmailMessage, send_bulk  # type: ignore
+        rep = send_bulk(BulkEmailMessage(
+            to=[admin_email], subject=subject, html=html, sender=sender,
+            tags={"digest": "bot_traffic_weekly"},
+        ))
+        if int(rep.get("sent", 0)) < 1:
+            reason = rep.get("reason") or "bulk_send_failed"
             return {"sent": False, "to": admin_email,
-                    "reason": "send_error:ses_non_2xx"}
+                    "reason": f"send_error:{reason}"}
         logger.info(f"[bot-report] sent weekly report → {admin_email} ({stats.get('iso_week','')})")
         return {"sent": True, "to": admin_email, "subject": subject}
     except Exception as exc:
-        logger.warning(f"[bot-report] SES send failed: {exc}")  # Task #556
+        logger.warning(f"[bot-report] bulk send failed: {exc}")  # Task #556
         return {"sent": False, "to": admin_email, "reason": f"send_error:{type(exc).__name__}"}
 
 

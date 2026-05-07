@@ -1715,23 +1715,16 @@ async def _send_review_prompt_weekly_digest_email(
     recipients = _resolve_review_prompt_digest_recipients(to)
     if not recipients:
         return {"sent": False, "to": "", "recipients": [], "reason": "no_admin_email"}
-    # Task #556 — fail-loud preflight: SES requires AWS creds. Without
-    # them every send_admin_email call would log-and-drop, so surface
-    # the reason here so the digest log shows a single clear cause.
-    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
-            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
-        primary = recipients[0]
-        return {"sent": False, "to": primary, "recipients": recipients,
-                "reason": "no_aws_creds"}
-    # Preserve legacy single-string ``to`` field for callers / tests that
-    # only inspected the first recipient (the digest used to be 1:1).
+    # Task #556 round-4 — bulk/digest fan-out goes through the
+    # Cloudflare Email Workers bulk path (NOT SES transactional).
+    # Preflight: BULK_EMAIL_WORKER_URL must be configured.
     primary = recipients[0]
-    try:
-        from email_templates import EMAIL_FROM as _from
-    except Exception:
-        _from = os.environ.get(
-            "EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>",
-        ).strip()
+    if not os.environ.get("BULK_EMAIL_WORKER_URL", "").strip():
+        return {"sent": False, "to": primary, "recipients": recipients,
+                "reason": "no_worker_url"}
+    sender = os.environ.get(
+        "EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>",
+    ).strip()
     html = _format_review_prompt_weekly_digest_html(stats)
     ctr_pct = stats.get("ctr_pct")
     ctr_str = "—" if ctr_pct is None else f"{ctr_pct:.1f}%"
@@ -1741,17 +1734,16 @@ async def _send_review_prompt_weekly_digest_email(
         f"{stats.get('iso_week','')}"
     )
     try:
-        from email_templates import send_admin_email
-        ok = send_admin_email(
-            to=list(recipients),
-            subject=subject,
-            html=html,
-            sender=_from,
-        )
-        if not ok:
+        from bulk_email import BulkEmailMessage, send_bulk
+        rep = send_bulk(BulkEmailMessage(
+            to=list(recipients), subject=subject, html=html, sender=sender,
+            tags={"digest": "review_prompt_weekly"},
+        ))
+        if int(rep.get("sent", 0)) < 1:
+            reason = rep.get("reason") or "bulk_send_failed"
             return {
                 "sent": False, "to": primary, "recipients": recipients,
-                "reason": "send_error:ses_non_2xx",  # Task #556 — was sendgrid_non_2xx
+                "reason": f"send_error:{reason}",
             }
         logger.info(
             f"[review-prompt digest] sent → {', '.join(recipients)} "
@@ -1762,7 +1754,7 @@ async def _send_review_prompt_weekly_digest_email(
             "subject": subject,
         }
     except Exception as exc:
-        logger.warning(f"[review-prompt digest] SES send failed: {exc}")  # Task #556
+        logger.warning(f"[review-prompt digest] bulk send failed: {exc}")  # Task #556
         return {
             "sent": False, "to": primary, "recipients": recipients,
             "reason": f"send_error:{type(exc).__name__}",

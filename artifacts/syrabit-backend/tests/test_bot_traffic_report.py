@@ -260,18 +260,18 @@ def test_send_skipped_when_no_admin_email():
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_uses_ses_when_email_and_key_present():  # Task #556 — SES sole path
+def test_send_uses_bulk_when_email_and_url_present():  # Task #556 round-4 — bulk path
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
     )
     sent_calls = []
 
-    def _fake_send_admin_email(**kwargs):
-        sent_calls.append(kwargs)
-        return True
+    def _fake_send_bulk(message):
+        sent_calls.append(message)
+        return {"sent": len(message.to), "failed": 0, "skipped": 0, "reason": "ok"}
 
-    import email_templates as _et
+    import bulk_email as _bulk
     fake_stats = bot_traffic_report._compose_bot_traffic_report(
         {"by_category": {"Search Engine Crawler": 280}, "bot_total": 280, "bot_5xx": 0,
          "source": "cloudflare"},
@@ -279,15 +279,16 @@ def test_send_uses_ses_when_email_and_key_present():  # Task #556 — SES sole p
          "source": "cloudflare"},
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
-         patch.dict("os.environ", {}, clear=False):
+         patch.object(_bulk, "send_bulk", _fake_send_bulk), \
+         patch.dict("os.environ",
+                    {"BULK_EMAIL_WORKER_URL": "https://bulk.test"}, clear=False):
         result = asyncio.run(bot_traffic_report._send_bot_traffic_report_email(fake_stats))
     assert result["sent"] is True
     assert sent_calls
-    call = sent_calls[0]
-    assert call["to"] == ["admin@syrabit.ai"]
-    assert "bot traffic weekly report" in call["subject"].lower()
-    assert "219 → 280" in call["html"]
+    msg = sent_calls[0]
+    assert msg.to == ["admin@syrabit.ai"]
+    assert "bot traffic weekly report" in msg.subject.lower()
+    assert "219 → 280" in msg.html
 
 
 def test_send_refuses_when_stats_has_error():
