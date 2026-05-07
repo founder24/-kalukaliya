@@ -14,6 +14,11 @@ import logging
 import asyncio
 from typing import Optional, AsyncGenerator
 
+# Task #513 §B — token-budget clamp. The polish pipeline routes through
+# `content_formatter` (Vertex primary, Workers-AI Llama-3.3-70b fallback);
+# both legs share the `content_formatter` budget defined in cost_caps.py.
+import cost_caps  # noqa: F401  (referenced by tests/test_cost_caps.py)
+
 logger = logging.getLogger(__name__)
 
 _PIPELINE_METRICS: list = []
@@ -462,6 +467,14 @@ async def stage3_polish(
     max_tokens: int = 4096,
 ) -> Optional[str]:
     from llm import _call_llm_raw, _LLM_PROVIDERS_CHAT
+    # Task #513 §B + §K.2 — clamp messages and consult the deterministic
+    # input cache before paying for an upstream call.
+    from cost_caps import clamp_messages as _ccs_clamp, max_output_tokens_for as _ccs_max_out
+    from ai_input_cache import (
+        get_response as _aic_get,
+        set_response as _aic_set,
+        is_deterministic as _aic_is_det,
+    )
     t0 = time.perf_counter()
 
     prompt = _build_stage3_prompt(query, factual_draft, context, user_info)
@@ -469,6 +482,12 @@ async def stage3_polish(
         {"role": "system", "content": prompt},
         {"role": "user", "content": query},
     ]
+    # Defensive clamp at the polish boundary (the dispatcher clamps too,
+    # but Stage-3 builds its own messages so we must clamp them here as
+    # well or a 50 KB factual_draft would slip past the chat budget
+    # before `_call_llm_raw` ever sees it).
+    messages = _ccs_clamp(messages, call_type="chat_turn")
+    max_tokens = _ccs_max_out("chat_turn", max_tokens)
 
     # Task #490 — Vertex chat hot-path removed. Stage-3 polish for the
     # chat pipeline now goes straight to the workers-AI / Azure chat
@@ -485,6 +504,26 @@ async def stage3_polish(
 
     provider_name = _LLM_PROVIDERS_CHAT[0]["provider"]
     model_name    = _LLM_PROVIDERS_CHAT[0]["default_model"]
+
+    # Task #513 §K.2 — opt-in deterministic cache. Stage-3 polish is a
+    # pure function of (query, factual_draft, context, plan/board) so a
+    # repeat dispatch with the same inputs MUST hit the cache instead
+    # of paying for a duplicate Vertex/Workers-AI call. Streaming
+    # variant (`stage3_polish_stream`) deliberately does NOT cache —
+    # streamed chunks are rendered as they arrive and re-emitting from
+    # cache would have to fake the chunk schedule.
+    if _aic_is_det(messages, model_name, temperature=0.0, stream=False):
+        _cached = _aic_get(messages, model_name, max_tokens=max_tokens)
+        if _cached:
+            logger.info(
+                "[PIPELINE][S3][CACHE-HIT] aic served %d chars (model=%s)",
+                len(_cached), model_name,
+            )
+            _record_pipeline_stage(
+                "response_polisher", model_name, provider_name,
+                (time.perf_counter() - t0) * 1000, True, "cache_hit",
+            )
+            return _cached
     t0 = time.perf_counter()
 
     try:
@@ -498,6 +537,14 @@ async def stage3_polish(
             f"[PIPELINE][S3] Polish done in {dur:.0f}ms: "
             f"{len(result)} chars | provider={provider_name}/{model_name}"
         )
+        # Task #513 §K.2 — store the polished output for future
+        # deterministic-input replays. Bounded by `_INPROC_MAX=2 048`
+        # in-process and `_DEFAULT_TTL_SEC=86 400` in Redis.
+        try:
+            if result and _aic_is_det(messages, model_name, temperature=0.0, stream=False):
+                _aic_set(messages, model_name, result, max_tokens=max_tokens)
+        except Exception:
+            pass
         return result
     except asyncio.TimeoutError:
         dur = (time.perf_counter() - t0) * 1000

@@ -202,3 +202,35 @@ and each will be a separate follow-up task.
 ---
 
 > Any PR proposing a row-change must (a) cite the V4 section it amends, (b) update both this matrix and `replit.md`'s "Architecture decisions" pointer, and (c) leave the CI drift guard green. **Drift introduced silently is treated as a regression and reverted.**
+
+---
+
+## §E — Cost minimization for browser-heavy traffic (Task #513, 2026-05-07)
+
+The four-cloud lock holds steady (no new providers; no budget shifts inside the 40/30/20/10 split). The additions below tighten the spend per-call and per-anon without renegotiating the matrix.
+
+### E1. Edge-layer caps (Cloudflare)
+
+- **Chat cap:** `workers/edge-proxy/src/index.ts` short-circuits `/api/ai/chat` and `/api/chat` at the edge — `30 / month + 3 / day` per `x-anon-id` (falls back to `clientIp` when the SPA hasn't issued an anon-id). 429 carries `X-Cap: chat_monthly_30_per_anon` or `X-Cap: chat_daily_3_per_anon` so dashboards can split denials by reason. Counters live in the existing `RATE_LIMIT` KV namespace; keys auto-expire on the natural window.
+- **Smoke probe:** `artifacts/syrabit-backend/scripts/smoke_chat_cap.py` (CI-runnable, idempotent) hammers `/api/ai/chat` 35× with a stable anon-id and asserts both caps fire.
+
+### E2. Backend dispatch (Azure ACA)
+
+- **Token budgets:** `artifacts/syrabit-backend/cost_caps.py` owns the locked `TOKEN_BUDGETS` table — chat 3000/800, content 4000/2000, formatter 4500/2500, translate 2000/2000, vision OCR 1500/800, STT 2000/500. Every dispatcher (`llm.py`, `pipeline.py`, `content_formatter.py`, `providers/chunk_embedder.py`, `routes/voice.py`) imports the module; `tests/test_cost_caps.py` walks the source files and fails CI when a dispatcher forgets the wiring or when a budget is bumped without a `# COST-CAP-OVERRIDE: <reason>` comment.
+- **Tier-routing:** `cost_caps._select_chat_model(...)` is the single chokepoint for English-chat model selection. Free user turns 1-2 → Workers-AI Mistral-7B; turns 3-15 → Azure `gpt-4.1-nano`; turn >15 → same primary clamped to a 600-token output ceiling. Paid plans bypass to full budget. Assamese always routes to Sarvam (specialist credit pool drains first).
+- **Right-sized SKU:** `infra/azure/aca-syrabit-backend.bicep` shrinks each pod to **0.25 vCPU / 0.5 GiB**, raises `maxReplicas` 10 → 30, and tightens `concurrentRequests` 50 → 30. Net peak concurrency 900 (matches the chat-cap headroom); idle baseline drops ~75 %.
+- **Credit-drain assertion:** `tests/test_credit_drain_order.py` freezes the per-pool provider order — Sarvam before Workers-AI Indic, Vertex before Workers-AI llama33_70b, `workers_ai_custom` first in `embed`. Retired providers (Cerebras / Cohere / Voyage / Bedrock) must never re-appear in any pool.
+
+### E3. Rule D — global monthly USD cap
+
+- **Meter D** (`credit_burn_meter.MeterD`) tracks calendar-month USD spend. Notify at 80 % of `MONTHLY_TOTAL_USD_CAP` (env, default `$500`); LOCK at 100 % by setting `chat:cheaponly=1` in Redis. `_select_chat_model` reads the flag on every dispatch and clamps to Workers-AI Mistral-7B until `chat:cheaponly:pin` is cleared at 00:00 UTC on the 1st of the next month. Alert sink reuses the Meter A/B/C pager wiring (no auto-flip without an alert).
+
+### E4. Optimizations (K-series)
+
+- **K.2 — Deterministic-input AI cache** (`artifacts/syrabit-backend/ai_input_cache.py`): in-process LRU + Redis-backed completion cache keyed on `sha256(model | max_tokens | canonical_json(messages))`. Opt-in via `is_deterministic(...)` — never serves a cached response across users for streaming or temperature>0 calls. Wired on the admin chapter pre-gen pipeline and `content_formatter` polish path.
+- **K.3 — Embed/formatter batching** (`artifacts/syrabit-backend/ai_batch_queue.py`): generic `AsyncBatcher(flush_size, flush_window_ms, flush_fn)` coalesces concurrent submissions into one upstream call. Cuts Workers-AI request count ~50× during bulk re-embed (`providers/chunk_embedder._BATCH_SIZE = 32` (Task #513 §K.3 — locked at 32, was 48; raising requires Sentry-annotated changelog)).
+- **Off in production:** all "nice-to-have" AI experiments (background pre-fetch, speculative completion, multi-model voting, full-history re-embed on sign-in) are gated by `ENABLE_AI_EXPERIMENTS`. Default OFF in production; flip via the admin runtime flags route only — never via Bicep.
+
+### E5. K.1 — Model-optimization eval
+
+Tracked separately. The eval harness (Workers-AI Mistral-7B vs. Azure `gpt-4.1-nano` on the synthetic Syrabit chat traffic mix) is a follow-up item — it depends on the real cap-shaped traffic this task introduces. Current `_select_chat_model` rules are the founder-locked starting point; eval results refine the SESSION_CHEAP_TURN_LIMIT / CONSERVATIVE_OUTPUT_TOKENS thresholds in a future PR.

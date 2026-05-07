@@ -160,6 +160,27 @@ preview_id = "c7d531ef4b9a4cd980134251f5739556"
 #   wrangler kv namespace create BOT_HTML_CACHE
 #   wrangler kv namespace create BOT_HTML_CACHE --preview
 # Then replace the IDs below with the output values.
+# Task #513 §K.2 — deterministic AI response cache. The FastAPI
+# backend writes 30-day TTL entries here via `ai_input_cache.py`
+# (Redis is the primary tier; this KV is the cross-region replica
+# read by the edge worker on cache-eligible AI proxy paths).
+# Create with:  wrangler kv namespace create AI_RESPONSE_CACHE
+#               wrangler kv namespace create AI_RESPONSE_CACHE --preview
+# Then paste the IDs below. Until provisioned the worker treats the
+# binding as absent and falls back to direct origin calls.
+# NOTE: AI_RESPONSE_CACHE binding is INTENTIONALLY commented out at
+# the top-level (default-env) scope so `wrangler deploy` from this
+# repo cannot ship placeholder IDs into production. Operators must
+# (a) provision the namespace with `wrangler kv namespace create
+# AI_RESPONSE_CACHE` (and `--preview`), then (b) uncomment + paste
+# the real IDs below before deploying. Until then the worker treats
+# `env.AI_RESPONSE_CACHE` as undefined and the §K.2 cache silently
+# degrades to the backend Redis tier (correct fail-open behaviour).
+# [[kv_namespaces]]
+# binding = "AI_RESPONSE_CACHE"
+# id = "REPLACE_WITH_AI_RESPONSE_CACHE_KV_ID"
+# preview_id = "REPLACE_WITH_AI_RESPONSE_CACHE_KV_PREVIEW_ID"
+
 [[kv_namespaces]]
 binding = "BOT_HTML_CACHE"
 id = "a92591899d544ddb8ac61c54d2b40180"

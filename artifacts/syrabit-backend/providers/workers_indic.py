@@ -114,6 +114,31 @@ async def call_indic_trans(
         src    = source_lang or _LANG_ASM
         tgt    = target_lang or _LANG_ENG
 
+    # Task #513 §K.2 — deterministic AI response cache. IndicTrans2
+    # is fully deterministic for a given (text, src, tgt) tuple at
+    # CF Workers AI's default temperature, so a repeat translation
+    # MUST hit the 30-day cache instead of paying for the call.
+    _aic_msgs = [{"role": "user", "content": text}]
+    _aic_model = f"workers_indic:{model}:{src}:{tgt}"
+    try:
+        from ai_input_cache import (
+            get_response as _aic_get,
+            set_response as _aic_set,
+            is_deterministic as _aic_is_det,
+        )
+        _aic_enabled = _aic_is_det(_aic_msgs, _aic_model, temperature=0.0, stream=False)
+    except Exception:
+        _aic_get = _aic_set = None  # type: ignore[assignment]
+        _aic_enabled = False
+    if _aic_enabled and _aic_get is not None:
+        _cached = _aic_get(_aic_msgs, _aic_model)
+        if _cached:
+            logger.info(
+                "workers_indic: %s [CACHE-HIT] %d chars (model=%s)",
+                direction, len(_cached), model,
+            )
+            return _cached
+
     url = (
         f"https://api.cloudflare.com/client/v4/accounts/{_ACCOUNT_ID}"
         f"/ai/run/{model}"
@@ -182,6 +207,12 @@ async def call_indic_trans(
         "workers_indic: %s translated %d chars → %d chars",
         direction, len(text), len(translated),
     )
+    # §K.2 — write back successful translation for the next 30 days.
+    if _aic_enabled and _aic_set is not None:
+        try:
+            _aic_set(_aic_msgs, _aic_model, translated)
+        except Exception:
+            pass
     return translated
 
 

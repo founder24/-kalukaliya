@@ -1061,10 +1061,94 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         logger.info(f"AI cache HIT (L1): {cache_key}")
 
     if answer is None:
+        # ── Task #513 §C — tier-routing on every English-chat dispatch ──
+        # The dispatcher is the single source of truth for which provider /
+        # model / output-cap a chat turn uses. Reading the tier decision
+        # here (rather than at request entry) lets Rule D (`chat:cheaponly`)
+        # take effect on the very next turn after the cap is tripped, with
+        # no replica restart and no per-request feature flag.
+        try:
+            from cost_caps import (
+                _select_chat_model as _ccs_select,
+                clamp_messages as _ccs_clamp,
+                max_output_tokens_for as _ccs_max_out,
+            )
+            from credit_burn_meter_runtime import is_chat_cheaponly_active as _ccs_cheaponly
+            _chat_decision = _ccs_select(
+                user_id=str((user.get("id") if user else "") or ""),
+                # Task #513 §C round-6 — `session_turn_count` is the
+                # ORDINAL of the turn we are about to dispatch, NOT the
+                # count of completed pairs in history. `_select_chat_model`
+                # treats `turn <= SESSION_CHEAP_TURN_LIMIT (=2)` as cheap,
+                # so on the user's 3rd message (history holds 2 prior
+                # user+assistant pairs → 4 messages → 2 completed pairs)
+                # we MUST pass 3 to flip to the primary tier. Off-by-one
+                # here meant turn 3 stayed on Mistral-7B forever.
+                session_turn_count=int(
+                    (len(history_messages) // 2) + 1
+                    if isinstance(history_messages, list) else 1
+                ),
+                user_plan=str((user.get("plan", "free") if user else "free") or "free"),
+                lang=str(_ns_resp_lang or "en"),
+                cheaponly_active=_ccs_cheaponly(),
+            )
+            _ns_model = _chat_decision.get("model") or _ns_model
+            max_tokens = _ccs_max_out(
+                "chat_turn",
+                int(_chat_decision.get("max_output_tokens") or max_tokens or 0) or None,
+            )
+            messages = _ccs_clamp(messages, call_type="chat_turn")
+            try:
+                import sentry_sdk as _sentry_sdk
+                _sentry_sdk.set_tag("chat_tier",     str(_chat_decision.get("tier", "")))
+                _sentry_sdk.set_tag("chat_provider", str(_chat_decision.get("provider", "")))
+                if _chat_decision.get("cheaponly_lock"):
+                    _sentry_sdk.set_tag("chat_cheaponly_lock", "1")
+            except Exception:
+                pass
+            logger.info(
+                "[CHAT][TIER] tier=%s provider=%s model=%s max_out=%s cheaponly=%s",
+                _chat_decision.get("tier"), _chat_decision.get("provider"),
+                _chat_decision.get("model"), _chat_decision.get("max_output_tokens"),
+                bool(_chat_decision.get("cheaponly_lock")),
+            )
+        except Exception as _tier_exc:
+            logger.warning("[CHAT][TIER] tier-routing failed (%s) — using request defaults", _tier_exc)
+
+        # §C — pull provider hint from the tier decision so
+        # `call_llm_api_chat` dispatches DIRECTLY to the chosen
+        # provider (not just tags `_ns_model`). Absent / unknown
+        # providers fall through to the PROVIDER_PRIORITY chain.
+        _ns_provider = None
+        try:
+            _ns_provider = (_chat_decision or {}).get("provider")  # type: ignore[name-defined]
+        except Exception:
+            _ns_provider = None
         _t_llm_start = _time_mod.time()
         try:
-            answer = await call_llm_api_chat(messages, model=_ns_model, max_tokens=max_tokens, lang=_ns_resp_lang or "en")
+            answer = await call_llm_api_chat(
+                messages, model=_ns_model, max_tokens=max_tokens,
+                lang=_ns_resp_lang or "en", provider_override=_ns_provider,
+            )
             _llm_elapsed_ms = (_time_mod.time() - _t_llm_start) * 1000
+            # §J — feed the credit-burn meters from the same hot path
+            # that just spent money. We pass an estimated USD figure
+            # derived from a conservative per-1k-token blended rate;
+            # exact pricing is reconciled by the daily billing cron
+            # which calls the same `ingest_meter_c_usd` function we
+            # call here. This wiring is what makes Rule D's
+            # `chat:cheaponly` lock fire under real traffic — without
+            # an in-process ingest call, MeterD would only see the
+            # daily cron and lag by up to 24h.
+            try:
+                from credit_burn_meter_runtime import ingest_daily_cost_usd as _cb_ingest_c
+                _est_in  = sum(len(str(m.get("content", ""))) for m in (messages or []))
+                _est_out = len(answer or "")
+                # Blended rate: ~$0.20 per 1M chars (≈ $0.80 / 1M tokens).
+                _est_usd = (_est_in + _est_out) * 0.0000002
+                _cb_ingest_c(_est_usd)
+            except Exception as _cb_exc:
+                logger.debug("[CHAT][METER] ingest skipped: %s", _cb_exc)
             await ai_cache_aset(cache_key, answer, _cache_ttl, saved_ms=_llm_elapsed_ms)
             _ai_response_cache[cache_key] = answer
             _t_llm_done = _time_mod.time()

@@ -45,6 +45,60 @@ async def save_onboarding(data: OnboardingData, user: dict = Depends(get_current
     await supa_update_user(user["id"], update_data)
     return {"message": "Onboarding complete"}
 
+@router.get("/me/quota")
+async def get_chat_quota(user: Optional[dict] = Depends(get_current_user_optional)):
+    """Task #513 §A — chat-cap quota for the authenticated caller.
+
+    The Cloudflare edge worker enforces the per-user chat-budget at the
+    network edge and serves `/api/me/quota` directly from KV in
+    production. This backend handler is a defence-in-depth fallback for
+    direct-origin calls (admin tooling, internal probes, dev runs that
+    bypass the edge) and intentionally returns ONLY the static caps and
+    plan — live counters live in CF KV and are not mirrored here.
+    """
+    plan = (user or {}).get("plan", "free") if user else "free"
+    # Task #513 §A round-7 — match the edge worker's `_isPaidPlan`
+    # semantics exactly: ANY non-empty plan that is not literally
+    # "free" / "anon" qualifies as paid and bypasses the daily soft
+    # cap. The previous fixed allowlist drifted from edge logic and
+    # could produce different `day` shapes in origin fallback vs.
+    # edge responses for new paid tiers.
+    _norm_plan = (plan or "").strip().lower()
+    is_paid = bool(_norm_plan) and _norm_plan not in {"free", "anon", "anonymous"}
+    now = datetime.now(timezone.utc)
+    next_month = (
+        datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+        if now.month == 12
+        else datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    )
+    next_midnight = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+    return {
+        "identity_kind": "user" if user else "anon",
+        "plan":          plan,
+        "month": {
+            "cap":       30,
+            "used":      None,
+            "remaining": None,
+            "reset":     next_month.isoformat().replace("+00:00", "Z"),
+            "source":    "edge_kv",
+        },
+        "day": None if is_paid else {
+            "cap":       3,
+            "used":      None,
+            "remaining": None,
+            "reset":     next_midnight.isoformat().replace("+00:00", "Z"),
+            "source":    "edge_kv",
+        },
+        "note": (
+            "Live counters are served by the Cloudflare edge worker at "
+            "/api/me/quota — this origin endpoint returns the static cap "
+            "shape only (Task #513 §A)."
+        ),
+    }
+
+
 @router.get("/user/profile")
 async def get_profile(user: Optional[dict] = Depends(get_current_user_optional)):
     if not user:

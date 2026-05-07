@@ -735,3 +735,76 @@ def test_memory_brain_guard_soft_in_production(monkeypatch):
     with ctx.chat_turn(session_id="s"):
         # Must not raise in prod — emits a metric instead.
         ctx.assert_mongo_read_or_raise()
+
+
+# ── Task #513 §J — Rule D `chat:cheaponly` month-rollover semantics ──
+
+
+def _utc_ts(year: int, month: int, day: int, hour: int = 0,
+            minute: int = 0, second: int = 0) -> float:
+    from datetime import datetime, timezone
+    return datetime(year, month, day, hour, minute, second,
+                    tzinfo=timezone.utc).timestamp()
+
+
+def test_meter_d_cheaponly_lock_ttl_aligns_to_next_utc_month_start():
+    """Locking mid-month must set TTL to remaining seconds of the
+    month, NOT a fixed 32-day window — otherwise the lock leaks past
+    the spend-control boundary."""
+    from credit_burn_meter import (
+        MeterD, MeterDConfig, CHAT_CHEAPONLY_KEY,
+    )
+
+    r = FakeRedis()
+    cfg = MeterDConfig(cap_usd=100.0, ttl_sec=32 * 24 * 3600)
+    md = MeterD(redis=r, alert_sink=lambda *a, **k: None, cfg=cfg)
+
+    # 2026-05-15 00:00:00 UTC — 17 days until 2026-06-01 00:00:00 UTC.
+    now = _utc_ts(2026, 5, 15, 0, 0, 0)
+    md.record_usd(150.0, now=now)
+
+    assert r.get(CHAT_CHEAPONLY_KEY) == b"1"
+    expected_ttl = int(_utc_ts(2026, 6, 1) - now)
+    assert r.expires[CHAT_CHEAPONLY_KEY] == expected_ttl
+    # Sanity bound: 17 days ≈ 1_468_800 s; must NOT be the 32-day default.
+    assert r.expires[CHAT_CHEAPONLY_KEY] < 32 * 24 * 3600
+    assert r.expires[CHAT_CHEAPONLY_KEY] == 17 * 24 * 3600
+
+
+def test_meter_d_cheaponly_lock_handles_december_to_january_rollover():
+    from credit_burn_meter import MeterD, MeterDConfig, CHAT_CHEAPONLY_KEY
+
+    r = FakeRedis()
+    md = MeterD(redis=r, alert_sink=lambda *a, **k: None, cfg=MeterDConfig(cap_usd=10.0))
+
+    # 2026-12-20 12:00 UTC → 2027-01-01 00:00 UTC.
+    now = _utc_ts(2026, 12, 20, 12, 0, 0)
+    md.record_usd(99.0, now=now)
+
+    expected_ttl = int(_utc_ts(2027, 1, 1) - now)
+    assert r.expires[CHAT_CHEAPONLY_KEY] == expected_ttl
+
+
+def test_meter_d_cheaponly_cleared_at_month_rollover_unless_pinned():
+    """Simulate the post-TTL state: at month N+1 the auto-set lock is
+    gone; `is_cheaponly_active()` must report False unless the
+    operator pin is present."""
+    from credit_burn_meter import (
+        MeterD, MeterDConfig,
+        CHAT_CHEAPONLY_KEY, CHAT_CHEAPONLY_PIN_KEY,
+    )
+
+    r = FakeRedis()
+    md = MeterD(redis=r, alert_sink=lambda *a, **k: None, cfg=MeterDConfig(cap_usd=10.0))
+
+    # Lock mid-May.
+    md.record_usd(50.0, now=_utc_ts(2026, 5, 15))
+    assert md.is_cheaponly_active() is True
+
+    # Simulate Redis TTL expiry at the month boundary.
+    r.delete(CHAT_CHEAPONLY_KEY)
+    assert md.is_cheaponly_active() is False
+
+    # Pin survives the rollover.
+    r.set(CHAT_CHEAPONLY_PIN_KEY, "1")
+    assert md.is_cheaponly_active() is True

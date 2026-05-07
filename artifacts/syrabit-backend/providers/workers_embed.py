@@ -203,16 +203,50 @@ async def embed(
     return out
 
 
+_QUERY_BATCHER = None
+
+
+def _get_query_batcher():
+    """Task #513 §K.3 — lazily-built singleton batcher that coalesces
+    concurrent ``embed_query`` calls into a single Workers-AI request.
+
+    The chat hot path frequently issues 3-6 concurrent embed_query
+    calls (one per ranked retrieval pass: BM25, vector, web, …); each
+    call costs the same as a 48-text batched call so coalescing them
+    cuts request count by up to 6× during peak.
+
+    The batcher is instantiated on first use so module import does
+    NOT touch the asyncio loop (some test environments import this
+    module before any loop exists).
+    """
+    global _QUERY_BATCHER
+    if _QUERY_BATCHER is None:
+        from ai_batch_queue import AsyncBatcher
+
+        async def _flush(items):
+            return await embed(list(items), input_type="search_query")
+
+        _QUERY_BATCHER = AsyncBatcher(
+            _flush, flush_size=8, flush_window_ms=20, name="workers_embed_query",
+        )
+    return _QUERY_BATCHER
+
+
 async def embed_query(text: str) -> List[float]:
-    """Embed a single query. Returns ``[]`` on hard failure."""
+    """Embed a single query. Returns ``[]`` on hard failure.
+
+    Routes through the §K.3 ``AsyncBatcher`` so concurrent callers
+    share a single Workers-AI request when their submissions arrive
+    inside the 20 ms flush window.
+    """
     if not text:
         return []
     try:
-        vecs = await embed([text], input_type="search_query")
+        vec = await _get_query_batcher().submit(text)
     except Exception as exc:
         logger.warning("[workers_embed] embed_query failed: %s", exc)
         return []
-    return vecs[0] if vecs else []
+    return vec or []
 
 
 async def embed_documents(texts: List[str]) -> List[List[float]]:

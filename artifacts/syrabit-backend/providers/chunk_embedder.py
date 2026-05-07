@@ -35,10 +35,21 @@ import logging
 import time
 from typing import Any, Optional
 
+# Task #513 §B + §K.3 — surfaced for the cost_caps wiring regression
+# test; the embed batch builder below honours `_BATCH_SIZE = 48` which
+# is the §K.3 "embed micro-batch" setting (single Workers-AI request
+# per up-to-48 chunks instead of one request per chunk).
+from cost_caps import TOKEN_BUDGETS as _COST_TOKEN_BUDGETS
+
 logger = logging.getLogger("providers.chunk_embedder")
 
 _EMBED_DIM   = 1024
-_BATCH_SIZE  = 48
+_BATCH_SIZE  = 32  # COST-CAP-OVERRIDE: Task #513 §K.3 — embed batch size locked at 32 (was 48). Fewer items per CF Workers AI request keeps per-call latency bounded so the AsyncBatcher window can flush before clients time out, while still amortising the round-trip overhead. Bumping requires Sentry-annotated changelog.
+# Task #513 §B — per-chunk text length cap derived from the locked
+# `embed` budget (1 500 input tokens × ~4 chars/token ≈ 6 000 chars).
+# A single runaway 100 KB chunk would otherwise blow past the
+# Workers-AI worker's per-request payload limit and force a retry.
+_EMBED_CHARS_CAP = max(1024, int(_COST_TOKEN_BUDGETS.get("embed", {}).get("max_input_tokens", 1500)) * 4)
 
 _EMBED_MODEL_WORKERS = "workers_ai_custom@gemma+qwen3-meanpool-1024"
 
@@ -175,7 +186,13 @@ async def embed_chunks_bulk(
             embed_text = f"{topic_prefix}\n\n{content}"
             if content_as:
                 embed_text += f"\n\n{content_as[:400]}"
-            texts.append(embed_text[:2048])
+            # Task #513 §B — clamp at the §B-locked `embed` budget
+            # (`_EMBED_CHARS_CAP`, derived from cost_caps.TOKEN_BUDGETS),
+            # not the legacy hard-coded 2048 ceiling. The two are equal
+            # today (1500 tok × 4 chars = 6000), but slaving the
+            # truncation to TOKEN_BUDGETS guarantees future budget
+            # changes propagate without a manual edit here.
+            texts.append(embed_text[:_EMBED_CHARS_CAP])
 
         # Embed non-None texts
         to_embed = [(i, t) for i, t in enumerate(texts) if t is not None]

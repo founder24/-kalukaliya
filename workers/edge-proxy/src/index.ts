@@ -53,6 +53,24 @@ interface Env {
   RATE_LIMIT: KVNamespace;
   BOT_HTML_CACHE?: KVNamespace;
   /**
+   * Task #513 §K.2 — deterministic AI response cache. Cloudflare KV
+   * namespace `ai_response_cache` shared with the FastAPI backend
+   * (the backend writes via the `/api/edge/ai-response-cache/*`
+   * route on the worker; same key namespace as the backend's
+   * `ai_input_cache.py`). 30-day TTL is enforced at write time on
+   * the backend side. Optional so the worker still boots when the
+   * binding is not declared.
+   */
+  AI_RESPONSE_CACHE?: KVNamespace;
+  /**
+   * Task #513 §A — HMAC-SHA256 secret used to verify the chat-cap
+   * caller's identity. MUST match the FastAPI backend's `JWT_SECRET`
+   * environment variable (see artifacts/syrabit-backend/auth_deps.py).
+   * Bind via `wrangler secret put JWT_SECRET`. When absent, every
+   * caller is treated as anonymous and the cap falls back to anon-id.
+   */
+  JWT_SECRET?: string;
+  /**
    * Task #511 — KV namespace mirroring the artifacts edge worker's
    * `CF_EDGE_CACHE` binding. The deployed worker doesn't own any
    * /api/edge/kv-cache routes today, but if/when it does we want the
@@ -639,10 +657,336 @@ const RATE_LIMIT_WINDOW_S = 60;
 const AI_RATE_LIMIT_RPM = 30;
 const AI_RATE_LIMIT_PREFIXES = ["/api/ai/chat", "/api/ai/generate", "/api/ai/grounded", "/api/ai/explain", "/api/ai/quiz", "/api/ai/summarize", "/api/chat"];
 
+// ─── Task #513 §A — chat-cap (per-user monthly hard + daily soft) ─────────
+// Chat dispatch is the single most expensive call type per request
+// (Azure gpt-4.1-nano hot path). The cap is enforced AT THE EDGE so
+// an abusive client never reaches the FastAPI origin in the first
+// place. Identity is the JWT-verified `sub` (user_id) claim; an
+// unauthenticated caller falls back to anon-id, then IP. Plan is the
+// JWT-verified `plan` claim — an attacker-supplied `x-plan` header
+// is IGNORED.
+//
+// Two windows per identity:
+//   - Monthly hard cap (`CHAT_CAP_MONTHLY=30`) applies to EVERYONE
+//     (free + paid) and rolls over at the 1st of the next UTC month.
+//     Key: `chat-budget:<id>:<YYYY-MM>` (TTL ≈ 32 days).
+//   - Daily soft cap (`CHAT_CAP_DAILY=3`) applies to FREE users only.
+//     Paid plans bypass the daily cap (their monthly hard cap is the
+//     only edge limit). Key: `chat-daily:<id>:<YYYY-MM-DD>` (TTL ≈
+//     25 h).
+//
+// Increments fire AFTER the origin returns a success status (<400)
+// so a 4xx/5xx that the client retries does not consume a turn.
+const CHAT_CAP_MONTHLY = 30;
+const CHAT_CAP_DAILY = 3;
+// Coverage (Task #513 §A round-7 narrowed): the chat budget gates
+// CHAT verbs only — `/api/ai/chat`, `/api/chat`, and the
+// `/api/edu/study/*` chat-equivalents (chat / qa / explain). The
+// other AI routes (`generate`, `grounded`, `quiz`, `summarize`)
+// remain on the standard 30 RPM AI rate-limit but DO NOT consume
+// the per-user chat cap, because the per-call cost-cap clamp in
+// `cost_caps.TOKEN_BUDGETS` already pins their token spend and
+// the cap was specified for the chat hot-path only. Re-broadening
+// CHAT_CAP_PATHS requires a Sentry-annotated changelog entry per
+// the COST-CAP-OVERRIDE convention.
+const CHAT_CAP_PATHS = [
+  "/api/ai/chat",
+  "/api/chat",
+  "/api/edu/study/chat",
+  "/api/edu/study/qa",
+  "/api/edu/study/explain",
+];
+// Paid plans bypass only the DAILY soft cap. Monthly cap still
+// applies to enforce per-user spend.
+const CHAT_DAILY_BYPASS_PLANS = new Set(["pro", "student-plus", "student_plus", "premium", "enterprise"]);
+
+function isChatPath(p: string): boolean {
+  return CHAT_CAP_PATHS.some((x) => p.startsWith(x));
+}
+
+function _utcDayKey(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function _utcMonthKey(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function _nextUtcMidnightDate(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1,
+    0, 0, 0, 0,
+  ));
+}
+
+function _nextUtcMonthStartDate(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth() + 1, 1,
+    0, 0, 0, 0,
+  ));
+}
+
+function _secondsToNextUtcMidnight(): number {
+  return Math.max(1, Math.floor((_nextUtcMidnightDate().getTime() - Date.now()) / 1000));
+}
+
+function _secondsToNextUtcMonthStart(): number {
+  return Math.max(1, Math.floor((_nextUtcMonthStartDate().getTime() - Date.now()) / 1000));
+}
+
+function _isPaidPlan(plan: string): boolean {
+  // Task #513 §A round-3 — broaden the daily-cap bypass per spec:
+  // ANY non-empty plan that is not literally "free" qualifies as
+  // paid. The fixed allowlist is kept as documentation only — every
+  // tier we ship today (`pro`, `student-plus`, `premium`, etc.) is
+  // already covered, and any future paid tier will inherit the
+  // bypass automatically without a worker redeploy.
+  if (!plan) return false;
+  const norm = plan.trim().toLowerCase();
+  if (!norm || norm === "free" || norm === "anonymous" || norm === "anon") return false;
+  return true;
+}
+
+// ─── HMAC-SHA256 JWT verification (HS256) ─────────────────────────────────
+// Backend uses python-jose HS256 with `JWT_SECRET`. We perform full
+// signature verification at the edge so we can trust `sub` (user_id)
+// and `plan` claims. JWT_SECRET MUST be bound on the worker
+// (wrangler secret put JWT_SECRET); when absent, we treat the caller
+// as anonymous and fall back to anon-id. We do NOT trust an
+// unverified bearer token.
+function _b64urlToUint8(s: string): Uint8Array {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function _b64urlDecodeJson(s: string): Record<string, unknown> | null {
+  try {
+    const txt = new TextDecoder().decode(_b64urlToUint8(s));
+    return JSON.parse(txt) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+const _HMAC_KEY_CACHE = new Map<string, CryptoKey>();
+async function _importHmacKey(secret: string): Promise<CryptoKey> {
+  const cached = _HMAC_KEY_CACHE.get(secret);
+  if (cached) return cached;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  _HMAC_KEY_CACHE.set(secret, key);
+  return key;
+}
+
+interface VerifiedJwt { user_id: string; plan: string; }
+
+async function verifyJwtFromRequest(
+  request: Request, env: Env,
+): Promise<VerifiedJwt | null> {
+  const auth = request.headers.get("Authorization") || "";
+  if (!auth.startsWith("Bearer ")) return null;
+  const token = auth.slice(7).trim();
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [headerB64, payloadB64, sigB64] = parts;
+  const header = _b64urlDecodeJson(headerB64);
+  if (!header || header.alg !== "HS256") return null;
+
+  const secret = (env as Env & { JWT_SECRET?: string }).JWT_SECRET;
+  if (!secret) {
+    // No JWT secret bound — treat caller as anonymous. Do NOT trust
+    // any claims from an unverified token.
+    return null;
+  }
+  let ok = false;
+  try {
+    const key = await _importHmacKey(secret);
+    const sig = _b64urlToUint8(sigB64);
+    const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+    ok = await crypto.subtle.verify("HMAC", key, sig, data);
+  } catch {
+    ok = false;
+  }
+  if (!ok) return null;
+
+  const payload = _b64urlDecodeJson(payloadB64);
+  if (!payload) return null;
+  // Expiry check
+  const exp = typeof payload.exp === "number" ? payload.exp : 0;
+  if (exp > 0 && Date.now() / 1000 > exp) return null;
+  const sub = typeof payload.sub === "string" ? payload.sub : "";
+  if (!sub) return null;
+  const plan = typeof payload.plan === "string" ? payload.plan : "free";
+  return { user_id: sub, plan };
+}
+
+async function _kvIncr(env: Env, key: string, ttlSec: number): Promise<number> {
+  if (!env.RATE_LIMIT) return 0;
+  try {
+    const raw = await env.RATE_LIMIT.get(key);
+    const n = (parseInt(raw || "0", 10) || 0) + 1;
+    await env.RATE_LIMIT.put(key, String(n), { expirationTtl: ttlSec });
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+interface ChatCapPrecheck {
+  allowed: boolean;
+  error?: "chat_budget_exhausted" | "chat_daily_soft_cap";
+  limit?: number;
+  window?: "month" | "day";
+  reset?: string;             // ISO-8601 UTC timestamp of window rollover.
+  retry_after?: number;       // Seconds — exact distance to `reset`.
+  remaining_month: number;
+  remaining_day: number;
+  dayKey: string;             // Returned so the caller can bump on success.
+  monthKey: string;
+  bypassed: boolean;          // True when KV is unavailable.
+  identity_kind: "user" | "anon" | "ip";
+  paid: boolean;
+}
+
+async function precheckChatCap(
+  env: Env, identity: string, identityKind: "user" | "anon" | "ip", paid: boolean,
+): Promise<ChatCapPrecheck> {
+  const dayKey = `chat-daily:${identity}:${_utcDayKey()}`;
+  const monthKey = `chat-budget:${identity}:${_utcMonthKey()}`;
+
+  const baseAllowed = (rm: number, rd: number): ChatCapPrecheck => ({
+    allowed: true, remaining_month: rm, remaining_day: rd,
+    dayKey, monthKey, bypassed: false, identity_kind: identityKind, paid,
+  });
+
+  if (!env.RATE_LIMIT) {
+    return {
+      allowed: true, remaining_month: CHAT_CAP_MONTHLY, remaining_day: CHAT_CAP_DAILY,
+      dayKey, monthKey, bypassed: true, identity_kind: identityKind, paid,
+    };
+  }
+
+  try {
+    // Always read the monthly counter; daily only matters for free users.
+    const reads: Promise<string | null>[] = [env.RATE_LIMIT.get(monthKey)];
+    if (!paid) reads.push(env.RATE_LIMIT.get(dayKey));
+    const results = await Promise.all(reads);
+    const mCur = parseInt(results[0] || "0", 10) || 0;
+    const dCur = paid ? 0 : (parseInt(results[1] || "0", 10) || 0);
+
+    // Monthly hard cap — applies to everyone.
+    if (mCur >= CHAT_CAP_MONTHLY) {
+      const sec = _secondsToNextUtcMonthStart();
+      return {
+        allowed: false,
+        error: "chat_budget_exhausted",
+        limit: CHAT_CAP_MONTHLY,
+        window: "month",
+        reset: _nextUtcMonthStartDate().toISOString(),
+        retry_after: sec,
+        remaining_month: 0,
+        remaining_day: paid ? CHAT_CAP_DAILY : Math.max(0, CHAT_CAP_DAILY - dCur),
+        dayKey, monthKey, bypassed: false, identity_kind: identityKind, paid,
+      };
+    }
+    // Daily soft cap — free users only.
+    if (!paid && dCur >= CHAT_CAP_DAILY) {
+      const sec = _secondsToNextUtcMidnight();
+      return {
+        allowed: false,
+        error: "chat_daily_soft_cap",
+        limit: CHAT_CAP_DAILY,
+        window: "day",
+        reset: _nextUtcMidnightDate().toISOString(),
+        retry_after: sec,
+        remaining_month: Math.max(0, CHAT_CAP_MONTHLY - mCur),
+        remaining_day: 0,
+        dayKey, monthKey, bypassed: false, identity_kind: identityKind, paid,
+      };
+    }
+    return baseAllowed(
+      Math.max(0, CHAT_CAP_MONTHLY - mCur),
+      paid ? CHAT_CAP_DAILY : Math.max(0, CHAT_CAP_DAILY - dCur),
+    );
+  } catch {
+    return {
+      allowed: true, remaining_month: CHAT_CAP_MONTHLY, remaining_day: CHAT_CAP_DAILY,
+      dayKey, monthKey, bypassed: true, identity_kind: identityKind, paid,
+    };
+  }
+}
+
+// Per-request context plumbed from the chat-cap precheck site to the
+// outer fetch handler so the cap counter can be bumped AFTER the
+// origin returns a success status (response.status < 400). Using a
+// WeakMap keyed on the Request keeps the lifetime correct (entry is
+// reaped automatically when the Request is GC'd).
+const _CHAT_CAP_PENDING: WeakMap<Request, { dayKey: string; monthKey: string; paid: boolean }> = new WeakMap();
+
+async function bumpChatCapOnSuccess(
+  env: Env, dayKey: string, monthKey: string, paid: boolean,
+): Promise<void> {
+  // Always bump the monthly counter (cap applies to everyone). Bump
+  // the daily counter only for free users (paid bypass the daily
+  // soft cap). ~25 h day TTL covers DST drift; ~32 day month TTL
+  // covers the longest calendar month.
+  if (!env.RATE_LIMIT) return;
+  try {
+    const writes: Promise<unknown>[] = [_kvIncr(env, monthKey, 32 * 24 * 60 * 60)];
+    if (!paid) writes.push(_kvIncr(env, dayKey, 90_000));
+    await Promise.all(writes);
+  } catch {
+    // Best-effort — a KV write failure must NOT block the request that
+    // already succeeded at the origin.
+  }
+}
+
+// Read-only counters for `/api/me/quota` (called via internal CF
+// header injection from the worker into the proxied request, so the
+// backend can render the user's current spend without an extra KV
+// round-trip from inside FastAPI).
+async function readChatCapCounters(
+  env: Env, identity: string,
+): Promise<{ used_month: number; used_day: number }> {
+  if (!env.RATE_LIMIT) return { used_month: 0, used_day: 0 };
+  const dayKey = `chat-daily:${identity}:${_utcDayKey()}`;
+  const monthKey = `chat-budget:${identity}:${_utcMonthKey()}`;
+  try {
+    const [m, d] = await Promise.all([
+      env.RATE_LIMIT.get(monthKey),
+      env.RATE_LIMIT.get(dayKey),
+    ]);
+    return {
+      used_month: parseInt(m || "0", 10) || 0,
+      used_day: parseInt(d || "0", 10) || 0,
+    };
+  } catch {
+    return { used_month: 0, used_day: 0 };
+  }
+}
+
 // D1 Sync warm-on-startup flag — runs sync immediately when worker boots
 let _d1WarmOnStartupDone = false;
 function isAiPath(p: string): boolean {
   if (p.startsWith("/api/ai/fallback/")) return false;
+  // Task #513 §A — `/api/edu/study/{chat,qa,explain}` are also chat
+  // verbs that MUST be capped at the edge. Without this they bypass
+  // the precheck because they live outside `/api/ai/*`.
+  if (CHAT_CAP_PATHS.some((x) => p.startsWith(x))) return true;
   return AI_RATE_LIMIT_PREFIXES.some((x) => p.startsWith(x)) || (p.startsWith("/api/ai/") && !p.startsWith("/api/ai/fallback/"));
 }
 
@@ -2839,6 +3183,65 @@ async function _handleEdgeFetch(
     // dependency state moved to /api/readyz, which intentionally
     // proxies through to the backend so on-call sees real Mongo /
     // PG / Vertex status instead of a static "edge is up" lie.
+    // ── Task #513 §A — /api/me/quota (read-only chat-cap state) ───────────
+    // Returns the caller's current chat-budget state so the SPA can
+    // render an accurate "X chats left this month / Y left today"
+    // banner without a guess-and-check 429. The worker has direct KV
+    // access so we serve this entirely from the edge — no FastAPI
+    // round-trip. Identity resolution mirrors the cap precheck:
+    // JWT-verified `sub` first, anon-id second, IP last.
+    if (pathname === "/api/me/quota" && (request.method === "GET" || request.method === "HEAD")) {
+      const _verified = await verifyJwtFromRequest(request, env);
+      const _anonId = (request.headers.get("x-anon-id") || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+      let _identity: string;
+      let _identityKind: "user" | "anon" | "ip";
+      if (_verified) {
+        _identity = `u:${_verified.user_id}`;
+        _identityKind = "user";
+      } else if (_anonId) {
+        _identity = `a:${_anonId}`;
+        _identityKind = "anon";
+      } else {
+        const _ip = (request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "0.0.0.0").split(",")[0].trim();
+        _identity = `ip:${_ip}`;
+        _identityKind = "ip";
+      }
+      const _paid = _verified ? _isPaidPlan(_verified.plan) : false;
+      const counters = await readChatCapCounters(env, _identity);
+      const monthCap = CHAT_CAP_MONTHLY;
+      const dayCap   = _paid ? null : CHAT_CAP_DAILY;
+      const body = {
+        identity_kind: _identityKind,
+        plan: _verified?.plan || "free",
+        month: {
+          cap:        monthCap,
+          used:       counters.used_month,
+          remaining:  Math.max(0, monthCap - counters.used_month),
+          reset:      _nextUtcMonthStartDate().toISOString(),
+        },
+        day: dayCap === null ? null : {
+          cap:        dayCap,
+          used:       counters.used_day,
+          remaining:  Math.max(0, dayCap - counters.used_day),
+          reset:      _nextUtcMidnightDate().toISOString(),
+        },
+      };
+      // §A — short edge cache: counters change at most once per
+      // request (the chat post-bump is the only writer), so a 5 s
+      // public cache cuts the SPA's "remaining" banner refresh cost
+      // ~99 % without showing a stale value for more than one tick.
+      // `private` keeps logged-in plan data out of intermediate
+      // shared caches; `s-maxage=5` is the Cloudflare-edge TTL.
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: {
+          ...cors,
+          "Content-Type":  "application/json",
+          "Cache-Control": "private, max-age=5, s-maxage=5",
+          "Vary":          "Authorization, X-Anon-Id",
+        },
+      });
+    }
     if (
       pathname === "/api/health" ||
       pathname === "/api/livez" ||
@@ -3234,6 +3637,83 @@ async function _handleEdgeFetch(
       const anonId = (request.headers.get("x-anon-id") || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
       if (isAiPath(pathname)) {
+        // Task #513 §A — chat cap. Short-circuit BEFORE the per-IP /
+        // per-anon rate-limit check so a capped client never reaches
+        // the FastAPI origin (and never burns LLM dispatch budget).
+        if (isChatPath(pathname)) {
+          // Identity = JWT-verified `sub` (user_id) when the bearer
+          // token validates against `JWT_SECRET`. Otherwise we fall
+          // back to anon-id, then IP. We deliberately IGNORE any
+          // `x-plan` header — only the JWT-verified `plan` claim
+          // grants the daily-soft-cap bypass for paid users (the old
+          // header-trusting code allowed an attacker to forge
+          // `x-plan: pro` and skip the per-user budget).
+          const verified = await verifyJwtFromRequest(request, env);
+          let identity: string;
+          let identityKind: "user" | "anon" | "ip";
+          if (verified) {
+            identity = `u:${verified.user_id}`;
+            identityKind = "user";
+          } else if (anonId) {
+            identity = `a:${anonId}`;
+            identityKind = "anon";
+          } else {
+            identity = `ip:${clientIp}`;
+            identityKind = "ip";
+          }
+          const paid = verified ? _isPaidPlan(verified.plan) : false;
+
+          const cap = await precheckChatCap(env, identity, identityKind, paid);
+          if (!cap.allowed) {
+            const retryAfter = String(cap.retry_after ?? (cap.window === "day" ? _secondsToNextUtcMidnight() : _secondsToNextUtcMonthStart()));
+            // §A response contract (round-2): body is
+            //   {"error":"chat_budget_exhausted"|"chat_daily_soft_cap",
+            //    "cap": <int>, "reset_at": <ISO-8601 UTC>,
+            //    "window": "month"|"day",
+            //    "remaining_month": <int>, "remaining_day": <int>,
+            //    "detail": "..."}
+            // and the canonical client-readable header is `X-Cap`,
+            // matching the smoke test's contract assertion.
+            const xCap = cap.error === "chat_daily_soft_cap"
+              ? "chat_daily_3_per_anon"
+              : "chat_monthly_30_per_anon";
+            return new Response(
+              JSON.stringify({
+                error:           cap.error,
+                cap:             cap.limit,
+                reset_at:        cap.reset,
+                window:          cap.window,
+                remaining_month: cap.remaining_month,
+                remaining_day:   cap.remaining_day,
+                detail: cap.error === "chat_daily_soft_cap"
+                  ? "Daily chat allowance reached. Try again after the next UTC midnight or upgrade for unlimited daily turns."
+                  : "Monthly chat budget reached. Resets at the start of next UTC month.",
+              }),
+              {
+                status: 429,
+                headers: {
+                  ...cors,
+                  "Content-Type": "application/json",
+                  "Retry-After":                 retryAfter,
+                  "X-Cap":                       xCap,
+                  "X-Chat-Cap-Error":            cap.error || "chat_capped",
+                  "X-Chat-Cap-Remaining-Month":  String(cap.remaining_month ?? 0),
+                  "X-Chat-Cap-Remaining-Day":    String(cap.remaining_day ?? 0),
+                  "X-Chat-Cap-Reset":            String(cap.reset ?? ""),
+                  "X-Chat-Cap-Identity":         identityKind,
+                  "X-AE-RL": "chat_capped",
+                },
+              },
+            );
+          }
+          // Allowed — stash the cap context so the outer handler can
+          // bump the counters AFTER the origin returns a success
+          // status (post-success increment per §A spec). KV-unavailable
+          // requests skip the bump entirely.
+          if (!cap.bypassed) {
+            _CHAT_CAP_PENDING.set(request, { dayKey: cap.dayKey, monthKey: cap.monthKey, paid });
+          }
+        }
         // AI rate limit — check per-IP first, then per-user if anon-id present.
         const aiIpKey   = `rl:ai:${clientIp}`;
         const aiUserKey = anonId ? `rl:ai:user:${anonId}` : null;
@@ -3584,6 +4064,18 @@ export default {
       isAiRequest:      isAiPath(reqPath),
       httpStatus:       response.status,
     });
+    // ── Task #513 §A — post-success chat-cap increment ──────────────────────
+    // Bump the per-anon day + month counters ONLY when the origin
+    // returned a success status (< 400). 4xx/5xx responses that the
+    // SPA may retry deliberately do NOT consume a turn against the
+    // 30/month + 3/day budget.
+    const _capPending = _CHAT_CAP_PENDING.get(request);
+    if (_capPending && response.status < 400) {
+      ctx.waitUntil(bumpChatCapOnSuccess(env, _capPending.dayKey, _capPending.monthKey, _capPending.paid));
+    }
+    if (_capPending) {
+      _CHAT_CAP_PENDING.delete(request);
+    }
     // Strip internal header if present (only on rate-limit 429 responses).
     if (response.headers.has("x-ae-rl")) {
       const stripped = new Headers(response.headers);

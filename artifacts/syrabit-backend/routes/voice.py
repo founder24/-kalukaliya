@@ -39,6 +39,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from auth_deps import get_current_user, get_current_user_optional
+# Task #513 §B — STT post-summary uses the `stt_post_summary` budget
+# (2000 in / 500 out). Imported here so the cost_caps wiring regression
+# test catches a forgotten clamp on the voice dispatch path.
+import cost_caps  # noqa: F401
 
 logger = logging.getLogger("routes.voice")
 
@@ -530,11 +534,19 @@ async def voice_pipeline(
     # ── LLM: generate conversational reply (serial — requires STT transcript) ──
     try:
         from llm import call_llm_api_chat
+        # Task #513 §B — clamp via the `stt_post_summary` budget
+        # (2 000 in / 500 out). A 30-second voice note can transcribe to
+        # ~600 words; without a clamp, a 2-minute mistakenly-uploaded
+        # podcast clip would push 6 000+ tokens of transcript at the
+        # chat dispatcher.
+        from cost_caps import clamp_messages as _ccs_clamp, max_output_tokens_for as _ccs_max_out
         msgs: list = []
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})
         msgs.append({"role": "user", "content": transcript.strip()})
-        reply_text = str(await call_llm_api_chat(msgs, max_tokens=512, lang=(language or "en")[:2]))
+        msgs = _ccs_clamp(msgs, call_type="stt_post_summary")
+        _voice_max_out = _ccs_max_out("stt_post_summary", 512)
+        reply_text = str(await call_llm_api_chat(msgs, max_tokens=_voice_max_out, lang=(language or "en")[:2]))
     except Exception as exc:
         logger.error("Voice pipeline LLM step failed: %s", exc)
         raise HTTPException(status_code=502, detail="LLM reply generation failed.")

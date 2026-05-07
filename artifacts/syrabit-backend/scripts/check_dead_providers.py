@@ -153,6 +153,10 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/tests/test_dead_providers_guard.py",
     # Regression tests that ASSERT removed providers stay removed.
     "artifacts/syrabit-backend/tests/test_provider_dispatch.py",
+    # Task #513 — credit-drain order test asserts retired providers
+    # stay absent from PROVIDER_PRIORITY pools. Same pattern as the
+    # provider-dispatch regression test above.
+    "artifacts/syrabit-backend/tests/test_credit_drain_order.py",
     # Throttle / 429-burst lifecycle (groq throttle metric still emitted by
     # production providers as a side-channel; renaming requires a coordinated
     # migration of the CF AI Gateway analytics pipeline — tracked separately).

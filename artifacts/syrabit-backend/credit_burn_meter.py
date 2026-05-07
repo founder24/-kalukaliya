@@ -435,11 +435,143 @@ class MeterC:
                        {"meter": "C", "usd": total, "notify_only": True})
 
 
+# ── Meter D — global monthly USD cap (Task #513 §J) ───────────────────────
+# Notify-only at 80 % of the configured cap; LOCKING at 100 % (flips
+# the chat tier-router into cheap-only mode by setting
+# `chat:cheaponly=1` in Redis, which `_select_chat_model` reads on
+# every dispatch). Auto-clears at 00:00 UTC on the 1st of the next
+# month unless `chat:cheaponly:pin=1`. Same Meter A/B/C alert_sink
+# contract — no auto-flip without an alert.
+CHAT_CHEAPONLY_KEY = "chat:cheaponly"
+CHAT_CHEAPONLY_PIN_KEY = "chat:cheaponly:pin"
+MONTHLY_USD_KEY_PREFIX = "rule_d:usd"  # rule_d:usd:YYYY-MM
+
+
+@dataclass
+class MeterDConfig:
+    """Configuration for Rule D (global monthly USD cap)."""
+    cap_usd: float = 500.0
+    warning_pct: float = 0.80
+    # Storage TTL: ~32 days so the next-month key is born fresh and the
+    # current-month key survives a same-day cold-start without losing
+    # the running total.
+    ttl_sec: int = 32 * 24 * 60 * 60
+
+
+class MeterD:
+    """Global monthly USD cap. Notify at 80 %, LOCK chat tier into
+    cheap-only mode at 100 %.
+
+    `record_usd(amount)` is called by the same Meter-C ingest path
+    (cron/credit_burn_meter_c_ingest.py); we count the same dollars,
+    just on a calendar-month window instead of a 365-day rolling
+    window. The chat dispatcher checks `is_cheaponly_active()` on
+    every English-chat turn — when True, `_select_chat_model` clamps
+    to `workers_ai_mistral_7b` regardless of paid-plan / turn count
+    (this is the "kill switch" Section J specifies).
+    """
+
+    def __init__(self, redis: _RedisLike, alert_sink: AlertSink,
+                 cfg: Optional[MeterDConfig] = None) -> None:
+        self.redis = redis
+        self.alert = alert_sink
+        self.cfg = cfg or MeterDConfig()
+        self._warned_keys: set[str] = set()
+        self._locked_keys: set[str] = set()
+
+    @staticmethod
+    def _month_key(now: Optional[float] = None) -> str:
+        ts = now if now is not None else time.time()
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m")
+
+    def _redis_key(self, month: str) -> str:
+        return f"{MONTHLY_USD_KEY_PREFIX}:{month}"
+
+    @staticmethod
+    def _seconds_to_next_utc_month_start(now: Optional[float] = None) -> int:
+        """Return seconds remaining until 00:00 UTC on the 1st of the
+        next calendar month.
+
+        Task #513 §J round-5 — the ``chat:cheaponly`` lock MUST clear
+        automatically when the new month begins (the monthly USD
+        bucket resets), unless an operator has set
+        ``chat:cheaponly:pin``. Using a fixed multi-day TTL would let
+        the lock leak well into the next month and degrade paid
+        traffic past the spend-control window.
+        """
+        ts = now if now is not None else time.time()
+        cur = datetime.fromtimestamp(ts, tz=timezone.utc)
+        if cur.month == 12:
+            nxt = cur.replace(year=cur.year + 1, month=1, day=1,
+                              hour=0, minute=0, second=0, microsecond=0)
+        else:
+            nxt = cur.replace(month=cur.month + 1, day=1,
+                              hour=0, minute=0, second=0, microsecond=0)
+        return max(1, int(nxt.timestamp() - ts))
+
+    def record_usd(self, amount: float, now: Optional[float] = None) -> None:
+        if amount <= 0 or self.cfg.cap_usd <= 0:
+            return
+        month = self._month_key(now)
+        rkey = self._redis_key(month)
+        # Use a string-stored float since redis_client.incr is integer-only.
+        try:
+            cur = self.redis.get(rkey)
+            cur_v = float(cur.decode() if isinstance(cur, (bytes, bytearray))
+                          else (cur or 0.0))
+        except Exception:
+            cur_v = 0.0
+        new_v = cur_v + float(amount)
+        try:
+            self.redis.set(rkey, f"{new_v:.4f}", ex=self.cfg.ttl_sec)
+        except Exception:
+            pass
+        warn_at = self.cfg.cap_usd * self.cfg.warning_pct
+        if new_v >= self.cfg.cap_usd and month not in self._locked_keys:
+            self._locked_keys.add(month)
+            try:
+                # §J round-5 — TTL is the exact distance to the next
+                # UTC month start, so the cheap-only lock auto-clears
+                # the moment the monthly USD bucket resets. The pin
+                # key (`chat:cheaponly:pin`, set by operators) is
+                # checked separately in `is_cheaponly_active()` and
+                # therefore survives this auto-expiry.
+                _lock_ttl = self._seconds_to_next_utc_month_start(now)
+                self.redis.set(CHAT_CHEAPONLY_KEY, "1", ex=_lock_ttl)
+            except Exception:
+                pass
+            self.alert("critical",
+                       f"Rule D LOCKED: ${new_v:.2f} >= cap ${self.cfg.cap_usd:.0f} "
+                       f"for {month}; chat tier-router forced cheap-only.",
+                       {"meter": "D", "usd": new_v, "month": month,
+                        "action": "chat_cheaponly_locked"})
+        elif new_v >= warn_at and month not in self._warned_keys:
+            self._warned_keys.add(month)
+            self.alert("warning",
+                       f"Rule D warning: ${new_v:.2f} >= "
+                       f"{int(self.cfg.warning_pct*100)}% of "
+                       f"${self.cfg.cap_usd:.0f} for {month}",
+                       {"meter": "D", "usd": new_v, "month": month,
+                        "notify_only": True})
+
+    def is_cheaponly_active(self) -> bool:
+        """True iff the chat tier-router is currently locked to the
+        cheap pool. Pin survives auto-clear."""
+        try:
+            if self.redis.get(CHAT_CHEAPONLY_PIN_KEY):
+                return True
+            return bool(self.redis.get(CHAT_CHEAPONLY_KEY))
+        except Exception:
+            return False
+
+
 __all__ = [
     "AlertSink",
     "CHAT_FALLBACK_KEY", "CHAT_FALLBACK_PIN_KEY", "EMAIL_FALLBACK_KEY",
+    "CHAT_CHEAPONLY_KEY", "CHAT_CHEAPONLY_PIN_KEY",
     "FallbackFlag",
     "MeterA", "MeterAConfig",
     "MeterB", "MeterBConfig",
     "MeterC", "MeterCConfig",
+    "MeterD", "MeterDConfig",
 ]

@@ -1515,6 +1515,22 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
     return response
 
 async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 1024, provider_list=None, feature_key: str = "") -> str:
+    # Task #513 §B — token-budget clamp. Resolve a coarse call_type from
+    # `feature_key` (chat hot path → chat_turn; everything else falls
+    # back to chat_turn's conservative ceiling). The clamp runs BEFORE
+    # provider dispatch so an over-budget message never reaches a paid
+    # endpoint. See artifacts/syrabit-backend/cost_caps.py for the
+    # locked TOKEN_BUDGETS table.
+    from cost_caps import clamp_messages, max_output_tokens_for
+    _ct = "chat_turn"
+    if feature_key in ("content", "content_generation"):
+        _ct = "content_generation"
+    elif feature_key in ("translate",):
+        _ct = "translate"
+    elif feature_key in ("vision", "vision_ocr"):
+        _ct = "vision_ocr"
+    messages = clamp_messages(messages, call_type=_ct)
+    max_tokens = max_output_tokens_for(_ct, max_tokens)
     import time as _t
     # Wall-clock start of the whole primary-rotation loop. Used so the
     # Workers AI fallback path (Task #636) can attribute the *real*
@@ -2210,6 +2226,51 @@ async def _dispatch_llm_for_feature(
             _record_llm_call("workers_ai_indic", "indictrans2", int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
             raise
 
+    # ── Task #513 §C round-4 — explicit tier-router aliases ───────────
+    # `cost_caps._select_chat_model` emits provider names like
+    # `workers_ai_mistral_7b` / `workers_ai_llama32_3b` along with the
+    # exact model id we must invoke. Without these branches the call
+    # would fall through to the generic `workers_ai` arm below and pick
+    # the default Workers-AI chat model (gpt-oss-20b), which means the
+    # "free turns 1-2 → Mistral-7B" rule and the Rule-D cheaponly lock
+    # would be advertised in tags but not enforced on the wire. We
+    # therefore route each alias through `_call_llm_raw` with its
+    # canonical model id pinned, while still using the Workers-AI-only
+    # provider pool so deprecated providers cannot sneak back in.
+    _TIER_ALIAS_TO_MODEL = {
+        "workers_ai_mistral_7b": "@cf/mistral/mistral-7b-instruct-v0.3",
+        "workers_ai_llama32_3b": "@cf/meta/llama-3.2-3b-instruct",
+        "workers_ai_llama31_8b": "@cf/meta/llama-3.1-8b-instruct-fp8",
+    }
+    if provider in _TIER_ALIAS_TO_MODEL:
+        if not _LLM_PROVIDERS_WORKERS_ONLY:
+            raise RuntimeError(
+                f"{provider}: Cloudflare AI (CF_AI_ENABLED) is not configured"
+            )
+        _pinned_model = _TIER_ALIAS_TO_MODEL[provider]
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _call_llm_raw(
+                messages,
+                model=_pinned_model,
+                max_tokens=max_tokens,
+                provider_list=_LLM_PROVIDERS_WORKERS_ONLY,
+                feature_key=feature,
+            )
+            _record_llm_call(
+                provider, _pinned_model,
+                int((_dp_t.perf_counter() - _t0) * 1000),
+                True, len(result.split()), feature_key=feature,
+            )
+            return result
+        except Exception as _exc:
+            _record_llm_call(
+                provider, _pinned_model,
+                int((_dp_t.perf_counter() - _t0) * 1000),
+                False, 0, error_type=type(_exc).__name__, feature_key=feature,
+            )
+            raise
+
     # workers_ai or any unknown provider → Workers-AI-only dispatch.
     # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
     # Gemini) cannot re-enter routing via this fallback path — they are absent
@@ -2702,8 +2763,18 @@ async def polish_notes_with_format(
 7. Return ONLY the polished Markdown. NO commentary, NO preamble, NO disclaimers.
 """
 
-    from content_formatter import format_content as _format_content
-    res = await _format_content(
+    # Task #513 §K.3 round-7 — bulk producers (admin chapter pre-gen
+    # in routes/admin_pipeline.py + Assamese backfill in
+    # `aca_jobs/as_translation_backfill`) fire many concurrent
+    # `polish_notes_with_format` calls. Routing through
+    # `format_content_batched` lets `AsyncBatcher` coalesce up to
+    # `_FORMATTER_BATCH_SIZE=10` concurrent submissions into a single
+    # upstream Vertex/WAI request (50 ms window), cutting provider
+    # call count ~10× during bulk runs. Single-call latency cost is
+    # one extra batching tick (≤50 ms) which is negligible against
+    # the multi-second polish itself.
+    from content_formatter import format_content_batched as _format_batched
+    res = await _format_batched(
         polish_prompt,
         style="notebook_lm",
         lang=("as" if is_assamese else "en"),
@@ -2739,6 +2810,7 @@ async def call_llm_api_chat(
     model: str = None,
     max_tokens: int = 2048,
     lang: str = "en",
+    provider_override: str | None = None,
 ) -> str:
     """LLM call for student chat via PROVIDER_PRIORITY weighted dispatch.
 
@@ -2759,6 +2831,27 @@ async def call_llm_api_chat(
     can be introduced after the weighted pool exhausts.
     """
     feature = "assamese_rag_chat" if lang == "as" else "english_rag_chat"
+    # Task #513 §C — tier-routing override. When the caller (e.g.
+    # `routes/ai_chat.py` after `cost_caps._select_chat_model`) hands
+    # us an explicit provider, dispatch DIRECTLY to that provider
+    # before consulting `PROVIDER_PRIORITY`. This is the path that
+    # makes the free-user turns 1-2 → Workers-AI Mistral-7B and
+    # Rule-D `cheaponly` clamps actually take effect on the wire
+    # (without it, the dispatcher would always honour the fixed
+    # PROVIDER_PRIORITY and the tier decision would be advisory).
+    # Failure of the overridden provider falls through to the normal
+    # weighted chain so a transient outage does not surface a 503.
+    if provider_override:
+        try:
+            return await _dispatch_llm_for_feature(
+                messages, provider_override, max_tokens, feature=feature,
+            )
+        except Exception as _ovr_exc:
+            logger.warning(
+                "[CHAT][TIER] provider_override=%s failed (%s) — "
+                "falling through to PROVIDER_PRIORITY chain",
+                provider_override, _ovr_exc,
+            )
     try:
         return await call_with_provider_fallback(
             feature, lang,

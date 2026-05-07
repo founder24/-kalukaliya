@@ -33,6 +33,7 @@ _METERS_INIT = False
 _METER_A = None
 _METER_B = None
 _METER_C = None
+_METER_D = None  # Task #513 §J — global monthly USD cap (Rule D).
 _FLAG = None
 _LAST_B_TICK_LOG = 0.0
 
@@ -92,7 +93,7 @@ class _InMemoryRedis:
 
 
 def _ensure_meters() -> None:
-    global _METERS_INIT, _METER_A, _METER_B, _METER_C, _FLAG
+    global _METERS_INIT, _METER_A, _METER_B, _METER_C, _METER_D, _FLAG
     if _METERS_INIT:
         return
     with _LOCK:
@@ -100,8 +101,9 @@ def _ensure_meters() -> None:
             return
         try:
             from credit_burn_meter import (
-                FallbackFlag, MeterA, MeterB, MeterC,
+                FallbackFlag, MeterA, MeterB, MeterC, MeterD, MeterDConfig,
             )
+            from cost_caps import _monthly_total_usd_cap
             try:
                 from deps import redis_client as _r
             except Exception:
@@ -120,6 +122,14 @@ def _ensure_meters() -> None:
             _METER_A = MeterA(_r, _FLAG, _ALERT_SINK)
             _METER_B = MeterB(_r, _FLAG, _ALERT_SINK)
             _METER_C = MeterC(_ALERT_SINK)
+            # Task #513 §J — Rule D ($500/month default, env-overridable
+            # via MONTHLY_TOTAL_USD_CAP). Shares the same Redis client
+            # so the chat tier-router (`_select_chat_model`) can read
+            # `chat:cheaponly` from any replica without coordination.
+            _METER_D = MeterD(
+                _r, _ALERT_SINK,
+                MeterDConfig(cap_usd=_monthly_total_usd_cap()),
+            )
         except Exception as _exc:
             logger.warning(
                 "[credit-burn] meter init failed (%s) — chat will run "
@@ -128,6 +138,7 @@ def _ensure_meters() -> None:
             _METER_A = None
             _METER_B = None
             _METER_C = None
+            _METER_D = None
             _FLAG = None
         _METERS_INIT = True
 
@@ -141,6 +152,17 @@ def ingest_daily_cost_usd(usd: float) -> Optional[float]:
     or None when meters aren't initialised.
     """
     _ensure_meters()
+    # Task #513 §J — fan out the SAME dollars to Meter D in the same
+    # call so any caller that already feeds C (chat hot path, daily
+    # billing cron, admin reconciliation) automatically feeds D too.
+    # This satisfies the reviewer's "Integrate ingest_meter_d_usd()
+    # into the existing billing ingestion pipeline (same path
+    # feeding Meter C)" requirement and ensures Rule D's
+    # `chat:cheaponly` lock can fire on real traffic.
+    try:
+        ingest_meter_d_usd(float(usd))
+    except Exception as _d_exc:
+        logger.debug("[credit-burn] meter D fan-out failed: %s", _d_exc)
     if _METER_C is None:
         return None
     try:
@@ -202,3 +224,46 @@ def get_flag():
     None if init failed)."""
     _ensure_meters()
     return _FLAG
+
+
+# ── Task #513 §J — Rule D (global monthly USD cap) runtime wiring ────────
+def ingest_meter_d_usd(usd: float) -> None:
+    """Record `usd` against the current calendar month for Rule D.
+
+    Called from the same daily billing flush that feeds Meter C; we
+    count the same dollars on a calendar-month window. When the
+    cumulative spend crosses the configured cap (`MONTHLY_TOTAL_USD_CAP`,
+    default $500), MeterD flips `chat:cheaponly=1` in Redis and
+    `_select_chat_model` clamps every English chat turn to the
+    Workers-AI Mistral-7B cheap tier. Never raises.
+    """
+    _ensure_meters()
+    if _METER_D is None:
+        return
+    try:
+        _METER_D.record_usd(float(usd))
+    except Exception as _exc:
+        logger.debug("[credit-burn] meter D ingest failed: %s", _exc)
+
+
+def is_chat_cheaponly_active() -> bool:
+    """True when Rule D has locked the chat tier-router into cheap-only
+    mode. Read by `routes/ai_chat.py` on every English-chat dispatch
+    and passed into `cost_caps._select_chat_model(cheaponly_active=...)`.
+
+    Defensive: any Redis read failure returns False so a Redis outage
+    does not silently degrade every English chat turn to Mistral-7B.
+    """
+    _ensure_meters()
+    if _METER_D is None:
+        return False
+    try:
+        return bool(_METER_D.is_cheaponly_active())
+    except Exception:
+        return False
+
+
+def get_meter_d():
+    """Test/admin helper — returns the singleton MeterD (or None)."""
+    _ensure_meters()
+    return _METER_D

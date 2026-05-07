@@ -545,10 +545,41 @@ async def analyze_image(
     """Analyse an image with the Workers AI llama-3.2-11b vision model."""
     if not _ok():
         return None
+    # Task #513 §K.2 — deterministic AI response cache. OCR / vision
+    # passes are pure functions of (image_bytes, prompt, mime_type)
+    # at temperature 0, so a repeat call (e.g. PYQ re-OCR after a
+    # transient parse error) MUST hit the 30-day cache. Key uses a
+    # SHA-256 of the image bytes so the canonical-JSON hash stays
+    # bounded.
+    import hashlib as _hl
+    _img_digest = _hl.sha256(image_bytes).hexdigest()
+    _aic_msgs = [{"role": "user", "content": f"{mime_type}|{_img_digest}|{prompt}"}]
+    _aic_model = f"vertex_services.analyze_image:llama-3.2-11b:{max_output_tokens}"
+    try:
+        from ai_input_cache import (
+            get_response as _aic_get,
+            set_response as _aic_set,
+            is_deterministic as _aic_is_det,
+        )
+        _aic_enabled = _aic_is_det(_aic_msgs, _aic_model, temperature=0.0, stream=False)
+    except Exception:
+        _aic_get = _aic_set = None  # type: ignore[assignment]
+        _aic_enabled = False
+    if _aic_enabled and _aic_get is not None:
+        _cached = _aic_get(_aic_msgs, _aic_model, max_tokens=max_output_tokens)
+        if _cached:
+            logger.info("[wai] analyze_image [CACHE-HIT] %d chars", len(_cached))
+            return _cached
+
     from providers.cloudflare_ai import analyze_image as _cf_vision
     try:
         text = await _cf_vision(image_bytes, prompt=prompt, mime_type=mime_type)
         _breaker.record_success()
+        if text and _aic_enabled and _aic_set is not None:
+            try:
+                _aic_set(_aic_msgs, _aic_model, str(text), max_tokens=max_output_tokens)
+            except Exception:
+                pass
         return text or None
     except Exception as exc:
         logger.warning("[wai] analyze_image failed: %s: %s", type(exc).__name__, str(exc)[:200])

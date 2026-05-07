@@ -105,9 +105,19 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name:  'syrabit-backend'
           image: '${acrName}.azurecr.io/${image}'
+          // Task #513 §G — right-size for browser-heavy traffic. The
+          // FastAPI hot path is I/O-bound (Mongo + Pinecone + LLM
+          // dispatch); 0.25 vCPU / 0.5 GiB per replica is the smallest
+          // ACA SKU that still keeps a Gunicorn worker responsive
+          // under 30 concurrent requests (see scale rule below). The
+          // monthly compute cost drops from ~$60 (1.0 vCPU × 2 min
+          // replicas, 24×7) to ~$15 (0.25 vCPU × 2 min replicas) —
+          // a 75 % saving on idle baseline. Burst headroom is provided
+          // by `maxReplicas: 30` so the platform scales out instead of
+          // running fewer-but-fatter pods.
           resources: {
-            cpu:     json('1.0')
-            memory: '2.0Gi'
+            cpu:     json('0.25')
+            memory: '0.5Gi'
           }
           env: [
             // Task #400 — Tier-2 email is Amazon SES (boto3). The
@@ -171,13 +181,20 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
           ]
         }
       ]
+      // Task #513 §G — scale-out (not scale-up) for browser-heavy
+      // traffic. `concurrentRequests: '30'` (down from 50) keeps each
+      // tiny pod from queueing requests behind slow LLM round-trips,
+      // and `maxReplicas: 30` (up from 10) gives 3× the burst headroom
+      // we previously had — total peak concurrency 30 × 30 = 900,
+      // matched to the chat cap headroom (Cap: 30/month + 3/day per
+      // anon-id at the edge worker).
       scale: {
         minReplicas: 2
-        maxReplicas: 10
+        maxReplicas: 30
         rules: [
           {
             name: 'http-concurrency'
-            http: { metadata: { concurrentRequests: '50' } }
+            http: { metadata: { concurrentRequests: '30' } }
           }
         ]
       }
