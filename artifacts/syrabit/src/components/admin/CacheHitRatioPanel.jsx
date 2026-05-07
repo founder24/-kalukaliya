@@ -56,6 +56,12 @@ export default function CacheHitRatioPanel({
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [lastFetchAt, setLastFetchAt] = useState(null);
+  // Task #575 — public `/api/health/season` snapshot. Refreshed on
+  // the same cadence as the cache-health payload above; rendered as a
+  // banner above the per-content-type rows so an operator can see at
+  // a glance whether deterministic-cache TTLs are currently stretched
+  // (90d) or normal (30d) and when the next season transition lands.
+  const [season, setSeason] = useState(null);
 
   useEffect(() => {
     if (!adminToken) return undefined;
@@ -73,6 +79,14 @@ export default function CacheHitRatioPanel({
       } catch (e) {
         if (cancelled) return;
         setError(e?.response?.data?.detail || e?.message || 'fetch failed');
+      }
+      // Season is a public endpoint — no auth header required, and a
+      // failure here must not poison the cache-health panel.
+      try {
+        const sres = await axios.get(`${API_BASE}/health/season`, { timeout: 5000 });
+        if (!cancelled) setSeason(sres.data);
+      } catch {
+        if (!cancelled) setSeason(null);
       }
     };
     load();
@@ -114,6 +128,27 @@ export default function CacheHitRatioPanel({
       data-testid="cache-hit-ratio-panel"
       className="mb-3 pb-3 border-b border-gray-200"
     >
+      {season && (
+        <div
+          data-testid="cache-season-banner"
+          className={`mb-2 px-2 py-1 rounded text-[10px] flex items-center justify-between ${
+            season.season === 'exam' || season.season === 'results'
+              ? 'bg-amber-50 text-amber-900 border border-amber-200'
+              : 'bg-gray-50 text-gray-600 border border-gray-200'
+          }`}
+        >
+          <span>
+            <strong>Cache season:</strong> {season.season}
+            {season.ttl_multiplier ? ` (TTL ×${season.ttl_multiplier})` : ''}
+            {season.active_window?.name ? ` — ${season.active_window.name}` : ''}
+          </span>
+          {season.next_transition?.at && (
+            <span className="text-[9px] opacity-80">
+              next → {season.next_transition.to} on {season.next_transition.at}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-1.5">
         <label className="text-[10px] text-gray-500 font-medium">
           Cache hit-ratio (Task #571)

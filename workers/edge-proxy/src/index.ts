@@ -34,10 +34,21 @@ import {
 import {
   getCacheablePrefixes,
   getCacheTtlEntries,
+  getExamCacheTtlEntries,
   getBypassPrefixes,
   getUserSpecificPrefixes,
   DEFAULT_CACHE_TTL_SECONDS,
 } from "./monitored-urls";
+// Task #575 — in-isolate cache of `/api/health/season`. The fetch
+// handler refreshes `_currentSeasonSnapshot` once per request (the
+// helper itself is internally rate-limited to one origin call per
+// 60s per isolate) so `getCacheTtl()` stays a synchronous lookup at
+// every callsite.
+import {
+  getSeasonSnapshot,
+  pickEffectiveTtl,
+  type SeasonSnapshot,
+} from "./season-cache";
 // Task #944 — Unified Log Explorer: per-request shipper that batches
 // records and POSTs them to /api/logs/ingest via ctx.waitUntil so it
 // never adds latency to user-visible responses.
@@ -648,6 +659,31 @@ const ALLOWED_ORIGINS = [
 // ─────────────────────────────────────────────────────────────────────────────
 const CACHEABLE_PREFIXES = getCacheablePrefixes();
 const CACHE_TTL_ENTRIES = getCacheTtlEntries();
+// Task #575 — exam-mode TTL overrides loaded from `monitored-urls.json`
+// (`edge_cache.exam_ttl_seconds`). Sorted by descending prefix length
+// so the most specific entry wins, same contract as `CACHE_TTL_ENTRIES`.
+const EXAM_CACHE_TTL_ENTRIES = getExamCacheTtlEntries();
+// Task #575 — populated at the top of every fetch invocation by
+// `refreshSeasonSnapshot(env, ctx)`. Reads are racy across concurrent
+// requests in the same isolate but only ever flip between
+// {normal, exam, results} so a brief desync is harmless: every request
+// either gets the old or the new TTL, never a mid-tuple value.
+let _currentSeasonSnapshot: SeasonSnapshot = {
+  season: "normal",
+  ttl_multiplier: 1.0,
+  fetched_at_ms: 0,
+};
+
+async function refreshSeasonSnapshot(
+  env: { BACKEND_URL: string },
+  ctx: { waitUntil(promise: Promise<unknown>): void },
+): Promise<void> {
+  try {
+    _currentSeasonSnapshot = await getSeasonSnapshot(env.BACKEND_URL, ctx);
+  } catch {
+    // Already returns a fallback — nothing to do.
+  }
+}
 const USER_SPECIFIC_PREFIXES = getUserSpecificPrefixes();
 const BYPASS_PREFIXES = getBypassPrefixes();
 
@@ -1286,12 +1322,19 @@ function safeCorsHeaders(origin: string | null): Record<string, string> {
 }
 
 function getCacheTtl(pathname: string): number {
-  // CACHE_TTL_ENTRIES is sorted by descending key length so the most
-  // specific prefix wins (e.g. /api/seo/keyword-index before /api/seo/).
-  for (const [prefix, ttl] of CACHE_TTL_ENTRIES) {
-    if (pathname.startsWith(prefix)) return ttl;
-  }
-  return DEFAULT_CACHE_TTL_SECONDS;
+  // Task #575 — `pickEffectiveTtl` checks the exam-mode override list
+  // first when `_currentSeasonSnapshot.season` is `"exam"` or
+  // `"results"`, then falls back to the normal CACHE_TTL_ENTRIES
+  // (sorted by descending key length so /api/seo/keyword-index wins
+  // over /api/seo/), and finally to DEFAULT_CACHE_TTL_SECONDS. During
+  // `"normal"` the original behaviour is preserved exactly.
+  return pickEffectiveTtl(
+    pathname,
+    _currentSeasonSnapshot,
+    CACHE_TTL_ENTRIES,
+    EXAM_CACHE_TTL_ENTRIES,
+    DEFAULT_CACHE_TTL_SECONDS,
+  );
 }
 
 export function isCacheable(pathname: string): boolean {
@@ -4024,6 +4067,11 @@ export default {
     const startMs = Date.now();
     let response: Response;
     let level: "info" | "warn" | "error" | "debug" | undefined;
+    // Task #575 — refresh the season snapshot once per request before
+    // the inner handler dispatches. The helper is internally rate-
+    // limited to one origin call per 60s per isolate so this stays
+    // O(1) on the hot path.
+    await refreshSeasonSnapshot(env, ctx);
     try {
       response = await _handleEdgeFetch(request, env, ctx);
     } catch (err) {

@@ -94,8 +94,30 @@ jobs:
         working-directory: artifacts/syrabit-backend
         run: python scripts/check_budget_ceiling.py
 
+  exam_calendar_gate:
+    # Task #575 — pre-deploy guard for `config/exam_calendar.yaml`.
+    # Fails the build when the calendar can't be parsed, when two
+    # windows overlap (would silently double-count a season change),
+    # or when the latest window's `end` is less than 365 days from
+    # `today` (we always keep ≥12 months of windows on disk so the
+    # edge worker keeps applying exam-mode TTLs through the next
+    # AHSEC + SEBA pass without a manual refresh).
+    name: Exam-calendar guard (#575)
+    needs: canonical_delegation_gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PyYAML
+        run: python -m pip install --quiet "pyyaml>=6.0"
+      - name: Run guard
+        working-directory: artifacts/syrabit-backend
+        run: python scripts/ci/check_exam_calendar.py
+
   deploy:
-    needs: [canonical_delegation_gate, budget_ceiling_gate]
+    needs: [canonical_delegation_gate, budget_ceiling_gate, exam_calendar_gate]
     if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 35

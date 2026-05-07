@@ -1,0 +1,63 @@
+# Task #575 — AHSEC + SEBA exam-window calendar.
+#
+# Drives `cache_calendar.current_season()` which is consumed by:
+#   * `ai_input_cache.set_response` to stretch deterministic-cache TTLs
+#     (MCQ / definition / flashcard / PYQ → 90 days during exam mode,
+#     formatter / translate / OCR keep their normal 30-day default).
+#   * `/api/health/season` so the edge proxy can apply per-route
+#     `exam_ttl_seconds` overrides from `monitored-urls.json`.
+#   * The admin Observability cache banner (current season + next
+#     transition + TTL multiplier).
+#
+# Editor contract (enforced by `scripts/ci/check_exam_calendar.py`):
+#   * Every entry MUST have `name`, `kind` (exam|results),
+#     `start` (YYYY-MM-DD inclusive), and `end` (YYYY-MM-DD inclusive).
+#   * Windows MUST cover at least the next 12 months of expected
+#     AHSEC + SEBA passes — the CI guard fails the build when the
+#     latest `end` is less than 365 days from `today`.
+#   * Windows MUST NOT overlap each other; an overlap is almost
+#     always a copy/paste typo and would silently double-count an
+#     exam pass. Concurrent AHSEC + SEBA passes are merged into a
+#     single combined window (the cache layer only reads a single
+#     "exam" / "results" / "normal" classification).
+#   * `start` MUST be <= `end` on every entry.
+#
+# Founder locks unchanged by this knob:
+#   * `/api/me/quota` 5 s edge cache TTL.
+#   * `/api/ai/chat` edge bypass (chat hot-path is NEVER cached).
+#   * `$100/mo` monthly USD cap (cost_caps + credit_burn_meter).
+#   * `TOKEN_BUDGETS` ceilings (cost_caps.py).
+#
+# Source: AHSEC + SEBA published exam timetables for 2026 / 2027 +
+# the published results-window dates. The combined main-board window
+# spans the union of AHSEC + SEBA dates. The results window is 21
+# days starting from the announced result date so cached MCQ/PYQ
+# pages survive the post-result revision spike without an early TTL
+# eviction.
+
+windows:
+  # ── 2026 main board pass (AHSEC + SEBA combined) ──────────────────
+  - name: "AHSEC + SEBA Boards 2026"
+    kind: "exam"
+    start: "2026-02-10"
+    end:   "2026-03-20"
+  - name: "AHSEC + SEBA Results 2026"
+    kind: "results"
+    start: "2026-05-25"
+    end:   "2026-06-15"
+
+  # ── 2026 supplementary / compartment pass ─────────────────────────
+  - name: "AHSEC + SEBA Compartment 2026"
+    kind: "exam"
+    start: "2026-07-10"
+    end:   "2026-08-15"
+
+  # ── 2027 main board pass (12-mo lookahead requirement) ────────────
+  - name: "AHSEC + SEBA Boards 2027"
+    kind: "exam"
+    start: "2027-02-09"
+    end:   "2027-03-19"
+  - name: "AHSEC + SEBA Results 2027"
+    kind: "results"
+    start: "2027-05-25"
+    end:   "2027-06-15"

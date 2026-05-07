@@ -43,6 +43,18 @@ export interface MonitoredEdgeCache {
   ttl_seconds?: number;
   /** When true, the cache key includes a per-user identity header so each user gets their own entry. */
   user_keyed?: boolean;
+  /**
+   * Task #575 — optional stretched TTL applied while the backend's
+   * `cache_calendar.current_season()` is `"exam"` or `"results"`. The
+   * worker polls `/api/health/season` (60 s in-DO cache) and uses
+   * this value in place of `ttl_seconds` for the duration of the
+   * window. Routes that don't declare it keep `ttl_seconds`
+   * unchanged regardless of season — so a route opt-out is just
+   * "leave the field off".
+   */
+  exam_ttl_seconds?: number;
+  /** Advisory hit-ratio target surfaced by `/api/health/cache`. */
+  cache_hit_ratio_target?: number;
 }
 
 /**
@@ -222,6 +234,18 @@ const CACHE_TTL_ENTRIES_SORTED: ReadonlyArray<readonly [string, number]> = Objec
     .sort((a, b) => b[0].length - a[0].length),
 );
 
+// Task #575 — parallel array sorted the same way that holds
+// `(path, exam_ttl_seconds)` for the routes that opted in. The worker
+// consults this list while in exam / results mode and falls back to
+// the normal CACHE_TTL_ENTRIES_SORTED entry (or DEFAULT_CACHE_TTL_SECONDS)
+// for routes without the field.
+const EXAM_CACHE_TTL_ENTRIES_SORTED: ReadonlyArray<readonly [string, number]> = Object.freeze(
+  CACHEABLE_ENTRIES
+    .filter((entry) => typeof entry.edge_cache?.exam_ttl_seconds === "number")
+    .map((entry) => [entry.path, entry.edge_cache!.exam_ttl_seconds!] as const)
+    .sort((a, b) => b[0].length - a[0].length),
+);
+
 /** Default cache TTL for paths that match `isCacheable` but have no explicit TTL entry. */
 export const DEFAULT_CACHE_TTL_SECONDS = 300;
 
@@ -247,4 +271,15 @@ export function getUserSpecificPrefixes(): readonly string[] {
  */
 export function getCacheTtlEntries(): ReadonlyArray<readonly [string, number]> {
   return CACHE_TTL_ENTRIES_SORTED;
+}
+
+/**
+ * Task #575 — exam-season TTL overrides. Same iteration contract as
+ * `getCacheTtlEntries` (descending prefix-length sort) but only
+ * contains routes that declare `edge_cache.exam_ttl_seconds`. The
+ * worker checks this list first while in exam / results mode and
+ * falls through to `getCacheTtlEntries` for unmatched routes.
+ */
+export function getExamCacheTtlEntries(): ReadonlyArray<readonly [string, number]> {
+  return EXAM_CACHE_TTL_ENTRIES_SORTED;
 }

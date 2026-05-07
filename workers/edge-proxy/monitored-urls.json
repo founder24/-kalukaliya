@@ -47,6 +47,13 @@
     "                            renders this alongside the live AI-cache numbers so the runbook knows when",
     "                            to escalate. Defaults derived from (TTL, traffic shape) per `target_for()`",
     "                            in the Task #571 jq patch.",
+    "  edge_cache.exam_ttl_seconds — Task #575 optional stretched TTL applied while the backend's",
+    "                            cache_calendar.current_season() is 'exam' or 'results'. The worker polls",
+    "                            /api/health/season (60 s in-DO cache) and uses this value in place of",
+    "                            ttl_seconds during AHSEC/SEBA exam + results windows. Routes without it",
+    "                            keep ttl_seconds unchanged regardless of season — opting out is just",
+    "                            'leave the field off'. Founder locks (/api/me/quota 5s, /api/ai/chat",
+    "                            bypass, $100/mo cap, TOKEN_BUDGETS) are explicitly NOT touched by this knob.",
     "  runtime_constant        — name of the exported identifier (constant or helper function) that the",
     "                            registered_in file uses to reach this path/URL. When set, the Task #901",
     "                            drift test accepts the file mentioning that identifier as a stand-in for",
@@ -176,7 +183,7 @@
     {
       "path": "/api/content/chapter-by-slug/",
       "match": "prefix",
-      "rationale": "edge-cached public chapter lookup by slug (Task #900)",
+      "rationale": "edge-cached public chapter lookup by slug (Task #900); Task #575 stretches the per-POP TTL to 6h during AHSEC/SEBA exam+results windows since chapter bodies are read-mostly during the exam spike",
       "registered_in": [
         "workers/edge-proxy/src/index.ts"
       ],
@@ -184,13 +191,14 @@
       "edge_cache": {
         "behavior": "cacheable",
         "ttl_seconds": 3600,
+        "exam_ttl_seconds": 21600,
         "cache_hit_ratio_target": 0.80
       }
     },
     {
       "path": "/api/content/library-bundle",
       "match": "prefix",
-      "rationale": "edge-cached heavy public library bundle; admin writes purge it explicitly. TTL bumped 300→1800s so cold POPs avoid the ~1.5s D1+backend round-trip every TTL boundary (Task #900)",
+      "rationale": "edge-cached heavy public library bundle; admin writes purge it explicitly. TTL bumped 300→1800s so cold POPs avoid the ~1.5s D1+backend round-trip every TTL boundary (Task #900); Task #575 stretches to 4h during exam+results windows (admin purges still flush per-POP, so a publish during the window still propagates immediately)",
       "registered_in": [
         "workers/edge-proxy/src/index.ts"
       ],
@@ -198,13 +206,14 @@
       "edge_cache": {
         "behavior": "cacheable",
         "ttl_seconds": 1800,
+        "exam_ttl_seconds": 14400,
         "cache_hit_ratio_target": 0.85
       }
     },
     {
       "path": "/api/content/topic/",
       "match": "prefix",
-      "rationale": "edge-cached public topic detail keyed by path segment (Task #900)",
+      "rationale": "edge-cached public topic detail keyed by path segment (Task #900); Task #575 stretches to 6h during exam+results windows",
       "registered_in": [
         "workers/edge-proxy/src/index.ts"
       ],
@@ -212,6 +221,7 @@
       "edge_cache": {
         "behavior": "cacheable",
         "ttl_seconds": 3600,
+        "exam_ttl_seconds": 21600,
         "cache_hit_ratio_target": 0.80
       }
     },
@@ -247,7 +257,7 @@
     {
       "path": "/api/pyq/",
       "match": "prefix",
-      "rationale": "edge-cached public past-year question bank (Task #900)",
+      "rationale": "edge-cached public past-year question bank (Task #900); Task #575 stretches to 24h during exam+results windows — PYQ corpus is the canonical exam-prep target and is by definition immutable inside a window",
       "registered_in": [
         "workers/edge-proxy/src/index.ts"
       ],
@@ -255,6 +265,7 @@
       "edge_cache": {
         "behavior": "cacheable",
         "ttl_seconds": 3600,
+        "exam_ttl_seconds": 86400,
         "cache_hit_ratio_target": 0.75
       }
     },

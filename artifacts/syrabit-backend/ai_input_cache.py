@@ -107,7 +107,7 @@ def _key(
 # `Syrabit/Cache` CloudWatch namespace where the hit-ratio + cardinality
 # alarms live.
 _KNOWN_CONTENT_TYPES = (
-    "mcq", "flashcard", "definition", "formatter",
+    "mcq", "flashcard", "definition", "pyq", "formatter",
     "translate", "ocr", "stage3_polish", "unknown",
 )
 _MISS_REASONS = (
@@ -602,7 +602,7 @@ def set_response(
     text: str,
     *,
     max_tokens: Optional[int] = None,
-    ttl: int = _DEFAULT_TTL_SEC,
+    ttl: Optional[int] = None,
     content_type: Optional[str] = None,
     template_version: str = "",
     normalize_text: bool = False,
@@ -614,11 +614,25 @@ def set_response(
     canonical key the next read will compute. The recently-set ring is
     bumped so a subsequent miss for the same key gets attributed to
     `ttl_expiry` rather than `cold`.
+
+    Task #575 additions: `ttl` is now optional — when omitted we pick
+    the season-aware default via `cache_calendar.ai_cache_ttl_for`,
+    which stretches the TTL to 90 days for the deterministic
+    exam-relevant content types (mcq / flashcard / definition / pyq)
+    during AHSEC + SEBA exam / results windows. Formatter / translate
+    / OCR keep the 30-day default. Callers that pass `ttl` explicitly
+    bypass the calendar entirely.
     """
     if not text:
         return
     msgs = list(messages)
     ct = content_type if content_type in _KNOWN_CONTENT_TYPES else "unknown"
+    if ttl is None:
+        try:
+            from cache_calendar import ai_cache_ttl_for as _aic_ttl
+            ttl = _aic_ttl(ct)
+        except Exception:
+            ttl = _DEFAULT_TTL_SEC
     key = _key(msgs, model, max_tokens=max_tokens,
                normalize_text=normalize_text, template_version=template_version)
     _inproc_set(key, text)
