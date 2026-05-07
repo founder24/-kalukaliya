@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Database, Zap, CreditCard, RefreshCw, ShieldCheck, AlertTriangle, Wifi, Copy, Check, Users, Activity, MessageSquare, TrendingUp, DollarSign, BarChart2, RotateCw, Clock, Undo2, Star, ExternalLink } from 'lucide-react';
 import CronHealthPill, { SlackConfigBadge } from './CronHealthPill';
 import CfWafDriftCronPill from './CfWafDriftCronPill';
+import D1MirrorLagPill from './D1MirrorLagPill';
 import TrustpilotRefreshCronPill from './TrustpilotRefreshCronPill';
 import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
@@ -824,6 +825,34 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       .catch(() => setUnifiedLogsCfPullCronAlertHistory({ events: [] }));
   }, [adminToken]);
 
+  // Task #508 — D1 mirror lag alerter (Task #460) snapshot + lazy
+  // paged-history loader. Same shape as the sibling cron pills above
+  // so the AdminHealth dashboard can render the lag pill alongside
+  // them; the endpoint already bundles the lock-doc projection onto
+  // its response so a single GET feeds both the pill colour and the
+  // shared "last paged Xh ago" caption.
+  const [d1MirrorLagHealth, setD1MirrorLagHealth] = useState(null);
+  const [d1MirrorLagLoading, setD1MirrorLagLoading] = useState(false);
+  const [d1MirrorLagAlertHistory, setD1MirrorLagAlertHistory] = useState(null);
+
+  const loadD1MirrorLagHealth = useCallback(() => {
+    setD1MirrorLagLoading(true);
+    axios.get(`${API_BASE}/admin/health/d1-mirror/lag`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setD1MirrorLagHealth(r.data))
+      .catch(() => setD1MirrorLagHealth({ _error: true }))
+      .finally(() => setD1MirrorLagLoading(false));
+  }, [adminToken]);
+
+  const loadD1MirrorLagAlertHistory = useCallback(() => {
+    axios.get(`${API_BASE}/admin/health/d1-mirror/lag/alert-history`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setD1MirrorLagAlertHistory(r.data))
+      .catch(() => setD1MirrorLagAlertHistory({ events: [] }));
+  }, [adminToken]);
+
   const loadTpJsonldReport = useCallback(() => {
     setTpJsonldLoading(true);
     axios.get(`${API_BASE}/admin/trustpilot-jsonld/report`, {
@@ -866,6 +895,10 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     // silent ingest shows up next to cf-waf-drift / edge-proxy-
     // deploy without a page reload.
     loadUnifiedLogsCfPullCronHealth();
+    // Task #508 — D1 mirror lag pill polls on the same 60s cadence
+    // so a freshly-breached mirror shows up next to the sibling
+    // cron pills without a page reload.
+    loadD1MirrorLagHealth();
     // Task #902 — pull alerter-state alongside the pill snapshots so
     // the "last paged Xh ago · in debounce ~Yh" caption stays in
     // sync with the pill's colour. Same 60s cadence as the rest;
@@ -912,6 +945,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadCfDriftCronHealth();
       loadEdgeProxyDeployCronHealth();
       loadUnifiedLogsCfPullCronHealth();
+      loadD1MirrorLagHealth();
       loadEdgeProxyDeployCronAlertState();
       loadCfDriftCronAlertState();
       loadTpCronAlertState();
@@ -933,6 +967,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   }, [adminToken, loadTpJsonldReport, loadTpJsonldHistory,
       loadTpJsonldAlerts, loadTpCronHealth, loadCfDriftCronHealth,
       loadEdgeProxyDeployCronHealth, loadUnifiedLogsCfPullCronHealth,
+      loadD1MirrorLagHealth,
       loadEdgeProxyDeployCronAlertState, loadCfDriftCronAlertState,
       loadTpCronAlertState, loadUnifiedLogsCfPullCronAlertState,
       loadAigGuardrailAlertState,
@@ -3570,6 +3605,32 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           slackMissingAlertState={slackWebhookMissingAlertStates['UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK']}
           slackMissingAlertHistory={slackWebhookMissingAlertHistories['UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK']}
           onSnoozeSlackMissing={snoozeSlackWebhookMissing}
+        />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="D1 Mirror Lag">
+        {/*
+          Task #508 — surface the D1 mirror lag alerter (Task #460)
+          on the AdminHealth dashboard alongside the other cron pills.
+          The alerter watches the cross-replica nightly mirror lease's
+          ``last_fired_at`` timestamp and pages on-call when the lag
+          exceeds ``D1_MIRROR_LAG_THRESHOLD_S`` for
+          ``D1_MIRROR_LAG_REQUIRED_STREAK`` consecutive checks. Until
+          this pill shipped, admins couldn't visually see "the mirror
+          is N hours behind, paging in M more polls" without hitting
+          the JSON endpoint manually. The shared <CronHealthPill>
+          backbone gives us the same colour cascade + paged-history
+          disclosure as the sibling alerters; the wrapper adapts the
+          alerter's ``not_enabled / never_observed / breached / healthy``
+          vocabulary onto the shared ``not_configured / never_observed
+          / silent / healthy`` keys.
+        */}
+        <D1MirrorLagPill
+          data={d1MirrorLagHealth}
+          loading={d1MirrorLagLoading}
+          onRefresh={loadD1MirrorLagHealth}
+          alertHistory={d1MirrorLagAlertHistory}
+          onLoadAlertHistory={loadD1MirrorLagAlertHistory}
         />
         </SectionErrorBoundary>
 

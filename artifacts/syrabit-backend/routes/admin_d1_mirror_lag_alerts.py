@@ -208,6 +208,68 @@ async def get_d1_mirror_lag_health(db) -> dict[str, Any]:
 
 # ─── Admin health endpoint ─────────────────────────────────────────────────
 
+async def _read_alert_state(db) -> dict[str, Any]:
+    """Project the lock-doc onto the alert-state shape the dashboard
+    pills consume (mirrors ``_build_alert_state_response`` for the
+    sibling cron alerters in ``routes/admin_health.py``).
+
+    Always returns a dict — when the lock doc is missing or Mongo is
+    unreachable, ``present: False`` is returned so the pill can still
+    render a meaningful "no page recorded yet" state. Task #508.
+    """
+    base: dict[str, Any] = {
+        "present": False,
+        "lastState": None,
+        "lastAlertAt": None,
+        "lastAlertAgeSeconds": None,
+        "consecutiveBreachCount": 0,
+        "inDebounce": False,
+        "debounceRemainingSeconds": None,
+        "realertIntervalSeconds": _REALERT_INTERVAL_S,
+    }
+    if db is None:
+        return base
+    try:
+        doc = await db.job_locks.find_one({"_id": _LOCK_ID})
+    except Exception as exc:
+        logger.debug(f"[d1-mirror-lag] lock-doc read failed: {exc}")
+        return base
+    # Defensive: in unit tests the global `deps.db` may be a mock
+    # whose `find_one` returns a non-dict sentinel, in which case
+    # `doc.get(...)` would return another mock and produce coroutine
+    # warnings further down. Only proceed when we have a real mapping.
+    if not isinstance(doc, dict):
+        return base
+    last_state = doc.get("last_state")
+    last_alert_dt = _parse_iso_utc(doc.get("last_alert_at"))
+    now_utc = datetime.now(timezone.utc)
+    last_alert_age = None
+    if last_alert_dt is not None:
+        last_alert_age = max(
+            0, int((now_utc - last_alert_dt).total_seconds()),
+        )
+    in_debounce = (
+        last_state == "breached"
+        and last_alert_age is not None
+        and last_alert_age < _REALERT_INTERVAL_S
+    )
+    debounce_remaining = None
+    if in_debounce and last_alert_age is not None:
+        debounce_remaining = max(0, _REALERT_INTERVAL_S - last_alert_age)
+    return {
+        "present": True,
+        "lastState": last_state,
+        "lastAlertAt": doc.get("last_alert_at"),
+        "lastAlertAgeSeconds": last_alert_age,
+        "consecutiveBreachCount": int(
+            doc.get("consecutive_breach_count") or 0,
+        ),
+        "inDebounce": bool(in_debounce),
+        "debounceRemainingSeconds": debounce_remaining,
+        "realertIntervalSeconds": _REALERT_INTERVAL_S,
+    }
+
+
 @router.get("/admin/health/d1-mirror/lag")
 async def admin_d1_mirror_lag_health(
     admin: dict = Depends(get_admin_user),
@@ -222,6 +284,12 @@ async def admin_d1_mirror_lag_health(
       * ``breached`` — lag exceeded threshold; the alerter is paging
         (or about to, once the streak counter trips).
       * ``healthy`` — lag within threshold.
+
+    Task #508 — the response also carries the lock-doc projection
+    (``alertState`` + the flat ``consecutiveBreachCount`` /
+    ``lastAlertAt`` fields) so the AdminHealth pill can render the
+    "current streak / required streak" + "last paged Xh ago"
+    captions without a second round-trip.
     """
     try:
         from deps import db  # type: ignore
@@ -238,13 +306,40 @@ async def admin_d1_mirror_lag_health(
         status = "breached"
     else:
         status = "healthy"
+    alert_state = await _read_alert_state(db)
     return {
         **health,
         "status": status,
         "lagThresholdSeconds": threshold,
         "requiredStreak": _required_streak(),
         "healthUrl": _HEALTH_URL,
+        "alertState": alert_state,
+        "consecutiveBreachCount": alert_state["consecutiveBreachCount"],
+        "lastAlertAt": alert_state["lastAlertAt"],
+        "lastAlertAgeSeconds": alert_state["lastAlertAgeSeconds"],
+        "lastAlertState": alert_state["lastState"],
+        "inDebounce": alert_state["inDebounce"],
+        "debounceRemainingSeconds": alert_state["debounceRemainingSeconds"],
+        "realertIntervalSeconds": alert_state["realertIntervalSeconds"],
     }
+
+
+@router.get("/admin/health/d1-mirror/lag/alert-history")
+async def admin_d1_mirror_lag_alert_history(
+    limit: int = 20,
+    admin: dict = Depends(get_admin_user),
+) -> dict[str, Any]:
+    """Audit-log of pages issued by the D1 mirror lag alerter, most
+    recent first. Task #508 — surfaces the events
+    ``record_cron_alert_event`` already writes against
+    ``_LOCK_ID`` so the AdminHealth pill can render a "Show paged
+    history" disclosure inline like its sibling cron pills.
+
+    Always 200; returns ``events: []`` when the alerter has never
+    fired or when Mongo is unavailable.
+    """
+    from routes.admin_health import _build_alert_history_response
+    return await _build_alert_history_response(_LOCK_ID, limit=limit)
 
 
 # ─── Classification ────────────────────────────────────────────────────────
