@@ -517,9 +517,12 @@ def _check_canonical_bank() -> list[str]:
     failures.extend(_scan_pattern_global(re.compile(TODO_556_PATTERN, re.IGNORECASE),
                                          tag="Task #556 (canonical email — SES sole path)",
                                          scan_iac=True))
-    # TODO Task #557 — flip on once self-hosted web-push lands:
-    # failures.extend(_scan_pattern_global(re.compile(TODO_557_PATTERN, re.IGNORECASE),
-    #                                      tag="Task #557 (canonical web-push)"))
+    # Task #557 — self-hosted web-push (pywebpush + py-vapid) has shipped;
+    # the umbrella now bans the legacy Firebase Admin SDK import path and
+    # the FCM_SERVER_KEY / FIREBASE_SERVICE_ACCOUNT env-var names so a
+    # half-merged regression cannot reintroduce the Firebase dependency.
+    failures.extend(_scan_pattern_global(re.compile(TODO_557_PATTERN, re.IGNORECASE),
+                                         tag="Task #557 (canonical web-push)"))
     # Task #558 — observability narrowing has shipped; the umbrella now
     # bans Sentry tracing literals and multi-exporter OTEL configs.
     failures.extend(_scan_pattern_global(re.compile(TODO_558_PATTERN),

@@ -115,6 +115,19 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // Cloudflare Secrets as read-only replicas"). Rotation must
         // update KV first, then mirror to the two replicas.
         { name: 'sarvam-api-key',       keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SARVAM-API-KEY',       identity: 'system' }
+        // Task #557 — self-hosted web-push (pywebpush + py-vapid).
+        // PEM-encoded EC P-256 private key. The matching public key
+        // is *derived* from this on every `/push/vapid-public-key`
+        // request, so there is no second secret to keep in sync.
+        // Source of truth lives in Azure Key Vault as
+        // `WEB-PUSH-VAPID-PRIVATE-KEY`; mirror read-only into AWS
+        // Secrets Manager (`syrabit/prod/web-push-vapid-private-key`)
+        // and Cloudflare Secrets (`WEB_PUSH_VAPID_PRIVATE_KEY`
+        // binding) per the secrets-management policy. Rotation
+        // invalidates every browser subscription on file — only
+        // rotate during a planned `pushManager.subscribe` re-prompt
+        // window.
+        { name: 'web-push-vapid-private-key', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/WEB-PUSH-VAPID-PRIVATE-KEY', identity: 'system' }
       ]
     }
     template: {
@@ -193,6 +206,14 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // the assamese_rag_chat chain falls through to
             // `workers_ai_indic` immediately (V4 §12 — loud).
             { name: 'SARVAM_API_KEY',                 secretRef: 'sarvam-api-key' }
+            // Task #557 — self-hosted web-push. The private key is
+            // mounted from Key Vault (see secrets[] above);
+            // WEB_PUSH_CONTACT is the RFC-8292 `sub` claim sent on
+            // every outbound webpush request and surfaces in
+            // gateway abuse reports — keep it pointed at a real,
+            // monitored mailbox.
+            { name: 'WEB_PUSH_VAPID_PRIVATE_KEY',     secretRef: 'web-push-vapid-private-key' }
+            { name: 'WEB_PUSH_CONTACT',               value: 'mailto:admin@syrabit.ai' }
           ]
           probes: [
             {

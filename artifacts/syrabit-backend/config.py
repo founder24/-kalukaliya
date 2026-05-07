@@ -762,6 +762,18 @@ SARVAM_API_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 SARVAM_API_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
 SARVAM_BASE_URL = 'https://api.sarvam.ai'
 
+# ── Self-hosted Web Push (Task #557) ────────────────────────────────────────
+# VAPID private key (PEM, EC P-256) sourced from Azure Key Vault as
+# `WEB-PUSH-VAPID-PRIVATE-KEY` and mounted into ACA via secretRef. The public
+# key is *derived* from the private key at startup and exposed via
+# `GET /push/vapid-public-key`. WEB_PUSH_CONTACT is the `mailto:` claim
+# subject sent on every webpush request (RFC 8292 §2). When the env var is
+# absent (local dev / first-boot before KV rotation) the legacy Mongo-backed
+# `db.api_config.push_vapid` keypair is used as a one-shot bootstrap; this
+# fallback is loud (logged at WARNING) per V4 §12.
+WEB_PUSH_VAPID_PRIVATE_KEY = os.environ.get('WEB_PUSH_VAPID_PRIVATE_KEY', '').strip()
+WEB_PUSH_CONTACT = os.environ.get('WEB_PUSH_CONTACT', 'mailto:admin@syrabit.ai').strip()
+
 # Alias: CLOUDFLARE_ACCOUNT_ID → CF_AI_GATEWAY_ACCOUNT_ID when not set.
 # vectorize_client, wrangler scripts, and CF SDK all expect CLOUDFLARE_ACCOUNT_ID;
 # CF_AI_GATEWAY_ACCOUNT_ID holds the same value in Railway/Replit deployments.

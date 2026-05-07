@@ -67,10 +67,51 @@ async def admin_delete_notification(notif_id: str, admin: dict = Depends(get_adm
 # ─────────────────────────────────────────────
 
 async def _get_or_create_vapid_keys() -> dict:
-    """Return VAPID key pair from db.api_config, generating once if absent."""
+    """Return the VAPID key pair.
+
+    Source-of-truth precedence (Task #557):
+      1. ``config.WEB_PUSH_VAPID_PRIVATE_KEY`` (Azure Key Vault →
+         ACA secretRef ``web-push-vapid-private-key``). The matching
+         public key is *derived* from the private PEM at call time so
+         we never have to keep two halves of the same secret in sync.
+      2. Legacy ``db.api_config.push_vapid`` (used by the pre-Task-#557
+         deploy that auto-generated and stored both halves in Mongo).
+         Treated as a one-shot bootstrap fallback and logged loudly so
+         a missed KV rotation surfaces in admin alerts (V4 §12 — no
+         silent fallbacks).
+      3. Last-resort: generate-and-store in Mongo (local dev / first
+         boot before either of the above is configured).
+    """
+    try:
+        import config as _cfg  # local import keeps startup-order safe
+    except Exception:
+        _cfg = None
+    env_private_pem = (getattr(_cfg, "WEB_PUSH_VAPID_PRIVATE_KEY", "") or "").strip()
+    if env_private_pem:
+        try:
+            from cryptography.hazmat.primitives.serialization import (
+                Encoding, PublicFormat, load_pem_private_key,
+            )
+            priv = load_pem_private_key(env_private_pem.encode(), password=None)
+            pub_raw = priv.public_key().public_bytes(
+                Encoding.X962, PublicFormat.UncompressedPoint
+            )
+            pub_b64 = base64.urlsafe_b64encode(pub_raw).rstrip(b"=").decode()
+            return {"public_key": pub_b64, "private_key_pem": env_private_pem}
+        except Exception as e:
+            logger.error(
+                "WEB_PUSH_VAPID_PRIVATE_KEY is set but unparseable (%s); "
+                "refusing to fall back silently per V4 §12", e,
+            )
+            return {}
+
     cfg = await db.api_config.find_one({}, {"push_vapid": 1})
     existing = (cfg or {}).get("push_vapid", {})
     if existing.get("public_key") and existing.get("private_key_pem"):
+        logger.warning(
+            "Using legacy db.api_config.push_vapid keypair — "
+            "WEB_PUSH_VAPID_PRIVATE_KEY env var is not configured (Task #557)"
+        )
         return existing
     try:
         from py_vapid import Vapid
@@ -87,11 +128,29 @@ async def _get_or_create_vapid_keys() -> dict:
         pub_b64 = base64.urlsafe_b64encode(pub_raw).rstrip(b"=").decode()
         keys = {"public_key": pub_b64, "private_key_pem": private_pem}
         await db.api_config.update_one({}, {"$set": {"push_vapid": keys}}, upsert=True)
-        logger.info("VAPID keys generated and stored in db.api_config")
+        logger.info("VAPID keys generated and stored in db.api_config (bootstrap)")
         return keys
     except Exception as e:
         logger.error(f"VAPID key generation failed: {e}")
         return {}
+
+
+def _vapid_claims_sub() -> str:
+    """Return the `sub` claim for outbound webpush requests.
+
+    Sourced from `config.WEB_PUSH_CONTACT` (RFC 8292 §2 — must be a
+    `mailto:` or `https:` URI identifying the application server).
+    Defaults to ``mailto:admin@syrabit.ai`` to preserve the historical
+    behaviour for callers that haven't set the env var yet.
+    """
+    try:
+        import config as _cfg
+        contact = (getattr(_cfg, "WEB_PUSH_CONTACT", "") or "").strip()
+        if contact:
+            return contact
+    except Exception:
+        pass
+    return "mailto:admin@syrabit.ai"
 
 
 async def _dispatch_push_to_all(payload: dict):
@@ -227,7 +286,7 @@ async def _dispatch_push(payload: dict, admin_only: bool = False):
                     subscription_info=sub["subscription_info"],
                     data=json.dumps(payload),
                     vapid_private_key=private_pem,
-                    vapid_claims={"sub": "mailto:admin@syrabit.ai"},
+                    vapid_claims={"sub": _vapid_claims_sub()},
                 )
                 sent += 1
                 delivery_results.append({
