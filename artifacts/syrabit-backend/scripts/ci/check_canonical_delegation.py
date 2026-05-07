@@ -120,6 +120,10 @@ ALLOWLIST_FILES = {
     # Guard + its pytest wrapper — literals are quoted.
     "artifacts/syrabit-backend/scripts/check_dead_providers.py",
     "artifacts/syrabit-backend/scripts/ci/check_canonical_delegation.py",
+    # Task #557 — operator-facing migration runner whose docstring names
+    # the retired `firebase_admin` literal in audit-trail prose. The
+    # runtime path itself contains no FCM call.
+    "artifacts/syrabit-backend/scripts/migrate_fcm_to_vapid.py",
     "artifacts/syrabit-backend/tests/test_dead_providers_guard.py",
     "artifacts/syrabit-backend/tests/test_provider_dispatch.py",
     "artifacts/syrabit-backend/tests/test_credit_drain_order.py",

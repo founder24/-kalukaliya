@@ -491,6 +491,33 @@ async def admin_push_subscriptions(
     return {"subscriptions": subs, "total": len(subs)}
 
 
+@router.get("/admin/push/migration-status")
+async def admin_push_migration_status(
+    admin: dict = Depends(get_admin_user),
+):
+    """Task #557 — FCM → VAPID migration progress for the admin health card.
+
+    Reads the `migration_state` field stamped by
+    `scripts/migrate_fcm_to_vapid.py`, plus computes the bucket on the fly
+    for any doc the sweep has not touched yet, so the card stays useful
+    even before the first nightly run.
+
+    Returns counts + percentages for `migrated` / `pending` / `tombstoned`,
+    the active migration window, and the next purge grace period. Surfaced
+    by the AdminHealth panel as the "Web push migration" tile.
+    """
+    from scripts.migrate_fcm_to_vapid import collect_status
+
+    status = await collect_status()
+    total = max(status.get("total", 0), 1)
+    return {
+        **status,
+        "pct_migrated":   round(100.0 * status.get("migrated", 0) / total, 2),
+        "pct_pending":    round(100.0 * status.get("pending", 0) / total, 2),
+        "pct_tombstoned": round(100.0 * status.get("tombstoned", 0) / total, 2),
+    }
+
+
 @router.get("/admin/push/delivery-stats")
 async def admin_push_delivery_stats(
     days: int = Query(7, ge=1, le=90),
