@@ -190,7 +190,10 @@ def _aic_get(prompt: str, *, content_type: str, template_version: str, max_token
             max_tokens=max_tokens,
             content_type=content_type,
             template_version=template_version,
-            normalize_text=False,  # generator prompts are already-templated
+            normalize_text=True,  # Task #571 — pass templated prompt
+            # through prompt_normalizer so cosmetic re-wraps (extra
+            # whitespace from a CMS edit, NFC/NFKC drift) collide on
+            # the same key.
         )
     except Exception:
         return None
@@ -204,7 +207,7 @@ def _aic_set(prompt: str, text: str, *, content_type: str, template_version: str
             max_tokens=max_tokens,
             content_type=content_type,
             template_version=template_version,
-            normalize_text=False,
+            normalize_text=True,
         )
     except Exception:
         pass

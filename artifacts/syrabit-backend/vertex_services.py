@@ -904,6 +904,7 @@ async def extract_key_concepts(
                 max_tokens=2048,
                 content_type="definition",
                 template_version=_AIC_DEF_TPL,
+                normalize_text=True,  # Task #571
             )
             if cached:
                 try:
@@ -927,6 +928,7 @@ async def extract_key_concepts(
                 max_tokens=2048,
                 content_type="definition",
                 template_version=_AIC_DEF_TPL,
+                normalize_text=True,  # Task #571
             )
         except Exception:
             pass
