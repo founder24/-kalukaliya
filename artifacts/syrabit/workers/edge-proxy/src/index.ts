@@ -212,10 +212,14 @@ async function _flushSharedKvCounter(
   const s = _kvBindingState(binding);
   try {
     await kv.put(_sharedCounterKey(binding), JSON.stringify(s.counters), {
-      // 48h TTL: long enough that yesterday's keys naturally expire after
-      // today's snapshot has accumulated, short enough that abandoned
-      // isolate IDs don't pile up in the namespace.
-      expirationTtl: 60 * 60 * 48,
+      // Task #512 — short TTL (6h) so a dead/PoP-rotated isolate's
+      // last flushed counter cannot dominate the global tally for a
+      // full 24h window. Live isolates re-flush every KV_FLUSH_EVERY_OPS
+      // ops so any binding seeing meaningful traffic refreshes its
+      // shared key well within 6h; quiet isolates whose keys age out
+      // simply contribute nothing further, which is the desired
+      // behaviour once their traffic has stopped.
+      expirationTtl: 60 * 60 * 6,
     });
   } catch {
     /* shared-store write best-effort */
@@ -404,6 +408,17 @@ export async function _collectKvIsolatesBreakdown(
     const keys = (listResult as { keys: { name: string }[] }).keys || [];
     for (const k of keys) {
       try {
+        // Task #512 — defence in depth. The listing prefix already
+        // pins us to today's UTC day, but parse the day suffix and
+        // skip anything that isn't today's so a stale key from a
+        // dead isolate (whose 6h TTL hasn't yet fired) cannot leak
+        // into today's aggregated total — e.g. one served right at
+        // a UTC rollover, or surfaced by an upstream prefix glitch.
+        const tail = k.name.slice(SHARED_KV_USAGE_PREFIX.length + binding.length + 1);
+        const sepIdx = tail.indexOf(':');
+        if (sepIdx < 0) continue;
+        const keyDay = tail.slice(0, sepIdx);
+        if (keyDay !== _kvCurrentDay) continue;
         const raw = await kv.get(k.name);
         if (!raw) continue;
         const parsed = JSON.parse(raw) as Partial<Record<KvOpName, number>>;

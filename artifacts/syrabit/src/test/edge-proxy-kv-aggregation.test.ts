@@ -137,6 +137,97 @@ describe('CF_EDGE_CACHE cross-isolate aggregation', () => {
     expect(isolates[0].id).not.toBe(isolates[1].id);
   });
 
+  it("does not leak a sibling isolate's previous-UTC-day counter into today's total (Task #512)", async () => {
+    const kv = new FakeKv();
+    const ns = kv as unknown as KVNamespace;
+
+    // ── Pre-seed a sibling isolate's HUGE counter under YESTERDAY's
+    //    day suffix, as if it had flushed right before midnight UTC and
+    //    then died — its 6h TTL hasn't fired yet so the key is still
+    //    physically present in the namespace. ──
+    const today = new Date().toISOString().slice(0, 10);
+    const y = new Date();
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterday = y.toISOString().slice(0, 10);
+    expect(yesterday).not.toBe(today);
+    await ns.put(
+      `__kv_usage:CF_EDGE_CACHE:${yesterday}:dead-isolate`,
+      JSON.stringify({ read: 99_999, write: 999, list: 0, delete: 0 }),
+    );
+
+    // ── A live isolate handles 4 reads + 1 write today and serves the
+    //    snapshot probe. ──
+    _setKvIsolateIdForTests('live-isolate');
+    _seedKvCountersForTests('CF_EDGE_CACHE', { read: 4, write: 1 });
+
+    const { total, isolates } = await _collectKvIsolatesBreakdown(
+      'CF_EDGE_CACHE',
+      ns,
+    );
+
+    // The dead isolate's yesterday counter MUST NOT be summed into
+    // today's totals — otherwise a single stuck isolate inflates the
+    // global edge-cache tally for up to a full TTL window after its
+    // traffic has stopped.
+    expect(total.read).toBe(4);
+    expect(total.write).toBe(1);
+    expect(isolates).toHaveLength(1);
+    expect(isolates[0].counters.read).toBe(4);
+
+    // Sanity: the yesterday key really is still present in the
+    // underlying namespace — this test only succeeds because the
+    // aggregator filters it out, not because the store was empty.
+    expect(
+      kv.store.has(`__kv_usage:CF_EDGE_CACHE:${yesterday}:dead-isolate`),
+    ).toBe(true);
+  });
+
+  it('defensively filters non-today keys even if listing returns them (Task #512)', async () => {
+    // Simulate a misbehaving / overly broad list result by handing back
+    // a yesterday-suffixed key alongside a today-suffixed one. The
+    // aggregator must skip the yesterday entry based on the parsed day
+    // suffix, even though the prefix-based listing wouldn't normally
+    // surface it.
+    const today = new Date().toISOString().slice(0, 10);
+    const y = new Date();
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterday = y.toISOString().slice(0, 10);
+    const store = new Map<string, string>([
+      [
+        `__kv_usage:CF_EDGE_CACHE:${yesterday}:ghost`,
+        JSON.stringify({ read: 50_000, write: 500, list: 0, delete: 0 }),
+      ],
+      [
+        `__kv_usage:CF_EDGE_CACHE:${today}:fresh`,
+        JSON.stringify({ read: 3, write: 1, list: 0, delete: 0 }),
+      ],
+    ]);
+    const broadList = {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => {
+        store.set(k, v);
+      },
+      delete: async (k: string) => {
+        store.delete(k);
+      },
+      // Returns BOTH days' keys regardless of the requested prefix —
+      // this is what exercises the defensive day-suffix filter.
+      list: async () => ({
+        keys: Array.from(store.keys()).map((name) => ({ name })),
+        list_complete: true,
+      }),
+    } as unknown as KVNamespace;
+
+    _setKvIsolateIdForTests('local');
+    const { total } = await _collectKvIsolatesBreakdown(
+      'CF_EDGE_CACHE',
+      broadList,
+    );
+    // Only the today key + this isolate's flush (zero counters) count.
+    expect(total.read).toBe(3);
+    expect(total.write).toBe(1);
+  });
+
   it('falls back to local counters when listing fails', async () => {
     const broken = {
       get: async () => null,
