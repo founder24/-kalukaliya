@@ -71,16 +71,29 @@ describe('AdminBotSecurity', () => {
     ).not.toThrow();
   });
 
-  // Task #447 — the Alert Settings panel now iterates
-  // ALERT_THRESHOLD_FIELDS to render the memory_brain failure-rate
-  // tunables (added to _ALERT_THRESHOLDS_DEFAULT in Task #417). This
-  // test pins the iterated config so a regression that drops either
-  // key from the panel surfaces immediately.
+  // Task #447 / Task #484 — the Alert Settings panel iterates
+  // ALERT_THRESHOLD_FIELDS to render every threshold row. Task #484
+  // migrated the four originally hand-coded thresholds (spoof_rpm,
+  // auto_block_threshold, auto_block_expiry_hours,
+  // collection_growth_per_day) onto this same config so they share
+  // the iterator's default-text + range validation behaviour. These
+  // tests pin the config so a regression that drops any key from the
+  // panel surfaces immediately.
   describe('ALERT_THRESHOLD_FIELDS config', () => {
     it('exposes both memory_brain failure-rate tunables in the iterated panel config', () => {
       const keys = ALERT_THRESHOLD_FIELDS.map(f => f.key);
       expect(keys).toContain('memory_brain_failure_rate_pct');
       expect(keys).toContain('memory_brain_failure_min_sample');
+    });
+
+    // Task #484 — mirrors the memory_brain assertion above for the
+    // four legacy thresholds that were migrated onto the iterator.
+    it('exposes the four legacy thresholds in the iterated panel config', () => {
+      const keys = ALERT_THRESHOLD_FIELDS.map(f => f.key);
+      expect(keys).toContain('spoof_rpm');
+      expect(keys).toContain('auto_block_threshold');
+      expect(keys).toContain('auto_block_expiry_hours');
+      expect(keys).toContain('collection_growth_per_day');
     });
 
     it('every field has a label, help text and a default for the panel UI', () => {
