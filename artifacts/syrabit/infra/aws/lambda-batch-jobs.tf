@@ -48,6 +48,15 @@ data "aws_secretsmanager_secret" "gcp_sa_json" {
   depends_on = [aws_secretsmanager_secret.workers]
 }
 
+# Task #571 — `cache-effectiveness` Lambda mints a short-lived admin
+# JWT to call /api/health/cache. The signing secret lives alongside
+# the other Mongo / Pinecone replicas in Secrets Manager (canonical
+# source = Azure Key Vault per V4 §6).
+data "aws_secretsmanager_secret" "admin_jwt" {
+  name       = "${local.lz_project}/${local.lz_env}/admin-jwt/secret"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
 # `pinecone` and `workers_embed` data sources are already declared in
 # `sqs-reembed.tf`. We reference them directly below.
 
@@ -76,6 +85,19 @@ locals {
       schedule          = "cron(0 4 ? * SUN *)" # weekly Sun 04:00 UTC
       max_docs_per_run  = 25
       description       = "Task #551 — Weekly AWS Comprehend sentiment + PII sampler over chapters."
+    }
+    # Task #571 — daily AI-cache-effectiveness shipper. Scrapes
+    # /api/health/cache (admin-only, JWT minted from ADMIN_JWT_SECRET)
+    # and emits per-content-type counters to the `Syrabit/Cache`
+    # CloudWatch namespace. Two alarms below ride on the (ContentType=Total)
+    # dimension: hit-ratio floor (<30 %) + cardinality spike (>3x 7-day MA).
+    "cache-effectiveness" = {
+      handler           = "lambda_batch.cache_effectiveness.handler"
+      memory_mb         = 128
+      timeout_s         = 120
+      schedule          = "cron(15 3 * * ? *)" # daily 03:15 UTC (after as-translation-backfill 03:00)
+      max_docs_per_run  = 0
+      description       = "Task #571 — Daily AI-input-cache effectiveness shipper to Syrabit/Cache namespace."
     }
   }
 }
@@ -216,6 +238,12 @@ resource "aws_lambda_function" "batch_job" {
       # Embed worker URL is not a secret — same value used by the
       # deferred-embed Lambda in `sqs-reembed.tf` (line 122).
       WORKERS_EMBED_URL                 = "https://embed.syrabit.ai"
+      # Task #571 — only `cache-effectiveness` reads ADMIN_JWT_SECRET to
+      # mint the short-lived JWT it presents to /api/health/cache, but
+      # injecting the ARN on every job is harmless (handlers ignore env
+      # vars they do not consume) and keeps the env block uniform.
+      ADMIN_JWT_SECRET_ARN              = data.aws_secretsmanager_secret.admin_jwt.arn
+      BACKEND_URL                       = "https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io"
     })
   }
 
@@ -363,6 +391,81 @@ resource "aws_cloudwatch_metric_alarm" "as_backfill_failed_spike" {
 
   dimensions = {
     Job = "as-translation-backfill"
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# ── Task #571 — Cache-effectiveness alarms (Syrabit/Cache namespace) ────────
+# Both alarms target the (ContentType=Total) dimension that the
+# cache_effectiveness Lambda emits. Per-content-type rows are still
+# published to CloudWatch so the admin Observability panel can chart
+# them; we just don't page on per-row noise.
+
+resource "aws_cloudwatch_metric_alarm" "cache_ai_hitratio_low" {
+  alarm_name          = "${local.lz_project}-cache-ai-hitratio-low-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  metric_name         = "HitRatio"
+  namespace           = "Syrabit/Cache"
+  period              = 86400
+  statistic           = "Average"
+  threshold           = 0.30
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #571 — AI-input-cache total HitRatio dropped below 30% over the last 24h. Likely causes: a prompt-template bump that has not yet refilled, a normalizer regression that fragments keys, or a TTL that is too short for the call volume. Inspect /admin/observability cache panel + miss_reasons breakdown."
+
+  dimensions = {
+    ContentType = "Total"
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# Cardinality spike — detected via Metric Math: today's UniqueKeys24h
+# > 3x the trailing 7-day moving average. Catches the runaway-key
+# pattern (e.g. a generator started embedding a wall-clock timestamp
+# into the prompt, fragmenting the keyspace).
+resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
+  alarm_name          = "${local.lz_project}-cache-cardinality-spike-${local.lz_env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Task #571 — UniqueKeys24h spiked above 3x the trailing 7-day moving average. Almost always means a generator is fragmenting cache keys (timestamp/uuid leaked into prompt, normalizer regression). Inspect /admin/observability cache panel + content_type breakdown to localize the offender."
+
+  metric_query {
+    id          = "today"
+    return_data = false
+    metric {
+      namespace   = "Syrabit/Cache"
+      metric_name = "UniqueKeys24h"
+      period      = 86400
+      stat        = "Maximum"
+      dimensions  = { ContentType = "Total" }
+    }
+  }
+  metric_query {
+    id          = "ma7"
+    return_data = false
+    metric {
+      namespace   = "Syrabit/Cache"
+      metric_name = "UniqueKeys24h"
+      period      = 86400
+      stat        = "Average"
+      dimensions  = { ContentType = "Total" }
+    }
+  }
+  metric_query {
+    id          = "spike"
+    return_data = true
+    expression  = "today - 3 * ma7"
+    label       = "UniqueKeys24h - 3x 7d MA"
   }
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]

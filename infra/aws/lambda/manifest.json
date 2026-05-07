@@ -44,5 +44,20 @@
   ],
   "exempt_modules": [
     "__init__"
+  ],
+  "_task_571_doc": "Task #571 — `cache-effectiveness` is a *new* batch shipper, not an ACA-Jobs migration; it has no `aca_module` counterpart. Listed in `auxiliary_jobs` below so the dead-providers CI guard (which only walks `aca_jobs/*.py`) does not require an entry, while the lambda-batch-jobs.tf locals.batch_jobs table still mirrors it 1:1.",
+  "auxiliary_jobs": [
+    {
+      "name": "cache-effectiveness",
+      "lambda_function_name": "syrabit-cache-effectiveness",
+      "handler": "lambda_batch.cache_effectiveness.handler",
+      "schedule": "cron(15 3 * * ? *)",
+      "schedule_doc": "daily 03:15 UTC (after as-translation-backfill at 03:00)",
+      "memory_mb": 128,
+      "timeout_s": 120,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "task": 571,
+      "notes": "Daily shipper for the AI-input-cache snapshot. Scrapes admin-only /api/health/cache and emits per-content-type Hits/Misses/HitRatio/UniqueKeys24h/MissReason to the Syrabit/Cache CloudWatch namespace. Two alarms ride on the (ContentType=Total) dimension: cache-ai-hitratio-low (HitRatio < 0.30 for 1 day) + cache-cardinality-spike (UniqueKeys24h > 3x the trailing 7-day moving average)."
+    }
   ]
 }

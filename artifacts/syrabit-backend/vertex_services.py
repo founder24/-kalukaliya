@@ -885,9 +885,51 @@ async def extract_key_concepts(
         f"TEXT:\n{text[:4000]}\n\n"
         f"Return ONLY valid JSON."
     )
-    raw = await _generate(prompt, max_tokens=2048, temperature=0.1)
+    # Task #571 — definition-style generator (key_terms[].definition is
+    # the canonical "definition" content type for the Mongo topics
+    # corpus). Wired through ai_input_cache so repeat passes over the
+    # same chapter text on the same template skip the LLM round-trip.
+    _AIC_DEF_TPL = "extract_key_concepts_v1"
+    _aic_g = _aic_s = None
+    try:
+        from ai_input_cache import (
+            get_response as _aic_g,
+            set_response as _aic_s,
+            is_deterministic as _aic_d,
+        )
+        _msgs = [{"role": "user", "content": prompt}]
+        if _aic_d(_msgs, "vertex_extract_key_concepts", temperature=0.0):
+            cached = _aic_g(
+                _msgs, "vertex_extract_key_concepts",
+                max_tokens=2048,
+                content_type="definition",
+                template_version=_AIC_DEF_TPL,
+            )
+            if cached:
+                try:
+                    return json.loads(_clean_json(cached))
+                except Exception:
+                    return {"raw": cached}
+    except Exception:
+        _aic_g = _aic_s = None
+    # Task #571 — temperature pinned to 0.0 so the response we cache
+    # under the `definition` content_type is deterministic. The prior
+    # 0.1 sampling combined with a deterministic cache key would have
+    # frozen one random sample as the answer for that chapter forever.
+    raw = await _generate(prompt, max_tokens=2048, temperature=0.0)
     if not raw:
         return {"error": "NLP analysis failed"}
+    if _aic_s is not None:
+        try:
+            _aic_s(
+                [{"role": "user", "content": prompt}],
+                "vertex_extract_key_concepts", raw,
+                max_tokens=2048,
+                content_type="definition",
+                template_version=_AIC_DEF_TPL,
+            )
+        except Exception:
+            pass
     try:
         return json.loads(_clean_json(raw))
     except Exception:

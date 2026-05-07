@@ -41,6 +41,12 @@
     "  edge_cache.ttl_seconds  — cache TTL when behavior='cacheable'. Required for cacheable entries.",
     "  edge_cache.user_keyed   — when true, the cache key includes a per-user identity header so each user",
     "                            gets their own cached entry (e.g. /api/user/stats).",
+    "  edge_cache.cache_hit_ratio_target — Task #571 advisory floor: the per-route hit-ratio CF Analytics",
+    "                            should report under steady state. Not enforced by code (the edge worker has",
+    "                            no read-back path for CF cache stats); the admin /api/health/cache panel",
+    "                            renders this alongside the live AI-cache numbers so the runbook knows when",
+    "                            to escalate. Defaults derived from (TTL, traffic shape) per `target_for()`",
+    "                            in the Task #571 jq patch.",
     "  runtime_constant        — name of the exported identifier (constant or helper function) that the",
     "                            registered_in file uses to reach this path/URL. When set, the Task #901",
     "                            drift test accepts the file mentioning that identifier as a stand-in for",
@@ -93,7 +99,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 86400,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -106,7 +113,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 86400,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -119,7 +127,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 86400,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -132,7 +141,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 21600,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -145,7 +155,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 3600,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -158,7 +169,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 3600,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -171,7 +183,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 3600,
+        "cache_hit_ratio_target": 0.80
       }
     },
     {
@@ -184,7 +197,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 1800
+        "ttl_seconds": 1800,
+        "cache_hit_ratio_target": 0.85
       }
     },
     {
@@ -197,7 +211,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 3600,
+        "cache_hit_ratio_target": 0.80
       }
     },
     {
@@ -211,7 +226,8 @@
       "smoke_skip_reason": "Task #917 — handler in seo_engine.py uses the motor cursor pattern `await db.seo_pages.find(...).to_list(50000)` which tests/_deps_stub.py does not yet model (the stub returns an AsyncMock for `find_one` but a plain MagicMock for `find`, so `find(...).to_list` is non-awaitable). Real production has motor + Mongo so this is not a runtime bug; remove this annotation once _deps_stub gains cursor support.",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 3600,
+        "cache_hit_ratio_target": 0.80
       }
     },
     {
@@ -224,7 +240,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 600
+        "ttl_seconds": 600,
+        "cache_hit_ratio_target": 0.65
       }
     },
     {
@@ -237,7 +254,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 3600
+        "ttl_seconds": 3600,
+        "cache_hit_ratio_target": 0.75
       }
     },
     {
@@ -251,7 +269,8 @@
       "edge_cache": {
         "behavior": "cacheable",
         "ttl_seconds": 900,
-        "user_keyed": true
+        "user_keyed": true,
+        "cache_hit_ratio_target": 0.50
       }
     },
     {
@@ -264,7 +283,8 @@
       "runtime_constant": "getCacheablePrefixes",
       "edge_cache": {
         "behavior": "cacheable",
-        "ttl_seconds": 86400
+        "ttl_seconds": 86400,
+        "cache_hit_ratio_target": 0.95
       }
     },
     {

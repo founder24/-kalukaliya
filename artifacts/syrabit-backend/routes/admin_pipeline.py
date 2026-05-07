@@ -169,6 +169,47 @@ def _validate_mcq_output(result: str, expected_count: int = 5) -> bool:
         return False
 
 
+_MCQ_TEMPLATE_VERSION = "mcq_pipeline_v1"
+_FLASHCARD_TEMPLATE_VERSION = "flashcard_pipeline_v1"
+
+
+def _aic_get(prompt: str, *, content_type: str, template_version: str, max_tokens: int):
+    """Task #571 — AI-input-cache lookup for deterministic generators.
+
+    Wrapped in `is_deterministic` per K.2 (chat-adjacent but safe).
+    Best-effort: any failure inside the cache layer returns None so the
+    LLM dispatch proceeds normally.
+    """
+    try:
+        from ai_input_cache import get_response as _aic_g, is_deterministic as _aic_d
+        msgs = [{"role": "user", "content": prompt}]
+        if not _aic_d(msgs, "content", temperature=0.0, stream=False):
+            return None
+        return _aic_g(
+            msgs, "content",
+            max_tokens=max_tokens,
+            content_type=content_type,
+            template_version=template_version,
+            normalize_text=False,  # generator prompts are already-templated
+        )
+    except Exception:
+        return None
+
+
+def _aic_set(prompt: str, text: str, *, content_type: str, template_version: str, max_tokens: int) -> None:
+    try:
+        from ai_input_cache import set_response as _aic_s
+        _aic_s(
+            [{"role": "user", "content": prompt}], "content", text,
+            max_tokens=max_tokens,
+            content_type=content_type,
+            template_version=template_version,
+            normalize_text=False,
+        )
+    except Exception:
+        pass
+
+
 async def _pipeline_generate_mcqs(
     content: str, subject_name: str, chapter_title: str, class_name: str, count: int = 20,
 ) -> list:
@@ -186,6 +227,24 @@ async def _pipeline_generate_mcqs(
         f'"correct_answer": "A", "explanation": "...", "difficulty": "medium", "topic": "...", "marks": 1}}]\n\n'
         f"Chapter content:\n{content[:4500]}"
     )
+    # Task #571 — AI-input-cache short-circuit for repeat bulk-generate
+    # passes (e.g. an admin re-running the chapter pipeline after a
+    # validation hiccup). Caches by (template_version, prompt) so a
+    # template bump invalidates the entire MCQ corpus cleanly.
+    cached = _aic_get(prompt, content_type="mcq",
+                      template_version=_MCQ_TEMPLATE_VERSION, max_tokens=3000)
+    if cached and _validate_mcq_output(cached, count):
+        try:
+            cleaned = cached.strip()
+            if cleaned.startswith("```"):
+                parts = cleaned.split("```")
+                cleaned = parts[1] if len(parts) > 1 else cleaned
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:]
+            data = json.loads(cleaned)
+            return data if isinstance(data, list) else data.get("mcqs", data.get("questions", []))
+        except Exception:
+            pass
     try:
         async with _pipeline_sem:
             result = await call_llm_api_content_with_retry(
@@ -193,6 +252,9 @@ async def _pipeline_generate_mcqs(
                 max_tokens=3000,
                 validate_fn=lambda r: _validate_mcq_output(r, count),
             )
+        if result and _validate_mcq_output(result, count):
+            _aic_set(prompt, result, content_type="mcq",
+                     template_version=_MCQ_TEMPLATE_VERSION, max_tokens=3000)
         cleaned = result.strip()
         if cleaned.startswith("```"):
             parts = cleaned.split("```")
@@ -244,6 +306,20 @@ async def _pipeline_generate_flashcards(
         f'"difficulty": "easy", "tags": ["..."]}}]}}\n\n'
         f"Chapter content:\n{content[:4500]}"
     )
+    cached = _aic_get(prompt, content_type="flashcard",
+                      template_version=_FLASHCARD_TEMPLATE_VERSION, max_tokens=3000)
+    if cached and _validate_flashcard_output(cached):
+        try:
+            cleaned = cached.strip()
+            if cleaned.startswith("```"):
+                parts = cleaned.split("```")
+                cleaned = parts[1] if len(parts) > 1 else cleaned
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:]
+            data = json.loads(cleaned)
+            return data.get("flashcards", [])
+        except Exception:
+            pass
     try:
         async with _pipeline_sem:
             result = await call_llm_api_content_with_retry(
@@ -251,6 +327,9 @@ async def _pipeline_generate_flashcards(
                 max_tokens=3000,
                 validate_fn=_validate_flashcard_output,
             )
+        if result and _validate_flashcard_output(result):
+            _aic_set(prompt, result, content_type="flashcard",
+                     template_version=_FLASHCARD_TEMPLATE_VERSION, max_tokens=3000)
         cleaned = result.strip()
         if cleaned.startswith("```"):
             parts = cleaned.split("```")
