@@ -4573,7 +4573,8 @@ _THROTTLE_TILE_KEYS = (
     "workers_ai_throttle",
     "groq_throttle",
     "gemini_throttle",
-    "azure_openai_throttle",
+    # Task #554 — `azure_openai_throttle` retired alongside the Azure
+    # OpenAI tenant (chat is now Vertex → Workers-AI Llama-3.2-3B).
     "deepgram_throttle",
     "assamese_chat_unavailable",
 )
@@ -4607,9 +4608,6 @@ def _build_throttle_tiles() -> dict:
     _gemini_burst_60 = 0
     _gemini_burst_180 = 0
     _gemini_threshold = 5
-    _azure_burst_60 = 0
-    _azure_burst_180 = 0
-    _azure_threshold = 5
     _deepgram_burst_60 = 0
     _deepgram_burst_180 = 0
     _deepgram_threshold = 5
@@ -4624,8 +4622,7 @@ def _build_throttle_tiles() -> dict:
         _groq_burst_180 = _get_p_burst("groq", 180)
         _gemini_burst_60 = _get_p_burst_ip("gemini", 60)
         _gemini_burst_180 = _get_p_burst("gemini", 180)
-        _azure_burst_60 = _get_p_burst_ip("azure_openai", 60)
-        _azure_burst_180 = _get_p_burst("azure_openai", 180)
+        # Task #554 — azure_openai burst tracking removed.
         _deepgram_burst_60 = _get_p_burst_ip("deepgram", 60)
         _deepgram_burst_180 = _get_p_burst("deepgram", 180)
     except Exception:
@@ -4635,7 +4632,7 @@ def _build_throttle_tiles() -> dict:
         _wai_threshold = int(_at.get("workers_ai_429_burst_threshold", 5))
         _groq_threshold = int(_at.get("groq_429_burst_threshold", 5))
         _gemini_threshold = int(_at.get("gemini_429_burst_threshold", 5))
-        _azure_threshold = int(_at.get("azure_openai_429_burst_threshold", 5))
+        # Task #554 — azure_openai 429 threshold removed.
         _deepgram_threshold = int(_at.get("deepgram_429_burst_threshold", 5))
     except Exception:
         pass
@@ -4683,12 +4680,7 @@ def _build_throttle_tiles() -> dict:
             "alert_threshold": _gemini_threshold,
             "throttled": _gemini_burst_60 >= _gemini_threshold,
         },
-        "azure_openai_throttle": {
-            "burst_60s": _azure_burst_60,
-            "burst_180s": _azure_burst_180,
-            "alert_threshold": _azure_threshold,
-            "throttled": _azure_burst_60 >= _azure_threshold,
-        },
+        # Task #554 — azure_openai_throttle tile removed.
         "deepgram_throttle": {
             "burst_60s": _deepgram_burst_60,
             "burst_180s": _deepgram_burst_180,

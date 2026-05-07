@@ -1762,13 +1762,12 @@ async def admin_llm_health(admin: dict = Depends(get_admin_user)):
         "burst_429_60s":  burst_60,
         "note": (
             "routing_chains: Bedrock REMOVED from all pools (AWS account-wide daily token quota exhausted). "
-            "Task #490 / #494 — Vertex REMOVED from chat/safety pools entirely; only "
-            "remaining Vertex surface is `content_format` (NotebookLM-style polish via "
-            "`content_formatter.format_content` → vertex/gemini-2.5-flash primary, "
-            "workers_ai_llama33_70b sole allowed fallback). "
-            "english_rag_chat = azure_openai/gpt-4.1-nano (10000) → workers_ai_llama32_3b / workers_ai_mistral_7b / workers_ai (0, last-resort fallbacks); "
+            "Task #554 (2026-05-07) — Azure OpenAI fully RETIRED. Vertex Gemini 2.5 Flash is now the chat HEAD; "
+            "the `content_format` polish chain still routes vertex/gemini-2.5-flash → workers_ai_llama33_70b. "
+            "english_rag_chat = STRICT 2-position chain — vertex/gemini-2.5-flash → workers_ai_llama32_3b "
+            "(order flips when projected GCP credit runway ≤ 90 days; selector lives in `cost_caps._select_chat_primary`). "
             "assamese_rag_chat = sarvam/sarvam-m (10000) → workers_ai_indic (0, last-resort). "
-            "Active chat/content allowlist: Azure OpenAI, Sarvam, Workers AI. "
+            "Active chat/content allowlist: Vertex, Sarvam, Workers AI. "
             "Safety pool primary is Workers AI. Re-add Bedrock only after AWS Service Quotas are raised. "
             "burst_429 uses Redis when available (180s TTL); burst_429_60s is always in-process."
         ),

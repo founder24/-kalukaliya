@@ -27,10 +27,10 @@ param acrName string
 @description('Initial container image tag to bootstrap the revision with. CI swaps this on every deploy.')
 param image string
 
-@description('Region — must match the Azure OpenAI deployment to keep the chat hot-path intra-region.')
+@description('Azure region for the Container App. Vertex Gemini is now the chat HEAD (Task #554); the surviving Azure surfaces are Azure Speech and Azure Translator, both region-flexible.')
 param location string = 'eastus'
 
-@description('Azure Key Vault name that holds the runtime secrets (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AZURE_OPENAI_API_KEY, MONGO_URI, …). SendGrid was retired by Task #400 — Tier-2 email is now Amazon SES via boto3.')
+@description('Azure Key Vault name that holds the runtime secrets (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, MONGO_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, AZURE_SPEECH_KEY, AZURE_TRANSLATOR_KEY, …). SendGrid was retired by Task #400 — Tier-2 email is now Amazon SES via boto3.')
 param keyVaultName string = 'syrabit-prod-kv'
 
 resource managedEnv 'Microsoft.App/managedEnvironments@2024-03-01' existing = {

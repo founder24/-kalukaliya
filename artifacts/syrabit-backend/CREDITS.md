@@ -21,7 +21,7 @@ track runway and plan renewals.
 | **Cloud Text-to-Speech** | Neural2 — `hi-IN-Neural2-A`, `hi-IN-Neural2-C`, `bn-IN-Neural2-A`, `as-IN-Wavenet-B` | Indic TTS. ElevenLabs is primary for English; Deepgram aura-2 is the universal TTS fallback. | ~$16 / 1M chars | ~$3 / month |
 | **Cloud Translation v3** | `translateText` endpoint | Indic translation — Hindi, Bengali, Assamese. Workers AI IndicTrans2 is the locked primary in the `translate` pool; this is the residual Google fallback for hi/bn. | ~$20 / 1M chars | ~$6 / month |
 | **Cloud Vision** | `DOCUMENT_TEXT_DETECTION` | OCR for Devanagari/Bengali script documents (past papers, textbooks). Triggers when Workers AI vision confidence < 0.80 or document language is Indic. Workers AI vision remains primary for Latin-script. | ~$1.50 / 1K images | ~$2 / month |
-| **Gemini 2.5 Flash (via Vertex / google-vertex-ai CF slug)** | `gemini-2.5-flash` | Chat fallback — position-2 in the locked content chain: `azure_openai → vertex → workers_ai`. Reached through the CF AI Gateway BYOK slug `google-vertex-ai` (project `blissful-acumen-495019-t6`, region `us-central1`); only the 2.5 family is provisioned. No direct `GEMINI_API_KEY` env reads outside `config.py`. | ~$0.075 / 1M tokens (input) | ~$3 / month |
+| **Gemini 2.5 Flash (via Vertex / google-vertex-ai CF slug)** | `gemini-2.5-flash` | Chat HEAD (Task #554, 2026-05-07) — position-1 in the locked English chat chain `vertex → workers_ai_llama32_3b` (chain flips when projected GCP credit runway ≤ 90 days). Also position-1 in the `content` polish chain. Reached through the CF AI Gateway BYOK slug `google-vertex-ai` (project `blissful-acumen-495019-t6`, region `us-central1`); only the 2.5 family is provisioned. No direct `GEMINI_API_KEY` env reads outside `config.py`. | ~$0.075 / 1M tokens (input) | ~$3 / month |
 | **Vertex AI Embeddings** | `text-embedding-004` (768-dim) | Embed fallback for long-form content (> 2048 tokens) or when Workers AI embed is in cooldown. **NOTE:** 768-dim — do NOT mix with main 1024-dim bge-large index. | ~$0.00013 / 1K chars | ~$1 / month |
 
 **Total estimated monthly burn: ~$19/month → ~8 years runway at current scale.**
@@ -48,9 +48,9 @@ Translation: [hi/bn/as target] → Workers AI IndicTrans2 (primary, weight 3000)
 OCR:         [Latin script / confidence ≥ 0.80] → Workers AI llama-3.2 vision
              [Devanagari/Bengali / confidence < 0.80] → Google Vision DOCUMENT_TEXT_DETECTION
 
-Chat:        english_rag_chat:  azure_openai(10000) → vertex(100) → workers_ai(0)
-             assamese_rag_chat: sarvam(10000) → vertex(100)             [no workers fallback]
-             content:           vertex(10000) → azure_openai(100) → workers_ai(0)
+Chat:        english_rag_chat:  vertex(10000) → workers_ai_llama32_3b(0)        [Task #554 — strict 2-position chain, flips at ≤90d GCP credit runway]
+             assamese_rag_chat: sarvam(10000) → workers_ai_indic(0)              [no wrong-language fallback]
+             content:           vertex(10000) → workers_ai_llama33_70b(0) → workers_ai(0)
 
 Embeddings:  workers_ai_custom (Gemma-300M + Qwen3-0.6B, 1024-dim) [primary]
              → pinecone_ai (multilingual-e5-large) [secondary]

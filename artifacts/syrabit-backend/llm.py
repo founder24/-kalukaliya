@@ -3921,18 +3921,17 @@ async def call_embed_with_dispatch(
 ) -> list:
     """Embed *text* via the weighted provider selected for the 'embed' feature key.
 
-    Routing (single-source, post Task #491):
+    Routing (single-source, post Task #491; Azure OpenAI embed retired in Task #554):
       ``embed_en`` and ``embed_indic`` →
-        workers_ai_custom (primary) → azure_openai → workers_ai
+        workers_ai_custom (primary) → workers_ai
 
     workers_ai_custom: providers.workers_embed.embed_query — Task #382
                        primary embed via the custom Cloudflare Worker
                        (Gemma-300M + Qwen3-0.6B mean-pooled to 1024-dim).
     workers_ai: cloudflare_ai.embed (1024-dim, @cf/baai/bge-m3) — dormant
                 fallback after Task #382.
-    azure_openai: branch kept for back-compat in case POOL_WEIGHTS
-    is overridden at runtime.
-    (Legacy AWS-managed and direct embed branches removed in Tasks #347/#491.)
+    (Legacy AWS-managed, direct, and Azure OpenAI embed branches removed
+    in Tasks #347 / #491 / #554.)
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP, EMBED_PROVIDER_PRIMARY as _EPP
