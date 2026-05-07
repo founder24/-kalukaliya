@@ -335,6 +335,17 @@
       "edge_cache": {
         "behavior": "bypass"
       }
+    },
+    {
+      "path": "/api/health/season",
+      "match": "exact",
+      "rationale": "Task #575 — SeasonCacheDO polls this once per 60s per region to drive edge_cache.exam_ttl_seconds selection during AHSEC/SEBA exam + results windows. Registered here so a rename of the FastAPI route surfaces as a CI failure instead of a silent regression to default TTLs.",
+      "registered_in": [
+        "workers/edge-proxy/src/season-cache-do.ts",
+        "workers/edge-proxy/src/season-cache.ts",
+        "workers/edge-proxy/src/monitored-urls.ts"
+      ],
+      "runtime_constant": "SEASON_HEALTH_PATH"
     }
   ],
   "intentionally_external": [

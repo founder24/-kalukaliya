@@ -56,7 +56,9 @@ import { recordEdgeLog, type EdgeLogShipperEnv } from "./log-shipper";
 // Task #109 Phase 5 — Durable Object rate limiter + Analytics Engine query utility.
 import { RateLimiter } from "./rate-limiter-do";
 import { queryEdgeMetrics } from "./analytics-engine";
-export { RateLimiter };
+// Task #575 — SeasonCacheDO owns the /api/health/season snapshot for the region.
+import { SeasonCacheDO } from "./season-cache-do";
+export { RateLimiter, SeasonCacheDO };
 
 interface Env {
   BACKEND_URL: string;
@@ -260,6 +262,16 @@ interface Env {
    * the [[migrations]] have been applied via `wrangler deploy`).
    */
   RATE_LIMITER_DO?: DurableObjectNamespace;
+  /**
+   * Task #575 — SeasonCacheDO owns the authoritative `/api/health/season`
+   * snapshot for the entire region. Single instance per region (resolved
+   * via `idFromName("global")`) enforces the 60s shared-refresh contract
+   * so the FastAPI origin sees one call per minute regardless of isolate
+   * count. Optional so the worker still boots in local dev without the
+   * `[[migrations]] tag = "v2"` applied — when unbound, season-aware TTL
+   * stretching is a no-op (every route gets its normal `ttl_seconds`).
+   */
+  SEASON_CACHE_DO?: DurableObjectNamespace;
   /**
    * Task #109 Phase 5 — Cloudflare API token with Analytics: Read scope.
    * Used by the /api/edge/analytics route to query the Analytics Engine
@@ -675,11 +687,11 @@ let _currentSeasonSnapshot: SeasonSnapshot = {
 };
 
 async function refreshSeasonSnapshot(
-  env: { BACKEND_URL: string },
+  env: { SEASON_CACHE_DO?: DurableObjectNamespace },
   ctx: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<void> {
   try {
-    _currentSeasonSnapshot = await getSeasonSnapshot(env.BACKEND_URL, ctx);
+    _currentSeasonSnapshot = await getSeasonSnapshot(env, ctx);
   } catch {
     // Already returns a fallback — nothing to do.
   }

@@ -72,6 +72,19 @@ EXAM_TTL_MULTIPLIER = 3.0  # surfaced to the admin banner
 # they are admin-edit driven and the longer TTL would mask a freshly
 # polished body for too long after a CMS re-edit.
 EXAM_STRETCH_CONTENT_TYPES = frozenset({"mcq", "flashcard", "definition", "pyq"})
+# NOTE on PYQ wiring scope (Task #575): the deterministic AI input
+# cache (``ai_input_cache``) is wired into the MCQ, flashcard, and
+# definition generators today (Task #571). The PYQ generation
+# pipeline (``routes/pyq.py:admin_pyq_agentic_process``) currently
+# calls Gemini Vision OCR DIRECTLY, without going through
+# ``ai_input_cache``. Including ``"pyq"`` in
+# ``EXAM_STRETCH_CONTENT_TYPES`` here makes the calendar READY for
+# that wiring — when the PYQ generator is refactored to write through
+# ``ai_input_cache.set_response(content_type="pyq", ...)`` (follow-up
+# task #582), exam-mode TTL stretching will apply automatically with
+# no change here. The edge-cache side of the PYQ benefit (the
+# ``/api/pyq/`` route's ``exam_ttl_seconds`` stretch declared in
+# ``workers/edge-proxy/monitored-urls.json``) is live today regardless.
 
 
 @dataclass(frozen=True)

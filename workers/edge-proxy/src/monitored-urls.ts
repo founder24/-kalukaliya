@@ -169,6 +169,16 @@ export function getExternalUrl(url: string): MonitoredExternalUrl {
 /** Synthetic-probe target — see `synthetic-probe.ts`. */
 export const SYNTHETIC_PROBE_PATH = getBackendPath("/api/admin/diagnostics").path;
 
+/**
+ * Task #575 — public health endpoint exposing the current AHSEC/SEBA
+ * exam season classification + TTL multiplier. Read by `season-cache-do.ts`
+ * (and indirectly by `season-cache.ts`) once per 60 s per region to drive
+ * `edge_cache.exam_ttl_seconds` selection in `pickEffectiveTtl()`.
+ * Registered in `monitored-urls.json` so the FastAPI drift test catches
+ * any rename of the corresponding `/api/health/season` route.
+ */
+export const SEASON_HEALTH_PATH = getBackendPath("/api/health/season").path;
+
 /** cf-block-probe target — see `cf-block-probe.ts`. */
 export const CF_BLOCK_PROBE_DEFAULT_URL = getExternalUrl("https://syrabit.ai/").url;
 

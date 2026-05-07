@@ -1,23 +1,25 @@
 /**
- * Task #575 — in-isolate cache of the backend's `/api/health/season`
- * response. The Cloudflare worker stretches per-route cache TTLs
- * during AHSEC + SEBA exam / results windows, but only the FastAPI
- * backend owns the calendar (so the season is consistent across
- * worker, API, and Lambda batch jobs). Polling the backend on every
- * request would defeat the cache it's enabling, so we keep a single
- * snapshot per isolate, refresh it lazily once per `TTL_MS`, and
- * fall back to "normal" on any error.
+ * Task #575 — isolate-level shadow of the season snapshot. The
+ * authoritative cache lives in the `SeasonCacheDO` Durable Object
+ * (`season-cache-do.ts`), which serves exactly one origin refresh
+ * per 60 s per region. This module shaves the per-request DO RPC
+ * by mirroring the snapshot in isolate-local globals, so
+ * `getCacheTtl()` stays a synchronous lookup at every callsite.
  *
- * Two-tier cache:
- *   1. **POP-level**: the upstream `fetch()` is sent with
- *      `cf: { cacheTtl: 60, cacheEverything: true }`, so Cloudflare's
- *      per-POP edge cache absorbs the fan-out — every isolate in the
- *      POP shares a single 60 s origin call. The backend response
- *      already carries `Cache-Control: public, max-age=60` so the
- *      contract is consistent on both sides.
- *   2. **Isolate-level**: `cached` shaves the per-isolate `fetch()`
- *      call (even a CF-cache HIT still costs ~ms) so `getCacheTtl()`
- *      stays a synchronous lookup at every callsite.
+ * Three-tier cache:
+ *   1. **Region-level (DO)**: `SeasonCacheDO` (single ID
+ *      `idFromName("global")`) owns the authoritative snapshot and
+ *      enforces the 60 s shared refresh contract. Refresh fan-out
+ *      to the FastAPI origin is exactly one call per minute per
+ *      region regardless of isolate count.
+ *   2. **POP-level**: the DO's upstream `fetch()` carries
+ *      `cf: { cacheTtl: 60, cacheEverything: true }` as belt-and-
+ *      braces against the rare cross-POP cold-wake stampede. The
+ *      backend response already carries
+ *      `Cache-Control: public, max-age=60` so the contract is
+ *      consistent on both sides.
+ *   3. **Isolate-level**: `cached` shaves the per-isolate DO RPC so
+ *      `getCacheTtl()` stays a synchronous lookup at every callsite.
  *
  * Failure mode: when the backend is unreachable we return the last
  * snapshot we successfully fetched (even if it's older than `TTL_MS`),
@@ -51,7 +53,7 @@ export interface SeasonSnapshot {
 }
 
 const TTL_MS = 60_000;
-const TIMEOUT_MS = 3_000;
+const DO_RPC_TIMEOUT_MS = 1_000;
 
 let cached: SeasonSnapshot | null = null;
 let inflight: Promise<SeasonSnapshot> | null = null;
@@ -66,26 +68,29 @@ function isStretched(season: SeasonName): boolean {
   return season === "exam" || season === "results";
 }
 
-async function fetchSeason(backendUrl: string): Promise<SeasonSnapshot> {
+interface SeasonCacheEnv {
+  /**
+   * Optional so the worker still boots in local dev without the DO
+   * migration applied. When unbound, every request gets the FALLBACK
+   * snapshot ("normal"); season-aware TTL stretching is effectively a
+   * no-op until the binding lands.
+   */
+  SEASON_CACHE_DO?: DurableObjectNamespace;
+}
+
+async function fetchSeasonFromDO(env: SeasonCacheEnv): Promise<SeasonSnapshot> {
+  if (!env.SEASON_CACHE_DO) return FALLBACK;
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => ac.abort(), DO_RPC_TIMEOUT_MS);
   try {
-    const res = await fetch(`${backendUrl}/api/health/season`, {
+    const id = env.SEASON_CACHE_DO.idFromName("global");
+    const stub = env.SEASON_CACHE_DO.get(id);
+    const res = await stub.fetch("https://season-cache/snapshot", {
       method: "GET",
-      headers: { "Accept": "application/json" },
       signal: ac.signal,
-      // Use Cloudflare's per-POP edge cache as the SHARED 60 s cache
-      // tier — every isolate in this POP collapses onto a single
-      // origin request per minute. The backend already serves
-      // `Cache-Control: public, max-age=60`, so the contract matches
-      // on both sides. The isolate-level `cached` global below shaves
-      // the remaining per-isolate fetch overhead.
-      cf: { cacheTtl: 60, cacheEverything: true } as RequestInitCfProperties,
     });
-    if (!res.ok) {
-      throw new Error(`season fetch ${res.status}`);
-    }
-    const body = (await res.json()) as { season?: SeasonName; ttl_multiplier?: number };
+    if (!res.ok) throw new Error(`season DO ${res.status}`);
+    const body = (await res.json()) as Partial<SeasonSnapshot>;
     const season: SeasonName =
       body.season === "exam" || body.season === "results" || body.season === "normal"
         ? body.season
@@ -94,19 +99,28 @@ async function fetchSeason(backendUrl: string): Promise<SeasonSnapshot> {
       typeof body.ttl_multiplier === "number" && Number.isFinite(body.ttl_multiplier)
         ? body.ttl_multiplier
         : 1.0;
-    return { season, ttl_multiplier, fetched_at_ms: Date.now() };
+    return {
+      season,
+      ttl_multiplier,
+      fetched_at_ms:
+        typeof body.fetched_at_ms === "number" ? body.fetched_at_ms : Date.now(),
+    };
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
- * Returns the current season snapshot, refreshing in the background
- * when older than `TTL_MS`. Never throws — fetch failures preserve
- * the previous snapshot or fall back to `"normal"`.
+ * Returns the current season snapshot. Reads through the
+ * `SeasonCacheDO` Durable Object (which owns the 60 s shared
+ * refresh contract); the per-isolate `cached` global shaves the DO
+ * RPC on every subsequent request inside `TTL_MS`. Never throws —
+ * fetch failures preserve the previous snapshot, and a fresh
+ * isolate without a snapshot yet returns `FALLBACK` ("normal")
+ * immediately while refreshing in the background.
  */
 export async function getSeasonSnapshot(
-  backendUrl: string,
+  env: SeasonCacheEnv,
   ctx: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<SeasonSnapshot> {
   const now = Date.now();
@@ -116,7 +130,7 @@ export async function getSeasonSnapshot(
   if (inflight) {
     return cached ?? FALLBACK;
   }
-  inflight = fetchSeason(backendUrl)
+  inflight = fetchSeasonFromDO(env)
     .then((snap) => {
       cached = snap;
       return snap;
@@ -125,15 +139,15 @@ export async function getSeasonSnapshot(
     .finally(() => {
       inflight = null;
     });
-  // Cold-start contract: never block the request path on the
-  // upstream fetch (would add up to TIMEOUT_MS of user-visible
-  // latency). Serve the FALLBACK ("normal") snapshot immediately and
+  // Cold-start contract: never block the request path on the DO
+  // RPC. Serve the FALLBACK ("normal") snapshot immediately and
   // refresh in the background — the next request through this
   // isolate picks up the real value. Warm path is identical: serve
   // the (slightly stale) cached snapshot, refresh via waitUntil.
   ctx.waitUntil(inflight.then(() => undefined).catch(() => undefined));
   return cached ?? FALLBACK;
 }
+
 
 /**
  * Pick the effective TTL for a path given the season snapshot.

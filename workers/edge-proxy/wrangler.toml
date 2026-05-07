@@ -312,9 +312,21 @@ dataset = "syrabit-edge-metrics"
 name       = "RATE_LIMITER_DO"
 class_name = "RateLimiter"
 
+# Task #575 — SeasonCacheDO owns the authoritative `/api/health/season`
+# snapshot for the entire region. A single instance per region
+# (`idFromName("global")`) enforces the 60s shared refresh contract so
+# the FastAPI origin sees one call per minute regardless of isolate count.
+[[durable_objects.bindings]]
+name       = "SEASON_CACHE_DO"
+class_name = "SeasonCacheDO"
+
 [[migrations]]
 tag         = "v1"
 new_classes = ["RateLimiter"]
+
+[[migrations]]
+tag         = "v2"
+new_classes = ["SeasonCacheDO"]
 
 [triggers]
 # Two crons fan out from the same `scheduled` handler in src/index.ts —
