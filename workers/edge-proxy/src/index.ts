@@ -52,6 +52,20 @@ interface Env {
   PAGES_ORIGIN?: string;
   RATE_LIMIT: KVNamespace;
   BOT_HTML_CACHE?: KVNamespace;
+  /**
+   * Task #511 — KV namespace mirroring the artifacts edge worker's
+   * `CF_EDGE_CACHE` binding. The deployed worker doesn't own any
+   * /api/edge/kv-cache routes today, but if/when it does we want the
+   * per-isolate counter under-reporting fix from Task #454 to be
+   * already wired (shared-key flush + list+sum aggregation in
+   * kv-monitor.ts). Wrapping the binding through `wrapKvNamespace`
+   * causes every read/write/list/delete to be counted, periodically
+   * flushed to `__kv_usage:CF_EDGE_CACHE:<day>:<isolate-id>`, and
+   * summed across isolates by `getUsageSnapshotAggregated` on the
+   * /api/edge/kv-usage probe. Optional so the worker still boots
+   * without the binding declared in wrangler.toml.
+   */
+  CF_EDGE_CACHE?: KVNamespace;
   CONTENT_DB: D1Database;
   D1_SYNC_SECRET: string;
   /** Secret shared with the FastAPI backend for /admin/kv-alerts. */
@@ -245,7 +259,7 @@ interface Env {
   MTLS_REQUIRED?: string;
 }
 
-const KV_BINDINGS = ["RATE_LIMIT", "BOT_HTML_CACHE"] as const;
+const KV_BINDINGS = ["RATE_LIMIT", "BOT_HTML_CACHE", "CF_EDGE_CACHE"] as const;
 
 function buildKvMonitorOpts(env: Env, ctx: ExecutionContext): WrapKvOptions {
   let quota: Partial<KvUsageQuota> | undefined;
@@ -278,6 +292,11 @@ function wrapEnvKv(env: Env, ctx: ExecutionContext): Env {
   if (env.BOT_HTML_CACHE) {
     wrapped.BOT_HTML_CACHE = wrapKvNamespace(env.BOT_HTML_CACHE, "BOT_HTML_CACHE", opts);
   }
+  // Task #511 — wrap CF_EDGE_CACHE through the same monitor so its
+  // counters get the cross-isolate aggregation treatment from Task #454.
+  if (env.CF_EDGE_CACHE) {
+    wrapped.CF_EDGE_CACHE = wrapKvNamespace(env.CF_EDGE_CACHE, "CF_EDGE_CACHE", opts);
+  }
   return wrapped;
 }
 
@@ -307,6 +326,9 @@ async function handleKvUsage(env: Env, request: Request, cors: Record<string, st
   // overhead for the snapshot endpoint).
   if (env.RATE_LIMIT) bindingArgs.push({ binding: "RATE_LIMIT", kv: env.RATE_LIMIT });
   if (env.BOT_HTML_CACHE) bindingArgs.push({ binding: "BOT_HTML_CACHE", kv: env.BOT_HTML_CACHE });
+  // Task #511 — include CF_EDGE_CACHE so its counters get the same
+  // cross-isolate flush+list+sum treatment as the other bindings.
+  if (env.CF_EDGE_CACHE) bindingArgs.push({ binding: "CF_EDGE_CACHE", kv: env.CF_EDGE_CACHE });
   let snapshot;
   try {
     snapshot = await getUsageSnapshotAggregated(bindingArgs, opts);
