@@ -449,9 +449,18 @@ MONTHLY_USD_KEY_PREFIX = "rule_d:usd"  # rule_d:usd:YYYY-MM
 
 @dataclass
 class MeterDConfig:
-    """Configuration for Rule D (global monthly USD cap)."""
-    cap_usd: float = 500.0
+    """Configuration for Rule D (global monthly USD cap).
+
+    Default cap is $100/month per Task #549 (perpetual hold at 10k DAU).
+    The three-stage degradation ladder runs at 60 / 80 / 95 % of the cap
+    (see `cost_caps.DEGRADATION_PCT_*`); the 100 % LOCK at this class
+    sets `chat:cheaponly=1` and is the final shed.
+    """
+    cap_usd: float = 100.0
     warning_pct: float = 0.80
+    pause_batch_pct: float = 0.60
+    voice_off_pct: float = 0.80
+    free_503_pct: float = 0.95
     # Storage TTL: ~32 days so the next-month key is born fresh and the
     # current-month key survives a same-day cold-start without losing
     # the running total.

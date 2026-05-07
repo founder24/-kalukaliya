@@ -95,45 +95,49 @@ def _assert_equal_weights(feature: str, expected_active: set[str]):
     )
 
 
-def test_english_rag_chat_azure_primary_workers_fallback():
-    """english_rag_chat — strict primary/fallback (2026-05-05 user instruction).
-    Azure OpenAI is the SOLE primary (weight 10000); Workers AI variants sit
-    at weight 0 as pure fallbacks that call_with_provider_fallback only
-    reaches through its exclusion-redraw loop after Azure exhausts. Vertex
-    must NOT be present in this pool — it was removed entirely from chat."""
+def test_english_rag_chat_workers_primary_paid_fallback():
+    """english_rag_chat — Task #549 perpetual $100/mo budget.
+    Workers-AI Llama-3.2-3B is the SOLE primary (weight 10000) so the
+    free Cloudflare tier carries the chat hot path. Workers-AI Mistral-7B,
+    the generic workers_ai gpt-oss-20b leg, plus Vertex Gemini 2.5 Flash
+    and Azure OpenAI all sit at weight 0 as exclusion-redraw fallbacks.
+    PROVIDER_PRIORITY must START with workers_ai_llama32_3b (or vertex
+    when CHAT_PRIMARY_OVERRIDE=vertex flips the runway-aware selector)."""
     from llm import select_provider
     from collections import Counter
 
     weights = POOL_WEIGHTS["english_rag_chat"]
-    assert weights.get("azure_openai") == 10000, (
-        f"english_rag_chat: azure_openai must carry weight 10000 (sole primary), "
-        f"got {weights.get('azure_openai')!r}"
+    assert weights.get("workers_ai_llama32_3b") == 10000, (
+        f"english_rag_chat: workers_ai_llama32_3b must carry weight 10000 "
+        f"(sole primary, Task #549), got {weights.get('workers_ai_llama32_3b')!r}"
     )
-    assert "vertex" not in weights, (
-        "english_rag_chat: vertex must NOT be in the chat pool (2026-05-05 — "
-        "Vertex removed from both chat chains entirely)"
+    # Acceptance criterion #549 — chain must start with vertex_gemini_flash
+    # OR workers_ai (workers_ai_llama32_3b is a workers_ai variant).
+    head = PROVIDER_PRIORITY["english_rag_chat"][0]
+    assert head in {"workers_ai_llama32_3b", "workers_ai_mistral_7b",
+                    "workers_ai", "vertex"}, (
+        f"english_rag_chat priority list must start with a workers_ai "
+        f"variant or vertex (Task #549); got {head!r}"
     )
-    # Workers AI fallbacks must be present (in pool) so the dispatcher can
-    # reach them via exclusion-redraw, but they MUST be weight 0 — non-zero
-    # would steal traffic from the Azure primary.
-    for fallback in ("workers_ai_llama32_3b", "workers_ai_mistral_7b", "workers_ai"):
+    # Every other provider in the pool must be weight-0 fallback.
+    for fallback in ("workers_ai_mistral_7b", "workers_ai", "vertex", "azure_openai"):
         assert fallback in weights, (
-            f"english_rag_chat: {fallback} must be in the pool (as a fallback "
-            f"reachable via call_with_provider_fallback exclusion-redraw)"
+            f"english_rag_chat: {fallback} must be in the pool as a fallback"
         )
         assert weights[fallback] == 0, (
             f"english_rag_chat: {fallback} must be weight 0 (pure fallback — "
-            f"non-zero would steal traffic from the Azure primary), got {weights[fallback]}"
+            f"non-zero would steal traffic from the Workers-AI primary), "
+            f"got {weights[fallback]}"
         )
 
-    # Healthy-path draw: 200 selections must all return azure_openai because
-    # it is the sole non-zero-weight entry in the pool.
+    # Healthy-path draw: 200 selections must all return the workers_ai
+    # primary because it is the sole non-zero-weight entry in the pool.
     counts = Counter(select_provider("english_rag_chat", lang="en") for _ in range(200))
-    assert counts.get("azure_openai", 0) == 200, (
-        f"english_rag_chat: healthy-path draw must route 100% to azure_openai; "
-        f"counts={dict(counts)}"
+    assert counts.get("workers_ai_llama32_3b", 0) == 200, (
+        f"english_rag_chat: healthy-path draw must route 100% to "
+        f"workers_ai_llama32_3b; counts={dict(counts)}"
     )
-    print("  PASS: english_rag_chat azure_openai-primary, workers_ai-fallback (vertex removed)")
+    print("  PASS: english_rag_chat workers_ai-primary, vertex/azure-fallback (Task #549)")
 
 
 def test_content_workers_ai_primary():
@@ -326,10 +330,11 @@ def test_priority_lists_contain_every_active_member():
     loop) defines the failover order for chat pools that have a single
     primary at non-zero weight."""
     expectations = {
-        # english_rag_chat (2026-05-05): vertex REMOVED. The chain is
-        # azure_openai (primary) → workers_ai variants (fallbacks).
-        "english_rag_chat":  {"azure_openai",
-                              "workers_ai_llama32_3b", "workers_ai_mistral_7b"},
+        # english_rag_chat (Task #549): workers_ai_llama32_3b primary;
+        # workers_ai_mistral_7b, generic workers_ai, vertex, azure_openai
+        # all reachable as exclusion-redraw fallbacks.
+        "english_rag_chat":  {"workers_ai_llama32_3b",
+                              "workers_ai_mistral_7b"},
         # Task #490: vertex REMOVED from `content`; it now lives only
         # in the `content_format` pool.
         "content":           {"workers_ai_mistral_7b", "workers_ai_llama32_3b"},
@@ -353,16 +358,19 @@ def test_priority_lists_contain_every_active_member():
         f"assamese_rag_chat must contain exactly sarvam/workers_ai_indic; "
         f"got {PROVIDER_PRIORITY['assamese_rag_chat']}"
     )
-    # english_rag_chat: vertex must NOT be in the chain.
-    assert "vertex" not in PROVIDER_PRIORITY["english_rag_chat"], (
-        f"english_rag_chat must NOT contain vertex (2026-05-05 — Vertex "
-        f"removed from chat); got {PROVIDER_PRIORITY['english_rag_chat']}"
+    # english_rag_chat: must START with vertex_gemini_flash or workers_ai
+    # variant (Task #549 acceptance criterion).
+    head = PROVIDER_PRIORITY["english_rag_chat"][0]
+    assert head in {"workers_ai_llama32_3b", "workers_ai_mistral_7b",
+                    "workers_ai", "vertex"}, (
+        f"english_rag_chat must start with workers_ai variant or vertex "
+        f"(Task #549); got head={head!r}"
     )
     print("  PASS: PROVIDER_PRIORITY membership matches chat primary/fallback contract")
 
 
 if __name__ == "__main__":
-    test_english_rag_chat_azure_primary_workers_fallback()
+    test_english_rag_chat_workers_primary_paid_fallback()
     test_content_workers_ai_primary()
     test_assamese_rag_chat_sarvam_primary_indic_fallback()
     test_translate_workers_ai_indic_only()

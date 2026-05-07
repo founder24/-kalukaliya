@@ -1180,9 +1180,21 @@ PROVIDER_PRIORITY: dict = {
     # `assamese_rag_chat`. Bedrock + OpenAI/xAI removed in Task #347.
     # Task #491 — legacy SLM provider fully retired; no longer reachable
     # via BYOK either.
+    # Task #549 — perpetual $100/mo budget. The english_rag_chat chain
+    # now starts with Workers-AI Llama-3.2-3B (Cloudflare free tier),
+    # backed by Workers-AI Mistral-7B and the generic workers_ai
+    # gpt-oss-20b leg. Vertex Gemini 2.5 Flash and Azure OpenAI are
+    # kept on the tail purely as exclusion-redraw fallbacks reachable
+    # from `call_with_provider_fallback` after the Workers-AI legs
+    # exhaust. `cost_caps._select_chat_primary()` lets ops flip the
+    # head to vertex via `CHAT_PRIMARY_OVERRIDE=vertex` to drain the
+    # GCP startup balance without a code edit.
     "english_rag_chat":  [
+        "workers_ai_llama32_3b",
+        "workers_ai_mistral_7b",
+        "workers_ai",
+        "vertex",
         "azure_openai",
-        "workers_ai_mistral_7b", "workers_ai_llama32_3b", "workers_ai",
     ],
     # Assamese chat (2026-05-05 user instruction — strict primary/fallback):
     # Sarvam is the SOLE primary; Workers AI IndicTrans2 (en-indic neural
@@ -1345,17 +1357,21 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_llama33_70b":   100,
     },
     "english_rag_chat": {
-        # Strict primary/fallback (2026-05-05 user instruction): Azure
-        # OpenAI is the SOLE primary at weight 10000, Workers AI tail
-        # variants sit at weight 0 as pure fallbacks reachable only
-        # through call_with_provider_fallback's exclusion-redraw loop
-        # after Azure exhausts/throttles. Vertex REMOVED from the chat
-        # pool entirely — it stays reserved for content polish + other
-        # non-chat features.
-        "azure_openai":           10000,
-        "workers_ai_llama32_3b":      0,  # fallback (azure-exhausted only)
-        "workers_ai_mistral_7b":      0,  # fallback (azure-exhausted only)
-        "workers_ai":                 0,  # deepest fallback — gpt-oss-20b
+        # Task #549 — perpetual $100/mo budget. Workers-AI Llama-3.2-3B
+        # is the SOLE primary at weight 10000; Workers-AI Mistral-7B,
+        # the generic workers_ai gpt-oss-20b leg, Vertex Gemini 2.5
+        # Flash, and Azure OpenAI all sit at weight 0 as pure
+        # fallbacks reachable only through
+        # call_with_provider_fallback's exclusion-redraw loop after
+        # the primary exhausts/throttles. The previous "Azure SOLE
+        # primary" contract was rolled back when the perpetual
+        # $100/month cap landed — Cloudflare free-tier inference is
+        # the only chain that makes 10k DAU at this budget feasible.
+        "workers_ai_llama32_3b":  10000,
+        "workers_ai_mistral_7b":      0,  # fallback (primary-exhausted only)
+        "workers_ai":                 0,  # deepest workers fallback — gpt-oss-20b
+        "vertex":                     0,  # paid fallback (drains GCP credits)
+        "azure_openai":               0,  # paid fallback (drains Azure credits)
     },
     "assamese_rag_chat": {
         # Strict primary/fallback (2026-05-05 user instruction): Sarvam

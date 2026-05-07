@@ -223,7 +223,7 @@ The four-cloud lock holds steady (no new providers; no budget shifts inside the 
 
 ### E3. Rule D — global monthly USD cap
 
-- **Meter D** (`credit_burn_meter.MeterD`) tracks calendar-month USD spend. Notify at 80 % of `MONTHLY_TOTAL_USD_CAP` (env, default `$500`); LOCK at 100 % by setting `chat:cheaponly=1` in Redis. `_select_chat_model` reads the flag on every dispatch and clamps to Workers-AI Mistral-7B until `chat:cheaponly:pin` is cleared at 00:00 UTC on the 1st of the next month. Alert sink reuses the Meter A/B/C pager wiring (no auto-flip without an alert).
+- **Meter D** (`credit_burn_meter.MeterD`) tracks calendar-month USD spend. Notify at 80 % of `MONTHLY_TOTAL_USD_CAP` (env, default `$100` per Task #549 — perpetual $100/mo at 10k DAU); LOCK at 100 % by setting `chat:cheaponly=1` in Redis. `_select_chat_model` reads the flag on every dispatch and clamps to Workers-AI Mistral-7B until `chat:cheaponly:pin` is cleared at 00:00 UTC on the 1st of the next month. Alert sink reuses the Meter A/B/C pager wiring (no auto-flip without an alert). The three-stage degradation ladder (`cost_caps.DEGRADATION_PCT_*`) sheds non-essential async batch at 60 %, disables voice for free users + doubles cache TTLs at 80 %, and 503s free-user chat + disables new free signups at 95 %.
 
 ### E4. Optimizations (K-series)
 

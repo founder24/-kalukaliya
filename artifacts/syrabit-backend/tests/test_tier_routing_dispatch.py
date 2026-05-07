@@ -148,5 +148,8 @@ def test_turn_count_third_message_flips_to_primary():
         f"turn 3 must flip to primary, got tier={d['tier']!r} "
         f"provider={d['provider']!r}"
     )
-    assert d["provider"] == "azure_openai"
-    assert d["model"] == "gpt-4.1-nano"
+    # Task #549 — perpetual $100/mo budget. Default primary is the
+    # Workers-AI Llama-3.2-3B free-tier slot; ops can flip to vertex
+    # via CHAT_PRIMARY_OVERRIDE=vertex.
+    assert d["provider"] == "workers_ai_llama32_3b"
+    assert d["model"] == "@cf/meta/llama-3.2-3b-instruct"

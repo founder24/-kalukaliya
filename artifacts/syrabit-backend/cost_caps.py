@@ -49,8 +49,26 @@ CONSERVATIVE_OUTPUT_TOKENS = 600      # output cap once free user crosses 15 tur
 
 # ── Rule D — global monthly USD cap (Section J) ────────────────────────────
 # Read at call time via _monthly_total_usd_cap() so ops can flex with
-# a single env-var change. Default = $500 per task spec.
-_DEFAULT_MONTHLY_TOTAL_USD_CAP = 500.0
+# a single env-var change. Default = $100 per Task #549 spec
+# (perpetual $100/month at 10k DAU). Raising this default requires the
+# same "# COST-CAP-OVERRIDE: <reason>" + Sentry-annotated changelog
+# discipline as the TOKEN_BUDGETS table, enforced by the CI guard
+# `scripts/check_budget_ceiling.py`.
+_DEFAULT_MONTHLY_TOTAL_USD_CAP = 100.0
+
+# Three-stage degradation ladder (Task #549). Operators / dispatchers
+# read these to decide what to shed at each spend percentage of the
+# monthly cap:
+#   60 % → pause non-essential async batch (deferred-embed, backfills).
+#   80 % → disable voice routes for free users + double cache TTLs.
+#   95 % → free-user chat returns 503 + new free signups disabled.
+# These are pure constants; the runtime evaluator lives in
+# `credit_burn_meter.MeterD` (which already locks chat:cheaponly at
+# 100 %) — anything stricter than that ladder is gated by reading
+# `monthly_spend_fraction()` against these thresholds.
+DEGRADATION_PCT_PAUSE_BATCH = 0.60
+DEGRADATION_PCT_VOICE_OFF   = 0.80
+DEGRADATION_PCT_FREE_503    = 0.95
 
 
 def _monthly_total_usd_cap() -> float:
@@ -61,6 +79,38 @@ def _monthly_total_usd_cap() -> float:
         return max(0.0, float(raw))
     except ValueError:
         return _DEFAULT_MONTHLY_TOTAL_USD_CAP
+
+
+def _select_chat_primary() -> str:
+    """Credit-runway-aware primary selector for english_rag_chat (Task #549).
+
+    Returns the provider name that should sit at the head of the
+    English chat dispatch chain. Today the only functional return
+    value is `workers_ai_llama32_3b` (Cloudflare free tier — the
+    cheapest option that still produces production-grade English
+    answers).
+
+    The `CHAT_PRIMARY_OVERRIDE` env var is reserved for the future
+    runway-aware flip to Vertex Gemini 2.5 Flash, but vertex chat
+    dispatch was removed from `llm.py` in Task #490 — re-enabling it
+    is sub-task #555/#556. Until then this helper logs and ignores
+    any non-workers override so we never silently route through a
+    fallback (V4 §12 "no silent fallbacks"). The dispatcher reads
+    this on every turn so a runway-tracker cron can flip the env var
+    without a redeploy once the underlying dispatch path is restored.
+    """
+    override = (os.environ.get("CHAT_PRIMARY_OVERRIDE", "") or "").strip().lower()
+    if override and override not in {"workers_ai_llama32_3b", "workers_ai"}:
+        try:
+            import logging
+            logging.getLogger("cost_caps").warning(
+                "CHAT_PRIMARY_OVERRIDE=%r is unsupported (vertex / azure chat "
+                "dispatch was removed in Task #490 — re-enabling it is sub-task "
+                "#555/#556). Falling back to workers_ai_llama32_3b.", override,
+            )
+        except Exception:
+            pass
+    return "workers_ai_llama32_3b"
 
 
 # ── Per-call-type token budgets (Section B) ────────────────────────────────
@@ -257,6 +307,12 @@ def _select_chat_model(
     plan = (user_plan or "free").strip().lower()
     lang_lc = (lang or "en").strip().lower()
 
+    # Task #549 — credit-runway-aware primary. Currently always returns
+    # `workers_ai_llama32_3b`; the override hook is reserved for the
+    # vertex re-enable work tracked in sub-task #555/#556.
+    primary_provider = _select_chat_primary()
+    primary_model = "@cf/meta/llama-3.2-3b-instruct"
+
     # Rule D LOCKED — global monthly USD cap reached. Force the
     # cheap-tier (Workers-AI Mistral-7B) for English chat regardless of
     # plan / turn count. Assamese still uses Sarvam (the bypass below
@@ -282,12 +338,12 @@ def _select_chat_model(
             "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
         }
 
-    # Paid users — premium model, full budget.
+    # Paid users — runway-aware primary, full budget.
     if plan and plan != "free":
         return {
             "tier": "paid",
-            "provider": "azure_openai",
-            "model": "gpt-4.1-nano",
+            "provider": primary_provider,
+            "model": primary_model,
             "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
         }
 
@@ -303,14 +359,14 @@ def _select_chat_model(
     if turn > 15:
         return {
             "tier": "conservative",
-            "provider": "azure_openai",
-            "model": "gpt-4.1-nano",
+            "provider": primary_provider,
+            "model": primary_model,
             "max_output_tokens": CONSERVATIVE_OUTPUT_TOKENS,
         }
     return {
         "tier": "primary",
-        "provider": "azure_openai",
-        "model": "gpt-4.1-nano",
+        "provider": primary_provider,
+        "model": primary_model,
         "max_output_tokens": TOKEN_BUDGETS["chat_turn"]["max_output_tokens"],
     }
 
@@ -319,8 +375,12 @@ __all__ = [
     "TOKEN_BUDGETS",
     "SESSION_CHEAP_TURN_LIMIT",
     "CONSERVATIVE_OUTPUT_TOKENS",
+    "DEGRADATION_PCT_PAUSE_BATCH",
+    "DEGRADATION_PCT_VOICE_OFF",
+    "DEGRADATION_PCT_FREE_503",
     "clamp_messages",
     "max_output_tokens_for",
     "_select_chat_model",
+    "_select_chat_primary",
     "_monthly_total_usd_cap",
 ]

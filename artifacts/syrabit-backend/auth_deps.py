@@ -243,6 +243,26 @@ async def get_current_user_optional(
     except:
         return None
 
+async def require_paid_plan(user: dict = Depends(get_current_user)) -> dict:
+    """Task #549 — gate paid-only routes (currently /api/voice/*).
+
+    Free-plan users hit a hard 402 PAYMENT REQUIRED. Voice synthesis +
+    transcription dominate the per-DAU cost envelope ($100/mo budget at
+    10k DAU only works when ElevenLabs / Deepgram / AssemblyAI minutes
+    are reserved for paying users). Admins and staff bypass this gate
+    so internal CMS / QA flows keep working.
+    """
+    if (user or {}).get("is_admin") or (user or {}).get("role") in {"admin", "staff", "educator"}:
+        return user
+    plan = (user or {}).get("plan", "free")
+    if not plan or str(plan).strip().lower() == "free":
+        raise HTTPException(
+            status_code=402,
+            detail="Voice features require a paid plan. Upgrade to Starter or Pro.",
+        )
+    return user
+
+
 async def get_educator_user(user=Depends(get_current_user)):
     """Require the caller to be an educator (or an admin).
 
