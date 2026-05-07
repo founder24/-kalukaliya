@@ -193,35 +193,63 @@ async def kv_alert_ingest(
     severity = str(payload.get("severity") or "warning")
     utc_day = str(payload.get("utc_day") or datetime.now(timezone.utc).date().isoformat())
 
-    title = f"KV {severity}: {binding}.{op} at {pct:.0f}%"
-    msg = (
-        f"Cloudflare Workers KV binding `{binding}` has used {used:,} of "
-        f"{quota:,} {op} ops today (UTC {utc_day}) — {pct:.1f}% of the daily "
-        f"quota. The edge worker has switched to the Cache API + in-memory "
-        f"fallback so pages keep rendering, but writes will be deferred "
-        f"until the quota resets at 00:00 UTC."
-    )
+    # Task #544 — `isolate_skew` is a third severity emitted by the edge
+    # worker when ONE isolate is responsible for most of the day's burn
+    # for a binding (default ≥60%). The payload carries `isolate_id` +
+    # `isolate_count` so the admin notification points the operator at
+    # the right shard. `used`/`quota` here are this-isolate-vs-all-isolates
+    # totals (NOT against the daily KV quota), so the message is shaped
+    # differently to avoid falsely implying the binding is exhausted.
+    if severity == "isolate_skew":
+        isolate_id = str(payload.get("isolate_id") or "?")
+        isolate_count = int(payload.get("isolate_count") or 0)
+        title = (
+            f"KV isolate_skew: {binding} — isolate {isolate_id} at {pct:.0f}%"
+        )
+        msg = (
+            f"Cloudflare Workers KV binding `{binding}`: a single edge isolate "
+            f"(`{isolate_id}`) is responsible for {pct:.1f}% of today's flushed "
+            f"ops ({used:,} of {quota:,} across {isolate_count} isolates, UTC "
+            f"{utc_day}). This usually means traffic is pinned to one PoP / "
+            f"isolate — investigate before the binding's daily quota trips."
+        )
+        notif_type = "warning"
+    else:
+        title = f"KV {severity}: {binding}.{op} at {pct:.0f}%"
+        msg = (
+            f"Cloudflare Workers KV binding `{binding}` has used {used:,} of "
+            f"{quota:,} {op} ops today (UTC {utc_day}) — {pct:.1f}% of the daily "
+            f"quota. The edge worker has switched to the Cache API + in-memory "
+            f"fallback so pages keep rendering, but writes will be deferred "
+            f"until the quota resets at 00:00 UTC."
+        )
+        notif_type = "warning" if severity != "exhausted" else "error"
+
+    meta = {
+        "kind": "kv_quota_alert",
+        "binding": binding,
+        "op": op,
+        "used": used,
+        "quota": quota,
+        "percentage": pct,
+        "severity": severity,
+        "utc_day": utc_day,
+    }
+    if severity == "isolate_skew":
+        meta["isolate_id"] = str(payload.get("isolate_id") or "")
+        meta["isolate_count"] = int(payload.get("isolate_count") or 0)
 
     notif = {
         "id": str(uuid.uuid4()),
         "title": title,
         "message": msg,
-        "type": "warning" if severity != "exhausted" else "error",
+        "type": notif_type,
         "channel": "in_app",
         "audience": "admins",
         "status": "sent",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sent_at": datetime.now(timezone.utc).isoformat(),
-        "meta": {
-            "kind": "kv_quota_alert",
-            "binding": binding,
-            "op": op,
-            "used": used,
-            "quota": quota,
-            "percentage": pct,
-            "severity": severity,
-            "utc_day": utc_day,
-        },
+        "meta": meta,
     }
     try:
         await supa_insert_notification(notif)

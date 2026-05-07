@@ -60,6 +60,12 @@ export interface Env {
   // Task #424 — warning threshold (percent of quota) at which the
   // worker fires the first alert for a binding/op pair. Defaults to 80.
   KV_WARNING_PCT?: string;
+  // Task #544 — when this isolate's share of today's flushed counters
+  // for a binding crosses this percent of the cross-isolate total, the
+  // worker fires a `severity: "isolate_skew"` alert (dedupe-once-per-day).
+  // Helps catch a "one isolate is doing 80% of the work" pattern early
+  // before the aggregate quota alert would trip. Defaults to 60.
+  KV_ISOLATE_SKEW_PCT?: string;
 }
 
 // Re-export DO classes so wrangler can find them at the worker entrypoint.
@@ -237,6 +243,7 @@ function _maybeFlushSharedKvCounter(
   binding: string,
   kv: KVNamespace | undefined,
   ctx: ExecutionContext,
+  env?: Env,
 ): void {
   if (!kv) return;
   const n = (_kvOpsSinceFlush.get(binding) ?? 0) + 1;
@@ -245,7 +252,15 @@ function _maybeFlushSharedKvCounter(
     return;
   }
   _kvOpsSinceFlush.set(binding, 0);
-  ctx.waitUntil(_flushSharedKvCounter(binding, kv));
+  // Task #544 — chain the per-isolate skew check after the flush so the
+  // listing pass sees this isolate's freshest counters. Skipped when no
+  // env is forwarded (only the bumpKvCounter call site has one today).
+  ctx.waitUntil(
+    _flushSharedKvCounter(binding, kv).then(() => {
+      if (env) return _maybeFireKvIsolateSkewAlert(binding, kv, env, ctx);
+      return undefined;
+    }),
+  );
 }
 
 function utcDayKey(d: Date = new Date()): string {
@@ -290,6 +305,16 @@ function _resolveKvWarningPct(env: Env): number {
   const raw = Number(env.KV_WARNING_PCT ?? '');
   if (Number.isFinite(raw) && raw > 0 && raw <= 100) return raw;
   return DEFAULT_WARNING_PCT;
+}
+
+// Task #544 — default isolate-skew threshold. The per-isolate breakdown
+// (Task #510) makes this visible in the admin panel; the alert here
+// pages on-call before someone has to open it.
+const DEFAULT_ISOLATE_SKEW_PCT = 60;
+function _resolveKvIsolateSkewPct(env: Env): number {
+  const raw = Number(env.KV_ISOLATE_SKEW_PCT ?? '');
+  if (Number.isFinite(raw) && raw > 0 && raw <= 100) return raw;
+  return DEFAULT_ISOLATE_SKEW_PCT;
 }
 
 interface KvIsolateBreakdownEntry {
@@ -547,6 +572,100 @@ async function _maybeFireKvAlert(
   ctx.waitUntil(fire);
 }
 
+/**
+ * Task #544 — list every isolate's flushed counters under today's
+ * shared prefix and fire a `severity: "isolate_skew"` alert when THIS
+ * isolate is responsible for ≥ KV_ISOLATE_SKEW_PCT of the total. Same
+ * dedupe-once-per-day discipline as the warning/exhausted alerts.
+ *
+ * Best-effort: a listing failure, an empty store, a single-isolate day,
+ * or zero traffic all silently no-op. The flush in
+ * `_maybeFlushSharedKvCounter` already ran by the time we're called so
+ * this isolate's contribution is part of the listed set.
+ */
+async function _maybeFireKvIsolateSkewAlert(
+  binding: string,
+  kv: KVNamespace,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<void> {
+  const skewPct = _resolveKvIsolateSkewPct(env);
+  if (!(skewPct > 0) || skewPct > 100) return;
+  const s = _kvBindingState(binding);
+  // One isolate_skew page per binding per UTC day — same cadence as
+  // warning/exhausted, so noisy isolates don't spam admin email.
+  const dedupeKey = 'isolate_skew:any';
+  if (s.alertedToday.has(dedupeKey)) return;
+  // Validate config BEFORE marking the dedupe key (mirrors
+  // _maybeFireKvAlert) so a temporary misconfig doesn't permanently
+  // suppress the page for the rest of the day.
+  const backendUrl = _backendUrlForAlert(env);
+  const alertSecret = (env.KV_ALERT_SECRET ?? '').trim();
+  if (!backendUrl || !alertSecret) return;
+
+  const prefix = `${SHARED_KV_USAGE_PREFIX}${binding}:${_kvCurrentDay}:`;
+  let listResult;
+  try {
+    listResult = await kv.list({ prefix });
+  } catch {
+    return;
+  }
+  const keys = (listResult as { keys: { name: string }[] }).keys || [];
+  // Need at least 2 isolates for "skew" to be a meaningful concept —
+  // a one-isolate cohort is 100% by definition and is a noisy alert.
+  if (keys.length < 2) return;
+  const ops: KvOpName[] = ['read', 'write', 'list', 'delete'];
+  const myKey = _sharedCounterKey(binding);
+  let myTotal = 0;
+  let grandTotal = 0;
+  for (const k of keys) {
+    try {
+      const tail = k.name.slice(SHARED_KV_USAGE_PREFIX.length + binding.length + 1);
+      const sepIdx = tail.indexOf(':');
+      if (sepIdx < 0) continue;
+      const keyDay = tail.slice(0, sepIdx);
+      if (keyDay !== _kvCurrentDay) continue;
+      const raw = await kv.get(k.name);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<Record<KvOpName, number>>;
+      let entryTotal = 0;
+      for (const op of ops) entryTotal += parsed[op] ?? 0;
+      grandTotal += entryTotal;
+      if (k.name === myKey) myTotal = entryTotal;
+    } catch {
+      /* skip malformed entry */
+    }
+  }
+  if (grandTotal <= 0 || myTotal <= 0) return;
+  const sharePct = (myTotal / grandTotal) * 100;
+  if (sharePct < skewPct) return;
+  s.alertedToday.add(dedupeKey);
+  const body = JSON.stringify({
+    binding,
+    op: 'all',
+    used: myTotal,
+    quota: grandTotal,
+    percentage: Math.round(sharePct * 10) / 10,
+    utc_day: _kvCurrentDay,
+    severity: 'isolate_skew',
+    isolate_id: _shortIsolateId(_kvIsolateId()),
+    isolate_count: keys.length,
+  });
+  const fire = fetch(`${backendUrl}/admin/kv-alerts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-KV-Alert-Secret': alertSecret,
+    },
+    body,
+  })
+    .then(() => undefined)
+    .catch((err) => {
+      console.warn('[edge-proxy] kv-isolate-skew dispatch failed', { binding, err });
+    });
+  ctx.waitUntil(fire);
+}
+
 function _bumpKvCounter(
   binding: string,
   op: KvOpName,
@@ -562,8 +681,10 @@ function _bumpKvCounter(
   // Task #454 — periodically mirror our local counters to the shared
   // `__kv_usage:*` key so the snapshot endpoint can sum across every
   // isolate that has handled CF_EDGE_CACHE traffic.
+  // Task #544 — `env` is forwarded so the flush path can also fire the
+  // per-isolate skew alert once it has fresh shared-counter data.
   if (binding === 'CF_EDGE_CACHE') {
-    _maybeFlushSharedKvCounter(binding, env.CF_EDGE_CACHE, ctx);
+    _maybeFlushSharedKvCounter(binding, env.CF_EDGE_CACHE, ctx, env);
   }
 }
 

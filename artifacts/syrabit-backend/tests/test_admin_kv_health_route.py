@@ -455,3 +455,56 @@ def test_kv_alert_marks_exhausted_severity_as_error_type():
     assert res.status_code == 200
     assert persisted[0]["type"] == "error"
     assert persisted[0]["meta"]["severity"] == "exhausted"
+
+
+def test_kv_alert_records_isolate_skew_severity():
+    """Task #544 — when the edge worker reports that one isolate is
+    responsible for most of today's flushed counters, the route must
+    persist an admin notification with the new ``isolate_skew`` severity
+    and surface the offending isolate id + cohort size in ``meta`` so
+    operators can drill into the right shard."""
+    client = _alert_app()
+    persisted = []
+
+    async def _fake_insert(notif):
+        persisted.append(notif)
+
+    payload = {
+        "binding": "CF_EDGE_CACHE",
+        "op": "all",
+        "used": 7200,
+        "quota": 10000,
+        "percentage": 72.0,
+        "severity": "isolate_skew",
+        "utc_day": "2026-05-07",
+        "isolate_id": "ab12cd34",
+        "isolate_count": 4,
+    }
+    with patch.dict(os.environ, {"KV_ALERT_SECRET": "shh"}, clear=False):
+        with patch("routes.admin_kv_health.supa_insert_notification",
+                   AsyncMock(side_effect=_fake_insert)):
+            with patch("routes.admin_kv_health._email_admins_about_kv_alert",
+                       AsyncMock(return_value=None)):
+                res = client.post(
+                    "/admin/kv-alerts",
+                    json=payload,
+                    headers={"X-KV-Alert-Secret": "shh"},
+                )
+
+    assert res.status_code == 200
+    assert len(persisted) == 1
+    n = persisted[0]
+    # Surfaces as a warning (not an error) because nothing is actually
+    # exhausted yet — this is an EARLY page before the aggregate quota
+    # alert would trip.
+    assert n["type"] == "warning"
+    assert n["title"].startswith("KV isolate_skew: CF_EDGE_CACHE")
+    assert "ab12cd34" in n["title"]
+    assert "72" in n["title"]
+    assert n["meta"]["severity"] == "isolate_skew"
+    assert n["meta"]["isolate_id"] == "ab12cd34"
+    assert n["meta"]["isolate_count"] == 4
+    # Message must NOT pretend the binding is exhausted — the percentage
+    # here is share-of-isolate-total, not share-of-daily-quota.
+    assert "exhaust" not in n["message"].lower()
+    assert "isolate" in n["message"].lower()
