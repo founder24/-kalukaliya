@@ -32,7 +32,10 @@ Currently enforced canonical rows:
     `[sarvam, workers_ai_indic]` (Sarvam primary, IndicTrans2 last
     resort). Vertex / Azure-OpenAI may not appear in the chain.
   - **Voice paywall** = `routes/voice.py` `/tts`, `/stt`, `/voice/voice`
-    must all sit behind `Depends(require_paid_plan)`. (This duplicates
+    must all sit behind `Depends(require_paid_plan)` OR
+    `Depends(require_paid_plan_or_voice_preview)` (Task #581 §L9 split
+    1/UTC-day STT+TTS free preview; admin/staff/educator bypass).
+    (This duplicates
     `scripts/check_budget_ceiling.py` deliberately so a guard skip
     here cannot smuggle the paywall removal past the umbrella.)
   - **Azure-OpenAI ban** (Task #554) = `azure_openai|AzureOpenAI|
@@ -372,7 +375,10 @@ def _check_chat_primary_selector() -> list[str]:
 
 def _check_voice_paywall() -> list[str]:
     """Task #549 + #559 — `/tts`, `/stt`, `/voice/voice` must each sit
-    behind `Depends(require_paid_plan)`. Mirrors the assertion in
+    behind `Depends(require_paid_plan)` OR
+    `Depends(require_paid_plan_or_voice_preview)` (Task #581 §L9
+    1/UTC-day free preview wrapper, split STT/TTS buckets — admin /
+    staff / educator bypass). Mirrors the assertion in
     `scripts/check_budget_ceiling.py` so a single-guard skip cannot
     smuggle the paywall removal past the umbrella."""
     failures: list[str] = []
@@ -386,6 +392,10 @@ def _check_voice_paywall() -> list[str]:
             "(Task #559 canonical 'Voice paywall' row)."
         )
         return failures
+    accepted_deps = (
+        "Depends(require_paid_plan)",
+        "Depends(require_paid_plan_or_voice_preview)",
+    )
     for route in ("/voice/tts", "/voice/stt", "/voice/voice"):
         idx = src.find(f'"{route}"')
         if idx < 0:
@@ -396,15 +406,17 @@ def _check_voice_paywall() -> list[str]:
             failures.append(
                 f"routes/voice.py: canonical route {route} not found "
                 f"(Task #559 'Voice paywall' row — must remain present "
-                f"and gated by Depends(require_paid_plan))."
+                f"and gated by Depends(require_paid_plan) or "
+                f"Depends(require_paid_plan_or_voice_preview))."
             )
             continue
         # Look at the next ~50 lines after the route declaration for the
-        # require_paid_plan dependency.
+        # paywall dependency.
         window = src[idx:idx + 2500]
-        if "Depends(require_paid_plan)" not in window:
+        if not any(dep in window for dep in accepted_deps):
             failures.append(
                 f"routes/voice.py: route {route} must use Depends(require_paid_plan) "
+                f"or Depends(require_paid_plan_or_voice_preview) "
                 f"(Task #559 canonical 'Voice paywall' row; mirrors check_budget_ceiling.py)."
             )
     return failures
