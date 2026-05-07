@@ -243,6 +243,19 @@ async def get_current_user_optional(
     except:
         return None
 
+def _voice_preview_kind_for_request(request: Request) -> str:
+    """Map the request URL to the preview bucket kind. STT and TTS get
+    SEPARATE daily allowances per Task #581 §L9 — the umbrella
+    `/voice/voice` pipeline route counts as STT (it transcribes first)."""
+    try:
+        path = (request.url.path or "").lower()
+    except Exception:
+        path = ""
+    if "/tts" in path:
+        return "tts"
+    return "stt"
+
+
 async def require_paid_plan_or_voice_preview(
     request: Request,
     user: dict = Depends(get_current_user),
@@ -250,15 +263,17 @@ async def require_paid_plan_or_voice_preview(
     """Task #581 §L9 — paid-plan gate with a free-tier voice preview escape.
 
     Same paid-or-better gate as `require_paid_plan`, except free callers
-    get ONE voice-preview budget per UTC day:
+    get TWO independent once-per-UTC-day budgets:
       * 1 STT call per day (any duration up to the existing 25 MB cap)
       * 1 TTS call per day, capped at ~30 s of audio (≤ 600 chars input)
 
-    The TTS char limit is enforced inside the route (it sees the body
-    text); this dep only manages the once-per-day allowance counter
-    (`voice:free:preview:{user_id}:day`) and stamps the resolved user
-    dict with `__voice_preview=True` so the route knows to apply the
-    char clamp.
+    The kind is derived from the request URL — `/tts` → `tts`, anything
+    else (`/stt`, `/voice/voice`) → `stt`. The TTS char clamp is
+    enforced inside the route (it sees the body text); this dep only
+    manages the per-kind allowance counter
+    (`voice:free:preview:{kind}:{user_id}:day`) and stamps the resolved
+    user dict with `__voice_preview=True` so the route knows to apply
+    the clamp.
 
     Paid users (plan != "free") pass through unchanged with no flag.
     Admin / staff / educator bypass unconditionally — same semantics as
@@ -270,23 +285,26 @@ async def require_paid_plan_or_voice_preview(
     plan = (user.get("plan") or "free").strip().lower()
     if plan and plan != "free":
         return user
-    # Free callers — check the once-per-day preview counter.
+    # Free callers — separate STT and TTS daily buckets.
     user_id = user.get("id", "anonymous")
+    kind = _voice_preview_kind_for_request(request)
     if not check_rate_limit(
-        f"voice:free:preview:{user_id}:day",
+        f"voice:free:preview:{kind}:{user_id}:day",
         max_requests=1,
         window_seconds=86400,
     ):
         raise HTTPException(
             status_code=402,
             detail=(
-                "Free-tier voice preview already used today (1 STT + 1 short TTS/day). "
+                f"Free-tier {kind.upper()} preview already used today "
+                "(1 STT + 1 short TTS per UTC day). "
                 "Upgrade to Pro for unlimited voice features."
             ),
-            headers={"X-Paywall-Feature": "voice"},
+            headers={"X-Paywall-Feature": "voice", "X-Paywall-Voice-Kind": kind},
         )
     user = dict(user)
     user["__voice_preview"] = True
+    user["__voice_preview_kind"] = kind
     return user
 
 

@@ -1060,6 +1060,34 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         ai_cache_record_hit_saved_latency(ai_cache_expected_saved_ms())
         logger.info(f"AI cache HIT (L1): {cache_key}")
 
+    # ── Task #581 §L6 — Assamese pre-gate (runs BEFORE Sarvam dispatch) ──
+    # Translation cache → cached-explanation+translate → needs_reasoning
+    # heuristic. Hits short-circuit the LLM call entirely; misses fall
+    # through to the existing Sarvam strict chain unchanged. Sarvam is
+    # still the locked Assamese head — this gate is a *short-circuit*,
+    # never a replacement.
+    if answer is None and (str(_ns_resp_lang or "").lower() == "as"):
+        try:
+            import assamese_dispatch as _asd
+            _as_hit = await _asd.translation_cache_lookup(msg.message)
+            _as_source = "ai_input_cache" if _as_hit else None
+            if not _as_hit:
+                _as_hit = await _asd.cached_explanation_lookup(msg.message)
+                _as_source = "rag_cache" if _as_hit else None
+            if _as_hit:
+                answer = _as_hit
+                _ns_model = f"assamese_dispatch/{_as_source}"
+                try:
+                    import free_tier_dispatch as _ftd
+                    _ftd.record(
+                        _ftd.TIER_CACHE_HIT if _as_source == "ai_input_cache" else _ftd.TIER_RAG_HIT,
+                        lang="as",
+                    )
+                except Exception:
+                    pass
+        except Exception as _as_exc:
+            logger.debug("[CHAT][L6-ASSAMESE] %s", _as_exc)
+
     if answer is None:
         # ── Task #513 §C — tier-routing on every English-chat dispatch ──
         # The dispatcher is the single source of truth for which provider /
@@ -1067,13 +1095,21 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         # here (rather than at request entry) lets Rule D (`chat:cheaponly`)
         # take effect on the very next turn after the cap is tripped, with
         # no replica restart and no per-request feature flag.
+        _chat_decision = None
         try:
             from cost_caps import (
                 _select_chat_model as _ccs_select,
                 clamp_messages as _ccs_clamp,
                 max_output_tokens_for as _ccs_max_out,
+                effective_free_tier_output_cap as _ccs_free_cap,
+                is_long_context_paid_only as _ccs_long_paid,
             )
-            from credit_burn_meter_runtime import is_chat_cheaponly_active as _ccs_cheaponly
+            from credit_burn_meter_runtime import (
+                is_chat_cheaponly_active as _ccs_cheaponly,
+                monthly_spend_fraction as _ccs_spend_frac,
+            )
+            _user_plan = str((user.get("plan", "free") if user else "free") or "free")
+            _spend_frac = _ccs_spend_frac()
             _chat_decision = _ccs_select(
                 user_id=str((user.get("id") if user else "") or ""),
                 # Task #513 §C round-6 — `session_turn_count` is the
@@ -1088,16 +1124,110 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
                     (len(history_messages) // 2) + 1
                     if isinstance(history_messages, list) else 1
                 ),
-                user_plan=str((user.get("plan", "free") if user else "free") or "free"),
+                user_plan=_user_plan,
                 lang=str(_ns_resp_lang or "en"),
                 cheaponly_active=_ccs_cheaponly(),
+                monthly_spend_fraction=_spend_frac,
             )
-            _ns_model = _chat_decision.get("model") or _ns_model
-            max_tokens = _ccs_max_out(
-                "chat_turn",
-                int(_chat_decision.get("max_output_tokens") or max_tokens or 0) or None,
-            )
-            messages = _ccs_clamp(messages, call_type="chat_turn")
+
+            # ── Task #581 §L9 — long-context paywall ─────────────────────
+            # Free callers cannot ship more than 8k input tokens. This
+            # gate runs BEFORE retrieval-first / dispatch so the paywall
+            # surfaces immediately; admin/staff/educator + paid plans
+            # bypass via is_long_context_paid_only (returns False).
+            try:
+                _approx_in = sum(len(str(m.get("content", ""))) for m in (messages or [])) // 4
+                if _ccs_long_paid(_approx_in, _user_plan):
+                    try:
+                        import free_tier_dispatch as _ftd
+                        _ftd.record(_ftd.TIER_PAYWALL, lang=str(_ns_resp_lang or "en"))
+                    except Exception:
+                        pass
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "error": "long_context_requires_paid_plan",
+                            "upgrade_url": "/pricing",
+                            "message": "Long-context chat (>8k input tokens) is a paid feature.",
+                        },
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+
+            # ── Task #581 §L4 / §L10 — retrieval-only or paywall tier ──
+            # When the selector returns provider=None the live dispatcher
+            # MUST NOT silently fall back to the prior model. For
+            # retrieval_only we attempt `retrieval_first.try_resolve`
+            # (≥0.85 confidence) and only paywall on miss; for paywall
+            # we 402 immediately with the standard upgrade payload.
+            _tier = str(_chat_decision.get("tier") or "")
+            if _tier in ("retrieval_only", "paywall") and (_chat_decision.get("provider") is None):
+                _hit = None
+                if _tier == "retrieval_only":
+                    try:
+                        from retrieval_first import try_resolve as _rf_try
+                        _hit = await _rf_try(
+                            msg.message,
+                            content_type="explanation",
+                            lang=str(_ns_resp_lang or "en"),
+                        )
+                    except Exception as _rf_exc:
+                        logger.debug("[CHAT][RETRIEVAL-FIRST] %s", _rf_exc)
+                        _hit = None
+                try:
+                    import free_tier_dispatch as _ftd
+                    if _hit:
+                        _ft_lang = str(_ns_resp_lang or "en")
+                        if _hit.source.startswith("mongo:"):
+                            _ftd.record(_ftd.TIER_MONGO_HIT, lang=_ft_lang)
+                        elif _hit.source == "rag_cache":
+                            _ftd.record(_ftd.TIER_RAG_HIT, lang=_ft_lang)
+                        else:
+                            _ftd.record(_ftd.TIER_CACHE_HIT, lang=_ft_lang)
+                    else:
+                        _ftd.record(_ftd.TIER_PAYWALL, lang=str(_ns_resp_lang or "en"))
+                except Exception:
+                    pass
+                if _hit:
+                    answer = _hit.answer
+                    _ns_model = "retrieval_first/" + _hit.source
+                else:
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "error": "free_tier_chat_quota_exceeded",
+                            "upgrade_url": "/pricing",
+                            "message": (
+                                "You've reached today's free chat allowance. "
+                                "Upgrade for unlimited chat with Vertex Gemini."
+                            ),
+                            "tier": _tier,
+                        },
+                    )
+            else:
+                _ns_model = _chat_decision.get("model") or _ns_model
+
+            if _tier in ("cheap", "tight", "primary", "paid"):
+                # §L7 — apply per-content-type free-tier output sub-cap
+                # only to free callers (helper is a no-op for paid plans).
+                _decided_out = int(_chat_decision.get("max_output_tokens") or max_tokens or 0)
+                _decided_out = _ccs_free_cap("explanation", user_plan=_user_plan, base_cap=_decided_out)
+                max_tokens = _ccs_max_out("chat_turn", _decided_out or None)
+                messages = _ccs_clamp(messages, call_type="chat_turn")
+                # §L8 — emit the per-tier counter for observability.
+                try:
+                    import free_tier_dispatch as _ftd
+                    _ft_lang = str(_ns_resp_lang or "en")
+                    if _user_plan and _user_plan.lower() != "free":
+                        _ftd.record(_ftd.TIER_PAID_ESCALATE, lang=_ft_lang)
+                    elif _tier == "cheap":
+                        _ftd.record(_ftd.TIER_CHEAP, lang=_ft_lang)
+                    elif _tier == "tight":
+                        _ftd.record(_ftd.TIER_TIGHT, lang=_ft_lang)
+                except Exception:
+                    pass
             try:
                 import sentry_sdk as _sentry_sdk
                 _sentry_sdk.set_tag("chat_tier",     str(_chat_decision.get("tier", "")))

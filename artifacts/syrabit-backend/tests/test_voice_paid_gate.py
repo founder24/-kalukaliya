@@ -102,3 +102,48 @@ async def test_voice_preview_dep_admin_staff_educator_bypass():
     # Paid plans pass through, no preview flag.
     out = await require_paid_plan_or_voice_preview(req, user={"id": "p1", "plan": "pro"})
     assert "__voice_preview" not in out
+
+
+@pytest.mark.asyncio
+async def test_voice_preview_separate_stt_and_tts_daily_buckets(monkeypatch):
+    """Task #581 §L9 — STT and TTS each get an independent
+    1-call/UTC-day budget. A used STT preview must NOT block the
+    same user's first TTS preview call (and vice versa). Regression
+    locks the per-kind bucket key shape `voice:free:preview:{kind}:{user_id}:day`."""
+    import auth_deps
+    from auth_deps import require_paid_plan_or_voice_preview
+
+    seen_keys: list[str] = []
+
+    def _fake_check_rate_limit(key, max_requests, window_seconds):
+        seen_keys.append(key)
+        # Allow first call per distinct key; deny second call to the same key.
+        return seen_keys.count(key) <= max_requests
+
+    monkeypatch.setattr(auth_deps, "check_rate_limit", _fake_check_rate_limit)
+
+    def _req(path: str):
+        return type(
+            "R", (),
+            {
+                "client": type("C", (), {"host": "127.0.0.1"})(),
+                "headers": {},
+                "url": type("U", (), {"path": path})(),
+            },
+        )()
+
+    free = {"id": "u9", "plan": "free"}
+    out_stt = await require_paid_plan_or_voice_preview(_req("/voice/stt"), user=dict(free))
+    assert out_stt["__voice_preview"] is True
+    assert out_stt["__voice_preview_kind"] == "stt"
+    out_tts = await require_paid_plan_or_voice_preview(_req("/voice/tts"), user=dict(free))
+    assert out_tts["__voice_preview"] is True
+    assert out_tts["__voice_preview_kind"] == "tts"
+    # Pipeline route shares the STT bucket.
+    assert any(k.startswith("voice:free:preview:stt:u9:") for k in seen_keys)
+    assert any(k.startswith("voice:free:preview:tts:u9:") for k in seen_keys)
+    # Second STT call same day → 402, but the TTS bucket stays usable.
+    with pytest.raises(HTTPException) as exc:
+        await require_paid_plan_or_voice_preview(_req("/voice/stt"), user=dict(free))
+    assert exc.value.status_code == 402
+    assert exc.value.headers.get("X-Paywall-Voice-Kind") == "stt"
