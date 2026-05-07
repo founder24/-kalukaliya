@@ -1567,6 +1567,23 @@ async def lifespan(app):
             "cf-waf-drift cron alert loop not started: "
             f"{_cfw_cron_alert_err}"
         )
+    # Task #485 — periodic check that scans the AI Gateway
+    # ``guardrail_by_model`` snapshot built by Task #448 and pages
+    # on-call when any model's guardrail block_ratio stays at or above
+    # the configured threshold (default 30%) past a minimum-sample
+    # floor. Per-model debounce of 24h mirrors the Task #893 / #831 /
+    # #751 alerter pattern; cross-replica safety is the per-model CAS
+    # inside the loop, so it is safe to run on every replica.
+    try:
+        from routes.admin_aig_guardrail_alerts import (
+            _aig_guardrail_alert_loop,
+        )
+        _aca_create_task(_aig_guardrail_alert_loop(), key="aig-guardrail-alert")
+    except Exception as _aig_guardrail_alert_err:
+        logger.warning(
+            "ai-gateway guardrail alert loop not started: "
+            f"{_aig_guardrail_alert_err}"
+        )
     # Task #951 — symmetric silence alerter for the unified-logs
     # Cloudflare GraphQL pull. Task #947 made the pull single-leader
     # via a Mongo lease; the flip side is that if every replica is
@@ -2064,6 +2081,11 @@ from routes.admin_trustpilot_jsonld_status import router as admin_trustpilot_jso
 from routes.admin_trustpilot_cron_alerts import router as admin_trustpilot_cron_alerts_router
 from routes.cf_waf_drift_cron_heartbeat import router as cf_waf_drift_cron_heartbeat_router
 from routes.admin_cf_waf_drift_cron_alerts import router as admin_cf_waf_drift_cron_alerts_router
+# Task #485 — page on-call when one model trips a sustained guardrail
+# block-ratio spike (Llama-Guard / AI Content Safety) so a regression
+# in a model's safety behaviour or a prompt-injection wave hitting one
+# provider stops requiring a human to spot the per-model tile.
+from routes.admin_aig_guardrail_alerts import router as admin_aig_guardrail_alerts_router
 from routes.admin_cf_enterprise import router as admin_cf_enterprise_router
 # Task #951 — silence alerter for the unified-logs Cloudflare GraphQL
 # pull. Pages on-call when every backend replica has stopped advancing
@@ -2261,6 +2283,7 @@ api.include_router(admin_trustpilot_jsonld_status_router)
 api.include_router(admin_trustpilot_cron_alerts_router)
 api.include_router(cf_waf_drift_cron_heartbeat_router)
 api.include_router(admin_cf_waf_drift_cron_alerts_router)
+api.include_router(admin_aig_guardrail_alerts_router)
 api.include_router(admin_cf_enterprise_router)
 api.include_router(admin_logs_cf_pull_silence_alerts_router)
 api.include_router(admin_d1_mirror_lag_alerts_router)

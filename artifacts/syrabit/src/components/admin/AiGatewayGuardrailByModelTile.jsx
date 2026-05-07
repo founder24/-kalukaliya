@@ -34,10 +34,44 @@ function formatRatio(ratio) {
   return `${Math.round(ratio * 100)}%`;
 }
 
-export default function AiGatewayGuardrailByModelTile({ data, loading, onRefresh }) {
+// Task #485 — render an alerter lock-doc's `lastAlertAgeSeconds` as a
+// short caption ("paged 3h ago", "paged 12m ago"). Mirrors the
+// "last paged Xh ago" shape the cron silence-alerter pills already
+// surface so the dashboard reads consistently. Returns "" when the
+// alerter has not paged on this row yet.
+function formatPagedAge(ageSeconds) {
+  if (ageSeconds == null || ageSeconds < 0) return '';
+  if (ageSeconds < 60) return 'paged just now';
+  if (ageSeconds < 3600) {
+    return `paged ${Math.round(ageSeconds / 60)}m ago`;
+  }
+  if (ageSeconds < 24 * 3600) {
+    return `paged ${(ageSeconds / 3600).toFixed(1)}h ago`;
+  }
+  return `paged ${Math.round(ageSeconds / 86400)}d ago`;
+}
+
+export default function AiGatewayGuardrailByModelTile({
+  data, loading, onRefresh, alerterState,
+}) {
   const enabled = !!data?.enabled;
   const rows = Array.isArray(data?.guardrail_by_model) ? data.guardrail_by_model : [];
   const topRows = rows.slice(0, 5);
+  // Task #485 — index per-model alerter lock docs by `provider::model`
+  // so the row render below can surface the matching "last paged Xh
+  // ago" caption inline beside the block_ratio cell. Robust to the
+  // alerter-state endpoint being unreachable / returning the default
+  // empty shape.
+  const alerterByKey = React.useMemo(() => {
+    const out = {};
+    const list = Array.isArray(alerterState?.models) ? alerterState.models : [];
+    for (const m of list) {
+      const provider = m?.provider || 'unknown';
+      const model = m?.model || 'unknown';
+      out[`${provider}::${model}`] = m;
+    }
+    return out;
+  }, [alerterState]);
 
   return (
     <div className="rounded-2xl border bg-white shadow-sm overflow-hidden" data-testid="aig-guardrail-by-model-tile">
@@ -91,14 +125,29 @@ export default function AiGatewayGuardrailByModelTile({ data, loading, onRefresh
             </thead>
             <tbody>
               {topRows.map((row, idx) => {
-                const key = `${row.provider || 'unknown'}::${row.model || 'unknown'}::${idx}`;
+                const provider = row.provider || 'unknown';
+                const model = row.model || 'unknown';
+                const key = `${provider}::${model}::${idx}`;
+                const alerter = alerterByKey[`${provider}::${model}`];
+                const pagedCaption = formatPagedAge(alerter?.lastAlertAgeSeconds);
                 return (
                   <tr key={key} className="border-b border-gray-50 last:border-0" data-testid={`aig-guardrail-row-${row.model || 'unknown'}`}>
                     <td className="py-1.5 pr-2">
                       <div className="font-mono text-gray-700 truncate max-w-[14rem]" title={row.model || ''}>
                         {row.model || 'unknown'}
                       </div>
-                      <div className="text-[10px] text-gray-400">{row.provider || 'unknown'}</div>
+                      <div className="text-[10px] text-gray-400">{provider}</div>
+                      {pagedCaption && (
+                        <div
+                          className={`text-[10px] mt-0.5 ${
+                            alerter?.inDebounce ? 'text-rose-500' : 'text-gray-400'
+                          }`}
+                          data-testid={`aig-guardrail-paged-${row.model || 'unknown'}`}
+                        >
+                          {pagedCaption}
+                          {alerter?.inDebounce ? ' · in debounce' : ''}
+                        </div>
+                      )}
                     </td>
                     <td
                       className={`py-1.5 px-2 text-right font-mono font-semibold ${ratioColor(row.block_ratio)}`}

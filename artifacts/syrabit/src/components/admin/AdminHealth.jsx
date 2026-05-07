@@ -562,6 +562,20 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       .catch(() => setTpCronAlertState(null));
   }, [adminToken]);
 
+  // Task #485 — alerter-state for the per-model AI Gateway guardrail
+  // spike alerter. Same lazy-load + null-on-failure contract as the
+  // sibling cron alert-state fetches above; the
+  // AiGatewayGuardrailByModelTile reads `models[*]` and decorates
+  // each row with a "paged Xh ago" caption + "in debounce" tag.
+  const [aigGuardrailAlertState, setAigGuardrailAlertState] = useState(null);
+  const loadAigGuardrailAlertState = useCallback(() => {
+    axios.get(`${API_BASE}/admin/health/ai-gateway/guardrail-alerts/state`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setAigGuardrailAlertState(r.data))
+      .catch(() => setAigGuardrailAlertState(null));
+  }, [adminToken]);
+
   const loadUnifiedLogsCfPullCronAlertState = useCallback(() => {
     axios.get(`${API_BASE}/admin/health/unified-logs/cf-pull/cron/alert-state`, {
       headers: adminHeaders(adminToken), withCredentials: true,
@@ -860,6 +874,10 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     loadCfDriftCronAlertState();
     loadTpCronAlertState();
     loadUnifiedLogsCfPullCronAlertState();
+    // Task #485 — per-model AI Gateway guardrail-spike alerter state
+    // for the AiGatewayGuardrailByModelTile inline "paged Xh ago"
+    // caption. Same 60s cadence as the sibling alert-state loaders.
+    loadAigGuardrailAlertState();
     // Task #974 — per-env missing-Slack-webhook nag state, batched
     // into a single loader so the three GETs fire in parallel and
     // the badges' "· paged Nh ago" decoration stays in lockstep
@@ -898,6 +916,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadCfDriftCronAlertState();
       loadTpCronAlertState();
       loadUnifiedLogsCfPullCronAlertState();
+      // Task #485 — keep the per-model guardrail alerter caption fresh.
+      loadAigGuardrailAlertState();
       loadSlackWebhookMissingAlertStates();
       loadSlackWebhookMissingAlertHistories();
       loadCfAudit();
@@ -915,6 +935,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadEdgeProxyDeployCronHealth, loadUnifiedLogsCfPullCronHealth,
       loadEdgeProxyDeployCronAlertState, loadCfDriftCronAlertState,
       loadTpCronAlertState, loadUnifiedLogsCfPullCronAlertState,
+      loadAigGuardrailAlertState,
       loadSlackWebhookMissingAlertStates,
       loadSlackWebhookMissingAlertHistories, loadCfAudit, loadCfHealth, loadGcpCredits,
       loadCfAddons, loadAwsCredits, loadAzureCredits, loadAxiomCredits, loadSentryCredits]);
@@ -3635,6 +3656,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           data={cfHealthData?.ai_gateway}
           loading={cfHealthLoading}
           onRefresh={loadCfHealth}
+          alerterState={aigGuardrailAlertState}
         />
         </SectionErrorBoundary>
 

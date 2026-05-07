@@ -89,6 +89,51 @@ describe('AiGatewayGuardrailByModelTile', () => {
     }
   });
 
+  it('decorates a row with "paged Xh ago" when the alerter has fired', () => {
+    // Task #485 — the per-model guardrail alerter writes a lock doc
+    // each time it pages. AdminHealth fetches that state and threads
+    // it through `alerterState`. The tile must surface the matching
+    // row's age + "in debounce" tag inline so on-call sees at a
+    // glance which model was last paged and whether a re-page is
+    // currently suppressed.
+    const alerterState = {
+      alerter: { blockRatioThreshold: 0.3, minSamples: 20 },
+      models: [
+        {
+          provider: baseRow.provider,
+          model: baseRow.model,
+          lastState: 'spike',
+          lastAlertAgeSeconds: 7200,
+          inDebounce: true,
+          debounceRemainingSeconds: 3600,
+        },
+      ],
+    };
+    render(
+      <AiGatewayGuardrailByModelTile
+        data={{ enabled: true, guardrail_by_model: [baseRow] }}
+        alerterState={alerterState}
+      />
+    );
+    const caption = screen.getByTestId(`aig-guardrail-paged-${baseRow.model}`);
+    expect(caption.textContent).toContain('paged 2.0h ago');
+    expect(caption.textContent).toContain('in debounce');
+  });
+
+  it('does not render the alerter caption when the model has never paged', () => {
+    // Empty alerter-state payload (alerter has been quiet) must not
+    // litter every row with a misleading "paged just now" caption.
+    render(
+      <AiGatewayGuardrailByModelTile
+        data={{ enabled: true, guardrail_by_model: [baseRow] }}
+        alerterState={{ alerter: {}, models: [] }}
+      />
+    );
+    expect(
+      screen.queryByTestId(`aig-guardrail-paged-${baseRow.model}`)
+    ).not.toBeInTheDocument();
+  });
+
   it('surfaces the OBS-off state when the backend flag is disabled', () => {
     render(
       <AiGatewayGuardrailByModelTile
