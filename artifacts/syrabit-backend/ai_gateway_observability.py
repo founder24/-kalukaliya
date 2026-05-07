@@ -238,6 +238,12 @@ def record_aig_response(headers: Any, *, provider: str = "",
             "model": model or None,
             "cache_status": cs,
             "guardrail_action": action,
+            # Task #486 — persist the guardrail category (pii / profanity /
+            # code / …) onto each sample so the per-model aggregation
+            # below can surface "why" a model is being blocked, not just
+            # "how often". Dropped silently up to now even though
+            # parse_aig_response_headers already surfaced it.
+            "guardrail_category": (summary.get("guardrail") or {}).get("category"),
             "log_id": summary.get("log_id"),
         }
         _SAMPLES.append(sample)
@@ -338,6 +344,15 @@ def _aggregate_guardrail_by_model(samples: list[dict[str, Any]]) -> list[dict[st
             "allows": 0,
             "rewrites": 0,
             "blocks": 0,
+            # Task #486 — count blocking guardrail categories per model
+            # so the admin tile can surface the dominant block reason
+            # ("65% blocks · mostly PII") next to the block ratio. We
+            # tally categories on `block` actions only — the caption
+            # sits beside the *block* ratio, so folding rewrites in
+            # would let a frequently-rewritten-but-rarely-blocked
+            # category mislead on-call about why a model is being
+            # blocked.
+            "_block_category_counts": {},
         })
         bucket["samples"] += 1
         action = s.get("guardrail_action")
@@ -347,6 +362,13 @@ def _aggregate_guardrail_by_model(samples: list[dict[str, Any]]) -> list[dict[st
             bucket["rewrites"] += 1
         elif action == "block":
             bucket["blocks"] += 1
+        if action == "block":
+            category = s.get("guardrail_category")
+            if category:
+                cat_key = str(category).strip().lower()
+                if cat_key:
+                    counts = bucket["_block_category_counts"]
+                    counts[cat_key] = counts.get(cat_key, 0) + 1
     out: list[dict[str, Any]] = []
     for bucket in by_key.values():
         guardrail_total = bucket["allows"] + bucket["rewrites"] + bucket["blocks"]
@@ -355,6 +377,17 @@ def _aggregate_guardrail_by_model(samples: list[dict[str, Any]]) -> list[dict[st
             round(bucket["blocks"] / guardrail_total, 4)
             if guardrail_total else None
         )
+        # Materialise the per-model top categories list (descending by
+        # count, then alphabetical for stable ordering when counts tie)
+        # and drop the private accumulator so the snapshot payload
+        # stays clean.
+        cat_counts = bucket.pop("_block_category_counts", {})
+        bucket["top_categories"] = [
+            {"category": cat, "count": count}
+            for cat, count in sorted(
+                cat_counts.items(), key=lambda kv: (-kv[1], kv[0])
+            )
+        ]
         out.append(bucket)
     # Sort: rows with a ratio first (highest block_ratio, then most
     # blocks), rows with no guardrail telemetry (ratio is None) last

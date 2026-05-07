@@ -34,6 +34,18 @@ function formatRatio(ratio) {
   return `${Math.round(ratio * 100)}%`;
 }
 
+// Task #486 — render the top guardrail category surfaced by the
+// backend's per-model `top_categories` list so on-call sees *why* a
+// model is being blocked, not just *how often*. Returns "" when the
+// model has no categorised block/rewrite samples yet so we don't
+// litter quiet rows with a misleading "mostly —" caption.
+function formatTopCategory(topCategories) {
+  if (!Array.isArray(topCategories) || topCategories.length === 0) return '';
+  const top = topCategories[0];
+  if (!top || !top.category) return '';
+  return `mostly ${String(top.category).toUpperCase()}`;
+}
+
 // Task #485 — render an alerter lock-doc's `lastAlertAgeSeconds` as a
 // short caption ("paged 3h ago", "paged 12m ago"). Mirrors the
 // "last paged Xh ago" shape the cron silence-alerter pills already
@@ -154,6 +166,18 @@ export default function AiGatewayGuardrailByModelTile({
                       data-testid={`aig-guardrail-ratio-${row.model || 'unknown'}`}
                     >
                       {formatRatio(row.block_ratio)}
+                      {(() => {
+                        const caption = formatTopCategory(row.top_categories);
+                        if (!caption) return null;
+                        return (
+                          <div
+                            className="text-[10px] font-normal text-gray-500 mt-0.5"
+                            data-testid={`aig-guardrail-top-category-${row.model || 'unknown'}`}
+                          >
+                            {caption}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="py-1.5 px-2 text-right font-mono text-gray-600">{row.blocks ?? 0}</td>
                     <td className="py-1.5 px-2 text-right font-mono text-gray-600">{row.rewrites ?? 0}</td>

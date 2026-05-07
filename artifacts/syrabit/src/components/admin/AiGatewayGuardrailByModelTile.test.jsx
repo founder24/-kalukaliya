@@ -62,6 +62,46 @@ describe('AiGatewayGuardrailByModelTile', () => {
     expect(ratioCell.textContent).not.toBe('0%');
   });
 
+  it('renders the top guardrail category beside the block ratio', () => {
+    // Task #486 — backend hands us a `top_categories` breakdown so the
+    // tile can show "why" a model is being blocked, not just "how
+    // often". The dominant block reason should appear inline beside
+    // the ratio so on-call's triage is one glance, not a console
+    // round-trip.
+    render(
+      <AiGatewayGuardrailByModelTile
+        data={{
+          enabled: true,
+          guardrail_by_model: [
+            {
+              ...baseRow,
+              top_categories: [
+                { category: 'pii', count: 5 },
+                { category: 'profanity', count: 1 },
+              ],
+            },
+          ],
+        }}
+      />
+    );
+    const caption = screen.getByTestId(`aig-guardrail-top-category-${baseRow.model}`);
+    expect(caption.textContent).toContain('mostly PII');
+  });
+
+  it('omits the top-category caption when no categories were captured', () => {
+    render(
+      <AiGatewayGuardrailByModelTile
+        data={{
+          enabled: true,
+          guardrail_by_model: [{ ...baseRow, top_categories: [] }],
+        }}
+      />
+    );
+    expect(
+      screen.queryByTestId(`aig-guardrail-top-category-${baseRow.model}`)
+    ).not.toBeInTheDocument();
+  });
+
   it('shows the empty-state copy when the window has no samples yet', () => {
     render(
       <AiGatewayGuardrailByModelTile data={{ enabled: true, guardrail_by_model: [] }} />

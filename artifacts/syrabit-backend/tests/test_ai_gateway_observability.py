@@ -274,6 +274,79 @@ def test_guardrail_by_model_ratio_rows_sort_before_dash_rows(monkeypatch):
     assert rows[1]["block_ratio"] is None
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Task #486 — guardrail category persists onto each sample and the
+# per-model bucket exposes a top-categories breakdown so the admin
+# tile can surface the dominant block reason next to the ratio.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_sample_carries_guardrail_category(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    record_aig_response({
+        "cf-aig-cache-status": "MISS",
+        "cf-aig-guardrail-action": "block",
+        "cf-aig-guardrail-category": "pii",
+    }, provider="workers_ai", model="llama-3.3-70b")
+    samples = snapshot()["recent_samples"]
+    assert samples and samples[-1]["guardrail_category"] == "pii"
+
+
+def test_guardrail_by_model_top_categories_descending(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # llama: 2 PII blocks, 1 profanity block. Plus a PII rewrite and
+    # an allow which must NOT count toward top_categories — the
+    # caption sits beside the *block* ratio, so only block events
+    # earn a tally to keep the dominant-reason label honest.
+    for category in ("pii", "pii", "profanity"):
+        record_aig_response({
+            "cf-aig-cache-status": "MISS",
+            "cf-aig-guardrail-action": "block",
+            "cf-aig-guardrail-category": category,
+        }, provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({
+        "cf-aig-cache-status": "MISS",
+        "cf-aig-guardrail-action": "rewrite",
+        "cf-aig-guardrail-category": "code",
+    }, provider="workers_ai", model="llama-3.3-70b")
+    record_aig_response({
+        "cf-aig-cache-status": "MISS",
+        "cf-aig-guardrail-action": "allow",
+    }, provider="workers_ai", model="llama-3.3-70b")
+    rows = snapshot()["guardrail_by_model"]
+    by_model = {r["model"]: r for r in rows}
+    cats = by_model["llama-3.3-70b"]["top_categories"]
+    assert cats == [
+        {"category": "pii", "count": 2},
+        {"category": "profanity", "count": 1},
+    ]
+    # The rewrite category must not leak into the breakdown.
+    assert all(c["category"] != "code" for c in cats)
+
+
+def test_guardrail_by_model_top_categories_empty_without_block_category(monkeypatch):
+    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
+    from ai_gateway_observability import record_aig_response, snapshot
+    # Non-block events (allow / rewrite) carry no meaningful blocking
+    # category — top_categories must stay empty so the frontend
+    # doesn't render a misleading "mostly X" caption beside a row
+    # whose blocks count is zero.
+    record_aig_response({
+        "cf-aig-cache-status": "MISS",
+        "cf-aig-guardrail-action": "allow",
+        "cf-aig-guardrail-category": "pii",
+    }, provider="workers_ai", model="quiet-model")
+    record_aig_response({
+        "cf-aig-cache-status": "MISS",
+        "cf-aig-guardrail-action": "rewrite",
+        "cf-aig-guardrail-category": "profanity",
+    }, provider="workers_ai", model="quiet-model")
+    rows = snapshot()["guardrail_by_model"]
+    assert rows[0]["top_categories"] == []
+
+
 def test_cache_by_model_ratio_rows_sort_before_dash_rows(monkeypatch):
     monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
     from ai_gateway_observability import record_aig_response, snapshot
