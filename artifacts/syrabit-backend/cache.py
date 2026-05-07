@@ -1,10 +1,96 @@
 """Syrabit.ai — Redis + in-memory caching helpers."""
-import asyncio, hashlib, json, logging, os, time
-from typing import Optional
+import asyncio, hashlib, json, logging, os, threading, time
+from typing import Any, Optional
 import cachetools
 from deps import redis_client
 
 logger = logging.getLogger(__name__)
+
+
+# ── Task #571 — L1 in-process cache instrumentation ──────────────────────────
+# Hit/miss/set counters per named TTLCache. The counters are module-level and
+# read by `routes/admin_cache._l1_inproc_stats` for the /api/health/cache panel
+# + the nightly `Syrabit/Cache` CloudWatch shipper. Implementation contract:
+# every write path (`__setitem__`, `pop`) and every read path (`__getitem__`,
+# `__contains__`, `get`) is intercepted on the subclass. The previous bare
+# `cachetools.TTLCache` instances had no counters at all — operators could not
+# tell whether a Redis fan-out / DB hit was happening because the L1 ring was
+# missing or just because the request was genuinely cold.
+_L1_COUNTERS_LOCK = threading.Lock()
+_L1_COUNTERS: dict[str, dict[str, int]] = {}
+
+
+def _l1_record(name: str, kind: str) -> None:
+    """Increment a (name, kind) counter under the module-level lock.
+
+    `kind` ∈ {"hits", "misses", "sets"}. Best-effort — any failure inside the
+    counter path must never raise into the caller's hot path."""
+    try:
+        with _L1_COUNTERS_LOCK:
+            row = _L1_COUNTERS.setdefault(name, {"hits": 0, "misses": 0, "sets": 0})
+            if kind in row:
+                row[kind] += 1
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+
+def l1_counters_snapshot() -> dict[str, dict[str, int]]:
+    """Return a deep copy of every (cache-name → {hits, misses, sets}) row.
+
+    Read by `routes/admin_cache._l1_inproc_stats`. Snapshot is a copy so the
+    admin endpoint cannot mutate the live counters. Cheap (≤ 11 caches)."""
+    with _L1_COUNTERS_LOCK:
+        return {name: dict(row) for name, row in _L1_COUNTERS.items()}
+
+
+def l1_counters_reset_for_tests() -> None:
+    """Test-only escape hatch — wipe every counter row.
+
+    Production callers MUST NOT use this; the panel relies on monotonic
+    counters and the `cache-cardinality-spike` alarm computes a 7-day moving
+    average that breaks if counters reset mid-day."""
+    with _L1_COUNTERS_LOCK:
+        _L1_COUNTERS.clear()
+
+
+class _InstrumentedTTLCache(cachetools.TTLCache):
+    """`cachetools.TTLCache` subclass that records hits/misses/sets per name.
+
+    Every public read path on the parent class either calls `__getitem__` (raises
+    KeyError on miss) or `__contains__` (returns False on miss). We intercept
+    both. `get(default=None)` calls `__getitem__` internally on cachetools so we
+    do not need a separate override for it.
+
+    Sets count both `__setitem__` and `pop()`-then-set patterns; we only count
+    successful inserts (a `pop` of a non-existent key is silently a no-op for
+    the cardinality counter)."""
+
+    def __init__(self, *args: Any, name: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Pre-register the row so the snapshot endpoint always shows every L1
+        # ring even if it has not yet served a request. Otherwise a freshly
+        # restarted pod would be missing rows the panel expects.
+        with _L1_COUNTERS_LOCK:
+            _L1_COUNTERS.setdefault(name, {"hits": 0, "misses": 0, "sets": 0})
+        self._name = name
+
+    def __getitem__(self, key: Any) -> Any:  # type: ignore[override]
+        try:
+            v = super().__getitem__(key)
+        except KeyError:
+            _l1_record(self._name, "misses")
+            raise
+        _l1_record(self._name, "hits")
+        return v
+
+    def __contains__(self, key: object) -> bool:  # type: ignore[override]
+        present = super().__contains__(key)
+        _l1_record(self._name, "hits" if present else "misses")
+        return present
+
+    def __setitem__(self, key: Any, value: Any) -> None:  # type: ignore[override]
+        super().__setitem__(key, value)
+        _l1_record(self._name, "sets")
 
 # Lazy import — ai_cache imports from us indirectly via the legacy fallback
 # path, so we resolve it on demand inside the AI-cache helpers below to keep
@@ -42,12 +128,12 @@ __all__ = [
     "get_hierarchy_cache", "set_hierarchy_cache",
 ]
 
-_ai_response_cache = cachetools.TTLCache(maxsize=4096, ttl=7200)  # Flex/upgraded Redis: 4× larger, 2× longer
+_ai_response_cache = _InstrumentedTTLCache(maxsize=4096, ttl=7200, name="_ai_response_cache")  # Flex/upgraded Redis: 4× larger, 2× longer
 
 # ── User Object Cache ─────────────────────────────────────────────────────────
 # Keyed by user_id — eliminates DB round-trip on every auth'd request.
 # Flex tier: 5000 entries (up from 2000), 15-min TTL (up from 10-min).
-_user_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=5000, ttl=900)
+_user_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=5000, ttl=900, name="_user_cache")
 
 def _invalidate_user_cache(uid: str):
     _user_cache.pop(uid, None)
@@ -56,7 +142,7 @@ def _invalidate_user_cache(uid: str):
 # ── Conversation Object Cache ──────────────────────────────────────────────────
 # Keyed by "conv_id:uid" — avoids PG on every chat turn.
 # Flex tier: 10000 entries (up from 4000).
-_conv_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=10000, ttl=600)
+_conv_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=10000, ttl=600, name="_conv_cache")
 
 def _conv_cache_key(conv_id: str, uid: str) -> str:
     return f"{conv_id}:{uid}"
@@ -67,19 +153,19 @@ def _invalidate_conv_cache(conv_id: str, uid: str):
 # ── RAG Result Cache ───────────────────────────────────────────────────────────
 # Keyed by (query_hash, subject_id) — skips 3 MongoDB queries on repeat.
 # Flex tier: 8192 entries (up from 2048), 30-min TTL (up from 15-min).
-_rag_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=8192, ttl=1800)
+_rag_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=8192, ttl=1800, name="_rag_cache")
 
 # Vector RAG cache — Workers AI embed API calls saved by keeping results longer.
 # Flex tier: 2048 entries (up from 512), 20-min TTL (up from 10-min).
-_vector_rag_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=2048, ttl=1200)
+_vector_rag_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=2048, ttl=1200, name="_vector_rag_cache")
 
 # Query embedding cache — avoids re-embedding the same queries.
 # Flex tier: 2048 entries (up from 512), 30-min TTL (up from 15-min).
-_query_embed_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=2048, ttl=1800)
+_query_embed_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=2048, ttl=1800, name="_query_embed_cache")
 
 # Content card cache — avoids duplicate seo_pages + chapters queries.
 # Flex tier: 2048 entries (up from 512), 15-min TTL (up from 10-min).
-_content_card_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=2048, ttl=900)
+_content_card_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=2048, ttl=900, name="_content_card_cache")
 
 def _content_card_cache_key(query: str, subject_id: Optional[str], subject_name: Optional[str], intent: Optional[str] = None, chapter_title: Optional[str] = None) -> str:
     raw = f"{query.strip().lower()}|{subject_id or ''}|{subject_name or ''}|{intent or ''}|{chapter_title or ''}"
@@ -87,7 +173,7 @@ def _content_card_cache_key(query: str, subject_id: Optional[str], subject_name:
 
 # Syllabus cache — syllabi almost never change; 1h TTL.
 # Flex tier: 1024 entries (up from 256).
-_syllabus_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=1024, ttl=3600)
+_syllabus_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=1024, ttl=3600, name="_syllabus_cache")
 
 def _syllabus_cache_key(board_id: str, class_id: str, stream_id: Optional[str], subject_id: Optional[str] = None) -> str:
     return f"{board_id}|{class_id}|{stream_id or ''}|{subject_id or ''}"
@@ -101,7 +187,7 @@ def _vector_rag_cache_key(query: str, subject_id: Optional[str], top_k: int) -> 
     return hashlib.md5(raw.encode()).hexdigest()
 
 # Embedding cache — Flex tier: 4096 entries (up from 1024), 30-min TTL.
-_embedding_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=4096, ttl=1800)
+_embedding_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=4096, ttl=1800, name="_embedding_cache")
 
 def _embedding_cache_key(text: str, task_type: str) -> str:
     raw = f"{text[:200].strip().lower()}|{task_type}"
@@ -282,7 +368,7 @@ def _redis_invalidate_session(user_id: str):
     _redis_del("session", user_id)
     _invalidate_user_cache(str(user_id))
 
-_hierarchy_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=256, ttl=1800)
+_hierarchy_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=256, ttl=1800, name="_hierarchy_cache")
 
 def get_hierarchy_cache(stream_id: str):
     return _hierarchy_cache.get(stream_id)
@@ -290,7 +376,7 @@ def get_hierarchy_cache(stream_id: str):
 def set_hierarchy_cache(stream_id: str, data: dict):
     _hierarchy_cache[stream_id] = data
 
-_content_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=1024, ttl=1800)
+_content_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=1024, ttl=1800, name="_content_cache")
 CONTENT_CACHE_SECONDS = 1800
 REDIS_CONTENT_PREFIX = "content:"
 

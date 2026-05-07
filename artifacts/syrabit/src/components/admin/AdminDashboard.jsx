@@ -5,6 +5,7 @@ import AdminQuickLinks from './AdminQuickLinks';
 import AdminDraftServedSubjects from './AdminDraftServedSubjects';
 import AlertReasonsRow from './AlertReasonsRow';
 import BotCachePanel from './BotCachePanel';
+import CacheHitRatioPanel from './CacheHitRatioPanel';
 import R2ColdStoragePanel from './R2ColdStoragePanel';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { computeHeavyFreshness } from '@/utils/metricsFreshness';
@@ -3509,6 +3510,14 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                   sparkline geometry can be unit-tested without
                   rendering the whole admin dashboard. */}
               <BotCachePanel kvHealth={kvHealth} />
+
+              {/* Task #571 — AI-input + per-layer cache hit-ratio
+                  panel. Polls /api/health/cache every 60s and shows
+                  per-content-type ratios + miss-reason ranking + L1
+                  saturation. Renders red when any content-type
+                  drops below the same floor the
+                  `cache-ai-hitratio-low` CloudWatch alarm uses. */}
+              <CacheHitRatioPanel adminToken={adminToken} />
 
               {/* Task #315 — R2 cold-storage / Logpush watchdog snapshot
                   (Task #314 watchdog persists state to KV; this surfaces

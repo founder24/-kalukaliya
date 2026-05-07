@@ -83,11 +83,16 @@ Action items derived from this snapshot:
 
 ### 1. MCQ / flashcard / definition generators were uncached
 
-`artifacts/syrabit-backend/routes/admin_pipeline.py:_pipeline_generate_mcqs`,
-`_pipeline_generate_flashcards`, plus
-`artifacts/syrabit-backend/vertex_services.py:extract_key_concepts`
-(the canonical "definition" content type) all dispatched a live LLM
-call on every invocation. Admin re-runs against the same chapter
+The deterministic generators called out in the Task #571 brief live
+in two files (NOT `pipeline.py`, which only owns `stage3_polish`):
+
+- `artifacts/syrabit-backend/routes/admin_pipeline.py:_pipeline_generate_mcqs`
+- `artifacts/syrabit-backend/routes/admin_pipeline.py:_pipeline_generate_flashcards`
+- `artifacts/syrabit-backend/vertex_services.py:extract_key_concepts`
+  (the canonical "definition" content type — invoked from
+  `routes/admin_definitions.py` and the nightly definition backfill)
+
+All three dispatched a live LLM call on every invocation. Admin re-runs against the same chapter
 content paid the LLM bill on every retry.
 
 Fix: each generator now wraps its prompt with `_aic_get` /

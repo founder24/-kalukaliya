@@ -126,27 +126,38 @@ def _rag_cache_stats() -> dict[str, Any]:
 
 
 def _l1_inproc_stats() -> dict[str, Any]:
-    """Cardinality-only snapshot of the `cachetools.TTLCache` ring set in
-    `cache.py`. `cachetools` does not expose hit/miss counters natively,
-    so the panel renders cardinality plus the TTL and capacity to help
-    operators tune sizes; hit-ratio for these layers is reported as
-    `None` (NOT zero — zero would page false alarms)."""
+    """Snapshot of every `_InstrumentedTTLCache` ring in `cache.py`.
+
+    Task #571 round-3: counters now come from `cache.l1_counters_snapshot()`
+    (each `_InstrumentedTTLCache` increments hits/misses/sets on every read +
+    write). Hit-rate is computed as `hits / (hits + misses)` — `None` only
+    when the ring has not yet served any traffic (NOT zero, which would
+    page false alarms on a freshly restarted pod)."""
     out: dict[str, Any] = {}
     try:
         import cache as _c
+        counters = _c.l1_counters_snapshot()
         for name in (
-            "_user_cache", "_conv_cache", "_content_cache", "_rag_cache",
-            "_vector_rag_cache", "_query_embed_cache", "_embedding_cache",
-            "_content_card_cache", "_syllabus_cache",
+            "_ai_response_cache", "_user_cache", "_conv_cache", "_content_cache",
+            "_rag_cache", "_vector_rag_cache", "_query_embed_cache",
+            "_embedding_cache", "_content_card_cache", "_syllabus_cache",
+            "_hierarchy_cache",
         ):
             inst = getattr(_c, name, None)
             if inst is None:
                 continue
+            row = counters.get(name) or {"hits": 0, "misses": 0, "sets": 0}
+            hits = int(row.get("hits", 0))
+            misses = int(row.get("misses", 0))
+            total = hits + misses
             out[name] = {
                 "currsize": getattr(inst, "currsize", None),
                 "maxsize": getattr(inst, "maxsize", None),
                 "ttl_seconds": getattr(inst, "ttl", None),
-                "hit_rate": None,  # not instrumented — see docstring
+                "hits": hits,
+                "misses": misses,
+                "sets": int(row.get("sets", 0)),
+                "hit_rate": (round(hits / total, 4) if total else None),
             }
     except Exception as e:
         logger.debug("[admin_cache] l1 inproc cache stats unavailable: %s", e)

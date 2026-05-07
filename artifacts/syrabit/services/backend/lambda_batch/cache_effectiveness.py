@@ -114,17 +114,31 @@ def _emit_layer(cw, layer: str, *, hits: int, misses: int, hit_rate: float) -> N
     ])
 
 
-def _emit_l1(cw, name: str, *, currsize: int, maxsize: int) -> None:
+def _emit_l1(cw, name: str, *, currsize: int, maxsize: int,
+             hits: int, misses: int, hit_rate: float | None) -> None:
+    """Emit one L1 ring's row. `hit_rate` is `None` for rings that have not
+    served any traffic yet — we omit the metric in that case so the alarm
+    surface does not see a false zero."""
     base = [{"Name": "L1Cache", "Value": name}]
-    cw.put_metric_data(Namespace=NAMESPACE, MetricData=[
+    metrics = [
         {"MetricName": "L1Currsize", "Value": float(currsize), "Unit": "Count", "Dimensions": base},
         {"MetricName": "L1Capacity", "Value": float(maxsize),  "Unit": "Count", "Dimensions": base},
+        {"MetricName": "L1Hits",     "Value": float(hits),     "Unit": "Count", "Dimensions": base},
+        {"MetricName": "L1Misses",   "Value": float(misses),   "Unit": "Count", "Dimensions": base},
         # Saturation = currsize / maxsize. Helps tune layer sizes without
         # reading the dashboard math.
         {"MetricName": "L1Saturation",
          "Value": float(currsize) / float(maxsize) if maxsize else 0.0,
          "Unit": "None", "Dimensions": base},
-    ])
+    ]
+    if hit_rate is not None:
+        metrics.append({
+            "MetricName": "L1HitRate",
+            "Value": float(hit_rate),
+            "Unit": "None",
+            "Dimensions": base,
+        })
+    cw.put_metric_data(Namespace=NAMESPACE, MetricData=metrics)
 
 
 def _emit_edge_route(cw, path: str, *, hit_rate: float) -> None:
@@ -260,11 +274,15 @@ def handler(event, context):  # noqa: ARG001
                 misses=int(rag.get("misses", 0)),
                 hit_rate=float(rag.get("hit_rate", 0.0)))
 
-    # ── 3. L1 in-process cachetools rings (cardinality only) ────────
+    # ── 3. L1 in-process cachetools rings (real hit/miss + cardinality) ─
     for name, row in (snapshot.get("l1_inproc") or {}).items():
+        hr = row.get("hit_rate")
         _emit_l1(cw, name,
                  currsize=int(row.get("currsize") or 0),
-                 maxsize=int(row.get("maxsize") or 0))
+                 maxsize=int(row.get("maxsize") or 0),
+                 hits=int(row.get("hits") or 0),
+                 misses=int(row.get("misses") or 0),
+                 hit_rate=(float(hr) if hr is not None else None))
 
     # ── 4. Cloudflare edge hit-rate per cacheable route (optional) ──
     edge_targets = snapshot.get("edge_targets") or []

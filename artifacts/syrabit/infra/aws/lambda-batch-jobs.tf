@@ -430,14 +430,30 @@ resource "aws_cloudwatch_metric_alarm" "cache_ai_hitratio_low" {
 # > 3x the trailing 7-day moving average. Catches the runaway-key
 # pattern (e.g. a generator started embedding a wall-clock timestamp
 # into the prompt, fragmenting the keyspace).
+#
+# Task #571 round-3: declared per content type via `for_each` so a
+# regression in one generator (e.g. flashcard suddenly fragmenting)
+# pages on-call instead of being averaged out by the Total row. The
+# `Total` row is included in the set so the rollup keeps its alarm
+# too — matches the pattern used by the Assamese-translation backfill
+# alarms.
+locals {
+  cache_cardinality_alarm_dims = toset([
+    "Total",
+    "mcq", "flashcard", "definition", "formatter",
+    "translate", "ocr", "stage3_polish",
+  ])
+}
+
 resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
-  alarm_name          = "${local.lz_project}-cache-cardinality-spike-${local.lz_env}"
+  for_each            = local.cache_cardinality_alarm_dims
+  alarm_name          = "${local.lz_project}-cache-cardinality-spike-${each.key}-${local.lz_env}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   datapoints_to_alarm = 1
   threshold           = 0
   treat_missing_data  = "notBreaching"
-  alarm_description   = "Task #571 — UniqueKeys24h spiked above 3x the trailing 7-day moving average. Almost always means a generator is fragmenting cache keys (timestamp/uuid leaked into prompt, normalizer regression). Inspect /admin/observability cache panel + content_type breakdown to localize the offender."
+  alarm_description   = "Task #571 — UniqueKeys24h for ContentType=${each.key} spiked above 3x the trailing 7-day moving average. Almost always means a generator is fragmenting cache keys (timestamp/uuid leaked into prompt, normalizer regression). Inspect /admin/observability cache panel + miss_reasons for this content_type."
 
   metric_query {
     id          = "today"
@@ -447,7 +463,7 @@ resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
       metric_name = "UniqueKeys24h"
       period      = 86400
       stat        = "Maximum"
-      dimensions  = { ContentType = "Total" }
+      dimensions  = { ContentType = each.key }
     }
   }
   metric_query {
@@ -458,14 +474,14 @@ resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
       metric_name = "UniqueKeys24h"
       period      = 86400
       stat        = "Average"
-      dimensions  = { ContentType = "Total" }
+      dimensions  = { ContentType = each.key }
     }
   }
   metric_query {
     id          = "spike"
     return_data = true
     expression  = "today - 3 * ma7"
-    label       = "UniqueKeys24h - 3x 7d MA"
+    label       = "UniqueKeys24h(${each.key}) - 3x 7d MA"
   }
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]
