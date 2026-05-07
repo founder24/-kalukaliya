@@ -80,8 +80,17 @@ def _fetch_snapshot() -> dict[str, Any]:
 
 
 def _emit(cw, dims_ct: str, *, hits: int, misses: int, sets: int,
-          hit_ratio: float, unique_keys: int, miss_reasons: dict[str, int]) -> None:
-    """Publish one ContentType row to CloudWatch."""
+          hit_ratio: float, unique_keys: int,
+          miss_reasons: dict[str, int],
+          miss_reasons_24h: dict[str, int] | None = None) -> None:
+    """Publish one ContentType row to CloudWatch.
+
+    Emits both the lifetime `MissReason` series (kept for backwards
+    compat with anyone still reading historical data) AND the new
+    `MissReason24h` series — round-7 architect comment: aligning the
+    Lambda's miss-reason emission with the panel's 24h aggregate so a
+    one-off post-deploy flood cannot dominate the CW trend forever.
+    """
     base = [{"Name": "ContentType", "Value": dims_ct}]
     metrics = [
         {"MetricName": "Hits",          "Value": float(hits),          "Unit": "Count",   "Dimensions": base},
@@ -93,6 +102,13 @@ def _emit(cw, dims_ct: str, *, hits: int, misses: int, sets: int,
     for reason, n in (miss_reasons or {}).items():
         metrics.append({
             "MetricName": "MissReason",
+            "Value": float(n),
+            "Unit": "Count",
+            "Dimensions": base + [{"Name": "Reason", "Value": reason}],
+        })
+    for reason, n in (miss_reasons_24h or {}).items():
+        metrics.append({
+            "MetricName": "MissReason24h",
             "Value": float(n),
             "Unit": "Count",
             "Dimensions": base + [{"Name": "Reason", "Value": reason}],
@@ -250,6 +266,7 @@ def handler(event, context):  # noqa: ARG001
         hit_ratio=float(totals.get("hit_ratio", 0.0)),
         unique_keys=int(totals.get("unique_keys_24h", 0)),
         miss_reasons={},
+        miss_reasons_24h=totals.get("miss_reasons_24h") or {},
     )
     for ct, row in cts.items():
         _emit(
@@ -260,6 +277,7 @@ def handler(event, context):  # noqa: ARG001
             hit_ratio=float(row.get("hit_ratio", 0.0)),
             unique_keys=int(row.get("unique_keys_24h", 0)),
             miss_reasons=row.get("miss_reasons") or {},
+            miss_reasons_24h=row.get("miss_reasons_24h") or {},
         )
 
     # ── 2. Other backend layers (Layer dimension) ───────────────────
