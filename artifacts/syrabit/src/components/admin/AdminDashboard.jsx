@@ -436,6 +436,13 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   // see read/write counters & quota % at a glance and react before a
   // KV outage starts dropping pages and the analytics beacon.
   const [kvHealth, setKvHealth] = useState(null);
+  // Task #510 — operator-toggled expansion of the per-isolate
+  // breakdown under each kv-health binding row. Map<binding, bool> so
+  // multiple bindings can be expanded independently. Starts collapsed
+  // because most operators only need the aggregate; the breakdown is
+  // useful when burn spikes and we need to know if one isolate is
+  // responsible for most of it.
+  const [kvExpandedIsolates, setKvExpandedIsolates] = useState({});
   // Task #315 — R2 cold-storage watchdog snapshot from the edge worker.
   // ``null`` while loading; ``{ configured, state?, ... }`` once the
   // backend responds. Surfaced as a tile so admins can confirm the
@@ -3439,6 +3446,57 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                               Last alert fired: {b.lastAlertFired.severity} on {b.lastAlertFired.op} at {new Date(b.lastAlertFired.at).toLocaleString()}
                             </div>
                           )}
+                          {/* Task #510 — per-isolate breakdown. The
+                              edge worker now sums CF_EDGE_CACHE
+                              counters across every isolate; expanding
+                              this row shows which isolate(s) are
+                              hottest so an operator can see if a
+                              single rogue isolate is driving burn. */}
+                          {Array.isArray(b.isolates) && b.isolates.length > 0 && (() => {
+                            const expanded = !!kvExpandedIsolates[b.binding];
+                            return (
+                              <div className="mt-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setKvExpandedIsolates((prev) => ({
+                                      ...prev,
+                                      [b.binding]: !prev[b.binding],
+                                    }))
+                                  }
+                                  className="text-[10px] text-blue-600 hover:underline"
+                                  data-testid={`notif-prefs-kv-health-isolates-toggle-${b.binding}`}
+                                >
+                                  {expanded ? '▾' : '▸'} by isolate ({b.isolates.length})
+                                </button>
+                                {expanded && (
+                                  <ul
+                                    className="mt-1 ml-3 space-y-0.5"
+                                    data-testid={`notif-prefs-kv-health-isolates-list-${b.binding}`}
+                                  >
+                                    {b.isolates.map((iso) => {
+                                      const r = iso.counters?.read ?? 0;
+                                      const w = iso.counters?.write ?? 0;
+                                      const l = iso.counters?.list ?? 0;
+                                      const d = iso.counters?.delete ?? 0;
+                                      return (
+                                        <li
+                                          key={iso.id}
+                                          className="text-[10px] text-gray-600 tabular-nums flex items-center justify-between gap-2"
+                                          data-testid={`notif-prefs-kv-health-isolate-${b.binding}-${iso.id}`}
+                                        >
+                                          <span className="font-mono text-gray-500">{iso.id}</span>
+                                          <span>
+                                            r {r.toLocaleString()} · w {w.toLocaleString()} · l {l.toLocaleString()} · d {d.toLocaleString()}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </li>
                       );
                     })}

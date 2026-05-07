@@ -115,8 +115,13 @@ async def admin_kv_health(admin: dict = Depends(get_admin_user)):
     if sec_url:
         try:
             async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_S) as client:
+                # Task #510 — opt into the per-isolate breakdown so the
+                # admin panel can show which isolate(s) are hottest under
+                # the CF_EDGE_CACHE row. Backwards compatible: the worker
+                # only adds the `isolates` field when the param is set.
                 sec_resp = await client.get(
                     f"{sec_url}/api/edge/kv-usage",
+                    params={"breakdown": "isolates"},
                     headers={"X-Edge-Admin-Secret": secret},
                 )
             if sec_resp.status_code == 200:

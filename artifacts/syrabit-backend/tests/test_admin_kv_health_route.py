@@ -84,7 +84,7 @@ def test_kv_health_proxies_worker_snapshot(app_client_authed):
         def __init__(self, *a, **k): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, params=None):
             captured["url"] = url
             captured["headers"] = headers or {}
             return _FakeResp()
@@ -132,6 +132,7 @@ def test_kv_health_merges_secondary_kv_cache_snapshot(app_client_authed):
         ],
     }
     captured_urls: list[str] = []
+    captured_calls: list[dict] = []
 
     class _FakeResp:
         def __init__(self, body): self._body = body; self.status_code = 200
@@ -141,8 +142,9 @@ def test_kv_health_merges_secondary_kv_cache_snapshot(app_client_authed):
         def __init__(self, *a, **k): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, params=None):
             captured_urls.append(url)
+            captured_calls.append({"url": url, "params": params})
             if "kv-cache-edge" in url:
                 return _FakeResp(secondary_snapshot)
             return _FakeResp(primary_snapshot)
@@ -166,6 +168,10 @@ def test_kv_health_merges_secondary_kv_cache_snapshot(app_client_authed):
     # Both edge URLs were probed.
     assert any("api.example.com" in u for u in captured_urls)
     assert any("kv-cache-edge.example.com" in u for u in captured_urls)
+    # Task #510 — the secondary call must opt into the per-isolate
+    # breakdown so the admin UI can render the new "by isolate" row.
+    sec_call = next(c for c in captured_calls if "kv-cache-edge" in c["url"])
+    assert sec_call["params"] == {"breakdown": "isolates"}
 
 
 def test_kv_health_secondary_failure_does_not_break_primary(app_client_authed):
@@ -192,7 +198,7 @@ def test_kv_health_secondary_failure_does_not_break_primary(app_client_authed):
         def __init__(self, *a, **k): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, params=None):
             if "kv-cache-edge" in url:
                 raise RuntimeError("connection refused")
             return _FakeResp()
@@ -237,7 +243,7 @@ def test_kv_health_skips_secondary_when_url_matches_primary(app_client_authed):
         def __init__(self, *a, **k): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, params=None):
             call_count["n"] += 1
             return _FakeResp()
 
@@ -288,7 +294,7 @@ def test_kv_health_merge_does_not_overwrite_primary_binding(app_client_authed):
         def __init__(self, *a, **k): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, params=None):
             if "kv-cache-edge" in url:
                 return _FakeResp(secondary_snapshot)
             return _FakeResp(primary_snapshot)

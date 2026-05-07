@@ -288,6 +288,13 @@ function _resolveKvWarningPct(env: Env): number {
   return DEFAULT_WARNING_PCT;
 }
 
+interface KvIsolateBreakdownEntry {
+  // Anonymised short id (8 hex chars) — distinct enough for an
+  // operator to tell isolates apart without leaking the full UUID.
+  id: string;
+  counters: Record<KvOpName, number>;
+}
+
 interface KvBindingSnapshot {
   binding: string;
   utcDay: string;
@@ -296,6 +303,17 @@ interface KvBindingSnapshot {
   percentages: Record<KvOpName, number>;
   status: 'healthy' | 'warning' | 'exhausted';
   fallbackActive: boolean;
+  // Task #510 — populated only when the snapshot caller asks for the
+  // per-isolate breakdown (`?breakdown=isolates`). Omitted by default
+  // so the existing default response shape is unchanged.
+  isolates?: KvIsolateBreakdownEntry[];
+}
+
+/** Anonymise a raw isolate id (UUID or fallback) to an 8-char tag.
+ *  We only need distinctness for the admin UI — never identifiability. */
+function _shortIsolateId(raw: string): string {
+  const cleaned = raw.replace(/-/g, '');
+  return cleaned.slice(0, 8) || raw.slice(0, 8);
 }
 
 function _kvSnapshotFromCounters(
@@ -348,42 +366,89 @@ export async function _aggregateKvCountersAcrossIsolates(
   binding: string,
   kv: KVNamespace,
 ): Promise<Record<KvOpName, number>> {
+  const { total } = await _collectKvIsolatesBreakdown(binding, kv);
+  return total;
+}
+
+/**
+ * Task #510 — same listing pass as `_aggregateKvCountersAcrossIsolates`
+ * but also returns the per-isolate counters so the admin
+ * `/admin/kv-health` panel can show which isolate is hottest. The
+ * isolate IDs are anonymised (`_shortIsolateId`) before being returned;
+ * the worker only needs distinctness for the UI, not identifiability.
+ *
+ * On listing failure we fall back to a single-entry breakdown reflecting
+ * THIS isolate's local counters so the panel still renders something.
+ */
+export async function _collectKvIsolatesBreakdown(
+  binding: string,
+  kv: KVNamespace,
+): Promise<{
+  total: Record<KvOpName, number>;
+  isolates: KvIsolateBreakdownEntry[];
+}> {
   _rollKvDayIfNeeded();
   const local = _kvBindingState(binding);
   await _flushSharedKvCounter(binding, kv);
-  const aggregated: Record<KvOpName, number> = {
+  const total: Record<KvOpName, number> = {
     read: 0,
     write: 0,
     list: 0,
     delete: 0,
   };
+  const isolates: KvIsolateBreakdownEntry[] = [];
+  const ops: KvOpName[] = ['read', 'write', 'list', 'delete'];
+  const prefix = `${SHARED_KV_USAGE_PREFIX}${binding}:${_kvCurrentDay}:`;
   try {
-    const listResult = await kv.list({
-      prefix: `${SHARED_KV_USAGE_PREFIX}${binding}:${_kvCurrentDay}:`,
-    });
+    const listResult = await kv.list({ prefix });
     const keys = (listResult as { keys: { name: string }[] }).keys || [];
     for (const k of keys) {
       try {
         const raw = await kv.get(k.name);
         if (!raw) continue;
         const parsed = JSON.parse(raw) as Partial<Record<KvOpName, number>>;
-        for (const op of ['read', 'write', 'list', 'delete'] as KvOpName[]) {
-          aggregated[op] += parsed[op] ?? 0;
+        const counters: Record<KvOpName, number> = {
+          read: 0,
+          write: 0,
+          list: 0,
+          delete: 0,
+        };
+        for (const op of ops) {
+          const v = parsed[op] ?? 0;
+          counters[op] = v;
+          total[op] += v;
         }
+        const rawId = k.name.slice(prefix.length);
+        isolates.push({ id: _shortIsolateId(rawId), counters });
       } catch {
         /* skip malformed isolate entry */
       }
     }
   } catch {
-    return { ...local.counters };
+    return {
+      total: { ...local.counters },
+      isolates: [
+        { id: _shortIsolateId(_kvIsolateId()), counters: { ...local.counters } },
+      ],
+    };
   }
-  // If the shared store had nothing yet (cold isolate, or list returned
-  // before our own flush propagated), fall back to local counters so
-  // the snapshot is never spuriously empty.
-  const sum =
-    aggregated.read + aggregated.write + aggregated.list + aggregated.delete;
-  if (sum === 0) return { ...local.counters };
-  return aggregated;
+  const sum = total.read + total.write + total.list + total.delete;
+  if (sum === 0) {
+    return {
+      total: { ...local.counters },
+      isolates: [
+        { id: _shortIsolateId(_kvIsolateId()), counters: { ...local.counters } },
+      ],
+    };
+  }
+  // Sort hottest-first by total ops so the UI naturally shows the
+  // isolate(s) most worth looking at at the top.
+  isolates.sort((a, b) => {
+    const sumA = a.counters.read + a.counters.write + a.counters.list + a.counters.delete;
+    const sumB = b.counters.read + b.counters.write + b.counters.list + b.counters.delete;
+    return sumB - sumA;
+  });
+  return { total, isolates };
 }
 
 /** Test-only reset hook so unit tests can start from a clean slate. */
@@ -512,16 +577,23 @@ async function dispatchKvUsage(
     return new Response('unauthorised', { status: 401 });
   }
   _rollKvDayIfNeeded();
+  // Task #510 — opt-in per-isolate breakdown. Default response shape
+  // (no `isolates` key) is preserved so existing callers keep working.
+  const wantBreakdown = url.searchParams.get('breakdown') === 'isolates';
   const bindings: KvBindingSnapshot[] = [];
   if (env.CF_EDGE_CACHE) {
     // Task #454 — sum every isolate's persisted counters before
     // returning so the dashboard sees global burn, not just whichever
     // isolate happened to serve this probe.
-    const counters = await _aggregateKvCountersAcrossIsolates(
+    const { total, isolates } = await _collectKvIsolatesBreakdown(
       'CF_EDGE_CACHE',
       env.CF_EDGE_CACHE,
     );
-    bindings.push(_kvSnapshotFromCounters('CF_EDGE_CACHE', counters, env));
+    const snapshot = _kvSnapshotFromCounters('CF_EDGE_CACHE', total, env);
+    if (wantBreakdown) {
+      snapshot.isolates = isolates;
+    }
+    bindings.push(snapshot);
   }
   return jsonResponse({
     utcDay: _kvCurrentDay,

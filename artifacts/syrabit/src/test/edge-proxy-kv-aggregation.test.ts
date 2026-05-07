@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _aggregateKvCountersAcrossIsolates,
+  _collectKvIsolatesBreakdown,
   _resetKvCountersForTests,
   _setKvIsolateIdForTests,
   _seedKvCountersForTests,
@@ -104,6 +105,36 @@ describe('CF_EDGE_CACHE cross-isolate aggregation', () => {
     expect(
       kv.store.has(`__kv_usage:CF_EDGE_CACHE:${day}:isolate-b`),
     ).toBe(true);
+  });
+
+  it('returns per-isolate breakdown sorted hottest-first (Task #510)', async () => {
+    const kv = new FakeKv();
+    const ns = kv as unknown as KVNamespace;
+
+    // Isolate A — light load.
+    _setKvIsolateIdForTests('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    _seedKvCountersForTests('CF_EDGE_CACHE', { read: 5, write: 1 });
+    await _collectKvIsolatesBreakdown('CF_EDGE_CACHE', ns);
+
+    // Isolate B — heavy load.
+    _resetKvCountersForTests();
+    _setKvIsolateIdForTests('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+    _seedKvCountersForTests('CF_EDGE_CACHE', { read: 500, write: 20 });
+
+    const { total, isolates } = await _collectKvIsolatesBreakdown(
+      'CF_EDGE_CACHE',
+      ns,
+    );
+    expect(total.read).toBe(505);
+    expect(total.write).toBe(21);
+    expect(isolates).toHaveLength(2);
+    // Hottest isolate (B) listed first.
+    expect(isolates[0].counters.read).toBe(500);
+    expect(isolates[1].counters.read).toBe(5);
+    // Anonymised id — short, dash-stripped, distinct.
+    expect(isolates[0].id).toBe('bbbbbbbb');
+    expect(isolates[1].id).toBe('aaaaaaaa');
+    expect(isolates[0].id).not.toBe(isolates[1].id);
   });
 
   it('falls back to local counters when listing fails', async () => {
