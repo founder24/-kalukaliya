@@ -135,6 +135,32 @@ export default function CacheHitRatioPanel({
         </div>
       )}
 
+      {/* Top miss reasons (24h) — drives regression detection. The
+          per-CT "Top miss" column above shows the lifetime dominator;
+          this tile shows what's actually breaking in the rolling
+          24-hour window so a stale flood cannot mask a fresh issue. */}
+      {totals?.top_miss_reasons_24h && totals.top_miss_reasons_24h.length > 0 && (
+        <div
+          className="rounded-md ring-1 ring-amber-200 bg-amber-50 px-2 py-1.5 mb-2"
+          data-testid="cache-panel-top-miss-24h"
+        >
+          <div className="text-[10px] text-amber-700 font-medium mb-0.5">
+            Top miss reasons (24h)
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-amber-900">
+            {totals.top_miss_reasons_24h.slice(0, 5).map((m) => (
+              <span
+                key={m.reason}
+                data-testid={`cache-panel-top-miss-24h-${m.reason}`}
+              >
+                <span className="font-mono">{m.reason}</span>
+                <span className="tabular-nums"> {fmtInt(m.count)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Total rollup */}
       {totals && (
         <div

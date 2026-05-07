@@ -131,7 +131,13 @@ _TIERS = ("inproc", "cf_kv", "redis")
 def _empty_ct_counters() -> dict:
     return {
         "hits": 0, "misses": 0, "sets": 0,
+        # Lifetime miss-reason counters (kept for backwards compat with
+        # existing tests + dashboards). The 24h-windowed view used by the
+        # new "Top miss reasons (24h)" tile lives in `miss_reasons_24h`
+        # below — a ring of (epoch_seconds, reason) tuples that the
+        # snapshot rolls into a ranked aggregate.
         "miss_reasons": {r: 0 for r in _MISS_REASONS},
+        "miss_reasons_24h": [],  # ring of (epoch_seconds, reason)
         "unique_keys_24h": [],  # ring of (epoch_seconds, key) for cardinality
         # Per-tier breakdown of `hits` above. `tier_hits["inproc"] +
         # tier_hits["cf_kv"] + tier_hits["redis"] == hits` is an invariant
@@ -164,6 +170,22 @@ def _bump_unique_key(ct: str, key: str) -> None:
     bucket.append((now, key))
     # Drop entries older than 24 h. Cheap because the list is append-only
     # and the prefix is monotonically aged.
+    while bucket and bucket[0][0] < cutoff:
+        bucket.pop(0)
+
+
+def _bump_miss_reason_24h(ct: str, reason: str) -> None:
+    """Append a (now, reason) tuple to the per-CT 24h ring + age out
+    entries older than 24 h. Round-7 fix — the lifetime `miss_reasons`
+    counter cannot age out a stale dominator (e.g. a one-off
+    `template_version_bump` flood after a deploy keeps the panel
+    showing that reason as #1 for weeks). The 24h window is what the
+    `Top miss reasons (24h)` tile and the
+    `cache-effectiveness` Lambda actually consume."""
+    now = time.time()
+    cutoff = now - 86_400.0
+    bucket = _COUNTERS[ct]["miss_reasons_24h"]
+    bucket.append((now, reason))
     while bucket and bucket[0][0] < cutoff:
         bucket.pop(0)
 
@@ -201,6 +223,17 @@ def snapshot() -> dict:
             hr = round(c["hits"] / total, 4) if total else 0.0
             tier_hits = dict(c.get("tier_hits") or {t: 0 for t in _TIERS})
             tier_sets = dict(c.get("tier_sets") or {t: 0 for t in _TIERS})
+            # Round-7 — roll the 24h ring into a per-reason count.
+            # Age-out happens on each append, but a snapshot taken hours
+            # after the last miss could still hold expired entries; do
+            # one cheap defensive sweep here.
+            now_local = time.time()
+            cutoff_local = now_local - 86_400.0
+            ring = c.get("miss_reasons_24h") or []
+            mr24: dict[str, int] = {r: 0 for r in _MISS_REASONS}
+            for ts, reason in ring:
+                if ts >= cutoff_local and reason in mr24:
+                    mr24[reason] += 1
             out["content_types"][ct] = {
                 "hits": c["hits"],
                 "misses": c["misses"],
@@ -208,6 +241,7 @@ def snapshot() -> dict:
                 "hit_ratio": hr,
                 "unique_keys_24h": len({k for _, k in c["unique_keys_24h"]}),
                 "miss_reasons": dict(c["miss_reasons"]),
+                "miss_reasons_24h": mr24,
                 "tier_hits": tier_hits,
                 "tier_sets": tier_sets,
             }
@@ -236,6 +270,22 @@ def snapshot() -> dict:
             "cf_kv_enabled": bool(_CF_KV_ENABLED),
             "redis_enabled": _redis_client() is not None,
         }
+        # Round-7 — global 24h miss-reason rollup, ranked desc. Drives
+        # the new "Top miss reasons (24h)" tile in the admin panel and
+        # the per-reason CW alarm thresholds in
+        # lambda_batch.cache_effectiveness. Lifetime counters cannot
+        # detect "regression in the last day" because a one-off flood
+        # would dominate them forever.
+        agg: dict[str, int] = {r: 0 for r in _MISS_REASONS}
+        for entry in out["content_types"].values():
+            for r, n in (entry.get("miss_reasons_24h") or {}).items():
+                agg[r] = agg.get(r, 0) + int(n)
+        out["totals"]["miss_reasons_24h"] = agg
+        out["totals"]["top_miss_reasons_24h"] = [
+            {"reason": r, "count": n}
+            for r, n in sorted(agg.items(), key=lambda x: x[1], reverse=True)
+            if n > 0
+        ]
     return out
 
 
@@ -436,6 +486,7 @@ def get_response(
     with _COUNTERS_LOCK:
         _COUNTERS[ct]["misses"] += 1
         _COUNTERS[ct]["miss_reasons"][reason] += 1
+        _bump_miss_reason_24h(ct, reason)
     return None
 
 
