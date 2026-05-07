@@ -294,6 +294,73 @@ def test_embed_stack_health_surfaces_staging_row(app_client_authed,
     assert body["embed"]["ok"] is True  # back-compat field still production-only
 
 
+# ── Task #477 — staging embed-worker outage must never page on-call ─────
+# The Task #438 design contract is "staging failures show a yellow row but
+# DO NOT page". The provider-level behaviour is unit-tested in
+# ``test_health_check_environments_staging_failure_does_not_flip_pages``,
+# but the route-level guarantee — that the admin embed-stack endpoint's
+# top-level ``ok`` field stays ``True`` when only the staging row is down
+# — needs its own pin so a future refactor of the aggregation logic
+# can't silently regress the on-call paging contract.
+def test_embed_stack_health_staging_only_outage_does_not_page(
+        app_client_authed, patched_backfill, monkeypatch):
+    from providers import workers_embed as _we
+    from providers import pinecone_ai as _pc
+    from providers import memory_brain as _mb
+
+    async def _fake_envs():
+        return [
+            {"env": "production", "label": "Production", "ok": True,
+             "configured": True, "pages": True, "dims": 1024,
+             "model_version": "1.0.0", "latency_ms": 38, "status_code": 200,
+             "url": "https://embed.test.local"},
+            {"env": "staging", "label": "Staging", "ok": False,
+             "configured": True, "pages": False, "dims": 1024,
+             "model_version": "staging-2026-05-07",
+             "latency_ms": 0, "status_code": 503,
+             "url": "https://embed-staging.test.local",
+             "reason": "workers_embed: HTTP 503: upstream down"},
+        ]
+
+    async def _fake_embed_health():
+        return {"ok": True, "configured": True, "dims": 1024,
+                "model_version": "1.0.0", "latency_ms": 38}
+
+    async def _fake_rerank_health():
+        return {"ok": True}
+
+    async def _fake_memory_health():
+        return {"ok": True}
+
+    monkeypatch.setattr(_we, "health_check_environments", _fake_envs)
+    monkeypatch.setattr(_we, "health_check", _fake_embed_health)
+    monkeypatch.setattr(_pc, "rerank_health_check", _fake_rerank_health,
+                        raising=False)
+    monkeypatch.setattr(_mb, "health_check", _fake_memory_health,
+                        raising=False)
+
+    res = app_client_authed.get("/admin/health/embed-stack")
+    assert res.status_code == 200
+    body = res.json()
+
+    # Critical contract: a staging-only outage must NOT page on-call.
+    assert body["ok"] is True, (
+        "staging embed-worker outage flipped the page-level ok flag — "
+        "this would page on-call for a canary failure (Task #438)"
+    )
+    # Production-only back-compat pill stays green.
+    assert body["embed"]["ok"] is True
+
+    # Staging row is exposed under embed_environments so the dashboard
+    # can still render the yellow canary row.
+    envs = body.get("embed_environments")
+    assert isinstance(envs, list)
+    by_env = {e["env"]: e for e in envs}
+    assert "staging" in by_env, "staging row missing from embed_environments"
+    assert by_env["staging"]["ok"] is False
+    assert by_env["production"]["ok"] is True
+
+
 # ── Task #469 — embed-stack alert pill counter contract ─────────────────
 # Task #436 added the per-leg "N/3 consecutive failures" badge driven by
 # the Task #412 watchdog counters in metrics.py. The metrics accessor
