@@ -186,3 +186,152 @@ describe('<MyMemoriesPage /> — Forget everything flow (Task #443/#480)', () =>
     expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Task #481 / #526 — Lock the debounced keyword search box on
+ * /profile/memories. Asserts the three behaviors that make search
+ * feel reliable to a student:
+ *
+ *   1. Typing fires exactly ONE reload after the 300ms debounce
+ *      (and forwards the trimmed `q` param to the backend).
+ *   2. The clear (X) button resets the input + result list back to
+ *      the unfiltered baseline returned by the API.
+ *   3. When the backend returns no matches for `q`, the existing
+ *      "no matches" empty-state copy is shown (not the cold-start
+ *      "Syra hasn't saved any memories" copy).
+ */
+describe('<MyMemoriesPage /> — debounced keyword search (Task #481/#526)', () => {
+  it('debounces typing and triggers exactly one reload with the trimmed q', async () => {
+    vi.useFakeTimers();
+    try {
+      // First call (initial mount, no q) returns the seeded list.
+      mockGet.mockResolvedValueOnce({
+        data: { items: SEEDED_ITEMS, total: 2, offset: 0, limit: 20, has_more: false },
+      });
+
+      render(<MyMemoriesPage />);
+      // Flush the initial mount load so the search box renders.
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+
+      const input = screen.getByTestId('memory-search-input');
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // Second call (the debounced search) returns just one item.
+      mockGet.mockResolvedValueOnce({
+        data: {
+          items: [SEEDED_ITEMS[0]],
+          total: 1, offset: 0, limit: 20, has_more: false,
+        },
+      });
+
+      // Three keystrokes inside the 300ms window — must collapse
+      // into ONE backend call, not three.
+      await act(async () => { fireEvent.change(input, { target: { value: 'p' } }); });
+      await act(async () => { vi.advanceTimersByTime(100); });
+      await act(async () => { fireEvent.change(input, { target: { value: 'ph' } }); });
+      await act(async () => { vi.advanceTimersByTime(100); });
+      await act(async () => { fireEvent.change(input, { target: { value: 'phys' } }); });
+
+      // Mid-flight: still only the original mount call.
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // Cross the debounce boundary → one fresh load fires.
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+
+      expect(mockGet).toHaveBeenCalledTimes(2);
+      const [, lastOpts] = mockGet.mock.calls[1];
+      expect(mockGet.mock.calls[1][0]).toBe('/user/memories');
+      expect(lastOpts.params.q).toBe('phys');
+      // limit/offset stay aligned with the page contract.
+      expect(lastOpts.params.offset).toBe(0);
+      expect(lastOpts.params.limit).toBe(20);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clear (X) button resets the input and reloads the unfiltered list', async () => {
+    vi.useFakeTimers();
+    try {
+      // Mount load → seeded items.
+      mockGet.mockResolvedValueOnce({
+        data: { items: SEEDED_ITEMS, total: 2, offset: 0, limit: 20, has_more: false },
+      });
+      render(<MyMemoriesPage />);
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+
+      const input = screen.getByTestId('memory-search-input');
+
+      // Search load → only one item matches.
+      mockGet.mockResolvedValueOnce({
+        data: { items: [SEEDED_ITEMS[0]], total: 1, offset: 0, limit: 20, has_more: false },
+      });
+      await act(async () => { fireEvent.change(input, { target: { value: 'newton' } }); });
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+      expect(mockGet).toHaveBeenCalledTimes(2);
+
+      // The clear button only renders while the input has content.
+      const clearBtn = screen.getByTestId('memory-search-clear');
+
+      // Reset load → seeded list again, no `q` param.
+      mockGet.mockResolvedValueOnce({
+        data: { items: SEEDED_ITEMS, total: 2, offset: 0, limit: 20, has_more: false },
+      });
+      await act(async () => { fireEvent.click(clearBtn); });
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+
+      // Input is empty + clear button is gone.
+      expect(screen.getByTestId('memory-search-input').value).toBe('');
+      expect(screen.queryByTestId('memory-search-clear')).toBeNull();
+
+      // The reset reload omits the `q` param entirely (not q='').
+      expect(mockGet).toHaveBeenCalledTimes(3);
+      const [, resetOpts] = mockGet.mock.calls[2];
+      expect('q' in resetOpts.params).toBe(false);
+
+      // Both seeded cards are back on screen.
+      expect(screen.getAllByTestId('memory-card')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the "no matches" empty state when q returns zero results', async () => {
+    vi.useFakeTimers();
+    try {
+      mockGet.mockResolvedValueOnce({
+        data: { items: SEEDED_ITEMS, total: 2, offset: 0, limit: 20, has_more: false },
+      });
+      render(<MyMemoriesPage />);
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+
+      const input = screen.getByTestId('memory-search-input');
+
+      // Search returns no matches — must show the *no-matches* copy,
+      // NOT the cold-start "Syra hasn't saved any memories" copy.
+      mockGet.mockResolvedValueOnce({
+        data: { items: [], total: 0, offset: 0, limit: 20, has_more: false },
+      });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'zzznomatch' } });
+      });
+      await act(async () => { vi.advanceTimersByTime(300); });
+      await act(async () => { await Promise.resolve(); });
+
+      const empty = screen.getByTestId('memories-empty');
+      expect(empty.textContent).toMatch(/No memories match these filters/i);
+      expect(empty.textContent).not.toMatch(/hasn't saved any memories/i);
+      // Cards from the previous load are gone.
+      expect(screen.queryAllByTestId('memory-card')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

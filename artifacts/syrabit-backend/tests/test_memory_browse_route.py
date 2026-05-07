@@ -15,6 +15,7 @@ collection and assert:
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from typing import Any
 
 import pytest
@@ -26,18 +27,34 @@ from fastapi.testclient import TestClient
 # ── Fake Mongo collection (filter-aware) ─────────────────────────────
 
 
+def _value_matches(actual: Any, expected: Any) -> bool:
+    """Match a single field. Supports the ``{"$regex": ..., "$options": ...}``
+    operator used by the Task #481 ``q`` keyword filter — needed so
+    tests can drive the new search path through the same fake Mongo."""
+    if isinstance(expected, dict) and "$regex" in expected:
+        if not isinstance(actual, str):
+            return False
+        flags = 0
+        if "i" in (expected.get("$options") or ""):
+            flags |= re.IGNORECASE
+        return re.search(expected["$regex"], actual, flags) is not None
+    return actual == expected
+
+
 def _matches(doc: dict[str, Any], query: dict[str, Any]) -> bool:
     """Tiny subset of Mongo's match semantics — enough for the
-    ``user_id`` / ``_id`` / ``metadata.subject_id`` / ``kind`` filters
-    used by ``routes/memory_browse.py``."""
+    ``user_id`` / ``_id`` / ``metadata.subject_id`` / ``kind`` / ``text``
+    (with ``$regex``) filters used by ``routes/memory_browse.py``."""
     for key, expected in query.items():
         if "." in key:
             head, tail = key.split(".", 1)
             sub = doc.get(head) or {}
-            if not isinstance(sub, dict) or sub.get(tail) != expected:
+            if not isinstance(sub, dict):
+                return False
+            if not _value_matches(sub.get(tail), expected):
                 return False
         else:
-            if doc.get(key) != expected:
+            if not _value_matches(doc.get(key), expected):
                 return False
     return True
 
@@ -269,3 +286,138 @@ def test_unauthenticated_delete_all_returns_401(collection):
     assert res.status_code == 401
     # Nothing got wiped.
     assert len(collection.docs) == 4
+
+
+# ── Task #481 / #526 — `q` keyword filter contract ───────────────────
+
+
+@pytest.fixture
+def q_collection(monkeypatch):
+    """Richer seed for the keyword search tests. We keep the original
+    A_MEM_* / B_MEM_* docs intact so they still anchor the privacy
+    assertions, and add a few more rows whose ``text`` exercises the
+    case-insensitive substring + cross-user isolation paths."""
+    base = _seed_docs()
+    t0 = _dt.datetime(2026, 5, 1, 10, 0, 0, tzinfo=_dt.timezone.utc)
+    extra = [
+        {
+            "_id": ObjectId(), "user_id": "user-A", "kind": "qa",
+            "text": "Photosynthesis happens in chloroplasts",
+            "metadata": {"subject_id": "bio-11"},
+            "created_at": t0 + _dt.timedelta(hours=4),
+        },
+        {
+            "_id": ObjectId(), "user_id": "user-A", "kind": "note",
+            "text": "Newton's laws of motion summary",
+            "metadata": {"subject_id": "phy-11"},
+            "created_at": t0 + _dt.timedelta(hours=5),
+        },
+        {
+            # Same keyword as one of A's docs, but owned by B —
+            # must never leak into A's `q=newton` results.
+            "_id": ObjectId(), "user_id": "user-B", "kind": "note",
+            "text": "Newton ring experiment notes",
+            "metadata": {"subject_id": "phy-11"},
+            "created_at": t0 + _dt.timedelta(hours=6),
+        },
+    ]
+    col = _FakeCollection(base + extra)
+    import deps
+    monkeypatch.setattr(deps, "db", _FakeDB(col), raising=False)
+    return col
+
+
+def test_q_matches_case_insensitively_against_text(q_collection):
+    """``q`` is a case-insensitive substring match on ``text``. A query
+    of ``newton`` (lowercase) must surface A's "Newton's laws…" doc."""
+    client = _build_app(USER_A)
+    res = client.get("/user/memories", params={"q": "newton"})
+    assert res.status_code == 200
+    body = res.json()
+    texts = [item["text"] for item in body["items"]]
+    assert any("Newton's laws of motion" in t for t in texts)
+    # Total reflects only A's matches, not B's "Newton ring…" doc.
+    assert body["total"] == 1
+
+
+def test_q_whitespace_only_is_treated_as_no_filter(q_collection):
+    """A whitespace-only ``q`` must behave exactly like no ``q`` at
+    all — i.e. return every memory the caller owns."""
+    client = _build_app(USER_A)
+    baseline = client.get("/user/memories").json()
+    res = client.get("/user/memories", params={"q": "   "})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == baseline["total"]
+    assert {i["id"] for i in body["items"]} == {
+        i["id"] for i in baseline["items"]
+    }
+
+
+def test_q_ands_with_kind_and_subject_filters(q_collection):
+    """``q`` must AND with the existing ``kind`` and ``subject_id``
+    filters — never widen the result set."""
+    client = _build_app(USER_A)
+
+    # `q=memory` matches A_MEM_1 ("A's first memory") + A_MEM_2
+    # ("A's second memory"). Adding kind=qa narrows to A_MEM_1 only.
+    res = client.get(
+        "/user/memories", params={"q": "memory", "kind": "qa"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == str(A_MEM_1)
+
+    # `q=memory` + subject_id=phy-11 narrows to A_MEM_2 only (the
+    # "Newton's laws…" doc is in phy-11 too but does not contain
+    # the substring "memory").
+    res = client.get(
+        "/user/memories",
+        params={"q": "memory", "subject_id": "phy-11"},
+    )
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == str(A_MEM_2)
+
+
+def test_q_never_returns_other_users_memories(q_collection):
+    """Cross-user isolation must hold even when B owns a doc whose
+    text matches the same keyword. A searching for ``newton`` must
+    NOT see B's "Newton ring experiment notes" doc."""
+    client = _build_app(USER_A)
+    res = client.get("/user/memories", params={"q": "newton"})
+    body = res.json()
+    texts = [item["text"] for item in body["items"]]
+    assert all("Newton ring" not in t for t in texts)
+    # Symmetric check: B's `q=newton` returns only B's match.
+    client_b = _build_app(USER_B)
+    res_b = client_b.get("/user/memories", params={"q": "newton"})
+    body_b = res_b.json()
+    assert body_b["total"] == 1
+    assert "Newton ring" in body_b["items"][0]["text"]
+
+
+def test_q_pagination_offset_limit_and_has_more(q_collection):
+    """Pagination contract (``limit`` / ``offset`` / ``has_more`` /
+    ``total``) must remain consistent when ``q`` is active."""
+    client = _build_app(USER_A)
+
+    # `q=memory` matches exactly 2 of A's docs (A_MEM_1, A_MEM_2).
+    page1 = client.get(
+        "/user/memories", params={"q": "memory", "limit": 1, "offset": 0},
+    ).json()
+    assert page1["total"] == 2
+    assert len(page1["items"]) == 1
+    assert page1["has_more"] is True
+
+    page2 = client.get(
+        "/user/memories", params={"q": "memory", "limit": 1, "offset": 1},
+    ).json()
+    assert page2["total"] == 2
+    assert len(page2["items"]) == 1
+    assert page2["has_more"] is False
+
+    # The two pages together cover both matching docs without overlap.
+    seen = {page1["items"][0]["id"], page2["items"][0]["id"]}
+    assert seen == {str(A_MEM_1), str(A_MEM_2)}
