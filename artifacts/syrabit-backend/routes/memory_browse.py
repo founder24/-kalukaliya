@@ -19,6 +19,7 @@ surface and therefore strictly authenticated.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 
 from bson import ObjectId
@@ -39,6 +40,9 @@ _PREVIEW_CHAR_CAP = 600
 # Anything else is silently dropped so a hostile/typo'd query param can't
 # inject arbitrary fields into the Mongo filter.
 _ALLOWED_KINDS = {"qa", "fact", "note"}
+# Cap the search needle so a hostile client can't ship a giant payload
+# that turns into an expensive regex against every memory doc.
+_MAX_SEARCH_LEN = 120
 
 
 def _truncate(s: str, cap: int = _PREVIEW_CHAR_CAP) -> str:
@@ -70,6 +74,7 @@ async def list_my_memories(
     offset: int = 0,
     kind: Optional[str] = None,
     subject_id: Optional[str] = None,
+    q: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return the signed-in student's saved memory_brain entries,
@@ -81,6 +86,13 @@ async def list_my_memories(
         client cannot 4xx itself.
       * ``subject_id`` — matches ``metadata.subject_id`` exactly. Empty
         string is treated as "no subject filter".
+
+    Optional filter (Task #481):
+      * ``q`` — case-insensitive substring match against the ``text``
+        field. Empty/whitespace-only values are ignored. The needle is
+        capped at ``_MAX_SEARCH_LEN`` chars and ``re.escape``'d so
+        regex metacharacters in the query are matched literally and
+        cannot turn into a ReDoS payload.
     """
     try:
         n = max(1, min(int(limit or _DEFAULT_LIMIT), _MAX_LIMIT))
@@ -110,6 +122,9 @@ async def list_my_memories(
     subject_norm = (subject_id or "").strip()
     if subject_norm:
         query["metadata.subject_id"] = subject_norm
+    q_norm = (q or "").strip()[:_MAX_SEARCH_LEN]
+    if q_norm:
+        query["text"] = {"$regex": re.escape(q_norm), "$options": "i"}
 
     col = db[_MB_COLLECTION]
     items: list[dict[str, Any]] = []

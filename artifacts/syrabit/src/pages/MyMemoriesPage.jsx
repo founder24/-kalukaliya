@@ -9,7 +9,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, Loader2, Brain, ChevronLeft, AlertTriangle } from 'lucide-react';
+import { Trash2, Loader2, Brain, ChevronLeft, AlertTriangle, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -106,17 +106,24 @@ export default function MyMemoriesPage() {
   const [forgetting, setForgetting] = useState(false);
   const [kindFilter, setKindFilter] = useState('all');
   const [subjectFilter, setSubjectFilter] = useState('');
+  // Task #481 — text search. `searchInput` is what the user is typing
+  // right now; `searchQuery` is the debounced value actually sent to
+  // the backend so we don't fire a request on every keystroke.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   // Subject options accumulate across loads so the picker doesn't
   // collapse to just the currently-selected subject after filtering.
   const [subjectOptions, setSubjectOptions] = useState([]);
 
-  const load = useCallback(async (off, append, kindArg, subjectArg) => {
+  const load = useCallback(async (off, append, kindArg, subjectArg, qArg) => {
     if (off === 0) setLoading(true);
     else setLoadingMore(true);
     try {
       const params = { limit: PAGE_SIZE, offset: off };
       if (kindArg && kindArg !== 'all') params.kind = kindArg;
       if (subjectArg) params.subject_id = subjectArg;
+      const qTrim = (qArg || '').trim();
+      if (qTrim) params.q = qTrim;
       const res = await apiClient().get('/user/memories', { params });
       const data = res.data || {};
       const next = Array.isArray(data.items) ? data.items : [];
@@ -143,10 +150,17 @@ export default function MyMemoriesPage() {
     }
   }, []);
 
+  // Debounce the search input so we don't issue a request on every
+  // keystroke. 300ms feels snappy without being chatty.
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   useEffect(() => {
     if (!user) return;
-    load(0, false, kindFilter, subjectFilter);
-  }, [user, load, kindFilter, subjectFilter]);
+    load(0, false, kindFilter, subjectFilter, searchQuery);
+  }, [user, load, kindFilter, subjectFilter, searchQuery]);
 
   const handleDelete = (memory) => {
     setPendingDelete(memory);
@@ -167,6 +181,8 @@ export default function MyMemoriesPage() {
       setSubjectOptions([]);
       setSubjectFilter('');
       setKindFilter('all');
+      setSearchInput('');
+      setSearchQuery('');
       toast.success(
         deleted === 0
           ? 'Nothing to forget'
@@ -255,7 +271,36 @@ export default function MyMemoriesPage() {
             )}
           </div>
 
-          {(subjectOptions.length > 0 || items.length > 0 || kindFilter !== 'all' || subjectFilter) && (
+          {(subjectOptions.length > 0 || items.length > 0 || kindFilter !== 'all' || subjectFilter || searchQuery.trim()) && (
+            <div className="relative" data-testid="memory-search">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search your memories…"
+                maxLength={120}
+                data-testid="memory-search-input"
+                className="w-full h-9 pl-8 pr-9 rounded-xl text-sm text-foreground outline-none border border-border bg-card"
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={() => setSearchInput('')}
+                  aria-label="Clear search"
+                  data-testid="memory-search-clear"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {(subjectOptions.length > 0 || items.length > 0 || kindFilter !== 'all' || subjectFilter || searchQuery.trim()) && (
             <div className="flex flex-wrap items-center gap-2" data-testid="memory-filters">
               <div className="flex flex-wrap gap-1.5">
                 {KIND_TABS.map((tab) => {
@@ -309,7 +354,7 @@ export default function MyMemoriesPage() {
               }}
               data-testid="memories-empty"
             >
-              {kindFilter !== 'all' || subjectFilter
+              {kindFilter !== 'all' || subjectFilter || searchQuery.trim()
                 ? "No memories match these filters. Try clearing them."
                 : "Syra hasn't saved any memories about you yet. Chat with it or confirm flashcards and they'll show up here."}
             </div>
@@ -331,7 +376,7 @@ export default function MyMemoriesPage() {
               {hasMore && (
                 <div className="flex justify-center pt-2">
                   <button
-                    onClick={() => load(offset, true, kindFilter, subjectFilter)}
+                    onClick={() => load(offset, true, kindFilter, subjectFilter, searchQuery)}
                     disabled={loadingMore}
                     className="px-4 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted disabled:opacity-50"
                   >
