@@ -136,7 +136,10 @@ Set every variable listed below. Values marked **required** must be set for the 
 | `CHAT_DEFAULT_MODEL` | System-wide chat model when admin has no override (e.g. `openai/gpt-oss-20b`). Task #490: the legacy `vertex/gemini-flash` value is no longer valid — Vertex was removed from the chat hot-path; if set it is transparently rewritten to `openai/gpt-oss-20b` at dispatch. |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST endpoint |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token |
-| `RESEND_API_KEY` | Resend API key for transactional email |
+| `AWS_ACCESS_KEY_ID` | AWS access key for the SES transactional email IAM user (Task #556) |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key for the SES transactional email IAM user |
+| `SES_REGION` | SES region (`us-east-1` primary, `ap-south-1` standby) |
+| `EMAIL_FROM` | Verified SES sender address (e.g. `noreply@syrabit.ai`) |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key |
 | `SUPABASE_ANON_KEY` | Supabase anonymous key |

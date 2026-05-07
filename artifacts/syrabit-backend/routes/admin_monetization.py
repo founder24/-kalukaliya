@@ -67,10 +67,11 @@ async def admin_patch_plan_tier(plan: str, data: dict, admin: dict = Depends(get
 DEFAULT_API_CONFIG = {
     "groq":        {"key": ""},
     "payment":     {"razorpay_key_id": "", "razorpay_key_secret": "", "razorpay_webhook_secret": ""},
-    # Task #347 — Resend removed; SendGrid is the sole transactional
-    # email transport. Key lives in env var SENDGRID_API_KEY rather than
-    # admin DB config so it's managed alongside other secrets.
-    "email":       {"sendgrid_key": ""},
+    # Task #556 — Amazon SES is the sole transactional email transport
+    # (legacy providers retired). Credentials live in env vars
+    # AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + SES_REGION rather
+    # than admin DB config so they're managed alongside other secrets.
+    "email":       {"ses_region": ""},
     "push":        {"onesignal_key": ""},
     "analytics":   {"posthog_key": ""},
     "google_auth": {"client_id": "", "client_secret": "", "enabled": False},

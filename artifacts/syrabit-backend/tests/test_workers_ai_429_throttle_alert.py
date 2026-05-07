@@ -404,7 +404,8 @@ class TestAlertWithRealDispatch:
 
         with (
             patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "RESEND_API_KEY": ""}),
+                                     "AWS_ACCESS_KEY_ID": "",
+                                     "AWS_SECRET_ACCESS_KEY": ""}),
             patch.object(metrics_mod, "_notification_channels", silence_channels),
             patch.object(metrics_mod, "db", mock_db),
             patch("routes.admin_notifications._dispatch_push_to_admins",
