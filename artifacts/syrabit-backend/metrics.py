@@ -2832,6 +2832,72 @@ async def _alerting_loop():
             except Exception:
                 pass
 
+            # ── 6d. memory_brain per-worker failure rate (Task #529) ─
+            # Section 6b above pages on the *fleet-aggregate* failure
+            # rate pulled from this worker's local ring buffer. That
+            # alert can sit silent for hours when one gunicorn worker
+            # has a revoked Voyage key (or a corrupted Mongo
+            # connection) at 100% failure while the other workers
+            # carry enough healthy traffic to dilute the average
+            # below ``memory_brain_failure_rate_pct``. Task #483
+            # already exposes the per-worker breakdown via
+            # ``memory_brain_metrics.get_fleet_workers()``; this
+            # check pages on-call when ANY individual worker in
+            # that breakdown crosses the same threshold + min-sample
+            # gate, with the offending pid in the alert key + body
+            # so on-call can target the recycle.
+            #
+            # Per-pid alert key (``memory_brain_worker_failure_rate:<pid>``)
+            # so the 30-min cooldown is scoped per worker — a second
+            # bad worker still pages even if pid 42 paged 5 min ago,
+            # but a sustained 100% on the same pid doesn't re-page
+            # every tick.
+            try:
+                _mb_worker_threshold = float(
+                    _ALERT_THRESHOLDS.get("memory_brain_failure_rate_pct", 0) or 0
+                )
+                _mb_worker_min_sample = int(
+                    _ALERT_THRESHOLDS.get("memory_brain_failure_min_sample", 20) or 20
+                )
+                if _mb_worker_threshold > 0:
+                    import memory_brain_metrics as _mbm_workers
+                    _workers = _mbm_workers.get_fleet_workers(hours=1) or []
+                    for _w in _workers:
+                        _w_total = int(_w.get("total", 0) or 0)
+                        _w_rate = float(_w.get("failure_rate_pct", 0) or 0)
+                        if (
+                            _w_total >= _mb_worker_min_sample
+                            and _w_rate > _mb_worker_threshold
+                        ):
+                            _w_pid = _w.get("pid")
+                            await _dispatch_alert(
+                                f"memory_brain_worker_failure_rate:{_w_pid}",
+                                "memory_brain worker failure rate high",
+                                f"Worker pid={_w_pid}: {_w_rate:.1f}% of last "
+                                f"{_w_total} memory_brain ops failed in the "
+                                f"current hour bucket (threshold: "
+                                f"{_mb_worker_threshold:.0f}%, "
+                                f"failures={_w.get('failures', 0)}). The "
+                                f"fleet aggregate may still look healthy "
+                                f"because other workers are diluting the "
+                                f"average — this single worker is silently "
+                                f"degraded. Likely cause: revoked Voyage "
+                                f"API key on this pid, stuck Mongo "
+                                f"connection, or a per-process secret that "
+                                f"didn't refresh. Recycle the worker or "
+                                f"investigate /admin/memory-brain/metrics "
+                                f"› per-worker breakdown.",
+                                threshold_snapshot={
+                                    "metric": "memory_brain_worker_failure_rate_pct",
+                                    "value": _mb_worker_threshold,
+                                    "actual": _w_rate,
+                                    "sample": _w_total,
+                                    "worker_pid": _w_pid,
+                                },
+                            )
+            except Exception:
+                pass
+
             # ── 7. Credit-deduct fallback rate (Task #769) ────────────
             # `db_ops.atomic_deduct_credit` records every fall-through
             # past the Postgres path. If the rolling 5-min rate stays
