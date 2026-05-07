@@ -161,7 +161,6 @@ state.
 |------------------------------|-----------------------------|--------------------------|
 | `supabase-service-role-key`  | `SUPABASE_SERVICE_ROLE_KEY` | 1Password `Supabase`     |
 | `upstash-redis-rest-token`   | `UPSTASH_REDIS_REST_TOKEN`  | 1Password `Upstash`      |
-| `resend-api-key`             | `RESEND_API_KEY`            | 1Password `Resend`       |
 | `sentry-dsn-cron`            | `SENTRY_DSN`                | 1Password `Sentry`       |
 | `axiom-ingest-token`         | `AXIOM_INGEST_TOKEN`        | 1Password `Axiom`        |
 | `slack-ops-webhook`          | (action group; see §7)      | 1Password `Slack`        |
@@ -202,7 +201,7 @@ Re-verify at any time without writing:
 Rotate a single secret:
 
 ```bash
-./scripts/populate-azure-secrets.sh --secret resend-api-key
+./scripts/populate-azure-secrets.sh --secret sentry-dsn-cron
 ```
 
 Network ACL note: the Key Vault is created with
@@ -220,10 +219,16 @@ spec — the runtime managed identity resolves them at job-start:
 
 ```yaml
 secrets:
-  - name: resend-api-key
-    keyVaultUrl: https://syrabit-cron-obs-kv.vault.azure.net/secrets/resend-api-key
+  - name: sentry-dsn-cron
+    keyVaultUrl: https://syrabit-cron-obs-kv.vault.azure.net/secrets/sentry-dsn-cron
     identity: /subscriptions/<sub>/resourceGroups/syrabit-cron-obs-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/syrabit-cron-jobs-runtime
 ```
+
+Note (Task #556 retirement): the previous third-party transactional email
+vendor secret has been retired from this Key Vault — Amazon SES is the
+sole transactional path and reads its credentials from the existing
+`AWS_*` mirrors. Do not re-add the legacy secret without a V5 spec
+change.
 
 ### Rotation
 

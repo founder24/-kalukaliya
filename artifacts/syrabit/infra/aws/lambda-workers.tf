@@ -206,13 +206,20 @@ resource "aws_lambda_event_source_mapping" "sqs_consumer" {
   enabled                            = true
 }
 
-# ─── Email retry wiring (reuses existing email-worker Lambda) ───────────────
-# The Phase 1b Lambda handles SES sends; this second trigger lets
-# producers fan out via SQS for retry on transient SES errors instead
-# of invoking it synchronously over the function URL. Task #556 — the
-# legacy provider was retired; SES is now the sole transactional path.
+# ─── SES retry-queue wiring (NOT a provider fallback) ──────────────────────
+# Task #556 (2026-05-07) — Amazon SES is the SOLE transactional path,
+# no fallback, no break-glass (V4 §12). This SQS-backed trigger lets
+# producers re-drive transient SES errors (throttle / 5xx / network
+# blip) against the same SES endpoint asynchronously instead of
+# dropping the message. There is no second provider involved at any
+# point — both the synchronous call and this consumer talk to SES.
+# The legacy "email-fallback" SQS queue key + resource label are
+# retained because renaming SQS queues forces a destructive replace;
+# operator-facing semantics are documented in
+# `services/backend/sqs_consumers/email_fallback.py` and
+# `infra/four-cloud-delegation.md`.
 
-resource "aws_lambda_event_source_mapping" "email_fallback" {
+resource "aws_lambda_event_source_mapping" "ses_retry_queue" {
   event_source_arn                   = aws_sqs_queue.worker["email-fallback"].arn
   function_name                      = aws_lambda_function.email_worker.arn
   batch_size                         = 5
@@ -221,11 +228,11 @@ resource "aws_lambda_event_source_mapping" "email_fallback" {
   enabled                            = true
 }
 
-# Grant the existing email-worker role permission to drain the
-# fallback queue. Inline policy keeps the grant scoped to that queue
+# Grant the existing email-worker role permission to drain the SES
+# retry queue. Inline policy keeps the grant scoped to that queue
 # only — the role still cannot touch the other seven worker queues.
-resource "aws_iam_role_policy" "email_worker_sqs_fallback" {
-  name = "sqs-email-fallback"
+resource "aws_iam_role_policy" "email_worker_ses_retry_queue" {
+  name = "sqs-ses-retry"
   role = aws_iam_role.email_worker.id
 
   policy = jsonencode({

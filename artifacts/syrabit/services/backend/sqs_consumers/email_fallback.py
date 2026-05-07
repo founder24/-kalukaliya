@@ -1,11 +1,18 @@
-"""email-fallback SQS consumer (Task #332).
+"""SES retry-queue SQS consumer (Task #332; renamed semantically by
+Task #556 retirement — 2026-05-07).
 
-The primary email path is Amazon SES (Task #556 — SES is the sole
-transactional provider); on transient SES failure the API
-producer drops the original payload onto the email-fallback SQS
-queue and SES is the secondary route. This handler unpacks the
-queued payload and calls SES via boto3 — the same to/subject/html
-shape SES expects so callers don't need a parallel template path.
+This is **not** a provider fallback. Amazon SES is the sole
+transactional email path (Task #556 — no fallback, no break-glass,
+V4 §12). The retry queue exists only so a transient SES error
+(throttle, 5xx, network blip) on the synchronous path can be
+re-driven asynchronously against the **same** SES endpoint instead
+of dropping the message. Both the primary call and this consumer
+talk to SES — there is no second provider involved at any point.
+
+The legacy "email-fallback" queue + Terraform resource names are
+retained because renaming SQS queues forces a destructive replace;
+the operator-facing semantics live in this docstring and in
+`infra/four-cloud-delegation.md` §A "Transactional email".
 """
 from __future__ import annotations
 
@@ -22,7 +29,7 @@ async def _handle(body: dict[str, Any]) -> None:
     html = body.get("html") or ""
     text = body.get("text") or ""
     if not to:
-        raise ValueError("email-fallback message missing 'to'")
+        raise ValueError("SES retry-queue message missing 'to'")
 
     region = os.environ.get("AWS_REGION", "ap-south-1")
     sender = os.environ.get("SES_SENDER", "no-reply@syrabit.ai")

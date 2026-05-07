@@ -212,6 +212,17 @@ ALLOWLIST_FILES = {
     "infra/four-cloud-delegation.md",
     "docs/architecture/adr/0003-canonical-strict-specialist-delegation.md",
     "artifacts/syrabit/docs/infra/canonical-delegation-cutover.md",
+    # Task #556 round-6 — historical operator runbooks + the legacy
+    # provider-priority map intentionally name the retired transports
+    # (SendGrid, Resend, Bedrock, Stripe…) in audit-trail prose so the
+    # rollback / credit-burn / pricing history stays readable. New
+    # active-policy claims belong in `infra/four-cloud-delegation.md`
+    # (the canonical map) or `infra/v4-locked-architecture.md`, both of
+    # which the umbrella DOES scan — only the runbooks are exempt.
+    "infra/credit-burn-runbook.md",
+    "infra/provider-priority-map.md",
+    "infra/cloud-cutover-364.md",
+    "infra/per-cloud-feature-delegation.md",
 }
 ALLOWLIST_NAME_PREFIXES = ("CHANGELOG",)
 
@@ -617,12 +628,15 @@ def _scan_pattern_global(pat: re.Pattern[str], *, tag: str, scan_iac: bool = Fal
                     if "node_modules" in p.parts:
                         continue
                     extra_files.append(p)
-        # Top-level docs that document operator-facing env contracts —
-        # if a retired knob shows up here as an "active variable" row
-        # the umbrella catches it.
-        for env_doc in (ROOT / "ENVIRONMENT_VARIABLES.md",):
-            if env_doc.exists():
-                extra_files.append(env_doc)
+        # Top-level docs that document operator-facing env contracts +
+        # canonical delegation policy — if a retired knob shows up as
+        # an "active variable" row or a stale "primary provider"
+        # statement the umbrella catches it.
+        if (ROOT / "ENVIRONMENT_VARIABLES.md").exists():
+            extra_files.append(ROOT / "ENVIRONMENT_VARIABLES.md")
+        infra_md = ROOT / "infra"
+        if infra_md.exists():
+            extra_files.extend(infra_md.glob("*.md"))
     for base in (BACKEND, FRONTEND):
         if not base.exists():
             continue
