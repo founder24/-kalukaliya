@@ -370,8 +370,8 @@ _CF_PROVIDER_SLUGS = {
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
     "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
-    # Phase 2 — Azure OpenAI is the sole non-Sarvam managed-LLM left after #347.
-    "azure_openai": "azure-openai",      # Azure OpenAI — chat/completions; CF handles key
+    # Task #554 — Azure OpenAI fully removed; English chat is vertex →
+    # workers_ai_llama32_3b only. Vertex calls go direct (not via CF AIG).
 }
 
 _DIRECT_PROVIDER_URLS = {
@@ -387,8 +387,7 @@ _DIRECT_PROVIDER_URLS = {
     # Fallback direct URLs (used when CF gateway is down)
     # Task #491 — legacy embed-provider direct URLs removed.
     "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
-    # Azure direct: tenant endpoint (requires env var). Bedrock removed (Task #347).
-    "azure_openai": None,  # Set at runtime via AZURE_OPENAI_ENDPOINT
+    # Azure OpenAI direct URL removed (Task #554 — provider decommissioned).
 }
 
 _cf_gw_healthy = True
@@ -636,59 +635,18 @@ BEDROCK_PROXY_URL = ""
 BEDROCK_PROXY_AUTH_TOKEN = ""
 BEDROCK_POLLY_VOICE = ""
 
-# ── Azure OpenAI deployment / direct-endpoint config (Task #256, #290) ───────
-# Azure uses a "deployment name" (created in the Azure portal) — not a model
-# name — for chat / embeddings / Whisper REST URLs. Task #290 standardised on
-# AZURE_OPENAI_DEPLOYMENT; AZURE_OPENAI_MODEL remains a backwards-compatible
-# alias so existing Railway/Replit secrets keep working without rotation.
-#
-# Direct-endpoint mode (Task #290) — set AZURE_OPENAI_ENDPOINT and at least
-# one of AZURE_OPENAI_KEY_1 / AZURE_OPENAI_KEY_2. The provider chains them
-# (KEY_1 → KEY_2) on retryable failures so a key rotation/throttle can be
-# absorbed without dropping traffic. CF AI Gateway BYOK still wins when up.
-# V4 §4 A3 (B3, 2026-05-06; user-locked 2026-05-06): default is **gpt-4.1-nano**.
-# Founder explicitly chose nano as the canonical default after V4 §4 A3 was
-# initially drafted with mini. Resolution order (override wins): operator
-# override env → deployment env → legacy model env → V4 default. The
-# override env var exists so the long-turn quality upgrade to gpt-4.1-mini
-# (or any future SKU) can be staged via a single env flip WITHOUT rotating
-# the canonical AZURE_OPENAI_DEPLOYMENT secret. When the override is set
-# we emit an INFO so Sentry / log scrapers see the deviation from default.
-_AZURE_MODEL_OVERRIDE = os.environ.get('AZURE_OPENAI_MODEL_OVERRIDE', '').strip()
-AZURE_OPENAI_DEPLOYMENT = (
-    _AZURE_MODEL_OVERRIDE
-    or os.environ.get('AZURE_OPENAI_DEPLOYMENT', '').strip()
-    or os.environ.get('AZURE_OPENAI_MODEL', '').strip()
-    or 'gpt-4.1-nano'
-)
-# Legacy alias kept for callers that imported AZURE_OPENAI_MODEL directly.
-AZURE_OPENAI_MODEL = AZURE_OPENAI_DEPLOYMENT
-if _AZURE_MODEL_OVERRIDE:
-    import logging as _logging_az_override
-    _logging_az_override.getLogger(__name__).info(
-        "AZURE_OPENAI_MODEL_OVERRIDE active — deployment=%s "
-        "(V4 §4 A3 operator override; clear the env var to revert "
-        "to the gpt-4.1-nano default)",
-        _AZURE_MODEL_OVERRIDE,
-    )
-AZURE_OPENAI_ENDPOINT = (
-    os.environ.get('AZURE_OPENAI_ENDPOINT', '').strip()
-    or 'https://syrabit-openai.openai.azure.com/'
-).rstrip('/')
-AZURE_OPENAI_API_VERSION = (
-    os.environ.get('AZURE_OPENAI_API_VERSION', '2024-12-01-preview').strip()
-    or '2024-12-01-preview'
-)
-AZURE_OPENAI_KEY_1 = (
-    os.environ.get('AZURE_OPENAI_KEY_1', '').strip()
-    or os.environ.get('AZURE_OPENAI_API_KEY', '').strip()
-)
-AZURE_OPENAI_KEY_2 = os.environ.get('AZURE_OPENAI_KEY_2', '').strip()
+# ── Azure OpenAI fully decommissioned (Task #554) ────────────────────────────
+# All Azure OpenAI chat / embed / vision / translate-via-OpenAI surfaces are
+# removed. English chat is now Vertex Gemini 2.5 Flash (head, default) →
+# Workers-AI Llama-3.2-3B (fallback, swaps to head when GCP credit runway
+# projects ≤ 90 days). The `AZURE_OPENAI_*` env vars are intentionally NOT
+# read here any more — `scripts/check_dead_providers.py` bans the literal
+# from new code so a regression is impossible. Azure SPEECH (Neural TTS) and
+# Azure TRANSLATOR remain in active use; their config lives below.
 
-# ── Azure Speech & Translator (Task #256) ────────────────────────────────────
-# Azure Speech Services — used for Azure Neural TTS (call_tts in azure_openai.py)
-# and Azure Whisper STT (call_stt via CF BYOK).
-# Set in Railway/Replit Secrets; when unset, azure_openai TTS raises RuntimeError.
+# ── Azure Speech & Translator (Task #256, kept under Task #554) ──────────────
+# Azure Speech Services — used for Azure Neural TTS (call_tts in
+# providers/azure_speech.py) and Azure Whisper STT via CF BYOK.
 AZURE_SPEECH_KEY = os.environ.get('AZURE_SPEECH_KEY', '').strip()
 AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', '').strip()
 # Default Azure Neural TTS voice — Indian English expressive neural voice.
@@ -696,8 +654,9 @@ AZURE_TTS_VOICE = (
     os.environ.get('AZURE_TTS_VOICE', 'en-IN-NeerjaExpressiveNeural').strip()
     or 'en-IN-NeerjaExpressiveNeural'
 )
-# Azure Translator — used for azure_openai.call_translate().
-# Separate from the Azure OpenAI key; set AZURE_TRANSLATOR_KEY in Railway Secrets.
+# Azure Translator — used for providers.azure_speech.call_translate().
+# Separate Azure resource from the (now-removed) Azure OpenAI tenant; set
+# AZURE_TRANSLATOR_KEY in Railway/Replit Secrets.
 AZURE_TRANSLATOR_KEY = os.environ.get('AZURE_TRANSLATOR_KEY', '').strip()
 AZURE_TRANSLATOR_ENDPOINT = (
     os.environ.get('AZURE_TRANSLATOR_ENDPOINT', 'https://api.cognitive.microsofttranslator.com').strip()
@@ -1156,7 +1115,6 @@ PLAN_PRICES = {
 #
 # Credit reference table (minimum confirmed startup-programme amounts):
 #   vertex        Google Cloud for Startups          $2,000
-#   azure_openai  Azure for Startups                 $2,500
 #   sarvam        Sarvam startup credits             $500
 #   elevenlabs    ElevenLabs startup credits         $500
 #   assemblyai    AssemblyAI startup credits         $1,000
@@ -1166,35 +1124,18 @@ PLAN_PRICES = {
 #   mongodb_atlas MongoDB Atlas free tier            $0  (fallback only)
 #   workers_ai    Cloudflare free tier               $0  (absolute last resort)
 PROVIDER_PRIORITY: dict = {
-    # English chat + RAG (V4 §4, user-locked 2026-05-06 via B3 conflict
-    # resolution). Azure gpt-4.1-nano is the SOLE primary; Workers AI
-    # variants are pure fallbacks (weight 0 — only reached when Azure is
-    # exhausted/throttled). Vertex is intentionally NOT in this pool — an
-    # earlier V4 draft proposed Vertex Gemini 2.5 Flash as a co-primary
-    # behind a CF-Worker token-length + risk-score router; the founder
-    # rejected that design in favour of the simpler chain below (no edge
-    # router built; Vertex stays in the `content` pool only). Workers AI
-    # tail order matches V4 §4 A9: Mistral-7B (better English instruction-
-    # following at this size) then Llama-3.2-3B (smaller/faster) then
-    # generic workers_ai (last-resort gpt-oss-20b). Sarvam reserved for
-    # `assamese_rag_chat`. Bedrock + OpenAI/xAI removed in Task #347.
-    # Task #491 — legacy SLM provider fully retired; no longer reachable
-    # via BYOK either.
-    # Task #549 — perpetual $100/mo budget. The english_rag_chat chain
-    # now starts with Workers-AI Llama-3.2-3B (Cloudflare free tier),
-    # backed by Workers-AI Mistral-7B and the generic workers_ai
-    # gpt-oss-20b leg. Vertex Gemini 2.5 Flash and Azure OpenAI are
-    # kept on the tail purely as exclusion-redraw fallbacks reachable
-    # from `call_with_provider_fallback` after the Workers-AI legs
-    # exhaust. `cost_caps._select_chat_primary()` lets ops flip the
-    # head to vertex via `CHAT_PRIMARY_OVERRIDE=vertex` to drain the
-    # GCP startup balance without a code edit.
+    # Task #554 — Azure OpenAI fully decommissioned. English chat is a
+    # pure 2-position chain: Vertex Gemini 2.5 Flash (head, drains GCP
+    # startup credits) → Workers-AI Llama-3.2-3B (Cloudflare free-tier
+    # fallback). The order swaps when projected GCP credit runway falls
+    # to ≤ 90 days — see `cost_caps._select_chat_primary()` (60 s cache).
+    # `select_provider("english_rag_chat", ...)` walks the dynamic chain
+    # in order, NOT the static list below — the static entry is kept as
+    # the membership snapshot for `select_provider`'s pool-existence
+    # checks and admin/health surfaces.
     "english_rag_chat":  [
-        "workers_ai_llama32_3b",
-        "workers_ai_mistral_7b",
-        "workers_ai",
         "vertex",
-        "azure_openai",
+        "workers_ai_llama32_3b",
     ],
     # Assamese chat (2026-05-05 user instruction — strict primary/fallback):
     # Sarvam is the SOLE primary; Workers AI IndicTrans2 (en-indic neural
@@ -1241,13 +1182,14 @@ PROVIDER_PRIORITY: dict = {
     # Task #382 — primary embed is the custom Workers-AI worker
     # (Gemma-300M + Qwen3-0.6B, mean-pooled to 1024-dim). Task #491
     # retired the legacy embed providers from this chain; the dispatcher now has
-    # workers_ai_custom (primary) → azure_openai → workers_ai. On
-    # Workers-AI custom embed outage the controller flips into Option-D
-    # cache-only degraded mode and enqueues misses on the AWS SQS
-    # deferred-embed queue (V4 §15).
-    "embed":             ["workers_ai_custom", "azure_openai", "workers_ai"],
-    "embed_en":          ["workers_ai_custom", "azure_openai", "workers_ai"],
-    "embed_indic":       ["workers_ai_custom", "azure_openai", "workers_ai"],
+    # workers_ai_custom (primary) → workers_ai (generic CF fallback).
+    # Task #554 removed the azure_openai embed leg entirely — the
+    # tenant is decommissioned. On Workers-AI custom embed outage the
+    # controller flips into Option-D cache-only degraded mode and
+    # enqueues misses on the AWS SQS deferred-embed queue (V4 §15).
+    "embed":             ["workers_ai_custom", "workers_ai"],
+    "embed_en":          ["workers_ai_custom", "workers_ai"],
+    "embed_indic":       ["workers_ai_custom", "workers_ai"],
     # Reranking: Task #382 collapses this to Pinecone-only when
     # RERANK_PROVIDER=pinecone_only. Workers AI remains in the list as
     # a dormant fallback the dispatcher can advance to if the flag is
@@ -1259,16 +1201,17 @@ PROVIDER_PRIORITY: dict = {
     # vector store; Atlas remains as a weight-0 disaster fallback.
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "workers_ai"],
     # Translation (English→Assamese):
-    #   workers_ai_indic (IndicTrans2, primary)
-    #   → azure_openai  (Azure Translator REST, paid fallback, gated by
-    #                    `azure.translator.enabled` admin toggle)
-    #   → workers_ai    (generic LLM translate prompt, last-resort)
-    # Task #490 removed Vertex; Task #492 removed Sarvam. The chain is
-    # multi-leg again so a single Workers-AI IndicTrans2 outage does
-    # not collapse Assamese translation into a hard 503.
-    "translate":         ["workers_ai_indic", "azure_openai", "workers_ai"],
-    # Vision / OCR: Azure OpenAI GPT-4o → Workers AI. Vertex removed (Task #490).
-    "vision":            ["azure_openai", "workers_ai"],
+    #   workers_ai_indic   (IndicTrans2, primary)
+    #   → azure_translator (Azure Translator REST, paid fallback, gated by
+    #                       `azure.translator.enabled` admin toggle)
+    #   → workers_ai       (generic LLM translate prompt, last-resort)
+    # Task #554 — replaced the legacy `azure_openai` translate leg with
+    # a dedicated `azure_translator` provider key (separate Azure resource;
+    # Azure OpenAI tenant is decommissioned).
+    "translate":         ["workers_ai_indic", "azure_translator", "workers_ai"],
+    # Vision / OCR: Workers AI only (Task #554 — Azure OpenAI vision removed
+    # alongside the rest of the tenant; vertex remains content_format only).
+    "vision":            ["workers_ai"],
     # Safety checks: Workers AI. Vertex safety branch removed (Task #490).
     "safety":            ["workers_ai"],
     # RAG search with external web results: Exa neural search → Workers AI.
@@ -1278,9 +1221,10 @@ PROVIDER_PRIORITY: dict = {
 }
 
 PROVIDER_CREDITS: dict = {
-    "vertex":           2000,   # Google Cloud for Startups — $2k
+    "vertex":           2000,   # Google Cloud for Startups — $2k; english_rag_chat head + content_format primary
     # bedrock entry removed in Task #347 (provider decommissioned).
-    "azure_openai":     2500,   # Azure for Startups — $2.5k; primary for english_rag_chat
+    # azure_openai entry removed in Task #554 (Azure OpenAI tenant decommissioned).
+    "azure_translator":    0,   # Azure Translator (separate Azure resource) — paid fallback for `translate`
     "sarvam":            500,   # Sarvam startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
@@ -1314,7 +1258,7 @@ PROVIDER_MAX_CONCURRENT: dict[str, int] = {
     "workers-ai":   167,   # combined Cloudflare account — Standard plan ~10 000 RPM total
     "sarvam":         5,   # paid tier
     "gemini":        10,   # Vertex AI Gemini 2.5 Flash
-    "azure_openai":   8,   # Azure GPT-4.1-mini
+    "vertex":        10,   # alias for the english_rag_chat dispatch path (Task #554)
     "openai":         1,   # transport-only (Workers AI uses AsyncOpenAI client) — no real api.openai.com traffic
 }
 
@@ -1357,21 +1301,15 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_llama33_70b":   100,
     },
     "english_rag_chat": {
-        # Task #549 — perpetual $100/mo budget. Workers-AI Llama-3.2-3B
-        # is the SOLE primary at weight 10000; Workers-AI Mistral-7B,
-        # the generic workers_ai gpt-oss-20b leg, Vertex Gemini 2.5
-        # Flash, and Azure OpenAI all sit at weight 0 as pure
-        # fallbacks reachable only through
-        # call_with_provider_fallback's exclusion-redraw loop after
-        # the primary exhausts/throttles. The previous "Azure SOLE
-        # primary" contract was rolled back when the perpetual
-        # $100/month cap landed — Cloudflare free-tier inference is
-        # the only chain that makes 10k DAU at this budget feasible.
+        # Task #554 — pure 2-position chain (vertex ↔ workers_ai_llama32_3b).
+        # Order is decided dynamically per turn by
+        # `cost_caps._select_chat_primary()` (60 s cache, swaps when
+        # projected GCP credit runway ≤ 90 days). Both legs carry weight
+        # 10000 here so `select_provider`'s membership / saturation logic
+        # treats them as first-class; the actual head is enforced by the
+        # ordered walk in `select_provider("english_rag_chat", ...)`.
+        "vertex":                 10000,
         "workers_ai_llama32_3b":  10000,
-        "workers_ai_mistral_7b":      0,  # fallback (primary-exhausted only)
-        "workers_ai":                 0,  # deepest workers fallback — gpt-oss-20b
-        "vertex":                     0,  # paid fallback (drains GCP credits)
-        "azure_openai":               0,  # paid fallback (drains Azure credits)
     },
     "assamese_rag_chat": {
         # Strict primary/fallback (2026-05-05 user instruction): Sarvam
@@ -1392,14 +1330,15 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_indic": 10000,
     },
     "translate": {
-        # Task #492 (V4 §15): IndicTrans2 stays the dominant primary;
-        # Azure Translator + generic Workers-AI carry weight-1/0 so
-        # `select_provider` actually advances on outage rather than
-        # raising "translate: all providers exhausted" on a single
-        # IndicTrans2 hiccup. Sarvam was removed from this pool.
-        "workers_ai_indic": 1000,
-        "azure_openai":        1,
-        "workers_ai":          0,
+        # Task #492 (V4 §15) / Task #554: IndicTrans2 stays the dominant
+        # primary; Azure Translator (separate `azure_translator` provider
+        # key — Azure OpenAI tenant is gone) + generic Workers-AI carry
+        # weight-1/0 so `select_provider` actually advances on outage
+        # rather than raising "translate: all providers exhausted" on a
+        # single IndicTrans2 hiccup.
+        "workers_ai_indic":   1000,
+        "azure_translator":      1,
+        "workers_ai":            0,
     },
     # embed/tts/stt explicit overrides so the established primaries
     # (ElevenLabs/Deepgram) keep deterministic priority over generic
@@ -1428,13 +1367,12 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     },
 }
 
-# ── Task #382 / #491 — flag-driven embed pool weights ──────────────────────
-# After Task #491 the legacy embed providers are gone. The pool
-# now collapses to workers_ai_custom (primary) → azure_openai →
-# workers_ai. `EMBED_PROVIDER_PRIMARY` is retained as an operator flag
-# so a future provider swap can re-prime the chain without a code edit.
+# ── Task #382 / #491 / #554 — flag-driven embed pool weights ──────────────
+# Task #554 removed the azure_openai embed leg. The pool now collapses to
+# workers_ai_custom (primary) → workers_ai (generic CF Workers-AI BGE-M3
+# fallback). `EMBED_PROVIDER_PRIMARY` is retained as an operator flag so a
+# future provider swap can re-prime the chain without a code edit.
 _LEGACY_EMBED_WEIGHTS = {
-    "azure_openai":  500,
     "workers_ai":    100,
 }
 def _build_embed_pool(primary: str) -> dict[str, int]:
@@ -1442,7 +1380,6 @@ def _build_embed_pool(primary: str) -> dict[str, int]:
     if primary == "workers_ai_custom":
         return {
             "workers_ai_custom": 10000,
-            "azure_openai":          0,
             "workers_ai":            0,
         }
     pool = {"workers_ai_custom": 0, **_LEGACY_EMBED_WEIGHTS}

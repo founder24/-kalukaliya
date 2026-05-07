@@ -248,18 +248,16 @@ async def _synthesize_with_fallback(
                 raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired (Task #490: vertex removed from tts pool)")
             # Task #347: bedrock TTS branch removed (providers/bedrock.py deleted).
             # AWS Polly survives via the explicit ``_tts_aws_polly`` fallback below.
-            elif provider == "azure_openai":
-                # Task #338 — gated by azure.speech.enabled (Azure Neural TTS
-                # rides on the same Azure Speech resource as STT/Custom Voice).
-                # Disabled => raise so the outer fallback loop drops to the
-                # next TTS provider in PROVIDER_PRIORITY['tts'].
+            elif provider == "azure_speech":
+                # Task #554 — Azure Neural TTS via providers.azure_speech.
+                # Gated by azure.speech.enabled admin toggle (legacy).
                 from azure_ai_runtime import is_enabled as _az_enabled
                 if not await _az_enabled("speech"):
                     raise RuntimeError(
                         "azure speech disabled via admin toggle "
                         "(azure.speech.enabled=false) — routing to next provider"
                     )
-                from providers.azure_openai import call_tts as _az_tts
+                from providers.azure_speech import call_tts as _az_tts
                 from azure_ai_metrics import record_latency as _rl, record_error as _re
                 import time as _t
                 _t0 = _t.perf_counter()
@@ -325,9 +323,6 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
                 raise RuntimeError("STT not supported by 'vertex' — no Cloud STT client wired (Task #490: vertex removed from stt pool)")
             # Task #347: bedrock STT branch removed (providers/bedrock.py deleted).
             # AWS Transcribe survives via the explicit fallback below.
-            elif provider == "azure_openai":
-                from providers.azure_openai import call_stt as _az_stt
-                return await _az_stt(audio_bytes, language=language)
             else:
                 raise RuntimeError(f"STT: unknown provider {provider!r}")
         except Exception as exc:
@@ -502,7 +497,7 @@ async def voice_pipeline(
     # The LLM step between the two legs is serial (requires the STT transcript).
     #
     # Dispatch pools:
-    #   STT leg: assemblyai(1000) → bedrock(1k,skip) → azure_openai(1,skip) → workers_ai(0)
+    #   STT leg: assemblyai(1000) → bedrock(1k,skip) → azure_speech(1,skip) → workers_ai(0)
     #   TTS leg: google_neural2(Indic first) → elevenlabs → deepgram → workers_ai(0)
     #   (Task #490: vertex removed from both STT and TTS legs — content_format only.)
 

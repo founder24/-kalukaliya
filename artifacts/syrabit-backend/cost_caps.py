@@ -81,36 +81,124 @@ def _monthly_total_usd_cap() -> float:
         return _DEFAULT_MONTHLY_TOTAL_USD_CAP
 
 
-def _select_chat_primary() -> str:
-    """Credit-runway-aware primary selector for english_rag_chat (Task #549).
+import time as _t_runway
 
-    Returns the provider name that should sit at the head of the
-    English chat dispatch chain. Today the only functional return
-    value is `workers_ai_llama32_3b` (Cloudflare free tier — the
-    cheapest option that still produces production-grade English
-    answers).
+# ── Task #554 — credit-runway-aware english chat dispatch chain ────────────
+# Default order is Vertex Gemini 2.5 Flash (drains GCP startup credits) →
+# Workers-AI Llama-3.2-3B (free-tier fallback). When projected GCP credit
+# runway falls to ≤ 90 days the order swaps so the free-tier head conserves
+# what's left of the credit pool and Vertex stays in the chain as the paid
+# fallback (V4 §12 — no silent removal). The result is cached for 60 s on a
+# monotonic clock so a hot dispatch loop never thrashes the env / redis
+# reads. Manual override knob is `CHAT_PRIMARY_OVERRIDE=vertex|workers_ai`
+# for ops; unrecognised values log + are ignored.
+_CHAT_CHAIN_DEFAULT: tuple[str, str] = ("vertex", "workers_ai_llama32_3b")
+_CHAT_CHAIN_FLIPPED: tuple[str, str] = ("workers_ai_llama32_3b", "vertex")
+_CHAT_RUNWAY_FLIP_DAYS = 90.0
+_CHAT_PRIMARY_CACHE_TTL_S = 60.0
+_chat_primary_cache: dict = {"chain": None, "ts": 0.0}
 
-    The `CHAT_PRIMARY_OVERRIDE` env var is reserved for the future
-    runway-aware flip to Vertex Gemini 2.5 Flash, but vertex chat
-    dispatch was removed from `llm.py` in Task #490 — re-enabling it
-    is sub-task #555/#556. Until then this helper logs and ignores
-    any non-workers override so we never silently route through a
-    fallback (V4 §12 "no silent fallbacks"). The dispatcher reads
-    this on every turn so a runway-tracker cron can flip the env var
-    without a redeploy once the underlying dispatch path is restored.
+
+def _projected_chat_runway_days() -> float | None:
+    """Return projected days of GCP credit runway, or None if unknown.
+
+    Inputs (env-driven so a runway-tracker cron can update them without a
+    redeploy):
+      * `GCP_CREDITS_REMAINING_USD` — operator-published current balance.
+      * `CHAT_CREDIT_RUNWAY_DAYS`   — direct override (cron-computed).
+
+    Returns None when neither signal is present, in which case callers
+    must fall back to the default chain (no silent flip).
     """
-    override = (os.environ.get("CHAT_PRIMARY_OVERRIDE", "") or "").strip().lower()
-    if override and override not in {"workers_ai_llama32_3b", "workers_ai"}:
+    direct = (os.environ.get("CHAT_CREDIT_RUNWAY_DAYS") or "").strip()
+    if direct:
         try:
-            import logging
-            logging.getLogger("cost_caps").warning(
-                "CHAT_PRIMARY_OVERRIDE=%r is unsupported (vertex / azure chat "
-                "dispatch was removed in Task #490 — re-enabling it is sub-task "
-                "#555/#556). Falling back to workers_ai_llama32_3b.", override,
+            return max(0.0, float(direct))
+        except ValueError:
+            pass
+    pool_raw = (os.environ.get("GCP_CREDITS_REMAINING_USD") or "").strip()
+    if not pool_raw:
+        return None
+    try:
+        pool_remaining = float(pool_raw)
+    except ValueError:
+        return None
+    if pool_remaining <= 0:
+        return 0.0
+    # Estimate burn from MeterD's month-to-date USD bucket if available.
+    try:
+        from deps import redis_client as _rc  # type: ignore
+        from credit_burn_meter import MONTHLY_USD_KEY_PREFIX as _PFX  # type: ignore
+        from datetime import datetime as _dt, timezone as _tz
+        if _rc is None:
+            return None
+        month = _dt.now(_tz.utc).strftime("%Y-%m")
+        raw = _rc.get(f"{_PFX}:{month}")
+        if raw is None:
+            return None
+        spent = float(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+    except Exception:
+        return None
+    if spent <= 0:
+        return None
+    from datetime import datetime, timezone
+    days_elapsed = max(1.0, float(datetime.now(timezone.utc).day))
+    daily_burn = spent / days_elapsed
+    if daily_burn <= 0:
+        return None
+    return pool_remaining / daily_burn
+
+
+def _compute_chat_chain() -> tuple[str, str]:
+    """Pure (env+meter only) computation of the 2-position chain."""
+    override = (os.environ.get("CHAT_PRIMARY_OVERRIDE", "") or "").strip().lower()
+    if override:
+        if override == "vertex":
+            return _CHAT_CHAIN_DEFAULT
+        if override in {"workers_ai_llama32_3b", "workers_ai"}:
+            return _CHAT_CHAIN_FLIPPED
+        try:
+            import logging as _lg
+            _lg.getLogger("cost_caps").warning(
+                "CHAT_PRIMARY_OVERRIDE=%r is unsupported (allowed: 'vertex' | "
+                "'workers_ai_llama32_3b'). Falling back to credit-runway-driven "
+                "selection (V4 §12 — no silent fallback).", override,
             )
         except Exception:
             pass
-    return "workers_ai_llama32_3b"
+    runway = _projected_chat_runway_days()
+    if runway is not None and runway <= _CHAT_RUNWAY_FLIP_DAYS:
+        return _CHAT_CHAIN_FLIPPED
+    return _CHAT_CHAIN_DEFAULT
+
+
+def _select_chat_primary() -> list[str]:
+    """Credit-runway-aware ordered chain for english_rag_chat (Task #554).
+
+    Returns a 2-position list of provider names. Position 0 is the head
+    used by `_select_chat_model` and `select_provider`; position 1 is the
+    explicit fallback that `call_with_provider_fallback` advances to on
+    primary 5xx / 429 / breaker-open. Default order is
+    ``["vertex", "workers_ai_llama32_3b"]``; swaps to
+    ``["workers_ai_llama32_3b", "vertex"]`` when projected GCP credit
+    runway is ≤ 90 days. Cached for 60 s on a monotonic clock so the
+    hot dispatch path never re-reads env / redis per turn.
+    """
+    now = _t_runway.monotonic()
+    cached = _chat_primary_cache.get("chain")
+    cached_ts = float(_chat_primary_cache.get("ts") or 0.0)
+    if cached is not None and (now - cached_ts) < _CHAT_PRIMARY_CACHE_TTL_S:
+        return list(cached)
+    chain = _compute_chat_chain()
+    _chat_primary_cache["chain"] = chain
+    _chat_primary_cache["ts"] = now
+    return list(chain)
+
+
+def _reset_chat_primary_cache() -> None:
+    """Test hook — clears the 60 s cache so a monkeypatched env flips immediately."""
+    _chat_primary_cache["chain"] = None
+    _chat_primary_cache["ts"] = 0.0
 
 
 # ── Per-call-type token budgets (Section B) ────────────────────────────────
@@ -292,11 +380,13 @@ def _select_chat_model(
       * Assamese (`lang in {"as", ...}`) — bypass: Sarvam always (the
         Indic specialist's credit pool burns first; tier-routing is an
         English-only knob).
-      * Paid user (any non-"free" plan) — Azure `gpt-4.1-nano` with the
-        full chat_turn output budget regardless of turn count.
+      * Paid user (any non-"free" plan) — runway-aware primary (vertex
+        gemini-2.5-flash by default; workers_ai_llama32_3b once GCP
+        credit runway projects ≤ 90 days) with the full chat_turn
+        output budget regardless of turn count.
       * Free user, turn ≤ SESSION_CHEAP_TURN_LIMIT — Workers-AI Mistral-7B.
-      * Free user, turn 3-15 — Azure `gpt-4.1-nano` (post-cleanup primary).
-      * Free user, turn > 15 — Azure `gpt-4.1-nano` with output clamped
+      * Free user, turn 3-15 — runway-aware primary.
+      * Free user, turn > 15 — runway-aware primary with output clamped
         to CONSERVATIVE_OUTPUT_TOKENS (already-engaged user, conservative
         spend).
 
@@ -307,11 +397,15 @@ def _select_chat_model(
     plan = (user_plan or "free").strip().lower()
     lang_lc = (lang or "en").strip().lower()
 
-    # Task #549 — credit-runway-aware primary. Currently always returns
-    # `workers_ai_llama32_3b`; the override hook is reserved for the
-    # vertex re-enable work tracked in sub-task #555/#556.
-    primary_provider = _select_chat_primary()
-    primary_model = "@cf/meta/llama-3.2-3b-instruct"
+    # Task #554 — credit-runway-aware 2-position chain. Position 0 is
+    # the head we ship; position 1 is the documented fallback that
+    # `call_with_provider_fallback` advances to on primary outage.
+    _chain = _select_chat_primary()
+    primary_provider = _chain[0]
+    primary_model = (
+        "gemini-2.5-flash" if primary_provider == "vertex"
+        else "@cf/meta/llama-3.2-3b-instruct"
+    )
 
     # Rule D LOCKED — global monthly USD cap reached. Force the
     # cheap-tier (Workers-AI Mistral-7B) for English chat regardless of
@@ -382,5 +476,11 @@ __all__ = [
     "max_output_tokens_for",
     "_select_chat_model",
     "_select_chat_primary",
+    "_compute_chat_chain",
+    "_projected_chat_runway_days",
+    "_reset_chat_primary_cache",
     "_monthly_total_usd_cap",
+    "_CHAT_CHAIN_DEFAULT",
+    "_CHAT_CHAIN_FLIPPED",
+    "_CHAT_RUNWAY_FLIP_DAYS",
 ]

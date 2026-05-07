@@ -72,7 +72,14 @@ BANNED_LITERAL = re.compile(
     # / brand strings (Bedrock IAM ARNs, Gemini model aliases, xAI
     # crawler UA tokens, etc.). Re-add them only after a sweep of the
     # docs/frontend/admin surfaces — tracked as the Task #491 follow-up.
-    r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5)\b",
+    # Task #554 — Azure OpenAI added to the bare-token ban (chat hot
+    # path is now Vertex Gemini 2.5 Flash → Workers-AI Llama-3.2-3B; the
+    # only surviving Azure surfaces are Speech + Translator via
+    # providers.azure_speech). The ``AZURE_OPENAI_*`` env-var family and
+    # the ``gpt-4.1-nano`` deployment alias are also banned bare-token.
+    r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5|"
+    r"azure_openai|AzureOpenAI|gpt-4\.1-nano)\b|"
+    r"\bAZURE_OPENAI_[A-Z0-9_]+\b",
     re.IGNORECASE,
 )
 # Stripe / Resend / bedrock-proxy are tracked separately because their
@@ -284,6 +291,28 @@ ALLOWLIST_FILES = {
     # in a `> banned by …` blockquote so operators can cross-reference
     # the exclusion list against PROVIDER_PRIORITY. Documentation-only.
     "artifacts/syrabit/docs/infra/credit-runway-cost-model.md",
+    # ── Task #554 file allowlist ─────────────────────────────────────────
+    # Regression / soft-shed / SLO emitter / session-fallback tests assert
+    # the historical azure_openai provider name still survives in their
+    # fixtures (RPM windows, redis keys, SLO tag values) so a future
+    # rename of the provider-id does not silently bypass the throttle.
+    "artifacts/syrabit-backend/tests/test_provider_priority_locked.py",
+    "artifacts/syrabit-backend/tests/test_chat_rpm_soft_shed.py",
+    "artifacts/syrabit-backend/tests/test_assamese_routing_chain_e2e.py",
+    "artifacts/syrabit-backend/tests/test_translate_fallback_chain.py",
+    "artifacts/syrabit-backend/tests/test_session_fallback.py",
+    "artifacts/syrabit-backend/tests/test_slo_emitter.py",
+    "artifacts/syrabit-backend/tests/test_credit_burn_meters.py",
+    # Task #554 — surviving Azure Speech / Translator module + the
+    # Azure-AI metrics emitter both reference the deleted azure_openai
+    # path in their docstring (operator breadcrumb).
+    "artifacts/syrabit-backend/providers/azure_speech.py",
+    "artifacts/syrabit-backend/azure_ai_metrics.py",
+    # Task #554 — RUNBOOK + CREDITS docs reference the historical
+    # provider chain in operator-facing changelog tables; refreshing
+    # those is tracked separately as the docs sweep follow-up.
+    "artifacts/syrabit-backend/RUNBOOK.md",
+    "artifacts/syrabit-backend/CREDITS.md",
 }
 ALLOWLIST_NAME_PREFIXES = ("CHANGELOG",)
 
@@ -320,8 +349,9 @@ def _scan_file(p: Path) -> list[str]:
             or stripped.startswith("*") or stripped.startswith("/*")
         )
         is_removal_note = (
-            "Task #347" in line or "Task #491" in line
+            "Task #347" in line or "Task #491" in line or "Task #554" in line
             or "removed" in line.lower() or "deprecated" in line.lower()
+            or "retired" in line.lower() or "decommission" in line.lower()
             or "REMOVED" in line or "retired" in line.lower()
             or "legacy" in line.lower() or "previous" in line.lower()
             or "disabled" in line.lower() or "backfill" in line.lower()

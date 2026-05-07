@@ -71,36 +71,28 @@ When `embed.syrabit.ai` is down or returning 5xx:
 
 ---
 
-## §4 — Per-turn dispatch order (chat hot path, locked)
+## §4 — Per-turn dispatch order (chat hot path, locked — Task #554 amendment 2026-05-07)
 
 ```
-English chat (single chain, no edge router)
-  Azure OpenAI gpt-4.1-nano (eastus2)        ← SOLE primary; see A3 SKU table below
-    ↓ on 5xx / exhaust
-  Workers-AI Mistral-7B (edge, ordered #1)   ← A9
-    ↓ on 5xx
-  Workers-AI Llama-3.2-3B (edge, ordered #2) ← A9
-    ↓ on 5xx
-  Workers-AI generic (gpt-oss-20b, last-resort, terminal)
+English chat (2-position chain, credit-runway-aware)
+  Vertex Gemini 2.5 Flash (drains GCP startup credits)   ← default head
+    ↓ on 5xx / 429 / exhaust
+  Workers-AI Llama-3.2-3B (Cloudflare free tier)         ← terminal fallback
+
+  When projected GCP credit runway ≤ 90 days, the chain FLIPS:
+  Workers-AI Llama-3.2-3B  →  Vertex Gemini 2.5 Flash
+  (no silent removal — V4 §12; selector lives in
+   `artifacts/syrabit-backend/cost_caps.py::_select_chat_primary`,
+   60 s monotonic cache so the hot path never thrashes env / redis.)
 ```
 
-**Cerebras note (A2):** Cerebras is retained as a CF-AI-Gateway-BYOK destination for telemetry parity (V4 §1) but is **NOT** wired into `PROVIDER_PRIORITY["english_rag_chat"]` — direct (non-gateway) Cerebras was decommissioned in Task #347 and the chat dispatch path terminates at generic Workers-AI. Reaching Cerebras requires an explicit CF AI Gateway opt-in route, never the per-turn fallback chain.
+**Task #554 retirement (2026-05-07):** Azure OpenAI (chat / embed / Whisper / text-embedding-3-large) is REMOVED from the dispatch chain. `providers/azure_openai.py`, `gpt-4.1-nano`, the legacy A3 SKU table, the third-tier `Workers-AI Mistral-7B` and `Workers-AI generic gpt-oss-20b` legs are all retired from `PROVIDER_PRIORITY["english_rag_chat"]`. The surviving Azure surfaces are **Azure Speech** (TTS / STT) and **Azure Translator**, both wired through `providers/azure_speech.py` on `AZURE_SPEECH_*` / `AZURE_TRANSLATOR_*` keys. CI guard `scripts/check_dead_providers.py` bans `azure_openai|AzureOpenAI|AZURE_OPENAI_*|gpt-4.1-nano` bare-token across the tree.
 
-**Founder choice (user-locked 2026-05-06, B3):** Vertex Gemini 2.5 Flash is **NOT** in the chat hot path and **Workers-AI Qwen3-0.6B is NOT** wired as a chat primary. An earlier V4 draft proposed a token-length + risk-score router on the Cloudflare Worker that would split short/low-risk → Qwen3-0.6B and long/high-risk → Vertex Gemini 2.5 Flash co-primary; that design was explicitly rejected in favour of the simpler Azure-SOLE-primary chain above. Vertex stays reserved for the §1 content-validation / safety role and the `content` long-form pool (where it sits behind Workers-AI as a quality fallback). Qwen3-0.6B remains in §2 (embedding) only. **No CF Worker dispatch router is built.**
+**Operator override:** `CHAT_PRIMARY_OVERRIDE=vertex|workers_ai_llama32_3b` pins the head; unrecognised values are logged and ignored (no silent fallback). Runway signal sources: `CHAT_CREDIT_RUNWAY_DAYS` (cron-published) or `GCP_CREDITS_REMAINING_USD` + MeterD month-to-date burn; absence of both keeps the default chain.
 
 - **Llama-Guard-2** runs as a pre-filter on the Azure ACA compute (moderation-primary). **Fail-open on transient 5xx, fail-closed on >5 s timeout** (see §1 row).
-- **Azure AI Content Safety** runs in parallel as moderation-secondary.
+- **Azure AI Content Safety** runs in parallel as moderation-secondary (uses Azure Cognitive Services key — distinct from the retired Azure OpenAI tenant).
 - **Vertex Gemini RAI** is batch/async-only for `content_type=exam_model_paper` — never per-turn synchronous.
-- **A9 — Workers-AI fallback ordering:** Mistral-7B is tried **first** (better English instruction-following at this size); Llama-3.2-3B is the **second** fallback (lower latency, smaller context). They are NOT parallel.
-
-**A3 — Azure OpenAI SKU table (decided 2026-05-06; user-locked 2026-05-06):**
-
-| SKU | Context | Approx $/1M in / $/1M out | Why this SKU? |
-|---|---|---|---|
-| **`gpt-4.1-nano`** *(V4 default — founder choice 2026-05-06)* | 1 M tokens | **~$0.10 / ~$0.40** | Cheapest 1 M-context Azure SKU. Founder explicitly picked nano over mini after the initial draft to minimise burn on the SOLE-primary chat path (Azure-only; Vertex is intentionally not in the chat pool — see §4 chain above). Quality trade-off is accepted; mini is the staged upgrade if long-turn quality degrades unacceptably. |
-| `gpt-4.1-mini` | 1 M tokens | ~$0.40 / ~$1.60 | **Not the V4 default** — quality-upgrade candidate. Reachable via `AZURE_OPENAI_MODEL_OVERRIDE=gpt-4.1-mini` (single env flip, no secret rotation). |
-
-Runtime logs `gpt-4.1-nano` and code default in `artifacts/syrabit-backend/config.py:689` is now `gpt-4.1-nano` — drift closed by **B3** (2026-05-06). Operator override pattern wired at the same site.
 
 **Assamese Indic path:**
 
@@ -131,7 +123,7 @@ Results from (1)+(2)+(3) are fused with **Reciprocal Rank Fusion (RRF)** before 
 ## §6 — Secrets topology (three-store sync, controlled)
 
 - **Source of truth:** **Azure Key Vault** (`syrabit-prod-kv`). Rotated first.
-  - Owns: `MONGO_URI_ATLAS`, `GCP_WEB_RISK_API_KEY`, `AWS_SES_*`, `CF_WORKER_AI_*`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `AZURE_OPENAI_API_KEY`.
+  - Owns: `MONGO_URI_ATLAS`, `GCP_WEB_RISK_API_KEY`, `AWS_SES_*`, `CF_WORKER_AI_*`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_SPEECH_KEY`, `AZURE_TRANSLATOR_KEY`. *(Task #554 — `AZURE_OPENAI_API_KEY` retired alongside the Azure OpenAI tenant; chat now auths via the GCP service-account JSON.)*
 - **Read-only replicas:** AWS Secrets Manager + Cloudflare Secrets (Worker bindings).
 - **Sync mechanism:** Terraform + GitHub Actions job (`.github/workflows/secrets-sync.yml`) runs daily and on Azure KV rotation hook:
   1. Pull from Azure KV.

@@ -59,7 +59,6 @@ from config import (
     _SARVAM_LLM_KEY, _SARVAM_LLM_KEY_2, _SARVAM_LLM_KEY_3, _AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_REGION,
     is_cf_gateway_up, mark_cf_gateway_down, get_provider_base_url,
     byok_headers, BYOK_PLACEHOLDER,
-    AZURE_OPENAI_DEPLOYMENT,
     ENABLE_PARALLEL_LLM_RACE, PARALLEL_RACE_TIMEOUT, MIN_PROVIDERS_TO_RACE, MAX_CONCURRENT_RACE_PROVIDERS,
 )
 # Task #490 — the `vertex_chat` (CF-shim streaming wrapper) and the
@@ -138,13 +137,16 @@ _LLM_ROUTING_HISTORY_MAX_ENTRIES = 100_000
 # silently auto-expires mid-burst.  The counter resets on the next
 # successful call (mark_ok → _reset_provider_429).
 #
-# Providers included: workers-ai, gemini, azure_openai, deepgram.  Others silently no-op.
+# Providers included: workers-ai, vertex, deepgram.  Others silently no-op.
+# Task #554 — azure_openai burst slot removed alongside the rest of the
+# Azure OpenAI tenant; Vertex Gemini is now the paid English chat head and
+# carries its own per-feature tracker via the gemini canonical key.
 _PROVIDER_429_BURST_WINDOW_S = 180   # shared lookback / Redis TTL for all providers
 _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps]
     "workers-ai":   [],
     # groq removed in Task #347 / V4 §0
     "gemini":       [],
-    "azure_openai": [],
+    "vertex":       [],   # Task #554 — Vertex chat dispatch (gemini-2.5-flash)
     # bedrock removed in Task #347
     "deepgram":     [],
 }
@@ -152,7 +154,7 @@ _PROVIDER_429_REDIS_KEYS: dict = {
     "workers-ai":   "wai_429_burst",
     # groq removed in Task #347 / V4 §0
     "gemini":       "gemini_429_burst",
-    "azure_openai": "azure_429_burst",
+    "vertex":       "vertex_429_burst",
     # bedrock removed in Task #347
     "deepgram":     "deepgram_429_burst",
     # Task #491 — legacy SLM provider retired (see V4 changelog).
@@ -216,25 +218,21 @@ def _reset_provider_429(provider: str) -> None:
 
 
 # ── Per-provider real RPM sliding window (chat soft-shed, 2026-05-05) ─────────
-# When ``azure_openai`` / ``sarvam`` (the strict primaries for the
-# ``english_rag_chat`` / ``assamese_rag_chat`` pools after the 2026-05-05
-# vertex purge) accumulate >= 70 % of their configured RPM cap inside a
-# 60-second window, ``select_provider`` excludes them so the dispatcher
+# When ``vertex`` / ``sarvam`` (the strict primaries for the
+# ``english_rag_chat`` / ``assamese_rag_chat`` pools after Task #554's
+# Azure OpenAI purge) accumulate >= 70 % of their configured RPM cap inside
+# a 60-second window, ``select_provider`` excludes them so the dispatcher
 # preemptively shifts traffic to the ``workers_ai_*`` fallback BEFORE a
 # single 429 is observed.
 #
-# This is a soft-shed; the 429-burst counter above is still the final
-# safety net for any traffic that slipped through (e.g. a sudden burst
-# that crossed the cap before the next select_provider draw saw it).
-#
 # Window width = 60 s (matches the per-minute semantics of "RPM").  Limits
 # come from ``_POOL_RPM_LIMITS`` (PROVIDER_MAX_CONCURRENT × 60, env-
-# overridable via AZURE_OPENAI_RPM_LIMIT / SARVAM_RPM_LIMIT, see
+# overridable via VERTEX_RPM_LIMIT / SARVAM_RPM_LIMIT, see
 # ``_build_pool_rpm_limits`` further down in this file).
 _PAID_PROVIDER_RPM_WINDOW_S = 60
 _PAID_PROVIDER_RPM_WINDOWS: dict = {   # provider → list[float] epoch timestamps
-    "azure_openai": [],
-    "sarvam":       [],
+    "vertex": [],
+    "sarvam": [],
 }
 
 # Redis key prefix for cross-worker RPM accounting.  The shed mechanism
@@ -895,8 +893,10 @@ _MODEL_PROVIDER_MAP = {
     # in-llm gemini chat dispatch branch was deleted along with the
     # Vertex chat hot path. Gemini 2.5 Flash is now reachable ONLY via
     # `vertex_format.format_with_vertex` (formatter polish).
-    "gpt-4o-mini": "azure_openai",
-    "gpt-4.1-mini": "azure_openai",
+    # Task #554 — Azure OpenAI removed; Vertex Gemini 2.5 Flash is the
+    # English chat head. Map the model id back to the canonical provider
+    # so reverse lookups (admin/health) keep working.
+    "gemini-2.5-flash": "vertex",
 }
 
 _MODEL_ALIAS_MAP = {
@@ -1025,7 +1025,7 @@ def _build_pool_rpm_limits() -> dict:
         "workers-ai":   "WORKERS_AI_RPM_LIMIT",
         "sarvam":       "SARVAM_RPM_LIMIT",
         "gemini":       "GEMINI_RPM_LIMIT",
-        "azure_openai": "AZURE_OPENAI_RPM_LIMIT",
+        "vertex":       "VERTEX_RPM_LIMIT",   # Task #554 — Vertex english chat head
         "openai":       "OPENAI_RPM_LIMIT",
     }
     out: dict = {}
@@ -1488,13 +1488,13 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
     # in PROVIDER_PRIORITY and the SDK is uninstalled.
     if provider == "openrouter":
         return await _call_openai_compat(messages, api_key, model, max_tokens, "openrouter", "https://openrouter.ai/api/v1")
-    if provider == "azure_openai":
-        # Task #290 — route through providers.azure_openai so we get the full
-        # candidate chain (CF BYOK → direct KEY_1 → direct KEY_2) and
-        # consistent failover across every dispatch path.
-        from providers.azure_openai import call_chat as _az_chat
-        from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL
-        return await _az_chat(messages, model=model or _AZ_DEPL, max_tokens=max_tokens)
+    if provider == "vertex":
+        # Task #554 — Vertex Gemini 2.5 Flash is the English chat head
+        # (default; swaps to fallback when GCP credit runway projects
+        # ≤ 90 days). The provider module is the only Vertex chat
+        # surface; the formatter uses `vertex_format` separately.
+        from providers.vertex_chat import call_chat as _vx_chat
+        return await _vx_chat(messages, model=model or "gemini-2.5-flash", max_tokens=max_tokens)
 
     system_msg = ""
     user_msg = ""
@@ -1774,14 +1774,17 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 # pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    # Task #490: `vertex` removed from chat/embed/vector pools entirely.
-    # The remaining Vertex surface (`content_format` formatter) goes
-    # through `vertex_format.format_with_vertex`, which uses its own
-    # model-id constant (`VERTEX_GEMINI_MODEL`) — not this dispatch
-    # default-model map. Re-adding `vertex` here would silently put
-    # Vertex back into the round-robin chat pool.
+    # Task #554 — Vertex Gemini 2.5 Flash re-added as the English chat
+    # head (replaces the decommissioned Azure OpenAI `gpt-4.1-nano`).
+    # The formatter polish path stays on `vertex_format.format_with_vertex`
+    # with its own `VERTEX_GEMINI_MODEL` constant — that surface is
+    # untouched.
     # bedrock removed in Task #347
-    "azure_openai":     AZURE_OPENAI_DEPLOYMENT,                     # Azure OpenAI deployment from config (Task #290 — env-driven, no hard-coded model drift)
+    "vertex":           "gemini-2.5-flash",
+    # Azure Translator (separate Azure resource — the OpenAI tenant is
+    # gone). Translation default-model id is descriptive only; the
+    # provider client picks the actual REST route.
+    "azure_translator": "azure-translator-rest",
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
     "assemblyai":       "best",                                      # AssemblyAI STT
@@ -1804,11 +1807,13 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
 # Maps provider names to the canonical provider string used by _call_single_provider.
 # This bridges Task #250's semantic provider names to llm.py's internal strings.
 _PROVIDER_CANONICAL: dict[str, str] = {
-    # Task #490: `vertex` → `gemini` mapping removed; the chat/vision
-    # Gemini dispatch branch was deleted along with the Vertex chat
-    # hot-path. The formatter goes through `vertex_format` directly.
+    # Task #554 — Vertex chat re-added as english_rag_chat head. The
+    # canonical key is `vertex` (separate from the historical `gemini`
+    # canonical that was removed in Task #490 because it pointed at the
+    # generativelanguage.googleapis.com path the backend can't reach).
     # bedrock removed in Task #347
-    "azure_openai":     "azure_openai",     # Task #290 — own branch w/ failover chain
+    "vertex":           "vertex",
+    "azure_translator": "azure_translator",   # Task #554 — translate fallback only
     "sarvam":           "sarvam",
     "elevenlabs":       "elevenlabs",
     "assemblyai":       "assemblyai",
@@ -1832,8 +1837,8 @@ _PROVIDER_CANONICAL: dict[str, str] = {
 _SELECT_SATURATION_THRESHOLD = 0.80
 
 # Chat-pool soft-shed threshold (2026-05-05 user instruction): when the
-# strict primary for a chat pool (``azure_openai`` for english_rag_chat,
-# ``sarvam`` for assamese_rag_chat) reaches this fraction of its
+# strict primary for a chat pool (``vertex`` for english_rag_chat after
+# Task #554, ``sarvam`` for assamese_rag_chat) reaches this fraction of its
 # configured RPM cap inside a 60-second window, ``select_provider``
 # excludes it and the dispatcher walks down to the ``workers_ai_*``
 # fallback BEFORE the upstream actually starts 429ing.  Default 0.70
@@ -1851,7 +1856,7 @@ def _get_provider_saturation(provider_name: str) -> float:
 
     Resolution order:
       1. ``workers-ai`` → aggregate ``_SmartKeyPool._rpm_ratio`` across slots.
-      2. Paid chat primary (``azure_openai`` / ``sarvam``) → real
+      2. Paid chat primary (``vertex`` / ``sarvam``) → real
          dispatched-request count over the last 60 s divided by the
          configured ``_POOL_RPM_LIMITS`` cap. This drives the new 70 %
          soft-shed (2026-05-05) so the dispatcher pre-emptively shifts
@@ -1882,7 +1887,7 @@ def _get_provider_saturation(provider_name: str) -> float:
 
     # For other providers, use the 429 burst counter as a proxy:
     # ≥ 5 bursts in 60s → treat as saturated (0.85+).
-    # NOTE: look up by the original provider_name first (azure_openai, bedrock, gemini, groq)
+    # NOTE: look up by the original provider_name first (vertex, bedrock, gemini, groq)
     # because _PROVIDER_429_WINDOWS keys use provider_name, not the canonical string.
     burst_key = provider_name if provider_name in _PROVIDER_429_WINDOWS else canonical
     burst = get_provider_429_burst_inprocess(burst_key, window_seconds=60)
@@ -1925,6 +1930,38 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
     candidates = PROVIDER_PRIORITY.get(feature, ["workers_ai"])
     _is_assamese_feature = feature in ("assamese_rag_chat", "assamese_content")
 
+    # Task #554 — english_rag_chat is a deterministic 2-position chain.
+    # Walk `cost_caps._select_chat_primary()` in order so the dynamic
+    # head (vertex by default; workers_ai_llama32_3b once GCP credit
+    # runway projects ≤ 90 days) is honoured. Saturation + exclude
+    # filters still apply; on full exhaustion we raise per V4 §12 (no
+    # silent downgrade to a non-chain provider).
+    if feature == "english_rag_chat":
+        try:
+            from cost_caps import _select_chat_primary as _scp
+            ordered_chain = _scp()
+        except Exception:
+            ordered_chain = list(candidates)
+        for p in ordered_chain:
+            if p in exclude:
+                continue
+            saturation = _get_provider_saturation(p)
+            if saturation >= _CHAT_RPM_SOFT_SHED_THRESHOLD:
+                logger.info(
+                    "select_provider[english_rag_chat]: skipping %s — at %.0f%% RPM "
+                    "(threshold %.0f%%, advancing in 2-position chain)",
+                    p, saturation * 100, _CHAT_RPM_SOFT_SHED_THRESHOLD * 100,
+                )
+                continue
+            return p
+        logger.warning(
+            "select_provider[english_rag_chat]: 2-position chain exhausted "
+            "(chain=%s, exclude=%s) — returning None per V4 §12 (no silent "
+            "downgrade to a non-chain provider).",
+            ordered_chain, sorted(exclude),
+        )
+        return None
+
     # 2-leg allowlist for assamese_rag_chat (Task #490 — Vertex was removed
     # from the chat hot path and dropped from this third leg): sarvam →
     # workers_ai_indic. workers_ai_llama31_8b is still excluded because it
@@ -1949,10 +1986,10 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
         if _is_assamese_feature and p == "sarvam" and lang.lower().strip() != "as":
             continue                                   # Sarvam reserved for Assamese only
         saturation = _get_provider_saturation(p)
-        # Chat pools (english_rag_chat / assamese_rag_chat) use the
-        # tighter 70 % soft-shed threshold so azure_openai / sarvam
-        # primaries hand off to the workers_ai_* fallback BEFORE 429s
-        # start.  All other features keep the 80 % default.
+        # Chat pools (assamese_rag_chat after the english_rag_chat
+        # short-circuit above) use the tighter 70 % soft-shed threshold
+        # so the sarvam primary hands off to the workers_ai_indic
+        # fallback BEFORE 429s start. All other features keep 80 %.
         threshold = (
             _CHAT_RPM_SOFT_SHED_THRESHOLD
             if feature in _CHAT_POOLS_FOR_RPM_SHED
@@ -2014,9 +2051,9 @@ def route_for_feature(feature: str, lang: str = "") -> tuple[str, str]:
     Example::
 
         provider, model = route_for_feature("english_rag_chat")
-        # → ("azure_openai", AZURE_OPENAI_DEPLOYMENT) when azure is selected, or
-        #   ("workers-ai", "@cf/meta/llama-3.3-70b-instruct-fp8-fast") as fallback.
-        # (Task #490: the prior ("gemini", "gemini-2.5-flash") branch is gone.)
+        # → ("vertex", "gemini-2.5-flash") when the runway head is vertex
+        #   (Task #554 default), or ("workers-ai", "@cf/meta/llama-3.2-3b-instruct")
+        #   when the credit-runway flip selects the workers_ai head.
     """
     provider_name = select_provider(feature, lang=lang)
     canonical = _PROVIDER_CANONICAL.get(provider_name, provider_name)
@@ -2074,8 +2111,7 @@ async def _dispatch_llm_for_feature(
     IndicTrans2 is a translation model — it must not be called for chat/safety
     pools where the caller expects a generated natural-language answer.
 
-    Raises ``RuntimeError`` for Phase-2 providers (bedrock, azure_openai) that
-    are not yet wired as full client modules (see Task #256).
+    Raises ``RuntimeError`` for any provider whose client module is not wired.
 
     Falls back to the Workers AI SmartKeyPool batcher for ``workers_ai`` and
     any unrecognised provider name.
@@ -2111,14 +2147,10 @@ async def _dispatch_llm_for_feature(
     # yet (provider == "workers_ai"), the guard inside the model-level
     # call wins; this branch covers the common explicit cases.
     _resolved_model = None
-    # Task #490: the `provider == "vertex"` branch was removed (Vertex
-    # is no longer a chat-pool dispatch target). Add new providers here.
-    if provider == "azure_openai":
-        try:
-            from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL_PEEK
-            _resolved_model = _AZ_DEPL_PEEK
-        except Exception:
-            _resolved_model = "gpt-4.1-mini"
+    # Task #554 — Vertex Gemini 2.5 Flash is the english_rag_chat head;
+    # resolve eagerly so the live-chat-model guard sees the real model id.
+    if provider == "vertex":
+        _resolved_model = "gemini-2.5-flash"
 
     # For workers_ai we resolve the concrete model id via _TASK_ROUTE so
     # the guard can catch a chat-feature dispatch to gpt-oss-120b
@@ -2135,9 +2167,29 @@ async def _dispatch_llm_for_feature(
         else:
             _assert_model_ok(_resolved_model)
 
-    # Task #490 — `vertex` chat dispatch branch removed. Vertex is now
-    # scoped to `content_format` only. Use vertex_format.format_with_vertex
-    # for polish; do not route hot-path chat through Vertex.
+    # Task #554 — Vertex Gemini 2.5 Flash is the english_rag_chat head.
+    # Dispatched via providers.vertex_chat.call_chat (SA OAuth →
+    # generateContent). The formatter polish path is independent and
+    # still goes through vertex_format.format_with_vertex.
+    if provider == "vertex":
+        from providers.vertex_chat import call_chat as _vx_chat
+        _record_paid_provider_request("vertex")
+        _t0 = _dp_t.perf_counter()
+        try:
+            result = await _vx_chat(messages, model="gemini-2.5-flash", max_tokens=max_tokens)
+            _record_llm_call(
+                "vertex", "gemini-2.5-flash",
+                int((_dp_t.perf_counter() - _t0) * 1000),
+                True, len(result.split()), feature_key=feature,
+            )
+            return result
+        except Exception as _exc:
+            _record_llm_call(
+                "vertex", "gemini-2.5-flash",
+                int((_dp_t.perf_counter() - _t0) * 1000),
+                False, 0, error_type=type(_exc).__name__, feature_key=feature,
+            )
+            raise
 
     if provider == "sarvam":
         sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
@@ -2159,43 +2211,9 @@ async def _dispatch_llm_for_feature(
     # Task #347: bedrock dispatch branch deleted — providers/bedrock.py is gone
     # and no PROVIDER_PRIORITY pool routes to "bedrock" any more.
 
-    if provider == "azure_openai":
-        # Azure OpenAI chat/completions — providers/azure_openai handles the
-        # candidate chain (CF AI Gateway BYOK → direct KEY_1 → direct KEY_2).
-        # Deployment name comes from AZURE_OPENAI_DEPLOYMENT (Task #290; default
-        # set via config.py, falls back to legacy AZURE_OPENAI_MODEL alias).
-        # Task #338: gated by the azure.openai.enabled admin toggle so ops can
-        # drop the Azure path without a redeploy when MI auth/quotas misbehave.
-        from azure_ai_runtime import is_enabled as _az_enabled
-        if not await _az_enabled("openai"):
-            raise RuntimeError(
-                "azure openai disabled via admin toggle "
-                "(azure.openai.enabled=false) — routing to next provider"
-            )
-        from providers.azure_openai import call_chat as _az_chat
-        from config import AZURE_OPENAI_DEPLOYMENT as _AZ_DEPL
-        # 2026-05-05 — record against the 60-second RPM soft-shed window
-        # BEFORE issuing the call so timed-out / 429ed attempts still
-        # consume against the cap (matches Azure's own quota meter).
-        _record_paid_provider_request("azure_openai")
-        _t0 = _dp_t.perf_counter()
-        try:
-            result = await _az_chat(messages, model=_AZ_DEPL, max_tokens=max_tokens)
-            _record_llm_call("azure_openai", _AZ_DEPL, int((_dp_t.perf_counter() - _t0) * 1000), True, len(result.split()), feature_key=feature)
-            try:
-                from azure_ai_metrics import record_latency as _rl
-                _rl("openai", (_dp_t.perf_counter() - _t0) * 1000)
-            except Exception:
-                pass
-            return result
-        except Exception as _exc:
-            _record_llm_call("azure_openai", _AZ_DEPL, int((_dp_t.perf_counter() - _t0) * 1000), False, 0, error_type=type(_exc).__name__, feature_key=feature)
-            try:
-                from azure_ai_metrics import record_error as _re
-                _re("openai", f"{type(_exc).__name__}: {_exc}")
-            except Exception:
-                pass
-            raise
+    # Task #554 — Azure OpenAI chat dispatch removed (tenant decommissioned).
+    # The vertex branch above is the new English chat head; the
+    # workers_ai_llama32_3b leg below is the explicit fallback.
 
     if provider == "workers_ai_indic":
         # CF Workers AI IndicTrans2 — translation-only provider (Task #267).
@@ -2429,49 +2447,52 @@ async def call_with_provider_fallback(
 
 
 # ── RAG-quality call path ───────────────────────────────────────────────────────
-# V4 §4 (user-locked 2026-05-06 via B3): chat/RAG dispatch is Azure
-# gpt-4.1-nano SOLE primary → Workers-AI Mistral-7B → Workers-AI
-# Llama-3.2-3B → generic Workers-AI. The actual order is enforced by
-# PROVIDER_PRIORITY['english_rag_chat'] in config.py — this list is only
-# the *terminal hard-fallback* pool used by call_llm_for_rag() when the
-# weighted dispatch above exhausts. Workers-AI 120B / 70B kept here as a
-# last-ditch quality option (off the V4 spec'd chain but still safer than
-# returning RuntimeError to the student). Gemini removed from this hard
-# fallback (founder rejected Vertex in chat hot path; reachable only via
-# the `content` pool).
+# Task #554: english_rag_chat is the 2-position chain Vertex Gemini 2.5
+# Flash → Workers-AI Llama-3.2-3B (swaps when GCP credit runway ≤ 90 d).
+# This list is only the *terminal hard-fallback* pool used by
+# call_llm_for_rag() when the chain above is fully exhausted — Workers-AI
+# 120B / 70B kept here as a last-ditch quality option so the student gets
+# an answer instead of a RuntimeError.
 _RAG_PROVIDERS: list[dict] = []
 if _CF_AI_ENABLED:
     _RAG_PROVIDERS.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/openai/gpt-oss-120b"})
     _RAG_PROVIDERS.append({"provider": "workers-ai", "key": _CF_API_TOKEN, "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
 
 
-async def call_llm_for_rag(messages: list, max_tokens: int = 2048) -> str:
+async def call_llm_for_rag(
+    messages: list,
+    max_tokens: int = 2048,
+    *,
+    lang: str = "en",
+    feature: str = "english_rag_chat",
+) -> str:
     """LLM call optimised for RAG answer synthesis.
 
-    Dispatches through PROVIDER_PRIORITY["english_rag_chat"] weighted round-robin
-    via call_with_provider_fallback → _dispatch_llm_for_feature.
+    Dispatches through ``PROVIDER_PRIORITY[feature]`` weighted round-robin
+    via ``call_with_provider_fallback`` → ``_dispatch_llm_for_feature``.
 
-    Provider priority (V4 §4, user-locked 2026-05-06 via B3):
-      Azure OpenAI gpt-4.1-nano (SOLE primary) → Workers-AI Mistral-7B (A9 #1)
-      → Workers-AI Llama-3.2-3B (A9 #2) → generic Workers-AI (gpt-oss-20b last-resort).
-    Vertex is intentionally NOT in this pool (founder rejected the V4-draft
-    Vertex co-primary + CF Worker token-length / risk-score router).
-    Bedrock + Groq + direct Cerebras removed in Task #347.
-
-    Final hard fallback: Workers AI only — ensures no non-PROVIDER_PRIORITY providers
-    can be introduced after the weighted pool exhausts.
+    Task #554 — English chat is a STRICT 2-position chain (Vertex Gemini
+    2.5 Flash → Workers-AI Llama-3.2-3B; order flips when GCP credit
+    runway projects ≤ 90 days). When BOTH legs fail there is **no silent
+    fallback** to a non-chain provider — the dispatcher surfaces an HTTP
+    503 so callers see an honest "service temporarily unavailable" error
+    (V4 §12 — "no silent fallbacks").
     """
     try:
         return await call_with_provider_fallback(
-            "english_rag_chat", "en",
-            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature="english_rag_chat"),
+            feature, lang,
+            lambda p: _dispatch_llm_for_feature(messages, p, max_tokens, feature=feature),
         )
     except Exception as exc:
         logger.warning(
-            "call_llm_for_rag feature dispatch exhausted (%s) — hard fallback to workers_ai only",
-            exc,
+            "call_llm_for_rag %s strict chain exhausted (%s) — surfacing 503 "
+            "(Task #554: no silent fallback to non-chain providers)",
+            feature, exc,
         )
-        return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key="english_rag_chat")
+        raise HTTPException(
+            status_code=503,
+            detail="Chat service temporarily unavailable. Please try again.",
+        ) from exc
 
 
 async def call_llm_api(messages: list, model: str = None, max_tokens: int = 2048) -> str:
@@ -2893,9 +2914,23 @@ async def call_llm_api_chat(
                 status_code=503,
                 detail="Assamese chat service temporarily unavailable. Please try again.",
             ) from exc
+        # Task #554 — English chat is a STRICT 2-position chain (Vertex →
+        # Workers-AI Llama-3.2-3B). When both legs fail we surface an
+        # honest 503 instead of silently downgrading onto a non-chain
+        # generic Workers-AI provider (V4 §12 — no silent fallbacks).
+        if feature == "english_rag_chat":
+            logger.warning(
+                "call_llm_api_chat english_rag_chat strict chain exhausted "
+                "(%s) — surfacing 503 (Task #554: no silent fallback)",
+                exc,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Chat service temporarily unavailable. Please try again.",
+            ) from exc
         logger.warning(
-            "call_llm_api_chat feature dispatch exhausted (%s) — hard fallback to workers_ai only",
-            exc,
+            "call_llm_api_chat %s feature dispatch exhausted (%s) — hard fallback to workers_ai only",
+            feature, exc,
         )
         return await _call_llm_raw(messages, max_tokens=max_tokens, provider_list=_LLM_PROVIDERS_WORKERS_ONLY, feature_key=feature)
 
@@ -3329,58 +3364,11 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     }
 
     if use_model_raw == "openai/gpt-oss-20b":
-        # ── Azure OpenAI fast-path (T007) ─────────────────────────────────────
-        # When the default English SLM model is requested and Azure is configured
-        # via the CF AI Gateway, attempt Azure GPT-4.1-mini streaming first.
-        # Azure offers better output quality and typically faster TTFT (~200-400ms)
-        # than the Workers AI SLM hedged pool (~400-800ms).
-        # On ANY failure BEFORE the first token → silently fall through to SLM pool.
-        # On mid-stream failure AFTER the first token → emit error and return.
-        if not _indic_mode:
-            try:
-                from providers import azure_openai as _az_prov
-                if _az_prov.ENABLED:
-                    _az_first_token = False
-                    _az_ttft_ms = 0.0
-                    _az_t0 = time.monotonic()
-                    try:
-                        _az_batch = ""
-                        _AZ_BATCH_SIZE = 2
-                        async for token in _az_prov.stream_chat(messages, max_tokens=max_tokens):
-                            if not _az_first_token:
-                                _az_ttft_ms = (time.monotonic() - _az_t0) * 1000
-                                logger.info(f"[AZURE-PERF] TTFT={_az_ttft_ms:.0f}ms model=azure/gpt-4.1-mini")
-                                _az_first_token = True
-                            _az_batch += token
-                            if len(_az_batch) >= _AZ_BATCH_SIZE:
-                                yield f"data: {json.dumps({'content': _az_batch})}\n\n"
-                                _az_batch = ""
-                        if _az_batch:
-                            yield f"data: {json.dumps({'content': _az_batch})}\n\n"
-                        if _az_first_token:
-                            _az_total_ms = (time.monotonic() - _az_t0) * 1000
-                            logger.info(f"[AZURE-PERF] Total={_az_total_ms:.0f}ms model=azure/gpt-4.1-mini")
-                            try:
-                                from chat_speedup_metrics import record_provider_call as _rec_prov
-                                _rec_prov("azure_openai", ttfb_ms=_az_ttft_ms, total_ms=_az_total_ms)
-                            except Exception:
-                                pass
-                            yield f"data: {json.dumps({'__provider': 'azure_openai'})}\n\n"
-                            return
-                        logger.warning("[AZURE-FASTPATH] Empty stream — falling back to SLM pool")
-                    except Exception as _az_err:
-                        if _az_first_token:
-                            logger.warning(f"[AZURE-FASTPATH] Mid-stream error: {type(_az_err).__name__}: {str(_az_err)[:200]}")
-                            yield f"data: {json.dumps({'error': 'AI service interrupted'})}\n\n"
-                            return
-                        logger.warning(f"[AZURE-FASTPATH] Pre-first-token failure: {type(_az_err).__name__}: {str(_az_err)[:200]} — SLM pool fallback")
-                    try:
-                        from chat_speedup_metrics import record_provider_fallback as _rec_fb
-                        _rec_fb("azure_openai", "slm_pool")
-                    except Exception:
-                        pass
-            except ImportError:
-                pass
+        # Task #554 — Azure OpenAI streaming fast-path removed alongside
+        # the rest of the tenant. The English chat head is now Vertex
+        # Gemini 2.5 Flash (non-streaming via providers.vertex_chat); the
+        # streaming SLM pool below is the only remaining streaming path
+        # for this entry point.
         _active_pool = _slm_pool
         _input_chars = sum(len(m.get("content", "")) for m in messages)
 
@@ -4138,12 +4126,7 @@ async def call_embed_with_dispatch(
                 return _vec_wai
             # Task #347: bedrock embed branch removed (providers/bedrock.py deleted).
             # Task #491 — legacy embed-provider branches removed.
-            elif provider == "azure_openai":
-                # Azure OpenAI text-embedding-3-large via CF BYOK (Task #256).
-                from providers.azure_openai import call_embed as _az_embed
-                _az_vec = await _az_embed(text)
-                _persist(_az_vec)
-                return _az_vec
+            # Task #554 — azure_openai embed branch removed (tenant decommissioned).
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
@@ -4174,7 +4157,9 @@ async def call_translate_with_dispatch(
 
     Priority (PROVIDER_PRIORITY['translate']):
       workers_ai_indic (IndicTrans2 en→indic-1b, sole primary)
-      → azure_openai (Azure Translator REST, fallback when admin toggle on)
+      → azure_translator (Azure Translator REST, fallback when admin toggle on;
+                           Task #554 split this off from the now-removed
+                           azure_openai provider key)
       → workers_ai (generic translate prompt, last resort)
 
     Sarvam was removed by Task #492 (V4 §15 amendment); the Sarvam
@@ -4215,19 +4200,23 @@ async def call_translate_with_dispatch(
                 )
             # Task #490: vertex translate branch removed.
             # Task #347: bedrock translate branch removed.
-            if provider == "azure_openai":
+            if provider == "azure_translator":
                 # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
                 # Task #338: gated by the azure.translator.enabled admin
                 # toggle so ops can drop the Azure path without a redeploy
                 # when MI auth/quotas misbehave. Disabled => raise to the
                 # outer loop which moves to the next provider in pool.
+                # Task #554 — split off from the decommissioned
+                # `azure_openai` provider key into its own dedicated
+                # client module so the Azure OpenAI removal doesn't
+                # collapse the translate fallback.
                 from azure_ai_runtime import is_enabled as _az_enabled
                 if not await _az_enabled("translator"):
                     raise RuntimeError(
                         "azure translator disabled via admin toggle "
                         "(azure.translator.enabled=false) — routing to next provider"
                     )
-                from providers.azure_openai import call_translate as _az_translate
+                from providers.azure_speech import call_translate as _az_translate
                 return await _az_translate(text, target_lang=target_lang, source_lang=source_lang)
             elif provider == "workers_ai_indic":
                 # IndicTrans2 en→indic-1b — Assamese translation pool (Task #267).
@@ -4350,11 +4339,12 @@ async def call_rerank_with_dispatch(
     """Rerank *docs* via the weighted provider selected for 'rerank'.
 
     Priority (PROVIDER_PRIORITY['rerank']):
-      pinecone_ai(500) → azure_openai(1, skip) → workers_ai(0)
+      pinecone_ai(500) → workers_ai(0)
 
     pinecone_ai: providers.pinecone_ai.rerank (bge-reranker-v2-m3, multilingual) — fully wired.
-    azure_openai: rerank not wired (Task #257) — excluded gracefully.
     workers_ai: no rerank endpoint — excluded gracefully.
+    (Task #554 removed the dormant azure_openai rerank branch alongside
+     the rest of the Azure OpenAI tenant.)
     (cohere rerank branch removed in Task #491.)
 
     Task #382 — when ``RERANK_PROVIDER=pinecone_only`` (the new default)
@@ -4404,9 +4394,6 @@ async def call_rerank_with_dispatch(
                 # Sort docs by score descending (highest relevance first).
                 ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
                 return [d for _, d in ranked]
-            elif provider == "azure_openai":
-                # Azure OpenAI rerank not wired (Task #257); excluded gracefully.
-                raise RuntimeError("azure_openai rerank not wired (Task #257)")
             elif provider == "workers_ai":
                 raise RuntimeError("rerank via workers_ai: no rerank endpoint available")
             else:
@@ -4427,13 +4414,13 @@ async def call_vision_with_dispatch(
 ) -> str:
     """Analyse *b64_image* via the weighted provider selected for 'vision'.
 
-    Priority (PROVIDER_PRIORITY['vision']) — Task #490 dropped Vertex from vision:
-      bedrock(1000, Nova Lite multimodal) → azure_openai(1, GPT-4o) → workers_ai(0)
+    Priority (PROVIDER_PRIORITY['vision']) — Task #554 dropped azure_openai
+    GPT-4o (tenant decommissioned). The vision pool collapses to:
+      workers_ai(0) — no multimodal endpoint, surfaces RuntimeError.
 
-    bedrock: Amazon Nova Lite multimodal via providers.bedrock.call_converse_vision (Task #304).
-             Claude 3.5 Sonnet kept as in-pool higher-quality fallback if Nova Lite fails.
-    azure_openai: GPT-4o vision via providers.azure_openai.call_chat with image_url content.
-    workers_ai: no multimodal endpoint — excluded gracefully.
+    Vision OCR is currently degraded; restoring a multimodal path is
+    tracked in a separate task (vertex multimodal re-enable). Workers AI
+    stays in the pool as the documented terminal failure target.
 
     Returns the model's text response.
     Raises RuntimeError if all providers fail.
@@ -4445,26 +4432,10 @@ async def call_vision_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider("vision", lang=lang, exclude=exclude)
         try:
-            # Task #490: vertex vision branch removed. Vision now flows
-            # through Azure GPT-4o → Workers-AI multimodal (V4 §15).
-            # Task #347: bedrock vision branch removed (Nova Lite + Claude
-            # Sonnet via providers/bedrock.py deleted alongside the SDK).
-            if provider == "azure_openai":
-                from providers import azure_openai as _az_prov
-                _az_vision_msgs = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime_type};base64,{b64_image}"},
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ]
-                return await _az_prov.call_chat(_az_vision_msgs, max_tokens=1024)
-            elif provider == "workers_ai":
+            # Task #490: vertex vision branch removed. Task #554: azure_openai
+            # GPT-4o vision branch removed (tenant decommissioned). Workers
+            # AI is the only remaining provider and surfaces RuntimeError.
+            if provider == "workers_ai":
                 raise RuntimeError("vision via workers_ai: no multimodal endpoint configured")
             else:
                 raise RuntimeError(f"vision: unknown provider {provider!r}")

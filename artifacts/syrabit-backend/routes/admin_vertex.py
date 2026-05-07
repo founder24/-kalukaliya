@@ -202,8 +202,11 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
     PROVIDER_META = {
         "vertex":           {"label": "Vertex AI / Gemini (google-ai-studio)", "env": ["GOOGLE_APPLICATION_CREDENTIALS_JSON", "VERTEX_PROJECT_ID"],
                              "enabled": _gemini_or_vertex_configured()},
-        "azure_openai":     {"label": "Azure OpenAI",                "env": ["AZURE_OPENAI_KEY_1", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY_2", "AZURE_OPENAI_ENDPOINT"],
-                             "enabled": _flag("providers.azure_openai")},
+        # Task #554 — Azure OpenAI retired (chat = Vertex → Workers-AI
+        # Llama-3.2-3B). Azure Speech / Translator survive via providers.azure_speech.
+        "azure_speech":     {"label": "Azure Speech + Translator",
+                             "env": ["AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION", "AZURE_TRANSLATOR_KEY"],
+                             "enabled": bool(os.environ.get("AZURE_SPEECH_KEY") or os.environ.get("AZURE_TRANSLATOR_KEY"))},
         # Task #347 — bedrock entry removed from the admin routing config
         # (provider decommissioned; providers/bedrock.py deleted).
         "sarvam":           {"label": "Sarvam (Indic LLM)",          "env": ["SARVAM_API_KEY", "SARVAM_API_KEY_2", "SARVAM_API_KEY_3"],

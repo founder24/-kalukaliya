@@ -259,50 +259,39 @@ def test_non_chat_features_keep_80_pct_default_threshold():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_llm_for_feature_records_azure_request_on_success():
-    """The full _dispatch_llm_for_feature azure_openai branch must
+async def test_dispatch_llm_for_feature_records_vertex_request_on_success():
+    """Task #554 — _dispatch_llm_for_feature vertex branch must
     accumulate against the RPM cap on a successful upstream call.
     """
-    # Stub the upstream call so we don't actually hit Azure
-    with patch("providers.azure_openai.call_chat",
+    with patch("providers.vertex_chat.call_chat",
                new=AsyncMock(return_value="ok")):
-        # Memory-brain assertion + admin-toggle path are no-ops outside
-        # a ChatTurnContext, so we can call the dispatcher directly.
-        with patch("azure_ai_runtime.is_enabled",
-                   new=AsyncMock(return_value=True)):
-            for _ in range(3):
-                await llm._dispatch_llm_for_feature(
-                    [{"role": "user", "content": "hi"}],
-                    "azure_openai", 64, feature="english_rag_chat",
-                )
-    assert llm._get_paid_provider_rpm_count("azure_openai") == 3, (
+        for _ in range(3):
+            await llm._dispatch_llm_for_feature(
+                [{"role": "user", "content": "hi"}],
+                "vertex", 64, feature="english_rag_chat",
+            )
+    assert llm._get_paid_provider_rpm_count("vertex") == 3, (
         "_dispatch_llm_for_feature must increment the RPM window on success"
     )
 
 
 @pytest.mark.asyncio
-async def test_dispatch_llm_for_feature_records_azure_request_on_failure():
-    """A failed upstream Azure call must STILL count against the cap —
-    the soft-shed must reflect what the provider's own quota meter sees,
-    which counts attempts (not just successes)."""
+async def test_dispatch_llm_for_feature_records_vertex_request_on_failure():
+    """Task #554 — failed Vertex calls must STILL count against the cap."""
     async def _boom(*args, **kwargs):
         import httpx
         raise httpx.HTTPStatusError(
             "rate limit", request=None,  # type: ignore[arg-type]
             response=httpx.Response(429),
         )
-    with patch("providers.azure_openai.call_chat", new=_boom):
-        with patch("azure_ai_runtime.is_enabled",
-                   new=AsyncMock(return_value=True)):
-            for _ in range(2):
-                with pytest.raises(Exception):
-                    await llm._dispatch_llm_for_feature(
-                        [{"role": "user", "content": "hi"}],
-                        "azure_openai", 64, feature="english_rag_chat",
-                    )
-    assert llm._get_paid_provider_rpm_count("azure_openai") == 2, (
-        "Failed/429ed attempts must STILL count toward the soft-shed cap"
-    )
+    with patch("providers.vertex_chat.call_chat", new=_boom):
+        for _ in range(2):
+            with pytest.raises(Exception):
+                await llm._dispatch_llm_for_feature(
+                    [{"role": "user", "content": "hi"}],
+                    "vertex", 64, feature="english_rag_chat",
+                )
+    assert llm._get_paid_provider_rpm_count("vertex") == 2
 
 
 @pytest.mark.asyncio

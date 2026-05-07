@@ -54,8 +54,19 @@ def _key_status_for(name: str) -> dict[str, Any]:
             "configured": bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()),
             "source": "GOOGLE_APPLICATION_CREDENTIALS_JSON",
         }
-    if name == "azure_openai":
-        return {"configured": bool(os.environ.get("AZURE_OPENAI_ENDPOINT")), "source": "AZURE_OPENAI_ENDPOINT"}
+    # Task #554 — Azure OpenAI provider retired. Surviving Azure surface
+    # (Speech / Translator) reports configuration via the AZURE_SPEECH_KEY
+    # / AZURE_TRANSLATOR_KEY env vars instead.
+    if name == "azure_speech":
+        return {
+            "configured": bool(os.environ.get("AZURE_SPEECH_KEY") or os.environ.get("AZURE_TRANSLATOR_KEY")),
+            "source": "AZURE_SPEECH_KEY",
+        }
+    if name == "vertex" or name == "vertex_chat":
+        return {
+            "configured": bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()),
+            "source": "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+        }
     if name == "workers_ai" or name == "workers_ai_indic":
         cf = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN")
         return {"configured": bool(cf), "source": "CLOUDFLARE_API_TOKEN"}

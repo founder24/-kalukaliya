@@ -27,7 +27,7 @@ GET /admin/credits/smoke-test
     elevenlabs  GET  /v1/models (model list)              (BYOK: xi-api-key: "")
     sarvam      POST /v1/chat/completions  max_tokens=1   (BYOK: api-subscription-key: "")
     bedrock     POST /model/amazon.nova-lite-v1:0/converse max_tokens=1  (CF SigV4 BYOK)
-    azure_openai POST /chat/completions    max_tokens=1   (BYOK: api-key + Authorization: "")
+    # Task #554 — azure_openai probe retired alongside the provider.
 
   Providers without a CF AI Gateway slug (vertex, workers_ai, pinecone_ai,
   exa_ai, tavily, mongodb_atlas) are marked "skip" — select_provider() is
@@ -48,7 +48,6 @@ import httpx
 from fastapi import APIRouter, Depends
 
 from auth_deps import get_admin_user
-from config import AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["admin-credits"])
@@ -58,7 +57,8 @@ router = APIRouter(tags=["admin-credits"])
 _CREDIT_REFERENCE: dict[str, int] = {
     "vertex":        2000,
     "bedrock":       1000,
-    "azure_openai":  2500,   # $2.5k Azure for Startups — weight is fixed at 1 though
+    # Task #554 — Azure OpenAI programme retired; Azure Speech / Translator
+    # credit pool tracked separately via the azure-native runbook.
     "sarvam":         500,
     "elevenlabs":     500,
     "assemblyai":    1000,
@@ -76,7 +76,6 @@ _PROGRAMME_NAMES: dict[str, str] = {
     # programme entry is required for the fallback.
     "vertex":        "Google Cloud for Startups (content_format primary)",
     "bedrock":       "AWS Activate",
-    "azure_openai":  "Azure for Startups",
     "sarvam":        "Sarvam Startup Credits",
     "elevenlabs":    "ElevenLabs Startup Credits",
     "assemblyai":    "AssemblyAI Startup Credits",
@@ -96,7 +95,7 @@ _CREDITS_LOW_THRESHOLD = 0.20   # < 20% of original = "credits_low"
 # Design principles:
 #   • Prefer cheap/free listing endpoints (GET /models, /voices, etc.) that
 #     validate auth without consuming LLM credits.
-#   • For LLM-only providers (sarvam, bedrock, azure_openai), use max_tokens=1
+#   • For LLM-only providers (sarvam, bedrock), use max_tokens=1
 #     completion calls — cheapest path that exercises the full BYOK chain.
 #   • extra_headers contains the provider-specific upstream auth header set to
 #     "" (empty) so CF AI Gateway substitutes its BYOK-stored key.
@@ -168,26 +167,7 @@ _PROVIDER_PROBE_SPECS: dict[str, dict] = {
         },
         "description": "1-token Converse → validates CF SigV4 BYOK for bedrock",
     },
-    # Azure OpenAI — POST /chat/completions?api-version=2024-02-01 (max_tokens=1).
-    # CF AI gateway azure-openai slug routes to the Azure OpenAI REST endpoint.
-    # BYOK: api-key=placeholder + empty Authorization → CF substitutes Azure key.
-    "azure_openai": {
-        "method": "POST",
-        # CF BYOK probe path — uses the Azure deployment name from config so it
-        # matches whichever deployment operators created in the portal (Task #290).
-        "path": f"/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version={AZURE_OPENAI_API_VERSION}",
-        "body": {
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1,
-        },
-        "extra_headers": {
-            "Content-Type": "application/json",
-            # BYOK: empty Authorization + placeholder api-key → CF substitutes Azure key
-            "api-key": "x",
-            "Authorization": "",
-        },
-        "description": "1-token chat → validates BYOK azure_openai key",
-    },
+    # Task #554 — Azure OpenAI probe spec retired alongside provider removal.
 }
 
 # ── Task #263: Cloudflare paid add-on migration status ────────────────────────
@@ -642,7 +622,8 @@ async def admin_credits_provider_weights(
         "CF AI Gateway slug to exercise BYOK auth and upstream reachability. "
         "Probes: assemblyai GET "
         "/v2/transcript, elevenlabs GET /v1/models, sarvam POST /v1/chat/completions, "
-        "bedrock POST /model/amazon.nova-lite-v1:0/converse, azure_openai POST /chat/completions. "
+        # Task #554 — azure_openai probe retired alongside the provider.
+        "bedrock POST /model/amazon.nova-lite-v1:0/converse. "
         "Providers without a CF slug (vertex, workers_ai, etc.) are marked 'skip'. "
         "Fires a Slack alert (SMOKE_TEST_SLACK_WEBHOOK) on non-200 or connection error. "
         "All probes run concurrently."

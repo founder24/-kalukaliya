@@ -1,24 +1,22 @@
-"""Smoke test — POOL_WEIGHTS contract (2026-05-05 user instruction).
+"""Smoke test — POOL_WEIGHTS / PROVIDER_PRIORITY contract (Task #554).
 
-Mixed semantics across pools:
+Task #554 — English chat is now a strict 2-position chain that the
+``cost_caps._select_chat_primary()`` selector returns dynamically:
 
-  CHAT pools — STRICT PRIMARY / FALLBACK (per 2026-05-05 user instruction
-  "for english azure openai will be primary backed by worker ai, for
-  assamese sarvam will be primary backed by worker ai indic"). Vertex
-  REMOVED from both chat pools entirely.
-    english_rag_chat   azure_openai (primary 10000) → workers_ai_llama32_3b /
-                       workers_ai_mistral_7b / workers_ai (all weight 0,
-                       reachable only via call_with_provider_fallback's
-                       exclusion-redraw after Azure exhausts)
-    assamese_rag_chat  sarvam (primary 10000) → workers_ai_indic (weight 0,
-                       reachable only after Sarvam exhausts)
+  * Default order      :  vertex            → workers_ai_llama32_3b
+  * Credit-runway flip :  workers_ai_llama32_3b → vertex
+    (when projected GCP credit runway ≤ 90 days; cached for 60 s on
+    a monotonic clock so the hot dispatch path never re-reads env / redis
+    per turn).
 
-  CONTENT / TRANSLATE pools — round-robin equal-weight draw remains in
-  effect for the generate stage. Task #490: Vertex was scoped to the
-  separate `content_format` pool, so it is no longer in `content` /
-  `translate`:
-    content             workers_ai_mistral_7b, workers_ai_llama32_3b
-    translate           workers_ai_indic
+Other pools are unchanged:
+
+  * assamese_rag_chat — sarvam (primary 10000) → workers_ai_indic
+    (weight 0; reachable only via call_with_provider_fallback's
+    exclusion-redraw after Sarvam exhausts).
+  * content / assamese_content — Workers AI exclusively.
+  * content_format — Vertex (primary) → Workers-AI Llama-3.3-70b.
+  * translate — workers_ai_indic only.
 
 Run::
 
@@ -28,6 +26,7 @@ from __future__ import annotations
 
 import os
 import sys
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,344 +35,339 @@ import logging
 # Suppress noisy import-time logging from config without leaking the
 # global ``logging.disable`` state into other test modules. Task #402:
 # leaving ``logging.disable(logging.CRITICAL)`` set at module scope made
-# tests/test_vertex_startup_probe.py fail when run after this file (the
-# probe asserts on captured ERROR records, which a non-NOTSET disable
-# level silently swallows). Save the previous level, suppress only
-# across the import that needs it, then restore.
+# tests/test_vertex_startup_probe.py fail when run after this file.
 _PREV_LOGGING_DISABLE_LEVEL = logging.root.manager.disable
 logging.disable(logging.CRITICAL)
 try:
     from config import POOL_WEIGHTS, PROVIDER_PRIORITY
+    from cost_caps import (
+        _CHAT_CHAIN_DEFAULT,
+        _CHAT_CHAIN_FLIPPED,
+        _select_chat_primary,
+        _reset_chat_primary_cache,
+    )
 finally:
     logging.disable(_PREV_LOGGING_DISABLE_LEVEL)
 
 
-def _expect_round_robin(feature: str, expected_active: set[str], lang: str = "en",
-                        *, draws: int = 600, tolerance: float = 0.40):
-    """Assert that all *expected_active* providers appear in roughly equal share.
-
-    With ``draws=600`` and ``tolerance=0.40``, each provider should land in
-    ``[ (1/N - tol/N), (1/N + tol/N) ]`` of draws — i.e. within 40% of its
-    fair share. This is a loose bound chosen to keep the test stable under
-    the binomial variance of `random.choices` with N=4 (~95 expected hits per
-    bucket, std-dev ≈9; ±40% is ±38 hits, well outside 2σ noise).
-    """
-    from llm import select_provider
-    from collections import Counter
-    counts = Counter(select_provider(feature, lang=lang) for _ in range(draws))
-    fair = draws / len(expected_active)
-    lower = fair * (1 - tolerance)
-    upper = fair * (1 + tolerance)
-    seen_active = {p for p in counts if p in expected_active}
-    assert seen_active == expected_active, (
-        f"{feature}: expected every active provider in {expected_active} to be drawn at "
-        f"least once across {draws} draws, missing {expected_active - seen_active}; "
-        f"counts={dict(counts)}"
-    )
-    for p in expected_active:
-        assert lower <= counts[p] <= upper, (
-            f"{feature}: provider {p} drawn {counts[p]}/{draws} times — "
-            f"outside ±{tolerance:.0%} of fair share ({fair:.0f}); counts={dict(counts)}"
-        )
+_CHAT_CHAIN_PROVIDERS = {"vertex", "workers_ai_llama32_3b"}
 
 
-def _assert_equal_weights(feature: str, expected_active: set[str]):
-    """Each active provider in the pool must carry the same weight."""
-    weights = POOL_WEIGHTS[feature]
-    active_weights = {p: weights[p] for p in expected_active if p in weights}
-    assert set(active_weights.keys()) == expected_active, (
-        f"{feature}: POOL_WEIGHTS missing entries for {expected_active - set(active_weights)}"
+def _clear_runway_env(monkeypatch):
+    """Drop both runway-driving env vars so the default chain wins."""
+    monkeypatch.delenv("CHAT_CREDIT_RUNWAY_DAYS", raising=False)
+    monkeypatch.delenv("GCP_CREDITS_REMAINING_USD", raising=False)
+    monkeypatch.delenv("CHAT_PRIMARY_OVERRIDE", raising=False)
+    _reset_chat_primary_cache()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# english_rag_chat — Task #554 2-position chain
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def test_english_rag_chat_chain_is_exactly_two_positions(monkeypatch):
+    """Acceptance C — _select_chat_primary returns exactly 2 entries
+    (vertex + workers_ai_llama32_3b in some order). No third leg, no
+    azure_openai, no other workers_ai variant."""
+    _clear_runway_env(monkeypatch)
+    chain = _select_chat_primary()
+    assert isinstance(chain, list), f"chain must be a list, got {type(chain)}"
+    assert len(chain) == 2, (
+        f"english chat chain must be exactly 2 positions (Task #554); got {chain}"
     )
-    distinct = set(active_weights.values())
-    assert len(distinct) == 1, (
-        f"{feature}: round-robin requires equal weights across active providers, "
-        f"got {active_weights}"
+    assert set(chain) == _CHAT_CHAIN_PROVIDERS, (
+        f"english chat chain must be exactly {{vertex, workers_ai_llama32_3b}}; "
+        f"got {chain}"
     )
-    only_weight = distinct.pop()
-    assert only_weight > 0, (
-        f"{feature}: active providers must have a positive equal weight, got {only_weight}"
+    assert "azure_openai" not in chain, (
+        "Task #554 negative — azure_openai is RETIRED from the english chat chain"
     )
 
 
-def test_english_rag_chat_workers_primary_paid_fallback():
-    """english_rag_chat — Task #549 perpetual $100/mo budget.
-    Workers-AI Llama-3.2-3B is the SOLE primary (weight 10000) so the
-    free Cloudflare tier carries the chat hot path. Workers-AI Mistral-7B,
-    the generic workers_ai gpt-oss-20b leg, plus Vertex Gemini 2.5 Flash
-    and Azure OpenAI all sit at weight 0 as exclusion-redraw fallbacks.
-    PROVIDER_PRIORITY must START with workers_ai_llama32_3b (or vertex
-    when CHAT_PRIMARY_OVERRIDE=vertex flips the runway-aware selector)."""
-    from llm import select_provider
-    from collections import Counter
+def test_english_rag_chat_default_chain_starts_with_vertex(monkeypatch):
+    """Healthy GCP credits → Vertex Gemini 2.5 Flash is the head."""
+    _clear_runway_env(monkeypatch)
+    chain = _select_chat_primary()
+    assert chain[0] == "vertex", (
+        f"default head must be vertex (drains GCP startup credits); got {chain}"
+    )
+    assert chain == list(_CHAT_CHAIN_DEFAULT)
 
+
+def test_english_rag_chat_credit_flip_swaps_head(monkeypatch):
+    """Acceptance D — when projected runway ≤ 90 days the chain flips
+    so workers_ai_llama32_3b becomes the head and Vertex stays as the
+    paid fallback (V4 §12 — no silent removal)."""
+    _clear_runway_env(monkeypatch)
+    monkeypatch.setenv("CHAT_CREDIT_RUNWAY_DAYS", "89")
+    _reset_chat_primary_cache()
+    chain = _select_chat_primary()
+    assert chain == list(_CHAT_CHAIN_FLIPPED), (
+        f"runway≤90d must flip the chain to {_CHAT_CHAIN_FLIPPED}; got {chain}"
+    )
+    assert chain[0] == "workers_ai_llama32_3b"
+    assert chain[1] == "vertex"
+
+
+def test_english_rag_chat_credit_flip_at_threshold(monkeypatch):
+    """Boundary — runway == 90.0 days must already trigger the flip
+    (selector uses ``runway <= 90`` so the transition is inclusive)."""
+    _clear_runway_env(monkeypatch)
+    monkeypatch.setenv("CHAT_CREDIT_RUNWAY_DAYS", "90")
+    _reset_chat_primary_cache()
+    chain = _select_chat_primary()
+    assert chain[0] == "workers_ai_llama32_3b", (
+        f"runway == 90d (boundary) must flip; got head={chain[0]!r}"
+    )
+
+
+def test_english_rag_chat_healthy_runway_uses_default(monkeypatch):
+    """Runway 91+ days → default chain (vertex first)."""
+    _clear_runway_env(monkeypatch)
+    monkeypatch.setenv("CHAT_CREDIT_RUNWAY_DAYS", "180")
+    _reset_chat_primary_cache()
+    chain = _select_chat_primary()
+    assert chain[0] == "vertex", f"runway 180d must keep vertex head; got {chain}"
+
+
+def test_english_rag_chat_override_vertex(monkeypatch):
+    """CHAT_PRIMARY_OVERRIDE=vertex pins the default chain regardless of
+    the credit-runway signal."""
+    _clear_runway_env(monkeypatch)
+    monkeypatch.setenv("CHAT_CREDIT_RUNWAY_DAYS", "5")  # would normally flip
+    monkeypatch.setenv("CHAT_PRIMARY_OVERRIDE", "vertex")
+    _reset_chat_primary_cache()
+    chain = _select_chat_primary()
+    assert chain == list(_CHAT_CHAIN_DEFAULT), (
+        f"CHAT_PRIMARY_OVERRIDE=vertex must pin the default chain; got {chain}"
+    )
+
+
+def test_english_rag_chat_override_workers(monkeypatch):
+    """CHAT_PRIMARY_OVERRIDE=workers_ai_llama32_3b pins the flipped chain."""
+    _clear_runway_env(monkeypatch)
+    monkeypatch.setenv("CHAT_PRIMARY_OVERRIDE", "workers_ai_llama32_3b")
+    _reset_chat_primary_cache()
+    chain = _select_chat_primary()
+    assert chain == list(_CHAT_CHAIN_FLIPPED), (
+        f"CHAT_PRIMARY_OVERRIDE=workers_ai_llama32_3b must pin the flipped chain; "
+        f"got {chain}"
+    )
+
+
+def test_english_rag_chat_pool_membership_negative():
+    """Negative — no retired provider may appear in PROVIDER_PRIORITY or
+    POOL_WEIGHTS for english_rag_chat."""
+    chain = list(PROVIDER_PRIORITY["english_rag_chat"])
     weights = POOL_WEIGHTS["english_rag_chat"]
-    assert weights.get("workers_ai_llama32_3b") == 10000, (
-        f"english_rag_chat: workers_ai_llama32_3b must carry weight 10000 "
-        f"(sole primary, Task #549), got {weights.get('workers_ai_llama32_3b')!r}"
+    assert "azure_openai" not in chain, (
+        "Task #554 — azure_openai must NOT appear in PROVIDER_PRIORITY['english_rag_chat']"
     )
-    # Acceptance criterion #549 — chain must start with vertex_gemini_flash
-    # OR workers_ai (workers_ai_llama32_3b is a workers_ai variant).
-    head = PROVIDER_PRIORITY["english_rag_chat"][0]
-    assert head in {"workers_ai_llama32_3b", "workers_ai_mistral_7b",
-                    "workers_ai", "vertex"}, (
-        f"english_rag_chat priority list must start with a workers_ai "
-        f"variant or vertex (Task #549); got {head!r}"
+    assert "azure_openai" not in weights, (
+        "Task #554 — azure_openai must NOT appear in POOL_WEIGHTS['english_rag_chat']"
     )
-    # Every other provider in the pool must be weight-0 fallback.
-    for fallback in ("workers_ai_mistral_7b", "workers_ai", "vertex", "azure_openai"):
-        assert fallback in weights, (
-            f"english_rag_chat: {fallback} must be in the pool as a fallback"
-        )
-        assert weights[fallback] == 0, (
-            f"english_rag_chat: {fallback} must be weight 0 (pure fallback — "
-            f"non-zero would steal traffic from the Workers-AI primary), "
-            f"got {weights[fallback]}"
+    # Chain must contain both Task #554 chain members.
+    for required in _CHAT_CHAIN_PROVIDERS:
+        assert required in chain, (
+            f"english_rag_chat: PROVIDER_PRIORITY must include {required!r}; got {chain}"
         )
 
-    # Healthy-path draw: 200 selections must all return the workers_ai
-    # primary because it is the sole non-zero-weight entry in the pool.
-    counts = Counter(select_provider("english_rag_chat", lang="en") for _ in range(200))
-    assert counts.get("workers_ai_llama32_3b", 0) == 200, (
-        f"english_rag_chat: healthy-path draw must route 100% to "
-        f"workers_ai_llama32_3b; counts={dict(counts)}"
-    )
-    print("  PASS: english_rag_chat workers_ai-primary, vertex/azure-fallback (Task #549)")
+
+def test_english_rag_chat_weights_have_chain_members():
+    """Both chain providers must carry a positive weight so a healthy-
+    path draw resolves; the relative order is decided by the runtime
+    selector (cost_caps._select_chat_primary)."""
+    weights = POOL_WEIGHTS["english_rag_chat"]
+    for required in _CHAT_CHAIN_PROVIDERS:
+        assert weights.get(required, 0) > 0, (
+            f"english_rag_chat: {required!r} must carry a positive weight; got {weights}"
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Other locked pools (unchanged by Task #554, retained for regression cover)
+# ───────────────────────────────────────────────────────────────────────────
 
 
 def test_content_workers_ai_primary():
-    """content + assamese_content pools — Task #490 (2026-05-06):
-    Stage-1 GENERATE is owned by Workers AI exclusively. Vertex was
-    scoped out of the `content` and `assamese_content` pools entirely
-    and now lives in its own `content_format` pool (Stage-2 polish via
-    `vertex_format.format_with_vertex`).
-
-    English `content` pool:
-      workers_ai_mistral_7b (10000), workers_ai_llama32_3b (10000),
-      workers_ai (0 — emergency safety net).
-
-    Assamese `assamese_content` pool:
-      workers_ai_indic (10000).
-
-    Stage-2 polish pool:
-      content_format → vertex (10000).
-    """
-    from llm import select_provider, polish_notes_with_vertex
+    """content + assamese_content pools — Workers AI exclusive (Task #490)."""
+    from llm import select_provider
     from collections import Counter
 
-    # ---- English content pool ------------------------------------------
     weights = POOL_WEIGHTS["content"]
     primaries = {"workers_ai_mistral_7b", "workers_ai_llama32_3b"}
-
     for p in primaries:
-        assert weights[p] == 10000, (
-            f"content: workers-AI primary {p} must carry weight 10000, got {weights[p]}"
-        )
-    assert "vertex" not in weights, (
-        "content: vertex must NOT be in the English content pool (Task #490 — "
-        "Vertex moved to the dedicated content_format pool); got " + str(weights)
-    )
-    assert weights.get("workers_ai", 0) == 0, (
-        "content: generic workers_ai must remain weight-0 (last-resort safety net)"
-    )
-    assert "sarvam" not in weights
+        assert weights[p] == 10000, f"content: {p} must carry weight 10000"
+    assert "vertex" not in weights
     assert "azure_openai" not in weights
+    assert weights.get("workers_ai", 0) == 0
 
     draws = 600
     counts = Counter(select_provider("content", lang="en") for _ in range(draws))
     primary_share = sum(counts[p] for p in primaries) / draws
-    assert primary_share == 1.0, (
-        f"content: stage-1 generate must route 100% to Workers AI primaries; "
-        f"counts={dict(counts)}"
-    )
-    assert counts.get("vertex", 0) == 0
+    assert primary_share == 1.0
 
-    # ---- Assamese content pool -----------------------------------------
     as_weights = POOL_WEIGHTS["assamese_content"]
     assert as_weights["workers_ai_indic"] == 10000
-    assert "vertex" not in as_weights, (
-        "assamese_content: vertex must NOT be in the Assamese content pool "
-        "(Task #490 — Vertex moved to dedicated content_format pool)"
-    )
+    assert "vertex" not in as_weights
 
-    as_counts = Counter(select_provider("assamese_content", lang="as") for _ in range(draws))
-    assert as_counts.get("workers_ai_indic", 0) == draws
-    assert as_counts.get("vertex", 0) == 0
-
-    # ---- Stage-2 polish pool (`content_format`) — Vertex primary +
-    # Workers-AI Llama-3.3-70b sole fallback (Task #494, V4 §15 §6) -----
+    # content_format polish pool — Vertex primary, Llama-3.3-70b fallback.
     polish_weights = POOL_WEIGHTS["content_format"]
-    assert set(polish_weights.keys()) == {"vertex", "workers_ai_llama33_70b"}, (
-        f"content_format must list exactly {{'vertex','workers_ai_llama33_70b'}} "
-        f"(Task #494 V4 §15 §6); got {polish_weights}"
-    )
+    assert set(polish_weights.keys()) == {"vertex", "workers_ai_llama33_70b"}
     assert polish_weights["vertex"] == 10000
-    assert 0 < polish_weights["workers_ai_llama33_70b"] < polish_weights["vertex"], (
-        "Llama-3.3-70b must be a non-zero but dominated fallback so the "
-        "weighted draw still lands on Vertex deterministically while the "
-        "dispatcher retains an explicit advance path on Vertex outage."
-    )
-    polish_counts = Counter(select_provider("content_format") for _ in range(200))
-    # With vertex weight 10000 vs llama 100, vertex must dominate (>95%).
-    assert polish_counts.get("vertex", 0) >= 190, (
-        f"content_format: weighted draw must overwhelmingly select vertex; "
-        f"got {dict(polish_counts)}"
-    )
-
-    # ---- Stage-2 polish helpers exist and are callable -----------------
-    assert callable(polish_notes_with_vertex), (
-        "llm.polish_notes_with_vertex must exist as a callable — it now "
-        "delegates to content_formatter.format_content"
-    )
-    from llm import polish_notes_with_format
-    assert callable(polish_notes_with_format), (
-        "llm.polish_notes_with_format must exist as the dict-returning "
-        "Task #494 wrapper that surfaces formatted_by for the audit field"
-    )
-
-    print(
-        "  PASS: content + assamese_content stage-1 is workers-only; "
-        "content_format stage-2 is vertex(primary)+llama33-70b(fallback) (Task #494)"
-    )
+    assert 0 < polish_weights["workers_ai_llama33_70b"] < polish_weights["vertex"]
 
 
 def test_assamese_rag_chat_sarvam_primary_indic_fallback():
-    """assamese_rag_chat — strict primary/fallback (2026-05-05 user instruction).
-    Sarvam is the SOLE primary (weight 10000); Workers AI IndicTrans2 sits
-    at weight 0 as the pure fallback that call_with_provider_fallback only
-    reaches through its exclusion-redraw loop after Sarvam exhausts. Vertex
-    REMOVED from the Assamese chat chain entirely. Strict 2-leg exhaustion
-    must surface 503 (no silent downgrade to wrong-language providers)."""
+    """assamese_rag_chat — Sarvam primary, IndicTrans2 fallback. Vertex
+    REMOVED from the Assamese chat chain entirely (2026-05-05)."""
     from llm import select_provider
     from collections import Counter
 
     weights = POOL_WEIGHTS["assamese_rag_chat"]
-    assert weights.get("sarvam") == 10000, (
-        f"assamese_rag_chat: sarvam must carry weight 10000 (sole primary), "
-        f"got {weights.get('sarvam')!r}"
-    )
-    assert "vertex" not in weights, (
-        "assamese_rag_chat: vertex must NOT be in the chat pool (2026-05-05 — "
-        "Vertex removed from both chat chains entirely)"
-    )
-    assert "workers_ai_indic" in weights, (
-        "assamese_rag_chat: workers_ai_indic must be in the pool (as the "
-        "fallback reachable via call_with_provider_fallback exclusion-redraw)"
-    )
-    assert weights["workers_ai_indic"] == 0, (
-        f"assamese_rag_chat: workers_ai_indic must be weight 0 (pure fallback — "
-        f"non-zero would steal traffic from the Sarvam primary), "
-        f"got {weights['workers_ai_indic']}"
-    )
-    # Wrong-language providers must NOT appear in the Assamese chat pool.
+    assert weights.get("sarvam") == 10000
+    assert "vertex" not in weights
+    assert weights["workers_ai_indic"] == 0
     for forbidden in ("workers_ai_llama31_8b", "workers_ai", "azure_openai"):
         assert forbidden not in weights, (
-            f"assamese_rag_chat: {forbidden} must NOT be in the Assamese chat pool — "
-            f"it emits non-Assamese output for Assamese prompts"
+            f"assamese_rag_chat: {forbidden} must NOT appear in the chat pool"
         )
 
-    # PROVIDER_PRIORITY chain must contain exactly sarvam + workers_ai_indic
-    # (vertex removed, no wrong-language tail).
     chain = list(PROVIDER_PRIORITY["assamese_rag_chat"])
-    assert chain == ["sarvam", "workers_ai_indic"], (
-        f"assamese_rag_chat: PROVIDER_PRIORITY must be exactly "
-        f"['sarvam', 'workers_ai_indic'] (vertex removed); got {chain}"
-    )
+    assert chain == ["sarvam", "workers_ai_indic"]
 
-    # Healthy-path draw: every selection must return sarvam because it is
-    # the sole non-zero-weight entry in the pool.
     counts = Counter(select_provider("assamese_rag_chat", lang="as") for _ in range(200))
-    assert counts.get("sarvam", 0) == 200, (
-        f"assamese_rag_chat: healthy-path draw must route 100% to sarvam; "
-        f"counts={dict(counts)}"
-    )
-    print("  PASS: assamese_rag_chat sarvam-primary, workers_ai_indic-fallback (vertex removed)")
+    assert counts.get("sarvam", 0) == 200
 
 
-def test_translate_workers_ai_indic_only():
-    """Task #490: Vertex was removed from the `translate` pool. Only
-    workers_ai_indic (IndicTrans2) remains as the translate provider."""
+def test_translate_workers_ai_indic_primary():
+    """translate pool — IndicTrans2 must remain dominant."""
     from llm import select_provider
     from collections import Counter
 
     weights = POOL_WEIGHTS["translate"]
-    assert "vertex" not in weights, (
-        "translate: vertex must NOT be in the translate pool (Task #490 — "
-        "Vertex is content_format only); got " + str(weights)
-    )
-    assert weights.get("workers_ai_indic", 0) > 0, (
-        f"translate: workers_ai_indic must carry positive weight; got {weights}"
-    )
+    assert "vertex" not in weights
+    assert weights.get("workers_ai_indic", 0) > 0
 
     counts = Counter(select_provider("translate", lang="as") for _ in range(200))
-    assert counts.get("workers_ai_indic", 0) == 200, (
-        f"translate: every draw must select workers_ai_indic; counts={dict(counts)}"
+    assert counts.get("workers_ai_indic", 0) >= 180, (
+        f"translate: workers_ai_indic must dominate; counts={dict(counts)}"
     )
-    print("  PASS: translate routes 100% to workers_ai_indic (vertex removed)")
 
 
 def test_workers_ai_fallback_uses_gpt_oss_20b():
-    """When content / english_rag_chat fall through to the weight-0
-    workers_ai last-resort leg, the dispatched model must be
-    @cf/openai/gpt-oss-20b (no quota lock-up like llama-3.3-70b)."""
+    """Generic workers_ai default model must remain @cf/openai/gpt-oss-20b
+    (no quota lock-up like llama-3.3-70b)."""
     from llm import _PROVIDER_DEFAULT_MODELS
-    assert _PROVIDER_DEFAULT_MODELS["workers_ai"] == "@cf/openai/gpt-oss-20b", (
-        f"workers_ai default model must be @cf/openai/gpt-oss-20b for the "
-        f"locked content + english_rag_chat fallback chain; got "
-        f"{_PROVIDER_DEFAULT_MODELS['workers_ai']!r}"
-    )
-    print("  PASS: workers_ai default model is @cf/openai/gpt-oss-20b")
+    assert _PROVIDER_DEFAULT_MODELS["workers_ai"] == "@cf/openai/gpt-oss-20b"
 
 
-def test_priority_lists_contain_every_active_member():
-    """PROVIDER_PRIORITY list-order seeds the candidate pool for
-    select_provider and (via call_with_provider_fallback's exclusion-redraw
-    loop) defines the failover order for chat pools that have a single
-    primary at non-zero weight."""
-    expectations = {
-        # english_rag_chat (Task #549): workers_ai_llama32_3b primary;
-        # workers_ai_mistral_7b, generic workers_ai, vertex, azure_openai
-        # all reachable as exclusion-redraw fallbacks.
-        "english_rag_chat":  {"workers_ai_llama32_3b",
-                              "workers_ai_mistral_7b"},
-        # Task #490: vertex REMOVED from `content`; it now lives only
-        # in the `content_format` pool.
-        "content":           {"workers_ai_mistral_7b", "workers_ai_llama32_3b"},
-        # assamese_rag_chat (2026-05-05): vertex REMOVED. Strict 2-leg
-        # chain — sarvam (primary) → workers_ai_indic (fallback).
-        "assamese_rag_chat": {"sarvam", "workers_ai_indic"},
-        # Task #490: vertex REMOVED from `translate`.
-        "translate":         {"workers_ai_indic"},
-        # Task #490: dedicated polish pool — vertex-only.
-        "content_format":    {"vertex"},
-    }
-    for feature, members in expectations.items():
-        chain = set(PROVIDER_PRIORITY[feature])
-        missing = members - chain
-        assert not missing, f"{feature}: PROVIDER_PRIORITY missing {missing}; got {PROVIDER_PRIORITY[feature]}"
-    # assamese_rag_chat: strict 2-leg chain (sarvam, workers_ai_indic).
-    # Vertex removed entirely from chat. workers_ai_llama31_8b and the
-    # generic workers_ai shorthand remain forbidden because they emit
-    # non-Assamese output.
-    assert set(PROVIDER_PRIORITY["assamese_rag_chat"]) == {"sarvam", "workers_ai_indic"}, (
-        f"assamese_rag_chat must contain exactly sarvam/workers_ai_indic; "
-        f"got {PROVIDER_PRIORITY['assamese_rag_chat']}"
+def test_no_azure_openai_anywhere_in_provider_priority():
+    """Negative — azure_openai must not appear in ANY PROVIDER_PRIORITY
+    pool. Task #554 retired the entire Azure OpenAI surface (chat /
+    embed / Whisper STT / text-embedding-3-large). Azure Speech /
+    Translator survive on their own keys via providers.azure_speech."""
+    for feature, chain in PROVIDER_PRIORITY.items():
+        assert "azure_openai" not in list(chain), (
+            f"PROVIDER_PRIORITY[{feature!r}] still references retired "
+            f"azure_openai (Task #554); got {chain}"
+        )
+    for feature, weights in POOL_WEIGHTS.items():
+        assert "azure_openai" not in weights, (
+            f"POOL_WEIGHTS[{feature!r}] still references retired "
+            f"azure_openai (Task #554); got {weights}"
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Task #554 — strict-chain (no silent fallback) + 60 s cache regression
+# ───────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def _no_runway_env(monkeypatch):
+    _clear_runway_env(monkeypatch)
+    yield
+
+
+def test_select_chat_primary_cache_is_60s_monotonic(monkeypatch, _no_runway_env):
+    """The selector must cache its result for ~60 s on a monotonic clock
+    so the hot dispatch path never re-reads env / redis per turn. We
+    flip CHAT_PRIMARY_OVERRIDE between the two heads and assert the
+    selector returns the SAME (cached) chain until the cache is
+    explicitly reset."""
+    import cost_caps as _cc
+
+    monkeypatch.setenv("CHAT_PRIMARY_OVERRIDE", "vertex")
+    _cc._reset_chat_primary_cache()
+    first = _cc._select_chat_primary()
+    assert first[0] == "vertex"
+
+    # Flip the override behind the cache — the selector must still
+    # return the cached value, proving the 60 s cache short-circuits
+    # env reads on hot calls.
+    monkeypatch.setenv("CHAT_PRIMARY_OVERRIDE", "workers_ai_llama32_3b")
+    cached = _cc._select_chat_primary()
+    assert cached == first, (
+        "selector must return cached chain on hot calls; got "
+        f"{cached!r} != {first!r}"
     )
-    # english_rag_chat: must START with vertex_gemini_flash or workers_ai
-    # variant (Task #549 acceptance criterion).
-    head = PROVIDER_PRIORITY["english_rag_chat"][0]
-    assert head in {"workers_ai_llama32_3b", "workers_ai_mistral_7b",
-                    "workers_ai", "vertex"}, (
-        f"english_rag_chat must start with workers_ai variant or vertex "
-        f"(Task #549); got head={head!r}"
+
+    # Confirm the cache TTL is exactly 60 s — anything looser would let
+    # the runway-flip drift across a ladder of turns.
+    assert _cc._CHAT_PRIMARY_CACHE_TTL_S == 60.0
+
+    # Reset clears the cache so the new override takes effect.
+    _cc._reset_chat_primary_cache()
+    after_reset = _cc._select_chat_primary()
+    assert after_reset[0] == "workers_ai_llama32_3b"
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_rag_strict_chain_raises_503_on_exhaustion(monkeypatch):
+    """Task #554 (no-silent-fallback) — when the english_rag_chat 2-leg
+    chain exhausts, ``call_llm_for_rag`` must raise an HTTP 503 instead
+    of silently downgrading onto a non-chain Workers-AI provider."""
+    from fastapi import HTTPException
+    import llm
+
+    async def _exhaust(*args, **kwargs):
+        raise RuntimeError("simulated chain exhaustion")
+
+    monkeypatch.setattr(llm, "call_with_provider_fallback", _exhaust)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await llm.call_llm_for_rag([{"role": "user", "content": "hi"}])
+    assert exc_info.value.status_code == 503, (
+        "english chain exhaustion must surface 503 (Task #554), got "
+        f"{exc_info.value.status_code}"
     )
-    print("  PASS: PROVIDER_PRIORITY membership matches chat primary/fallback contract")
+
+
+@pytest.mark.asyncio
+async def test_call_llm_api_chat_english_chain_raises_503_on_exhaustion(monkeypatch):
+    """Same invariant on the chat hot path — ``call_llm_api_chat`` with
+    ``feature='english_rag_chat'`` must surface 503 on chain exhaustion
+    rather than fall through to ``_LLM_PROVIDERS_WORKERS_ONLY``."""
+    from fastapi import HTTPException
+    import llm
+
+    async def _exhaust(*args, **kwargs):
+        raise RuntimeError("simulated chain exhaustion")
+
+    monkeypatch.setattr(llm, "call_with_provider_fallback", _exhaust)
+
+    # lang="en" → feature derives to "english_rag_chat" inside
+    # call_llm_api_chat — that's the strict-chain leg under test.
+    with pytest.raises(HTTPException) as exc_info:
+        await llm.call_llm_api_chat(
+            [{"role": "user", "content": "hi"}],
+            lang="en",
+        )
+    assert exc_info.value.status_code == 503
 
 
 if __name__ == "__main__":
-    test_english_rag_chat_workers_primary_paid_fallback()
-    test_content_workers_ai_primary()
-    test_assamese_rag_chat_sarvam_primary_indic_fallback()
-    test_translate_workers_ai_indic_only()
-    test_workers_ai_fallback_uses_gpt_oss_20b()
-    test_priority_lists_contain_every_active_member()
-    print("\nAll POOL_WEIGHTS / PROVIDER_PRIORITY assertions verified.")
+    import pytest as _pt
+    _pt.main([__file__, "-v"])

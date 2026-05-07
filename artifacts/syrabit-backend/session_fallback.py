@@ -13,7 +13,7 @@ Defaults (all overridable via env / runbook):
 
 * ``SESSION_FALLBACK_K``                 — consecutive slow turns to trip (3)
 * ``SESSION_FALLBACK_TTFB_MS``           — per-turn slow threshold ms (2400)
-* ``SESSION_FALLBACK_PROVIDER``          — provider to swap into ("azure_openai")
+* ``SESSION_FALLBACK_PROVIDER``          — provider to swap into ("vertex")
 * ``SESSION_FALLBACK_TTL_S``             — sticky-key TTL seconds (7200 = 2h)
 * ``SESSION_FALLBACK_HERD_PCT``          — fraction of active sessions
                                             that may be swapped before the
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # ── Configuration ────────────────────────────────────────────────────────────
 SESSION_FALLBACK_K = int(os.environ.get("SESSION_FALLBACK_K", "3"))
 SESSION_FALLBACK_TTFB_MS = int(os.environ.get("SESSION_FALLBACK_TTFB_MS", "2400"))
-SESSION_FALLBACK_PROVIDER = os.environ.get("SESSION_FALLBACK_PROVIDER", "azure_openai").strip()
+SESSION_FALLBACK_PROVIDER = os.environ.get("SESSION_FALLBACK_PROVIDER", "vertex").strip()
 SESSION_FALLBACK_TTL_S = int(os.environ.get("SESSION_FALLBACK_TTL_S", "7200"))
 SESSION_FALLBACK_HERD_PCT = float(os.environ.get("SESSION_FALLBACK_HERD_PCT", "0.05"))
 SESSION_TTFB_KEY_TTL_S = int(os.environ.get("SESSION_TTFB_KEY_TTL_S", str(24 * 3600)))

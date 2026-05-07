@@ -125,56 +125,13 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# 1. AI Gateway header capture — Azure OpenAI chat path
+# 1. AI Gateway header capture — Azure OpenAI chat path RETIRED (Task #554)
 # ──────────────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_aig_headers_recorded_on_azure_chat_completion(monkeypatch):
-    """When call_chat() succeeds against the cf_byok endpoint, the
-    cf-aig-* headers on the response must be parsed by the
-    ai_gateway_observability counters."""
-    monkeypatch.setenv("CF_AIGW_OBS_ON", "1")
-
-    import config as _cfg
-    importlib.reload(_cfg)
-
-    import ai_gateway_observability as obs
-    importlib.reload(obs)
-    obs.reset_for_tests()
-
-    from providers import azure_openai
-
-    fake_response = MagicMock()
-    fake_response.status_code = 200
-    fake_response.headers = {
-        "cf-aig-cache-status": "HIT",
-        "cf-aig-log-id": "log-test-1",
-        "cf-aig-event-id": "evt-1",
-    }
-    fake_response.json.return_value = {
-        "choices": [{"message": {"content": "ok"}}]
-    }
-    fake_response.raise_for_status = MagicMock()
-    fake_response.text = "{}"
-
-    fake_client = MagicMock()
-    fake_client.post = AsyncMock(return_value=fake_response)
-
-    monkeypatch.setattr(azure_openai, "_get_client", lambda: fake_client)
-    monkeypatch.setattr(
-        azure_openai, "_candidates",
-        lambda: [("cf_byok",
-                  "https://gateway.ai.cloudflare.com/v1/acct/gw/azure-openai",
-                  {"Authorization": "Bearer test"})],
-    )
-    monkeypatch.setattr(azure_openai, "_MODEL", "gpt-test", raising=False)
-
-    out = await azure_openai.call_chat(messages=[{"role": "user", "content": "hi"}])
-    assert out == "ok"
-
-    snap = obs.snapshot()
-    assert snap["counters"]["aig_cache_hits"] >= 1, snap
-    assert snap["counters"]["aig_responses_total"] >= 1, snap
+# Task #554 retired providers/azure_openai.py; the chat hot path is now
+# Vertex Gemini 2.5 Flash → Workers-AI Llama-3.2-3B and the surviving
+# Azure surfaces (Speech / Translator) do not parse cf-aig-* headers
+# through the observability counters. The corresponding cf-aig-headers
+# regression coverage moved to test_ai_gateway_observability.py.
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -51,8 +51,7 @@ from db_dualwrite import (
     mirror_edu_notes_write,
     mirror_edu_study_settings_write,
 )
-from llm import call_llm_api
-from providers.azure_openai import call_chat as _az_quiz_chat
+from llm import call_llm_api, call_llm_for_rag
 from guardrails.prompt_safety import validate_llm_output
 import deps
 # Task #492 — Sarvam translate/TTS/STT clients removed (V4 §15). Indic
@@ -652,14 +651,16 @@ async def _generate_and_clean_quiz(
         {"role": "system", "content": _QUIZ_SYS},
         {"role": "user",   "content": "\n".join([p for p in user_msg_parts if p])},
     ]
-    # Task #490 — Vertex chat hot-path removed. Quiz generation now runs
-    # Azure GPT-4.1-mini as PRIMARY (matches the V4 §4 english_rag_chat
-    # chain). The `prefer_vertex` kwarg is kept as a no-op for source-
+    # Task #554 — Quiz generation now routes through the english_rag_chat
+    # dispatcher (Vertex Gemini 2.5 Flash primary → Workers-AI Llama-3.2-3B
+    # fallback). The `prefer_vertex` kwarg is kept as a no-op for source-
     # level back-compat with older callers.
     try:
-        raw = await _az_quiz_chat(messages, max_tokens=max_tokens)
+        raw = await call_llm_for_rag(
+            messages, lang="en", feature="english_rag_chat", max_tokens=max_tokens,
+        )
     except Exception as e:
-        logger.warning(f"[edu_quiz] Azure GPT-4.1-mini quiz LLM call failed: {e}")
+        logger.warning(f"[edu_quiz] english_rag_chat quiz LLM call failed: {e}")
         raise HTTPException(status_code=502, detail="quiz_llm_failed")
     payload = _coerce_quiz_payload(raw)
     questions = payload.get("questions") or []

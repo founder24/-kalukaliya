@@ -79,7 +79,9 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // is set as a plain env (AWS_SES_REGION) below, not a secret.
         { name: 'aws-access-key-id',     keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/AWS-ACCESS-KEY-ID',     identity: 'system' }
         { name: 'aws-secret-access-key', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/AWS-SECRET-ACCESS-KEY', identity: 'system' }
-        { name: 'azure-openai-api-key',  keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/AZURE-OPENAI-API-KEY',  identity: 'system' }
+        // Task #554 — Azure OpenAI retired. Chat now routes Vertex Gemini
+        // 2.5 Flash → Workers-AI Llama-3.2-3B; the legacy chat-tenant
+        // Key Vault secret is no longer mounted into ACA.
         { name: 'mongo-uri',             keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/MONGO-URI',             identity: 'system' }
         { name: 'jwt-secret',            keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/JWT-SECRET',             identity: 'system' }
         { name: 'admin-jwt-secret',      keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/ADMIN-JWT-SECRET',       identity: 'system' }
@@ -128,7 +130,9 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'AWS_SECRET_ACCESS_KEY', secretRef: 'aws-secret-access-key' }
             { name: 'AWS_SES_REGION',        value: 'us-east-1' }
             { name: 'EMAIL_PROVIDER',        value: 'ses' }
-            { name: 'AZURE_OPENAI_API_KEY',  secretRef: 'azure-openai-api-key' }
+            // Task #554 — Azure OpenAI chat env removed. Vertex Gemini
+            // 2.5 Flash auths via GOOGLE_APPLICATION_CREDENTIALS_JSON
+            // (mounted from Key Vault elsewhere in the GCP cred chain).
             { name: 'MONGO_URL',             secretRef: 'mongo-uri' }
             { name: 'JWT_SECRET',            secretRef: 'jwt-secret' }
             { name: 'ADMIN_JWT_SECRET',      secretRef: 'admin-jwt-secret' }

@@ -8,7 +8,7 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 - **Backend dev:** `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
 - **Mockup sandbox:** `pnpm --filter @workspace/mockup-sandbox run dev`
 - **Health check:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
-- **Required env vars (ACA, from Azure KV):** `MONGO_URL`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `AZURE_OPENAI_API_KEY`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_PROVIDER`, `EMAIL_FALLBACK`, `EMBED_PROVIDER_PRIMARY`, `WORKERS_EMBED_URL`.
+- **Required env vars (ACA, from Azure KV):** `MONGO_URL`, `JWT_SECRET`, `ADMIN_JWT_SECRET`, `GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_SPEECH_KEY`, `AZURE_TRANSLATOR_KEY`, `RAZORPAY_KEY_SECRET`, `WORKERS_EMBED_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_PROVIDER`, `EMAIL_FALLBACK`, `EMBED_PROVIDER_PRIMARY`, `WORKERS_EMBED_URL`.
 
 ## Stack
 
@@ -35,7 +35,7 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 
 - **Cost split:** 40% Cloudflare, 30% Azure, 20% AWS, 10% GCP.
 - **Embedding strategy:** Primary is Gemma-300M + Qwen3-0.6B on Cloudflare Workers AI (1024-dim) to Pinecone. On primary outage, system enters cache-only degraded mode, queuing fresh content for replay.
-- **Chat dispatch:** Azure `gpt-4.1-nano` is primary, falling back to Workers-AI Mistral-7B, then Llama-3.2-3B. Vertex is for `content_format` only.
+- **Chat dispatch (Task #554, 2026-05-07):** English chat is a **strict 2-position chain** — **Vertex Gemini 2.5 Flash** (drains GCP startup credits) → **Workers-AI Llama-3.2-3B** (Cloudflare free-tier fallback). When projected GCP credit runway falls to ≤ 90 days the chain FLIPS so Llama-3.2-3B becomes the head and Vertex stays as the paid fallback (V4 §12 — no silent removal). Selector is `cost_caps._select_chat_primary()` with a 60 s monotonic cache. Operator override: `CHAT_PRIMARY_OVERRIDE=vertex|workers_ai_llama32_3b` pins the head; unsupported values are logged and ignored. Azure OpenAI (chat / embed / Whisper / text-embedding-3-large) is **fully retired** — only Azure Speech (TTS / STT) and Azure Translator survive, on `AZURE_SPEECH_*` / `AZURE_TRANSLATOR_*` keys via `providers/azure_speech.py`. Sarvam stays the Assamese-chat primary. CI guard `scripts/check_dead_providers.py` bans `azure_openai|AzureOpenAI|AZURE_OPENAI_*|gpt-4.1-nano` bare-token. Locked tests: `tests/test_provider_priority_locked.py` (chain shape + credit-flip + override + negative).
 - **Content formatter (§15 §6, Task #494):** All notebook/study/exam polish flows route through `content_formatter.format_content` — Vertex Gemini 2.5 Flash primary → Workers-AI Llama-3.3-70b fallback → passthrough on dual outage / Assamese purity-gate rejection. Every polished Mongo doc carries a `formatted_by` audit field; admin health panel reports per-formatter rolling counts.
 - **Vectorless RAG:** A three-tier router performs tree-walk on D1 syllabus, then BM25 on Mongo, then a vector pass. Results are fused with RRF before Pinecone rerank.
 - **Secrets management:** Azure Key Vault is the source of truth, with AWS Secrets Manager and Cloudflare Secrets as read-only replicas.
