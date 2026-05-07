@@ -52,7 +52,7 @@ vi.mock('@/components/ErrorBoundary', () => ({
 }));
 
 import AdminBotSecurity from './AdminBotSecurity';
-import { ALERT_THRESHOLD_FIELDS } from './AdminBotSecurity';
+import { ALERT_THRESHOLD_FIELDS, parseAlertSettingsBackendError } from './AdminBotSecurity';
 
 describe('AdminBotSecurity', () => {
   it('renders without throwing — shows loading state initially', () => {
@@ -94,6 +94,58 @@ describe('AdminBotSecurity', () => {
       expect(keys).toContain('auto_block_threshold');
       expect(keys).toContain('auto_block_expiry_hours');
       expect(keys).toContain('collection_growth_per_day');
+    });
+
+    // Task #531 — parseAlertSettingsBackendError must derive its
+    // field-name allowlist from ALERT_THRESHOLD_FIELDS so newly added
+    // thresholds (memory_brain_*) surface as per-field errors instead
+    // of falling through to the generic banner.
+    describe('parseAlertSettingsBackendError (Task #531)', () => {
+      it('maps a 422 detail keyed on a legacy threshold (spoof_rpm) to a per-field error', () => {
+        const err = {
+          response: {
+            status: 422,
+            data: { detail: [{ loc: ['body', 'thresholds', 'spoof_rpm'], msg: 'must be ≥ 1' }] },
+          },
+        };
+        const out = parseAlertSettingsBackendError(err);
+        expect(out).toEqual({ spoof_rpm: 'must be ≥ 1' });
+        expect(out.general).toBeUndefined();
+      });
+
+      it('maps a 422 detail keyed on a memory_brain threshold to a per-field error', () => {
+        const err = {
+          response: {
+            status: 422,
+            data: { detail: [{ loc: ['body', 'thresholds', 'memory_brain_failure_rate_pct'], msg: 'must be ≤ 100' }] },
+          },
+        };
+        const out = parseAlertSettingsBackendError(err);
+        expect(out).toEqual({ memory_brain_failure_rate_pct: 'must be ≤ 100' });
+        expect(out.general).toBeUndefined();
+      });
+
+      it('maps a string-detail mentioning a memory_brain key to that per-field error', () => {
+        const err = {
+          response: {
+            status: 400,
+            data: { detail: 'memory_brain_failure_min_sample must be > 0' },
+          },
+        };
+        const out = parseAlertSettingsBackendError(err);
+        expect(out).toEqual({ memory_brain_failure_min_sample: 'memory_brain_failure_min_sample must be > 0' });
+      });
+
+      it('falls through to general for an unknown 422 field', () => {
+        const err = {
+          response: {
+            status: 422,
+            data: { detail: [{ loc: ['body', 'mystery_field'], msg: 'nope' }] },
+          },
+        };
+        const out = parseAlertSettingsBackendError(err);
+        expect(out).toEqual({ general: 'nope' });
+      });
     });
 
     it('every field has a label, help text and a default for the panel UI', () => {

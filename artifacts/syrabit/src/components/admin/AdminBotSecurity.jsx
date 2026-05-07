@@ -258,6 +258,48 @@ export const ALERT_THRESHOLD_FIELDS = [
   },
 ];
 
+// Task #531 — module-level so it's unit-testable without mounting the
+// component. Maps a FastAPI/axios error into a {field: msg} dict whose
+// keys are drawn from ALERT_THRESHOLD_FIELDS plus the email / webhook /
+// digest-emails entries — so any new threshold added to the config row
+// (e.g. memory_brain_*) automatically gets per-field error surfacing
+// instead of falling through to the generic banner.
+export function parseAlertSettingsBackendError(err) {
+  const resp = err?.response;
+  if (!resp) return { general: 'Network error — could not reach server' };
+  const detail = resp.data?.detail;
+  const thresholdKeys = new Set(ALERT_THRESHOLD_FIELDS.map(f => f.key));
+  const knownFields = new Set([...thresholdKeys, 'email', 'webhook_url', 'review_prompt_digest_emails']);
+  const stringMatchers = [
+    ...ALERT_THRESHOLD_FIELDS.map(f => ({ key: f.key, needles: [f.key.toLowerCase()] })),
+    { key: 'email', needles: ['email'] },
+    { key: 'webhook_url', needles: ['webhook'] },
+  ];
+  if (resp.status === 422 && Array.isArray(detail)) {
+    const errors = {};
+    for (const item of detail) {
+      const loc = item.loc || [];
+      const field = loc[loc.length - 1] || 'general';
+      if (knownFields.has(field)) {
+        errors[field] = item.msg || 'Invalid value';
+      } else {
+        errors.general = item.msg || 'Validation error';
+      }
+    }
+    return Object.keys(errors).length ? errors : { general: 'Validation failed' };
+  }
+  if (typeof detail === 'string') {
+    const lower = detail.toLowerCase();
+    for (const m of stringMatchers) {
+      if (m.needles.some(n => lower.includes(n))) {
+        return { [m.key]: detail };
+      }
+    }
+    return { general: detail };
+  }
+  return { general: detail || `Server error (${resp.status})` };
+}
+
 function _validateThresholdFieldValue(field, value) {
   if (value === '' || value === null || value === undefined) {
     return `${field.label} is required`;
@@ -426,39 +468,7 @@ function AlertThresholdPanel({ adminToken, navContext }) {
     if (settingsError) setSettingsError(null);
   };
 
-  const parseBackendError = (err) => {
-    const resp = err.response;
-    if (!resp) return { general: 'Network error — could not reach server' };
-    const detail = resp.data?.detail;
-    if (resp.status === 422 && Array.isArray(detail)) {
-      const errors = {};
-      for (const item of detail) {
-        const loc = item.loc || [];
-        const field = loc[loc.length - 1] || 'general';
-        const mapped = field === 'spoof_rpm' ? 'spoof_rpm'
-          : field === 'auto_block_threshold' ? 'auto_block_threshold'
-          : field === 'email' ? 'email'
-          : field === 'webhook_url' ? 'webhook_url'
-          : null;
-        if (mapped) {
-          errors[mapped] = item.msg || 'Invalid value';
-        } else {
-          errors.general = item.msg || 'Validation error';
-        }
-      }
-      return Object.keys(errors).length ? errors : { general: 'Validation failed' };
-    }
-    if (typeof detail === 'string') {
-      const lower = detail.toLowerCase();
-      if (lower.includes('expiry')) return { auto_block_expiry_hours: detail };
-      if (lower.includes('auto_block')) return { auto_block_threshold: detail };
-      if (lower.includes('threshold') || lower.includes('rpm') || lower.includes('spoof_rpm')) return { spoof_rpm: detail };
-      if (lower.includes('email')) return { email: detail };
-      if (lower.includes('webhook')) return { webhook_url: detail };
-      return { general: detail };
-    }
-    return { general: detail || `Server error (${resp.status})` };
-  };
+  const parseBackendError = parseAlertSettingsBackendError;
 
   const handleSave = async () => {
     const errors = {};
