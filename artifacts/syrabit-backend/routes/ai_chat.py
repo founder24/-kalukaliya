@@ -1216,18 +1216,56 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
                 _decided_out = _ccs_free_cap("explanation", user_plan=_user_plan, base_cap=_decided_out)
                 max_tokens = _ccs_max_out("chat_turn", _decided_out or None)
                 messages = _ccs_clamp(messages, call_type="chat_turn")
-                # §L8 — emit the per-tier counter for observability.
-                try:
-                    import free_tier_dispatch as _ftd
-                    _ft_lang = str(_ns_resp_lang or "en")
-                    if _user_plan and _user_plan.lower() != "free":
-                        _ftd.record(_ftd.TIER_PAID_ESCALATE, lang=_ft_lang)
-                    elif _tier == "cheap":
-                        _ftd.record(_ftd.TIER_CHEAP, lang=_ft_lang)
-                    elif _tier == "tight":
-                        _ftd.record(_ftd.TIER_TIGHT, lang=_ft_lang)
-                except Exception:
-                    pass
+
+                # ── Task #581 §L5 — retrieval-first BEFORE *every* free-tier
+                # LLM dispatch. The 4-step turn ladder ensures retrieval-only
+                # kicks in at turns 21-30, but the heaviest savings come from
+                # never spending an LLM call on turns 1-20 when the answer
+                # already lives in the cache / rag / Mongo materialized
+                # stores at ≥0.85 confidence. We try the ladder first; on
+                # hit we short-circuit and emit the right counter, on miss
+                # we fall through to the LLM dispatch unchanged. Paid plans
+                # skip this gate to preserve their full-quality experience.
+                if _user_plan == "free":
+                    try:
+                        from retrieval_first import try_resolve as _rf_try
+                        _rf_hit = await _rf_try(
+                            msg.message,
+                            content_type="explanation",
+                            lang=str(_ns_resp_lang or "en"),
+                        )
+                    except Exception as _rf_exc:
+                        logger.debug("[CHAT][L5][PRE-LLM] %s", _rf_exc)
+                        _rf_hit = None
+                    if _rf_hit:
+                        answer = _rf_hit.answer
+                        _ns_model = "retrieval_first/" + _rf_hit.source
+                        try:
+                            import free_tier_dispatch as _ftd
+                            _ft_lang = str(_ns_resp_lang or "en")
+                            if _rf_hit.source.startswith("mongo:"):
+                                _ftd.record(_ftd.TIER_MONGO_HIT, lang=_ft_lang)
+                            elif _rf_hit.source == "rag_cache":
+                                _ftd.record(_ftd.TIER_RAG_HIT, lang=_ft_lang)
+                            else:
+                                _ftd.record(_ftd.TIER_CACHE_HIT, lang=_ft_lang)
+                        except Exception:
+                            pass
+
+                # §L8 — emit the per-tier counter for the LLM-bound branch
+                # (skipped above when retrieval-first short-circuited).
+                if answer is None:
+                    try:
+                        import free_tier_dispatch as _ftd
+                        _ft_lang = str(_ns_resp_lang or "en")
+                        if _user_plan and _user_plan.lower() != "free":
+                            _ftd.record(_ftd.TIER_PAID_ESCALATE, lang=_ft_lang)
+                        elif _tier == "cheap":
+                            _ftd.record(_ftd.TIER_CHEAP, lang=_ft_lang)
+                        elif _tier == "tight":
+                            _ftd.record(_ftd.TIER_TIGHT, lang=_ft_lang)
+                    except Exception:
+                        pass
             try:
                 import sentry_sdk as _sentry_sdk
                 _sentry_sdk.set_tag("chat_tier",     str(_chat_decision.get("tier", "")))
@@ -1254,12 +1292,42 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
             _ns_provider = (_chat_decision or {}).get("provider")  # type: ignore[name-defined]
         except Exception:
             _ns_provider = None
+
+        # ── Task #581 §L6 — Assamese needs_reasoning classifier ───────────
+        # If we got past the L6 cache probes above and are about to dispatch
+        # to Sarvam for an Assamese turn, run the reasoning classifier on
+        # the user message. Simple-definition / mixed-language requests get
+        # a tighter output cap (saves Sarvam tokens); requests that look
+        # like reasoning ("why", "explain", multi-step) keep the regular
+        # cap. Sarvam stays the locked Assamese head — this only clamps
+        # the output budget, it never re-routes to a different provider.
+        if (str(_ns_resp_lang or "").lower() == "as") and (answer is None):
+            try:
+                import assamese_dispatch as _asd
+                if not _asd.needs_reasoning(msg.message):
+                    _l6_cap = _ccs_max_out("chat_turn", 300)
+                    if _l6_cap and _l6_cap < max_tokens:
+                        max_tokens = _l6_cap
+                        logger.info("[CHAT][L6] simple Assamese turn → output clamp=%s", max_tokens)
+            except Exception as _l6_exc:
+                logger.debug("[CHAT][L6] classifier skipped: %s", _l6_exc)
+
+        if answer is not None:
+            # L5 retrieval-first or L6 cache probe already produced an
+            # answer — skip the LLM dispatch entirely (this is the whole
+            # point of the §L5 short-circuit).
+            try:
+                await ai_cache_aset(cache_key, answer, _cache_ttl, saved_ms=0)
+                _ai_response_cache[cache_key] = answer
+            except Exception:
+                pass
         _t_llm_start = _time_mod.time()
         try:
-            answer = await call_llm_api_chat(
+            if answer is None:
+              answer = await call_llm_api_chat(
                 messages, model=_ns_model, max_tokens=max_tokens,
                 lang=_ns_resp_lang or "en", provider_override=_ns_provider,
-            )
+              )
             _llm_elapsed_ms = (_time_mod.time() - _t_llm_start) * 1000
             # §J — feed the credit-burn meters from the same hot path
             # that just spent money. We pass an estimated USD figure
