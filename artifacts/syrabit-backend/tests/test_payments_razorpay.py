@@ -102,7 +102,7 @@ def fresh_db(monkeypatch):
     monkeypatch.setattr(mon, "_redis_invalidate_session", lambda uid: None)
     monkeypatch.setattr(deps, "pg_pool", None, raising=False)
     # Email send is fire-and-forget (asyncio.create_task) — stub so the
-    # success path doesn't try to talk to Resend.
+    # success path doesn't try to talk to SES (Task #556 — sole path).
     import email_templates
     monkeypatch.setattr(
         email_templates, "send_plan_activation",

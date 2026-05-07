@@ -227,7 +227,7 @@ def test_send_skipped_without_aws_creds():
     assert res["reason"] == "no_aws_creds"
 
 
-def test_send_dispatches_per_recipient_via_sendgrid():
+def test_send_dispatches_per_recipient_via_ses():  # Task #556 — SES sole path
     fake_stats = seo_engine._compose_seo_daily_summary({
         "job_id": "j", "total_generated": 5, "errors": 1,
         "outcomes": [_outcome("failed", "x")],

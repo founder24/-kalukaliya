@@ -21,7 +21,7 @@ const SERVICES = [
   { id: 'emergent',icon: Zap,        label: 'Emergent AI',      accent: 'amber',  desc: 'Universal LLM key — admin AI generation' },
   { id: 'supabase',icon: Database,   label: 'Supabase',         accent: 'cyan',   desc: 'Users & conversations DB' },
   { id: 'payment', icon: CreditCard, label: 'Payments',          accent: 'emerald', desc: 'Razorpay / Stripe' },
-  { id: 'email',   icon: Mail,       label: 'Email',             accent: 'blue',   desc: 'Resend / SendGrid' },
+  { id: 'email',   icon: Mail,       label: 'Email',             accent: 'blue',   desc: 'Amazon SES' },
   { id: 'push',    icon: Bell,       label: 'Push',              accent: 'orange', desc: 'OneSignal / FCM' },
   { id: 'analytics',icon: BarChart3, label: 'Analytics',         accent: 'pink',   desc: 'PostHog / GA4' },
   { id: 'auth',    icon: Shield,     label: 'Google Auth',       accent: 'red',    desc: 'OAuth 2.0' },
@@ -55,7 +55,7 @@ const inputStyle = "w-full h-9 px-3 rounded-xl text-sm text-gray-900 font-mono o
 
 export default function AdminApiConfig({ adminToken, onNavigate }) {
   const [active, setActive] = useState('routing');
-  const [creds, setCreds] = useState({ chatModelDefault: 'vertex/gemini-flash', emergentKey: '', emergentBaseUrl: '', supabaseUrl: '', supabaseServiceKey: '', supabaseAnonKey: '', razorpayKeyId: '', razorpayKeySecret: '', razorpayWebhookSecret: '', resendKey: '', oneSignalKey: '', posthogKey: '', googleClientId: '', googleClientSecret: '' });
+  const [creds, setCreds] = useState({ chatModelDefault: 'vertex/gemini-flash', emergentKey: '', emergentBaseUrl: '', supabaseUrl: '', supabaseServiceKey: '', supabaseAnonKey: '', razorpayKeyId: '', razorpayKeySecret: '', razorpayWebhookSecret: '', sesRegion: '', oneSignalKey: '', posthogKey: '', googleClientId: '', googleClientSecret: '' });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -75,7 +75,7 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
           razorpayKeyId: cfg.payment?.razorpay_key_id || '',
           razorpayKeySecret: cfg.payment?.razorpay_key_secret || '',
           razorpayWebhookSecret: cfg.payment?.razorpay_webhook_secret || '',
-          resendKey: cfg.email?.resend_key || '',
+          sesRegion: cfg.email?.ses_region || '',
           oneSignalKey: cfg.push?.onesignal_key || '',
           posthogKey: cfg.analytics?.posthog_key || '',
           googleClientId: cfg.google_auth?.client_id || '',
@@ -94,7 +94,7 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
     emergent: { key: creds.emergentKey, base_url: creds.emergentBaseUrl },
     supabase: { url: creds.supabaseUrl, service_key: creds.supabaseServiceKey, anon_key: creds.supabaseAnonKey },
     payment: { razorpay_key_id: creds.razorpayKeyId, razorpay_key_secret: creds.razorpayKeySecret, razorpay_webhook_secret: creds.razorpayWebhookSecret },
-    email: { resend_key: creds.resendKey },
+    email: { ses_region: creds.sesRegion },
     push: { onesignal_key: creds.oneSignalKey },
     analytics: { posthog_key: creds.posthogKey },
     google_auth: { client_id: creds.googleClientId, client_secret: creds.googleClientSecret },
@@ -158,7 +158,7 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
         await axios.get('https://accounts.google.com/.well-known/openid-configuration');
         setTestResult({ ok: true, data: 'Google OAuth endpoint reachable' });
       } else {
-        const hasKey = active === 'email' ? creds.resendKey : active === 'push' ? creds.oneSignalKey : creds.posthogKey;
+        const hasKey = active === 'email' ? creds.sesRegion : active === 'push' ? creds.oneSignalKey : creds.posthogKey;
         setTestResult({ ok: !!hasKey, data: hasKey ? 'API key is configured' : 'No API key configured' });
       }
     } catch (e) {
@@ -325,8 +325,9 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
               </div>
             )}
             {active === 'email' && (
-              <div><label className="text-xs text-gray-500 block mb-1">Resend API Key</label>
-                <SecretInput value={creds.resendKey} onChange={(e) => setCreds((c) => ({...c, resendKey: e.target.value}))} placeholder="re_..." />
+              <div><label className="text-xs text-gray-500 block mb-1">Amazon SES Region</label>
+                <input value={creds.sesRegion} onChange={(e) => setCreds((c) => ({...c, sesRegion: e.target.value}))} placeholder="us-east-1" className={inputStyle} />
+                <p className="text-[11px] text-gray-500 mt-1">SES credentials live in env vars (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY); only the region is configurable here.</p>
               </div>
             )}
             {active === 'push' && (

@@ -260,7 +260,7 @@ def test_send_skipped_when_no_admin_email():
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_uses_sendgrid_when_email_and_key_present():
+def test_send_uses_ses_when_email_and_key_present():  # Task #556 — SES sole path
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),

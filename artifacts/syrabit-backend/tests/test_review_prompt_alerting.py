@@ -328,7 +328,7 @@ def test_reason_drop_cooldown_suppresses_repeats_then_releases():
 
 def test_reason_drop_evaluator_does_not_mutate_cooldown_state():
     """Pure helper — the loop is responsible for cooldown bookkeeping
-    so a downstream Resend failure can be retried next tick."""
+    so a downstream SES failure can be retried next tick (Task #556)."""
     arp._REVIEW_PROMPT_ALERT_LAST_FIRED.clear()
     curr = [_reason_row("answer_helpful", 200, 4)]
     prev = [_reason_row("answer_helpful", 200, 40)]

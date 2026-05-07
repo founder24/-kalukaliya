@@ -344,8 +344,8 @@ def test_email_skipped_when_disabled_by_admin():
 
 
 def test_email_sent_with_csv_attachment_when_above_threshold(monkeypatch):
-    """>50 failing URLs + admin opted in + Resend key present + admin
-    email configured → Resend.Emails.send is called once with the CSV
+    """>50 failing URLs + admin opted in + AWS SES creds present + admin
+    email configured → SES SendEmail is called once with the CSV (Task #556)
     payload as a base64 attachment, the right subject, and a filename
     that includes the sitemap name and a timestamp."""
     async def _prefs(_admin_id):

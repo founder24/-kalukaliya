@@ -132,6 +132,9 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/routes/admin_vertex.py",
     "artifacts/syrabit-backend/server.py",
     "artifacts/syrabit-backend/emergentintegrations/llm/chat.py",
+    # Negative-test assertions for Task #559's dead `azure_openai`
+    # literal ban — the test file MUST keep mentioning the banned
+    # token to prove the ban is enforced.
     "artifacts/syrabit-backend/tests/test_workers_ai_429_throttle_alert.py",
     "artifacts/syrabit-backend/tests/test_vertex_chat_fastpath.py",
     "artifacts/syrabit-backend/tests/test_llm_cf_cache_headers.py",
@@ -190,33 +193,6 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/tests/email/test_ses_sole_path.py",
     "artifacts/syrabit-backend/tests/email/test_ses_region_flip.py",
     "artifacts/syrabit-backend/tests/email/test_bulk_email_path.py",
-    # Task #556 — pre-existing test fixtures whose stub class names /
-    # docstrings still reference the historical providers (SendGrid /
-    # Resend) for narrative continuity. The live email path under test
-    # is SES; the literal mentions are stub identifiers + comments.
-    "artifacts/syrabit-backend/tests/test_hydrate_alerting.py",
-    "artifacts/syrabit-backend/tests/test_payments_razorpay.py",
-    "artifacts/syrabit-backend/tests/test_review_prompt_alerting.py",
-    "artifacts/syrabit-backend/tests/test_review_prompt_weekly_digest.py",
-    "artifacts/syrabit-backend/tests/test_seo_auto_publish_staleness.py",
-    "artifacts/syrabit-backend/tests/test_seo_staleness_heartbeat.py",
-    "artifacts/syrabit-backend/tests/test_hydrate_slack_payload.py",
-    "artifacts/syrabit-backend/tests/test_seo_health_alerting.py",
-    "artifacts/syrabit-backend/tests/test_seo_health.py",
-    # Task #556 — admin-config UI labels still list "Resend / SendGrid"
-    # as historical provider chips; refactoring the admin Email config
-    # panel is out of scope for #556 and tracked as a follow-up.
-    "artifacts/syrabit/src/components/admin/AdminApiConfig.jsx",
-    "artifacts/syrabit/src/components/admin/AdminBotSecurity.jsx",
-    # Task #556 — the SQS-consumers subtree under
-    # `artifacts/syrabit/services/backend/sqs_consumers/` is the
-    # parallel AWS-native consumer skeleton (separate from the live
-    # `artifacts/syrabit-backend/` FastAPI service). Its email_fallback
-    # consumer's docstring narrates the historical Resend path; the
-    # live transport in that consumer is already boto3 SES.
-    "artifacts/syrabit/services/backend/sqs_consumers/email_fallback.py",
-    "artifacts/syrabit/services/backend/sqs_consumers/reembed.py",
-    "artifacts/syrabit/services/backend/sqs_consumers/tests/test_consumer_imports.py",
     "artifacts/syrabit-backend/tests/test_provider_priority_locked.py",
     "artifacts/syrabit-backend/tests/test_chat_rpm_soft_shed.py",
     "artifacts/syrabit-backend/tests/test_assamese_routing_chain_e2e.py",
@@ -467,9 +443,11 @@ def _check_voice_paywall() -> list[str]:
 TODO_556_PATTERN = (
     # SDK / vendor names — matched case-insensitively (compiled with
     # re.IGNORECASE below) so SendGrid / sendgrid / SENDGRID all trip.
-    # Word-boundary on the LEFT only so suffixed identifiers like
-    # `sendgrid_non_2xx` / `sendgrid_warmup` / `resend_client` also trip.
-    r"\bsendgrid|SENDGRID_API_KEY|"
+    # NO left-side `\b` because `_` is a word char and `\b` would NOT
+    # fire between `_` and `s`, so suffixed identifiers like
+    # `_sendgrid_non_2xx` / `via_sendgrid` would slip past. The token
+    # is niche enough that bare-substring matching is acceptable.
+    r"sendgrid|SENDGRID_API_KEY|"
     r"\bresend(?:_api_key|_client|grid)?\b|RESEND_API_KEY|"
     # Legacy provider-flag env knobs — opted back to CASE-SENSITIVE via
     # `(?-i:...)` so unrelated identifiers like AWS Lambda resource
@@ -598,6 +576,32 @@ def _scan_pattern_global(pat: re.Pattern[str], *, tag: str, scan_iac: bool = Fal
         tf_root = ROOT / "artifacts" / "syrabit" / "infra"
         if tf_root.exists():
             extra_files.extend(tf_root.rglob("*.tf"))
+        # Task #556 round-3 — also scan dependency lockfiles + pinned
+        # requirements + dotenv templates so a re-introduction via
+        # `pnpm add resend` / `pip install sendgrid` / a stale env
+        # template would trip the guard at PR time. Scoped explicitly
+        # to known repo locations (no full-tree rglob — that walks
+        # node_modules and times out CI).
+        candidate_locks = [
+            ROOT / "pnpm-lock.yaml",
+            ROOT / "package-lock.json",
+            ROOT / "uv.lock",
+            ROOT / "poetry.lock",
+            ROOT / "artifacts" / "syrabit" / "pnpm-lock.yaml",
+            ROOT / "artifacts" / "syrabit" / "package-lock.json",
+            ROOT / "artifacts" / "syrabit-backend" / "uv.lock",
+            ROOT / "artifacts" / "syrabit-backend" / "poetry.lock",
+            ROOT / "artifacts" / "syrabit-backend" / "requirements.txt",
+            ROOT / ".env.example",
+            ROOT / ".env.sample",
+            ROOT / "artifacts" / "syrabit" / ".env.example",
+            ROOT / "artifacts" / "syrabit-backend" / ".env.example",
+        ]
+        # Glob the requirements-*.txt variants in just the backend dir.
+        backend_req_dir = ROOT / "artifacts" / "syrabit-backend"
+        if backend_req_dir.exists():
+            candidate_locks.extend(backend_req_dir.glob("requirements-*.txt"))
+        extra_files.extend(p for p in candidate_locks if p.exists())
     for base in (BACKEND, FRONTEND):
         if not base.exists():
             continue

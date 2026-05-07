@@ -87,7 +87,7 @@ def test_payload_handles_missing_optional_fields():
 # -------- _dispatch_alert routing --------
 
 def _patch_dispatch_environment(*, webhook_url="https://hooks.slack.test/abc"):
-    """Common patch set: stub Mongo, Resend, push, and inject a webhook URL."""
+    """Common patch set: stub Mongo, SES (Task #556 — sole path), push, and inject a webhook URL."""
     fake_db = MagicMock()
     fake_db.alerts.insert_one = AsyncMock()
     return [
@@ -213,8 +213,8 @@ def test_seo_mute_does_not_affect_hydrate_routing():
 
 
 def test_hydrate_mute_does_not_suppress_email_or_push():
-    """hydrate_slack_enabled=False must mute ONLY the webhook — SendGrid
-    email and the browser-push fan-out must still run.
+    """hydrate_slack_enabled=False must mute ONLY the webhook — SES
+    email (Task #556 — sole path) and the browser-push fan-out must still run.
     """
     fake_db = MagicMock()
     fake_db.alerts.insert_one = AsyncMock()

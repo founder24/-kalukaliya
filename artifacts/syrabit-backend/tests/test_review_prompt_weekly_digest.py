@@ -6,7 +6,7 @@ install the deps stub, then exercise the pure helpers
 ``_format_review_prompt_weekly_digest_html``,
 ``_should_send_review_prompt_digest_now``,
 ``_try_send_review_prompt_weekly_digest_once``) without touching real
-Mongo / Resend.
+Mongo / Amazon SES (Task #556 — SES is the sole transactional email path).
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -493,9 +493,10 @@ def test_try_send_dedups_when_marker_already_set_for_week():
 
 
 def test_try_send_rolls_back_marker_on_send_failure():
-    """Transient Resend outage must not lock us out for the rest of the
-    Monday window — the marker rolls back so the next 5-minute tick
-    retries within the same window."""
+    """Transient SES outage (Task #556 — SES is the sole transactional
+    path) must not lock us out for the rest of the Monday window — the
+    marker rolls back so the next 5-minute tick retries within the same
+    window."""
     target = datetime(2026, 4, 20, 3, 30, tzinfo=timezone.utc)
     fake_db, state = _make_lock_db(initial_iso_week="2026-W16")  # last week
     fake_stats = {"iso_week": "2026-W17", "shown": 10, "clicked": 1,
@@ -568,7 +569,7 @@ def test_send_email_skipped_without_aws_creds(monkeypatch):
     )
     assert result["sent"] is False
     assert result["to"] == "ops@example.com"
-    assert result["reason"] == "no_aws_creds"  # Task #556 — was no_sendgrid_key
+    assert result["reason"] == "no_aws_creds"  # Task #556 — SES sole path
 
 
 def test_send_email_returns_no_stats_when_called_with_empty_dict():

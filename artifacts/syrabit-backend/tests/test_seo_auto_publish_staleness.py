@@ -226,7 +226,7 @@ def test_evaluate_weekly_uses_8_day_threshold(fake_db):
 
 def _patch_send():
     """Patch out the email + notification side-effects so tests run
-    without Resend/Supabase. We assert that the alert function was
+    without SES / Supabase (Task #556 — SES sole path). We assert that the alert function was
     called once per real alert event."""
     return patch.object(
         seo_engine, "_send_seo_staleness_alert",

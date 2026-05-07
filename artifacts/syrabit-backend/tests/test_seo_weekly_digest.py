@@ -169,7 +169,7 @@ def test_send_skipped_with_no_aws_creds_reason():
 def test_send_returns_ses_non_2xx_reason_on_provider_failure():
     """Task #556 — when ``send_admin_email`` returns False (the SES
     helper recorded a non-2xx), the digest sender must surface
-    ``send_error:ses_non_2xx`` (NOT the legacy sendgrid_non_2xx)."""
+    ``send_error:ses_non_2xx`` (the legacy provider tag is gone — Task #556)."""
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),

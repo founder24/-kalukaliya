@@ -139,7 +139,7 @@ def fake_db():
 
 def _patch_send():
     """Stub out the alert side-effects (notification + email + audit
-    log) so tests don't need Resend / Supabase. We assert call counts
+    log) so tests don't need SES / Supabase (Task #556). We assert call counts
     on the stub to verify exactly-once paging."""
     return patch.object(
         seo_engine, "_send_staleness_heartbeat_alert",

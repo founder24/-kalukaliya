@@ -258,7 +258,7 @@ def test_loop_does_not_mark_cooldown_when_dispatch_fails():
         for a in alerts:
             _alert_last_fired.pop(a["alert_type"], None)
             try:
-                raise RuntimeError("Resend down")
+                raise RuntimeError("SES down")  # Task #556 — SES sole path
             except Exception:
                 continue  # mirrors the production except-continue branch
             analytics._HYDRATE_ALERT_LAST_FIRED[a["alert_type"]] = 1.0

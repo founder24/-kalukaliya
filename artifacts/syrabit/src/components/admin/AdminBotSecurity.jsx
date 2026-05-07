@@ -62,7 +62,7 @@ function _formatRelative(iso) {
 }
 
 const _CHANNEL_LABELS = {
-  email: { label: 'Email (Resend)', icon: Mail },
+  email: { label: 'Email (Amazon SES)', icon: Mail },
   webhook: { label: 'Webhook (Slack/Discord)', icon: Link2 },
   persisted: { label: 'Persisted alert (dashboard)', icon: Inbox },
   push: { label: 'Browser push', icon: Smartphone },
@@ -696,7 +696,7 @@ function AlertThresholdPanel({ adminToken, navContext }) {
                   <p className="text-[11px] text-red-500 mt-1">{fieldErrors.email}</p>
                 ) : (
                   <p className="text-[10px] text-gray-400 mt-1">
-                    Receives email alerts via Resend when thresholds are exceeded
+                    Receives email alerts via Amazon SES when thresholds are exceeded
                   </p>
                 )}
               </div>

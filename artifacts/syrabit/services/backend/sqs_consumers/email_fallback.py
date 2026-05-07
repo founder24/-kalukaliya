@@ -1,10 +1,11 @@
 """email-fallback SQS consumer (Task #332).
 
-The primary email path is Resend; on transient failure the API
+The primary email path is Amazon SES (Task #556 — SES is the sole
+transactional provider); on transient SES failure the API
 producer drops the original payload onto the email-fallback SQS
 queue and SES is the secondary route. This handler unpacks the
 queued payload and calls SES via boto3 — the same to/subject/html
-shape Resend expects so callers don't need a parallel template path.
+shape SES expects so callers don't need a parallel template path.
 """
 from __future__ import annotations
 

@@ -610,7 +610,7 @@ def test_url_spike_no_alert_when_only_one_low_rate():
 
 def test_dispatch_alert_email_includes_by_sitemap_html():
     """Verify _dispatch_alert renders threshold_snapshot['by_sitemap_html']
-    inside the outgoing SendGrid email body, so the seo_url_spike alert
+    inside the outgoing SES email body (Task #556), so the seo_url_spike alert
     actually shows the per-sitemap breakdown to admins."""
     # Drop the test stub for metrics so we exercise the real implementation.
     sys.modules.pop("metrics", None)
@@ -652,7 +652,7 @@ def test_dispatch_alert_email_includes_by_sitemap_html():
         ))
 
     payload = captured.get("payload")
-    assert payload, "Expected SendGrid email payload to be sent"
+    assert payload, "Expected SES email payload to be sent"  # Task #556
     html = payload.get("html", "")
     assert "sitemap-learn.xml" in html, "Per-sitemap HTML must appear in email body"
     assert "2/10" in html

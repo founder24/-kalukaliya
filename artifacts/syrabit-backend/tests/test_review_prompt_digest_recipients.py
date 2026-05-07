@@ -145,7 +145,7 @@ def test_send_returns_recipients_field_when_no_admin_email(monkeypatch):
     assert result["recipients"] == []
 
 
-def test_send_uses_digest_list_and_passes_all_to_sendgrid(monkeypatch):
+def test_send_uses_digest_list_and_passes_all_to_ses(monkeypatch):  # Task #556
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
     saved = _with_channels({
         "email": "fallback@example.com",
