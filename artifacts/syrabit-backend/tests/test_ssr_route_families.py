@@ -285,6 +285,11 @@ def test_pyq_shortcut_falls_back_to_full_syllabus_when_no_pyq_pages(monkeypatch)
     db.seo_pages.count_documents = AsyncMock(return_value=0)
     db.seo_pages.aggregate = MagicMock(return_value=_make_async_cursor([]))
     db.boards.find_one = AsyncMock(return_value=board_doc)
+    # Task #515 — subject landing now fetches the per-locale class
+    # name to translate "Class 12" → "শ্ৰেণী ১২" in the AS header.
+    db.classes.find_one = AsyncMock(return_value={
+        "id": "cls-12", "slug": "class-12", "name": "Class 12",
+    })
     db.subjects.find_one = AsyncMock(return_value=subject_doc)
     db.chapters.find = MagicMock(return_value=_make_async_cursor([
         {"title": "Laws of Motion",

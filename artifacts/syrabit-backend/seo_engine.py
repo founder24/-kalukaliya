@@ -2733,6 +2733,17 @@ _BOARD_SYLLABUS_SOURCE = {
     "Degree": "National Education Policy (NEP) 2020 FYUGP curriculum as adopted by Assam universities (Gauhati University, Dibrugarh University, Cotton University)",
 }
 
+# Task #515 — Assamese sibling for the syllabus-source labels. The
+# topic / subject SSRs pick the matching entry by board key so the
+# "About this study material" block renders in Assamese instead of
+# leaking the English original on /as/... routes.
+_BOARD_SYLLABUS_SOURCE_AS = {
+    "AHSEC": "অসম উচ্চতৰ মাধ্যমিক শিক্ষা পৰিষদ (AHSEC)ৰ আনুষ্ঠানিক পাঠ্যক্ৰম",
+    "SEBA": "অসম মাধ্যমিক শিক্ষা পৰ্ষদ (SEBA)ৰ আনুষ্ঠানিক পাঠ্যক্ৰম",
+    "NEP FYUGP": "অসমৰ বিশ্ববিদ্যালয়সমূহে (গুৱাহাটী বিশ্ববিদ্যালয়, ডিব্ৰুগড় বিশ্ববিদ্যালয়, কটন বিশ্ববিদ্যালয়) গ্ৰহণ কৰা ৰাষ্ট্ৰীয় শিক্ষা নীতি (NEP) ২০২০ৰ FYUGP পাঠ্যক্ৰম",
+    "Degree": "অসমৰ বিশ্ববিদ্যালয়সমূহে (গুৱাহাটী বিশ্ববিদ্যালয়, ডিব্ৰুগড় বিশ্ববিদ্যালয়, কটন বিশ্ববিদ্যালয়) গ্ৰহণ কৰা ৰাষ্ট্ৰীয় শিক্ষা নীতি (NEP) ২০২০ৰ FYUGP পাঠ্যক্ৰম",
+}
+
 _PAGE_TYPE_METHODOLOGY = {
     "notes": "structured study notes following the definition → explanation → examples → exam tips format, aligned to the official syllabus",
     "definition": "formal academic definitions with context, etymology where relevant, and exam-oriented explanations",
@@ -2740,6 +2751,73 @@ _PAGE_TYPE_METHODOLOGY = {
     "mcqs": "multiple choice questions with correct answers and explanations, covering key concepts from the syllabus",
     "examples": "solved examples following the problem → approach → step-by-step solution → exam tip format",
 }
+
+# Task #515 — Assamese sibling for the per-page-type methodology
+# blurb that gets injected into the "Content Type" row of the
+# About-This-Study-Material panel.
+_PAGE_TYPE_METHODOLOGY_AS = {
+    "notes": "সংজ্ঞা → ব্যাখ্যা → উদাহৰণ → পৰীক্ষাৰ পৰামৰ্শ ক্ৰমত সজোৱা গঠনযুক্ত অধ্যয়ন টোকা, আনুষ্ঠানিক পাঠ্যক্ৰমৰ সৈতে মিলোৱা",
+    "definition": "প্ৰসংগ, প্ৰয়োজনীয় ক্ষেত্ৰত উৎপত্তি, আৰু পৰীক্ষা-কেন্দ্ৰিক ব্যাখ্যাৰ সৈতে আনুষ্ঠানিক শৈক্ষিক সংজ্ঞা",
+    "important-questions": "বিগত বছৰৰ প্ৰশ্ন পত্ৰ আৰু পাঠ্যক্ৰমৰ ভাৰ বিশ্লেষণৰ পৰা সংগ্ৰহ কৰা মাৰ্ক অনুসৰি গুৰুত্বপূৰ্ণ প্ৰশ্ন",
+    "mcqs": "শুদ্ধ উত্তৰ আৰু ব্যাখ্যাৰ সৈতে বহু-বিকল্পীয় প্ৰশ্ন, পাঠ্যক্ৰমৰ মূল ধাৰণাসমূহ সামৰি",
+    "examples": "সমস্যা → পদ্ধতি → পদক্ষেপ অনুসৰি সমাধান → পৰীক্ষাৰ পৰামৰ্শ ক্ৰমত সজোৱা সমাধান কৰা উদাহৰণ",
+}
+
+
+def _localized_syllabus_source(board_label: str, lang) -> str:
+    """Pick the matching syllabus-source label for *board_label*,
+    in Assamese when ``lang=as`` and English otherwise. Used by the
+    topic and subject SSR families so the "Syllabus Source" row is
+    not a permanent English leak on /as/... pages."""
+    table = _BOARD_SYLLABUS_SOURCE_AS if _is_as(lang) else _BOARD_SYLLABUS_SOURCE
+    for bkey, val in table.items():
+        if bkey.lower() in (board_label or "").lower():
+            return val
+    return table.get(
+        "Degree",
+        "অসম বৰ্ড / বিশ্ববিদ্যালয়ৰ আনুষ্ঠানিক পাঠ্যক্ৰম"
+        if _is_as(lang) else "Official board/university syllabus",
+    )
+
+
+def _render_footer_prose(board_label: str, class_label: str, lang) -> str:
+    """Locale-aware renderer for the three-line page footer (copyright,
+    curriculum disclaimer, geo-footer). Pulled out of the f-string SSR
+    templates because Python f-strings can't contain backslashes; an
+    inline ``<p class=\"geo-footer\">`` would not compile."""
+    import html as _html
+    b = _html.escape(board_label or "")
+    c = _html.escape(class_label or "")
+    if _is_as(lang):
+        return (
+            f"<p>&copy; Syrabit.ai — {b} ({c}) "
+            f"ছাত্ৰ-ছাত্ৰীৰ বাবে পাঠ্যক্ৰম-ভিত্তিক অধ্যয়ন সামগ্ৰী</p>"
+            f"<p>সামগ্ৰীটো আনুষ্ঠানিক {b} পাঠ্যক্ৰম অনুসৰি প্ৰস্তুত। "
+            f"শেহতীয়া পাঠ্যক্ৰমৰ বাবে আপোনাৰ বৰ্ড/বিশ্ববিদ্যালয়ৰ "
+            f"ৱেবছাইট চাওক।</p>"
+            f"<p class='geo-footer'>অসম, ভাৰতৰ ছাত্ৰ-ছাত্ৰীক সেৱা — "
+            f"গুৱাহাটী, যোৰহাট, ডিব্ৰুগড়, ধেমাজি, তেজপুৰ, শিলচৰ, "
+            f"নগাঁও, বৰপেটা আৰু অধিক।</p>"
+        )
+    return (
+        f"<p>&copy; Syrabit.ai — Syllabus-aligned study material for "
+        f"{b} ({c}) students</p>"
+        f"<p>Content follows the official {b} curriculum. For the latest "
+        f"syllabus, refer to your board/university website.</p>"
+        f"<p class='geo-footer'>Serving students across Assam, India — "
+        f"Guwahati, Jorhat, Dibrugarh, Dhemaji, Tezpur, Silchar, Nagaon, "
+        f"Barpeta, and more.</p>"
+    )
+
+
+def _localized_methodology(page_type: str, lang) -> str:
+    """Per-page-type methodology blurb in the active locale."""
+    table = _PAGE_TYPE_METHODOLOGY_AS if _is_as(lang) else _PAGE_TYPE_METHODOLOGY
+    return table.get(
+        page_type,
+        "পাঠ্যক্ৰমৰ সৈতে মিলোৱা অধ্যয়ন সামগ্ৰী"
+        if _is_as(lang) else "syllabus-aligned study material",
+    )
 
 # ── Task #432 — Assamese SSR localisation ───────────────────────────────
 # The Pages middleware rewrites ``/as/...`` URLs to the backend with
@@ -2803,6 +2881,60 @@ def _t(en: str, lang) -> str:
     """Translate a framework label for the active locale. Unknown labels
     fall through to English so callers can pass any string safely."""
     return _AS_LABELS.get(en, en) if _is_as(lang) else en
+
+
+# Task #515 — class label translation table. The
+# ``aca_jobs.as_translation_backfill`` driver does NOT cover the
+# ``classes`` collection (FIELD_MAP only manages content-bearing
+# collections), so ``class_name_as`` is empty in the wild. The SSR
+# was previously rendering "AHSEC Class 12" verbatim into the AS
+# page header / footer / breadcrumb, which the rendered-HTML probe
+# flagged as a Latin-leak. This static map gives the renderer a
+# safe fallback when the doc-level ``_as`` sibling is missing.
+_AS_CLASS_LABELS = {
+    "Class 9": "শ্ৰেণী ৯",
+    "Class 10": "শ্ৰেণী ১০",
+    "Class 11": "শ্ৰেণী ১১",
+    "Class 12": "শ্ৰেণী ১২",
+    "HS 1st Year": "HS প্ৰথম বৰ্ষ",
+    "HS 2nd Year": "HS দ্বিতীয় বৰ্ষ",
+    "1st Year": "প্ৰথম বৰ্ষ",
+    "2nd Year": "দ্বিতীয় বৰ্ষ",
+    "3rd Year": "তৃতীয় বৰ্ষ",
+    "4th Year": "চতুৰ্থ বৰ্ষ",
+}
+
+# Slug-keyed fallback used when only the slug is available (subject
+# landing route is reached without a fetched class doc).
+_AS_CLASS_SLUG_LABELS = {
+    "class-9": "শ্ৰেণী ৯",
+    "class-10": "শ্ৰেণী ১০",
+    "class-11": "শ্ৰেণী ১১",
+    "class-12": "শ্ৰেণী ১২",
+}
+
+
+def _class_label(en_label: str, lang, *, fallback: str = "") -> str:
+    """Return the Assamese class label for *en_label* when ``lang=as``;
+    otherwise echo *en_label*. *fallback* is used if both the AS map
+    and the English label are empty."""
+    if not _is_as(lang):
+        return en_label or fallback
+    if en_label in _AS_CLASS_LABELS:
+        return _AS_CLASS_LABELS[en_label]
+    # Try a normalized lookup (e.g. "class 12" → "Class 12").
+    norm = (en_label or "").strip().title()
+    if norm in _AS_CLASS_LABELS:
+        return _AS_CLASS_LABELS[norm]
+    return en_label or fallback
+
+
+def _class_label_from_slug(slug: str, lang) -> str:
+    """Class label from a slug (``class-12``) — Assamese when active,
+    falls back to a Title Case rendering of the slug."""
+    if _is_as(lang) and slug in _AS_CLASS_SLUG_LABELS:
+        return _AS_CLASS_SLUG_LABELS[slug]
+    return (slug or "").replace("-", " ").title()
 
 
 def _localized(doc: dict, base: str, lang) -> str:
@@ -2939,7 +3071,17 @@ def _render_seo_html(
     topic = html_mod.escape(_localized(page, "topic_title", lang) or page.get("topic_title", ""))
     subject = html_mod.escape(_localized(page, "subject_name", lang) or page.get("subject_name", ""))
     board = html_mod.escape(_localized(page, "board_name", lang) or page.get("board_name", ""))
-    cls = html_mod.escape(_localized(page, "class_name", lang) or page.get("class_name", ""))
+    # Task #515 (round-7 follow-up) — when ``lang=as`` and the page
+    # doc has no ``class_name_as`` sibling (the AS backfill doesn't
+    # cover ``classes``), fall back through the static class-label
+    # tables before defaulting to the English "Class 12" string.
+    _cls_raw = (
+        _localized(page, "class_name", lang)
+        or (_class_label(page.get("class_name", ""), lang) if is_as else "")
+        or (_class_label_from_slug(page.get("class_slug", ""), lang) if is_as else "")
+        or page.get("class_name", "")
+    )
+    cls = html_mod.escape(_cls_raw)
     chapter = html_mod.escape(_localized(page, "chapter_title", lang) or page.get("chapter_title", ""))
     page_type = page.get("page_type", "notes")
     _content_raw = (
@@ -2955,15 +3097,13 @@ def _render_seo_html(
     edu_level = f"{board} {cls}".strip()
     subject_url = f"https://syrabit.ai/{page.get('board_slug','')}/{page.get('class_slug','')}/{page.get('subject_slug','')}"
 
-    syllabus_source = ""
-    for bkey in _BOARD_SYLLABUS_SOURCE:
-        if bkey.lower() in board.lower() or bkey.lower() in edu_level.lower():
-            syllabus_source = _BOARD_SYLLABUS_SOURCE[bkey]
-            break
-    if not syllabus_source:
-        syllabus_source = _BOARD_SYLLABUS_SOURCE.get("Degree", "Official board/university syllabus")
-
-    content_methodology = _PAGE_TYPE_METHODOLOGY.get(page_type, "syllabus-aligned study material")
+    # Task #515 — route the syllabus-source / methodology blurbs
+    # through the locale-aware label tables. The previous direct
+    # ``_BOARD_SYLLABUS_SOURCE`` / ``_PAGE_TYPE_METHODOLOGY`` reads
+    # were always English and were the dominant Latin-leak in the
+    # rendered HTML probe.
+    syllabus_source = _localized_syllabus_source(board, lang) or _localized_syllabus_source(edu_level, lang)
+    content_methodology = _localized_methodology(page_type, lang)
 
     expanded_kw = _build_expanded_keywords(
         page.get("topic_title", ""), page.get("subject_name", ""),
@@ -3132,11 +3272,19 @@ def _render_seo_html(
     qa_pairs = page.get("qa_pairs", [])
     faq_items = []
     if qa_pairs:
+        # Task #515 — prefer the per-locale ``question_as`` /
+        # ``answer_as`` siblings on every qa_pair so the FAQPage
+        # JSON-LD and the visible Q/A list both render in Assamese
+        # on /as/... routes. The English originals stay as the
+        # explicit, no-silent fallback when a sibling is missing.
+        is_as_lang = _is_as(lang)
         for qp in qa_pairs[:10]:
+            q_text = (qp.get("question_as") if is_as_lang else "") or qp.get("question", "")
+            a_text = (qp.get("answer_as") if is_as_lang else "") or qp.get("answer", "")
             faq_items.append({
                 "@type": "Question",
-                "name": qp.get("question", ""),
-                "acceptedAnswer": {"@type": "Answer", "text": qp.get("answer", "")},
+                "name": q_text,
+                "acceptedAnswer": {"@type": "Answer", "text": a_text},
             })
     else:
         raw_content = page.get("content", "")
@@ -3266,8 +3414,17 @@ def _render_seo_html(
         prevnext_html = f'<nav class="pn-nav" aria-label="Topic navigation">{"".join(parts)}</nav>'
 
     # ── Task #457: GEO blocks (answer-first summary + Key Facts + attribution)
-    answer_summary = page.get("answer_summary") or ""
-    key_facts = page.get("key_facts") or []
+    # Task #515 — route the GEO answer/facts blocks through the
+    # locale-aware sibling lookup. ``_localized()`` handles strings;
+    # ``key_facts`` is a list so the AS sibling is fetched directly
+    # and only used when populated (no silent fallback to mixed
+    # English+AS items).
+    is_as_lang = _is_as(lang)
+    answer_summary = (_localized(page, "answer_summary", lang) if is_as_lang else "") \
+        or page.get("answer_summary") or ""
+    key_facts_as = page.get("key_facts_as") if is_as_lang else None
+    key_facts = (key_facts_as if isinstance(key_facts_as, list) and key_facts_as else None) \
+        or page.get("key_facts") or []
     if not answer_summary or not key_facts:
         # Older pages (pre-Task #457) don't have these fields stored — derive
         # them on the fly from the content so the upgraded template still
@@ -3435,9 +3592,7 @@ footer{{color:#6b7280;font-size:.85rem;margin-top:2rem;padding-top:1rem;border-t
 </section>
 <footer>
 <p>{_t("Source", lang)}: <a href="{html_mod.escape(page_url)}">Syrabit.ai — {topic}</a></p>
-<p>&copy; Syrabit.ai — Syllabus-aligned study material for {html_mod.escape(board)} ({html_mod.escape(cls)}) students</p>
-<p>Content follows the official {html_mod.escape(board)} curriculum. For the latest syllabus, refer to your board/university website.</p>
-<p class="geo-footer">Serving students across Assam, India — Guwahati, Jorhat, Dibrugarh, Dhemaji, Tezpur, Silchar, Nagaon, Barpeta, and more.</p>
+{_render_footer_prose(board, cls, lang)}
 </footer>
 </main>
 </body>
@@ -4215,25 +4370,37 @@ async def get_subject_landing_html(
     is_as = _is_as(lang)
     _lattrs = _lang_attrs(lang)
     _lang_attr = _lattrs["html_lang"]
+    # Task #515 — include the per-locale ``*_as`` siblings in the
+    # projection so the AS code path below (which reads
+    # ``topic_title_as`` / ``meta_description_as`` /
+    # ``chapter_title_as`` off each page) actually sees them. With a
+    # Mongo inclusion projection, omitted keys are simply absent from
+    # the returned doc — without these the AS branch silently fell
+    # back to the English originals.
     pages = await _db.seo_pages.find(
         {"board_slug": board, "class_slug": class_slug, "subject_slug": subject_slug,
          "status": "published", "page_type": list_page_type},
-        {"_id": 0, "topic_title": 1, "topic_slug": 1, "meta_description": 1,
-         "chapter_title": 1, "quality_score": 1},
+        {"_id": 0, "topic_title": 1, "topic_title_as": 1,
+         "topic_slug": 1, "meta_description": 1, "meta_description_as": 1,
+         "chapter_title": 1, "chapter_title_as": 1, "quality_score": 1},
     ).to_list(500)
 
     board_doc = await _db.boards.find_one({"slug": board}, {"_id": 0, "id": 1})
     subject_query = {"slug": subject_slug}
     if board_doc:
         subject_query["board_id"] = board_doc["id"]
-    subject_doc = await _db.subjects.find_one(
-        subject_query,
-        {"_id": 0, "name": 1, "description": 1, "id": 1, "thumbnailUrl": 1, "thumbnail_url": 1},
-    )
+    # Task #515 — projection must include ``name_as`` / ``description_as``
+    # so ``_localized(subject_doc, ...)`` below picks up the Assamese
+    # sibling instead of falling through to the English original.
+    _subject_proj = {
+        "_id": 0, "name": 1, "name_as": 1,
+        "description": 1, "description_as": 1,
+        "id": 1, "thumbnailUrl": 1, "thumbnail_url": 1,
+    }
+    subject_doc = await _db.subjects.find_one(subject_query, _subject_proj)
     if not subject_doc:
         subject_doc = await _db.subjects.find_one(
-            {"slug": subject_slug},
-            {"_id": 0, "name": 1, "description": 1, "id": 1, "thumbnailUrl": 1, "thumbnail_url": 1},
+            {"slug": subject_slug}, _subject_proj,
         )
     if not subject_doc and not pages:
         raise HTTPException(status_code=404, detail="Subject not found")
@@ -4256,14 +4423,41 @@ async def get_subject_landing_html(
             subject_doc["thumbnailUrl"] = _thumb_doc.get("thumbnailUrl") or _thumb_doc.get("thumbnail_url", "")
             subject_id = _thumb_doc.get("id") or subject_id
             _has_thumb = True
-    board_label = board.upper() if board in ("ahsec", "seba") else board.title()
-    class_label = class_slug.replace("-", " ").title()
+    # Task #515 — pull the localized board/class label so the subject
+    # landing header, breadcrumb, and footer don't render
+    # "AHSEC Class 12" verbatim on /as/... routes. Boards keep their
+    # acronym in both locales (AHSEC / SEBA) by convention; classes
+    # use the static ``_AS_CLASS_SLUG_LABELS`` map because the
+    # ``classes`` collection isn't covered by the AS backfill.
+    board_doc = await _db.boards.find_one(
+        {"slug": board}, {"_id": 0, "name": 1, "name_as": 1},
+    ) or {}
+    class_doc = await _db.classes.find_one(
+        {"slug": class_slug}, {"_id": 0, "name": 1, "name_as": 1},
+    ) or {}
+    if is_as:
+        board_label = (
+            _localized(board_doc, "name", lang)
+            or (board.upper() if board in ("ahsec", "seba") else board.title())
+        )
+        class_label = (
+            _localized(class_doc, "name", lang)
+            or _class_label(class_doc.get("name", ""), lang)
+            or _class_label_from_slug(class_slug, lang)
+        )
+    else:
+        board_label = board.upper() if board in ("ahsec", "seba") else board.title()
+        class_label = class_slug.replace("-", " ").title()
 
     chapters_docs = []
     if subject_doc and subject_doc.get("id"):
+        # Task #515 — include ``title_as`` / ``topics_as`` so the
+        # syllabus-structure block below can render Assamese chapter
+        # names instead of leaking English originals.
         chapters_docs = await _db.chapters.find(
             {"subject_id": subject_doc["id"]},
-            {"_id": 0, "title": 1, "topics": 1, "order_index": 1},
+            {"_id": 0, "title": 1, "title_as": 1,
+             "topics": 1, "topics_as": 1, "order_index": 1},
         ).sort("order_index", 1).to_list(50)
 
     page_type_counts = {}
@@ -4346,17 +4540,23 @@ async def get_subject_landing_html(
                 f"aligned to the official syllabus."
             )
 
-    syllabus_source = ""
-    for bkey in _BOARD_SYLLABUS_SOURCE:
-        if bkey.lower() in board.lower() or bkey.lower() in board_label.lower():
-            syllabus_source = _BOARD_SYLLABUS_SOURCE[bkey]
-            break
-    if not syllabus_source:
-        syllabus_source = _BOARD_SYLLABUS_SOURCE.get("Degree", "Official board/university syllabus")
+    # Task #515 — locale-aware syllabus-source label (mirrors the
+    # topic SSR change above).
+    syllabus_source = (
+        _localized_syllabus_source(board, lang)
+        or _localized_syllabus_source(board_label, lang)
+    )
 
+    # Task #515 — group by the per-locale chapter title when ``lang=as``
+    # so the ``<h3>`` chapter headings under "Topic-wise Study Material"
+    # render in Assamese instead of leaking the English original.
     by_chapter: dict = {}
+    _default_ch = "সাধাৰণ" if is_as else "General"
     for p in pages:
-        ch = p.get("chapter_title", "General")
+        ch = (
+            (p.get("chapter_title_as") if is_as else "")
+            or p.get("chapter_title", _default_ch)
+        )
         by_chapter.setdefault(ch, []).append(p)
 
     subject_intro_html = ""
@@ -4402,8 +4602,16 @@ async def get_subject_landing_html(
         overview_parts.append(f"<h2>{_t('Syllabus Structure', lang)}</h2>")
         overview_parts.append("<ol>")
         for ch in chapters_docs:
-            ch_title = html_mod.escape(ch.get("title", ""))
-            ch_topics = ch.get("topics", "")
+            # Task #515 — prefer the ``title_as`` / ``topics_as``
+            # siblings on /as/... routes so the syllabus list isn't
+            # English-only.
+            _ch_title_raw = (
+                (ch.get("title_as") if is_as else "") or ch.get("title", "")
+            )
+            ch_title = html_mod.escape(_ch_title_raw)
+            ch_topics = (
+                (ch.get("topics_as") if is_as else "") or ch.get("topics", "")
+            )
             if ch_topics:
                 if isinstance(ch_topics, list):
                     topic_list = ", ".join(str(t).strip() for t in ch_topics[:5])
@@ -4440,8 +4648,18 @@ async def get_subject_landing_html(
         topics_html_parts.append(f'<h3>{html_mod.escape(ch)}</h3><ul>')
         for tp in ch_pages:
             t_slug = tp.get("topic_slug", "")
-            t_title = html_mod.escape(tp.get("topic_title", t_slug))
-            t_desc = html_mod.escape(tp.get("meta_description", "")[:150])
+            # Task #515 — prefer per-locale topic title / description
+            # so the topics list under each chapter renders Assamese.
+            _raw_title = (
+                (tp.get("topic_title_as") if is_as else "")
+                or tp.get("topic_title", t_slug)
+            )
+            _raw_desc = (
+                (tp.get("meta_description_as") if is_as else "")
+                or tp.get("meta_description", "")
+            )
+            t_title = html_mod.escape(_raw_title)
+            t_desc = html_mod.escape((_raw_desc or "")[:150])
             if is_pyq:
                 url = f"https://syrabit.ai/{board}/{class_slug}/{subject_slug}/{t_slug}/important-questions"
                 link_label = f"{t_title} — PYQ"
@@ -4608,10 +4826,8 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 </section>
 </main>
 <footer>
-<p>Source: <a href="{html_mod.escape(page_url)}">Syrabit.ai — {html_mod.escape(subject_name)}</a></p>
-<p>&copy; Syrabit.ai — Syllabus-aligned study material for {html_mod.escape(board_label)} ({html_mod.escape(class_label)}) students</p>
-<p>Content follows the official {html_mod.escape(board_label)} curriculum. For the latest syllabus, refer to your board/university website.</p>
-<p class="geo-footer">Serving students across Assam, India — Guwahati, Jorhat, Dibrugarh, Dhemaji, Tezpur, Silchar, Nagaon, Barpeta, and more.</p>
+<p>{_t("Source", lang)}: <a href="{html_mod.escape(page_url)}">Syrabit.ai — {html_mod.escape(subject_name)}</a></p>
+{_render_footer_prose(board_label, class_label, lang)}
 </footer>
 </body>
 </html>"""

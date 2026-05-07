@@ -236,3 +236,241 @@ def test_sample_url_fields_are_subset_of_backfilled_fields():
             f"{s['url']} probes fields {unknown!r} that backfill "
             f"never writes for {s['collection']!r} (managed: {managed!r})"
         )
+
+
+# ── Task #515: rendered-HTML probe ──────────────────────────────────────────
+# The doc-level probe above only asserts the post-backfill ``*_as``
+# fields exist with <5% Latin chars. It does NOT catch framework-label
+# / footer-prose / publisher / JSON-LD / syllabus-source leaks because
+# those strings are baked into ``seo_engine.py`` itself, not into the
+# Mongo doc. Task #515 routes those strings through ``_AS_LABELS`` /
+# ``_BOARD_SYLLABUS_SOURCE_AS`` / ``_PAGE_TYPE_METHODOLOGY_AS`` so the
+# rendered HTML is actually Assamese on /as/... routes — and this
+# probe pins that behaviour by fetching the full SSR body and counting
+# Latin characters inside the visible ``<article>`` tag.
+_ARTICLE_RE = re.compile(r"<article[^>]*>(.*?)</article>", re.DOTALL | re.IGNORECASE)
+# Subject-landing SSR doesn't wrap its body in ``<article>`` — it
+# renders directly into ``<main>``. The probe accepts ``<main>`` as a
+# fallback container so the subject family is still covered, while
+# preferring ``<article>`` when present (topic / chapter SSRs use it).
+_MAIN_RE = re.compile(r"<main[^>]*>(.*?)</main>", re.DOTALL | re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_SCRIPT_RE = re.compile(
+    r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE,
+)
+
+
+def _strip_html(html: str) -> str:
+    """Drop all tags, JSON-LD ``<script>`` blocks, and inline CSS so
+    the Latin-ratio counts only the visible reader-facing text."""
+    html = _SCRIPT_RE.sub(" ", html)
+    html = _TAG_RE.sub(" ", html)
+    return html
+
+
+@pytest.fixture
+def rendered_ssr_client(monkeypatch):
+    """Mount the real ``/api/seo`` router with a Mongo stub stuffed
+    with Assamese ``*_as`` siblings on every relevant doc, and stub
+    out the I/O-bound helpers (``_inject_qa`` already returns the
+    mocked qa_pairs cursor; the related-topic / OG-image / page-type
+    helpers do nothing useful here and would otherwise need a forest
+    of mocked aggregate pipelines)."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+    import seo_engine
+
+    page_doc = {
+        "id": "page-newton",
+        "board_slug": "ahsec", "class_slug": "class-12",
+        "subject_slug": "physics", "topic_slug": "newton-laws",
+        "page_type": "notes", "status": "published",
+        "topic_title": "Newton's Laws of Motion",
+        "subject_name": "Physics",
+        "board_name": "AHSEC",
+        "class_name": "Class 12",
+        "chapter_title": "Laws of Motion",
+        "chapter_slug": "laws-of-motion",
+        "meta_description": "Complete notes on Newton's three laws.",
+        "title": "Newton's Laws of Motion — Study Notes",
+        "content": "Newton's first law explains inertia.",
+        "html_body": "<p>Newton's laws…</p>",
+        "answer_summary": "Newton's three laws describe motion.",
+        "key_facts": ["First law: inertia.", "Second law: F = ma.",
+                      "Third law: action-reaction."],
+        "quality_score": 0.92,
+        # Per-locale (`*_as`) siblings — these are exactly what the
+        # Task #515 renderer must consume so the visible <article>
+        # body comes back in Assamese.
+        "topic_title_as": _AS_LONG,
+        "subject_name_as": "পদাৰ্থ বিজ্ঞান",
+        "chapter_title_as": "গতিৰ সূত্ৰসমূহ",
+        "meta_description_as": "নিউটনৰ তিনিটা সূত্ৰৰ সম্পূৰ্ণ টোকা।",
+        "title_as": "নিউটনৰ গতিৰ সূত্ৰসমূহ — অধ্যয়ন টোকা",
+        "content_html_as": "<p>" + _AS_LONG + "</p>",
+        "answer_summary_as": "নিউটনৰ তিনিটা সূত্ৰই গতিৰ ব্যাখ্যা দিয়ে।",
+        "key_facts_as": ["প্ৰথম সূত্ৰ: জড়তা।",
+                          "দ্বিতীয় সূত্ৰ: বল = ভৰ × ত্বৰণ।",
+                          "তৃতীয় সূত্ৰ: ক্ৰিয়া আৰু প্ৰতিক্ৰিয়া।"],
+    }
+    qa_doc = {
+        "question": "What is Newton's first law?",
+        "answer": "An object at rest stays at rest unless acted on by a force.",
+        "question_as": "নিউটনৰ প্ৰথম সূত্ৰটো কি?",
+        "answer_as": "বাহ্যিক বলৰ অভাৱত স্থিৰ বস্তু স্থিৰেই থাকে।",
+        "upvotes": 5,
+    }
+    subject_doc = {
+        "id": "subj-physics", "slug": "physics",
+        "name": "Physics", "name_as": "পদাৰ্থ বিজ্ঞান",
+        "description": "AHSEC Class-12 Physics",
+        "description_as": _AS_LONG,
+        "thumbnailUrl": "https://example.com/phys.png",
+        "class_id": "cls-12", "board_id": "brd-ahsec",
+    }
+    chapter_doc = {
+        "title": "Laws of Motion", "title_as": "গতিৰ সূত্ৰসমূহ",
+        "topics": ["Newton's First Law", "Newton's Second Law"],
+        "order_index": 1,
+    }
+    board_doc = {"id": "brd-ahsec", "slug": "ahsec",
+                 "name": "AHSEC", "name_as": "AHSEC"}
+    class_doc = {"id": "cls-12", "slug": "class-12",
+                 "name": "Class 12", "name_as": "শ্ৰেণী ১২"}
+
+    def _apply_projection(doc, projection):
+        """Mimic Mongo inclusion-projection semantics. Without this the
+        mock returned the full doc regardless of projection, which
+        would mask production bugs where the renderer reads an
+        ``_as`` sibling that the projection forgot to include
+        (round-7 review finding for Task #515)."""
+        if not projection or not isinstance(doc, dict):
+            return doc
+        includes = {k for k, v in projection.items() if v == 1 and k != "_id"}
+        excludes = {k for k, v in projection.items() if v == 0}
+        if includes:
+            out = {k: v for k, v in doc.items() if k in includes}
+        elif excludes:
+            out = {k: v for k, v in doc.items() if k not in excludes}
+        else:
+            out = dict(doc)
+        if projection.get("_id", 1) == 1 and "_id" in doc:
+            out["_id"] = doc["_id"]
+        return out
+
+    def _make_async_cursor(items, projection=None):
+        projected = [_apply_projection(d, projection) for d in items]
+        cur = MagicMock()
+
+        async def _to_list(_n=None):
+            return projected
+        cur.to_list = _to_list
+        cur.sort = lambda *a, **k: cur
+        cur.limit = lambda *a, **k: cur
+
+        class _AsyncIter:
+            def __init__(self, data):
+                self._it = iter(data)
+            def __aiter__(self):
+                return self
+            async def __anext__(self):
+                try:
+                    return next(self._it)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        cur.__aiter__ = lambda self=cur: _AsyncIter(projected)
+        return cur
+
+    def _projecting_find(items):
+        """Return a callable that builds a projection-aware cursor on
+        each ``find(filter, projection)`` invocation."""
+        def _call(_filter=None, projection=None, *_a, **_k):
+            return _make_async_cursor(items, projection)
+        return _call
+
+    def _projecting_find_one(doc):
+        async def _call(_filter=None, projection=None, *_a, **_k):
+            return _apply_projection(doc, projection) if doc is not None else None
+        return _call
+
+    db = SimpleNamespace(
+        seo_pages=MagicMock(),
+        qa_pairs=MagicMock(),
+        subjects=MagicMock(),
+        chapters=MagicMock(),
+        boards=MagicMock(),
+        classes=MagicMock(),
+        homepage_seo=MagicMock(),
+    )
+    db.seo_pages.find_one = _projecting_find_one(page_doc)
+    db.seo_pages.find = _projecting_find([page_doc])
+    db.seo_pages.count_documents = AsyncMock(return_value=1)
+    db.seo_pages.aggregate = MagicMock(return_value=_make_async_cursor([
+        {"_id": "notes", "count": 1},
+    ]))
+    db.qa_pairs.find = _projecting_find([qa_doc])
+    db.subjects.find_one = _projecting_find_one(subject_doc)
+    db.subjects.count_documents = AsyncMock(return_value=1)
+    db.chapters.find = _projecting_find([chapter_doc])
+    db.chapters.find_one = _projecting_find_one(chapter_doc)
+    db.chapters.count_documents = AsyncMock(return_value=1)
+    db.boards.find_one = _projecting_find_one(board_doc)
+    db.classes.find_one = _projecting_find_one(class_doc)
+
+    monkeypatch.setattr(seo_engine, "_db", db, raising=False)
+
+    # The related-topic / page-type-link / OG-image helpers are pure
+    # I/O against ``_db`` and only contribute chrome; stubbing them
+    # to empty keeps the test focused on the article-body Latin
+    # ratio (which is the actual invariant Task #515 enforces).
+    async def _empty_pt_links(*a, **k):
+        return []
+
+    async def _empty_related(*a, **k):
+        return ([], None, None)
+
+    async def _empty_og(*a, **k):
+        return ""
+    monkeypatch.setattr(seo_engine, "_build_page_type_links", _empty_pt_links)
+    monkeypatch.setattr(seo_engine, "_build_related_data", _empty_related)
+    monkeypatch.setattr(seo_engine, "_resolve_og_image", _empty_og)
+
+    app = FastAPI()
+    app.include_router(seo_engine.router, prefix="/api")
+    return TestClient(app)
+
+
+# Routes that go through ``seo_engine`` and therefore inherit the
+# Task #515 locale-aware renderer. The PYQ ``/pyq/<slug>`` route lives
+# in ``routes/pyq.py`` and serves a pre-rendered HTML blob from Mongo
+# (so its locale is set at generation time, not render time) — that
+# family is intentionally out of scope for this rendered-HTML probe.
+_RENDERED_SSR_URLS = [
+    "/api/seo/html/ahsec/class-12/physics/newton-laws?lang=as",
+    "/api/seo/html/subject/ahsec/class-12/physics?lang=as",
+]
+
+
+@pytest.mark.parametrize("url", _RENDERED_SSR_URLS, ids=_RENDERED_SSR_URLS)
+def test_rendered_ssr_article_is_assamese(rendered_ssr_client, url):
+    """Fetch the full SSR HTML for *url* with ``lang=as`` and assert
+    the visible ``<article>`` text is <5% Latin. This is the Task #515
+    invariant: framework labels, JSON-LD, footer prose, syllabus-source
+    rows, FAQ Q&A and the GEO answer/key-facts blocks must all flip to
+    Assamese siblings — leaking even one English block typically pushes
+    the article ratio well past the 5% threshold."""
+    resp = rendered_ssr_client.get(url)
+    assert resp.status_code == 200, (
+        f"{url} returned {resp.status_code}: {resp.text[:300]!r}"
+    )
+    body = resp.text
+    match = _ARTICLE_RE.search(body) or _MAIN_RE.search(body)
+    assert match, f"{url} response is missing an <article>/<main> block"
+    article_text = _strip_html(match.group(1))
+    ratio = _latin_ratio(article_text)
+    assert ratio < 0.05, (
+        f"{url} <article> body has {ratio:.1%} Latin chars (>=5%). "
+        f"Sample: {article_text[:400]!r}"
+    )
