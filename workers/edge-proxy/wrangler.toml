@@ -186,6 +186,21 @@ binding = "BOT_HTML_CACHE"
 id = "a92591899d544ddb8ac61c54d2b40180"
 preview_id = "2c67fcc51dbf430391602e11d7a5e9fe"
 
+# Task #545 — CF_EDGE_CACHE binding declaration so the deployed worker's
+# `/api/edge/kv-usage` snapshot includes a CF_EDGE_CACHE row alongside
+# RATE_LIMIT and BOT_HTML_CACHE on the admin KV health panel. Task #511
+# already wired the per-isolate aggregation (kv-monitor.ts shared-key
+# flush + getUsageSnapshotAggregated list+sum) for this binding; the
+# binding just had to be declared here for the row to materialize on
+# the admin tile. The IDs mirror the artifacts-copy edge worker
+# (artifacts/syrabit/workers/edge-proxy/wrangler.toml) — same Cloudflare
+# account, same KV namespaces, so any future write-through cache shipped
+# in this worker rolls into the same per-day counters.
+[[kv_namespaces]]
+binding = "CF_EDGE_CACHE"
+id = "a672a5c8f6604db3ae07526bb30da72a"
+preview_id = "c8cdd4710c23460caf4d6fa526d76d2e"
+
 [[kv_namespaces]]
 binding = "CONTENT_CACHE"
 id = "981e939bcca445c481d4be818ebefee7"
