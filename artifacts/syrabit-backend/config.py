@@ -32,7 +32,6 @@ __all__ = [
     "_OPENAI_KEY",
     "_PG_DSN",
     "_SARVAM_LLM_KEY", "_SARVAM_LLM_KEY_2", "_SARVAM_LLM_KEY_3",
-    "_VOYAGE_AI_KEY",
     "_EXA_KEY", "_TAVILY_KEY",
     "_XAI_KEY",
     "cf_gateway_url", "get_provider_base_url",
@@ -367,11 +366,10 @@ _CF_PROVIDER_SLUGS = {
     # CF custom provider forwards {base}/custom-sarvam/<path> → https://api.sarvam.ai/<path>
     "sarvam":      "custom-sarvam",
     # New providers routed through CF AI Gateway
-    "cohere":      "cohere/v1",      # Embeddings/RAG — embed-multilingual-v3.0 (1024-dim)
+    # Task #491 — legacy embed-provider slugs removed.
     "assemblyai":  "assemblyai/v2",  # STT — /v2/upload, /v2/transcript
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech
     "deepgram":    "deepgram/v1",    # STT+TTS — primary STT provider, Aura-2 TTS
-    "voyage_ai":   "voyage-ai/v1",   # Embeddings — voyage-3-large (1024-dim)
     # Phase 2 — Azure OpenAI is the sole non-Sarvam managed-LLM left after #347.
     "azure_openai": "azure-openai",      # Azure OpenAI — chat/completions; CF handles key
 }
@@ -387,9 +385,8 @@ _DIRECT_PROVIDER_URLS = {
     # and non-LLM endpoints like /translate, /text-to-speech live at root.
     "sarvam":      "https://api.sarvam.ai",
     # Fallback direct URLs (used when CF gateway is down)
-    "cohere":      "https://api.cohere.com/v1",
+    # Task #491 — legacy embed-provider direct URLs removed.
     "deepgram":    "https://api.deepgram.com/v1",  # Deepgram STT + TTS direct fallback
-    "voyage_ai":   "https://api.voyageai.com/v1",  # Voyage AI embeddings direct fallback
     # Azure direct: tenant endpoint (requires env var). Bedrock removed (Task #347).
     "azure_openai": None,  # Set at runtime via AZURE_OPENAI_ENDPOINT
 }
@@ -434,7 +431,7 @@ def get_provider_base_url(provider: str) -> str | None:
 #      provider and forwards the request upstream.
 #   3. Upstream provider sees its real key and responds normally.
 #
-# Removing the provider env vars (GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY,
+# Removing the provider env vars (GEMINI_API_KEY, GROQ_API_KEY,
 # OPENROUTER_API_KEY, SARVAM_API_KEY, …) is SAFE once BYOK is wired — the
 # backend sends placeholders and CF does the real auth. Keep the CF gateway
 # env vars themselves (CF_AI_GATEWAY_ACCOUNT_ID, CF_AI_GATEWAY_ID,
@@ -508,19 +505,15 @@ _SARVAM_LLM_KEY = os.environ.get('SARVAM_API_KEY', '').strip()
 _SARVAM_LLM_KEY_2 = os.environ.get('SARVAM_API_KEY_2', '').strip()
 _SARVAM_LLM_KEY_3 = os.environ.get('SARVAM_API_KEY_3', '').strip()
 
-# ── New AI provider keys (Cohere, Deepgram, Voyage AI) ──────────────────────
+# ── New AI provider keys (Deepgram, AssemblyAI, ElevenLabs) ─────────────────
 # All route through CF AI Gateway (BYOK) so local keys are optional once the
 # keys are registered in the CF dashboard. When gateway is enabled and the
 # local env var is missing, BYOK_PLACEHOLDER is substituted so the provider
 # module activates and CF injects the real key on every request.
-_COHERE_KEY       = os.environ.get('COHERE_API_KEY',       '').strip()
+# Task #491 — Cohere + Voyage AI keys removed.
 _ASSEMBLYAI_KEY   = os.environ.get('ASSEMBLYAI_API_KEY',   '').strip()
 _ELEVENLABS_KEY   = os.environ.get('ELEVENLABS_API_KEY',   '').strip()
 _DEEPGRAM_KEY     = os.environ.get('DEEPGRAM_API_KEY',     '').strip()
-_VOYAGE_AI_KEY    = (
-    os.environ.get('VOYAGE_API_KEY',    '').strip()
-    or os.environ.get('VOYAGE_AI_API_KEY', '').strip()
-)
 # Search providers (Task #275): Exa neural search + Tavily live web search.
 # Used by PROVIDER_PRIORITY['search_rag'] and ['live_search'] pools.
 # Read directly by llm.py:3219 (Exa) and llm.py:3237 (Tavily) at request time;
@@ -536,29 +529,8 @@ ASSEMBLYAI_STT_MODEL = os.environ.get('ASSEMBLYAI_STT_MODEL', 'best').strip() or
 ELEVENLABS_VOICE_ID = os.environ.get('ELEVENLABS_VOICE_ID', '').strip()
 ELEVENLABS_MODEL_ID = os.environ.get('ELEVENLABS_MODEL_ID', 'eleven_multilingual_v2').strip() or 'eleven_multilingual_v2'
 
-# Cohere embed config
-COHERE_EMBED_MODEL   = os.environ.get('COHERE_EMBED_MODEL',   'embed-multilingual-v3.0').strip() or 'embed-multilingual-v3.0'
-COHERE_EMBED_PRIMARY = os.environ.get('COHERE_EMBED_PRIMARY', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-
-# Task #337 — Bedrock-Cohere is the **primary** Cohere route per
-# cloud-allocation-plan §6 + §9. When this flag is on AND
-# providers.aws_native.is_enabled("bedrock_cohere") is True, embed_text
-# and rerank route to Bedrock-Cohere FIRST and fall back to direct
-# Cohere / Workers AI / Vertex on failure. Default is on so the
-# documented "Bedrock-Cohere primary" routing matches a fresh deploy.
-BEDROCK_COHERE_PRIMARY = os.environ.get('BEDROCK_COHERE_PRIMARY', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-
-# Voyage AI embed config — voyage-3.5 has the strongest English retrieval
-# nDCG@10 in the public benchmark (0.816 vs Cohere multilingual-v3.0 0.781),
-# so we make it the primary for English / mixed-script queries via the
-# `embed_en` sub-pool. Output dim pinned to 1024 to keep parity with the
-# existing Cohere-shaped Pinecone index — both providers can write into the
-# same namespace without re-indexing.
-VOYAGE_EMBED_MODEL = os.environ.get('VOYAGE_EMBED_MODEL', 'voyage-3.5').strip() or 'voyage-3.5'
-try:
-    VOYAGE_EMBED_DIMS = int(os.environ.get('VOYAGE_EMBED_DIMS', '1024').strip() or '1024')
-except ValueError:
-    VOYAGE_EMBED_DIMS = 1024
+# Task #491 — Cohere / Bedrock-Cohere / Voyage embed config removed.
+# Embedding is now single-source workers_ai_custom (see EMBED_PROVIDER_PRIMARY).
 
 # ── Task #382 — Workers-AI custom embed worker + memory brain ───────────────
 # After Task #382 the embedding stack is owned by a Cloudflare Worker
@@ -568,10 +540,9 @@ except ValueError:
 # a new long-term-memory MongoDB collection (``memory_brain``) and is
 # no longer touched on the chunk path.
 #
-# Old providers (cohere, voyage on chunks, workers_ai bge-small) stay
-# in the repo but are skipped at runtime when the new flags are on.
-# Flip the env values back to roll back. Task #490: `vertex_embed` was
-# removed entirely — Vertex is `content_format` only.
+# Task #491 — legacy embed providers fully retired. Embedding stack
+# is now single-source workers_ai_custom; memory_brain also runs on
+# workers_ai_custom (1024-dim Atlas index unchanged).
 EMBED_PROVIDER_PRIMARY = os.environ.get(
     'EMBED_PROVIDER_PRIMARY', 'workers_ai_custom'
 ).strip().lower() or 'workers_ai_custom'
@@ -579,8 +550,8 @@ RERANK_PROVIDER = os.environ.get(
     'RERANK_PROVIDER', 'pinecone_only'
 ).strip().lower() or 'pinecone_only'
 MEMORY_BRAIN_PROVIDER = os.environ.get(
-    'MEMORY_BRAIN_PROVIDER', 'voyage'
-).strip().lower() or 'voyage'
+    'MEMORY_BRAIN_PROVIDER', 'workers_ai_custom'
+).strip().lower() or 'workers_ai_custom'
 MEMORY_BRAIN_COLLECTION = os.environ.get(
     'MEMORY_BRAIN_COLLECTION', 'memory_brain'
 ).strip() or 'memory_brain'
@@ -624,11 +595,10 @@ if CF_GATEWAY_ENABLED:
     # route them. Symbols stay bound to "" above.
     # Provider keys — BYOK allows CF gateway to inject keys stored in the
     # CF dashboard, so the local env var is optional in production.
-    _COHERE_KEY      = _COHERE_KEY      or BYOK_PLACEHOLDER
+    # Task #491 — legacy embed-provider key substitutions removed.
     _ASSEMBLYAI_KEY  = _ASSEMBLYAI_KEY  or BYOK_PLACEHOLDER
     _ELEVENLABS_KEY  = _ELEVENLABS_KEY  or BYOK_PLACEHOLDER
     _DEEPGRAM_KEY    = _DEEPGRAM_KEY    or BYOK_PLACEHOLDER
-    _VOYAGE_AI_KEY   = _VOYAGE_AI_KEY   or BYOK_PLACEHOLDER
     _EXA_KEY         = _EXA_KEY         or BYOK_PLACEHOLDER
     _TAVILY_KEY      = _TAVILY_KEY      or BYOK_PLACEHOLDER
     # Secondary/tertiary keys (_GEMINI_KEY_2, _SARVAM_LLM_KEY_2/3)
@@ -1190,7 +1160,6 @@ PLAN_PRICES = {
 #   sarvam        Sarvam startup credits             $500
 #   elevenlabs    ElevenLabs startup credits         $500
 #   assemblyai    AssemblyAI startup credits         $1,000
-#   cohere        Cohere startup credits             $1,000
 #   pinecone_ai   Pinecone startup credits           $500
 #   exa_ai        Exa startup credits                $1,000
 #   tavily        Tavily startup credits             $500
@@ -1209,8 +1178,8 @@ PROVIDER_PRIORITY: dict = {
     # following at this size) then Llama-3.2-3B (smaller/faster) then
     # generic workers_ai (last-resort gpt-oss-20b). Sarvam reserved for
     # `assamese_rag_chat`. Bedrock + OpenAI/xAI removed in Task #347.
-    # Cerebras is reachable only through CF AI Gateway BYOK; not listed
-    # here because direct cerebras provider was decommissioned (V4 §4 A2).
+    # Task #491 — Cerebras provider fully retired; no longer reachable
+    # via BYOK either.
     "english_rag_chat":  [
         "azure_openai",
         "workers_ai_mistral_7b", "workers_ai_llama32_3b", "workers_ai",
@@ -1258,21 +1227,15 @@ PROVIDER_PRIORITY: dict = {
     # continues to work; both currently resolve to the same single-provider
     # Workers AI chain.
     # Task #382 — primary embed is the custom Workers-AI worker
-    # (Gemma-300M + Qwen3-0.6B, mean-pooled to 1024-dim) when
-    # EMBED_PROVIDER_PRIMARY=workers_ai_custom. When the flag is
-    # flipped to a legacy provider name (cohere / voyage_ai / vertex
-    # / azure_openai / workers_ai) the dispatcher restores the
-    # pre-Task-#382 multi-provider draw — every legacy provider stays
-    # listed here so the exclusion-redraw loop can advance through
-    # them. The exact non-zero weights come from POOL_WEIGHTS["embed"]
-    # below, which is rebuilt from EMBED_PROVIDER_PRIMARY at import.
-    # Task #490 — Vertex `text-embedding-004` removed from every embed
-    # pool. On Workers-AI custom embed outage the controller flips into
-    # Option-D cache-only degraded mode and enqueues misses on the AWS
-    # SQS deferred-embed queue (V4 §15). No second Pinecone namespace.
-    "embed":             ["workers_ai_custom", "cohere", "voyage_ai", "azure_openai", "workers_ai"],
-    "embed_en":          ["workers_ai_custom", "cohere", "voyage_ai", "azure_openai", "workers_ai"],
-    "embed_indic":       ["workers_ai_custom", "cohere", "voyage_ai", "azure_openai", "workers_ai"],
+    # (Gemma-300M + Qwen3-0.6B, mean-pooled to 1024-dim). Task #491
+    # retired Cohere / Voyage from this chain; the dispatcher now has
+    # workers_ai_custom (primary) → azure_openai → workers_ai. On
+    # Workers-AI custom embed outage the controller flips into Option-D
+    # cache-only degraded mode and enqueues misses on the AWS SQS
+    # deferred-embed queue (V4 §15).
+    "embed":             ["workers_ai_custom", "azure_openai", "workers_ai"],
+    "embed_en":          ["workers_ai_custom", "azure_openai", "workers_ai"],
+    "embed_indic":       ["workers_ai_custom", "azure_openai", "workers_ai"],
     # Reranking: Task #382 collapses this to Pinecone-only when
     # RERANK_PROVIDER=pinecone_only. Workers AI remains in the list as
     # a dormant fallback the dispatcher can advance to if the flag is
@@ -1310,8 +1273,6 @@ PROVIDER_CREDITS: dict = {
     "elevenlabs":        500,   # ElevenLabs startup credits — $500
     "assemblyai":       1000,   # AssemblyAI startup credits — $1k
     "deepgram":          500,   # Deepgram startup credits — $500; primary STT + TTS fallback
-    "cohere":           1000,   # Cohere startup credits — $1k; primary embed
-    "voyage_ai":         500,   # Voyage AI startup credits — $500; memory-brain only after Task #382
     "workers_ai_custom":   0,   # Cloudflare custom embed worker — Task #382 primary embed (free tier)
     "pinecone_ai":       500,   # Pinecone startup credits — $500; primary rerank
     "exa_ai":           1000,   # Exa startup credits — $1k
@@ -1451,40 +1412,23 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     },
 }
 
-# ── Task #382 — flag-driven embed pool weights ──────────────────────────────
-# `EMBED_PROVIDER_PRIMARY` flips the weighted draw between the new custom
-# Workers-AI worker and the legacy multi-provider chain. Rebuilding the
-# pool here (rather than baking it into the literal above) means the
-# rollback story is genuine: setting `EMBED_PROVIDER_PRIMARY=cohere`
-# (or `vertex`/`voyage_ai`/`azure_openai`/`workers_ai`) actually removes
-# `workers_ai_custom` from the draw and restores the prior weighted
-# distribution across the legacy providers, so the dispatcher's
-# `select_provider` weighted draw + exclusion-redraw loop walks the
-# same chain it did before Task #382.
+# ── Task #382 / #491 — flag-driven embed pool weights ──────────────────────
+# After Task #491 the legacy Cohere/Voyage providers are gone. The pool
+# now collapses to workers_ai_custom (primary) → azure_openai →
+# workers_ai. `EMBED_PROVIDER_PRIMARY` is retained as an operator flag
+# so a future provider swap can re-prime the chain without a code edit.
 _LEGACY_EMBED_WEIGHTS = {
-    "cohere":       1000,
-    "voyage_ai":    1000,
-    # Task #490 — vertex removed from legacy embed weights.
     "azure_openai":  500,
     "workers_ai":    100,
 }
 def _build_embed_pool(primary: str) -> dict[str, int]:
     primary = (primary or "").strip().lower()
     if primary == "workers_ai_custom":
-        # Custom worker is the sole active provider; legacy providers
-        # remain in the pool at weight 0 so the exclusion-redraw loop
-        # can advance to them only after the worker is fully exhausted.
         return {
             "workers_ai_custom": 10000,
-            "cohere":                0,
-            "voyage_ai":             0,
             "azure_openai":          0,
             "workers_ai":            0,
         }
-    # Rollback — workers_ai_custom is forced to weight 0 (effectively
-    # excluded from the draw) and the legacy chain is restored. If the
-    # operator named a specific legacy provider, that one gets the top
-    # weight; otherwise the legacy defaults stand.
     pool = {"workers_ai_custom": 0, **_LEGACY_EMBED_WEIGHTS}
     if primary in pool and primary != "workers_ai_custom":
         pool[primary] = max(pool[primary], 10000)

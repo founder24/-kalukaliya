@@ -14,10 +14,16 @@ Intentionally NOT scanned:
   - ``perplexity`` — every hit refers to PerplexityBot, the AI
     search-engine crawler we want to serve content TO (robots.txt,
     GEO/JSONLD, bot-discovery dashboards). Not used as an LLM provider.
-  - ``groq`` / ``openrouter`` / ``cerebras`` — still referenced by the
-    BYOK secret-audit lifecycle in ``server.py`` and by historical
-    comments / model registries. Removal is tracked by the Railway
-    env-var audit table that already prints on every boot.
+  - ``groq`` / ``openrouter`` — still referenced by the BYOK secret-audit
+    lifecycle in ``server.py`` and by historical comments / model
+    registries. Removal is tracked by the Railway env-var audit table
+    that already prints on every boot.
+  - ``cerebras`` / ``cohere`` / ``voyage_ai`` / ``baseten`` /
+    ``cartesia`` / ``bedrock`` / ``gemini`` / ``xai`` /
+    ``openai_direct`` — purged in Task #491 from runtime code paths.
+    Banned bare-token to keep the dispatch chain honest. The audit
+    allowlist is the only place where the literals may legitimately
+    appear (this script + the V4 changelog).
 
 Allowlisted paths (banned tokens may legitimately appear here):
   - attached_assets/**   (raw user uploads / log snapshots)
@@ -60,7 +66,7 @@ FRONTEND = ROOT / "artifacts" / "syrabit"
 #     throttle metrics, BYOK env-audit warnings, deprecation stubs,
 #     regression tests, historical runbooks).
 BANNED_LITERAL = re.compile(
-    r"\b(cartesia|groq|cerebras|openrouter|quge5)\b",
+    r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5|baseten|bedrock|gemini|xai|openai_direct)\b",
     re.IGNORECASE,
 )
 # Stripe / Resend / bedrock-proxy are tracked separately because their

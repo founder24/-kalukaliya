@@ -20,10 +20,8 @@ from config import (
     POOL_WEIGHTS,
     MONGO_URL,
     _DEEPGRAM_KEY,
-    _COHERE_KEY,
     _ASSEMBLYAI_KEY,
     _ELEVENLABS_KEY,
-    _VOYAGE_AI_KEY,
     _SARVAM_LLM_KEY,
     _XAI_KEY,
     _OPENAI_KEY,
@@ -69,10 +67,6 @@ def _key_status_for(name: str) -> dict[str, Any]:
         return {"configured": _present(_ELEVENLABS_KEY), "source": "ELEVENLABS_API_KEY"}
     if name == "assemblyai":
         return {"configured": _present(_ASSEMBLYAI_KEY), "source": "ASSEMBLYAI_API_KEY"}
-    if name == "cohere":
-        return {"configured": _present(_COHERE_KEY), "source": "COHERE_API_KEY"}
-    if name == "voyage_ai":
-        return {"configured": _present(_VOYAGE_AI_KEY), "source": "VOYAGE_AI_API_KEY"}
     if name == "pinecone_ai":
         return {"configured": bool(os.environ.get("PINECONE_API_KEY")), "source": "PINECONE_API_KEY"}
     if name == "mongodb_atlas":

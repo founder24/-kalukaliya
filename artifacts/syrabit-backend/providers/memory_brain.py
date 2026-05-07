@@ -1,15 +1,11 @@
 """
-providers.memory_brain — Voyage-backed Mongo memory brain (Task #382).
+providers.memory_brain — workers-AI custom embedded Mongo memory brain.
 
-A new long-term chat memory store. Items are embedded with Voyage
-``voyage-3.5`` (1024-dim) and stored in a dedicated MongoDB collection
-(``memory_brain`` by default) with an Atlas ``$vectorSearch`` index of
-the same dimension.
-
-This module REPLACES Voyage's previous role on the chunk embedding
-path. The legacy ``providers.voyage_ai`` module remains importable and
-unmodified, but the chunk embedder no longer calls it; Voyage's only
-runtime customer in the new layout is ``memory_brain``.
+Long-term chat memory store. Items are embedded with the custom
+Cloudflare Workers-AI worker (Gemma-300M + Qwen3-0.6B mean-pool, 1024-dim
+— see ``providers.workers_embed``) and stored in a dedicated MongoDB
+collection (``memory_brain`` by default) with an Atlas ``$vectorSearch``
+index of the same dimension.
 
 Public API
 ----------
@@ -26,7 +22,7 @@ Public API
         collection if it does not already exist. Idempotent.
 
     health_check()
-        Return a status dict combining Voyage availability and the
+        Return a status dict combining workers-AI availability and the
         Mongo collection's index health.
 
 Schema
@@ -38,10 +34,10 @@ Each document::
         "user_id":         str,
         "kind":            str,                # "note" | "summary" | "fact" | …
         "text":            str,                # original memory content
-        "embedding":       list[float],        # voyage-3.5, 1024-dim
-        "embedding_model": "voyage-3.5",
+        "embedding":       list[float],        # workers_ai_custom, 1024-dim
+        "embedding_model": "workers_ai_custom@gemma+qwen3-meanpool-1024",
         "embedding_dim":   1024,
-        "embedding_source":"voyage",
+        "embedding_source":"workers_ai_custom",
         "metadata":        dict,               # arbitrary caller fields
         "created_at":      datetime (UTC),
     }
@@ -60,8 +56,8 @@ COLLECTION       = os.environ.get("MEMORY_BRAIN_COLLECTION", "memory_brain").str
 INDEX_NAME       = os.environ.get("MEMORY_BRAIN_INDEX_NAME", "memory_brain_vector_index").strip() or "memory_brain_vector_index"
 EMBED_DIM        = int(os.environ.get("MEMORY_BRAIN_DIMS", "1024") or "1024")
 EMBED_METRIC     = os.environ.get("MEMORY_BRAIN_METRIC", "cosine").strip() or "cosine"
-EMBED_MODEL_NAME = "voyage-3.5"
-PROVIDER_NAME    = os.environ.get("MEMORY_BRAIN_PROVIDER", "voyage").strip().lower() or "voyage"
+EMBED_MODEL_NAME = "workers_ai_custom@gemma+qwen3-meanpool-1024"
+PROVIDER_NAME    = os.environ.get("MEMORY_BRAIN_PROVIDER", "workers_ai_custom").strip().lower() or "workers_ai_custom"
 
 _FILTER_PATHS = [
     f.strip() for f in
@@ -85,24 +81,26 @@ def _collection():
 
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
-async def _embed_with_voyage(text: str, *, input_type: str) -> list[float]:
-    """Single-text Voyage embedding. Empty list on failure."""
-    if PROVIDER_NAME != "voyage":
+async def _embed_one(text: str, *, input_type: str) -> list[float]:
+    """Single-text workers-AI custom embedding. Raises on failure."""
+    if PROVIDER_NAME != "workers_ai_custom":
         raise RuntimeError(
             f"memory_brain: unsupported MEMORY_BRAIN_PROVIDER={PROVIDER_NAME!r}"
         )
-    from providers.voyage_ai import embed as _voyage_embed, ENABLED as _voy_on
-    if not _voy_on:
+    from providers import workers_embed as _we
+    if not _we.is_enabled():
         raise RuntimeError(
-            "memory_brain: Voyage disabled — set VOYAGE_API_KEY"
+            "memory_brain: workers_ai_custom disabled — set "
+            "WORKERS_EMBED_URL and WORKERS_EMBED_SECRET"
         )
-    vecs = await _voyage_embed([text], input_type=input_type)
-    if not vecs:
-        raise RuntimeError("memory_brain: Voyage returned no vectors")
+    vecs = await _we.embed([text], input_type=input_type)
+    if not vecs or vecs[0] is None:
+        raise RuntimeError("memory_brain: workers_ai_custom returned no vector")
     vec = vecs[0]
     if len(vec) != EMBED_DIM:
         raise RuntimeError(
-            f"memory_brain: voyage dim mismatch ({len(vec)} vs {EMBED_DIM})"
+            f"memory_brain: workers_ai_custom dim mismatch "
+            f"({len(vec)} vs {EMBED_DIM})"
         )
     return vec
 
@@ -115,13 +113,13 @@ async def write_memory(
     kind: str = "note",
     metadata: Optional[dict[str, Any]] = None,
 ) -> str:
-    """Embed *text* with Voyage and insert into the memory_brain
-    collection. Returns the string form of the inserted ``_id``.
+    """Embed *text* and insert into the memory_brain collection.
+    Returns the string form of the inserted ``_id``.
     """
     if not user_id or not text or not text.strip():
         raise ValueError("memory_brain.write_memory: user_id and text required")
 
-    vec = await _embed_with_voyage(text, input_type="document")
+    vec = await _embed_one(text, input_type="search_document")
     doc = {
         "user_id":          user_id,
         "kind":             kind,
@@ -129,7 +127,7 @@ async def write_memory(
         "embedding":        vec,
         "embedding_model":  EMBED_MODEL_NAME,
         "embedding_dim":    EMBED_DIM,
-        "embedding_source": "voyage",
+        "embedding_source": "workers_ai_custom",
         "metadata":         dict(metadata or {}),
         "created_at":       _dt.datetime.now(_dt.timezone.utc),
     }
@@ -152,15 +150,12 @@ async def query_memory(
     if not user_id or not query:
         return []
 
-    vec = await _embed_with_voyage(query, input_type="query")
+    vec = await _embed_one(query, input_type="search_query")
 
     vs_filter: dict[str, Any] = {"user_id": user_id}
     if kind:
         vs_filter["kind"] = kind
     if metadata_filter:
-        # Atlas vectorSearch filter syntax — caller supplies nested
-        # metadata.<field> paths so they take effect on the indexed
-        # filter fields list (configurable via MEMORY_BRAIN_FILTER_FIELDS).
         vs_filter.update(metadata_filter)
 
     pipeline = [
@@ -256,11 +251,11 @@ async def ensure_index() -> dict[str, Any]:
 
 # ── Health check ──────────────────────────────────────────────────────────────
 async def health_check() -> dict[str, Any]:
-    """Combined health: Voyage embed reachability + Mongo collection
-    presence + index info. Always returns 200-ish dict; ``ok=False`` on
-    any leg failure."""
+    """Combined health: workers-AI custom embed reachability + Mongo
+    collection presence + index info. Always returns 200-ish dict;
+    ``ok=False`` on any leg failure."""
     info: dict[str, Any] = {
-        "configured":  PROVIDER_NAME == "voyage",
+        "configured":  PROVIDER_NAME == "workers_ai_custom",
         "provider":    PROVIDER_NAME,
         "collection":  COLLECTION,
         "index":       INDEX_NAME,
@@ -268,13 +263,18 @@ async def health_check() -> dict[str, Any]:
         "model":       EMBED_MODEL_NAME,
     }
 
-    # Voyage leg
+    # Embed leg
     try:
-        from providers.voyage_ai import health_check as _voy_health
-        voy = await _voy_health()
+        from providers import workers_embed as _we
+        embed_ok = bool(_we.is_enabled())
+        embed_info: dict[str, Any] = {"ok": embed_ok}
+        if not embed_ok:
+            embed_info["reason"] = (
+                "workers_ai_custom disabled — set WORKERS_EMBED_URL/SECRET"
+            )
     except Exception as exc:
-        voy = {"ok": False, "reason": f"voyage_ai import/health failed: {exc}"}
-    info["voyage"] = voy
+        embed_info = {"ok": False, "reason": f"workers_embed import failed: {exc}"}
+    info["embed"] = embed_info
 
     # Mongo leg
     try:
@@ -287,11 +287,7 @@ async def health_check() -> dict[str, Any]:
     except Exception as exc:
         info["mongo"] = {"ok": False, "reason": str(exc)[:200]}
 
-    # Atlas vector-search index leg — the index is what makes
-    # query_memory work, so a healthy collection without the index is
-    # still effectively broken. We use the `listSearchIndexes`
-    # aggregation stage (Atlas-only) and look for our configured index
-    # name in a READY state.
+    # Atlas vector-search index leg.
     vs_info: dict[str, Any] = {
         "ok":     False,
         "exists": False,
@@ -324,7 +320,7 @@ async def health_check() -> dict[str, Any]:
     info["vector_index"] = vs_info
 
     info["ok"] = (
-        bool(voy.get("ok"))
+        bool(embed_info.get("ok"))
         and bool(info["mongo"].get("ok"))
         and bool(vs_info.get("ok"))
     )

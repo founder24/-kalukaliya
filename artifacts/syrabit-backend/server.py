@@ -131,7 +131,6 @@ def _RAILWAY_AUDIT_BLOCK_REMOVED_PLACEHOLDER():
     # new os.environ.get('XAI_API_KEY' | 'OPENAI_API_KEY') reads.
     _BYOK_PRIMARY = {
         "SARVAM_API_KEY":     "custom-sarvam",
-        "COHERE_API_KEY":     "cohere/v1",
     }
 
     # ── Category 2: Secondary/tertiary AI keys — always redundant with BYOK ──
@@ -156,7 +155,6 @@ def _RAILWAY_AUDIT_BLOCK_REMOVED_PLACEHOLDER():
         "ADMIN_EMAILS", "ADMIN_PASSWORDS", "ADMIN_NAMES",
         "STAFF_PASSWORDS",
         "MONGODB_MODEL_API_KEY",   # removed (dead code)
-        "VOYAGE_API_KEY",          # removed (dead code)
     ]
 
     # ── Category 5: DB-stored credentials (Railway fallback only) ─────────────

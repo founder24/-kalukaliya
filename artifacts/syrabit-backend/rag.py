@@ -545,11 +545,11 @@ async def _try_vector_provider(
         )
 
     elif provider == "mongodb_atlas":
-        # Atlas vector_index is Cohere 1024-dim — keep Cohere on this leg.
-        from providers.cohere import embed_query as _cohere_embed, ENABLED as _cohere_on
-        if not _cohere_on:
-            raise RuntimeError(f"{provider}: Cohere embeddings not configured (VOYAGE_API_KEY missing?)")
-        q_vec = await asyncio.wait_for(_cohere_embed(query), timeout=2.0)
+        # Task #491 — Atlas vector_index is now workers_ai_custom 1024-dim.
+        from providers.workers_embed import embed_one as _wai_embed_one, ENABLED as _wai_on
+        if not _wai_on:
+            raise RuntimeError(f"{provider}: workers_ai_custom embed worker not configured (WORKERS_EMBED_URL missing)")
+        q_vec = await asyncio.wait_for(_wai_embed_one(query), timeout=4.0)
 
     elif provider == "workers_ai":
         raise RuntimeError("workers_ai: no vector search endpoint available")
@@ -920,12 +920,9 @@ async def _fetch_internal_chapters(
                 "type":       "chapter",
             })
 
-        # ── 5. Reranking — Bedrock-Cohere PRIMARY, Pinecone fallback ──────────
-        # Task #337: per cloud-allocation-plan §6 + §9, Bedrock-Cohere
-        # rerank-v3-5 is the **primary** reranker. Pinecone bge-reranker-v2-m3
-        # is the fallback when Bedrock is disabled, returns no results, or
-        # raises. Both are multilingual; the Cohere-only allow-list is
-        # enforced inside providers.aws_native.bedrock_rerank.
+        # ── 5. Reranking — Pinecone-only (Task #491) ──────────────────────────
+        # Task #491 retired Bedrock-Cohere; rerank is now Pinecone-only
+        # via providers.pinecone_ai (bge-reranker-v2-m3, multilingual).
         if len(candidates) > 1:
             def _rerank_text(c: dict) -> str:
                 en_part = c["content"][:600]
@@ -933,27 +930,7 @@ async def _fetch_internal_chapters(
                 return f"{c['title']}\n\n{en_part}" + (f"\n\n{as_part}" if as_part else "")
 
             reranked = False
-            try:
-                from config import BEDROCK_COHERE_PRIMARY as _BEDROCK_PRIMARY
-                from providers import aws_native as _awsn
-                if _BEDROCK_PRIMARY and _awsn.is_enabled("bedrock_cohere") and _awsn.is_configured():
-                    docs = [_rerank_text(c) for c in candidates]
-                    ranked = await asyncio.wait_for(
-                        asyncio.to_thread(_awsn.bedrock_rerank, query, docs, top_n=limit),
-                        timeout=3.0,
-                    )
-                    order = [r["index"] for r in ranked if r.get("index") is not None]
-                    if order:
-                        candidates = [candidates[i] for i in order if 0 <= i < len(candidates)][:limit]
-                        reranked = True
-                        logger.info(
-                            "[INTERNAL_RAG] Bedrock-Cohere PRIMARY reranked → top %d for '%s'",
-                            len(candidates), query[:50],
-                        )
-            except Exception as _bk_err:
-                logger.debug("[INTERNAL_RAG] Bedrock-Cohere primary rerank failed: %s", _bk_err)
-
-            if not reranked and _pinecone_enabled:
+            if _pinecone_enabled:
                 try:
                     from providers.pinecone_ai import rerank_items as _pc_rerank
                     candidates = await asyncio.wait_for(

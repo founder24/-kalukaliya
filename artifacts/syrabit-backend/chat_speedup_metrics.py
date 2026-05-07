@@ -232,7 +232,7 @@ def record_provider_call(provider: str, *, ttfb_ms: float = 0.0, total_ms: float
     """Record a per-provider chat completion. Either ttfb_ms, total_ms, or
     both may be supplied — call once with whichever metrics are available
     at the call site. ``provider`` should be the same tag emitted as
-    ``__provider`` in the SSE stream (e.g. 'vertex_gemini', 'cerebras')."""
+    ``__provider`` in the SSE stream (e.g. 'azure_openai', 'workers_ai')."""
     p = _norm_provider(provider)
     with _lock:
         b = _provider_bucket(_today_key(), p)

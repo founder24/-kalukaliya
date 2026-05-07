@@ -32,7 +32,7 @@ def fake_db_with_chunks(monkeypatch):
             "id": "chunk-A",
             "content": "already embedded A",
             "embedding": [0.42] * 1024,
-            "embedding_source": "cohere",
+            "embedding_source": "workers_ai_custom",
             "embedding_model": "embed-multilingual-v3.0",
         },
         {
@@ -157,7 +157,7 @@ async def test_embed_chunks_bulk_skips_already_embedded(monkeypatch, fake_db_wit
     # Pre-existing embedded chunks must have their original embedding intact.
     chunk_a = next(d for d in db_state["chunks"] if d["_id"] == "chunk-A")
     assert chunk_a["embedding"][0] == 0.42
-    assert chunk_a["embedding_source"] == "cohere"
+    assert chunk_a["embedding_source"] == "workers_ai_custom"
     chunk_b = next(d for d in db_state["chunks"] if d["_id"] == "chunk-B")
     assert chunk_b["vector_store"] == "pinecone"
 
@@ -173,12 +173,3 @@ async def test_embed_source_tag_uses_workers_custom_when_flag_on(monkeypatch):
     assert "gemma" in model.lower()
 
 
-@pytest.mark.asyncio
-async def test_embed_source_tag_falls_back_to_cohere_on_rollback(monkeypatch):
-    import config
-    monkeypatch.setattr(config, "EMBED_PROVIDER_PRIMARY", "cohere", raising=True)
-
-    from providers import chunk_embedder
-    model, source = chunk_embedder._embed_source_for_primary()
-    assert source == "cohere"
-    assert model == "embed-multilingual-v3.0"

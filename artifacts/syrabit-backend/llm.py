@@ -13,7 +13,7 @@ _SARVAM_INDIC_MODEL_PREFERENCE = ["sarvam-m", "sarvam-105b"]
 class LlmResult(str):
     """String subclass that carries the provider that produced the result.
 
-    `provider` is the canonical name (e.g. "gemini", "cerebras", "workers-ai").
+    `provider` is the canonical name (e.g. "gemini", "workers-ai").
     `fallback_reason` is set ONLY when this result came from a fallback tier
     (Task #636) — it's the short label returned by
     `providers.workers_ai.classify_primary_error` ("timeout", "http_503",
@@ -147,7 +147,6 @@ _PROVIDER_429_WINDOWS: dict = {       # provider → list[float epoch timestamps
     "azure_openai": [],
     # bedrock removed in Task #347
     "deepgram":     [],
-    "cerebras":     [],   # V4 §1 / §4 — CF-Gateway-only fallback (Task #420)
 }
 _PROVIDER_429_REDIS_KEYS: dict = {
     "workers-ai":   "wai_429_burst",
@@ -156,7 +155,7 @@ _PROVIDER_429_REDIS_KEYS: dict = {
     "azure_openai": "azure_429_burst",
     # bedrock removed in Task #347
     "deepgram":     "deepgram_429_burst",
-    "cerebras":     "cerebras_429_burst",   # V4 §4 fallback
+    # Task #491 — legacy SLM provider retired (see V4 changelog).
 }
 
 # Backwards-compat module-level aliases for code that references these directly
@@ -1061,17 +1060,16 @@ class _SmartKeyPool:
     _RL_COOLDOWN  = 20.0
     _ERR_COOLDOWN = 7.0
     # With unified billing and a combined 10 000 RPM budget, keep Workers AI
-    # as primary until 85% (8 500 RPM) before soft-shifting to Cerebras
-    # (V4 §4 CF-Gateway-only fallback), and hard-deprioritize only at 95%
-    # (9 500 RPM). Per-model quota is independent so a single model
-    # saturating does not affect others. Groq removed in Task #347 / V4 §0.
+    # as primary until 85% (8 500 RPM) before soft-shifting to fallbacks,
+    # and hard-deprioritize only at 95% (9 500 RPM). Per-model quota is
+    # independent so a single model saturating does not affect others.
+    # Groq removed in Task #347 / V4 §0; Cerebras removed in Task #491.
     _RPM_SOFT_THRESHOLD = 0.85
     _RPM_HARD_THRESHOLD = 0.95
 
     # RPM limits per provider — see _parse_rpm_limit() for the env-var safe parser.
     # Workers AI: CF Standard plan with unified billing — 3 000 RPM per model.
     # Override with WORKERS_AI_RPM_LIMIT env var if the account tier differs.
-    # Cerebras: preview tier; set CEREBRAS_RPM_LIMIT for paid plan.
     _PROVIDER_RPM_LIMITS = _POOL_RPM_LIMITS  # module-level dict, populated just above
 
     def __init__(self, candidates: list):
@@ -1460,42 +1458,7 @@ async def _call_openai_compat(messages: list, api_key: str, model: str, max_toke
     content = resp.choices[0].message.content or ""
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
-async def _call_cerebras(messages: list, api_key: str, model: str, max_tokens: int) -> str:
-    direct_base = "https://api.cerebras.ai/v1"
-    base = get_provider_base_url("cerebras") or direct_base
-    client = _get_oai_client(api_key, base)
-    raw = None
-    try:
-        raw = await client.chat.completions.with_raw_response.create(
-            model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            extra_headers=_cf_cache_headers(api_key=api_key) or None,
-        )
-        resp = raw.parse()
-    except _oai.APIConnectionError as e:
-        if base != direct_base and _is_cf_connection_error(e):
-            _handle_cf_connection_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            base = direct_base
-            raw = await client.chat.completions.with_raw_response.create(
-                model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            )
-            resp = raw.parse()
-        else:
-            raise
-    except _oai.AuthenticationError as e:
-        if base != direct_base:
-            _handle_cf_gateway_auth_error(e)
-            client = _get_oai_client(api_key, direct_base)
-            base = direct_base
-            raw = await client.chat.completions.with_raw_response.create(
-                model=model, messages=messages, max_tokens=max_tokens, temperature=0.1,
-            )
-            resp = raw.parse()
-        else:
-            raise
-    _record_aig_from_raw(raw, base=base, provider="cerebras", model=model)
-    content = resp.choices[0].message.content or ""
-    return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+# Task #491 — legacy SLM single-provider call helper removed.
 
 async def _call_single_provider(messages: list, provider: str, api_key: str, model: str, max_tokens: int) -> str:
     model = _MODEL_ALIASES.get(model, model)
@@ -1518,8 +1481,7 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
         return await _call_sarvam_llm(messages, api_key, model, max_tokens)
     # Task #490 — gemini→vertex dispatch removed. Vertex is now scoped to
     # `content_format` (vertex_format.format_with_vertex) only.
-    if provider == "cerebras":
-        return await _call_cerebras(messages, api_key, model, max_tokens)
+    # Task #491 — legacy SLM dispatch branch removed.
     # Task #347 / V4 §0: groq dispatch branch removed — provider no longer
     # in PROVIDER_PRIORITY; CF AI Gateway slug `groq/v1` is not configured.
     # Task #347: xAI/Grok dispatch branch removed — provider is no longer
@@ -1792,7 +1754,7 @@ def route_for_task(task: str, lang: str = "") -> tuple[str, str]:
 
 # ── PROVIDER_PRIORITY weighted round-robin dispatch (Task #250) ───────────────
 # Maps provider names (as used in PROVIDER_PRIORITY) to their default LLM
-# model identifiers.  For non-LLM providers (assemblyai, cohere,
+# model identifiers.  For non-LLM providers (assemblyai,
 # pinecone_ai, exa_ai, tavily) the model string is a descriptive tag only —
 # the actual API call goes through the provider's own client module.
 _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
@@ -1808,8 +1770,6 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — primary TTS
     "assemblyai":       "best",                                      # AssemblyAI STT
     "deepgram":         "nova-3",                                    # Deepgram STT + Aura-2 TTS — primary STT
-    "cohere":           "embed-multilingual-v3.0",                   # Cohere Embed — primary embed
-    "voyage_ai":        "voyage-3-large",                            # Voyage AI embeddings — secondary embed
     "pinecone_ai":      "llama-text-embed-v2",                       # Pinecone embed/rerank — primary rerank
     "exa_ai":           "exa",                                       # Exa neural search
     "tavily":           "tavily-search",                             # Tavily search
@@ -1837,8 +1797,6 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     "elevenlabs":       "elevenlabs",
     "assemblyai":       "assemblyai",
     "deepgram":         "deepgram",
-    "cohere":           "cohere",
-    "voyage_ai":        "voyage_ai",
     "pinecone_ai":      "pinecone_ai",
     "exa_ai":           "exa_ai",
     "tavily":           "tavily",
@@ -2987,18 +2945,8 @@ def _record_aig_from_stream(stream: Any, *, base: str, provider: str, model: str
         pass
 
 
-async def _stream_cerebras(messages: list, api_key: str, model: str, max_tokens: int):
-    direct_base = "https://api.cerebras.ai/v1"
-    base = get_provider_base_url("cerebras") or direct_base
-    client = _get_oai_client(api_key, base)
-    stream = await client.chat.completions.create(
-        model=model, messages=messages, max_tokens=max_tokens, stream=True, temperature=0.1,
-    )
-    _record_aig_from_stream(stream, base=base, provider="cerebras", model=model)
-    async for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta and delta.content:
-            yield delta.content
+# Task #491: legacy SLM streaming helper deleted alongside its sync twin.
+# The provider is no longer in any PROVIDER_PRIORITY pool.
 
 # Task #347: ``_stream_xai`` was deleted. xAI/Grok is no longer in any
 # PROVIDER_PRIORITY pool, the SDK is uninstalled, and no dispatch path
@@ -3251,10 +3199,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
                 yield token
         # Task #490 — gemini→vertex stream branch removed. Vertex no longer
         # serves chat / streaming traffic; it is `content_format` only.
-        elif p_name == "cerebras":
-            logger.info(f"LLM stream: provider=cerebras, model={p_model}")
-            async for token in _stream_cerebras(messages, p_key, p_model, _mt):
-                yield token
+        # Task #491 — legacy SLM stream branch removed.
         # Task #347 / V4 §0: groq stream branch removed — _stream_openai_compat
         # is no longer invoked with the groq base URL. PROVIDER_PRIORITY drops
         # groq; alerting (metrics.py check #9) and counters (llm.py
@@ -3282,7 +3227,6 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     _SLM_TTFT_TIMEOUT = 1.5    # max seconds to wait for FIRST token from a slot
 
     _SLM_PROVIDER_MAX_INPUT_CHARS = {
-        "cerebras": 24000,
         "sarvam": 12000,
         # groq removed in Task #347 / V4 §0
         "gemini": 500000,
@@ -3876,23 +3820,11 @@ def _embed_feature_for(text: str, lang: str) -> str:
     """Return the POOL_WEIGHTS key for an embed call given the *text* and
     caller-supplied *lang* hint.
 
-    Routing rule (Voyage/Cohere hybrid):
-      • Any Indic-script character present in *text*  → ``embed_indic``
-        (Cohere primary — embed-multilingual-v3.0 has the strongest
-        Bengali/Assamese retrieval in the public Indic benchmark).
-      • Otherwise *lang* is in the Indic set            → ``embed_indic``
-        (catches romanised-Assamese / code-mixed queries the script test
-        misses; the caller already classified the user-language).
-      • Otherwise (English / Latin-script / unknown)    → ``embed_en``
-        (Voyage primary — voyage-3.5 nDCG@10 = 0.816 vs Cohere 0.781).
-
-    This is a per-query router, NOT a weighted blend: a query goes to the
-    language-best provider in full, and the *aggregate* split across all
-    queries reflects the user-language mix (~60/40 English/Indic in our
-    case → ~60% Voyage / 40% Cohere overall, without diluting either
-    class with a weighted average). Each sub-pool still falls back to the
-    other provider on failure (1024-dim → drop-in compatible) so a
-    provider outage degrades cleanly inside the existing dispatch loop.
+    Task #491 retired the Voyage/Cohere hybrid; both ``embed_en`` and
+    ``embed_indic`` now resolve to the same single-source primary
+    (``workers_ai_custom`` — Gemma-300M + Qwen3-0.6B mean-pool, 1024-dim,
+    multilingual). The two feature keys are kept so caller telemetry
+    (script vs. lang classification) survives.
     """
     if text and _INDIC_SCRIPT_RE.search(text):
         return "embed_indic"
@@ -3908,24 +3840,18 @@ async def call_embed_with_dispatch(
 ) -> list:
     """Embed *text* via the weighted provider selected for the 'embed' feature key.
 
-    Routing (hybrid, language-aware):
-      English / Latin-script    → POOL_WEIGHTS['embed_en']
-                                   voyage_ai(10000) → cohere(100) → workers_ai(0)
-      Indic-script / Indic lang → POOL_WEIGHTS['embed_indic']
-                                   cohere(10000) → voyage_ai(100) → workers_ai(0)
+    Routing (single-source, post Task #491):
+      ``embed_en`` and ``embed_indic`` →
+        workers_ai_custom (primary) → azure_openai → workers_ai
 
     workers_ai_custom: providers.workers_embed.embed_query — Task #382
                        primary embed via the custom Cloudflare Worker
                        (Gemma-300M + Qwen3-0.6B mean-pooled to 1024-dim).
-    voyage_ai: providers.voyage_ai.embed_query (1024-dim, voyage-3.5)
-               — kept dormant on the embed pool after Task #382;
-               Voyage now powers only the memory_brain collection.
-    cohere:    providers.cohere.embed_query    (1024-dim, embed-multilingual-v3.0).
     workers_ai: cloudflare_ai.embed (1024-dim, @cf/baai/bge-m3) — dormant
                 fallback after Task #382.
     azure_openai: branch kept for back-compat in case POOL_WEIGHTS
-    is overridden at runtime; not selected by the default hybrid pools.
-    (bedrock embed branch removed in Task #347.)
+    is overridden at runtime.
+    (Legacy AWS-managed and direct embed branches removed in Tasks #347/#491.)
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP, EMBED_PROVIDER_PRIMARY as _EPP
@@ -4118,24 +4044,7 @@ async def call_embed_with_dispatch(
                 _persist(_vec_wai)
                 return _vec_wai
             # Task #347: bedrock embed branch removed (providers/bedrock.py deleted).
-            elif provider == "cohere":
-                from providers.cohere import embed_query as _cohere_embed_q, ENABLED as _cohere_enabled
-                if not _cohere_enabled:
-                    raise RuntimeError("cohere embed: COHERE_API_KEY not configured")
-                _cohere_vec = await _cohere_embed_q(text)
-                if not _cohere_vec:
-                    raise RuntimeError("cohere embed: embed_query returned empty vector")
-                _persist(_cohere_vec)
-                return _cohere_vec
-            elif provider == "voyage_ai":
-                from providers.voyage_ai import embed_query as _voyage_embed_q, ENABLED as _voyage_enabled
-                if not _voyage_enabled:
-                    raise RuntimeError("voyage_ai embed: VOYAGE_API_KEY not configured")
-                _voyage_vec = await _voyage_embed_q(text)
-                if not _voyage_vec:
-                    raise RuntimeError("voyage_ai embed: embed_query returned empty vector")
-                _persist(_voyage_vec)
-                return _voyage_vec
+            # Task #491 — legacy embed-provider branches removed.
             elif provider == "azure_openai":
                 # Azure OpenAI text-embedding-3-large via CF BYOK (Task #256).
                 from providers.azure_openai import call_embed as _az_embed
@@ -4348,12 +4257,12 @@ async def call_rerank_with_dispatch(
     """Rerank *docs* via the weighted provider selected for 'rerank'.
 
     Priority (PROVIDER_PRIORITY['rerank']):
-      pinecone_ai(500) → cohere(1000, skip) → azure_openai(1, skip) → workers_ai(0)
+      pinecone_ai(500) → azure_openai(1, skip) → workers_ai(0)
 
     pinecone_ai: providers.pinecone_ai.rerank (bge-reranker-v2-m3, multilingual) — fully wired.
-    cohere: /rerank endpoint not accessible through CF gateway slug (Task #257) — excluded gracefully.
     azure_openai: rerank not wired (Task #257) — excluded gracefully.
     workers_ai: no rerank endpoint — excluded gracefully.
+    (cohere rerank branch removed in Task #491.)
 
     Task #382 — when ``RERANK_PROVIDER=pinecone_only`` (the new default)
     the dispatcher short-circuits to pinecone_ai exclusively. Other
@@ -4370,7 +4279,7 @@ async def call_rerank_with_dispatch(
     # Task #382 — Pinecone-only short-circuit. We do NOT consult the
     # weighted draw at all; pinecone_ai is called directly so a
     # provider key drift in POOL_WEIGHTS cannot accidentally re-enable
-    # cohere/azure/workers_ai rerank attempts.
+    # azure/workers_ai rerank attempts.
     if _RR == "pinecone_only":
         try:
             from providers import pinecone_ai as _pc_prov
@@ -4402,10 +4311,6 @@ async def call_rerank_with_dispatch(
                 # Sort docs by score descending (highest relevance first).
                 ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
                 return [d for _, d in ranked]
-            elif provider == "cohere":
-                # Cohere /rerank endpoint not accessible through the current CF gateway
-                # slug — wiring deferred to Task #257. Excluded gracefully.
-                raise RuntimeError("cohere rerank: endpoint not wired via CF gateway (Task #257)")
             elif provider == "azure_openai":
                 # Azure OpenAI rerank not wired (Task #257); excluded gracefully.
                 raise RuntimeError("azure_openai rerank not wired (Task #257)")

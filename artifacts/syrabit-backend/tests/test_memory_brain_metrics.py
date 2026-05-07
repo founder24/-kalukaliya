@@ -37,7 +37,7 @@ def test_record_event_aggregates_by_op_and_kind():
     import memory_brain_metrics as _m
     _m.record_event("write", kind="qa",   ok=True)
     _m.record_event("write", kind="qa",   ok=True)
-    _m.record_event("write", kind="fact", ok=False, reason="voyage_error")
+    _m.record_event("write", kind="fact", ok=False, reason="embed_error")
     _m.record_event("read",  kind="query", ok=True)
     _m.record_event("read",  kind="query", ok=False, reason="timeout")
 
@@ -50,7 +50,7 @@ def test_record_event_aggregates_by_op_and_kind():
     assert s["by_kind"]["qa"]["ok"] == 2
     assert s["by_kind"]["fact"]["fail"] == 1
     reasons = {r["reason"]: r["count"] for r in s["top_failure_reasons"]}
-    assert reasons == {"voyage_error": 1, "timeout": 1}
+    assert reasons == {"embed_error": 1, "timeout": 1}
 
 
 def test_invalid_op_is_ignored():
@@ -121,7 +121,7 @@ def test_chat_write_records_failure_with_classified_reason(monkeypatch):
     import memory_brain_chat as mbc
 
     async def boom(user_id, text, *, kind, metadata):
-        raise RuntimeError("voyage rate limit exceeded")
+        raise RuntimeError("embed rate limit exceeded")
 
     fake_mod = type(sys)("providers.memory_brain")
     fake_mod.write_memory = boom
@@ -134,7 +134,7 @@ def test_chat_write_records_failure_with_classified_reason(monkeypatch):
     s = _m.get_stats()
     assert s["by_op"]["write"]["fail"] == 1
     reasons = {r["reason"] for r in s["top_failure_reasons"]}
-    assert "voyage_error" in reasons
+    assert "embed_error" in reasons
 
 
 def test_chat_query_timeout_records_failure(monkeypatch):

@@ -407,8 +407,8 @@ def test_workers_ai_stream_records_aig_response_headers(monkeypatch):
 
 # ──────────────────────────────────────────────────────────────────────
 # Task #420 — OpenAI-compatible callsites in llm.py
-# (_call_openai_compat / _stream_openai_compat / _call_cerebras /
-# _stream_cerebras) now switch to ``with_raw_response.create()`` so the
+# (_call_openai_compat / _stream_openai_compat) now switch to
+# ``with_raw_response.create()`` so the
 # cf-aig-* response headers are reachable. They must feed
 # record_aig_response() ONLY when the request actually went through
 # the Cloudflare AI Gateway (base URL starts with CF_GATEWAY_BASE),
@@ -537,38 +537,6 @@ def test_oai_compat_does_not_record_when_routed_direct(monkeypatch):
     assert snap["counters"]["aig_responses_total"] == 0, snap
 
 
-def test_cerebras_records_aig_when_routed_through_cf(monkeypatch):
-    """Same wiring contract for the Cerebras-specific helper."""
-    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
-    from ai_gateway_observability import reset_for_tests, snapshot
-    reset_for_tests()
-
-    import config
-    monkeypatch.setattr(config, "CF_GATEWAY_BASE",
-                        "https://gateway.ai.cloudflare.com/v1/acct/gw")
-    cf_base = f"{config.CF_GATEWAY_BASE}/cerebras"
-
-    import llm
-    monkeypatch.setattr(llm, "get_provider_base_url",
-                        lambda _p: cf_base, raising=True)
-    monkeypatch.setattr(llm, "_get_oai_client",
-                        lambda _k, _b: _FakeOAIClient(
-                            {"cf-aig-cache-status": "MISS",
-                             "cf-aig-log-id": "log-cb"}),
-                        raising=True)
-
-    import asyncio
-    text = asyncio.run(llm._call_cerebras(
-        [{"role": "user", "content": "hi"}],
-        api_key="x", model="qwen", max_tokens=4,
-    ))
-    assert text == "ok"
-
-    snap = snapshot()
-    assert snap["counters"]["aig_cache_misses"] == 1, snap
-    assert snap["counters"]["aig_responses_total"] == 1, snap
-
-
 # ── Streaming variants ───────────────────────────────────────────────
 
 
@@ -668,42 +636,6 @@ def test_oai_compat_stream_records_aig_when_routed_through_cf(monkeypatch):
     assert snap["counters"]["aig_cache_hits"] == 1, snap
     assert snap["counters"]["aig_responses_total"] == 1, snap
     assert snap["recent_samples"][-1]["log_id"] == "log-stream-cf"
-
-
-def test_cerebras_stream_does_not_record_when_routed_direct(monkeypatch):
-    """Same direct-route guard for the Cerebras streaming helper —
-    closes the coverage gap flagged by the Task #420 code review."""
-    monkeypatch.setattr("ai_gateway_observability.CF_AIGW_OBS_ON", True)
-    from ai_gateway_observability import reset_for_tests, snapshot
-    reset_for_tests()
-
-    import config
-    monkeypatch.setattr(config, "CF_GATEWAY_BASE",
-                        "https://gateway.ai.cloudflare.com/v1/acct/gw")
-    direct_base = "https://api.cerebras.ai/v1"
-
-    import llm
-    monkeypatch.setattr(llm, "get_provider_base_url",
-                        lambda _p: direct_base, raising=True)
-    monkeypatch.setattr(llm, "_get_oai_client",
-                        lambda _k, _b: _FakeStreamingClient(
-                            {"cf-aig-cache-status": "HIT"},
-                            ["x"]),
-                        raising=True)
-
-    import asyncio
-
-    async def _drive() -> list[str]:
-        return [tok async for tok in llm._stream_cerebras(
-            [{"role": "user", "content": "hi"}],
-            api_key="key", model="qwen", max_tokens=4,
-        )]
-
-    asyncio.run(_drive())
-
-    snap = snapshot()
-    assert snap["counters"]["aig_cache_hits"] == 0, snap
-    assert snap["counters"]["aig_responses_total"] == 0, snap
 
 
 def test_oai_compat_stream_does_not_record_when_routed_direct(monkeypatch):

@@ -57,7 +57,7 @@ def test_route_requires_admin_auth(app_client_no_auth):
 def test_route_returns_expected_shape_and_reflects_recorded_events(app_client_authed):
     import memory_brain_metrics as _m
     _m.record_event("write", kind="qa", ok=True)
-    _m.record_event("write", kind="fact", ok=False, reason="voyage_error")
+    _m.record_event("write", kind="fact", ok=False, reason="embed_error")
     _m.record_event("read",  kind="query", ok=True)
 
     res = app_client_authed.get("/admin/memory-brain/metrics")
@@ -86,7 +86,7 @@ def test_route_returns_expected_shape_and_reflects_recorded_events(app_client_au
     assert stats["by_op"]["write"] == {"ok": 1, "fail": 1, "total": 2}
     assert stats["by_op"]["read"]  == {"ok": 1, "fail": 0, "total": 1}
     reasons = {r["reason"] for r in stats["top_failure_reasons"]}
-    assert "voyage_error" in reasons
+    assert "embed_error" in reasons
 
     # Buckets default to 24 entries with the four counter keys.
     assert isinstance(body["buckets"], list) and len(body["buckets"]) == 24

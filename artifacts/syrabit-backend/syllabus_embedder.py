@@ -196,20 +196,16 @@ class SyllabusEmbedder:
         topics: list = None,
         content: str = "",
     ) -> int:
-        # ── Embed function: Cohere primary (via vertex_services), Pinecone fallback
-        # Cohere embed-multilingual-v3.0 (1024-dim) via CF AI Gateway BYOK:
+        # ── Embed function: workers_ai_custom (Task #491 single-source).
+        # Gemma-300M + Qwen3-0.6B mean-pool (1024-dim) via Workers AI:
         # - Multilingual: handles Assamese/Bengali queries natively
         # - 1024-dim: matches Atlas vector_index and Cloudflare Vectorize dims
-        # - Routes through CF AI Gateway — no extra API key needed in Railway
-        # Pinecone multilingual-e5-large is kept as fallback if Cohere is down.
-        _pc_available = False
-        try:
-            from providers.pinecone_ai import ENABLED as _pc_enabled, embed_passages as _pc_embed_passages
-            _pc_available = _pc_enabled
-        except Exception:
-            pass
+        # - Routes through `vertex_services.embed_text` which now points
+        #   exclusively at workers_ai_custom (Task #491). No fallback —
+        #   if the primary fails we surface the error and let the SQS
+        #   deferred-embed consumer replay later (V4 §15).
 
-        async def _embed_fn_cohere(text: str, task_type: str = "RETRIEVAL_DOCUMENT", **_kw) -> Optional[list]:
+        async def _embed_fn_primary(text: str, task_type: str = "RETRIEVAL_DOCUMENT", **_kw) -> Optional[list]:
             try:
                 from vertex_services import embed_text as _vt_embed
                 return await asyncio.wait_for(
@@ -217,22 +213,11 @@ class SyllabusEmbedder:
                     timeout=20.0,
                 )
             except Exception as exc:
-                logger.warning("Cohere/vertex embed failed for '%s': %s", text[:40], exc)
+                logger.warning("workers_ai_custom embed failed for '%s': %s", text[:40], exc)
                 return None
 
-        async def _embed_fn_pinecone(text: str, **_kw) -> Optional[list]:
-            try:
-                vecs = await asyncio.wait_for(
-                    _pc_embed_passages([text[:2048]]),
-                    timeout=12.0,
-                )
-                return vecs[0] if vecs else None
-            except Exception as exc:
-                logger.warning("Pinecone embed failed for '%s': %s", text[:40], exc)
-                return None
-
-        _embed_fn = _embed_fn_cohere
-        _current_embed_model = "cohere/embed-multilingual-v3.0"
+        _embed_fn = _embed_fn_primary
+        _current_embed_model = "workers_ai_custom/gemma-300m+qwen3-0.6b"
 
         retriever = await self._get_retriever()
         if not retriever.is_configured():
@@ -257,14 +242,9 @@ class SyllabusEmbedder:
             logger.warning(f"Embed chapter failed for {title[:40]}: {exc}")
             vec = None
 
-        # Fallback: if Cohere failed, try Pinecone
-        if not vec and _pc_available:
-            logger.info("Cohere embed returned empty — retrying with Pinecone for '%s'", title[:40])
-            try:
-                vec = await _embed_fn_pinecone(embed_text_input)
-            except Exception:
-                pass
-
+        # Task #491 — no cross-model fallback. Indexed and query
+        # vectors must share the same embedding space; mixing model
+        # families silently degrades retrieval quality.
         if not vec:
             return 0
 
@@ -352,27 +332,19 @@ class SyllabusEmbedder:
         q_vec = _query_embed_cache.get(_embed_key) if _query_embed_cache is not None else None
 
         if q_vec is None:
-            # ── Pinecone primary, vertex fallback for query embedding ─────
+            # Task #491 — single-source workers_ai_custom for query embedding.
+            # Indexed and query vectors MUST share the same embedding
+            # space; the previous Pinecone-first branch produced
+            # cross-model contamination at retrieval time.
             try:
-                from providers.pinecone_ai import ENABLED as _pc_on, embed_one as _pc_embed_one
-                if _pc_on:
-                    q_vec = await asyncio.wait_for(
-                        _pc_embed_one(query[:1024], input_type="query"),
-                        timeout=3.0,
-                    )
-            except Exception:
-                q_vec = None
-
-            if not q_vec:
-                try:
-                    from vertex_services import embed_text
-                    q_vec = await asyncio.wait_for(
-                        embed_text(query, task_type="RETRIEVAL_QUERY"),
-                        timeout=3.0,
-                    )
-                except Exception as exc:
-                    logger.warning(f"Embed query failed (both Pinecone+vertex): {exc}")
-                    return None
+                from vertex_services import embed_text
+                q_vec = await asyncio.wait_for(
+                    embed_text(query, task_type="RETRIEVAL_QUERY"),
+                    timeout=3.0,
+                )
+            except Exception as exc:
+                logger.warning(f"Embed query failed (workers_ai_custom): {exc}")
+                return None
 
             if not q_vec:
                 return None

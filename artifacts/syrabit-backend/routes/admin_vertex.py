@@ -214,11 +214,6 @@ async def vertex_provider_routing(admin: dict = Depends(get_admin_user)):
                              "enabled": _flag("providers.assemblyai")},
         "deepgram":         {"label": "Deepgram",                    "env": ["DEEPGRAM_API_KEY"],
                              "enabled": _flag("providers.deepgram")},
-        "cohere":           {"label": "Cohere Embeddings",           "env": ["COHERE_API_KEY"],
-                             "enabled": _flag("providers.cohere")},
-        "voyage_ai":        {"label": "Voyage AI",                   "env": ["VOYAGE_AI_API_KEY", "VOYAGE_API_KEY"],
-                             "enabled": bool(os.environ.get("VOYAGE_AI_API_KEY", "").strip()
-                                             or os.environ.get("VOYAGE_API_KEY", "").strip())},
         "pinecone_ai":      {"label": "Pinecone (Inference + Rerank)", "env": ["PINECONE_API_KEY"],
                              "enabled": _flag("providers.pinecone_ai")},
         "exa_ai":           {"label": "Exa Neural Search",           "env": ["EXA_API_KEY"],

@@ -61,7 +61,7 @@ _SAMPLE_PROGRESS = {
     "target_source":   "workers_ai_custom",
     "total_chunks":    1000,
     "remaining":       250,
-    "remaining_by_source": {"legacy_voyage": 250},
+    "remaining_by_source": {"legacy": 250},
     "re_embedded":     750,
     "percent":         75.0,
     "running":         False,
@@ -350,7 +350,7 @@ def test_get_embed_stack_alert_snapshot_reflects_counter_mutation(
     _m._embed_stack_consecutive_failures["embed"] = 2
     _m._embed_stack_was_firing["rerank"] = True
     _m._embed_stack_consecutive_failures["rerank"] = 5
-    _m._embed_stack_last_error["memory_brain"] = "voyage 503"
+    _m._embed_stack_last_error["memory_brain"] = "workers_ai_custom 503"
     _m._embed_stack_last_latency_ms["embed"] = 137
 
     snap = _m.get_embed_stack_alert_snapshot()
@@ -359,7 +359,7 @@ def test_get_embed_stack_alert_snapshot_reflects_counter_mutation(
     assert snap["legs"]["embed"]["last_latency_ms"] == 137
     assert snap["legs"]["rerank"]["consecutive_failures"] == 5
     assert snap["legs"]["rerank"]["firing"] is True
-    assert snap["legs"]["memory_brain"]["last_error"] == "voyage 503"
+    assert snap["legs"]["memory_brain"]["last_error"] == "workers_ai_custom 503"
 
 
 def test_admin_embed_stack_health_surfaces_alert_state_per_leg(

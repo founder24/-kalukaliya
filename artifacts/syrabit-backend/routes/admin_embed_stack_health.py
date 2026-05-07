@@ -167,9 +167,7 @@ async def admin_embed_stack_health(
         # the new flags are active. Surfaced so on-call can see exactly
         # which modules are intentionally dormant.
         "dormant": [
-            {"provider": "cohere",       "reason": "embed path repointed to workers_ai_custom (Task #382)"},
             {"provider": "vertex_embed", "reason": "removed entirely (Task #490 — Vertex is content_format only)"},
-            {"provider": "voyage_ai",    "reason": "embed pool removed; memory_brain only (Task #382)"},
             {"provider": "workers_ai",   "reason": "@cf/baai/bge-m3 demoted to weight-0 fallback (Task #382)"},
         ],
     }

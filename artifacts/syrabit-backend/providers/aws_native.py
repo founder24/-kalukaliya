@@ -2,8 +2,8 @@
 
 Every entry below is wired as an *additional* path in an existing failover
 chain. Nothing here replaces a primary provider; the underlying chain still
-falls through to its existing GCP / Sarvam / Cohere / ElevenLabs primary if
-the AWS path is unconfigured or fails.
+falls through to its existing GCP / Sarvam / ElevenLabs primary if the AWS
+path is unconfigured or fails.
 
 Modules
 -------
@@ -15,7 +15,7 @@ Modules
 ``aws_translate``   Indic ↔ EN translate fallback when Sarvam returns 429/5xx.
 ``aws_personalize`` Recs surface (home + Continue Learning) with deterministic fallback.
 ``aws_fraud``       Risk score on signup + payment intent.
-``aws_bedrock_cohere`` Cohere embed + rerank via Bedrock (Cohere-only, see runbook §3.1).
+(Task #491 — Bedrock-Cohere embed/rerank module removed.)
 
 Calling pattern
 ---------------
@@ -55,7 +55,6 @@ except ImportError:  # pragma: no cover — dev shells without boto3
 
 
 FEATURE_KEYS: Tuple[str, ...] = (
-    "bedrock_cohere",
     "polly",
     "transcribe",
     "textract",
@@ -71,7 +70,6 @@ PRIMARY_REGION = os.environ.get("AWS_NATIVE_PRIMARY_REGION", "ap-south-1")
 SECONDARY_REGION = os.environ.get("AWS_NATIVE_SECONDARY_REGION", "us-east-1")
 
 _FEATURE_REGIONS: Dict[str, str] = {
-    "bedrock_cohere":  SECONDARY_REGION,   # Cohere models live in us-east-1
     "polly":           PRIMARY_REGION,
     "transcribe":      PRIMARY_REGION,
     "textract":        PRIMARY_REGION,
@@ -230,7 +228,6 @@ _COST_EXPLORER_SERVICE_MAP: Dict[str, str] = {
     "Amazon Translate":                      "translate",
     "Amazon Personalize":                    "personalize",
     "Amazon Fraud Detector":                 "fraud_detector",
-    "Amazon Bedrock":                        "bedrock_cohere",
 }
 
 
@@ -554,71 +551,6 @@ def get_fraud_score(
     return _timed("fraud_detector", _call)
 
 
-# 3.1 Bedrock — Cohere only
-
-# Explicit allow-list — the IAM policy in aws-native-features.tf is
-# scoped to exactly these two model ARNs. Any caller-supplied model id
-# outside this list is rejected before the network call so a typo can
-# never accidentally probe a Claude / Llama / Titan / Nova endpoint
-# (which would also fail at IAM, but the explicit guard surfaces the
-# intent of cloud-allocation-plan §6 + §9 at the call site).
-BEDROCK_COHERE_MODELS = frozenset({
-    "cohere.embed-multilingual-v3",
-    "cohere.rerank-v3-5:0",
-})
-
-
-def bedrock_embed(texts: List[str], *, model_id: str = "cohere.embed-multilingual-v3") -> List[List[float]]:
-    """Embed via Cohere on Bedrock. Cohere-only — see runbook §3.1."""
-    if model_id not in BEDROCK_COHERE_MODELS:
-        raise RuntimeError(
-            f"bedrock_embed: model {model_id!r} not allowed — Bedrock is Cohere-only "
-            "per cloud-allocation-plan §6 + §9"
-        )
-
-    import json as _json
-
-    def _call() -> List[List[float]]:
-        client = _client("bedrock-runtime", "bedrock_cohere")
-        body = _json.dumps({
-            "texts": texts,
-            "input_type": "search_document",
-            "embedding_types": ["float"],
-        })
-        resp = client.invoke_model(modelId=model_id, body=body)
-        payload = _json.loads(resp["body"].read())
-        emb = payload.get("embeddings", {})
-        if isinstance(emb, dict):
-            return emb.get("float") or emb.get("embeddings") or []
-        return emb or []
-    return _timed("bedrock_cohere", _call)
-
-
-def bedrock_rerank(query: str, documents: List[str], *, top_n: int = 5,
-                   model_id: str = "cohere.rerank-v3-5:0") -> List[Dict[str, Any]]:
-    """Rerank via Cohere on Bedrock. Cohere-only — see runbook §3.1."""
-    if model_id not in BEDROCK_COHERE_MODELS:
-        raise RuntimeError(
-            f"bedrock_rerank: model {model_id!r} not allowed — Bedrock is Cohere-only"
-        )
-
-    import json as _json
-
-    def _call() -> List[Dict[str, Any]]:
-        client = _client("bedrock-runtime", "bedrock_cohere")
-        body = _json.dumps({
-            "query": query,
-            "documents": [{"text": d} for d in documents],
-            "top_n": top_n,
-            "api_version": 2,
-        })
-        resp = client.invoke_model(modelId=model_id, body=body)
-        payload = _json.loads(resp["body"].read())
-        results = payload.get("results", []) or []
-        # Normalise to the shape the existing rerank pool consumes.
-        return [
-            {"index": r.get("index"), "score": r.get("relevance_score"),
-             "document": documents[r["index"]] if "index" in r and r["index"] < len(documents) else None}
-            for r in results
-        ]
-    return _timed("bedrock_cohere", _call)
+# Task #491 — 3.1 Bedrock-Cohere embed + rerank module removed.
+# Embedding stack collapsed to workers_ai_custom (Gemma-300M + Qwen3-0.6B
+# mean-pool, 1024-dim). Rerank is Pinecone-only.

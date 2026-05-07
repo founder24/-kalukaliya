@@ -86,7 +86,7 @@ def test_fleet_rollup_aggregates_into_redis(fake_redis):
     import memory_brain_metrics as _m
     _m.record_event("write", kind="qa", ok=True)
     _m.record_event("write", kind="qa", ok=True)
-    _m.record_event("write", kind="fact", ok=False, reason="voyage_error")
+    _m.record_event("write", kind="fact", ok=False, reason="embed_error")
     _m.record_event("read",  kind="query", ok=True)
     _m.record_event("read",  kind="query", ok=False, reason="timeout")
 
@@ -101,7 +101,7 @@ def test_fleet_rollup_aggregates_into_redis(fake_redis):
     assert s["by_kind"]["qa"]["ok"] == 2
     assert s["by_kind"]["fact"]["fail"] == 1
     reasons = {r["reason"]: r["count"] for r in s["top_failure_reasons"]}
-    assert reasons == {"voyage_error": 1, "timeout": 1}
+    assert reasons == {"embed_error": 1, "timeout": 1}
 
 
 def test_fleet_rollup_simulates_two_workers(fake_redis):
@@ -114,7 +114,7 @@ def test_fleet_rollup_simulates_two_workers(fake_redis):
     # "Other worker" writes — same fake Redis backs both.
     for _ in range(4):
         _m.record_event("write", kind="qa", ok=True)
-    _m.record_event("write", kind="qa", ok=False, reason="voyage_error")
+    _m.record_event("write", kind="qa", ok=False, reason="embed_error")
 
     s = _m.get_fleet_stats()
     assert s["by_op"]["write"]["ok"] == 7

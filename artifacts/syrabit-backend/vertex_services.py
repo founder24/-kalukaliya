@@ -317,33 +317,7 @@ async def _workers_ai_primary_embed(text: str) -> Optional[List[float]]:
         return None
 
 
-async def _cohere_primary_embed(text: str, task_type: str) -> Optional[List[float]]:
-    """Cohere embedding path — used only when COHERE_EMBED_PRIMARY=true.
-
-    Cohere ``embed-multilingual-v3.0`` also outputs 1024-dim, so it is
-    compatible with the Atlas Vector Search index dimensionally.
-    WARNING: switching to Cohere as primary requires re-indexing all content
-    because BGE and Cohere vectors live in different embedding spaces.
-
-    Maps task_type → Cohere input_type:
-      RETRIEVAL_DOCUMENT → search_document
-      RETRIEVAL_QUERY    → search_query
-      (anything else)    → search_document
-    """
-    from providers.cohere import embed as _cohere_embed, ENABLED as _COHERE_ENABLED
-    if not _COHERE_ENABLED:
-        return None
-    input_type = (
-        "search_query"
-        if task_type == "RETRIEVAL_QUERY"
-        else "search_document"
-    )
-    try:
-        results = await _cohere_embed([text.strip()[:8000]], input_type=input_type)
-        return results[0] if results else None
-    except Exception as exc:
-        logger.warning("[cohere] embed failed (non-fatal): %s", exc)
-        return None
+# Task #491 — `_cohere_primary_embed` removed; Cohere provider retired.
 
 
 async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Optional[List[float]]:
@@ -352,17 +326,14 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
     Uses the local LRU cache (cache.py) when available so hot queries
     never round-trip to any embedding provider.
 
-    Embedding priority (Task #490 — Option-D cache-only degraded mode):
-    1. If COHERE_EMBED_PRIMARY=true — Cohere embed-multilingual-v3.0
-       (NOTE: requires ALL content to have been indexed with Cohere vectors;
-        re-run the embedding pipeline after switching.)
-    2. Workers AI BGE-large-en-v1.5 (default primary, 1024-dim).
-    3. NO secondary embed provider. The legacy Vertex `text-embedding-004`
-       fallback (768-dim, second Pinecone namespace) was REMOVED in
-       Task #490. On Workers-AI outage `call_embed_with_dispatch` raises
-       `EmbedDegradedMode`; the SQS deferred-embed consumer replays the
-       request once the primary recovers. Cached vectors continue to
-       serve reads. See `infra/v4-locked-architecture.md` §15.
+    Embedding priority (Task #491 — single-source workers_ai_custom):
+    1. workers_ai_custom (Gemma-300M + Qwen3-0.6B mean-pool, 1024-dim) —
+       reached via `_workers_ai_primary_embed` below.
+    2. NO secondary embed provider. On Workers-AI outage
+       `call_embed_with_dispatch` raises `EmbedDegradedMode`; the SQS
+       deferred-embed consumer replays the request once the primary
+       recovers. Cached vectors continue to serve reads.
+       See `infra/v4-locked-architecture.md` §15.
     """
     if not text:
         return None
@@ -377,40 +348,10 @@ async def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Option
         _ek = None
         _embedding_cache = None  # type: ignore[assignment]
 
-    # Task #337 — Bedrock-Cohere is the **primary** Cohere route per
-    # cloud-allocation-plan §6 + §9. When the BEDROCK_COHERE_PRIMARY
-    # flag is on AND the admin has not disabled the bedrock_cohere
-    # feature, we hit Bedrock-Cohere FIRST. Same Cohere model
-    # (embed-multilingual-v3) so vectors stay in the 1024-dim space
-    # the main Vectorize index expects — no cross-space contamination.
-    # Cohere-only allow-list is enforced inside
-    # providers.aws_native.bedrock_embed itself.
-    vec = None
-    from config import (
-        BEDROCK_COHERE_PRIMARY as _BEDROCK_PRIMARY,
-        COHERE_EMBED_PRIMARY as _COHERE_PRIMARY,
-    )
-    if _BEDROCK_PRIMARY:
-        try:
-            from providers import aws_native as _awsn
-            if _awsn.is_enabled("bedrock_cohere") and _awsn.is_configured():
-                vecs = await asyncio.to_thread(_awsn.bedrock_embed, [text.strip()[:8000]])
-                if vecs:
-                    vec = vecs[0]
-                    logger.debug("[embed] Bedrock-Cohere PRIMARY hit (Task #337)")
-        except Exception as exc:
-            logger.warning("[embed] Bedrock-Cohere primary failed, falling back: %s", str(exc)[:150])
-
-    # Direct Cohere → Workers AI fallback chain when Bedrock-Cohere is
-    # disabled or returned no vector.
-    if vec is None:
-        if _COHERE_PRIMARY:
-            vec = await _cohere_primary_embed(text, task_type)
-            if vec is None:
-                logger.debug("[embed] Cohere direct failed — falling back to Workers AI")
-                vec = await _workers_ai_primary_embed(text)
-        else:
-            vec = await _workers_ai_primary_embed(text)
+    # Task #491 — Bedrock-Cohere + direct Cohere primary paths removed.
+    # workers_ai_custom is the single-source primary; the dispatcher
+    # raises EmbedDegradedMode on outage (handled by callers).
+    vec = await _workers_ai_primary_embed(text)
 
     # Task #490 — V4 §3 Vertex embed fallback REMOVED. The legacy
     # second-Pinecone-namespace path, the `RAG_EMBEDDING_PROVIDER`

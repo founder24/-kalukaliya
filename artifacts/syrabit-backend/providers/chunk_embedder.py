@@ -1,8 +1,9 @@
 """
 providers.chunk_embedder — Batch embedding pipeline for the chunks collection.
 
-Embeds all chunks that are missing an `embedding` field using Cohere
-`embed-multilingual-v3.0` via Cloudflare AI Gateway (BYOK).
+Embeds all chunks that are missing an `embedding` field using the
+custom Cloudflare Workers-AI worker (Gemma-300M + Qwen3-0.6B
+mean-pool, 1024-dim — see ``providers.workers_embed``).
 1024-dim, multilingual — handles Assamese, Bengali, Hindi, English content.
 
 After running, the Atlas `vector_index` on `chunks.embedding` becomes
@@ -36,22 +37,19 @@ from typing import Any, Optional
 
 logger = logging.getLogger("providers.chunk_embedder")
 
-_EMBED_MODEL = "embed-multilingual-v3.0"
 _EMBED_DIM   = 1024
-_BATCH_SIZE  = 48   # Cohere allows up to 96 inputs; keep below for safety
+_BATCH_SIZE  = 48
 
-# Task #382 — when the primary is the custom Workers-AI worker we tag
-# inserted chunks with that source name (so admin/diagnostics can tell
-# at-a-glance which embed provider produced a given vector batch) and
-# fall back to the historical "cohere" tag for the legacy path.
 _EMBED_MODEL_WORKERS = "workers_ai_custom@gemma+qwen3-meanpool-1024"
 
 
 def _embed_source_for_primary() -> tuple[str, str]:
-    """Return (model_string, source_tag) for the active primary."""
-    if _embed_provider_primary() == "workers_ai_custom":
-        return (_EMBED_MODEL_WORKERS, "workers_ai_custom")
-    return (_EMBED_MODEL, "cohere")
+    """Return (model_string, source_tag) for the active primary.
+
+    Task #491 retired Cohere/Voyage; the chunk path is single-source
+    workers_ai_custom. The function is kept for diagnostics callers.
+    """
+    return (_EMBED_MODEL_WORKERS, "workers_ai_custom")
 
 
 def _embed_provider_primary() -> str:
@@ -96,70 +94,16 @@ async def _workers_custom_embed_batch(texts: list[str]) -> list[Optional[list[fl
     return [None] * len(texts)
 
 
-async def _legacy_cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
-    """Legacy embed path — Cohere → Pinecone Inference fallback.
-
-    Kept for the rollback case (``EMBED_PROVIDER_PRIMARY != workers_ai_custom``)
-    so flipping the flag back restores the prior behaviour without a
-    code change. Never raises.
-    """
-    try:
-        from providers.cohere import embed as _cohere_embed, ENABLED as _cohere_on
-        if _cohere_on:
-            vecs = await asyncio.wait_for(
-                _cohere_embed(texts, input_type="search_document"),
-                timeout=25.0,
-            )
-            if vecs and len(vecs) == len(texts):
-                return vecs
-    except Exception as exc:
-        logger.warning("[chunk_embedder] Cohere embed batch failed: %s", exc)
-
-    try:
-        from providers.pinecone_ai import embed as pc_embed, ENABLED as _pc_on
-        if _pc_on:
-            logger.info("[chunk_embedder] Falling back to Pinecone for this batch")
-            vecs = await asyncio.wait_for(
-                pc_embed(texts, input_type="passage"),
-                timeout=20.0,
-            )
-            return vecs
-    except Exception as exc:
-        logger.warning("[chunk_embedder] Pinecone fallback also failed: %s", exc)
-
-    return [None] * len(texts)
-
-
 async def _embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
-    """Dispatch a chunk batch to the configured primary embed provider.
+    """Dispatch a chunk batch to the workers_ai_custom embed worker.
 
-    STRICT provider isolation (Task #382): when
-    ``EMBED_PROVIDER_PRIMARY=workers_ai_custom`` (the default), this
-    function is a single-source pipeline — it calls ONLY the custom
-    Workers-AI worker. A worker failure surfaces as None slots so
-    ``embed_chunks_bulk`` can mark those chunks as failed and retry
-    them on the next run; it does NOT silently fall back to Cohere /
-    Voyage / Pinecone Inference. The legacy multi-provider path is
-    only reachable when the operator flips
-    ``EMBED_PROVIDER_PRIMARY`` to a legacy provider name (cohere /
-    voyage_ai / vertex / azure_openai / workers_ai), which is the
-    explicit rollback contract. Voyage in particular is reserved for
-    the memory_brain collection (``providers.memory_brain``) and is
-    never reached from this chunk path under either flag value.
+    STRICT provider isolation (Task #382, hardened by Task #491): the
+    chunk path is single-source workers_ai_custom. A worker failure
+    surfaces as None slots so ``embed_chunks_bulk`` can mark those
+    chunks as failed and retry them on the next run; there is NO
+    silent fallback to retired providers (Cohere, Voyage, Bedrock).
     """
-    primary = _embed_provider_primary()
-    if primary == "workers_ai_custom":
-        return await _workers_custom_embed_batch(texts)
-    # Rollback path — Cohere → Pinecone Inference, original behaviour.
-    return await _legacy_cohere_embed_batch(texts)
-
-
-# Back-compat alias — keep the historical symbol importable for any
-# downstream caller (and in-tree tests) that still references the
-# Cohere-batch helper directly. The alias forwards to the dispatcher
-# so the new flag is honoured even via the old symbol name.
-async def _cohere_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
-    return await _embed_batch(texts)
+    return await _workers_custom_embed_batch(texts)
 
 
 async def embed_chunks_bulk(

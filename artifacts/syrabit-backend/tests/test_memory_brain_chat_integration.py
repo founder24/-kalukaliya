@@ -177,7 +177,7 @@ async def test_query_user_memories_swallows_provider_errors(monkeypatch):
     import providers.memory_brain as mb
 
     async def _raise(*args, **kwargs):
-        raise RuntimeError("voyage offline")
+        raise RuntimeError("embed offline")
 
     monkeypatch.setattr(mb, "query_memory", _raise, raising=True)
 
@@ -308,7 +308,7 @@ async def test_write_chat_turn_memory_swallows_provider_errors(monkeypatch):
     import providers.memory_brain as mb
 
     async def _raise(*a, **kw):
-        raise ValueError("voyage dim mismatch")
+        raise ValueError("embed dim mismatch")
 
     monkeypatch.setattr(mb, "write_memory", _raise, raising=True)
 

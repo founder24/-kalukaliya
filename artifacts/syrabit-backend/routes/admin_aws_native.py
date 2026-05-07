@@ -37,7 +37,6 @@ _BEDROCK_GUARDRAIL = (
 
 # Stable runbook anchors so the admin tile can deep-link.
 _RUNBOOK_ANCHORS: Dict[str, str] = {
-    "bedrock_cohere":  "31-bedrock-cohere-only",
     "polly":           "32-polly--third-tier-tts",
     "transcribe":      "33-transcribe--third-tier-stt",
     "textract":        "34-textract--structured-document-ocr",
