@@ -1,35 +1,27 @@
 #!/usr/bin/env python3
-"""
-DNS alignment check for the SendGrid sending domain (Task #364 §1
-gate 8 + §7 smoke row 4).
+"""DNS alignment check for the Amazon SES sending domain.
 
-Validates four things, all over plain DNS lookup (`dig +short`):
+Task #556 — SES is now the sole transactional email path. This script
+replaces the legacy SendGrid-targeted check; the historical SendGrid
+CNAMEs (`s1._domainkey`, `s2._domainkey`, link-branding `em####`) are
+no longer published, and SES auto-issues its own DKIM/SPF chain
+instead.
 
-  1. SPF on the parent domain (`syrabit.ai`) authorises SendGrid via
-     the standard `include:sendgrid.net` directive (or via
-     `include:em.syrabit.ai` if the operator chose the subdomain
-     delegation pattern).
-  2. The SendGrid sending subdomain (default `em.syrabit.ai`) has
-     **all three** CNAMEs SendGrid auto-issues when Domain
-     Authentication ("Authenticated Domain") is set up:
-       - `s1._domainkey.<domain>` and `s2._domainkey.<domain>` for
-         DKIM signing
-       - the link-branding CNAME at the operator-supplied prefix
-         (typically `em####.<domain>`; the exact `em####` varies per
-         account and is shown in SendGrid → Settings → Sender
-         Authentication). This is the third CNAME flagged by the
-         #364 review as missing from the earlier draft.
-     The script only checks that the CNAME targets exist and end in
-     `.sendgrid.net.`. The link-branding check is gated on the
-     operator passing `--link-branding-cname`; if omitted the
-     script emits a WARN (not FAIL) so existing operators on
-     Automated Security but without explicit link branding still
-     get a green DKIM/SPF/DMARC result.
-  3. DMARC on the parent domain has a `v=DMARC1` record with
-     `p=quarantine` or stricter (warns, does not fail, on `p=none`).
-  4. The DMARC record's `rua` mailbox is not the SendGrid default
-     placeholder (`postmaster@em.syrabit.ai` or unset → operator
-     would never see aggregate reports).
+Validates four things over plain DNS lookup (`dig +short`):
+
+  1. SPF on the parent domain (`syrabit.ai`) authorises Amazon SES via
+     the standard `include:amazonses.com` directive.
+  2. The SES MAIL FROM subdomain (default `mail.syrabit.ai`) has both
+     halves of the alignment chain published:
+       - the MAIL FROM MX (`feedback-smtp.<region>.amazonses.com`)
+       - the MAIL FROM SPF TXT (`v=spf1 include:amazonses.com -all`)
+  3. The three SES EasyDKIM CNAMEs published under the parent domain
+     (`<token>._domainkey.syrabit.ai` → `<token>.dkim.amazonses.com`).
+     The three tokens are rotated by SES; pass them via
+     `--dkim-token` (repeatable, must be supplied 3 times).
+  4. DMARC on the parent domain has a `v=DMARC1` record with
+     `p=quarantine` or stricter (warns, does not fail, on `p=none`),
+     and the `rua` mailbox is set to a real address (not blank).
 
 Exit codes:
   0  all four checks pass
@@ -37,190 +29,116 @@ Exit codes:
   2  harness failure (no `dig`, network down)
   3  usage error
 """
+from __future__ import annotations
 
 import argparse
 import shutil
 import subprocess
 import sys
 
+DEFAULT_DOMAIN = "syrabit.ai"
+DEFAULT_MAIL_FROM = "mail.syrabit.ai"
+DEFAULT_REGION = "us-east-1"
+
 
 def _dig(name: str, rtype: str) -> list[str]:
     if shutil.which("dig") is None:
         raise RuntimeError("`dig` CLI not on PATH")
     out = subprocess.run(
-        ["dig", "+short", "+time=5", "+tries=2", name, rtype],
-        capture_output=True, text=True, check=False)
+        ["dig", "+short", name, rtype],
+        capture_output=True, text=True, timeout=10,
+    )
     if out.returncode != 0:
-        raise RuntimeError(
-            f"dig {name} {rtype} failed: {out.stderr.strip()}")
-    return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+        raise RuntimeError(f"dig {name} {rtype} failed: {out.stderr.strip()}")
+    return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
 
 
-def _txt_strings(rows: list[str]) -> list[str]:
-    out = []
-    for row in rows:
-        if not row:
-            continue
-        if row.startswith('"') and row.endswith('"'):
-            out.append(row[1:-1].replace('" "', ''))
-        else:
-            out.append(row)
-    return out
+def check_spf(domain: str) -> tuple[bool, str]:
+    txts = _dig(domain, "TXT")
+    spf = next((t for t in txts if "v=spf1" in t.lower()), "")
+    if not spf:
+        return False, f"no SPF record on {domain}"
+    if "include:amazonses.com" not in spf.lower():
+        return False, f"SPF on {domain} does not include amazonses.com → {spf[:120]}"
+    return True, "SPF includes amazonses.com"
 
 
-def _check_spf(parent: str, sending_subdomain: str) -> tuple[bool, str]:
-    txt = _txt_strings(_dig(parent, "TXT"))
-    spf_rows = [t for t in txt if t.lower().startswith("v=spf1")]
-    if not spf_rows:
-        return (False, f"no SPF record on `{parent}`")
-    if len(spf_rows) > 1:
-        return (False,
-                f"multiple SPF records on `{parent}` "
-                f"(RFC 7208 forbids more than one)")
-    spf = spf_rows[0].lower()
-    if "include:sendgrid.net" in spf:
-        return (True, f"SPF includes sendgrid.net on `{parent}`")
-    if f"include:{sending_subdomain.lower()}" in spf:
-        return (True,
-                f"SPF includes `{sending_subdomain}` (subdomain "
-                f"delegation pattern) on `{parent}`")
-    return (False,
-            f"SPF on `{parent}` authorises neither sendgrid.net "
-            f"nor `{sending_subdomain}`")
+def check_mail_from(mail_from: str, region: str) -> tuple[bool, str]:
+    mxs = _dig(mail_from, "MX")
+    expected_mx = f"feedback-smtp.{region}.amazonses.com"
+    if not any(expected_mx in m.lower() for m in mxs):
+        return False, (
+            f"{mail_from} MX missing {expected_mx} (got {mxs or '∅'})"
+        )
+    txts = _dig(mail_from, "TXT")
+    if not any("v=spf1" in t.lower() and "amazonses.com" in t.lower()
+               for t in txts):
+        return False, f"{mail_from} SPF TXT missing amazonses.com"
+    return True, f"MAIL FROM {mail_from} aligned ({region})"
 
 
-def _check_dkim_cnames(sending_subdomain: str) -> tuple[bool, str]:
-    targets = []
-    for label in ("s1._domainkey", "s2._domainkey"):
-        rows = _dig(f"{label}.{sending_subdomain}", "CNAME")
-        if not rows:
-            return (False,
-                    f"no CNAME at `{label}.{sending_subdomain}` "
-                    f"(SendGrid DKIM signing key missing)")
-        targets.extend(rows)
-    bad = [t for t in targets if not t.lower().rstrip(".").endswith(
-        ".sendgrid.net")]
-    if bad:
-        return (False,
-                f"DKIM CNAMEs on `{sending_subdomain}` do not point at "
-                f".sendgrid.net targets: {bad}")
-    return (True,
-            f"DKIM CNAMEs on `{sending_subdomain}` "
-            f"({', '.join(targets)}) all chain into .sendgrid.net")
+def check_dkim(domain: str, tokens: list[str]) -> tuple[bool, str]:
+    if len(tokens) != 3:
+        return False, f"need exactly 3 DKIM tokens (got {len(tokens)})"
+    missing = []
+    for tok in tokens:
+        name = f"{tok}._domainkey.{domain}"
+        cnames = _dig(name, "CNAME")
+        target = f"{tok}.dkim.amazonses.com"
+        if not any(target in c.lower() for c in cnames):
+            missing.append(name)
+    if missing:
+        return False, f"missing/wrong DKIM CNAMEs: {missing}"
+    return True, "all 3 SES DKIM CNAMEs aligned"
 
 
-def _check_link_branding(fqdn: str) -> tuple[bool, str]:
-    """Validate the SendGrid link-branding CNAME (the third CNAME
-    SendGrid issues for Domain Authentication, alongside the two
-    DKIM CNAMEs). Operator supplies the exact FQDN because the
-    `em####` prefix is account-specific."""
-    rows = _dig(fqdn, "CNAME")
-    if not rows:
-        return (False,
-                f"no CNAME at `{fqdn}` (SendGrid link-branding "
-                f"record missing — link-tracking will fall back to "
-                f"sendgrid.net URLs in delivered email, which "
-                f"confuses recipients and reduces engagement)")
-    bad = [t for t in rows if not t.lower().rstrip(".").endswith(
-        ".sendgrid.net")]
-    if bad:
-        return (False,
-                f"link-branding CNAME on `{fqdn}` does not point "
-                f"at a .sendgrid.net target: {bad}")
-    return (True,
-            f"link-branding CNAME on `{fqdn}` "
-            f"({', '.join(rows)}) chains into .sendgrid.net")
-
-
-def _check_dmarc(parent: str) -> tuple[bool, str, list[str]]:
-    txt = _txt_strings(_dig(f"_dmarc.{parent}", "TXT"))
-    dmarc_rows = [t for t in txt if t.lower().startswith("v=dmarc1")]
-    if not dmarc_rows:
-        return (False, f"no DMARC record at `_dmarc.{parent}`", [])
-    dmarc = dmarc_rows[0]
-    parts = {seg.split("=", 1)[0].strip().lower():
-             seg.split("=", 1)[1].strip()
-             for seg in dmarc.split(";") if "=" in seg}
-    p = parts.get("p", "").lower()
-    rua = parts.get("rua", "")
-    warnings: list[str] = []
-    if p == "none":
-        warnings.append(
-            f"DMARC policy is `p=none` — recommend tightening to "
-            f"`p=quarantine` once SendGrid warmup §3 finalizes")
-    elif p not in ("quarantine", "reject"):
-        return (False,
-                f"DMARC `p=` is unrecognised value `{p}` "
-                f"(expected none/quarantine/reject)", warnings)
-    if not rua or "postmaster@em." in rua:
-        warnings.append(
-            f"DMARC `rua` mailbox is missing or set to the SendGrid "
-            f"default placeholder — operator will never see "
-            f"aggregate reports")
-    return (True, f"DMARC on `{parent}` has p={p or 'unset'}, "
-                  f"rua={rua or 'unset'}", warnings)
+def check_dmarc(domain: str) -> tuple[bool, str]:
+    txts = _dig(f"_dmarc.{domain}", "TXT")
+    rec = next((t for t in txts if "v=dmarc1" in t.lower()), "")
+    if not rec:
+        return False, f"_dmarc.{domain} TXT missing"
+    low = rec.lower()
+    if "p=quarantine" not in low and "p=reject" not in low:
+        return False, f"DMARC policy too weak (need quarantine|reject) → {rec[:120]}"
+    if "rua=mailto:" not in low or "rua=mailto:," in low:
+        return False, "DMARC rua mailbox unset — aggregate reports will go nowhere"
+    return True, "DMARC quarantine|reject + rua set"
 
 
 def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--domain", required=True,
-                   help="SendGrid sending subdomain "
-                        "(e.g. em.syrabit.ai)")
-    p.add_argument("--parent", default="",
-                   help="Parent domain for SPF + DMARC. Defaults to "
-                        "stripping the leftmost label of --domain.")
-    p.add_argument("--link-branding-cname", default="",
-                   help="Full FQDN of the SendGrid link-branding "
-                        "CNAME (e.g. em1234.em.syrabit.ai). The "
-                        "`em####` prefix is shown in SendGrid → "
-                        "Settings → Sender Authentication. If "
-                        "omitted, the link-branding check is "
-                        "skipped with a WARN.")
-    args = p.parse_args()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--domain", default=DEFAULT_DOMAIN)
+    ap.add_argument("--mail-from", default=DEFAULT_MAIL_FROM)
+    ap.add_argument("--region", default=DEFAULT_REGION,
+                    help="SES region for MAIL FROM MX (us-east-1 | ap-south-1)")
+    ap.add_argument("--dkim-token", action="append", default=[],
+                    help="SES EasyDKIM token (repeat 3x)")
+    args = ap.parse_args()
 
-    parent = args.parent.strip() or args.domain.split(".", 1)[1]
-    if "." not in parent:
-        print(f"ERROR: cannot derive parent domain from `{args.domain}`; "
-              f"pass --parent explicitly", file=sys.stderr)
+    if len(args.dkim_token) != 3:
+        print("usage error: pass --dkim-token THREE times "
+              "(values from `terraform output -json ses_dkim_cname_records`)",
+              file=sys.stderr)
         return 3
 
-    print(f"Checking SPF/DKIM/DMARC alignment for `{args.domain}` "
-          f"under parent `{parent}`")
-    print()
-
-    failed = False
     try:
-        ok, msg = _check_spf(parent, args.domain)
-        print(f"  [{'OK' if ok else 'FAIL'}] SPF: {msg}")
-        failed = failed or not ok
-
-        ok, msg = _check_dkim_cnames(args.domain)
-        print(f"  [{'OK' if ok else 'FAIL'}] DKIM: {msg}")
-        failed = failed or not ok
-
-        ok, msg, warnings = _check_dmarc(parent)
-        print(f"  [{'OK' if ok else 'FAIL'}] DMARC: {msg}")
-        for w in warnings:
-            print(f"  [WARN] DMARC: {w}")
-        failed = failed or not ok
-
-        if args.link_branding_cname:
-            ok, msg = _check_link_branding(args.link_branding_cname)
-            print(f"  [{'OK' if ok else 'FAIL'}] LinkBranding: {msg}")
-            failed = failed or not ok
-        else:
-            print(f"  [WARN] LinkBranding: skipped — pass "
-                  f"--link-branding-cname <fqdn> to validate the "
-                  f"third SendGrid CNAME")
-
-    except RuntimeError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        results = [
+            ("SPF",       check_spf(args.domain)),
+            ("MAIL FROM", check_mail_from(args.mail_from, args.region)),
+            ("DKIM",      check_dkim(args.domain, args.dkim_token)),
+            ("DMARC",     check_dmarc(args.domain)),
+        ]
+    except RuntimeError as exc:
+        print(f"HARNESS FAIL: {exc}", file=sys.stderr)
         return 2
 
-    print()
-    print("FAIL — fix the rows marked [FAIL] above" if failed
-          else "OK — SendGrid DNS alignment is good")
-    return 1 if failed else 0
+    failed = 0
+    for label, (ok, detail) in results:
+        marker = "PASS" if ok else "FAIL"
+        print(f"{marker:4} {label:9} {detail}")
+        if not ok:
+            failed += 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

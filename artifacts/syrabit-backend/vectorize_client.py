@@ -53,7 +53,7 @@ _auth_breaker_logged = False
 # Without an active alert, an expired/revoked CLOUDFLARE_API_TOKEN silently
 # degrades RAG quality — only a single WARNING line lands in Railway logs and
 # nobody notices until users complain. We piggyback on the existing
-# ``metrics._dispatch_alert`` pipeline (email via Resend, Slack/Discord
+# ``metrics._dispatch_alert`` pipeline (email via Amazon SES, Slack/Discord
 # webhook, persisted alert, browser push) so this lands wherever every other
 # ops alert already lands.
 #

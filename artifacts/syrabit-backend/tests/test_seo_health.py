@@ -364,7 +364,8 @@ def test_email_sent_with_csv_attachment_when_above_threshold(monkeypatch):
         EMAIL_FROM="Syrabit.ai <noreply@syrabit.ai>",
     )
 
-    monkeypatch.setenv("SENDGRID_API_KEY", "sg_test_123")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIATEST")  # Task #556 — SES sole path
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret_test")
 
     sent_calls = []
 
@@ -440,10 +441,12 @@ def test_deep_scan_route_invokes_email_helper_and_attaches_result():
     assert captured_calls[0]["admin_id"] == "admin-42"
 
 
-def test_email_skipped_without_sendgrid_key(monkeypatch):
-    """Missing SENDGRID_API_KEY must be a graceful no-op, not an
-    exception — the deep scan itself still succeeded and we don't want
-    email delivery problems to blow up the response."""
+def test_email_skipped_without_aws_creds(monkeypatch):
+    """Task #556 — SES is the sole transactional email path. Missing AWS
+    credentials must be a graceful no-op (the deep scan itself still
+    succeeded; we don't want email delivery problems to blow up the
+    response). Was previously gated on the legacy provider key before
+    SES became the sole transactional path."""
     async def _prefs(_admin_id):
         return {"email_failing_csv_enabled": True}
 
@@ -455,7 +458,8 @@ def test_email_skipped_without_sendgrid_key(monkeypatch):
         _notification_channels={"email": "oncall@syrabit.ai"},
         _load_alert_settings=_noop_load,
     )
-    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
 
     with patch.dict(sys.modules, {
         "db_ops": fake_db_ops, "metrics": fake_metrics,
@@ -466,7 +470,7 @@ def test_email_skipped_without_sendgrid_key(monkeypatch):
             admin_id="admin-1",
         ))
     assert result["sent"] is False
-    assert result["reason"] == "no_sendgrid_key"
+    assert result["reason"] == "no_aws_creds"
 
 
 # -------- Task #822: pin the self-check User-Agent contract --------

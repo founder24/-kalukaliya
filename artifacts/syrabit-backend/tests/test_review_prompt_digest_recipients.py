@@ -130,7 +130,6 @@ def test_resolve_returns_empty_list_when_nothing_configured(monkeypatch):
 
 def test_send_returns_recipients_field_when_no_admin_email(monkeypatch):
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
-    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
     saved = _with_channels({"email": "", "review_prompt_digest_emails": []})
     try:
         result = asyncio.run(
@@ -147,7 +146,6 @@ def test_send_returns_recipients_field_when_no_admin_email(monkeypatch):
 
 
 def test_send_uses_digest_list_and_passes_all_to_sendgrid(monkeypatch):
-    monkeypatch.setenv("SENDGRID_API_KEY", "test-key")
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
     saved = _with_channels({
         "email": "fallback@example.com",
@@ -184,7 +182,6 @@ def test_send_uses_digest_list_and_passes_all_to_sendgrid(monkeypatch):
 def test_send_override_to_targets_explicit_recipients(monkeypatch):
     """The admin "send me a test now" path posts the draft list as
     ``to`` so admins can validate a recipient before persisting it."""
-    monkeypatch.setenv("SENDGRID_API_KEY", "test-key")
     monkeypatch.delenv("ALERT_EMAIL", raising=False)
     saved = _with_channels({
         "email": "fallback@example.com",

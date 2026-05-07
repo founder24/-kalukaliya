@@ -254,7 +254,7 @@ def test_send_skipped_when_no_admin_email():
         {"by_category": {}, "bot_total": 0, "bot_5xx": 0, "source": "cloudflare"},
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.dict("os.environ", {"ALERT_EMAIL": "", "SENDGRID_API_KEY": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": ""}, clear=False):
         result = asyncio.run(bot_traffic_report._send_bot_traffic_report_email(fake_stats))
     assert result["sent"] is False
     assert result["reason"] == "no_admin_email"
@@ -280,7 +280,7 @@ def test_send_uses_sendgrid_when_email_and_key_present():
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
          patch.object(_et, "send_admin_email", _fake_send_admin_email), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "test-key"}, clear=False):
+         patch.dict("os.environ", {}, clear=False):
         result = asyncio.run(bot_traffic_report._send_bot_traffic_report_email(fake_stats))
     assert result["sent"] is True
     assert sent_calls

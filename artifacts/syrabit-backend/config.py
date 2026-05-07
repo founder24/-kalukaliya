@@ -145,9 +145,9 @@ GOOGLE_OAUTH_CLIENT_ID     = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '').strip(
 GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET', '').strip()
 
 # ── Email Configuration ───────────────────────────────────────────────────────
-# Task #347 — Resend removed; SendGrid is the in-process Tier-2 email
-# provider (Tier-1 = CF Email Worker, Tier-3 = Amazon SES via SQS).
-SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '').strip()
+# Task #556 — Amazon SES is the SOLE transactional email provider.
+# Auth is via AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (read directly
+# by `email_templates._send_via_ses`); no per-provider API key here.
 EMAIL_FROM     = os.environ.get('EMAIL_FROM', 'noreply@syrabit.ai').strip()
 FRONTEND_URL   = os.environ.get('FRONTEND_URL', 'https://syrabit.ai').strip().rstrip('/')
 

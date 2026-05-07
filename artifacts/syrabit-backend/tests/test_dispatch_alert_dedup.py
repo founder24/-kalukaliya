@@ -166,8 +166,7 @@ class TestConcurrentSameKeyDedups:
             r2 = await _metrics_mod._dispatch_alert("dup_key_test", "T", "B")
             return r1, r2
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -240,8 +239,7 @@ class TestConcurrentSameKeyDedups:
                 return_exceptions=False,
             )
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -269,8 +267,7 @@ class TestConcurrentSameKeyDedups:
             return None
 
         mock_db = _build_db_mock(claim_side_effect=_claim)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -306,8 +303,7 @@ class TestDistinctDedupKeysBothDeliver:
         # All claims succeed (no DuplicateKeyError).
         mock_db = _build_db_mock()
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -335,8 +331,7 @@ class TestDistinctDedupKeysBothDeliver:
         _silence_channels()
         mock_db = _build_db_mock()
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -378,8 +373,7 @@ class TestRollbackOnAllChannelFailure:
             insert_side_effect=RuntimeError("mongo write failed"),
         )
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -413,8 +407,7 @@ class TestRollbackOnAllChannelFailure:
 
         mock_db = _build_db_mock()  # all writes succeed
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -441,8 +434,7 @@ class TestForceBypassesCooldown:
         )
 
         mock_db = _build_db_mock()
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -471,8 +463,7 @@ class TestForceBypassesCooldown:
 
         mock_db = _build_db_mock(claim_side_effect=_claim_should_not_be_called)
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):
@@ -501,8 +492,7 @@ class TestForceBypassesCooldown:
 
         mock_db = _build_db_mock(claim_side_effect=_claim)
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "",
-                                     "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", mock_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins",
                    new_callable=AsyncMock):

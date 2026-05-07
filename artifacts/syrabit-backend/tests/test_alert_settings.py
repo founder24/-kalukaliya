@@ -179,7 +179,7 @@ class TestDispatchAlert:
         import email_templates as _et
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "env-admin@example.com", "SENDGRID_API_KEY": "sg_test_key"}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "env-admin@example.com"}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch.object(_et, "send_admin_email", _fake), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -194,7 +194,7 @@ class TestDispatchAlert:
         import email_templates as _et
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "env-fallback@example.com", "SENDGRID_API_KEY": "sg_test_key"}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "env-fallback@example.com"}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch.object(_et, "send_admin_email", _fake), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -212,7 +212,7 @@ class TestDispatchAlert:
         mock_client.post = AsyncMock(return_value=mock_response)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
-        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": "https://env-webhook.com", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": "https://env-webhook.com"}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("httpx.AsyncClient", return_value=mock_client), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -229,7 +229,7 @@ class TestDispatchAlert:
         mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
-        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": "https://env-fallback-webhook.com", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": "https://env-fallback-webhook.com"}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("httpx.AsyncClient", return_value=mock_client), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -251,7 +251,7 @@ class TestDispatchAlert:
             "metric": "seo_health_status", "value": "ok", "actual": "critical",
             "valid_sitemaps": 3, "total_sitemaps": 5, "url_check_success_rate": 62.5,
         }
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("httpx.AsyncClient", return_value=mock_client), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -285,7 +285,7 @@ class TestDispatchAlert:
         mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
-        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("httpx.AsyncClient", return_value=mock_client), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -337,7 +337,7 @@ class TestDispatchAlert:
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
         snapshot = {"metric": "error_rate_pct", "value": 5, "actual": 12.3}
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": "sg_test_key"}), \
+        with patch.dict(os.environ, {}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch.object(_et, "send_admin_email", _fake), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -356,7 +356,7 @@ class TestDispatchAlert:
         import email_templates as _et
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": "sg_test_key"}), \
+        with patch.dict(os.environ, {}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch.object(_et, "send_admin_email", _fake), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -373,7 +373,7 @@ class TestDispatchAlert:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         snapshot = {"metric": "latency_p95_ms", "value": 3000, "actual": 5500}
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("httpx.AsyncClient", return_value=mock_client), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -392,7 +392,7 @@ class TestDispatchAlert:
         mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("httpx.AsyncClient", return_value=mock_client), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -405,7 +405,7 @@ class TestDispatchAlert:
         _metrics_mod._notification_channels["webhook_url"] = ""
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             _run(_metrics_mod._dispatch_alert("persist_test", "Title", "Body"))
@@ -429,7 +429,7 @@ class TestDispatchAlertOutcomes:
         mock_alerts.insert_one = AsyncMock(return_value=None)
         mock_api_config = MagicMock()
         mock_api_config.update_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts, api_config=mock_api_config)), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             outcomes = _run(_metrics_mod._dispatch_alert("outcome_test", "T", "B", force=True))
@@ -483,7 +483,7 @@ class TestDispatchAlertOutcomes:
         mock_alerts.insert_one = AsyncMock(return_value=None)
         mock_api_config = MagicMock()
         mock_api_config.update_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts, api_config=mock_api_config)), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             blocked = _run(_metrics_mod._dispatch_alert("cd_test", "T", "B"))
@@ -499,7 +499,7 @@ class TestDispatchAlertOutcomes:
         mock_alerts.insert_one = AsyncMock(return_value=None)
         mock_api_config = MagicMock()
         mock_api_config.update_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts, api_config=mock_api_config)), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             _run(_metrics_mod._dispatch_alert("syn_test", "T", "B", force=True, mark_synthetic=True))
@@ -538,7 +538,7 @@ class TestTestDeliveryEndpoint:
         mock_api_config.update_one = AsyncMock(return_value=None)
         fake_db = MagicMock(alerts=mock_alerts, api_config=mock_api_config)
 
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", fake_db), \
              patch("routes.admin_settings.db", fake_db, create=True), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
@@ -992,7 +992,7 @@ class TestDispatchAlertWithMongomock:
     def test_persist_alert_document_shape(self, mongo_db):
         _metrics_mod._notification_channels["email"] = ""
         _metrics_mod._notification_channels["webhook_url"] = ""
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}):
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}):
             self._dispatch(mongo_db, "shape_test", "Alert Title", "Alert body text")
 
         doc = _run(mongo_db.alerts.find_one({"type": "shape_test"}))
@@ -1008,7 +1008,7 @@ class TestDispatchAlertWithMongomock:
         _metrics_mod._notification_channels["email"] = ""
         _metrics_mod._notification_channels["webhook_url"] = ""
         snapshot = {"metric": "error_rate_pct", "value": 5, "actual": 12.3}
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}):
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}):
             self._dispatch(mongo_db, "thresh_persist", "Rate spike", "High errors", threshold_snapshot=snapshot)
 
         doc = _run(mongo_db.alerts.find_one({"type": "thresh_persist"}))
@@ -1025,7 +1025,7 @@ class TestDispatchAlertWithMongomock:
             sent.append(kw); return True
         import email_templates as _et
         snapshot = {"metric": "latency_p95_ms", "value": 3000, "actual": 5500}
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": "sg_test_key"}):
+        with patch.dict(os.environ, {}):
             self._dispatch(
                 mongo_db, "email_persist", "Latency spike", "p95 is high",
                 threshold_snapshot=snapshot,
@@ -1049,7 +1049,7 @@ class TestDispatchAlertWithMongomock:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         snapshot = {"metric": "spoof_rpm", "value": 50, "actual": 120}
-        with patch.dict(os.environ, {"SENDGRID_API_KEY": ""}):
+        with patch.dict(os.environ, {}):
             self._dispatch(
                 mongo_db, "webhook_persist", "Spoof surge", "High spoof rate",
                 threshold_snapshot=snapshot,
@@ -1068,7 +1068,7 @@ class TestDispatchAlertWithMongomock:
     def test_cooldown_prevents_second_persist(self, mongo_db):
         _metrics_mod._notification_channels["email"] = ""
         _metrics_mod._notification_channels["webhook_url"] = ""
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}):
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}):
             self._dispatch(mongo_db, "cooldown_mongo", "First", "Body 1")
             self._dispatch(mongo_db, "cooldown_mongo", "Second", "Body 2")
 
@@ -1080,7 +1080,7 @@ class TestDispatchAlertWithMongomock:
     def test_multiple_alert_types_stored_independently(self, mongo_db):
         _metrics_mod._notification_channels["email"] = ""
         _metrics_mod._notification_channels["webhook_url"] = ""
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}):
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}):
             self._dispatch(mongo_db, "type_a", "Alert A", "Body A")
             self._dispatch(mongo_db, "type_b", "Alert B", "Body B")
 
@@ -1099,7 +1099,7 @@ class TestPushNotificationThresholdContext:
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
         snapshot = {"metric": "error_rate_pct", "value": 5, "actual": 12.3}
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock) as mock_push:
             _run(_metrics_mod._dispatch_alert("push_thresh", "Rate spike", "High errors", threshold_snapshot=snapshot))
@@ -1115,7 +1115,7 @@ class TestPushNotificationThresholdContext:
         _metrics_mod._notification_channels["webhook_url"] = ""
         mock_alerts = MagicMock()
         mock_alerts.insert_one = AsyncMock(return_value=None)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", MagicMock(alerts=mock_alerts)), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock) as mock_push:
             _run(_metrics_mod._dispatch_alert("push_plain", "Title", "Plain body"))
@@ -1183,7 +1183,7 @@ class TestPushChannelStatusFromDeliveryLog:
             }
         ]
         fake_db = self._make_db(log_docs)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", fake_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             _run(_metrics_mod._dispatch_alert("high_error_rate", "T", "B", force=True))
@@ -1219,7 +1219,7 @@ class TestPushChannelStatusFromDeliveryLog:
             },
         ]
         fake_db = self._make_db(log_docs)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", fake_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             _run(_metrics_mod._dispatch_alert("high_error_rate", "T", "B", force=True))
@@ -1260,7 +1260,7 @@ class TestPushChannelStatusFromDeliveryLog:
             },
         ]
         fake_db = self._make_db(log_docs)
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", fake_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             _run(_metrics_mod._dispatch_alert("high_error_rate", "T", "B", force=True))
@@ -1281,7 +1281,7 @@ class TestPushChannelStatusFromDeliveryLog:
             k: dict(v) for k, v in _metrics_mod._CHANNEL_STATUS_DEFAULT.items()
         }
         fake_db = self._make_db([])
-        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": "", "SENDGRID_API_KEY": ""}), \
+        with patch.dict(os.environ, {"ALERT_EMAIL": "", "ALERT_WEBHOOK_URL": ""}), \
              patch.object(_metrics_mod, "db", fake_db), \
              patch("routes.admin_notifications._dispatch_push_to_admins", new_callable=AsyncMock):
             _run(_metrics_mod._dispatch_alert("high_error_rate", "T", "B"))

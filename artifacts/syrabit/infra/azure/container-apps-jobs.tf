@@ -154,7 +154,9 @@ locals {
     { env_name = "DB_NAME",                   secret_name = "mongo-db-name",             kv_secret_name = "syrabit-mongo-db-name" },
     { env_name = "OPENAI_API_KEY",            secret_name = "openai-api-key",            kv_secret_name = "syrabit-openai-api-key" },
     { env_name = "GEMINI_API_KEY",            secret_name = "gemini-api-key",            kv_secret_name = "syrabit-gemini-api-key" },
-    { env_name = "RESEND_API_KEY",            secret_name = "resend-api-key",            kv_secret_name = "syrabit-resend-api-key" },
+    # Task #556 — RESEND_API_KEY retired; cron jobs read AWS_ACCESS_KEY_ID +
+    # AWS_SECRET_ACCESS_KEY + SES_REGION (declared elsewhere in this list)
+    # and email through Amazon SES via boto3.
     { env_name = "SLACK_WEBHOOK_URL",         secret_name = "slack-webhook-url",         kv_secret_name = "syrabit-slack-webhook-url" },
     { env_name = "CF_API_TOKEN",              secret_name = "cf-api-token",              kv_secret_name = "syrabit-cf-api-token" },
     { env_name = "CF_ACCOUNT_ID",             secret_name = "cf-account-id",             kv_secret_name = "syrabit-cf-account-id" },

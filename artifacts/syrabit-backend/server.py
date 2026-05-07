@@ -199,7 +199,8 @@ def _RAILWAY_AUDIT_BLOCK_REMOVED_PLACEHOLDER():
         "CF_ZONE_ID",             # CF zone for cache purge
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
-        "SENDGRID_API_KEY",       # Transactional email (Task #347 — replaces RESEND_API_KEY)
+        # Task #556 — SendGrid + Resend retired; SES is the sole transactional path.
+        # AWS creds (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) above carry it.
         "GOOGLE_OAUTH_CLIENT_ID",     # GA4 reporting OAuth (not user auth)
         "GOOGLE_OAUTH_CLIENT_SECRET", # GA4 reporting OAuth (not user auth)
         "R2_ACCESS_KEY_ID",       # Cloudflare R2 storage

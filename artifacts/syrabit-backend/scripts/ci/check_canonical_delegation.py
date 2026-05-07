@@ -183,6 +183,40 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit/docs/infra/gcp-landing-zone.md",
     "artifacts/syrabit/docs/features/aws-native.md",
     "artifacts/syrabit/docs/infra/credit-runway-cost-model.md",
+    # Task #556 — these test files explicitly assert the SES-only
+    # contract by referencing the dead SendGrid/Resend names ("no longer
+    # importable" assertions, dataclass-shape assertions, etc.). They
+    # MUST keep mentioning the literals to stay meaningful.
+    "artifacts/syrabit-backend/tests/email/test_ses_sole_path.py",
+    "artifacts/syrabit-backend/tests/email/test_ses_region_flip.py",
+    "artifacts/syrabit-backend/tests/email/test_bulk_email_path.py",
+    # Task #556 — pre-existing test fixtures whose stub class names /
+    # docstrings still reference the historical providers (SendGrid /
+    # Resend) for narrative continuity. The live email path under test
+    # is SES; the literal mentions are stub identifiers + comments.
+    "artifacts/syrabit-backend/tests/test_hydrate_alerting.py",
+    "artifacts/syrabit-backend/tests/test_payments_razorpay.py",
+    "artifacts/syrabit-backend/tests/test_review_prompt_alerting.py",
+    "artifacts/syrabit-backend/tests/test_review_prompt_weekly_digest.py",
+    "artifacts/syrabit-backend/tests/test_seo_auto_publish_staleness.py",
+    "artifacts/syrabit-backend/tests/test_seo_staleness_heartbeat.py",
+    "artifacts/syrabit-backend/tests/test_hydrate_slack_payload.py",
+    "artifacts/syrabit-backend/tests/test_seo_health_alerting.py",
+    "artifacts/syrabit-backend/tests/test_seo_health.py",
+    # Task #556 — admin-config UI labels still list "Resend / SendGrid"
+    # as historical provider chips; refactoring the admin Email config
+    # panel is out of scope for #556 and tracked as a follow-up.
+    "artifacts/syrabit/src/components/admin/AdminApiConfig.jsx",
+    "artifacts/syrabit/src/components/admin/AdminBotSecurity.jsx",
+    # Task #556 — the SQS-consumers subtree under
+    # `artifacts/syrabit/services/backend/sqs_consumers/` is the
+    # parallel AWS-native consumer skeleton (separate from the live
+    # `artifacts/syrabit-backend/` FastAPI service). Its email_fallback
+    # consumer's docstring narrates the historical Resend path; the
+    # live transport in that consumer is already boto3 SES.
+    "artifacts/syrabit/services/backend/sqs_consumers/email_fallback.py",
+    "artifacts/syrabit/services/backend/sqs_consumers/reembed.py",
+    "artifacts/syrabit/services/backend/sqs_consumers/tests/test_consumer_imports.py",
     "artifacts/syrabit-backend/tests/test_provider_priority_locked.py",
     "artifacts/syrabit-backend/tests/test_chat_rpm_soft_shed.py",
     "artifacts/syrabit-backend/tests/test_assamese_routing_chain_e2e.py",
@@ -234,7 +268,7 @@ def _scan_file(p: Path) -> list[str]:
         )
         is_removal_note = (
             "Task #347" in line or "Task #491" in line or "Task #554" in line
-            or "Task #559" in line
+            or "Task #556" in line or "Task #559" in line
             or "removed" in line.lower() or "deprecated" in line.lower()
             or "retired" in line.lower() or "decommission" in line.lower()
             or "REMOVED" in line or "retired" in line.lower()
@@ -423,11 +457,29 @@ def _check_voice_paywall() -> list[str]:
 
 
 # ─── TODO-gated bans (kept dormant until the parent task ships) ──────
-# Task #557 — SES sole tier-1 transactional email + self-hosted web-push.
-# When that task lands, replace the empty pattern with the regex below.
+# Task #556 — SES is the SOLE transactional email path. SendGrid + Resend
+# are fully retired (no fallback, no break-glass). This pattern is now
+# ENFORCED — it bans the SDK names, the env-var names, the helper
+# names from the deleted dual-path code, and the legacy provider-flag
+# env vars. Removal-note comments / docs that mention the historical
+# providers are skipped by `is_removal_note` so operator-facing prose
+# in the canonical map / runbook still reads naturally.
+TODO_556_PATTERN = (
+    # SDK / vendor names — matched case-insensitively (compiled with
+    # re.IGNORECASE below) so SendGrid / sendgrid / SENDGRID all trip.
+    # Word-boundary on the LEFT only so suffixed identifiers like
+    # `sendgrid_non_2xx` / `sendgrid_warmup` / `resend_client` also trip.
+    r"\bsendgrid|SENDGRID_API_KEY|"
+    r"\bresend(?:_api_key|_client|grid)?\b|RESEND_API_KEY|"
+    # Legacy provider-flag env knobs — opted back to CASE-SENSITIVE via
+    # `(?-i:...)` so unrelated identifiers like AWS Lambda resource
+    # names (`email_fallback`, `email_provider_metric`) don't trip.
+    r"(?-i:\bEMAIL_PROVIDER\b|\bEMAIL_PROVIDER_BREAK_GLASS\b|\bEMAIL_FALLBACK\b)|"
+    # Helper-function names from the deleted dual-path code.
+    r"_send_via_sendgrid|_send_via_resend"
+)
+# Task #557 — self-hosted web-push (still dormant; flips on with #557).
 TODO_557_PATTERN = (
-    r"sendgrid|SendGridAPIClient|SENDGRID_API_KEY|"
-    r"resend|RESEND_API_KEY|"
     r"firebase_admin|FCM_SERVER_KEY|FIREBASE_SERVICE_ACCOUNT"
 )
 # Task #558 — observability narrowing to a single GCP Cloud Trace exporter.
@@ -469,10 +521,16 @@ def _check_canonical_bank() -> list[str]:
     failures.extend(_check_chat_chains())
     failures.extend(_check_chat_primary_selector())
     failures.extend(_check_voice_paywall())
-    # TODO Task #557 — uncomment the block below once the SES-only +
-    # self-hosted web-push PRs merge:
+    # Task #556 — SES sole transactional email path has shipped; the
+    # umbrella now bans SendGrid + Resend SDK names, env-var names,
+    # helper names, and the legacy EMAIL_PROVIDER / EMAIL_FALLBACK
+    # provider-flag env vars.
+    failures.extend(_scan_pattern_global(re.compile(TODO_556_PATTERN, re.IGNORECASE),
+                                         tag="Task #556 (canonical email — SES sole path)",
+                                         scan_iac=True))
+    # TODO Task #557 — flip on once self-hosted web-push lands:
     # failures.extend(_scan_pattern_global(re.compile(TODO_557_PATTERN, re.IGNORECASE),
-    #                                      tag="Task #557 (canonical email/web-push)"))
+    #                                      tag="Task #557 (canonical web-push)"))
     # Task #558 — observability narrowing has shipped; the umbrella now
     # bans Sentry tracing literals and multi-exporter OTEL configs.
     failures.extend(_scan_pattern_global(re.compile(TODO_558_PATTERN),
@@ -480,9 +538,66 @@ def _check_canonical_bank() -> list[str]:
     return failures
 
 
-def _scan_pattern_global(pat: re.Pattern[str], *, tag: str) -> list[str]:
-    """Helper used by TODO-gated bans once they activate."""
+def _line_is_skippable_prose(line: str) -> bool:
+    """Mirror of the per-file `is_comment + is_removal_note` skip used in
+    `_scan_file`. Lets operator-facing prose in comments / docstrings
+    legitimately reference the historical providers ("SendGrid retired",
+    "was sendgrid_non_2xx", etc.) without tripping the Task #556 ban —
+    while still catching live identifiers (env var reads, function
+    calls, dependency declarations)."""
+    stripped = line.lstrip()
+    is_comment_or_doc = (
+        stripped.startswith("#") or stripped.startswith("//")
+        or stripped.startswith("*") or stripped.startswith("/*")
+        or stripped.startswith('"""') or stripped.startswith("'''")
+        or '"""' in line or "'''" in line
+        or stripped.startswith('"') or stripped.startswith("'")
+        # Bicep `@description('...')` decorators are operator-facing prose.
+        or stripped.startswith("@description(")
+    )
+    low = line.lower()
+    is_removal_note = (
+        "task #347" in low or "task #400" in low or "task #491" in low
+        or "task #554" in low or "task #556" in low or "task #559" in low
+        or "removed" in low or "deprecated" in low or "retired" in low
+        or "decommission" in low or "legacy" in low or "previous" in low
+        or "disabled" in low or "no longer" in low or "migrated from" in low
+        or "was sendgrid" in low or "was resend" in low
+    )
+    return is_comment_or_doc and is_removal_note
+
+
+def _scan_pattern_global(pat: re.Pattern[str], *, tag: str, scan_iac: bool = False) -> list[str]:
+    """Helper used by TODO-gated bans once they activate.
+
+    Scans backend/frontend Python + JS/TS sources, plus (Task #556) the
+    repo-level Bicep + GitHub Actions workflow YAML so retired env
+    knobs (`EMAIL_PROVIDER`, `SENDGRID_API_KEY`, etc.) cannot survive
+    in deploy contracts even when the Python code is clean. Comments
+    and docstrings tagged as removal notes (mentioning Task #556 or
+    "retired" / "removed" / "legacy") are skipped so operator-facing
+    prose can document the historical providers truthfully.
+    """
     out: list[str] = []
+    extra_files: list[Path] = []
+    if scan_iac:
+        # IaC scan is opt-in per-tag so a Task-#556 scope expansion
+        # doesn't surface stale-but-out-of-scope literals from other
+        # umbrella tasks (e.g. Task #558 OTLP exporter declarations
+        # in AWS Lambda Terraform that have their own retirement plan).
+        infra = ROOT / "infra" / "azure"
+        if infra.exists():
+            extra_files.extend(infra.rglob("*.bicep"))
+        workflows = ROOT / ".github" / "workflows"
+        if workflows.exists():
+            extra_files.extend(workflows.rglob("*.yml"))
+            extra_files.extend(workflows.rglob("*.yaml"))
+        apprunner = ROOT / "artifacts" / "syrabit-backend" / "apprunner.yaml"
+        if apprunner.exists():
+            extra_files.append(apprunner)
+        tf_root = ROOT / "artifacts" / "syrabit" / "infra"
+        if tf_root.exists():
+            extra_files.extend(tf_root.rglob("*.tf"))
     for base in (BACKEND, FRONTEND):
         if not base.exists():
             continue
@@ -495,8 +610,22 @@ def _scan_pattern_global(pat: re.Pattern[str], *, tag: str) -> list[str]:
                 except Exception:
                     continue
                 for ln, line in enumerate(text.splitlines(), 1):
+                    if _line_is_skippable_prose(line):
+                        continue
                     if pat.search(line):
                         out.append(f"{p.relative_to(ROOT)}:{ln}: {tag} → {line.strip()[:120]}")
+    for p in extra_files:
+        if _is_allowlisted(p):
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        for ln, line in enumerate(text.splitlines(), 1):
+            if _line_is_skippable_prose(line):
+                continue
+            if pat.search(line):
+                out.append(f"{p.relative_to(ROOT)}:{ln}: {tag} → {line.strip()[:120]}")
     return out
 
 

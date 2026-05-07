@@ -724,7 +724,7 @@ async def _evaluate_review_prompt_ctr_alerts(
     that *should* be dispatched right now (after cooldown checks). Does
     NOT mutate ``_REVIEW_PROMPT_ALERT_LAST_FIRED`` — the loop is
     responsible for marking cooldown only after a successful dispatch
-    (so a transient Resend/webhook failure doesn't suppress the next
+    (so a transient SES/webhook failure doesn't suppress the next
     alert for the cooldown window).
     Each entry is the kwargs dict for ``metrics._dispatch_alert``.
     """
@@ -1113,7 +1113,7 @@ async def _review_prompt_alert_loop():
 #   - per-reason breakdown
 #
 # Reuses the existing alert/email plumbing:
-#   - Resend SDK (same api key / from address as `email_templates`)
+#   - Amazon SES (same boto3 client / from address as `email_templates`)
 #   - admin email channel resolved through `metrics._notification_channels`
 #     (falls back to env `ALERT_EMAIL`)
 #
@@ -1332,7 +1332,7 @@ def _compose_review_prompt_weekly_digest(
 
 
 def _format_review_prompt_weekly_digest_html(stats: Dict[str, Any]) -> str:
-    """Render the digest payload as a Resend-compatible HTML email body."""
+    """Render the digest payload as an SES-compatible HTML email body."""
     import html as _html
     shown = int(stats.get("shown") or 0)
     clicked = int(stats.get("clicked") or 0)
@@ -1692,7 +1692,8 @@ def _resolve_review_prompt_digest_recipients(
 async def _send_review_prompt_weekly_digest_email(
     stats: Dict[str, Any], *, to: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Send the rendered digest via Resend. Returns
+    """Send the rendered digest via Amazon SES (Task #556 — sole transactional
+    email path; legacy providers retired by Task #556). Returns
     ``{sent, to, recipients, reason?, subject?}`` so the loop and the
     manual-trigger / test-send endpoints can surface the outcome.
 
@@ -1712,11 +1713,16 @@ async def _send_review_prompt_weekly_digest_email(
     except Exception:
         pass
     recipients = _resolve_review_prompt_digest_recipients(to)
-    # Task #400 — provider gating moved into email_templates.send_admin_email
-    # (EMAIL_PROVIDER=ses|sendgrid). Pre-checking SENDGRID_API_KEY here would
-    # falsely skip sends under SES-default deploys.
     if not recipients:
         return {"sent": False, "to": "", "recipients": [], "reason": "no_admin_email"}
+    # Task #556 — fail-loud preflight: SES requires AWS creds. Without
+    # them every send_admin_email call would log-and-drop, so surface
+    # the reason here so the digest log shows a single clear cause.
+    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
+            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
+        primary = recipients[0]
+        return {"sent": False, "to": primary, "recipients": recipients,
+                "reason": "no_aws_creds"}
     # Preserve legacy single-string ``to`` field for callers / tests that
     # only inspected the first recipient (the digest used to be 1:1).
     primary = recipients[0]
@@ -1745,7 +1751,7 @@ async def _send_review_prompt_weekly_digest_email(
         if not ok:
             return {
                 "sent": False, "to": primary, "recipients": recipients,
-                "reason": "send_error:sendgrid_non_2xx",
+                "reason": "send_error:ses_non_2xx",  # Task #556 — was sendgrid_non_2xx
             }
         logger.info(
             f"[review-prompt digest] sent → {', '.join(recipients)} "
@@ -1756,7 +1762,7 @@ async def _send_review_prompt_weekly_digest_email(
             "subject": subject,
         }
     except Exception as exc:
-        logger.warning(f"[review-prompt digest] SendGrid send failed: {exc}")
+        logger.warning(f"[review-prompt digest] SES send failed: {exc}")  # Task #556
         return {
             "sent": False, "to": primary, "recipients": recipients,
             "reason": f"send_error:{type(exc).__name__}",
@@ -1822,7 +1828,7 @@ async def _try_send_review_prompt_weekly_digest_once(
     result = await _send_review_prompt_weekly_digest_email(stats)
     if not result.get("sent"):
         # Roll the marker back so a subsequent poll inside the same
-        # window can retry (transient Resend outage, etc.).
+        # window can retry (transient SES outage, etc.).
         logger.info(
             f"[review-prompt digest] send failed for {cur_iso_week} "
             f"(reason={result.get('reason','unknown')}); rolling back claim"

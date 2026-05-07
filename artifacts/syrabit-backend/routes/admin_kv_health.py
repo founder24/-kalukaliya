@@ -11,7 +11,7 @@ Exposes two routes:
   binding crosses the warning threshold. Authenticated by a shared
   secret header (``X-KV-Alert-Secret``) so it cannot be abused. Records
   a notification for the admin inbox and (best-effort) emails admins
-  using the existing Resend pipeline so the team can react before the
+  using the existing SES pipeline so the team can react before the
   quota is fully exhausted.
 """
 from __future__ import annotations
@@ -169,7 +169,7 @@ async def kv_alert_ingest(
 ):
     """Worker calls this when a KV binding crosses the warning (or
     exhausted) threshold. Records an admin notification and best-effort
-    emails admins via the existing Resend helper.
+    emails admins via the existing SES helper.
 
     The secret check is constant-time-ish — we compare lengths first to
     short-circuit obvious mismatches without leaking timing on the real
@@ -244,7 +244,7 @@ def _consteq(a: str, b: str) -> bool:
 
 
 async def _email_admins_about_kv_alert(title: str, message: str) -> None:
-    """Email every admin (best-effort). Reuses the Resend wiring from
+    """Email every admin (best-effort). Reuses the SES wiring from
     ``email_templates`` so we don't add another sender; if that key isn't
     set the helper logs and skips so we don't fail noisily on local dev.
     """

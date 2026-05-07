@@ -6756,22 +6756,25 @@ async def _resolve_seo_summary_recipients(db, now_utc: datetime) -> list:
 
 
 async def _send_seo_daily_summary_email(stats: dict, recipients: list) -> dict:
-    """Send the rendered summary to each recipient via SendGrid.
-    Task #347 — migrated from Resend to SendGrid (send_admin_email).
+    """Send the rendered summary to each recipient via Amazon SES.
+    Task #556 — single-path SES via ``email_templates.send_admin_email``;
+    SendGrid + Resend retired.
     Fire-and-forget — never raises; returns a small report dict."""
     if not stats:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_stats"}
     if not recipients:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_recipients"}
-    # Task #400 — provider gating happens inside email_templates.send_admin_email
-    # (EMAIL_PROVIDER=ses|sendgrid). Pre-checking SENDGRID_API_KEY here would
-    # falsely skip sends under SES-default deploys.
     try:
         from email_templates import EMAIL_FROM, send_admin_email as _send_admin_email
     except Exception as exc:
-        logger.warning(f"[seo-daily-summary] sendgrid helper import failed: {exc}")
+        logger.warning(f"[seo-daily-summary] email helper import failed: {exc}")
         return {"sent": 0, "failed": len(recipients), "total": len(recipients),
                 "reason": f"send_error:{type(exc).__name__}"}
+    # Task #556 — fail-loud preflight: SES is the sole path; no AWS creds = no send.
+    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
+            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
+        return {"sent": 0, "failed": 0, "total": len(recipients),
+                "reason": "no_aws_creds"}
     html = _format_seo_daily_summary_html(stats)
     subject = (
         f"Syrabit SEO daily summary · "
@@ -6795,7 +6798,7 @@ async def _send_seo_daily_summary_email(stats: dict, recipients: list) -> dict:
                 errors.append({
                     "admin_id": r.get("admin_id", ""),
                     "email": r.get("email", ""),
-                    "error": "sendgrid_returned_false",
+                    "error": "ses_returned_false",  # Task #556 — was sendgrid_returned_false
                 })
         except Exception as exc:
             failed += 1
@@ -6869,7 +6872,7 @@ async def _maybe_dispatch_seo_daily_summary(job_id: str, log_doc: dict) -> dict:
         result = {"sent": 0, "failed": 0, "total": len(audience["recipients"]),
                   "reason": f"dispatch_error:{type(exc).__name__}"}
     # Persist regardless of success so operators can see "0 sent because
-    # no_sendgrid_key" or "0 sent because all admins in quiet hours".
+    # no_aws_creds" or "0 sent because all admins in quiet hours".  # Task #556
     enriched = {
         "at": now,
         "job_id": job_id,
@@ -6884,7 +6887,7 @@ async def _maybe_dispatch_seo_daily_summary(job_id: str, log_doc: dict) -> dict:
         "subject": result.get("subject"),
         "pages_generated": int((log_doc or {}).get("total_generated", 0) or 0),
         # Per-admin send failures so the admin notifications panel can show
-        # exactly which recipients hit a Resend error (Task #474 review).
+        # exactly which recipients hit a SES error (Task #474 review; #556 SES sole path).
         "errors": list(result.get("errors") or []),
     }
     await _record_seo_summary_dispatch(enriched)
@@ -7360,7 +7363,7 @@ async def _send_seo_staleness_alert(
     except Exception as exc:
         logger.debug(f"[seo-staleness] notification persist failed: {exc}")
 
-    # Best-effort email blast — fire-and-forget so a slow Resend can't
+    # Best-effort email blast — fire-and-forget so a slow SES can't
     # back up the staleness loop.
     asyncio.create_task(_email_admins_about_seo_staleness(db, title, msg))
 
@@ -7659,7 +7662,7 @@ async def _send_staleness_heartbeat_alert(
         logger.debug(
             f"[seo-staleness-heartbeat] notification persist failed: {exc}")
 
-    # Best-effort email — fire-and-forget so a slow Resend can't back up
+    # Best-effort email — fire-and-forget so a slow SES can't back up
     # the heartbeat loop.
     asyncio.create_task(_email_admins_about_seo_staleness(db, title, msg))
 

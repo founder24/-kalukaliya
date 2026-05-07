@@ -77,7 +77,7 @@ locals {
   lz_cron_secrets = {
     "supabase-service-role-key" = "Supabase service-role key (DB writes from cron jobs)."
     "upstash-redis-rest-token"  = "Upstash Redis REST token (rate-limit + 429 counter)."
-    "resend-api-key"            = "Resend API key (digest emails sent from cron jobs)."
+    # Task #556 — "resend-api-key" KV entry retired (SES sole transactional path).
     "sentry-dsn-cron"           = "Sentry DSN scoped to the cron-jobs project."
     "axiom-ingest-token"        = "Axiom ingest token (parallel log destination)."
     "slack-ops-webhook"         = "Slack incoming webhook for #infra-alerts."
@@ -100,7 +100,7 @@ locals {
     "syrabit-mongo-db-name"           = "Mongo database name (DB_NAME env var)."
     "syrabit-openai-api-key"          = "OpenAI API key for cron jobs that call OpenAI."
     "syrabit-gemini-api-key"          = "Google Gemini API key for grounded-recall + topic-discovery."
-    "syrabit-resend-api-key"          = "Resend API key for digest/alert emails."
+    # Task #556 — "syrabit-resend-api-key" KV entry retired (SES sole transactional path).
     "syrabit-slack-webhook-url"       = "Slack incoming webhook for ops alert paging."
     "syrabit-cf-api-token"            = "Cloudflare API token (zone scope) for the CF cron jobs."
     "syrabit-cf-account-id"           = "Cloudflare account ID."

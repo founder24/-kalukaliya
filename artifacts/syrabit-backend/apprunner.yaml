@@ -48,8 +48,9 @@ run:
       value: ""
     - name: REDIS_URL
       value: ""
-    - name: RESEND_API_KEY
-      value: ""
+    # Task #556 — RESEND_API_KEY retired; SES is the sole transactional path
+    # via AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + SES_REGION already
+    # declared above.
     - name: EMAIL_FROM
       value: "noreply@syrabit.ai"
     - name: SUPABASE_URL

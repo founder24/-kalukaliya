@@ -642,7 +642,7 @@ async def admin_hydrate_stats(
 # per HYDRATE_ALERT_COOLDOWN_S window (suppress dupes for ~60 min).
 #
 # Two independent alert types, both wired through metrics._dispatch_alert
-# (Resend email + persisted to db.alerts + Slack/webhook if configured):
+# (SES email + persisted to db.alerts + Slack/webhook if configured):
 #
 #   1. ``hydrate_failure_spike`` — more than HYDRATE_FAILURE_THRESHOLD
 #      `hydrate_preload_failed` events in the last hour. Indicates a CDN
@@ -780,7 +780,7 @@ async def _evaluate_hydrate_alerts(now_ts: Optional[float] = None) -> List[Dict[
     that *should* be dispatched right now (after cooldown checks). Does
     NOT mutate ``_HYDRATE_ALERT_LAST_FIRED`` — the loop is responsible for
     marking cooldown only after a successful dispatch (so a transient
-    Resend/webhook failure doesn't suppress the next alert for 60 min).
+    SES/webhook failure doesn't suppress the next alert for 60 min).
     Each entry is the kwargs dict for ``metrics._dispatch_alert``.
     """
     if now_ts is None:

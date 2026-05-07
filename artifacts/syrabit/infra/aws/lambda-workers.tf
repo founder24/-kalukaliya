@@ -206,10 +206,11 @@ resource "aws_lambda_event_source_mapping" "sqs_consumer" {
   enabled                            = true
 }
 
-# ─── Email-fallback wiring (reuses existing email-worker Lambda) ─────────────
-# The Phase 1b Lambda already handles SES sends; we just give it a
-# second trigger so producers can fan out via SQS instead of invoking
-# it synchronously over the function URL when Resend is degraded.
+# ─── Email retry wiring (reuses existing email-worker Lambda) ───────────────
+# The Phase 1b Lambda handles SES sends; this second trigger lets
+# producers fan out via SQS for retry on transient SES errors instead
+# of invoking it synchronously over the function URL. Task #556 — the
+# legacy provider was retired; SES is now the sole transactional path.
 
 resource "aws_lambda_event_source_mapping" "email_fallback" {
   event_source_arn                   = aws_sqs_queue.worker["email-fallback"].arn

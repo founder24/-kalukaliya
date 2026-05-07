@@ -2885,7 +2885,7 @@ def _compose_seo_weekly_digest(history: list, *, dashboard_url: str = _SEO_WEEKL
 
 
 def _format_seo_weekly_digest_html(stats: dict) -> str:
-    """Render the digest payload as a Resend-compatible HTML email body."""
+    """Render the digest payload as an HTML email body for SES delivery."""
     sc = stats.get("status_counts") or {}
     uptime = stats.get("uptime_pct", 0.0)
     uptime_color = "#16a34a" if uptime >= 95 else ("#d97706" if uptime >= 80 else "#c0392b")
@@ -2967,7 +2967,7 @@ async def _gather_weekly_digest_inputs(now: Optional[datetime] = None) -> dict:
 
 
 async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None) -> dict:
-    """Send the rendered digest via SendGrid (Task #347 — Resend removed).
+    """Send the rendered digest via Amazon SES (Task #556 — sole transactional path).
 
     Returns ``{sent, to, reason?}``.
     """
@@ -2983,9 +2983,12 @@ async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None
                        or os.environ.get("ALERT_EMAIL", "")).strip()
     except Exception:
         admin_email = (to or os.environ.get("ALERT_EMAIL", "")).strip()
-    # Task #400 — provider gating moved into email_templates.send_admin_email.
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
+    # Task #556 — SES is the sole transactional path; no AWS creds = no send.
+    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
+            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
+        return {"sent": False, "to": admin_email, "reason": "no_aws_creds"}
     try:
         from email_templates import EMAIL_FROM
     except Exception:
@@ -3005,12 +3008,13 @@ async def _send_seo_weekly_digest_email(stats: dict, *, to: Optional[str] = None
             sender=EMAIL_FROM,
         )
         if not ok:
+            # Task #556 — was sendgrid_non_2xx; SES is now the sole path.
             return {"sent": False, "to": admin_email,
-                    "reason": "send_error:sendgrid_non_2xx"}
+                    "reason": "send_error:ses_non_2xx"}
         logger.info(f"[SEO digest] sent weekly digest → {admin_email} ({stats.get('iso_week','')})")
         return {"sent": True, "to": admin_email, "subject": subject}
     except Exception as exc:
-        logger.warning(f"[SEO digest] SendGrid send failed: {exc}")
+        logger.warning(f"[SEO digest] SES send failed: {exc}")  # Task #556
         return {"sent": False, "to": admin_email, "reason": f"send_error:{type(exc).__name__}"}
 
 
@@ -3112,7 +3116,7 @@ async def _try_send_weekly_digest_once(db, now_utc: datetime) -> dict:
     result = await _send_seo_weekly_digest_email(stats)
     if not result.get("sent"):
         # Roll the marker back so a subsequent poll inside the same window
-        # can retry (transient Resend outage, etc.).
+        # can retry (transient SES outage, etc.).
         logger.info(
             f"[SEO digest] send failed for {cur_iso_week} "
             f"(reason={result.get('reason','unknown')}); rolling back claim"
@@ -3196,7 +3200,7 @@ async def _fan_out_remediation_signals(db, snapshot: Dict, kind: str) -> int:
 
 async def _seo_health_alert_loop():
     """Hourly: snapshot /seo/health. Fires two independent admin alerts via
-    metrics._dispatch_alert (Resend email + persisted to db.alerts):
+    metrics._dispatch_alert (SES email + persisted to db.alerts):
 
       1. ``seo_health_degraded`` — when the two most recent snapshots both
          have aggregate status of ``degraded`` or ``critical``.
@@ -3986,9 +3990,12 @@ async def _maybe_email_failing_csv(
     except Exception:
         admin_email = os.environ.get("ALERT_EMAIL", "").strip()
 
-    # Task #400 — provider gating moved into email_templates.send_admin_email.
     if not admin_email:
         return {"sent": False, "reason": "no_admin_email"}
+    # Task #556 — fail-loud preflight: SES is the sole path; no AWS creds = no send.
+    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
+            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
+        return {"sent": False, "to": admin_email, "reason": "no_aws_creds"}
 
     try:
         from email_templates import EMAIL_FROM
@@ -4041,7 +4048,7 @@ async def _maybe_email_failing_csv(
         if not ok:
             return {
                 "sent": False, "to": admin_email,
-                "reason": "send_error:sendgrid_non_2xx",
+                "reason": "send_error:ses_non_2xx",  # Task #556 — was sendgrid_non_2xx
             }
         logger.info(
             f"[SEO deep-scan email] sent failing CSV → {admin_email} "
@@ -4052,7 +4059,7 @@ async def _maybe_email_failing_csv(
             "filename": filename, "failing_count": failing_count,
         }
     except Exception as exc:
-        logger.warning(f"[SEO deep-scan email] SendGrid send failed: {exc}")
+        logger.warning(f"[SEO deep-scan email] SES send failed: {exc}")  # Task #556
         return {
             "sent": False, "to": admin_email,
             "reason": f"send_error:{type(exc).__name__}",

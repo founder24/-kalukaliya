@@ -97,7 +97,7 @@ def _patch_dispatch_environment(*, webhook_url="https://hooks.slack.test/abc"):
             {"email": "", "webhook_url": webhook_url,
              "seo_slack_enabled": True, "hydrate_slack_enabled": True},
         ),
-        patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False),
+        patch.dict("os.environ", {"ALERT_EMAIL": ""}, clear=False),
     ]
 
 
@@ -174,7 +174,7 @@ def test_hydrate_slack_enabled_false_mutes_webhook_only():
                       {"email": "", "webhook_url": "https://hooks.slack.test/x",
                        "seo_slack_enabled": True, "hydrate_slack_enabled": False}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": ""}, clear=False):
         asyncio.run(metrics._dispatch_alert(
             "hydrate_failure_spike", "title", "body",
             threshold_snapshot=_failure_spike_snap(),
@@ -203,7 +203,7 @@ def test_seo_mute_does_not_affect_hydrate_routing():
                       {"email": "", "webhook_url": "https://hooks.slack.test/x",
                        "seo_slack_enabled": False, "hydrate_slack_enabled": True}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": ""}, clear=False):
         asyncio.run(metrics._dispatch_alert(
             "hydrate_failure_spike", "title", "body",
             threshold_snapshot=_failure_spike_snap(),
@@ -250,7 +250,7 @@ def test_hydrate_mute_does_not_suppress_email_or_push():
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
          patch.dict(sys.modules, {"routes.admin_notifications": fake_admin_notif}), \
          patch.object(_et, "send_admin_email", _fake_send_admin_email), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "sg_fake", "ALERT_EMAIL": ""},
+         patch.dict("os.environ", {"ALERT_EMAIL": ""},
                     clear=False):
         asyncio.run(metrics._dispatch_alert(
             "hydrate_failure_spike", "title", "body",
@@ -289,7 +289,7 @@ def test_hydrate_mute_does_not_affect_seo_alert_routing():
                       {"email": "", "webhook_url": "https://hooks.slack.test/x",
                        "seo_slack_enabled": True, "hydrate_slack_enabled": False}), \
          patch.object(metrics, "httpx", MagicMock(AsyncClient=_FakeClient)), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "", "ALERT_EMAIL": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": ""}, clear=False):
         asyncio.run(metrics._dispatch_alert(
             "seo_health_degraded", "title", "body",
             threshold_snapshot={"actual": "degraded"},

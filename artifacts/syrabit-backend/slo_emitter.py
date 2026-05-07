@@ -56,7 +56,8 @@ SLO_TARGETS: dict[str, SloTarget] = {
     "mongo_profile_ms":   SloTarget("mongo_profile_ms",     12,   25),
     "moderation_ms":      SloTarget("moderation_ms",        80,  250),
     "validation_lag_ms":  SloTarget("validation_lag_ms",  2000, 5000),
-    "sendgrid_5xx_rate":  SloTarget("sendgrid_5xx_rate",     1,    5),  # percent
+    # Task #556 — SendGrid retired; SES is the sole transactional path.
+    "ses_5xx_rate":       SloTarget("ses_5xx_rate",            1,    5),  # percent
 }
 
 

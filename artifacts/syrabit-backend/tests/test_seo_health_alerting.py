@@ -635,8 +635,6 @@ def test_dispatch_alert_email_includes_by_sitemap_html():
 
     metrics._notification_channels = {"email": "admin@example.com", "webhook_url": ""}
     from config import Configurator
-    Configurator.set_runtime_env("SENDGRID_API_KEY", "test-key")
-
     by_sitemap_html = (
         "<table><tr><td>sitemap-learn.xml</td><td>2/10</td></tr></table>"
     )

@@ -753,7 +753,7 @@ async def run_and_alert_live(
         return out
 
     # Lazy import — keeps the module importable from CI without the
-    # full backend dependency graph (e.g. pymongo/resend/etc).
+    # full backend dependency graph (e.g. pymongo/boto3/etc).  # Task #556 — legacy email SDK retired.
     if dispatch is None:
         try:
             from metrics import _dispatch_alert as dispatch  # type: ignore

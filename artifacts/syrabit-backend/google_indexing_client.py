@@ -687,7 +687,7 @@ async def _claim_quota_alert_day(day: str) -> bool:
 
 async def _dispatch_quota_alert(day: str, sent: int, limit: int) -> None:
     """Send the quota-exhausted alert through the shared metrics alert
-    pipeline (Resend email + webhook + admin-dashboard banner). Never
+    pipeline (SES email + webhook + admin-dashboard banner). Never
     raises — the content generator must not be impacted by alert failures.
 
     Cross-worker dedupe: before dispatching, race on a Mongo claim doc

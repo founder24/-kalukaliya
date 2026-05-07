@@ -4,13 +4,13 @@ Every Monday morning (09:30 IST = 04:00 UTC) this module pulls a 7-day
 Cloudflare verified-bot breakdown for the syrabit.ai zone, computes
 week-over-week deltas per bot category (Search Engine Crawler, AI Crawler,
 Monitoring & Analytics, …), renders an HTML summary with the biggest movers
-highlighted at the top, and emails it to the admin inbox via Resend.
+highlighted at the top, and emails it to the admin inbox via Amazon SES.
 
 Design mirrors the existing ``_seo_weekly_digest_*`` pattern in
 ``routes/bot_discovery.py``:
 
   * Pure compose/format functions so everything is unit-testable without
-    hitting Mongo, Cloudflare, or Resend.
+    hitting Mongo, Cloudflare, or SES.
   * Per-ISO-week dedup via ``db.job_locks`` (atomic compare-and-set +
     bootstrap insert on a unique ``_id``) so multi-replica deployments
     never double-send.
@@ -278,7 +278,7 @@ def _format_per_ua_table_html(per_ua: Optional[Dict[str, Any]]) -> str:
 
 
 def _format_bot_traffic_report_html(stats: Dict[str, Any]) -> str:
-    """Render the digest as a Resend-compatible HTML body. Highlights
+    """Render the digest as an HTML body for SES delivery. Highlights
     (biggest week-over-week movers + total + bot 5xx) go at the top."""
     zone = stats.get("zone", "syrabit.ai")
     iso_week = stats.get("iso_week", "")
@@ -431,7 +431,7 @@ async def _gather_bot_traffic_report_inputs(
 async def _send_bot_traffic_report_email(
     stats: Dict[str, Any], *, to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Send the rendered report via Resend. Returns ``{sent, to, reason?}``."""
+    """Send the rendered report via Amazon SES (Task #556 — sole transactional path). Returns ``{sent, to, reason?}``."""
     if not stats or "_error" in stats:
         return {"sent": False, "to": "", "reason": stats.get("_error") or "no_stats"}
     try:
@@ -445,11 +445,12 @@ async def _send_bot_traffic_report_email(
     except Exception:
         admin_email = (to or os.environ.get("ALERT_EMAIL", "")).strip()
 
-    # Task #400 — provider gating moved into email_templates.send_admin_email
-    # (EMAIL_PROVIDER=ses|sendgrid). Pre-checking SENDGRID_API_KEY here would
-    # falsely skip sends under SES-default deploys.
     if not admin_email:
         return {"sent": False, "to": "", "reason": "no_admin_email"}
+    # Task #556 — SES is the sole transactional path; no AWS creds = no send.
+    if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
+            os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
+        return {"sent": False, "to": admin_email, "reason": "no_aws_creds"}
 
     try:
         from email_templates import EMAIL_FROM  # type: ignore
@@ -475,12 +476,13 @@ async def _send_bot_traffic_report_email(
             sender=EMAIL_FROM,
         )
         if not ok:
+            # Task #556 — was sendgrid_non_2xx; SES is now the sole path.
             return {"sent": False, "to": admin_email,
-                    "reason": "send_error:sendgrid_non_2xx"}
+                    "reason": "send_error:ses_non_2xx"}
         logger.info(f"[bot-report] sent weekly report → {admin_email} ({stats.get('iso_week','')})")
         return {"sent": True, "to": admin_email, "subject": subject}
     except Exception as exc:
-        logger.warning(f"[bot-report] SendGrid send failed: {exc}")
+        logger.warning(f"[bot-report] SES send failed: {exc}")  # Task #556
         return {"sent": False, "to": admin_email, "reason": f"send_error:{type(exc).__name__}"}
 
 

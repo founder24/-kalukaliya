@@ -214,14 +214,17 @@ def test_send_skipped_with_no_recipients():
     assert res["reason"] == "no_recipients"
 
 
-def test_send_skipped_without_sendgrid_key():
+def test_send_skipped_without_aws_creds():
+    """Task #556 — SES is the sole transactional path; no AWS creds = no send."""
     fake_stats = seo_engine._compose_seo_daily_summary({"job_id": "j", "total_generated": 1})
-    with patch.dict("os.environ", {"SENDGRID_API_KEY": ""}, clear=False):
+    with patch.dict("os.environ",
+                    {"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""},
+                    clear=False):
         res = asyncio.run(seo_engine._send_seo_daily_summary_email(
             fake_stats, [{"admin_id": "a", "email": "a@b.com"}]
         ))
     assert res["sent"] == 0
-    assert res["reason"] == "no_sendgrid_key"
+    assert res["reason"] == "no_aws_creds"
 
 
 def test_send_dispatches_per_recipient_via_sendgrid():
@@ -241,7 +244,7 @@ def test_send_dispatches_per_recipient_via_sendgrid():
         {"admin_id": "a2", "email": "two@x.com"},
     ]
     with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "test-key"}, clear=False):
+         patch.dict("os.environ", {}, clear=False):
         res = asyncio.run(seo_engine._send_seo_daily_summary_email(fake_stats, recipients))
     assert res["sent"] == 2
     assert res["failed"] == 0
@@ -268,7 +271,7 @@ def test_send_continues_when_one_recipient_fails():
         {"admin_id": "a3", "email": "ok2@x.com"},
     ]
     with patch.object(_et, "send_admin_email", _fake_send_admin_email), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "k"}, clear=False):
+         patch.dict("os.environ", {}, clear=False):
         res = asyncio.run(seo_engine._send_seo_daily_summary_email(fake_stats, recipients))
     assert res["sent"] == 2
     assert res["failed"] == 1

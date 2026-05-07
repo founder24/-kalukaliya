@@ -1788,7 +1788,7 @@ def _record_outcome(channel: str, outcome: dict, alert_type: str, now_iso: str):
 
 async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snapshot: dict = None,
                           force: bool = False, mark_synthetic: bool = False):
-    """Send alert via email (Resend), webhook, persisted alert, and browser push.
+    """Send alert via email (Amazon SES; Task #556), webhook, persisted alert, and browser push.
 
     Respects cooldown unless ``force=True`` (test deliveries from the admin
     dashboard bypass cooldown so admins can re-test on demand).
@@ -1926,7 +1926,7 @@ async def _dispatch_alert(alert_type: str, title: str, body: str, threshold_snap
                 "</p>"
             )
 
-    # 1) Email alert via SendGrid (to admin) — Task #347 migrated from Resend.
+    # 1) Email alert via Amazon SES (Task #556 — sole transactional path).
     try:
         # Task #476: Slack-only canary alerts skip the email channel
         # entirely so a non-paging staging drift never lands in the

@@ -126,14 +126,16 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             memory: '0.5Gi'
           }
           env: [
-            // Task #400 — Tier-2 email is Amazon SES (boto3). The
-            // `EMAIL_PROVIDER` flag drives `email_templates._send_sync`
-            // / `send_admin_email`; flip to `sendgrid` to roll back
-            // without redeploying code (the legacy path is preserved).
+            // Task #556 — Amazon SES is the SOLE transactional email
+            // path. There is no fallback (V4 §12 "no silent fallbacks").
+            // `SES_REGION=us-east-1` is the primary; flip to
+            // `ap-south-1` (warm secondary, identity verified +
+            // DKIM/SPF/DMARC aligned) and restart the revision to
+            // fail over. SendGrid + Resend are fully retired — the
+            // `EMAIL_PROVIDER` / `EMAIL_FALLBACK` flags no longer exist.
             { name: 'AWS_ACCESS_KEY_ID',     secretRef: 'aws-access-key-id' }
             { name: 'AWS_SECRET_ACCESS_KEY', secretRef: 'aws-secret-access-key' }
-            { name: 'AWS_SES_REGION',        value: 'us-east-1' }
-            { name: 'EMAIL_PROVIDER',        value: 'ses' }
+            { name: 'SES_REGION',            value: 'us-east-1' }
             // Task #554 — Azure OpenAI chat env removed. Vertex Gemini
             // 2.5 Flash auths via GOOGLE_APPLICATION_CREDENTIALS_JSON
             // (mounted from Key Vault elsewhere in the GCP cred chain).

@@ -19,7 +19,8 @@ locals {
   lz_worker_secrets = {
     "supabase/service-role-key" = "Supabase service-role key (DB writes from workers)."
     "upstash/redis-rest-token"  = "Upstash Redis REST token (rate-limit + 429 counter)."
-    "resend/api-key"            = "Resend API key (primary email path; SES is fallback)."
+    # Task #556 — "resend/api-key" Secrets Manager entry retired; SES is the
+    # sole transactional email path (no fallback, V4 §12 — no silent fallbacks).
     "stripe/webhook-secret"     = "Stripe webhook signing secret (payment workers)."
     "razorpay/webhook-secret"   = "Razorpay webhook signing secret (payment workers, IN)."
     "sentry/dsn-workers"        = "Sentry DSN scoped to the workers project."

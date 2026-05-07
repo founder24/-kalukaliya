@@ -419,7 +419,7 @@ async def _send_jsonld_streak_alert(
 # (Task #728) so the inbox looks consistent across all Trustpilot alert
 # channels. We deliberately reuse:
 #
-# * ``email_templates._send`` for the SMTP/Resend send (same path the
+# * ``email_templates._send`` for the SES send (same path the
 #   existing aggregate-feed alerter uses);
 # * ``db_ops.supa_insert_notification`` for the in-app notification —
 #   which is also what powers the existing Slack/webhook fan-out for

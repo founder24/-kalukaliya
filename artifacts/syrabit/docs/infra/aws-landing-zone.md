@@ -1,5 +1,16 @@
 # AWS Landing Zone Runbook — Async Workers, Queues & SES
 
+> **Task #556 update (2026-05-07).** Amazon SES is now the **sole**
+> transactional email provider. SendGrid + Resend are fully retired —
+> the dual-path code, the `EMAIL_PROVIDER` / `EMAIL_FALLBACK` env
+> knobs, and the `resend/api-key` Secrets Manager entry no longer
+> exist. SES is verified in **`us-east-1` (primary)** and
+> **`ap-south-1` (warm secondary)** with DKIM + SPF + DMARC alignment
+> on both regions; failover is a manual `SES_REGION=ap-south-1` env
+> flip + ACA revision restart (V4 §12 — no silent fallbacks). Bulk
+> / digest / marketing email moved to a separate Cloudflare Email
+> Worker path (`workers/bulk-email/`) — never an SES fallback.
+
 > ⚠️ **V4 cross-reference (2026-05-06).** The locked source of truth for the
 > overall Syrabit architecture is [`infra/v4-locked-architecture.md`](../../../../infra/v4-locked-architecture.md).
 > If anything below disagrees with V4, V4 wins. This doc is preserved as the
@@ -23,7 +34,8 @@ This AWS account is **only** the foundation for the Phase 4 worker tier:
 - Async workers (Lambda + occasional Fargate) that consume SQS queues
   ported from GCP Cloud Tasks.
 - Durable fan-out queues (SQS + DLQ).
-- Transactional email *fallback* tier (SES; Resend is still primary).
+- Transactional email — SES is the **sole** provider (Task #556; the
+  legacy "Resend primary, SES fallback" tri-tier is retired).
 - Bedrock inference proxy (already deployed; lives in `us-east-1`).
 
 It is **not** the home of:
@@ -145,7 +157,8 @@ on `secret_string` means rotations don't drift state.
 |--------------------------------------|------------------------------|--------------------------|
 | `supabase/service-role-key`          | `SUPABASE_SERVICE_ROLE_KEY`  | 1Password `Supabase`     |
 | `upstash/redis-rest-token`           | `UPSTASH_REDIS_REST_TOKEN`   | 1Password `Upstash`      |
-| `resend/api-key`                     | `RESEND_API_KEY`             | 1Password `Resend`       |
+<!-- Task #556 — `resend/api-key` removed; SES is the sole transactional path. -->
+| `ses/smtp-username` *(optional)*     | `SES_SMTP_USERNAME`          | 1Password `AWS SES`      |
 | `stripe/webhook-secret`              | `STRIPE_WEBHOOK_SECRET`      | 1Password `Stripe`       |
 | `razorpay/webhook-secret`            | `RAZORPAY_WEBHOOK_SECRET`    | 1Password `Razorpay`     |
 | `sentry/dsn-workers`                 | `SENTRY_DSN`                 | 1Password `Sentry`       |
@@ -161,8 +174,8 @@ ARNs are emitted by the `worker_secret_arns` Terraform output.
 ```bash
 aws secretsmanager put-secret-value \
   --region ap-south-1 \
-  --secret-id syrabit/prod/resend/api-key \
-  --secret-string "$(op read 'op://syrabit/Resend/api-key')"
+  --secret-id syrabit/prod/ses/smtp-username \
+  --secret-string "$(op read 'op://syrabit/AWS SES/smtp-username')"
 ```
 
 ### Rotation
@@ -221,17 +234,60 @@ aws sns publish \
   --message "landing-zone smoke from $(whoami)@$(hostname)"
 ```
 
-## 8. SES (`ses.tf`)
+## 8. SES (`ses.tf`) — **sole transactional provider**
 
+Task #556. SES is the only transactional email surface; SendGrid +
+Resend are retired. Two regions are identity-verified for warm
+failover (V4 §12 — no silent fallbacks; failover is a manual env
+flip, not a runtime fallback).
+
+| Region        | Role                  | Identity verified | DKIM | SPF align | DMARC | CloudWatch alarms |
+|---------------|-----------------------|-------------------|------|-----------|-------|-------------------|
+| `us-east-1`   | **Primary** (default) | ✅                | ✅   | ✅        | ✅    | ✅                |
+| `ap-south-1`  | Warm secondary        | ✅                | ✅   | ✅        | ✅    | ✅                |
+
+**Failover (manual, by design):**
+1. Set `SES_REGION=ap-south-1` on the ACA secret-store / Bicep env.
+2. Restart the ACA revision (`az containerapp revision restart …`).
+3. Backend `_ses_region()` picks up the new region on next cold
+   start; the legacy `AWS_SES_REGION` synonym is also honored to
+   keep an in-flight rollout working mid-deploy.
+4. Watch the `ses_5xx_rate` SLO emitter (`slo_emitter.py`) +
+   `Syrabit/Workers ses-bounce-rate` / `ses-complaint-rate`
+   CloudWatch alarms in the new region.
+
+**Per-region SES config (identical in both):**
 - Domain identity for **`syrabit.ai`** with EasyDKIM (RSA 2048).
 - Custom MAIL FROM domain `mail.syrabit.ai` (improves SPF alignment).
-- Configuration set `syrabit-workers`: TLS required, reputation metrics
-  on, sending enabled, click tracking via `click.syrabit.ai`.
-- Bounce / complaint / delivery / reject events publish to SNS topic
-  `syrabit-ses-domain-events`.
+- Configuration set `syrabit-workers`: TLS required, reputation
+  metrics on, sending enabled, click tracking via
+  `click.syrabit.ai`.
+- Bounce / complaint / delivery / reject events publish to the
+  per-region SNS topic `syrabit-ses-domain-events-<region>`.
 - The mailbox identity `no-reply@syrabit.ai` continues to exist via
   `lambda-email-worker.tf`; the domain identity adds every other
   `*@syrabit.ai` From-address without per-mailbox verification.
+
+**CloudWatch alarms (per region):**
+- `ses-bounce-rate-high` — bounce rate ≥ 5 % for 1 h (SES
+  reputation-suspension threshold is 10 %).
+- `ses-complaint-rate-high` — complaint rate ≥ 0.1 % for 1 h.
+- `ses-send-failed-5xx` — `Syrabit/Workers / ses_5xx_rate` ≥ 1 %
+  for 5 min, paged via `syrabit-ops-alerts`.
+
+**DNS alignment check:** run
+`scripts/infra/check_email_dns_alignment.py --region us-east-1
+--dkim-token <t1> --dkim-token <t2> --dkim-token <t3>` (and again
+for `ap-south-1`) before flipping the failover knob — the script
+verifies SPF / MAIL FROM MX+TXT / DKIM / DMARC for the target
+region and exits non-zero on any drift.
+
+**Bulk / digest / marketing email** does **not** use SES — it goes
+through the separate Cloudflare Email Worker path declared in
+`workers/bulk-email/wrangler.toml` and called by the backend
+`bulk_email.send_bulk()` helper. The two paths share nothing
+beyond the `BulkEmailMessage` dataclass shape so neither can become
+the other's silent fallback.
 
 ### Cloudflare DNS records to add
 
@@ -255,7 +311,7 @@ aws sesv2 put-account-details \
   --region ap-south-1 \
   --mail-type TRANSACTIONAL \
   --website-url https://syrabit.ai \
-  --use-case-description "Transactional fallback for Resend: OTP codes, password resets, payment receipts, weekly study digests. Bounce/complaint handling via SNS topic syrabit-ses-domain-events. Hard-bounce suppression on by default. Volume estimate: 5k/day steady-state, 50k/day peak." \
+  --use-case-description "Sole transactional email provider for Syrabit.ai (Task #556 — Resend + SendGrid retired): OTP codes, password resets, payment receipts. Bounce/complaint handling via SNS topic syrabit-ses-domain-events-<region>. Hard-bounce suppression on by default. Verified in both us-east-1 (primary) and ap-south-1 (warm secondary). Volume estimate: 5k/day steady-state, 50k/day peak." \
   --additional-contact-email-addresses ops@syrabit.ai \
   --production-access-enabled
 ```

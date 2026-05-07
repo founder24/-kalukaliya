@@ -1,36 +1,40 @@
 """
 Transactional email helpers for Syrabit.ai.
 
-Provider priority (Task #400 — Tier-2 default flipped to SES on Azure cutover):
-  1. Cloudflare Email Worker (EMAIL_WORKER_URL) — zero-cost path when the
-     CF email worker is deployed. Skipped automatically when unset.
-  2. Tier-2 (in-process) — selected by ``EMAIL_PROVIDER``:
-       ``ses`` (default)  → Amazon SES via boto3 ``send_email``. Requires
-                            ``AWS_ACCESS_KEY_ID`` + ``AWS_SECRET_ACCESS_KEY``
-                            (region from ``AWS_SES_REGION`` or ``AWS_REGION``).
-                            IAM principal needs ``ses:SendEmail`` on the
-                            ``EMAIL_FROM`` identity.
-       ``sendgrid``        → legacy SendGrid v3 HTTP API (SENDGRID_API_KEY).
-                            Kept for emergency rollback / SES sandbox-mode
-                            workarounds. Set ``EMAIL_PROVIDER=sendgrid`` to
-                            re-enable without a code change.
-  3. Amazon SES via the ``email-fallback`` SQS queue — final-tier retry
-     handled by the email-worker Lambda (DLQ + alarms). Reached only when
-     Tier-2 returns a retryable failure (5xx / transport / no creds).
+Single-path provider — Amazon SES (Task #556).
 
-All functions are fire-and-forget — they log warnings on failure and never raise.
+  * AWS SES is the **sole** transactional email path. There is no
+    fallback. Failures fail loud per V4 §12 ("no silent fallbacks") by
+    raising :class:`EmailSendFailed` — caller chooses whether to log,
+    retry at the request layer, or surface to the user.
+
+  * Resilience comes from SES multi-region (``us-east-1`` primary,
+    ``ap-south-1`` warm secondary). Failover is a manual env-var flip
+    (``SES_REGION=ap-south-1``) plus an ACA revision restart — see
+    ``artifacts/syrabit/docs/infra/aws-landing-zone.md`` §8.
+
+  * Bulk / digest / marketing sends use Cloudflare Email Workers as a
+    completely **separate** code path — never an SES fallback. See
+    :mod:`bulk_email` for that surface.
+
+  * The prior tri-tier email fan-out and the legacy provider SDKs are
+    fully retired by Task #556. The legacy provider-flag env knobs no
+    longer exist.
+
+The historical async :func:`_send` wrapper is preserved so existing
+``await _send(...)`` call-sites in this module's helper functions
+(e.g. :func:`send_password_reset`) keep working — it now just runs the
+synchronous SES call in a thread and re-raises on failure.
 """
+from __future__ import annotations
+
 import os
 import logging
 import asyncio
-import json
 
 logger = logging.getLogger(__name__)
 
-SENDGRID_API_KEY   = os.environ.get("SENDGRID_API_KEY", "").strip()
-EMAIL_FROM         = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
-EMAIL_WORKER_URL   = os.environ.get("EMAIL_WORKER_URL", "").rstrip("/")
-EMAIL_WORKER_KEY   = os.environ.get("EMAIL_WORKER_AUTH_KEY", "").strip()
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
 
 _BRAND = "#7c3aed"
 _BG    = "#0d0d1a"
@@ -38,6 +42,40 @@ _CARD  = "#1e1b4b"
 _MUTED = "#94a3b8"
 _TEXT  = "#e2e8f0"
 _BORDER = "#4c1d95"
+
+
+class EmailSendFailed(Exception):
+    """Raised when an SES send fails. Carries the underlying error.
+
+    Attributes:
+        provider: always ``"ses"`` — single-path provider.
+        region: the SES region the failed call targeted.
+        recipients: list of intended recipients (for ops triage).
+        original: the underlying exception (botocore/ClientError, etc).
+    """
+
+    def __init__(self, message: str, *, region: str, recipients: list[str],
+                 original: Exception | None = None):
+        super().__init__(message)
+        self.provider = "ses"
+        self.region = region
+        self.recipients = list(recipients)
+        self.original = original
+
+
+def _ses_region() -> str:
+    """Active SES region. Defaults to ``us-east-1`` (primary).
+
+    Operator override: set ``SES_REGION=ap-south-1`` (warm secondary)
+    and restart the ACA revision. Legacy ``AWS_SES_REGION`` is still
+    accepted as a synonym so an in-flight Bicep/ACA rollout doesn't
+    break the send path mid-deploy.
+    """
+    return (
+        os.environ.get("SES_REGION", "").strip()
+        or os.environ.get("AWS_SES_REGION", "").strip()
+        or "us-east-1"
+    )
 
 
 def _base(body_html: str) -> str:
@@ -81,103 +119,29 @@ def _parse_from(frm: str) -> tuple[str, str]:
     return frm, ""
 
 
-def _send_via_cf_worker(to: str, subject: str, html: str) -> bool:
-    """Send email via the Cloudflare Email Worker (Tier-1).
-
-    Returns True on success, False on any failure (caller falls back to
-    SendGrid in-process, then SES via the ``email-fallback`` SQS queue).
-    Requires:
-      - ``EMAIL_WORKER_URL`` set (e.g. https://syrabit-email.<acct>.workers.dev)
-      - The Worker's ``SENDGRID_API_KEY`` secret bound (set via wrangler).
-    """
-    worker_url = os.environ.get("EMAIL_WORKER_URL", "").rstrip("/")
-    auth_key   = os.environ.get("EMAIL_WORKER_AUTH_KEY", "").strip()
-    if not worker_url:
-        return False
-    try:
-        import httpx
-        headers = {"Content-Type": "application/json"}
-        if auth_key:
-            headers["Authorization"] = f"Bearer {auth_key}"
-        payload = {"to": to, "subject": subject, "html": html}
-        r = httpx.post(f"{worker_url}/email/send", json=payload, headers=headers, timeout=8.0)
-        if r.status_code in (200, 201):
-            logger.info(f"[Email/CF] Sent '{subject}' → {to}")
-            return True
-        logger.warning(f"[Email/CF] Worker returned {r.status_code}: {r.text[:200]}")
-        return False
-    except Exception as e:
-        logger.warning(f"[Email/CF] Worker call failed: {e}")
-        return False
-
-
-# Tri-state outcome from the SendGrid attempt so _send_sync can apply the
-# Task #347 fallback policy (only retryable failures escalate to SES).
-#
-#   "ok"        — 2xx, message accepted; nothing more to do.
-#   "no_key"    — SENDGRID_API_KEY missing → treat as configuration outage,
-#                 escalate so SES can carry the load.
-#   "retry_5xx" — SendGrid returned a 5xx OR the HTTP call itself failed
-#                 (timeout / DNS / TLS). These are infrastructure failures
-#                 SES is qualified to retry.
-#   "perm_4xx"  — SendGrid returned a 4xx (auth, rate-limit, invalid
-#                 payload, suppressed recipient). Re-sending the same
-#                 payload via SES would just produce the same error and
-#                 risk reputation damage — log + drop instead.
-_SENDGRID_OK         = "ok"
-_SENDGRID_NO_KEY     = "no_key"
-_SENDGRID_RETRY_5XX  = "retry_5xx"
-_SENDGRID_PERM_4XX   = "perm_4xx"
-
-# Tier-2 SES outcomes — same shape as the SendGrid tri-state above so
-# _send_sync applies the identical fallback policy regardless of which
-# Tier-2 provider is active. Mapping of botocore exception codes:
-#   Throttling / ServiceUnavailable / InternalFailure  → retry_5xx
-#   MessageRejected / MailFromDomainNotVerified / etc  → perm_4xx
-#   No creds                                            → no_key
-#   Connection / timeout (no .response attr)            → retry_5xx
-_SES_RETRYABLE_CODES = {
-    "Throttling", "ThrottlingException", "ServiceUnavailable",
-    "InternalFailure", "RequestTimeout", "RequestTimeoutException",
-}
-
-
 def _ses_client():
     """Build a boto3 SES client lazily so import-time has zero AWS deps."""
-    region = (
-        os.environ.get("AWS_SES_REGION", "").strip()
-        or os.environ.get("AWS_REGION", "").strip()
-        or "us-east-1"
-    )
     import boto3  # type: ignore
-    return boto3.client("ses", region_name=region)
+    return boto3.client("ses", region_name=_ses_region())
 
 
-def _ses_outcome_for(exc: Exception) -> str:
-    """Map a botocore exception to the SendGrid-style tri-state outcome."""
-    code = None
-    if hasattr(exc, "response"):
-        try:
-            code = exc.response["Error"]["Code"]  # type: ignore[index]
-        except Exception:
-            code = None
-    if code is None or code in _SES_RETRYABLE_CODES:
-        return _SENDGRID_RETRY_5XX
-    return _SENDGRID_PERM_4XX
+def _send_via_ses(to: str, subject: str, html: str) -> None:
+    """Send a single transactional email via Amazon SES.
 
-
-def _send_via_ses(to: str, subject: str, html: str) -> str:
-    """Send via Amazon SES (boto3 ``send_email``). Returns the same
-    tri-state outcome contract as ``_send_via_sendgrid`` so ``_send_sync``
-    can apply the Task #347 fallback policy unchanged.
+    Raises :class:`EmailSendFailed` on any failure. There is no
+    fallback (Task #556 — V4 §12 "no silent fallbacks").
     """
+    region = _ses_region()
     if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
             os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
-        return _SENDGRID_NO_KEY
+        raise EmailSendFailed(
+            "SES credentials missing (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)",
+            region=region,
+            recipients=[to],
+        )
     try:
         client = _ses_client()
-        frm = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
-        addr, name = _parse_from(frm)
+        addr, name = _parse_from(EMAIL_FROM)
         source = f'"{name}" <{addr}>' if name else addr
         client.send_email(
             Source=source,
@@ -187,39 +151,55 @@ def _send_via_ses(to: str, subject: str, html: str) -> str:
                 "Body":    {"Html":    {"Data": html,    "Charset": "UTF-8"}},
             },
         )
-        logger.info(f"[Email/SES] Sent '{subject}' → {to}")
-        return _SENDGRID_OK
-    except Exception as e:
-        outcome = _ses_outcome_for(e)
-        if outcome == _SENDGRID_RETRY_5XX:
-            logger.warning(f"[Email/SES] retryable failure → escalating to SQS: {e}")
-        else:
-            logger.warning(f"[Email/SES] permanent failure — dropping: {e}")
-        return outcome
+        logger.info(f"[Email/SES:{region}] Sent '{subject}' → {to}")
+    except EmailSendFailed:
+        raise
+    except Exception as exc:
+        logger.warning(f"[Email/SES:{region}] send failed for {to}: {exc}")
+        raise EmailSendFailed(
+            f"SES send_email failed: {exc}",
+            region=region,
+            recipients=[to],
+            original=exc,
+        ) from exc
 
 
-def _send_admin_via_ses(recipients: list, subject: str, html: str,
-                        attachments=None, sender: str = "") -> bool:
-    """Multi-recipient send for admin/digest/alert emails via SES.
+def send_admin_email(
+    *,
+    to,
+    subject: str,
+    html: str,
+    attachments=None,
+    sender: str = "",
+) -> bool:
+    """Multi-recipient send for admin / digest / alert emails (SES only).
 
-    Uses ``send_raw_email`` when attachments are present (SES has no
-    high-level attachment API), otherwise the simple ``send_email``.
-    Mirrors the SendGrid ``send_admin_email`` contract: returns True on
-    a 2xx-equivalent (no exception), False otherwise.
+    Returns ``True`` on a 2xx-equivalent SES accept, ``False`` on any
+    failure. Admin alert paths must be fire-and-forget — this helper
+    swallows :class:`EmailSendFailed` and logs a warning rather than
+    raising, so a single bad send can't take down a polling loop.
+
+    For the user-facing transactional path, callers should invoke
+    :func:`_send_via_ses` directly (or the high-level ``send_*`` helpers
+    below) and handle :class:`EmailSendFailed`.
     """
+    if isinstance(to, str):
+        recipients = [to]
+    else:
+        recipients = [t for t in to if t]
+    if not recipients:
+        return False
+    region = _ses_region()
     if not (os.environ.get("AWS_ACCESS_KEY_ID", "").strip() and
             os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()):
         logger.warning("[Email/SES:admin] no AWS creds — skipping send")
         return False
-    frm = (sender or os.environ.get(
-        "EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>")).strip()
+    frm = (sender or EMAIL_FROM).strip()
     addr, name = _parse_from(frm)
     source = f'"{name}" <{addr}>' if name else addr
     try:
         client = _ses_client()
         if attachments:
-            # send_raw_email path — build a multipart MIME message so each
-            # base64 attachment becomes a real attachment part.
             import base64
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
@@ -256,252 +236,19 @@ def _send_admin_via_ses(recipients: list, subject: str, html: str,
                     "Body":    {"Html":    {"Data": html,    "Charset": "UTF-8"}},
                 },
             )
-        logger.info(f"[Email/SES:admin] Sent '{subject}' → {', '.join(recipients)}")
+        logger.info(f"[Email/SES:admin:{region}] Sent '{subject}' → {', '.join(recipients)}")
         return True
     except Exception as exc:
-        logger.warning(f"[Email/SES:admin] send failed: {exc}")
+        logger.warning(f"[Email/SES:admin:{region}] send failed: {exc}")
         return False
 
 
-def _email_provider() -> str:
-    """Returns ``'ses'`` (default) or ``'sendgrid'`` based on EMAIL_PROVIDER.
+async def _send(to: str, subject: str, html: str) -> None:
+    """Async wrapper around :func:`_send_via_ses`.
 
-    Centralized so both _send_sync and send_admin_email pick up the same
-    flag value, and so a future migration to a third provider only needs
-    one edit point.
+    Raises :class:`EmailSendFailed` on failure. There is no fallback.
     """
-    val = os.environ.get("EMAIL_PROVIDER", "").strip().lower()
-    return "sendgrid" if val == "sendgrid" else "ses"
-
-
-def _send_via_sendgrid(to: str, subject: str, html: str) -> str:
-    """Send via SendGrid v3 and report Task #347 fallback policy outcome.
-
-    See ``_SENDGRID_*`` constants above for the contract. The legacy
-    bool-returning callers were rewritten in the same task, so this
-    function is now the sole API.
-    """
-    key = os.environ.get("SENDGRID_API_KEY", "").strip()
-    if not key:
-        return _SENDGRID_NO_KEY
-    try:
-        import httpx
-        frm = os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip()
-        addr, name = _parse_from(frm)
-        body = {
-            "personalizations": [{"to": [{"email": to}]}],
-            "from": {"email": addr, "name": name} if name else {"email": addr},
-            "subject": subject,
-            "content": [{"type": "text/html", "value": html}],
-        }
-        r = httpx.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            json=body,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            timeout=10.0,
-        )
-        if 200 <= r.status_code < 300:
-            logger.info(f"[Email/SendGrid] Sent '{subject}' → {to}")
-            return _SENDGRID_OK
-        if r.status_code >= 500:
-            logger.warning(
-                f"[Email/SendGrid] retryable HTTP {r.status_code}: "
-                f"{r.text[:200]} — escalating to SES"
-            )
-            return _SENDGRID_RETRY_5XX
-        # 4xx — permanent. Do NOT escalate; SES will produce the same error.
-        logger.warning(
-            f"[Email/SendGrid] permanent HTTP {r.status_code} — dropping (no SES retry): "
-            f"{r.text[:200]}"
-        )
-        return _SENDGRID_PERM_4XX
-    except Exception as e:
-        # Transport-level failure (timeout, DNS, TLS, connection reset). SES
-        # handles these well — escalate.
-        logger.warning(f"[Email/SendGrid] transport failure → escalating to SES: {e}")
-        return _SENDGRID_RETRY_5XX
-
-
-def send_admin_email(
-    *,
-    to,
-    subject: str,
-    html: str,
-    attachments=None,
-    sender: str = "",
-) -> bool:
-    """Synchronous SendGrid-only sender for admin / digest / alert emails.
-
-    Replaces the Task #347-deleted Resend SDK call sites in
-    ``routes/admin_review_prompts.py``, ``routes/bot_traffic_report.py``
-    and ``routes/bot_discovery.py``. Mirrors the previous Resend
-    semantics (single SDK call, multi-recipient, optional attachments).
-
-    Args:
-        to: a single address string OR an iterable of address strings.
-        subject: subject line.
-        html: rendered HTML body.
-        attachments: optional list of ``{"filename": str, "content": str}``
-            entries where ``content`` is the **base64-encoded** payload
-            (matches the Resend SDK contract the call sites already use).
-        sender: optional ``Display Name <addr@host>`` override; defaults
-            to ``EMAIL_FROM``.
-
-    Returns ``True`` on a 2xx, ``False`` otherwise. Never raises — admin
-    alert paths must be fire-and-forget.
-    """
-    if isinstance(to, str):
-        recipients = [to]
-    else:
-        recipients = [t for t in to if t]
-    if not recipients:
-        return False
-    # Provider-flag-driven (default = SES, override via EMAIL_PROVIDER=sendgrid).
-    if _email_provider() == "ses":
-        return _send_admin_via_ses(recipients, subject, html, attachments, sender)
-    key = os.environ.get("SENDGRID_API_KEY", "").strip()
-    if not key:
-        logger.warning("[Email/SendGrid:admin] no SENDGRID_API_KEY — skipping send")
-        return False
-    frm = (sender or os.environ.get(
-        "EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>")).strip()
-    addr, name = _parse_from(frm)
-    body = {
-        "personalizations": [
-            {"to": [{"email": r} for r in recipients]},
-        ],
-        "from": {"email": addr, "name": name} if name else {"email": addr},
-        "subject": subject,
-        "content": [{"type": "text/html", "value": html}],
-    }
-    if attachments:
-        body["attachments"] = [
-            {
-                "filename": a["filename"],
-                "content":  a["content"],
-                "type": a.get("type", "text/csv"),
-                "disposition": "attachment",
-            }
-            for a in attachments
-        ]
-    try:
-        import httpx
-        r = httpx.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            json=body,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            timeout=10.0,
-        )
-        if 200 <= r.status_code < 300:
-            logger.info(
-                f"[Email/SendGrid:admin] Sent '{subject}' → {', '.join(recipients)}"
-            )
-            return True
-        logger.warning(
-            f"[Email/SendGrid:admin] HTTP {r.status_code}: {r.text[:200]}"
-        )
-        return False
-    except Exception as exc:
-        logger.warning(f"[Email/SendGrid:admin] send failed: {exc}")
-        return False
-
-
-def _send_sync(to: str, subject: str, html: str) -> str:
-    """Tier-1 + Tier-2 of the email-send chain.
-
-    Returns:
-      "cf"        — sent via Cloudflare Email Worker (Tier-1, zero-cost).
-      "sendgrid"  — sent via SendGrid v3 HTTP API (Tier-2).
-      "fallback"  — Tier-2 returned a *retryable* failure (5xx, transport
-                    error, or no SENDGRID_API_KEY); caller enqueues the
-                    message to the ``email-fallback`` SQS queue so the
-                    Lambda can retry via Amazon SES (Tier-3).
-                    Per Task #347 policy, **permanent 4xx** failures (bad
-                    auth, suppressed recipient, validation error) deliberately
-                    do NOT escalate — SES would produce the same error and
-                    repeated retries hurt sender reputation. They terminate
-                    here as ``"dropped_perm"`` (logged-and-forgotten).
-      "dropped_perm" — see above.
-
-    The ``EMAIL_FALLBACK`` env var (``"sendgrid"``, ``"ses"``, ``"both"``)
-    forces the policy: ``"ses"`` always escalates (operator override for
-    SES burn-in or SendGrid outages); ``"sendgrid"`` never escalates;
-    unset / ``"both"`` uses the 5xx-only policy described above.
-
-    Fire-and-forget: never raises.
-    """
-    if _send_via_cf_worker(to, subject, html):
-        return "cf"
-    # Tier-2: provider-flag-driven (default = SES, override via EMAIL_PROVIDER=sendgrid).
-    provider = _email_provider()
-    if provider == "ses":
-        sg_outcome = _send_via_ses(to, subject, html)
-        ok_label = "ses"
-    else:
-        sg_outcome = _send_via_sendgrid(to, subject, html)
-        ok_label = "sendgrid"
-    if sg_outcome == _SENDGRID_OK:
-        return ok_label
-    override = os.environ.get("EMAIL_FALLBACK", "").strip().lower()
-    if override == "sendgrid":
-        logger.info(
-            f"[Email] EMAIL_FALLBACK=sendgrid — not escalating to SES for {to}: {subject}"
-        )
-        return "dropped_perm"
-    if override == "ses":
-        logger.info(
-            f"[Email] EMAIL_FALLBACK=ses — operator-forced escalation for {to}: {subject}"
-        )
-        return "fallback"
-    # Default policy: only retryable failures (5xx / transport / missing key)
-    # escalate to SES. Permanent 4xx terminates as dropped.
-    if sg_outcome == _SENDGRID_PERM_4XX:
-        logger.info(
-            f"[Email] SendGrid 4xx permanent — dropping (no SES retry) for {to}: {subject}"
-        )
-        return "dropped_perm"
-    logger.info(
-        f"[Email] Tier-2 retryable failure ({sg_outcome}) — handing off to SES for {to}: {subject}"
-    )
-    return "fallback"
-
-
-async def _send(to: str, subject: str, html: str):
-    """Tier-1 → Tier-2 → Tier-3 send chain (Task #347).
-
-    Tiers 1 and 2 run in-process (CF Email Worker → SendGrid v3 HTTP API).
-    On failure of both, the message is enqueued to the ``email-fallback``
-    SQS queue so the ``syrabit-email-worker`` Lambda can deliver via
-    Amazon SES with full DLQ + alarm coverage.
-
-        CF Email Worker → SendGrid → SES (via email-fallback SQS) → log warn
-    """
-    outcome = await asyncio.to_thread(_send_sync, to, subject, html)
-    # Only the explicit "fallback" outcome enqueues to SES; "cf", "sendgrid"
-    # and the new "dropped_perm" terminal state all return immediately.
-    if outcome != "fallback":
-        return
-    try:
-        from sqs_fanout import enqueue as _sqs_enqueue
-        await _sqs_enqueue(
-            "email-fallback",
-            {
-                "to": to,
-                "subject": subject,
-                "html": html,
-                "from": os.environ.get("EMAIL_FROM", "Syrabit.ai <noreply@syrabit.ai>").strip(),
-                "source": "email_templates._send",
-            },
-        )
-        logger.info(f"[Email/SES-fallback] enqueued '{subject}' → {to}")
-    except Exception as e:
-        logger.warning(f"[Email] All tiers failed for {to} (CF→SendGrid→SES enqueue: {e})")
+    await asyncio.to_thread(_send_via_ses, to, subject, html)
 
 
 async def send_plan_activation(email: str, name: str, plan: str, credits: int, amount_paise: int):

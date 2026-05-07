@@ -354,8 +354,7 @@ jobs:
                   "env": [
                     {"name":"AWS_ACCESS_KEY_ID",     "secretRef":"aws-access-key-id"},
                     {"name":"AWS_SECRET_ACCESS_KEY", "secretRef":"aws-secret-access-key"},
-                    {"name":"AWS_SES_REGION",        "value":"us-east-1"},
-                    {"name":"EMAIL_PROVIDER",        "value":"ses"},
+                    {"name":"SES_REGION",            "value":"us-east-1"},
                     {"name":"AZURE_OPENAI_API_KEY",  "secretRef":"azure-openai-api-key"},
                     {"name":"MONGO_URL",             "secretRef":"mongo-uri"},
                     {"name":"JWT_SECRET",            "secretRef":"jwt-secret"},

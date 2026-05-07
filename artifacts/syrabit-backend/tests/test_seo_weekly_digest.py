@@ -97,13 +97,15 @@ def test_send_skipped_when_no_admin_email():
     )
     fake_stats = bot_discovery._compose_seo_weekly_digest([_snap("ok", hours_ago=1)])
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
-         patch.dict("os.environ", {"ALERT_EMAIL": "", "SENDGRID_API_KEY": ""}, clear=False):
+         patch.dict("os.environ", {"ALERT_EMAIL": ""}, clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is False
     assert result["reason"] == "no_admin_email"
 
 
-def test_send_uses_sendgrid_when_email_and_key_present():
+def test_send_uses_ses_when_email_and_aws_creds_present():
+    """Task #556 — SES is the sole transactional path; happy path must
+    invoke ``send_admin_email`` once with the right payload."""
     metrics_stub = types.SimpleNamespace(
         _notification_channels={"email": "admin@syrabit.ai"},
         _load_alert_settings=AsyncMock(),
@@ -120,7 +122,10 @@ def test_send_uses_sendgrid_when_email_and_key_present():
     )
     with patch.dict(sys.modules, {"metrics": metrics_stub}), \
          patch.object(_et, "send_admin_email", _fake_send_admin_email), \
-         patch.dict("os.environ", {"SENDGRID_API_KEY": "test-key"}, clear=False):
+         patch.dict("os.environ",
+                    {"AWS_ACCESS_KEY_ID": "AKIA_TEST",
+                     "AWS_SECRET_ACCESS_KEY": "secret_test"},
+                    clear=False):
         result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
     assert result["sent"] is True
     assert result["to"] == "admin@syrabit.ai"
@@ -129,6 +134,63 @@ def test_send_uses_sendgrid_when_email_and_key_present():
     assert call["to"] == ["admin@syrabit.ai"]
     assert "weekly digest" in call["subject"].lower()
     assert "SEO weekly digest" in call["html"]
+
+
+def test_send_skipped_with_no_aws_creds_reason():
+    """Task #556 — when AWS credentials are absent, the digest sender
+    must short-circuit to ``no_aws_creds`` BEFORE attempting any SES
+    call (V4 §12 — no silent fallbacks)."""
+    metrics_stub = types.SimpleNamespace(
+        _notification_channels={"email": "admin@syrabit.ai"},
+        _load_alert_settings=AsyncMock(),
+    )
+    invoked = []
+
+    def _should_not_be_called(**kwargs):
+        invoked.append(kwargs)
+        return True
+
+    import email_templates as _et
+    fake_stats = bot_discovery._compose_seo_weekly_digest(
+        [_snap("ok", hours_ago=h) for h in (1, 2, 3)]
+    )
+    with patch.dict(sys.modules, {"metrics": metrics_stub}), \
+         patch.object(_et, "send_admin_email", _should_not_be_called), \
+         patch.dict("os.environ",
+                    {"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""},
+                    clear=False):
+        result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
+    assert result["sent"] is False
+    assert result["reason"] == "no_aws_creds"
+    assert result["to"] == "admin@syrabit.ai"
+    assert not invoked, "send_admin_email must not be called without AWS creds"
+
+
+def test_send_returns_ses_non_2xx_reason_on_provider_failure():
+    """Task #556 — when ``send_admin_email`` returns False (the SES
+    helper recorded a non-2xx), the digest sender must surface
+    ``send_error:ses_non_2xx`` (NOT the legacy sendgrid_non_2xx)."""
+    metrics_stub = types.SimpleNamespace(
+        _notification_channels={"email": "admin@syrabit.ai"},
+        _load_alert_settings=AsyncMock(),
+    )
+
+    def _fake_send_admin_email(**kwargs):
+        return False  # SES recorded a non-2xx
+
+    import email_templates as _et
+    fake_stats = bot_discovery._compose_seo_weekly_digest(
+        [_snap("ok", hours_ago=h) for h in (1, 2, 3)]
+    )
+    with patch.dict(sys.modules, {"metrics": metrics_stub}), \
+         patch.object(_et, "send_admin_email", _fake_send_admin_email), \
+         patch.dict("os.environ",
+                    {"AWS_ACCESS_KEY_ID": "AKIA_TEST",
+                     "AWS_SECRET_ACCESS_KEY": "secret_test"},
+                    clear=False):
+        result = asyncio.run(bot_discovery._send_seo_weekly_digest_email(fake_stats))
+    assert result["sent"] is False
+    assert result["reason"] == "send_error:ses_non_2xx"
 
 
 # ── _gather_weekly_digest_inputs ────────────────────────────────────────────
