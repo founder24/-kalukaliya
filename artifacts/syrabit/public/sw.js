@@ -57,6 +57,29 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
+// Task #557 — drop a legacy push subscription that does NOT carry a full
+// W3C `applicationServerKey` (i.e. the old Firebase/FCM-issued one) so the
+// next page load triggers usePushNotifications -> pushManager.subscribe
+// against the new VAPID public key. Idempotent: a fresh VAPID-shaped sub
+// is left untouched.
+async function dropLegacyFcmSubscription() {
+  try {
+    const sub = await self.registration.pushManager.getSubscription();
+    if (!sub) return;
+    const opts = (typeof sub.options === 'object' && sub.options) || {};
+    const ask = opts.applicationServerKey;
+    // FCM-vintage subs were created with no applicationServerKey at all
+    // (gcm_sender_id flow). VAPID subs always have a non-empty
+    // ArrayBuffer here. Treat anything falsy/zero-length as legacy.
+    const isLegacy = !ask || (ask.byteLength === 0);
+    if (isLegacy) {
+      await sub.unsubscribe();
+    }
+  } catch (e) {
+    // Non-fatal — the user can still re-subscribe manually from settings.
+  }
+}
+
 self.addEventListener('activate', (event) => {
   const keep = new Set([STATIC_CACHE, RUNTIME_CACHE, API_CACHE]);
   event.waitUntil(
@@ -65,6 +88,7 @@ self.addEventListener('activate', (event) => {
         Promise.all(keys.filter((k) => !keep.has(k)).map((k) => caches.delete(k)))
       ),
       self.registration.navigationPreload && self.registration.navigationPreload.enable().catch(() => {}),
+      dropLegacyFcmSubscription(),
     ])
   );
   self.clients.claim();

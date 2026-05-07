@@ -81,3 +81,30 @@ class TestRejectsMalformedSubscriptions:
         with pytest.raises(HTTPException) as exc:
             _run(notif.push_subscribe({}, user=_student()))
         assert exc.value.status_code == 400
+
+    def test_missing_keys_block_returns_400(self):
+        bad = {"endpoint": W3C_SUBSCRIPTION["endpoint"]}  # no keys at all
+        with pytest.raises(HTTPException) as exc:
+            _run(notif.push_subscribe({"subscription": bad}, user=_student()))
+        assert exc.value.status_code == 400
+        assert "keys" in (exc.value.detail or "").lower()
+
+    def test_missing_p256dh_returns_400(self):
+        bad = {
+            "endpoint": W3C_SUBSCRIPTION["endpoint"],
+            "keys": {"auth": W3C_SUBSCRIPTION["keys"]["auth"]},
+        }
+        with pytest.raises(HTTPException) as exc:
+            _run(notif.push_subscribe({"subscription": bad}, user=_student()))
+        assert exc.value.status_code == 400
+        assert "p256dh" in (exc.value.detail or "").lower()
+
+    def test_missing_auth_returns_400(self):
+        bad = {
+            "endpoint": W3C_SUBSCRIPTION["endpoint"],
+            "keys": {"p256dh": W3C_SUBSCRIPTION["keys"]["p256dh"]},
+        }
+        with pytest.raises(HTTPException) as exc:
+            _run(notif.push_subscribe({"subscription": bad}, user=_student()))
+        assert exc.value.status_code == 400
+        assert "auth" in (exc.value.detail or "").lower()

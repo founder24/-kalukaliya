@@ -133,11 +133,21 @@ async def run_sweep(apply: bool, purge: bool) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     classified = tombstoned = purged = marked_migrated = 0
 
-    cursor = db.push_subscriptions.find({}, {"_id": 0})
+    # Keep `_id` so token-only legacy FCM rows (no endpoint at all)
+    # can still be addressed for update/delete — they were the most
+    # common Firebase shape pre-W3C and MUST be tombstoned with the
+    # rest of the cohort.
+    cursor = db.push_subscriptions.find({})
     async for doc in cursor:
         endpoint = doc.get("endpoint") or (doc.get("subscription_info") or {}).get("endpoint")
-        if not endpoint:
-            continue
+        # Build the address filter once. Prefer endpoint (stable, indexed),
+        # fall back to _id for legacy token-only rows.
+        if endpoint:
+            addr = {"endpoint": endpoint}
+        elif doc.get("_id") is not None:
+            addr = {"_id": doc["_id"]}
+        else:
+            continue  # truly malformed — nothing to update
 
         # Already-tombstoned: handle purge if requested.
         state = (doc.get("migration_state") or "").lower()
@@ -153,7 +163,7 @@ async def run_sweep(apply: bool, purge: bool) -> dict[str, Any]:
                         deactivated_at = deactivated_at.replace(tzinfo=timezone.utc)
                     if now - deactivated_at > MIGRATION_PURGE_GRACE:
                         if apply:
-                            await db.push_subscriptions.delete_one({"endpoint": endpoint})
+                            await db.push_subscriptions.delete_one(addr)
                         purged += 1
                 except Exception as e:
                     logger.warning("Skipping purge for %s — bad deactivated_at: %s", endpoint, e)
@@ -164,7 +174,7 @@ async def run_sweep(apply: bool, purge: bool) -> dict[str, Any]:
             if state != "migrated":
                 if apply:
                     await db.push_subscriptions.update_one(
-                        {"endpoint": endpoint},
+                        addr,
                         {"$set": {
                             "migration_state": "migrated",
                             "migration_completed_at": now,
@@ -189,7 +199,7 @@ async def run_sweep(apply: bool, purge: bool) -> dict[str, Any]:
             first_seen = now
             if apply:
                 await db.push_subscriptions.update_one(
-                    {"endpoint": endpoint},
+                    addr,
                     {"$set": {
                         "migration_state": "pending",
                         "migration_first_seen_at": now,
@@ -201,7 +211,7 @@ async def run_sweep(apply: bool, purge: bool) -> dict[str, Any]:
         if now - first_seen > MIGRATION_WINDOW:
             if apply:
                 await db.push_subscriptions.update_one(
-                    {"endpoint": endpoint},
+                    addr,
                     {"$set": {
                         "active": False,
                         "deactivated_at": now,

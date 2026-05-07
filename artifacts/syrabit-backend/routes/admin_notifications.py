@@ -364,8 +364,17 @@ async def push_subscribe(data: dict, user: dict = Depends(get_current_user)):
     Stores admin_id alongside user_id so push dispatch can filter
     by per-admin notification preferences without joining the users collection."""
     subscription_info = data.get("subscription")
-    if not subscription_info or not subscription_info.get("endpoint"):
+    if not subscription_info or not isinstance(subscription_info, dict):
         raise HTTPException(400, "Missing subscription object")
+    # Task #557 — enforce the full W3C `PushSubscription` shape.
+    # pywebpush requires `endpoint` + both `keys.p256dh` and `keys.auth`
+    # to derive the message-encryption key; an incomplete blob would
+    # silently fail at dispatch time.
+    if not subscription_info.get("endpoint"):
+        raise HTTPException(400, "Missing subscription.endpoint")
+    keys = subscription_info.get("keys") or {}
+    if not isinstance(keys, dict) or not keys.get("p256dh") or not keys.get("auth"):
+        raise HTTPException(400, "Missing subscription.keys.p256dh or subscription.keys.auth")
     endpoint = subscription_info["endpoint"]
     is_admin = bool(user.get("is_admin"))
     role = "admin" if is_admin else "student"
