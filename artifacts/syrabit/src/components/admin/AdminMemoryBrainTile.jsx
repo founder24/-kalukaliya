@@ -32,6 +32,19 @@ function _fmtTs(ts) {
   try { return new Date(ts * 1000).toLocaleTimeString(); } catch { return '—'; }
 }
 
+// Task #530 — render an age in the most operator-friendly unit
+// ("12s ago", "4m ago", "2h ago"). Returns "—" when the worker has
+// never reported anything we can timestamp.
+function _fmtAge(ageSeconds) {
+  if (ageSeconds === null || ageSeconds === undefined) return '—';
+  const s = Math.max(0, Math.round(Number(ageSeconds)));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
+}
+
 export default function AdminMemoryBrainTile({ adminToken }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -298,7 +311,7 @@ export default function AdminMemoryBrainTile({ adminToken }) {
                     <th className="font-medium pr-2 py-1 text-right">r&nbsp;ok</th>
                     <th className="font-medium pr-2 py-1 text-right">r&nbsp;fail</th>
                     <th className="font-medium pr-2 py-1 text-right">fail&nbsp;%</th>
-                    <th className="font-medium py-1 text-right">last&nbsp;fail</th>
+                    <th className="font-medium py-1 text-right">last&nbsp;seen</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -307,20 +320,56 @@ export default function AdminMemoryBrainTile({ adminToken }) {
                     // Mirror the banner threshold so a per-worker row
                     // turns red the same instant the aggregate would.
                     const rowTripped = w.total >= minSample && wFailPct > bannerPct;
+                    // Task #530 — backend marks workers that haven't
+                    // reported within the configured stale window
+                    // (default 10m) so silent worker death is
+                    // obvious instead of disappearing from the table.
+                    const isStale = w.is_stale === true;
+                    const lastSeenTitle = w.last_seen_ts
+                      ? `Last reported at ${_fmtTs(w.last_seen_ts)}`
+                      : 'No reports recorded yet';
                     return (
                       <tr
                         key={w.pid}
-                        className={rowTripped ? 'text-red-600' : ''}
+                        className={
+                          isStale
+                            ? 'text-amber-700 bg-amber-50'
+                            : rowTripped
+                              ? 'text-red-600'
+                              : ''
+                        }
                         data-testid={`memory-brain-worker-row-${w.pid}`}
                       >
-                        <td className="font-mono pr-2 py-0.5">{w.pid}</td>
+                        <td className="font-mono pr-2 py-0.5">
+                          <span className="inline-flex items-center gap-1">
+                            {w.pid}
+                            {isStale && (
+                              <span
+                                className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-200 rounded px-1 py-[1px] font-semibold"
+                                data-testid={`memory-brain-worker-stale-${w.pid}`}
+                                title={`Worker has not reported in over ${Math.round((w.stale_threshold_seconds || 600) / 60)} min — likely crashed or hung.`}
+                              >
+                                <AlertTriangle size={9} /> stale
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td className="pr-2 py-0.5 text-right">{w.writes_ok}</td>
                         <td className="pr-2 py-0.5 text-right">{w.writes_fail}</td>
                         <td className="pr-2 py-0.5 text-right">{w.reads_ok}</td>
                         <td className="pr-2 py-0.5 text-right">{w.reads_fail}</td>
                         <td className="pr-2 py-0.5 text-right">{wFailPct.toFixed(1)}%</td>
-                        <td className="py-0.5 text-right text-gray-400">
-                          {_fmtTs(w.last_fail_ts)}
+                        <td
+                          className={`py-0.5 text-right ${isStale ? 'text-amber-700 font-semibold' : 'text-gray-400'}`}
+                          title={lastSeenTitle}
+                          data-testid={`memory-brain-worker-last-seen-${w.pid}`}
+                        >
+                          <span>{_fmtAge(w.last_seen_age_seconds)}</span>
+                          {w.last_seen_ts && (
+                            <span className="ml-1 text-[9px] text-gray-400 font-normal">
+                              ({_fmtTs(w.last_seen_ts)})
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );

@@ -103,6 +103,10 @@ async def admin_memory_brain_metrics(
     # when Upstash isn't wired or is currently failing reads — the
     # frontend hides the disclosure in that case.
     fleet_workers = _mbm.get_fleet_workers(hours=hours)
+    # Task #530 — surface the live stale threshold so the frontend
+    # tile's "stale" badge can mirror whatever the operator tuned via
+    # `MEMORY_BRAIN_WORKER_STALE_SECONDS` instead of a hardcoded value.
+    worker_stale_threshold_seconds = _mbm._worker_stale_threshold_seconds()
 
     return {
         "ok": True,
@@ -122,5 +126,6 @@ async def admin_memory_brain_metrics(
             "failure_rate_pct":   failure_rate_pct,
             "failure_min_sample": failure_min_sample,
             "fleet_dropped_min":  fleet_dropped_min,
+            "worker_stale_seconds": worker_stale_threshold_seconds,
         },
     }

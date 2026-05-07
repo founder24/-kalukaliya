@@ -37,6 +37,17 @@ class _FakeRedis:
     def hgetall(self, key):
         return dict(self.store.get(key, {}))
 
+    def hdel(self, key, *fields):
+        d = self.store.get(key)
+        if not d:
+            return 0
+        n = 0
+        for f in fields:
+            if f in d:
+                del d[f]
+                n += 1
+        return n
+
 
 @pytest.fixture
 def fake_redis(monkeypatch):

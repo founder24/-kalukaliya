@@ -97,6 +97,40 @@ _VALID_OPS = ("write", "read")
 #                             serve the request)
 _FLEET_KEY_PREFIX = "mb:fleet:h:"
 _FLEET_BUCKET_TTL_SECONDS = 25 * 3600  # 24h window + 1h slack
+# Task #530 — sibling Redis HASH that tracks every worker pid we've
+# ever seen write into the rolling window (pid -> last_seen_ts as a
+# float string). The hour-keyed buckets above only contain pids that
+# wrote *during the current hour*, so a worker that crashed silently
+# with zero events this hour would otherwise vanish from the admin
+# table — defeating the whole point of the per-worker breakdown.
+# This hash is the durable "seen list" so a dead worker still shows
+# up as a stale row instead of silently disappearing.
+_FLEET_WORKERS_KEY = "mb:fleet:workers"
+# Default stale threshold for the per-worker table (Task #530). A
+# worker that hasn't reported either a success or a failure within
+# this many seconds renders with a "stale" badge in the admin tile
+# so the operator can tell "pid 42 stopped reporting an hour ago"
+# from "pid 42 was never alive". Configurable via env so an operator
+# can dial it down during a noisy incident without a code change.
+_DEFAULT_WORKER_STALE_SECONDS = 600
+
+
+def _worker_stale_threshold_seconds() -> int:
+    """Read the per-worker stale threshold from the environment with
+    a safe fallback. Capped at the rolling-window length because a
+    threshold longer than the window is meaningless (the seen-list
+    hash itself only carries `_FLEET_BUCKET_TTL_SECONDS` of history).
+    """
+    raw = (_os.environ.get("MEMORY_BRAIN_WORKER_STALE_SECONDS") or "").strip()
+    if not raw:
+        return _DEFAULT_WORKER_STALE_SECONDS
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_WORKER_STALE_SECONDS
+    if v <= 0:
+        return _DEFAULT_WORKER_STALE_SECONDS
+    return min(v, _FLEET_BUCKET_TTL_SECONDS)
 # Task #483 — per-worker fan-out fields live in the same hour-keyed
 # hash as the aggregate counters so we don't double the Upstash key
 # count. Field naming:
@@ -195,6 +229,17 @@ def _fleet_writer_loop() -> None:
                 # Refresh TTL on every write so an actively-used hour
                 # bucket can't expire mid-window.
                 _rc.expire(key, _FLEET_BUCKET_TTL_SECONDS)
+                # Task #530 — durable per-worker seen-list. The
+                # hour-keyed hash above only carries pids that wrote
+                # *this hour*, so a worker that crashed silently with
+                # zero events would otherwise vanish from the admin
+                # table. Recording into a sibling hash here means a
+                # dead worker still surfaces as a stale row instead.
+                try:
+                    _rc.hset(_FLEET_WORKERS_KEY, str(pid), str(ts))
+                    _rc.expire(_FLEET_WORKERS_KEY, _FLEET_BUCKET_TTL_SECONDS)
+                except Exception as exc:
+                    logger.debug("fleet seen-list write failed: %s", exc)
             except Exception as exc:
                 # Don't spam — Upstash hiccups are common and the
                 # per-worker view is still authoritative.
@@ -734,6 +779,51 @@ def get_fleet_workers(hours: int = 24) -> list[dict[str, Any]]:
                 if cur is None or ts > cur:
                     row[key] = ts
 
+    # Task #530 — pull the durable seen-list so workers that crashed
+    # silently with zero events this hour still surface as stale rows.
+    # Failure to read this is non-fatal: we just lose the "still
+    # remembered across hour boundaries" property and fall back to the
+    # in-bucket pid set.
+    seen_list: dict[str, float] = {}
+    # Hash fields don't have per-field TTLs in Redis — only the key as
+    # a whole — and the writer refreshes the key TTL on every event.
+    # An always-busy fleet would therefore keep very old PID fields
+    # alive forever and clutter the table with long-dead workers. We
+    # prune at read-time (and HDEL the stragglers) so the seen-list
+    # respects the same rolling-window semantics as the hour buckets.
+    seen_cutoff = _time.time() - _FLEET_BUCKET_TTL_SECONDS
+    try:
+        from deps import redis_client as _rc
+        if _rc is not None:
+            raw_seen = _rc.hgetall(_FLEET_WORKERS_KEY) or {}
+            stale_fields: list[str] = []
+            for pid_field, ts_val in raw_seen.items():
+                pid_str = pid_field if isinstance(pid_field, str) else pid_field.decode("utf-8", "ignore")
+                ts = _coerce_float(ts_val)
+                if ts is None:
+                    stale_fields.append(pid_str)
+                    continue
+                if ts < seen_cutoff:
+                    stale_fields.append(pid_str)
+                    continue
+                seen_list[pid_str] = ts
+            if stale_fields:
+                try:
+                    _rc.hdel(_FLEET_WORKERS_KEY, *stale_fields)
+                except Exception as exc:
+                    logger.debug("fleet seen-list prune hdel failed: %s", exc)
+    except Exception as exc:
+        logger.debug("fleet seen-list read failed: %s", exc)
+
+    # Bring in pids that exist only in the seen-list (zero events in
+    # the current hour buckets) so the operator can still see them.
+    for pid_str in seen_list.keys():
+        if pid_str not in by_pid:
+            _row(pid_str)
+
+    now = _time.time()
+    stale_threshold = _worker_stale_threshold_seconds()
+
     out: list[dict[str, Any]] = []
     for pid, row in by_pid.items():
         total = row["writes_ok"] + row["writes_fail"] + row["reads_ok"] + row["reads_fail"]
@@ -743,6 +833,26 @@ def get_fleet_workers(hours: int = 24) -> list[dict[str, Any]]:
             pid_int: Any = int(pid)
         except (TypeError, ValueError):
             pid_int = pid
+
+        # last_seen_ts = most recent of last_ok_ts / last_fail_ts /
+        # the seen-list entry. The seen-list catches workers that
+        # crashed silently with zero events in the current hour
+        # buckets — without it they'd render with a None last_seen.
+        candidates = [
+            t for t in (row["last_ok_ts"], row["last_fail_ts"], seen_list.get(pid))
+            if t is not None
+        ]
+        last_seen_ts: Optional[float] = max(candidates) if candidates else None
+        if last_seen_ts is None:
+            # No timestamp anywhere — treat as stale so the operator
+            # notices instead of seeing a silent "—".
+            is_stale = True
+            last_seen_age_seconds: Optional[float] = None
+        else:
+            age = max(0.0, now - last_seen_ts)
+            last_seen_age_seconds = age
+            is_stale = age > stale_threshold
+
         out.append({
             "pid": pid_int,
             "writes_ok": row["writes_ok"],
@@ -754,10 +864,19 @@ def get_fleet_workers(hours: int = 24) -> list[dict[str, Any]]:
             "failure_rate_pct": failure_rate_pct,
             "last_ok_ts": row["last_ok_ts"],
             "last_fail_ts": row["last_fail_ts"],
+            "last_seen_ts": last_seen_ts,
+            "last_seen_age_seconds": last_seen_age_seconds,
+            "is_stale": is_stale,
+            "stale_threshold_seconds": stale_threshold,
         })
-    # Worst (highest failure rate, then highest volume) first so the
-    # operator's eye lands on the misbehaving worker immediately.
-    out.sort(key=lambda r: (-r["failure_rate_pct"], -r["total"]))
+    # Sort: stale rows first (silent worker death is the most urgent
+    # signal), then by highest failure rate, then by highest volume,
+    # so the operator's eye lands on whichever pid is misbehaving.
+    out.sort(key=lambda r: (
+        0 if r["is_stale"] else 1,
+        -r["failure_rate_pct"],
+        -r["total"],
+    ))
     return out
 
 
