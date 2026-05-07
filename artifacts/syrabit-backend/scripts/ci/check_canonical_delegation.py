@@ -516,7 +516,7 @@ def _check_canonical_bank() -> list[str]:
     return failures
 
 
-def _line_is_skippable_prose(line: str) -> bool:
+def _line_is_skippable_prose(line: str, *, is_doc_file: bool = False) -> bool:
     """Mirror of the per-file `is_comment + is_removal_note` skip used in
     `_scan_file`. Lets operator-facing prose in comments / docstrings
     legitimately reference the historical providers ("SendGrid retired",
@@ -542,7 +542,7 @@ def _line_is_skippable_prose(line: str) -> bool:
         or "disabled" in low or "no longer" in low or "migrated from" in low
         or "was sendgrid" in low or "was resend" in low
     )
-    return is_comment_or_doc and is_removal_note
+    return (is_comment_or_doc or is_doc_file) and is_removal_note
 
 
 def _scan_pattern_global(pat: re.Pattern[str], *, tag: str, scan_iac: bool = False) -> list[str]:
@@ -602,6 +602,27 @@ def _scan_pattern_global(pat: re.Pattern[str], *, tag: str, scan_iac: bool = Fal
         if backend_req_dir.exists():
             candidate_locks.extend(backend_req_dir.glob("requirements-*.txt"))
         extra_files.extend(p for p in candidate_locks if p.exists())
+        # Task #556 round-5 — also scan repo-root `workers/**` Cloudflare
+        # Worker code + their wrangler/package configs. The legacy
+        # `workers/email-worker/` SendGrid transport lived here and was
+        # invisible to the previous backend-/frontend-only scope; this
+        # extension makes a re-introduction (or an un-retirement of the
+        # current 410-stub) impossible without tripping the guard.
+        workers_root = ROOT / "workers"
+        if workers_root.exists():
+            for ext in ("*.ts", "*.tsx", "*.js", "*.jsx",
+                        "*.toml", "*.json", "*.md"):
+                for p in workers_root.rglob(ext):
+                    # Skip transitive dependency code.
+                    if "node_modules" in p.parts:
+                        continue
+                    extra_files.append(p)
+        # Top-level docs that document operator-facing env contracts —
+        # if a retired knob shows up here as an "active variable" row
+        # the umbrella catches it.
+        for env_doc in (ROOT / "ENVIRONMENT_VARIABLES.md",):
+            if env_doc.exists():
+                extra_files.append(env_doc)
     for base in (BACKEND, FRONTEND):
         if not base.exists():
             continue
@@ -625,8 +646,9 @@ def _scan_pattern_global(pat: re.Pattern[str], *, tag: str, scan_iac: bool = Fal
             text = p.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             continue
+        is_doc_file = p.suffix == ".md"
         for ln, line in enumerate(text.splitlines(), 1):
-            if _line_is_skippable_prose(line):
+            if _line_is_skippable_prose(line, is_doc_file=is_doc_file):
                 continue
             if pat.search(line):
                 out.append(f"{p.relative_to(ROOT)}:{ln}: {tag} → {line.strip()[:120]}")

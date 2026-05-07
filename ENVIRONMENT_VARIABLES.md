@@ -30,12 +30,13 @@ deploy workflows). It is grouped by surface and matches the V4 spec.
 | `WORKERS_EMBED_SECRET` | AKV | Shared secret for the Cloudflare embed worker (`embed.syrabit.ai`). Worker validates this on every `/embed` POST. |
 | `WORKERS_EMBED_URL` | static | `https://embed.syrabit.ai` (production) / `https://embed-staging.syrabit.ai` (staging). |
 | `EMBED_PROVIDER_PRIMARY` | static | Locked to `workers_ai_custom`. Switching to anything else disables the V4 embed path. |
-| `EMAIL_PROVIDER` | static | Locked to `sendgrid` (V4 §0). |
-| `EMAIL_FALLBACK` | static | Locked to `ses` (AWS SES, activated when SendGrid burn threshold exceeded). |
-| `SENDGRID_API_KEY` | AKV | SendGrid Pro 100k via Azure Marketplace. |
 | `AWS_ACCESS_KEY_ID` | AKV (mirror) | AWS SES + SQS (re-embed queue) + S3 + CloudWatch. |
 | `AWS_SECRET_ACCESS_KEY` | AKV (mirror) | Pair with above. |
-| `AWS_REGION` | static | `ap-south-1` (Mongo + Pinecone region; SES is `us-east-1` separately). |
+| `AWS_REGION` | static | `ap-south-1` (Mongo + Pinecone region). |
+| `SES_REGION` | static | `us-east-1` (SES sole transactional path — Task #556). Flip to `ap-south-1` for the quarterly DR drill via `scripts/ses_burn_smoke.sh`. |
+| `EMAIL_FROM` | static | `Syrabit.ai <noreply@syrabit.ai>` — sender for both the SES transactional helper and the Cloudflare bulk Worker. |
+| `BULK_EMAIL_WORKER_URL` | optional | Cloudflare Email Workers endpoint for bulk/digest fan-out (separate from SES; absence → digests skip with reason `no_worker_url`). |
+| `BULK_EMAIL_WORKER_AUTH_KEY` | optional | HMAC bearer for backend → bulk Worker auth. |
 | `PINECONE_API_KEY` | AKV | Pinecone `aws-ap-south-1` index. |
 | `PINECONE_INDEX` | static | Production index name. |
 | `PINECONE_NAMESPACE_PRIMARY` | static | `cached_gemma_today` (Gemma-300M 1024-dim). |
@@ -71,9 +72,23 @@ When the embed-worker health check fails:
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Hot counter for credit-burn meter (V4 §10) and translation cache. |
 | `GITHUB_TOKEN` | Used by ops scripts only (not by FastAPI runtime). |
 
-### Removed (Task #347 — never re-add without a V5 spec change)
+### Removed (Task #347 / #556 — never re-add without a V5 spec change)
 
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `BEDROCK_PROXY_AUTH_TOKEN`, `RESEND_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RAILWAY_TOKEN`, `QUGE5_*`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `FIREWORKS_API_KEY`, `OPENROUTER_API_KEY`.
+Historical AI / payment / transport vars — all retired:
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`,
+`BEDROCK_PROXY_AUTH_TOKEN`, `STRIPE_SECRET_KEY`,
+`STRIPE_WEBHOOK_SECRET`, `RAILWAY_TOKEN`, `QUGE5_*`, `GROQ_API_KEY`,
+`CEREBRAS_API_KEY`, `FIREWORKS_API_KEY`, `OPENROUTER_API_KEY`.
+
+Historical email transport vars (Task #556 — SES is the sole
+transactional path; the legacy provider-flag knobs are retired and
+must NOT be re-introduced): the previous `EMAIL_PROVIDER` flag, the
+previous `EMAIL_FALLBACK` flag, the previous SendGrid API key, and
+the previous Resend API key. The umbrella CI guard
+(`artifacts/syrabit-backend/scripts/ci/check_canonical_delegation.py`)
+fails the build if any of these names re-appears in code, env
+templates, lockfiles, IaC, deploy workflows, the Cloudflare Workers
+under `workers/`, or this document.
 
 ---
 

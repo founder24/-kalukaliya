@@ -3,17 +3,23 @@ main = "src/index.ts"
 account_id = "d66e40eac539fff1db270fddf384a5ec"
 compatibility_date = "2026-05-01"
 
-# Task #347 — transactional email migrated to SendGrid v3 HTTP API.
-# The previous `send_email = [{ name = "EMAIL_SENDER" }]` binding for
-# Cloudflare Email Workers is no longer needed; we POST to the SendGrid
-# Web API directly from the Worker.
+# Task #556 (2026-05-07) — RETIRED transport.
 #
-# Required secrets (set with `wrangler secret put <NAME>`):
-#   SENDGRID_API_KEY   — SendGrid v3 key with Mail Send full access
-#   BACKEND_AUTH_KEY   — shared secret for backend → worker auth
-# Optional plain vars:
-#   EMAIL_FROM_ADDRESS (default noreply@syrabit.ai)
-#   EMAIL_FROM_NAME    (default Syrabit.ai)
+# SES is now the SOLE transactional email path. The previous Worker
+# transport (Task #347) is fully decommissioned and retired — no
+# provider abstraction, no fallback, no break-glass. The previously
+# required vendor API-key secret is removed from this binding.
+# The Worker itself now serves only a 410 Gone stub at every route
+# except `/email/health` so any stale caller fails loud (V4 §12).
+#
+# Optional plain vars (kept for the 410 stub):
+#   BACKEND_AUTH_KEY — legacy shared secret; ignored by the stub but
+#                      retained so wrangler doesn't refuse to deploy
+#                      if the secret is still bound. Safe to remove.
+#
+# Removal note (Task #556 retirement): the legacy SendGrid API key
+# secret previously bound here is removed — delete it on the next
+# deploy with the wrangler secret-delete subcommand.
 
 routes = [
   { pattern = "syrabit.ai/email/*", zone_name = "syrabit.ai" },
