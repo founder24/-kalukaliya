@@ -290,13 +290,6 @@ class LlmChat:
                 yield delta.content
 
     # Task #491 — legacy SLM call/stream helpers removed.
-    async def _noop_legacy_slm_removed(self, *args, **kwargs):
-        async for _ in []:  # pragma: no cover
-            yield None
-        if False:
-            delta = None
-            if delta and delta.content:
-                yield delta.content
 
     async def _call_emergent(self, messages: list) -> str:
         import openai, os

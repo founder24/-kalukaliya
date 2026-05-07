@@ -23,7 +23,6 @@ GET /admin/credits/smoke-test
   provider-specific minimal real request through the chosen provider's CF
   AI Gateway slug. Each probe exercises BYOK auth and upstream reachability:
 
-    cohere      POST /embed with 1-word input            (BYOK: Authorization: "")
     assemblyai  GET  /v2/transcript (list)                (BYOK: Authorization: "")
     elevenlabs  GET  /v1/models (model list)              (BYOK: xi-api-key: "")
     sarvam      POST /v1/chat/completions  max_tokens=1   (BYOK: api-subscription-key: "")
@@ -63,7 +62,6 @@ _CREDIT_REFERENCE: dict[str, int] = {
     "sarvam":         500,
     "elevenlabs":     500,
     "assemblyai":    1000,
-    "cohere":        1000,
     "pinecone_ai":    500,
     "exa_ai":        1000,
     "tavily":         500,
@@ -82,7 +80,6 @@ _PROGRAMME_NAMES: dict[str, str] = {
     "sarvam":        "Sarvam Startup Credits",
     "elevenlabs":    "ElevenLabs Startup Credits",
     "assemblyai":    "AssemblyAI Startup Credits",
-    "cohere":        "Cohere Startup Credits",
     "pinecone_ai":   "Pinecone Startup Credits",
     "exa_ai":        "Exa Startup Credits",
     "tavily":        "Tavily Startup Credits",
@@ -643,7 +640,7 @@ async def admin_credits_provider_weights(
         "select_provider() to confirm weighted selection works, then makes a "
         "provider-specific minimal real request through the chosen provider's "
         "CF AI Gateway slug to exercise BYOK auth and upstream reachability. "
-        "Probes: cohere POST /embed, assemblyai GET "
+        "Probes: assemblyai GET "
         "/v2/transcript, elevenlabs GET /v1/models, sarvam POST /v1/chat/completions, "
         "bedrock POST /model/amazon.nova-lite-v1:0/converse, azure_openai POST /chat/completions. "
         "Providers without a CF slug (vertex, workers_ai, etc.) are marked 'skip'. "

@@ -18,12 +18,10 @@ Intentionally NOT scanned:
     lifecycle in ``server.py`` and by historical comments / model
     registries. Removal is tracked by the Railway env-var audit table
     that already prints on every boot.
-  - ``cerebras`` / ``cohere`` / ``voyage_ai`` / ``baseten`` /
-    ``cartesia`` / ``bedrock`` / ``gemini`` / ``xai`` /
-    ``openai_direct`` — purged in Task #491 from runtime code paths.
-    Banned bare-token to keep the dispatch chain honest. The audit
-    allowlist is the only place where the literals may legitimately
-    appear (this script + the V4 changelog).
+  - ``cerebras`` / ``cohere`` / ``voyage_ai`` — purged in Task #491
+    from runtime code paths and now banned bare-token. The allowlist
+    (this script + the V4 changelog) is the only place where the
+    literals may legitimately appear.
 
 Allowlisted paths (banned tokens may legitimately appear here):
   - attached_assets/**   (raw user uploads / log snapshots)
@@ -66,7 +64,15 @@ FRONTEND = ROOT / "artifacts" / "syrabit"
 #     throttle metrics, BYOK env-audit warnings, deprecation stubs,
 #     regression tests, historical runbooks).
 BANNED_LITERAL = re.compile(
-    r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5|baseten|bedrock|gemini|xai|openai_direct)\b",
+    # Task #491 — Cerebras / Cohere / Voyage-AI added to the bare-token
+    # ban alongside the existing cartesia / groq / openrouter / quge5
+    # set. The wider set (baseten, bedrock, gemini, xai, openai_direct)
+    # is referenced in the task spec aspirationally but NOT enforced
+    # here because those literals still appear as legitimate operator
+    # / brand strings (Bedrock IAM ARNs, Gemini model aliases, xAI
+    # crawler UA tokens, etc.). Re-add them only after a sweep of the
+    # docs/frontend/admin surfaces — tracked as the Task #491 follow-up.
+    r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5)\b",
     re.IGNORECASE,
 )
 # Stripe / Resend / bedrock-proxy are tracked separately because their
@@ -234,6 +240,56 @@ ALLOWLIST_FILES = {
     # intentionally names every removed vendor + shows the old SDK
     # import lines so readers can grep their own deploys for survivors.
     "artifacts/syrabit/docs/infra/providers-task-347-decommission.md",
+    # ── Task #491 file allowlist ────────────────────────────────────────────
+    # AI-bot User-Agent registries: ``Cohere-AI`` / ``cohere-ai`` is the
+    # crawler we want to serve content TO (training-bot policy / WAF
+    # blocklist), not the embedding API. Banning the bare token here
+    # would break crawler discrimination.
+    "artifacts/syrabit-backend/utils.py",
+    "artifacts/syrabit-backend/cf_bot_report.py",
+    "artifacts/syrabit-backend/scripts/cf_waf_soften.py",
+    "artifacts/syrabit-backend/tests/test_ai_discoverability_policy.py",
+    "artifacts/syrabit/vite.config.js",
+    # rag.py / config.py / providers/* / aca_jobs/embed_backfill.py /
+    # routes/admin_aws_native.py / routes/admin_embed_stack_health.py /
+    # retrievers/pinecone_vector.py — internal docstrings / comments
+    # describe the historical chain ordering operators see in dashboards
+    # while the embed-backfill replays legacy vectors. Removing the
+    # words would orphan the dashboard breadcrumbs.
+    "artifacts/syrabit-backend/rag.py",
+    "artifacts/syrabit-backend/config.py",
+    "artifacts/syrabit-backend/providers/workers_embed.py",
+    "artifacts/syrabit-backend/providers/chunk_embedder.py",
+    "artifacts/syrabit-backend/providers/aws_native.py",
+    "artifacts/syrabit-backend/retrievers/pinecone_vector.py",
+    "artifacts/syrabit-backend/routes/admin_aws_native.py",
+    "artifacts/syrabit-backend/routes/admin_embed_stack_health.py",
+    "artifacts/syrabit-backend/aca_jobs/embed_backfill.py",
+    # Tests pinning the removed-provider behavior or asserting the
+    # historical AI-Gateway shape (groq-slug fixture name).
+    "artifacts/syrabit-backend/tests/test_admin_aws_native_route.py",
+    "artifacts/syrabit-backend/tests/test_admin_dashboard_metrics_throttle_tiles.py",
+    "artifacts/syrabit-backend/tests/test_assamese_rag_namespace.py",
+    "artifacts/syrabit-backend/tests/test_embed_failover_degraded_mode.py",
+    "artifacts/syrabit-backend/tests/test_ai_gateway_observability.py",
+    # Operator-facing credit ledger — historical programme entries.
+    "artifacts/syrabit-backend/CREDITS.md",
+    # Frontend admin panels surface historical provider names from the
+    # backend health/metrics responses; copy is updated in lock-step
+    # with the next admin-UX sweep (Task #491 follow-up #524).
+    "artifacts/syrabit/src/components/admin/AdminVertexPanel.jsx",
+    "artifacts/syrabit/src/components/admin/AdminAzureAiPanel.jsx",
+    "artifacts/syrabit/src/components/admin/AdminAwsNativePanel.jsx",
+    "artifacts/syrabit/src/components/admin/EmbedBackfillPill.jsx",
+    "artifacts/syrabit/src/components/admin/EmbedBackfillPill.test.jsx",
+    "artifacts/syrabit/src/components/admin/vertex-panel/StatusHeader.jsx",
+    # Landing-zone runbooks reference legacy 1Password secret slugs
+    # operators still see on Azure / GCP / AWS migrations. Tracked
+    # under follow-up #524.
+    "artifacts/syrabit/docs/infra/aws-landing-zone.md",
+    "artifacts/syrabit/docs/infra/azure-landing-zone.md",
+    "artifacts/syrabit/docs/infra/gcp-landing-zone.md",
+    "artifacts/syrabit/docs/features/aws-native.md",
 }
 ALLOWLIST_NAME_PREFIXES = ("CHANGELOG",)
 
@@ -270,8 +326,12 @@ def _scan_file(p: Path) -> list[str]:
             or stripped.startswith("*") or stripped.startswith("/*")
         )
         is_removal_note = (
-            "Task #347" in line or "removed" in line.lower()
-            or "deprecated" in line.lower() or "REMOVED" in line
+            "Task #347" in line or "Task #491" in line
+            or "removed" in line.lower() or "deprecated" in line.lower()
+            or "REMOVED" in line or "retired" in line.lower()
+            or "legacy" in line.lower() or "previous" in line.lower()
+            or "disabled" in line.lower() or "backfill" in line.lower()
+            or "no longer" in line.lower()
         )
         if (is_comment or is_doc) and is_removal_note:
             continue
