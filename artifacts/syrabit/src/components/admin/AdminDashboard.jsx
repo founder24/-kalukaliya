@@ -2487,6 +2487,15 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                       toast.error(`Extended mirror failed: ${ext.reason || 'unknown reason'}`);
                     } else {
                       toast.success('D1 sync complete');
+                      // Task #507: re-fetch the live SEO/D1 health snapshot
+                      // once so the badge above the result panel reflects
+                      // the freshly synced state immediately, instead of
+                      // waiting for the next 60s poll. Only on success —
+                      // a failed sync must keep the prior "stale" badge
+                      // visible so operators don't get a false "ok".
+                      seoHealthLive()
+                        .then((r) => { setSeoLive(r.data); setSeoLiveError(null); })
+                        .catch(() => { /* keep prior badge on refresh failure */ });
                     }
                   } catch (e) {
                     setD1SyncDurationMs(_elapsed());
