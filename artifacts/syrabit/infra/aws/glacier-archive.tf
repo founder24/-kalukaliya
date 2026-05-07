@@ -179,6 +179,42 @@ resource "aws_s3_bucket_lifecycle_configuration" "cw_logs_archive" {
   }
 }
 
+# ── Live archive flow: attach a Deep Archive lifecycle to the existing ──────
+#    `var.s3_finals_bucket` (declared in `s3-to-r2-sync.tf`). Reviewer
+#    note (Task #551 round-2): the three new compliance buckets above
+#    cover NEW writes (Razorpay receipts, content snapshots, CW logs),
+#    but the already-live S3 → R2 finals pipeline also accumulates
+#    cold objects (PDFs, generated notes) under the `finals/` prefix
+#    that should transition to Deep Archive once they age out of the
+#    R2 hot mirror. Bucket creation is owned by `s3-to-r2-sync.tf`
+#    (input variable, may be pre-existing); we only add the lifecycle.
+resource "aws_s3_bucket_lifecycle_configuration" "finals_to_deep_archive" {
+  bucket = var.s3_finals_bucket
+
+  rule {
+    id     = "finals-180d-to-deep-archive"
+    status = "Enabled"
+
+    filter { prefix = "finals/" }
+
+    transition {
+      days          = 180
+      storage_class = "DEEP_ARCHIVE"
+    }
+
+    # Same 7-year DPDP / income-tax retention ceiling as the
+    # purpose-built compliance buckets above.
+    expiration {
+      days = 2555
+    }
+
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "DEEP_ARCHIVE"
+    }
+  }
+}
+
 # ── Outputs consumed by the FastAPI restore endpoint (admin_archive.py) ──────
 output "glacier_archive_buckets" {
   description = "Names of the three Glacier Deep Archive compliance buckets, surfaced via SSM for the FastAPI admin archive-restore endpoint."

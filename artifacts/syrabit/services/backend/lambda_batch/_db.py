@@ -64,10 +64,12 @@ def close() -> None:
 
 _SECRET_ENV_MAP: dict[str, tuple[str, ...]] = {
     # ARN-bearing env var on the Lambda  →  target env vars to populate.
+    # All entries resolve via Secrets Manager (`secretsmanager:GetSecretValue`)
+    # — non-secret config like `WORKERS_EMBED_URL` is passed through as
+    # a plain Lambda env var by `lambda-batch-jobs.tf` and not listed here.
     "MONGO_URL_SECRET_ARN":     ("MONGO_URL",),
     "PINECONE_API_KEY_SECRET":  ("PINECONE_API_KEY", "PINECONE_KEY"),
     "WORKERS_EMBED_SECRET_ARN": ("WORKERS_EMBED_SECRET", "EMBED_SHARED_SECRET"),
-    "WORKERS_EMBED_URL_SSM":    ("WORKERS_EMBED_URL",),
 }
 
 _bootstrapped = False

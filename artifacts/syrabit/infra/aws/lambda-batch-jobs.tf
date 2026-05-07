@@ -13,6 +13,19 @@
 ## via env var `ACA_JOB_BATCHES_DISABLED=1` and Lambda becomes the
 ## sole driver. Rollback = unset the env var.
 
+# Reuse the Secrets Manager entries already declared in `secrets.tf`
+# (under `aws_secretsmanager_secret.workers`) — keeps the Lambda batch
+# jobs on the same naming convention as `sqs-reembed.tf` rather than
+# inventing a parallel `pinecone-api-key` / `workers-embed-secret`
+# layout that would diverge on rotation.
+data "aws_secretsmanager_secret" "mongo_url" {
+  name       = "${local.lz_project}/${local.lz_env}/mongo/url"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+# `pinecone` and `workers_embed` data sources are already declared in
+# `sqs-reembed.tf`. We reference them directly below.
+
 locals {
   batch_jobs = {
     "as-translation-backfill" = {
@@ -146,12 +159,17 @@ resource "aws_lambda_function" "batch_job" {
       # which hydrates os.environ with the underlying values BEFORE any
       # aca_jobs module is imported — otherwise the provider modules
       # (workers_embed, pinecone client) boot in a misconfigured state.
-      # Account-id placeholder ("*") works because the IAM policy is
-      # already scoped to this project's Secrets Manager prefix.
-      MONGO_URL_SECRET_ARN     = "arn:aws:secretsmanager:${local.lz_primary_region}:*:secret:${local.lz_project}/${local.lz_env}/mongo-url"
-      PINECONE_API_KEY_SECRET  = "arn:aws:secretsmanager:${local.lz_primary_region}:*:secret:${local.lz_project}/${local.lz_env}/pinecone-api-key"
-      WORKERS_EMBED_SECRET_ARN = "arn:aws:secretsmanager:${local.lz_primary_region}:*:secret:${local.lz_project}/${local.lz_env}/workers-embed-secret"
-      WORKERS_EMBED_URL_SSM    = "arn:aws:secretsmanager:${local.lz_primary_region}:*:secret:${local.lz_project}/${local.lz_env}/workers-embed-url"
+      #
+      # Reuses the same Secrets Manager entries already wired by
+      # `sqs-reembed.tf` (`pinecone/api-key`, `workers-embed/secret`)
+      # rather than introducing a parallel naming convention.
+      # `mongo/url` is registered alongside in `secrets.tf`.
+      MONGO_URL_SECRET_ARN     = data.aws_secretsmanager_secret.mongo_url.arn
+      PINECONE_API_KEY_SECRET  = data.aws_secretsmanager_secret.pinecone.arn
+      WORKERS_EMBED_SECRET_ARN = data.aws_secretsmanager_secret.workers_embed.arn
+      # Embed worker URL is not a secret — same value used by the
+      # deferred-embed Lambda in `sqs-reembed.tf` (line 122).
+      WORKERS_EMBED_URL        = "https://embed.syrabit.ai"
     })
   }
 

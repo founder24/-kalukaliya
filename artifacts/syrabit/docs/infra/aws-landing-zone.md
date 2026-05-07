@@ -323,6 +323,10 @@ Three S3 buckets host the never-touched compliance tail at
 | `syrabit-cw-logs-archive-prod`      | CloudWatch Logs export tail (>14 d)                   | 30 days            | 7 years |
 
 Terraform: [`infra/aws/glacier-archive.tf`](../../infra/aws/glacier-archive.tf).
+The same file also attaches a `finals/`-prefix Deep Archive lifecycle
+to the existing `var.s3_finals_bucket` (S3 → R2 sync source) so cold
+generated PDFs / notes also flow into Glacier after 180 days instead
+of accumulating on the warm tier.
 Restore endpoint: `POST /api/admin/archive/restore` (admin-only,
 audit-logged to `admin_archive_restore_log`; recent requests at
 `GET /api/admin/archive/restore/log`).
