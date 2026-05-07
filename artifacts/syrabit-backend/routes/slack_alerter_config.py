@@ -61,6 +61,13 @@ SLACK_TRUSTPILOT_WEBHOOK_ENV = "SLACK_TRUSTPILOT_WEBHOOK_URL"
 # longer hard-coded here (Task #368) — see admin_credits._provider_
 # priority_count() for the dynamic source of truth.
 SMOKE_TEST_SLACK_WEBHOOK_ENV = "SMOKE_TEST_SLACK_WEBHOOK"
+# Task #509 — the D1 mirror lag watchdog (``routes.admin_d1_mirror_lag_alerts``)
+# pages on-call when the Cloudflare D1 mirror's ``lag_seconds`` climbs past
+# the configured threshold. Until #509 the fan-out only hit email + in-app
+# notifications; this env var slots the alerter into the same shared cron
+# Slack channel its sibling silence-alerters already post to so on-call
+# doesn't have to keep an inbox tab open.
+D1_MIRROR_LAG_SLACK_WEBHOOK_ENV = "D1_MIRROR_LAG_SLACK_WEBHOOK"
 
 
 class SlackAlerterConfig(TypedDict):

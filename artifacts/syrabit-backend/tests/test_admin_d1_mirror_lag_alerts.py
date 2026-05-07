@@ -579,3 +579,299 @@ def test_required_streak_reads_env(monkeypatch):
     assert cron._required_streak() == 1
     monkeypatch.setenv("D1_MIRROR_LAG_REQUIRED_STREAK", "")
     assert cron._required_streak() == 2
+
+
+# ─── Task #509 — Slack fan-out ─────────────────────────────────────────────
+
+def test_slack_payload_breached_carries_lag_threshold_error_and_link():
+    """The Slack body for a breach page must carry the four elements
+    the task spec calls out: lag, threshold, last error, and a link
+    to the admin pill endpoint."""
+    health = _health(
+        lag_age_s=40 * 3600,
+        last_sync_ok=False,
+        last_sync_error="cf 401 unauthorized",
+        consecutive_failures=3,
+    )
+    with _patch_threshold(36 * 3600):
+        payload = cron._slack_payload_for_lag_alert(
+            "D1 mirror lag breached: no sync in 40.0h",
+            "body",
+            "breached",
+            health,
+        )
+    assert payload["text"].startswith(":rotating_light:")
+    blocks_text = "\n".join(
+        b["text"]["text"] for b in payload["blocks"]
+    )
+    # Lag, threshold, last error, and the admin pill URL must all
+    # appear so on-call has the same triage context as the in-app
+    # body without context-switching.
+    assert "40.0h" in blocks_text
+    assert "36.0h" in blocks_text
+    assert "cf 401 unauthorized" in blocks_text
+    assert cron._HEALTH_URL in blocks_text
+
+
+def test_slack_payload_recovered_uses_check_emoji():
+    health = _health(lag_age_s=60)
+    with _patch_threshold(36 * 3600):
+        payload = cron._slack_payload_for_lag_alert(
+            "D1 mirror lag recovered", "body", "recovered", health,
+        )
+    assert payload["text"].startswith(":white_check_mark:")
+    header_text = payload["blocks"][0]["text"]["text"]
+    assert "recovered" in header_text.lower()
+
+
+def test_slack_payload_truncates_long_message_body():
+    """Defensively cap the free-form message section under Slack's
+    3000-char section limit, matching sibling alerters."""
+    health = _health(lag_age_s=40 * 3600)
+    huge = "x" * 5000
+    with _patch_threshold(36 * 3600):
+        payload = cron._slack_payload_for_lag_alert(
+            "t", huge, "breached", health,
+        )
+    msg_block = payload["blocks"][-1]["text"]["text"]
+    assert len(msg_block) <= 2900
+
+
+def test_post_slack_lag_alert_noop_when_env_unset(monkeypatch):
+    """No env var → no network call and the helper never raises."""
+    monkeypatch.delenv("D1_MIRROR_LAG_SLACK_WEBHOOK", raising=False)
+    captured = {"called": False}
+
+    class _SentinelClient:
+        def __init__(self, *a, **kw):
+            captured["called"] = True
+
+    with patch("httpx.AsyncClient", _SentinelClient):
+        with _patch_threshold(36 * 3600):
+            asyncio.run(cron._post_slack_lag_alert(
+                "t", "m", "breached",
+                _health(lag_age_s=40 * 3600),
+            ))
+    assert captured["called"] is False
+
+
+def test_post_slack_lag_alert_posts_when_env_set(monkeypatch):
+    """When the env var is set the helper POSTs the rendered payload
+    to that URL with a JSON body."""
+    monkeypatch.setenv(
+        "D1_MIRROR_LAG_SLACK_WEBHOOK", "https://hooks.slack.test/abc",
+    )
+    posted: dict = {}
+
+    class _Resp:
+        status_code = 200
+        text = "ok"
+
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            posted["url"] = url
+            posted["json"] = json
+            return _Resp()
+
+    with patch("httpx.AsyncClient", _Client):
+        with _patch_threshold(36 * 3600):
+            asyncio.run(cron._post_slack_lag_alert(
+                "t", "m", "breached",
+                _health(lag_age_s=40 * 3600),
+            ))
+    assert posted["url"] == "https://hooks.slack.test/abc"
+    assert posted["json"]["text"].startswith(":rotating_light:")
+    assert posted["json"]["blocks"]
+
+
+def test_post_slack_lag_alert_swallows_transport_failures(monkeypatch):
+    """A network error from the webhook must NOT propagate — the
+    Slack channel is best-effort, the email + in-app channels have
+    already succeeded by the time the background task runs."""
+    monkeypatch.setenv(
+        "D1_MIRROR_LAG_SLACK_WEBHOOK", "https://hooks.slack.test/abc",
+    )
+
+    class _BoomClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **kw):
+            raise RuntimeError("network dead")
+
+    with patch("httpx.AsyncClient", _BoomClient):
+        with _patch_threshold(36 * 3600):
+            # Must not raise.
+            asyncio.run(cron._post_slack_lag_alert(
+                "t", "m", "breached",
+                _health(lag_age_s=40 * 3600),
+            ))
+
+
+def test_post_slack_lag_alert_swallows_4xx_responses(monkeypatch):
+    """A 4xx response from the webhook is logged at WARNING but never
+    raised — same discipline as the cf-waf-drift sibling."""
+    monkeypatch.setenv(
+        "D1_MIRROR_LAG_SLACK_WEBHOOK", "https://hooks.slack.test/abc",
+    )
+
+    class _Resp:
+        status_code = 404
+        text = "no_team"
+
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **kw):
+            return _Resp()
+
+    with patch("httpx.AsyncClient", _Client):
+        with _patch_threshold(36 * 3600):
+            asyncio.run(cron._post_slack_lag_alert(
+                "t", "m", "breached",
+                _health(lag_age_s=40 * 3600),
+            ))
+
+
+def test_send_lag_alert_schedules_slack_fan_out(fake_db):
+    """End-to-end: ``_send_lag_alert`` must schedule a Slack POST on
+    the breach transition alongside the email + in-app channels."""
+    now = _now()
+    health = _health(
+        lag_age_s=40 * 3600,
+        last_sync_ok=False,
+        last_sync_error="cf 401 unauthorized",
+    )
+    captured: dict = {}
+
+    async def _fake_slack(title, msg, kind, h):
+        captured["title"] = title
+        captured["kind"] = kind
+        captured["health"] = h
+
+    async def _run():
+        with patch("db_ops.supa_insert_notification", new=AsyncMock()):
+            with patch.object(cron, "_post_slack_lag_alert",
+                              new=_fake_slack):
+                with patch.object(cron, "_email_admins",
+                                  new=AsyncMock()):
+                    await cron._send_lag_alert(
+                        fake_db, "breached", health, now,
+                    )
+                    # Background tasks scheduled via asyncio.create_task —
+                    # yield once so they run before the patches tear down.
+                    await asyncio.sleep(0)
+
+    with _patch_threshold(36 * 3600):
+        asyncio.run(_run())
+    assert captured.get("kind") == "breached"
+    assert "breached" in captured.get("title", "").lower()
+    assert captured.get("health") is health
+
+
+def test_send_recovery_alert_schedules_slack_fan_out(fake_db):
+    """The recovery transition must also fan out to Slack so on-call
+    sees the all-clear in the same channel as the original page."""
+    now = _now()
+    healthy = _health(lag_age_s=60)
+    captured: dict = {}
+
+    async def _fake_slack(title, msg, kind, h):
+        captured["kind"] = kind
+        captured["title"] = title
+
+    async def _run():
+        with patch("db_ops.supa_insert_notification", new=AsyncMock()):
+            with patch.object(cron, "_post_slack_lag_alert",
+                              new=_fake_slack):
+                with patch.object(cron, "_email_admins",
+                                  new=AsyncMock()):
+                    await cron._send_lag_alert(
+                        fake_db, "recovered", healthy, now,
+                    )
+                    await asyncio.sleep(0)
+
+    with _patch_threshold(36 * 3600):
+        asyncio.run(_run())
+    assert captured.get("kind") == "recovered"
+    assert "recovered" in captured.get("title", "").lower()
+
+
+def test_send_lag_alert_in_app_succeeds_when_slack_post_fails(fake_db):
+    """A failing Slack POST must NOT undo the in-app notification
+    persist that already ran — Slack is purely best-effort."""
+    now = _now()
+    health = _health(lag_age_s=40 * 3600)
+    persisted: dict = {}
+
+    async def _fake_persist(payload):
+        persisted.update(payload)
+
+    async def _boom_slack(*a, **kw):
+        raise RuntimeError("slack down")
+
+    async def _run():
+        with patch("db_ops.supa_insert_notification", new=_fake_persist):
+            with patch.object(cron, "_post_slack_lag_alert",
+                              new=_boom_slack):
+                with patch.object(cron, "_email_admins",
+                                  new=AsyncMock()):
+                    await cron._send_lag_alert(
+                        fake_db, "breached", health, now,
+                    )
+                    # Yield so the background Slack task runs and
+                    # raises (its raise must not surface here).
+                    await asyncio.sleep(0)
+
+    with _patch_threshold(36 * 3600):
+        asyncio.run(_run())
+    assert persisted.get("channel") == "in_app"
+    assert persisted.get("meta", {}).get("state") == "breached"
+
+
+def test_admin_health_endpoint_surfaces_slack_configured(monkeypatch):
+    """The pill endpoint must surface ``slackConfigured`` /
+    ``slackWebhookEnv`` so the AdminHealth dashboard can render the
+    "Slack ✓ / ✗" badge alongside its sibling cron pills."""
+    async def _call():
+        async def _fake(_db):
+            return _health(lag_age_s=40 * 3600)
+        with patch.object(cron, "get_d1_mirror_lag_health", new=_fake):
+            with _patch_threshold(36 * 3600):
+                with _patch_streak(2):
+                    return await cron.admin_d1_mirror_lag_health(admin={})
+
+    monkeypatch.setenv(
+        "D1_MIRROR_LAG_SLACK_WEBHOOK",
+        "https://hooks.slack.example.com/services/T0/B0/secret",
+    )
+    payload = asyncio.run(_call())
+    assert payload["slackConfigured"] is True
+    assert payload["slackWebhookEnv"] == "D1_MIRROR_LAG_SLACK_WEBHOOK"
+
+    monkeypatch.delenv("D1_MIRROR_LAG_SLACK_WEBHOOK", raising=False)
+    payload_unset = asyncio.run(_call())
+    assert payload_unset["slackConfigured"] is False
+    assert payload_unset["slackWebhookEnv"] == "D1_MIRROR_LAG_SLACK_WEBHOOK"

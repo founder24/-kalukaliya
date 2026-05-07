@@ -57,9 +57,18 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends
 
 from auth_deps import get_admin_user
+from routes.slack_alerter_config import (
+    D1_MIRROR_LAG_SLACK_WEBHOOK_ENV as _SLACK_WEBHOOK_ENV,
+    slack_config_for,
+    slack_webhook_url_for,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _slack_webhook_url() -> str:
+    return slack_webhook_url_for(_SLACK_WEBHOOK_ENV)
 
 
 # ─── Tunables ───────────────────────────────────────────────────────────────
@@ -313,6 +322,11 @@ async def admin_d1_mirror_lag_health(
         "lagThresholdSeconds": threshold,
         "requiredStreak": _required_streak(),
         "healthUrl": _HEALTH_URL,
+        # Task #509 — surface the same ``slackConfigured`` /
+        # ``slackWebhookEnv`` pair the sibling cron-silence alerters
+        # expose so the AdminHealth pill can render a "Slack ✓ / ✗"
+        # badge alongside the existing email + in-app indicators.
+        **slack_config_for(_SLACK_WEBHOOK_ENV),
         "alertState": alert_state,
         "consecutiveBreachCount": alert_state["consecutiveBreachCount"],
         "lastAlertAt": alert_state["lastAlertAt"],
@@ -526,6 +540,100 @@ def _format_age(seconds: Optional[float]) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
+# ─── Channels: Slack (Task #509) ───────────────────────────────────────────
+
+def _slack_payload_for_lag_alert(
+    title: str, message: str, kind: str, health: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the Slack incoming-webhook JSON body for a D1 mirror lag
+    page. Mirrors :func:`routes.admin_logs_cf_pull_silence_alerts.
+    _slack_payload_for_silence_alert` so the channel reads
+    consistently across every cron alerter on-call already watches.
+
+    The header section carries the lag + threshold + a link to the
+    admin pill endpoint; the detail section dumps the in-process
+    failure metadata (last_sync_ok, last error, consecutive failures)
+    so on-call gets the same triage context the in-app body has
+    without context-switching to email. The ``text`` fallback is
+    required by Slack so push notifications and clients that don't
+    render Block Kit still show something.
+    """
+    lag_s = health.get("lagSeconds")
+    age_h = _format_age(lag_s)
+    threshold_h = _lag_threshold_s() / 3600.0
+    last_err = health.get("lastSyncError") or "<none>"
+    consec_fail = health.get("consecutiveFailures") or 0
+    last_sync_ok = health.get("lastSyncOk")
+
+    if kind == "recovered":
+        emoji = ":white_check_mark:"
+        header_md = (
+            f"{emoji} *D1 mirror lag recovered*\n"
+            f"Current lag: `{age_h}` "
+            f"(threshold `{threshold_h:.1f}h`)\n"
+            f"<{_HEALTH_URL}|Admin health endpoint>"
+        )
+    else:
+        emoji = ":rotating_light:"
+        header_md = (
+            f"{emoji} *D1 mirror lag breached*\n"
+            f"No sync in `{age_h}` "
+            f"(threshold `{threshold_h:.1f}h`)\n"
+            f"<{_HEALTH_URL}|Admin health endpoint>"
+        )
+
+    detail_md = (
+        "*Last sync metadata*\n"
+        f"```lag={age_h}  threshold={threshold_h:.1f}h\n"
+        f"last_sync_ok={last_sync_ok}\n"
+        f"consecutive_failures={consec_fail}\n"
+        f"last_error={str(last_err)[:200]}```"
+    )
+
+    blocks: list[dict[str, Any]] = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": header_md}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": detail_md}},
+        # Slack section text caps at 3000 chars; defensively truncate
+        # the free-form notification body for the same reason the
+        # cf-waf-drift / cf-pull silence helpers do.
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": (message or "")[:2900]},
+        },
+    ]
+    return {"text": f"{emoji} {title}", "blocks": blocks}
+
+
+async def _post_slack_lag_alert(
+    title: str, message: str, kind: str, health: dict[str, Any],
+) -> None:
+    """Best-effort POST to ``D1_MIRROR_LAG_SLACK_WEBHOOK``. No-op
+    when the env var is unset; never raises. Mirrors
+    :func:`routes.admin_logs_cf_pull_silence_alerts._post_slack_silence_alert`
+    so failure modes are uniform across the admin alert surface — a
+    4xx is logged at WARNING with the body snippet, transport /
+    connection failures are logged at DEBUG and swallowed so the
+    email + in-app channels that already succeeded aren't undone.
+    """
+    webhook_url = _slack_webhook_url()
+    if not webhook_url:
+        return
+    payload = _slack_payload_for_lag_alert(title, message, kind, health)
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(webhook_url, json=payload)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "[d1-mirror-lag] slack webhook %s: %s",
+                    resp.status_code, resp.text[:200],
+                )
+    except Exception as exc:
+        logger.debug(
+            "[d1-mirror-lag] slack webhook post failed: %s", exc,
+        )
+
+
 async def _send_lag_alert(
     db, kind: str, health: dict[str, Any], now_utc: datetime,
 ) -> None:
@@ -616,6 +724,13 @@ async def _send_lag_alert(
         logger.debug(f"[d1-mirror-lag] notification persist failed: {exc}")
 
     asyncio.create_task(_email_admins(title, msg, kind))
+    # Task #509 — fan out to the on-call Slack channel as well so
+    # the page lands alongside the sibling cf-waf-drift / cf-pull
+    # silence alerts on-call already watches. Scheduled as a
+    # background task (matching the email fan-out above) so a slow /
+    # dead webhook can't stall the alert loop or undo the in-app
+    # notification that already succeeded.
+    asyncio.create_task(_post_slack_lag_alert(title, msg, kind, health))
     # Append to the paged-on-call audit log so the AdminHealth
     # dashboard's "show paged history" panel can render this event
     # next to the pill (Task #918 shared helper).
