@@ -428,6 +428,14 @@ TODO_557_PATTERN = (
 #   * `enable_tracing=True` Sentry-SDK kwarg.
 #   * Live use of the Sentry transaction / decorator APIs.
 TODO_558_PATTERN = (
+    # OTEL exporter env: ban EVERY value except the single literal
+    # `googlecloud` (with optional surrounding quotes). Comma-separated
+    # multi-value lists, alternative single exporters (otlp / jaeger /
+    # zipkin / azure_monitor / console / etc.), and empty string all
+    # trip. Negative-lookahead pins the only allowed shape.
+    r"OTEL_TRACES_EXPORTER\s*=\s*(?![\"']?googlecloud[\"']?\s*(?:$|[\s;#]))[^\s;#]+|"
+    # Also keep the explicit comma-arm so quoted+commaed lists remain
+    # caught even when the first token is `googlecloud`.
     r"OTEL_TRACES_EXPORTER\s*=\s*[\"']?[a-z_]+[\"']?\s*,|"
     # Match any positive numeric literal: 1, 0.1, 0.05, 0.001, .25, 1e-3, etc.
     # Allowed (literal zero or zero-only floats): =0, =0.0, =0.00. The negative

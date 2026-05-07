@@ -1235,23 +1235,131 @@ async def admin_pinecone_health(admin: dict = Depends(get_admin_user)) -> dict[s
 # ─────────────────────────────────────────────────────────────────────
 # Task #558 — Observability card + weekly digest
 # ─────────────────────────────────────────────────────────────────────
+_SENTRY_API_TIMEOUT = 8.0
+
+
+async def _sentry_event_count(window_hours: int) -> Optional[int]:
+    """Count Sentry events in the trailing ``window_hours`` window.
+
+    Uses the Sentry Events Stats API (``/api/0/organizations/<org>/
+    events-stats/``) with ``query=event.type:error`` and a
+    ``statsPeriod=<n>h`` so we cover the 1h / 24h / 7d (= 168h)
+    windows the task asks for. Returns ``None`` (rendered as "n/a"
+    by the admin card) when ``SENTRY_AUTH_TOKEN`` / ``SENTRY_ORG`` are
+    not configured — that surfaces the gap loudly in the admin UI
+    rather than reporting a false zero.
+    """
+    token = os.environ.get("SENTRY_AUTH_TOKEN", "").strip()
+    org = os.environ.get("SENTRY_ORG", "").strip()
+    if not (token and org):
+        return None
+    project = os.environ.get("SENTRY_PROJECT_ID", "").strip()
+    params: dict[str, Any] = {
+        "query": "event.type:error",
+        "statsPeriod": f"{window_hours}h",
+        "yAxis": "count()",
+        "interval": "1h" if window_hours <= 24 else "1d",
+    }
+    if project:
+        params["project"] = project
+    try:
+        async with httpx.AsyncClient(timeout=_SENTRY_API_TIMEOUT) as client:
+            r = await client.get(
+                f"https://sentry.io/api/0/organizations/{org}/events-stats/",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if r.status_code != 200:
+            logger.warning("[sentry] events-stats HTTP %d: %s", r.status_code, r.text[:120])
+            return None
+        body = r.json()
+        # events-stats returns { data: [[ts, [{count: N}]], ...] }
+        total = 0
+        for row in body.get("data") or []:
+            try:
+                bucket = row[1]
+                if isinstance(bucket, list):
+                    for cell in bucket:
+                        total += int(cell.get("count", 0))
+            except Exception:
+                continue
+        return total
+    except Exception as exc:
+        logger.warning("[sentry] events-stats fetch failed: %s", exc)
+        return None
+
+
+async def _sentry_top_issues(window_hours: int = 168, limit: int = 10) -> list[dict[str, Any]]:
+    """Top-N error issues for the trailing window via Sentry Issues API.
+
+    Returns ``[]`` when ``SENTRY_AUTH_TOKEN`` / ``SENTRY_ORG`` are not
+    configured. Each entry is ``{title, culprit, events, users,
+    permalink, last_seen}`` — exactly what the weekly digest body
+    needs to render a top-10 table without any client-side Sentry
+    re-fetch.
+    """
+    token = os.environ.get("SENTRY_AUTH_TOKEN", "").strip()
+    org = os.environ.get("SENTRY_ORG", "").strip()
+    if not (token and org):
+        return []
+    project = os.environ.get("SENTRY_PROJECT_ID", "").strip()
+    params: dict[str, Any] = {
+        "query": "is:unresolved event.type:error",
+        "statsPeriod": f"{window_hours}h",
+        "limit": limit,
+        "sort": "freq",
+    }
+    if project:
+        params["project"] = project
+    try:
+        async with httpx.AsyncClient(timeout=_SENTRY_API_TIMEOUT) as client:
+            r = await client.get(
+                f"https://sentry.io/api/0/organizations/{org}/issues/",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if r.status_code != 200:
+            logger.warning("[sentry] issues HTTP %d: %s", r.status_code, r.text[:120])
+            return []
+        rows = r.json() or []
+        out: list[dict[str, Any]] = []
+        for issue in rows[:limit]:
+            try:
+                out.append({
+                    "title":     issue.get("title") or issue.get("metadata", {}).get("type", "?"),
+                    "culprit":   issue.get("culprit") or "",
+                    "events":    int(issue.get("count") or 0),
+                    "users":     int(issue.get("userCount") or 0),
+                    "permalink": issue.get("permalink") or "",
+                    "last_seen": issue.get("lastSeen") or "",
+                })
+            except Exception:
+                continue
+        return out
+    except Exception as exc:
+        logger.warning("[sentry] issues fetch failed: %s", exc)
+        return []
+
+
 @router.get("/admin/health/observability")
 async def admin_observability(
     admin: dict = Depends(get_admin_user),
 ) -> dict[str, Any]:
     """Backs the AdminHealth "Observability" card.
 
-    Sources:
-      * **Tracing** — OTEL → GCP Cloud Trace (sole exporter, Task #558).
-        Pulled from ``tracing.get_otel_health()``: last successful
-        export ts, last error, ingestion lag, exported-span count.
+    Sections (Task #558 §D):
+      * **Tracing** — OTEL → GCP Cloud Trace (sole exporter). Pulled
+        from ``tracing.get_otel_health()``: last successful export ts,
+        last error, ingestion lag, exported-span count.
       * **Errors** — Sentry Developer free tier (errors-only sink).
-        Pulled from ``observability.get_sentry_health()``.
-
-    The 1h / 24h / 7d error-rate windows the task spec mentions are
-    rendered client-side from the Sentry events API using the standard
-    Sentry token; the card here only ships the init/health snapshot
-    and the trace ingestion-lag signal that has no Sentry equivalent.
+        Init snapshot from ``observability.get_sentry_health()`` plus
+        live 1h / 24h / 7d error counts via the Sentry Events Stats
+        API. ``error_rate_*`` is ``null`` when ``SENTRY_AUTH_TOKEN``
+        / ``SENTRY_ORG`` are unset — the card renders that as "n/a"
+        rather than implying a healthy zero.
+      * **Top issues (7d)** — top-10 unresolved error groups via the
+        Sentry Issues API; identical payload to the weekly digest so
+        the card and the email stay in sync.
     """
     from tracing import get_otel_health
     from observability import get_sentry_health
@@ -1268,6 +1376,13 @@ async def admin_observability(
     else:
         otel_status = "healthy"
 
+    err_1h, err_24h, err_7d = (
+        await _sentry_event_count(1),
+        await _sentry_event_count(24),
+        await _sentry_event_count(168),
+    )
+    top_issues = await _sentry_top_issues(window_hours=168, limit=10)
+
     return {
         "tracing": {
             "exporter": "gcp_trace",
@@ -1275,13 +1390,17 @@ async def admin_observability(
             **otel,
         },
         "errors": {
-            "sink":   "sentry_developer_free",
+            "sink":            "sentry_developer_free",
+            "error_rate_1h":   err_1h,
+            "error_rate_24h":  err_24h,
+            "error_rate_7d":   err_7d,
             **sentry,
         },
+        "top_issues_7d": top_issues,
         "weekly_digest": {
-            "transport": "ses",
+            "transport":      "ses",
             "recipient_role": "founder",
-            "schedule":  "weekly @ Mon 09:00 UTC",
+            "schedule":       "weekly (boot+10min, then every 7d)",
         },
     }
 
@@ -1289,35 +1408,53 @@ async def admin_observability(
 async def _emit_observability_weekly_digest(db: Any) -> dict[str, Any]:
     """Compose + send the weekly observability digest (Task #558 §D).
 
-    Wired into the existing weekly-digest cron loop (the same one that
-    delivers the SEO weekly digest in ``routes.bot_discovery``). This
-    function is kept side-effect free w.r.t. the cron scheduler — the
-    caller decides cadence — and returns the composed payload so a
-    dry-run admin invocation can preview it without SES delivery.
-
     Body sections:
-      1. Top 10 errors (last 7 d) — fetched from Sentry events API
-         using ``SENTRY_AUTH_TOKEN`` (admin-only, server-side).
-      2. Trace export health — ingestion lag, exported-span count,
+      1. **Top 10 errors (last 7 d)** — live fetch via the Sentry
+         Issues API using ``SENTRY_AUTH_TOKEN`` + ``SENTRY_ORG``.
+         Empty list when those env vars are unset (tagged as
+         ``sentry_api_unconfigured`` in the response so the UI / SES
+         body can call it out instead of implying zero issues).
+      2. **Error counts** — 1h / 24h / 7d windows via the Events
+         Stats API.
+      3. **Trace export health** — ingestion lag, exported-span count,
          last error from ``tracing.get_otel_health()``.
-      3. Sentry init snapshot from ``observability.get_sentry_health()``.
+      4. **Sentry init snapshot** from
+         ``observability.get_sentry_health()``.
 
-    Delivery uses the SES wrapper that ships in the email-canonical
-    task (#557). Until that ships the digest path skips the send and
-    returns ``{"sent": False, "reason": "ses-pending-task-557"}`` —
-    the umbrella TODO_557 ban will guarantee the SES adapter is the
-    only valid sink the day this gets switched on.
+    Delivery: prefers ``ses_email.send_email`` (lands with Task #557).
+    Until #557 merges the digest still computes the full payload
+    every tick (so the admin endpoint ``/admin/health/observability``
+    can render the same numbers) and returns ``ses-pending-task-557``
+    in the ``reason`` field — exactly the no-silent-fallback shape
+    V4 §12 requires. ``OBSERVABILITY_DIGEST_TO`` pins the recipient
+    once SES is live.
     """
     from tracing import get_otel_health
     from observability import get_sentry_health
 
     otel = get_otel_health()
     sentry = get_sentry_health()
-    payload = {
-        "subject": "Syrabit observability — weekly digest",
-        "tracing": otel,
-        "errors": sentry,
-        "top_errors_7d": [],  # filled in once the Sentry events API token is wired.
+    err_1h, err_24h, err_7d = (
+        await _sentry_event_count(1),
+        await _sentry_event_count(24),
+        await _sentry_event_count(168),
+    )
+    top_issues = await _sentry_top_issues(window_hours=168, limit=10)
+    sentry_api_configured = bool(
+        os.environ.get("SENTRY_AUTH_TOKEN", "").strip()
+        and os.environ.get("SENTRY_ORG", "").strip()
+    )
+    payload: dict[str, Any] = {
+        "subject":        "Syrabit observability — weekly digest",
+        "tracing":        otel,
+        "errors":         {
+            **sentry,
+            "error_rate_1h":  err_1h,
+            "error_rate_24h": err_24h,
+            "error_rate_7d":  err_7d,
+        },
+        "top_errors_7d":  top_issues,
+        "sentry_api_configured": sentry_api_configured,
     }
     try:
         from ses_email import send_email  # type: ignore

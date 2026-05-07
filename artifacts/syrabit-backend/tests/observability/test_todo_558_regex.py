@@ -67,14 +67,36 @@ def test_positive_floats_are_banned():
 
 
 def test_other_558_bans_still_fire():
+    # Comma-separated multi-exporter (any first token).
     assert _match("OTEL_TRACES_EXPORTER=googlecloud,otlp")
     assert _match('OTEL_TRACES_EXPORTER="googlecloud",otlp')
+    # Sentry tracing kwargs / decorators / API.
     assert _match("init(enable_tracing=True)")
     assert _match("with sentry_sdk.start_transaction(op='task'):")
     assert _match("@sentry_sdk.trace")
 
 
-def test_single_value_otel_exporter_is_allowed():
-    # Bicep ships exactly this single value; must not trip.
+def test_any_non_googlecloud_single_exporter_is_banned():
+    # Per round-2 review: the regex must reject EVERY OTEL exporter
+    # value except `googlecloud` (single literal). Single-value
+    # alternative exporters like otlp / jaeger / zipkin / azure_monitor
+    # / console / empty are all banned even without a trailing comma.
+    for s in (
+        "OTEL_TRACES_EXPORTER=otlp",
+        "OTEL_TRACES_EXPORTER=jaeger",
+        "OTEL_TRACES_EXPORTER=zipkin",
+        "OTEL_TRACES_EXPORTER=azure_monitor",
+        "OTEL_TRACES_EXPORTER=console",
+        'OTEL_TRACES_EXPORTER="otlp"',
+        'OTEL_TRACES_EXPORTER="azure_monitor"',
+    ):
+        assert _match(s), f"expected ban hit: {s!r}"
+
+
+def test_single_value_googlecloud_otel_exporter_is_allowed():
+    # Bicep ships exactly this single value; must not trip — neither
+    # bare nor quoted, neither with trailing whitespace nor at EOL.
     assert not _match("OTEL_TRACES_EXPORTER=googlecloud")
     assert not _match('OTEL_TRACES_EXPORTER="googlecloud"')
+    assert not _match("OTEL_TRACES_EXPORTER=googlecloud ")
+    assert not _match("OTEL_TRACES_EXPORTER=googlecloud\n")
