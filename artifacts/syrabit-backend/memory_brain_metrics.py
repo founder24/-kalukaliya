@@ -91,6 +91,25 @@ _VALID_OPS = ("write", "read")
 #   last_ok_ts / last_fail_ts                                 (HSET overwrite)
 _FLEET_KEY_PREFIX = "mb:fleet:h:"
 _FLEET_BUCKET_TTL_SECONDS = 25 * 3600  # 24h window + 1h slack
+# Task #483 — per-worker fan-out fields live in the same hour-keyed
+# hash as the aggregate counters so we don't double the Upstash key
+# count. Field naming:
+#   worker:<pid>:op:<op>:<outcome>   counters per (pid, op, outcome)
+#   worker:<pid>:last_<outcome>_ts   most-recent ok/fail timestamp
+# Co-locating the per-worker fields in the same hash means a single
+# HGETALL still returns everything the dashboard needs — no extra
+# round-trip and no risk of the aggregate and per-worker views going
+# out of sync between two reads.
+#
+# IMPORTANT: gunicorn runs with ``preload_app = True`` so this module
+# is imported in the *master* process before forking. Capturing
+# ``os.getpid()`` at import time would attribute every worker's
+# events to the master's pid, defeating the entire breakdown. We
+# resolve the pid lazily at write time via ``_current_worker_pid()``
+# so each forked worker stamps its own pid into Upstash. Tests
+# monkeypatch this helper to simulate multiple workers.
+def _current_worker_pid() -> int:
+    return _os.getpid()
 _FLEET_QUEUE_MAX = 4096
 _fleet_queue: _queue.Queue = _queue.Queue(maxsize=_FLEET_QUEUE_MAX)
 _fleet_writer_started = False
@@ -140,14 +159,24 @@ def _fleet_writer_loop() -> None:
                 continue
             key = f"{_FLEET_KEY_PREFIX}{_hour_bucket(ts)}"
             outcome = "ok" if ok else "fail"
+            # Resolve pid at write time, NOT module import time —
+            # gunicorn preloads this module in the master before
+            # forking (see ``_current_worker_pid`` docstring).
+            pid = _current_worker_pid()
             try:
                 _rc.hincrby(key, f"op:{op}:{outcome}", 1)
                 _rc.hincrby(key, f"kind:{kind}:{outcome}", 1)
                 if not ok and reason:
                     _rc.hincrby(key, f"reason:{reason}", 1)
+                # Task #483 — per-worker fan-out: same (op, outcome)
+                # counter scoped to this gunicorn worker pid so the
+                # admin tile can render a "pid 42 is the one failing"
+                # breakdown without standing up a second key.
+                _rc.hincrby(key, f"worker:{pid}:op:{op}:{outcome}", 1)
                 # Track most-recent timestamps so the tile can show
                 # "last ok / last fail" across the whole fleet.
                 _rc.hset(key, f"last_{outcome}_ts", str(ts))
+                _rc.hset(key, f"worker:{pid}:last_{outcome}_ts", str(ts))
                 # Refresh TTL on every write so an actively-used hour
                 # bucket can't expire mid-window.
                 _rc.expire(key, _FLEET_BUCKET_TTL_SECONDS)
@@ -561,6 +590,104 @@ def get_fleet_hourly_buckets(hours: int = 24) -> list[dict[str, Any]]:
     return out
 
 
+def get_fleet_workers(hours: int = 24) -> list[dict[str, Any]]:
+    """Task #483 — per-worker fan-out breakdown over the last ``hours``.
+
+    Walks the same hour-keyed Upstash hashes used by
+    :func:`get_fleet_stats` and pulls out the ``worker:<pid>:...``
+    fields, returning one row per worker pid seen in the window::
+
+        [{"pid": 42, "writes_ok": 100, "writes_fail": 3,
+          "reads_ok": 80, "reads_fail": 0,
+          "total": 183, "failures": 3, "failure_rate_pct": 1.64,
+          "last_ok_ts": 1.7e9, "last_fail_ts": 1.7e9}, ...]
+
+    Sorted by failure rate descending then by total descending so the
+    misbehaving workers float to the top of the operator's table —
+    that is the whole point of the breakdown (a partial outage where
+    pid 42 has a revoked Voyage key while the rest are healthy).
+    Returns an empty list when Upstash is unwired or unreadable so
+    the frontend can hide the disclosure section cleanly.
+    """
+    if hours <= 0 or hours > 24:
+        hours = 24
+    if not _fleet_enabled():
+        return []
+    raw, read_ok = _fleet_fetch_buckets(hours)
+    if not read_ok:
+        return []
+
+    # pid -> {writes_ok, writes_fail, reads_ok, reads_fail,
+    #         last_ok_ts, last_fail_ts}
+    by_pid: dict[str, dict[str, Any]] = {}
+
+    def _row(pid: str) -> dict[str, Any]:
+        return by_pid.setdefault(pid, {
+            "writes_ok": 0, "writes_fail": 0,
+            "reads_ok": 0, "reads_fail": 0,
+            "last_ok_ts": None, "last_fail_ts": None,
+        })
+
+    for entry in raw:
+        for field, val in (entry.get("fields") or {}).items():
+            f = field if isinstance(field, str) else field.decode("utf-8", "ignore")
+            if not f.startswith("worker:"):
+                continue
+            parts = f.split(":")
+            # worker:<pid>:op:<op>:<outcome>           (5 parts)
+            # worker:<pid>:last_ok_ts / last_fail_ts   (3 parts)
+            if len(parts) == 5 and parts[2] == "op":
+                pid, op, outcome = parts[1], parts[3], parts[4]
+                n = _coerce_int(val)
+                if n <= 0:
+                    continue
+                row = _row(pid)
+                if op == "write" and outcome == "ok":
+                    row["writes_ok"] += n
+                elif op == "write" and outcome == "fail":
+                    row["writes_fail"] += n
+                elif op == "read" and outcome == "ok":
+                    row["reads_ok"] += n
+                elif op == "read" and outcome == "fail":
+                    row["reads_fail"] += n
+            elif len(parts) == 3 and parts[2] in ("last_ok_ts", "last_fail_ts"):
+                pid = parts[1]
+                ts = _coerce_float(val)
+                if ts is None:
+                    continue
+                row = _row(pid)
+                key = "last_ok_ts" if parts[2] == "last_ok_ts" else "last_fail_ts"
+                cur = row[key]
+                if cur is None or ts > cur:
+                    row[key] = ts
+
+    out: list[dict[str, Any]] = []
+    for pid, row in by_pid.items():
+        total = row["writes_ok"] + row["writes_fail"] + row["reads_ok"] + row["reads_fail"]
+        failures = row["writes_fail"] + row["reads_fail"]
+        failure_rate_pct = round((failures / total) * 100.0, 2) if total else 0.0
+        try:
+            pid_int: Any = int(pid)
+        except (TypeError, ValueError):
+            pid_int = pid
+        out.append({
+            "pid": pid_int,
+            "writes_ok": row["writes_ok"],
+            "writes_fail": row["writes_fail"],
+            "reads_ok": row["reads_ok"],
+            "reads_fail": row["reads_fail"],
+            "total": total,
+            "failures": failures,
+            "failure_rate_pct": failure_rate_pct,
+            "last_ok_ts": row["last_ok_ts"],
+            "last_fail_ts": row["last_fail_ts"],
+        })
+    # Worst (highest failure rate, then highest volume) first so the
+    # operator's eye lands on the misbehaving worker immediately.
+    out.sort(key=lambda r: (-r["failure_rate_pct"], -r["total"]))
+    return out
+
+
 def get_fleet_dropped_events() -> int:
     """Return this worker's monotonic count of fleet-rollup queue
     drops (Task #482).
@@ -596,6 +723,7 @@ def reset() -> None:
 __all__ = [
     "record_event", "get_stats", "get_hourly_buckets",
     "get_fleet_stats", "get_fleet_hourly_buckets",
+    "get_fleet_workers",
     "get_fleet_dropped_events",
     "reset",
 ]

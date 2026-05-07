@@ -97,6 +97,12 @@ async def admin_memory_brain_metrics(
     # whether to enable the fleet/per-worker toggle or hide it.
     fleet_stats = _mbm.get_fleet_stats(window_seconds=window_seconds)
     fleet_buckets = _mbm.get_fleet_hourly_buckets(hours=hours)
+    # Task #483 — per-worker fan-out breakdown so the operator can
+    # spot a partial outage (e.g. one worker's Voyage key revoked)
+    # behind the "show workers" disclosure on the tile. Empty list
+    # when Upstash isn't wired or is currently failing reads — the
+    # frontend hides the disclosure in that case.
+    fleet_workers = _mbm.get_fleet_workers(hours=hours)
 
     return {
         "ok": True,
@@ -104,6 +110,12 @@ async def admin_memory_brain_metrics(
         "buckets": _mbm.get_hourly_buckets(hours=hours),
         "fleet_stats": fleet_stats,
         "fleet_buckets": fleet_buckets,
+        "fleet_workers": fleet_workers,
+        # ``workers`` is the field name from Task #483's spec
+        # ("returns a `workers: [...]` array"); kept as an alias of
+        # ``fleet_workers`` for any external consumer that follows the
+        # task wording. The current frontend reads ``fleet_workers``.
+        "workers": fleet_workers,
         "worker_pid": os.getpid(),
         "feature_enabled": feature_enabled,
         "alert_threshold": {

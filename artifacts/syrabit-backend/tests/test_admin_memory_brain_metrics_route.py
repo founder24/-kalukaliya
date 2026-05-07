@@ -69,8 +69,13 @@ def test_route_returns_expected_shape_and_reflects_recorded_events(app_client_au
     # worker view; both are required so the frontend can offer the
     # scope toggle without conditional-key juggling.
     for key in ("ok", "stats", "buckets", "fleet_stats", "fleet_buckets",
+                "fleet_workers",
                 "worker_pid", "feature_enabled", "alert_threshold"):
         assert key in body, f"missing top-level key: {key}"
+    # Task #483 — per-worker fan-out is always returned (empty list
+    # when Upstash isn't wired) so the frontend can render the
+    # disclosure without conditional-key juggling.
+    assert isinstance(body["fleet_workers"], list)
     # Fleet payload always carries the availability flag so the
     # frontend can disable the toggle when Upstash isn't wired
     # (e.g. in this test, where redis_client is None).

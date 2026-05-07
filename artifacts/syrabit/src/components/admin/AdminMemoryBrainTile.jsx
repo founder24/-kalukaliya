@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { RefreshCw, AlertTriangle, ShieldCheck, Brain, Network, Cpu } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ShieldCheck, Brain, Network, Cpu, ChevronDown, ChevronRight } from 'lucide-react';
 import { API_BASE } from '@/utils/api';
 // Default banner threshold + min sample. The backend response also
 // carries the live operator-tuned values under `alert_threshold` so
@@ -40,6 +40,10 @@ export default function AdminMemoryBrainTile({ adminToken }) {
   // deploy at once. Per-worker stays one click away for partial-
   // outage debugging (e.g. one worker's Voyage key revoked).
   const [scope, setScope] = useState('fleet');
+  // Task #483 — collapsed by default; the per-worker breakdown is
+  // only useful when the operator is actively chasing a partial
+  // outage, so we keep the tile compact for the common healthy case.
+  const [showWorkers, setShowWorkers] = useState(false);
 
   const load = useCallback(async () => {
     if (!adminToken) return;
@@ -246,6 +250,69 @@ export default function AdminMemoryBrainTile({ adminToken }) {
               <Area type="monotone" dataKey="failures" stroke="#ef4444" strokeWidth={1.5} fill="url(#mb-fail)" />
             </AreaChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Task #483 — per-worker fan-out breakdown. Only shown when
+          fleet rollup is wired and the backend returned at least one
+          worker row; otherwise there's nothing meaningful to disclose. */}
+      {fleetAvailable && (data?.fleet_workers || []).length > 0 && (
+        <div className="mt-3" data-testid="memory-brain-workers-section">
+          <button
+            type="button"
+            onClick={() => setShowWorkers(v => !v)}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-700"
+            data-testid="memory-brain-workers-toggle"
+            aria-expanded={showWorkers}
+          >
+            {showWorkers ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            show workers ({(data?.fleet_workers || []).length})
+          </button>
+          {showWorkers && (
+            <div className="mt-1 overflow-x-auto">
+              <table
+                className="w-full text-[11px] text-gray-600 border-collapse"
+                data-testid="memory-brain-workers-table"
+              >
+                <thead>
+                  <tr className="text-left text-gray-400">
+                    <th className="font-medium pr-2 py-1">pid</th>
+                    <th className="font-medium pr-2 py-1 text-right">w&nbsp;ok</th>
+                    <th className="font-medium pr-2 py-1 text-right">w&nbsp;fail</th>
+                    <th className="font-medium pr-2 py-1 text-right">r&nbsp;ok</th>
+                    <th className="font-medium pr-2 py-1 text-right">r&nbsp;fail</th>
+                    <th className="font-medium pr-2 py-1 text-right">fail&nbsp;%</th>
+                    <th className="font-medium py-1 text-right">last&nbsp;fail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.fleet_workers || []).map(w => {
+                    const wFailPct = Number(w.failure_rate_pct || 0);
+                    // Mirror the banner threshold so a per-worker row
+                    // turns red the same instant the aggregate would.
+                    const rowTripped = w.total >= minSample && wFailPct > bannerPct;
+                    return (
+                      <tr
+                        key={w.pid}
+                        className={rowTripped ? 'text-red-600' : ''}
+                        data-testid={`memory-brain-worker-row-${w.pid}`}
+                      >
+                        <td className="font-mono pr-2 py-0.5">{w.pid}</td>
+                        <td className="pr-2 py-0.5 text-right">{w.writes_ok}</td>
+                        <td className="pr-2 py-0.5 text-right">{w.writes_fail}</td>
+                        <td className="pr-2 py-0.5 text-right">{w.reads_ok}</td>
+                        <td className="pr-2 py-0.5 text-right">{w.reads_fail}</td>
+                        <td className="pr-2 py-0.5 text-right">{wFailPct.toFixed(1)}%</td>
+                        <td className="py-0.5 text-right text-gray-400">
+                          {_fmtTs(w.last_fail_ts)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
