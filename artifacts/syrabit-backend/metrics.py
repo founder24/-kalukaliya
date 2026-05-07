@@ -3198,4 +3198,175 @@ async def _alerting_loop():
         await asyncio.sleep(120)   # check every 2 minutes
 
 
+# ── Sarvam chat metrics (Task #553) ───────────────────────────────────────
+# Per-call event ring used by both the AdminHealth tile
+# (`/api/admin/health/sarvam`) and the <95 %/1 h Sentry alert. Each entry:
+#   {ts, success, latency_ms, prompt_tokens, completion_tokens, cost_usd, error}
+# Bounded list — process-local (per-replica). Alert sensitivity is
+# intentionally per-replica too: whichever replica first crosses the
+# floor pages on-call, instead of waiting for cross-replica aggregation.
+_SARVAM_CHAT_EVENTS: list[dict] = []
+_SARVAM_CHAT_EVENTS_MAX = 5000
+
+# Public Sarvam-m pricing (USD per 1k tokens, May 2026 published rates).
+# Treated as a constant — bumping it is a deliberate change because it
+# feeds the per-day cost figure on the admin tile.
+SARVAM_M_INPUT_USD_PER_1K = 0.0005
+SARVAM_M_OUTPUT_USD_PER_1K = 0.001
+
+# Sentry alert constants — surfaced on the admin tile too.
+SARVAM_ALERT_FLOOR = 0.95
+SARVAM_ALERT_WINDOW_S = 3600
+SARVAM_ALERT_MIN_SAMPLES = 20
+_SARVAM_LAST_ALERT_TS: float = 0.0
+SARVAM_ALERT_THROTTLE_S = 3600  # at most one Sentry hit per replica per hour
+
+
+def _sarvam_cost_usd(prompt_tokens: int, completion_tokens: int) -> float:
+    return (
+        prompt_tokens * SARVAM_M_INPUT_USD_PER_1K / 1000.0
+        + completion_tokens * SARVAM_M_OUTPUT_USD_PER_1K / 1000.0
+    )
+
+
+def record_sarvam_chat(
+    *,
+    success: bool,
+    latency_ms: float,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    error: str | None = None,
+) -> None:
+    """Append a Sarvam chat event with cost + token usage. Best-effort.
+
+    This is the canonical write path for the ``sarvam_chat`` metric
+    surfaced by ``/api/admin/health/sarvam`` and by the <95 %/1 h
+    Sentry alert in `providers/sarvam.py`."""
+    cost = _sarvam_cost_usd(prompt_tokens, completion_tokens)
+    _SARVAM_CHAT_EVENTS.append({
+        "ts": _time_mod.time(),
+        "success": bool(success),
+        "latency_ms": float(latency_ms),
+        "prompt_tokens": int(prompt_tokens),
+        "completion_tokens": int(completion_tokens),
+        "cost_usd": cost,
+        "error": (error or "")[:200],
+    })
+    if len(_SARVAM_CHAT_EVENTS) > _SARVAM_CHAT_EVENTS_MAX:
+        del _SARVAM_CHAT_EVENTS[: len(_SARVAM_CHAT_EVENTS) - _SARVAM_CHAT_EVENTS_MAX]
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    s = sorted(values)
+    k = max(0, min(len(s) - 1, int(round((pct / 100.0) * (len(s) - 1)))))
+    return s[k]
+
+
+def sarvam_chat_snapshot(
+    window_seconds: int = SARVAM_ALERT_WINDOW_S,
+    *,
+    short_window_seconds: int = 300,
+    cost_window_seconds: int = 86400,
+) -> dict:
+    """Return the rolling Sarvam chat snapshot powering the admin tile.
+
+    Fields:
+      • ``window_s`` (default 3600), ``ok``, ``err``, ``total``,
+        ``success_rate`` over the window — used for the Sentry alert.
+      • ``short_window_s`` (default 300) + ``success_rate_5m`` — what
+        the admin tile shows as the freshness indicator.
+      • ``p50_latency_ms`` / ``p95_latency_ms`` over the alert window.
+      • ``cost_window_s`` (default 86400) + ``cost_usd_24h`` +
+        ``tokens_24h`` — daily token + cost roll-up.
+      • ``last_error`` — most recent failure string (truncated 200ch).
+      • ``alert`` — True when ``success_rate < SARVAM_ALERT_FLOOR`` AND
+        ``total >= SARVAM_ALERT_MIN_SAMPLES``.
+    """
+    now = _time_mod.time()
+    cutoff_w = now - window_seconds
+    cutoff_s = now - short_window_seconds
+    cutoff_c = now - cost_window_seconds
+
+    ok = err = ok_s = total_s = 0
+    latencies: list[float] = []
+    cost_24h = 0.0
+    tokens_24h = 0
+    last_error = ""
+    last_error_ts = 0.0
+    for ev in _SARVAM_CHAT_EVENTS:
+        ts = ev["ts"]
+        if ts >= cutoff_w:
+            if ev["success"]:
+                ok += 1
+            else:
+                err += 1
+                if ts > last_error_ts and ev.get("error"):
+                    last_error = ev["error"]
+                    last_error_ts = ts
+            latencies.append(ev["latency_ms"])
+        if ts >= cutoff_s:
+            total_s += 1
+            if ev["success"]:
+                ok_s += 1
+        if ts >= cutoff_c:
+            cost_24h += float(ev.get("cost_usd") or 0.0)
+            tokens_24h += int(ev.get("prompt_tokens") or 0) + int(ev.get("completion_tokens") or 0)
+
+    total = ok + err
+    rate = (ok / total) if total else 1.0
+    rate_5m = (ok_s / total_s) if total_s else 1.0
+    alert = bool(total >= SARVAM_ALERT_MIN_SAMPLES and rate < SARVAM_ALERT_FLOOR)
+    return {
+        "window_s": window_seconds,
+        "short_window_s": short_window_seconds,
+        "cost_window_s": cost_window_seconds,
+        "ok": ok,
+        "err": err,
+        "total": total,
+        "success_rate": round(rate, 4),
+        "success_rate_5m": round(rate_5m, 4),
+        "total_5m": total_s,
+        "p50_latency_ms": round(_percentile(latencies, 50), 1),
+        "p95_latency_ms": round(_percentile(latencies, 95), 1),
+        "cost_usd_24h": round(cost_24h, 6),
+        "tokens_24h": tokens_24h,
+        "last_error": last_error,
+        "alert": alert,
+        "alert_floor": SARVAM_ALERT_FLOOR,
+        "min_samples": SARVAM_ALERT_MIN_SAMPLES,
+    }
+
+
+def maybe_emit_sarvam_alert() -> bool:
+    """Fire a throttled Sentry warning when the snapshot's ``alert``
+    flag flips on. Returns True if an alert was emitted (mainly for
+    tests). Throttled to once per ``SARVAM_ALERT_THROTTLE_S`` per
+    replica so a sustained outage doesn't flood Sentry."""
+    global _SARVAM_LAST_ALERT_TS
+    snap = sarvam_chat_snapshot()
+    if not snap["alert"]:
+        return False
+    now = _time_mod.time()
+    if now - _SARVAM_LAST_ALERT_TS < SARVAM_ALERT_THROTTLE_S:
+        return False
+    _SARVAM_LAST_ALERT_TS = now
+    try:  # pragma: no cover — Sentry availability is environmental
+        import sentry_sdk  # type: ignore
+
+        sentry_sdk.set_tag("provider", "sarvam")
+        sentry_sdk.set_tag("sarvam.success_rate_1h", str(snap["success_rate"]))
+        sentry_sdk.set_tag("sarvam.success_rate_5m", str(snap["success_rate_5m"]))
+        sentry_sdk.set_tag("sarvam.total_1h", str(snap["total"]))
+        sentry_sdk.set_tag("sarvam.p95_ms", str(snap["p95_latency_ms"]))
+        sentry_sdk.capture_message(
+            f"sarvam_chat_below_floor:{snap['success_rate']:.2%}",
+            level="warning",
+        )
+    except Exception:
+        pass
+    return True
+
+
 # Admin endpoints for alert management

@@ -8,6 +8,9 @@ const STATUS_STYLE = {
   not_configured: { bg: '#f3f4f6', fg: '#4b5563', border: '#d1d5db', label: 'NOT CONFIGURED', Icon: KeyRound },
 };
 
+function pct(v) { return `${(v * 100).toFixed(1)}%`; }
+function money(v) { return `$${Number(v || 0).toFixed(4)}`; }
+
 export default function SarvamHealthCard({ token }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -49,7 +52,6 @@ export default function SarvamHealthCard({ token }) {
 
   const style = STATUS_STYLE[data.status] || STATUS_STYLE.degraded;
   const { Icon } = style;
-  const ratePct = (data.success_rate * 100).toFixed(1);
   const floorPct = (data.alert_floor * 100).toFixed(0);
 
   return (
@@ -69,17 +71,22 @@ export default function SarvamHealthCard({ token }) {
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
-        <Stat label="OK / 1h"        value={data.ok} />
-        <Stat label="Errors / 1h"    value={data.err} tone={data.err > 0 ? 'warn' : 'ok'} />
-        <Stat label="Success rate"   value={`${ratePct}%`} tone={data.alert ? 'warn' : 'ok'} />
-        <Stat label="Per-user cap"   value={data.per_user_monthly_cap > 0 ? `${data.per_user_monthly_cap}/mo` : 'off'} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 8 }}>
+        <Stat label="Success / 5m"    value={pct(data.success_rate_5m)} sub={`${data.total_5m} calls`} tone={data.success_rate_5m < data.alert_floor ? 'warn' : 'ok'} />
+        <Stat label="Success / 1h"    value={pct(data.success_rate)} sub={`${data.total} calls`} tone={data.alert ? 'warn' : 'ok'} />
+        <Stat label="p50 / p95"       value={`${Math.round(data.p50_latency_ms)} / ${Math.round(data.p95_latency_ms)} ms`} />
+        <Stat label="Cost / 24h"      value={money(data.cost_usd_24h)} sub={`${data.tokens_24h.toLocaleString()} tok`} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 12 }}>
+        <Stat label="Per-user cap"  value={data.per_user_monthly_cap > 0 ? `${data.per_user_monthly_cap}/mo` : 'off'} />
+        <Stat label="Last error"    value={data.last_error ? data.last_error.slice(0, 40) : '—'} tone={data.last_error ? 'warn' : 'ok'} />
       </div>
 
       <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6 }}>
         Role: <strong>{data.role}</strong> in <code>assamese_rag_chat</code> chain
         → fallback <code>{data.fallback}</code>.
-        {' '}Sentry alert fires when success rate &lt; {floorPct}% over {Math.round(data.window_s/60)}min
+        {' '}Sentry alert fires when 1h success rate &lt; {floorPct}%
         (with ≥ {data.min_samples} samples).
       </div>
       {data.error && (
@@ -91,12 +98,13 @@ export default function SarvamHealthCard({ token }) {
   );
 }
 
-function Stat({ label, value, tone }) {
+function Stat({ label, value, sub, tone }) {
   const fg = tone === 'warn' ? '#b45309' : tone === 'ok' ? '#047857' : '#111827';
   return (
     <div style={{ background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: 8, padding: '8px 10px' }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 14, fontWeight: 700, color: fg }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }

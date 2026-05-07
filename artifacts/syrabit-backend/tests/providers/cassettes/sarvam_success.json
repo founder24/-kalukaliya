@@ -1,0 +1,29 @@
+{
+  "_recorded": "2026-05-07T19:00:00Z",
+  "_note": "VCR-style cassette for providers.sarvam.chat success path. Replayed via httpx.MockTransport — see tests/providers/test_sarvam.py.",
+  "request": {
+    "method": "POST",
+    "url": "/v1/chat/completions",
+    "json_keys": ["model", "messages", "max_tokens", "temperature", "stream", "response_language"]
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "id": "chatcmpl-cassette-success",
+      "object": "chat.completion",
+      "model": "sarvam-m",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "<think>The user greeted in English. Reply briefly in Assamese.</think>নমস্কাৰ, মই ভালে আছোঁ। আপুনি কেনে আছে?"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {"prompt_tokens": 18, "completion_tokens": 24, "total_tokens": 42}
+    }
+  }
+}

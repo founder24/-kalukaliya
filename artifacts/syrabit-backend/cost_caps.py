@@ -39,7 +39,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Iterable, List, Mapping
+from datetime import datetime, timezone
+from typing import Iterable, List, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -709,4 +710,52 @@ __all__ = [
     "_CHAT_CHAIN_DEFAULT",
     "_CHAT_CHAIN_FLIPPED",
     "_CHAT_RUNWAY_FLIP_DAYS",
+    "SARVAM_PER_USER_MONTHLY_CAP",
+    "record_sarvam_user_call",
 ]
+
+
+# ── Sarvam-AI per-user monthly cap interceptor (Task #553) ─────────────────
+# Defensive in-process backstop for the edge worker's CHAT_CAP_MONTHLY=30.
+# `providers/sarvam.chat()` calls `record_sarvam_user_call(user_id)` before
+# every dispatch; a False return surfaces as `SarvamRateLimited
+# ("per_user_monthly_cap")` (V4 §12 — fail loud, no silent downgrade).
+SARVAM_PER_USER_MONTHLY_CAP = int(
+    os.environ.get("SARVAM_PER_USER_MONTHLY_CAP", "30") or "30"
+)
+
+
+def record_sarvam_user_call(user_id: Optional[str], *, cap: Optional[int] = None) -> bool:
+    """Increment the per-user month bucket for Sarvam.
+
+    Returns ``True`` when the call is allowed (under the cap or anon /
+    cap disabled / Redis unavailable). Returns ``False`` ONLY when an
+    authenticated user has just crossed the configured monthly cap.
+
+    No-op (returns ``True``) when:
+      • ``cap <= 0`` or `SARVAM_PER_USER_MONTHLY_CAP <= 0` (override),
+      • ``user_id`` is falsy (anon — edge worker is the canonical
+        enforcer; it keys on ``anon-id`` which we don't see here),
+      • Redis is unavailable (best-effort by design — the edge cap is
+        the authoritative shed; an unreachable in-process bucket must
+        not 429 the chain since Sarvam itself is still healthy).
+    """
+    effective_cap = cap if cap is not None else SARVAM_PER_USER_MONTHLY_CAP
+    if effective_cap <= 0 or not user_id:
+        return True
+    try:
+        from deps import redis_client as _rc  # local import — see deps stub
+    except Exception:
+        return True
+    if not _rc:
+        return True
+    month = datetime.now(timezone.utc).strftime("%Y%m")
+    key = f"sarvam:user:{user_id}:{month}"
+    try:
+        new_val = int(_rc.incr(key))
+        if new_val == 1:
+            _rc.expire(key, 32 * 86400)
+    except Exception:
+        return True
+    return new_val <= effective_cap
+

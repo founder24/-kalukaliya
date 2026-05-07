@@ -1,26 +1,26 @@
 """tests.providers.test_sarvam — Task #553.
 
-Hermetic unit tests for ``providers.sarvam.chat`` covering the four
-contract cases the task lists as "VCR fixtures":
+VCR-style hermetic unit tests for ``providers.sarvam.chat``.
 
-  1. Successful Assamese reply           → ``ChatResponse`` with text
-  2. Upstream 429                        → ``SarvamRateLimited("upstream_429")``
-  3. Upstream 500                        → ``SarvamUnavailable``
-  4. Network timeout                     → ``SarvamUnavailable``
+The four required wire-level cases (success / 429 / 500 / timeout) are
+driven from JSON cassette files in ``tests/providers/cassettes/``,
+loaded into an ``httpx.MockTransport`` and bound to a real
+``httpx.AsyncClient`` that we patch into ``deps.sarvam_llm_client``.
+The cassettes carry the recorded HTTP exchange (status, headers,
+body) so adding a new case is "drop a JSON file + add a test stub" —
+no inline mock plumbing.
 
-Plus a fifth case for the per-user cap (``SarvamRateLimited
-("per_user_monthly_cap")``) and a sixth for the success-rate
-snapshot powering the admin tile + Sentry alert.
-
-We don't actually shell out to ``vcrpy`` because the live dispatcher
-already has chain-shape coverage in ``test_assamese_routing_chain_e2e.py``;
-these tests pin the **facade contract** (typed exceptions, dataclass
-shape, cap enforcement, success-rate counters) and use a dummy async
-client to keep them hermetic in CI.
+Higher-level facade contract tests (per-user cap, anon skip, cap=0
+override, success-rate snapshot, Sentry alert flip) use the same
+cassette infrastructure to stay consistent.
 """
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+from pathlib import Path
+from typing import Optional
 
 import httpx
 import pytest
@@ -31,121 +31,165 @@ from providers.sarvam import (
     SarvamRateLimited,
     SarvamUnavailable,
     chat,
-    success_rate_snapshot,
 )
 
-
-class _FakeResp:
-    def __init__(self, status_code: int, body=None, headers=None) -> None:
-        self.status_code = status_code
-        self._body = body if body is not None else {}
-        self.headers = headers or {}
-        self.text = str(body)[:200] if body is not None else ""
-
-    def json(self) -> dict:
-        if isinstance(self._body, Exception):
-            raise self._body
-        return self._body
+CASSETTE_DIR = Path(__file__).parent / "cassettes"
 
 
-class _FakeClient:
-    def __init__(self, behavior) -> None:
-        # `behavior` is either a _FakeResp, an Exception to raise, or
-        # a callable returning either of those.
-        self.behavior = behavior
-        self.calls: list[dict] = []
+def _load_cassette(name: str) -> dict:
+    """Load a JSON cassette by stem (no `.json`)."""
+    path = CASSETTE_DIR / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
 
-    async def post(self, path, json=None):  # noqa: A002 - shadowing stdlib `json` in signature
-        self.calls.append({"path": path, "json": json})
-        b = self.behavior() if callable(self.behavior) else self.behavior
-        if isinstance(b, Exception):
-            raise b
-        return b
+
+def _cassette_handler(cassette: dict):
+    """Build an ``httpx.MockTransport`` handler that replays one
+    recorded response. Tracks the inbound request on the closure so
+    tests can assert on it."""
+    captured: dict = {"calls": []}
+    resp_spec = cassette["response"]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        body_bytes = request.content or b""
+        try:
+            body_json = json.loads(body_bytes.decode("utf-8")) if body_bytes else None
+        except Exception:
+            body_json = None
+        captured["calls"].append({
+            "method": request.method,
+            "url": str(request.url),
+            "json": body_json,
+        })
+        if "raise" in resp_spec:
+            kind = resp_spec["raise"]
+            msg = resp_spec.get("message", "simulated transport error")
+            if kind.endswith("ReadTimeout"):
+                raise httpx.ReadTimeout(msg)
+            if kind.endswith("ConnectError"):
+                raise httpx.ConnectError(msg)
+            raise httpx.TransportError(msg)
+        body = resp_spec.get("body", {})
+        return httpx.Response(
+            status_code=int(resp_spec["status_code"]),
+            headers=resp_spec.get("headers") or {},
+            json=body if isinstance(body, (dict, list)) else None,
+            content=body if isinstance(body, (str, bytes)) else None,
+        )
+
+    return _handler, captured
+
+
+def _install_cassette(monkeypatch, cassette_name: Optional[str]):
+    """Wire a real ``httpx.AsyncClient`` driven by the cassette into
+    ``deps.sarvam_llm_client``. Returns the captured-calls dict."""
+    import deps
+
+    if cassette_name is None:
+        monkeypatch.setattr(deps, "sarvam_llm_client", None, raising=False)
+        return {"calls": []}
+
+    cassette = _load_cassette(cassette_name)
+    handler, captured = _cassette_handler(cassette)
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url="https://api.sarvam.ai")
+    monkeypatch.setattr(deps, "sarvam_llm_client", client, raising=False)
+    return captured
 
 
 @pytest.fixture(autouse=True)
-def _reset_recent_calls():
-    sarvam_mod._RECENT_CALLS.clear()
+def _reset_metrics_state():
+    """Drop the in-process Sarvam event ring + alert throttle between
+    tests so the rolling snapshot is deterministic."""
+    import metrics
+
+    metrics._SARVAM_CHAT_EVENTS.clear()
+    metrics._SARVAM_LAST_ALERT_TS = 0.0
     yield
-    sarvam_mod._RECENT_CALLS.clear()
+    metrics._SARVAM_CHAT_EVENTS.clear()
+    metrics._SARVAM_LAST_ALERT_TS = 0.0
 
 
-def _install_client(monkeypatch, fake):
-    import deps
+# ── 1. VCR — success cassette ─────────────────────────────────────────────
+def test_chat_success_cassette_returns_chat_response(monkeypatch):
+    captured = _install_cassette(monkeypatch, "sarvam_success")
 
-    monkeypatch.setattr(deps, "sarvam_llm_client", fake, raising=False)
-
-
-def _ok_body(text: str = "নমস্কাৰ") -> dict:
-    return {
-        "model": "sarvam-m",
-        "choices": [{"message": {"content": text}}],
-        "usage": {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16},
-    }
-
-
-# ── 1. Successful Assamese reply ──────────────────────────────────────────
-def test_chat_success_returns_chat_response(monkeypatch):
-    fake = _FakeClient(_FakeResp(200, _ok_body("নমস্কাৰ, মই ভালে আছোঁ।")))
-    _install_client(monkeypatch, fake)
-
-    out = asyncio.run(chat([{"role": "user", "content": "Hi"}], user_id=None))
+    out = asyncio.run(
+        chat([{"role": "user", "content": "Greet me briefly."}], user_id=None, max_tokens=80)
+    )
 
     assert isinstance(out, ChatResponse)
     assert out.provider == "sarvam"
     assert out.model == "sarvam-m"
+    # `<think>...</think>` reasoning stripped from cassette body
     assert "নমস্কাৰ" in out.text
-    assert out.usage["total_tokens"] == 16
-    # Snapshot reflects the success
-    snap = success_rate_snapshot()
-    assert snap["ok"] == 1 and snap["err"] == 0
-    assert snap["success_rate"] == 1.0
+    assert "<think>" not in out.text
+    assert out.usage["prompt_tokens"] == 18
+    assert out.usage["completion_tokens"] == 24
+    assert out.usage["total_tokens"] == 42
+    # Real cost derived from the upstream usage block
+    assert out.cost_usd > 0
+    # The recorded payload was actually sent (not a fake)
+    assert captured["calls"], "cassette transport did not see the request"
+    sent = captured["calls"][0]
+    assert sent["method"] == "POST"
+    assert sent["url"].endswith("/v1/chat/completions")
+    assert sent["json"]["model"] == "sarvam-m"
+    assert sent["json"]["response_language"] == "as-IN"  # `language="as"` mapping
 
 
-def test_chat_strips_think_block(monkeypatch):
-    fake = _FakeClient(_FakeResp(200, _ok_body("<think>reasoning</think>উত্তৰ")))
-    _install_client(monkeypatch, fake)
-    out = asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
-    assert out.text == "উত্তৰ"
+def test_chat_default_language_is_assamese(monkeypatch):
+    captured = _install_cassette(monkeypatch, "sarvam_success")
+    asyncio.run(chat([{"role": "user", "content": "hi"}], user_id=None))
+    assert captured["calls"][0]["json"]["response_language"] == "as-IN"
 
 
-# ── 2. Upstream 429 → SarvamRateLimited("upstream_429") ───────────────────
-def test_chat_upstream_429_raises_rate_limited(monkeypatch):
-    fake = _FakeClient(_FakeResp(429, {"error": "rate_limit"}, headers={"retry-after": "12"}))
-    _install_client(monkeypatch, fake)
+# ── 2. VCR — upstream 429 cassette ────────────────────────────────────────
+def test_chat_upstream_429_cassette_raises_rate_limited(monkeypatch):
+    _install_cassette(monkeypatch, "sarvam_429")
 
     with pytest.raises(SarvamRateLimited) as exc_info:
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
 
     assert exc_info.value.reason == "upstream_429"
     assert exc_info.value.retry_after == 12
-    snap = success_rate_snapshot()
+
+    from metrics import sarvam_chat_snapshot
+    snap = sarvam_chat_snapshot()
     assert snap["err"] == 1
+    assert snap["last_error"] == "upstream_429"
 
 
-# ── 3. Upstream 500 → SarvamUnavailable ───────────────────────────────────
-def test_chat_upstream_500_raises_unavailable(monkeypatch):
-    fake = _FakeClient(_FakeResp(500, "boom"))
-    _install_client(monkeypatch, fake)
+# ── 3. VCR — upstream 500 cassette ────────────────────────────────────────
+def test_chat_upstream_500_cassette_raises_unavailable(monkeypatch):
+    _install_cassette(monkeypatch, "sarvam_500")
     with pytest.raises(SarvamUnavailable):
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
 
+    from metrics import sarvam_chat_snapshot
+    snap = sarvam_chat_snapshot()
+    assert snap["err"] == 1
+    assert "upstream 500" in snap["last_error"]
 
-# ── 4. Transport / timeout → SarvamUnavailable ────────────────────────────
-def test_chat_timeout_raises_unavailable(monkeypatch):
-    fake = _FakeClient(httpx.ReadTimeout("read timed out"))
-    _install_client(monkeypatch, fake)
+
+# ── 4. VCR — transport timeout cassette ───────────────────────────────────
+def test_chat_timeout_cassette_raises_unavailable(monkeypatch):
+    _install_cassette(monkeypatch, "sarvam_timeout")
     with pytest.raises(SarvamUnavailable):
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
+
+    from metrics import sarvam_chat_snapshot
+    snap = sarvam_chat_snapshot()
+    assert snap["err"] == 1
+    assert "transport" in snap["last_error"].lower()
 
 
 def test_chat_client_not_initialised_raises_unavailable(monkeypatch):
-    _install_client(monkeypatch, None)
+    _install_cassette(monkeypatch, None)
     with pytest.raises(SarvamUnavailable):
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
 
 
-# ── 5. Per-user 30/mo cap ─────────────────────────────────────────────────
+# ── 5. cost_caps interceptor: per-user 30/mo cap ──────────────────────────
 class _FakeRedis:
     def __init__(self) -> None:
         self.store: dict[str, int] = {}
@@ -160,37 +204,40 @@ class _FakeRedis:
 
 
 def test_per_user_cap_blocks_31st_call(monkeypatch):
+    """Cap is enforced via ``cost_caps.record_sarvam_user_call`` — the
+    canonical interceptor — so a 31st call raises
+    ``SarvamRateLimited("per_user_monthly_cap")`` and never reaches
+    the upstream."""
+    import cost_caps
     import deps
 
     fake_redis = _FakeRedis()
     monkeypatch.setattr(deps, "redis_client", fake_redis, raising=False)
-    fake_client = _FakeClient(_FakeResp(200, _ok_body()))
-    monkeypatch.setattr(deps, "sarvam_llm_client", fake_client, raising=False)
-    monkeypatch.setattr(sarvam_mod, "PER_USER_MONTHLY_CAP", 30, raising=False)
+    captured = _install_cassette(monkeypatch, "sarvam_success")
+    monkeypatch.setattr(cost_caps, "SARVAM_PER_USER_MONTHLY_CAP", 30, raising=False)
 
-    # 30 successful calls
     for _ in range(30):
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id="u-1"))
 
     with pytest.raises(SarvamRateLimited) as exc_info:
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id="u-1"))
     assert exc_info.value.reason == "per_user_monthly_cap"
-    assert fake_client.calls and len(fake_client.calls) == 30
+    # 31st call did NOT hit the upstream
+    assert len(captured["calls"]) == 30
 
 
 def test_per_user_cap_disabled_when_zero(monkeypatch):
+    import cost_caps
     import deps
 
     fake_redis = _FakeRedis()
     monkeypatch.setattr(deps, "redis_client", fake_redis, raising=False)
-    fake_client = _FakeClient(_FakeResp(200, _ok_body()))
-    monkeypatch.setattr(deps, "sarvam_llm_client", fake_client, raising=False)
-    monkeypatch.setattr(sarvam_mod, "PER_USER_MONTHLY_CAP", 0, raising=False)
+    captured = _install_cassette(monkeypatch, "sarvam_success")
+    monkeypatch.setattr(cost_caps, "SARVAM_PER_USER_MONTHLY_CAP", 0, raising=False)
 
-    # 50 calls succeed
     for _ in range(50):
         asyncio.run(chat([{"role": "user", "content": "q"}], user_id="u-2"))
-    assert len(fake_client.calls) == 50
+    assert len(captured["calls"]) == 50
 
 
 def test_anonymous_user_skips_local_cap(monkeypatch):
@@ -200,57 +247,82 @@ def test_anonymous_user_skips_local_cap(monkeypatch):
 
     fake_redis = _FakeRedis()
     monkeypatch.setattr(deps, "redis_client", fake_redis, raising=False)
-    fake_client = _FakeClient(_FakeResp(200, _ok_body()))
-    monkeypatch.setattr(deps, "sarvam_llm_client", fake_client, raising=False)
+    _install_cassette(monkeypatch, "sarvam_success")
 
     asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
     assert fake_redis.store == {}
 
 
-# ── 6. Success-rate snapshot powers the admin tile + alert ────────────────
-def test_success_rate_alert_floor(monkeypatch):
-    fake_ok = _FakeResp(200, _ok_body())
-    fake_err = _FakeResp(500, "boom")
+# ── 6. metrics + Sentry alert hook ────────────────────────────────────────
+def test_metrics_records_real_token_cost(monkeypatch):
+    """Every successful call must write ``prompt_tokens`` / ``completion_tokens``
+    / ``cost_usd`` into ``metrics._SARVAM_CHAT_EVENTS`` so the
+    AdminHealth tile can show "Cost / 24h" + "tokens_24h"."""
+    import metrics
 
-    seq = [fake_ok] * 10 + [fake_err] * 11
+    _install_cassette(monkeypatch, "sarvam_success")
+    asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
 
-    def _next():
-        return seq.pop(0)
+    snap = metrics.sarvam_chat_snapshot()
+    assert snap["ok"] == 1
+    assert snap["tokens_24h"] == 18 + 24
+    assert snap["cost_usd_24h"] > 0
+    # p50/p95 are populated even with a single sample
+    assert snap["p50_latency_ms"] >= 0
+    assert snap["p95_latency_ms"] >= 0
 
-    fake_client = _FakeClient(_next)
-    _install_client(monkeypatch, fake_client)
 
+def test_success_rate_alert_floor_emits_sentry(monkeypatch):
+    """When success-rate drops below 95 % over 1 h with ≥ 20 samples,
+    ``metrics.maybe_emit_sarvam_alert`` must fire a Sentry warning."""
+    import sys
+    import types
+    import metrics
+
+    captured: list[tuple[str, str]] = []
+    fake_sentry = types.SimpleNamespace(
+        capture_message=lambda msg, level="warning": captured.append((msg, level)),
+        set_tag=lambda *a, **kw: None,
+    )
+    monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sentry)
+
+    # Seed 21 events: 10 ok, 11 err → 47.6 % success rate
     for _ in range(10):
-        asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
+        metrics.record_sarvam_chat(success=True, latency_ms=50.0,
+                                   prompt_tokens=10, completion_tokens=10)
     for _ in range(11):
-        try:
-            asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
-        except SarvamUnavailable:
-            pass
+        metrics.record_sarvam_chat(success=False, latency_ms=100.0,
+                                   error="upstream 500: boom")
 
-    snap = success_rate_snapshot()
-    assert snap["total"] == 21
-    assert snap["ok"] == 10
-    assert snap["err"] == 11
-    # 10/21 = 0.476... ≪ 0.95 → alert fires
+    snap = metrics.sarvam_chat_snapshot()
     assert snap["alert"] is True
     assert snap["success_rate"] < 0.95
 
+    fired = metrics.maybe_emit_sarvam_alert()
+    assert fired is True
+    assert captured, "expected exactly one Sentry capture_message"
+    msg, level = captured[0]
+    assert level == "warning"
+    assert "sarvam_chat_below_floor" in msg
 
-def test_success_rate_no_alert_below_min_samples(monkeypatch):
-    fake_client = _FakeClient(_FakeResp(500, "boom"))
-    _install_client(monkeypatch, fake_client)
+    # Throttle: a second call within the throttle window must NOT fire.
+    fired_again = metrics.maybe_emit_sarvam_alert()
+    assert fired_again is False
+
+
+def test_success_rate_no_alert_below_min_samples():
+    import metrics
+
     for _ in range(5):
-        try:
-            asyncio.run(chat([{"role": "user", "content": "q"}], user_id=None))
-        except SarvamUnavailable:
-            pass
-    snap = success_rate_snapshot()
+        metrics.record_sarvam_chat(success=False, latency_ms=10.0, error="boom")
+    snap = metrics.sarvam_chat_snapshot()
     # 5 < min_samples (20) → must NOT alert even though success_rate=0
     assert snap["alert"] is False
 
 
 def test_success_rate_empty_window_is_perfect():
+    from providers.sarvam import success_rate_snapshot
+
     snap = success_rate_snapshot()
     assert snap["total"] == 0
     assert snap["success_rate"] == 1.0

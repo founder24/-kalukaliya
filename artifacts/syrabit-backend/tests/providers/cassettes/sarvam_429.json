@@ -1,0 +1,10 @@
+{
+  "_recorded": "2026-05-07T19:01:00Z",
+  "_note": "VCR-style cassette for providers.sarvam.chat upstream 429 path.",
+  "request": {"method": "POST", "url": "/v1/chat/completions"},
+  "response": {
+    "status_code": 429,
+    "headers": {"content-type": "application/json", "retry-after": "12"},
+    "body": {"error": {"code": "rate_limit_exceeded", "message": "Too many requests; retry after 12s"}}
+  }
+}
