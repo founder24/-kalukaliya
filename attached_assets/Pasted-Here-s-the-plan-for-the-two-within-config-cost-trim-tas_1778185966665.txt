@@ -1,0 +1,58 @@
+Here's the plan for the two within-config cost-trim tasks I just drafted. Both stay strictly inside your current configuration (no provider swaps, no chain changes, no founder-lock touches).
+
+Task #597 — ACA + Mongo + Vertex within-config cost trim
+Why this exists: three of the largest non-Cloudflare cost lines can be cut with no architecture change — ACA pays for 2 idle replicas 24/7, Vertex re-sends the same syllabus prompt as full input tokens every English chat turn, and Mongo chunks still stores 1024-dim embedding arrays despite Pinecone being canonical since Task #203.
+
+Done looks like:
+
+ACA minReplicas 2 → 1 in Bicep (50 % idle saving, no cold-start risk).
+Vertex Gemini calls wrap the static syllabus + system-instruction prefix in cachedContent → cached input tokens billed at the discounted rate.
+chunks.embedding dropped from Atlas + writer-side guard prevents re-adding it.
+Mongo maxPoolSize clamped to a named constant in deps.py.
+Before/after numbers (ACA idle vCPU-sec/day, Vertex billed input tokens, Atlas storage GB, connection count) appended to credit-runway-cost-model.md after 7 days.
+Out of scope: any provider/architecture migration, KEDA scale-to-zero (min: 0), live routes/ai_chat.py policy changes, raising any founder lock, the Atlas tier downgrade itself.
+
+Steps (5):
+
+ACA minReplicas: 2 → 1 in infra/azure/aca-syrabit-backend.bicep. Nothing else in Bicep touched.
+Vertex cachedContent in providers/vertex_chat.py keyed by (board, class, stream, subject, model_version), 7-day TTL, fail-loud fallback to inline prompt. _select_chat_primary() untouched.
+Run scripts/drop_mongo_embeddings.py (staging → prod) + writer-side guard + CI test.
+Clamp maxPoolSize=50 in deps.py as a named constant.
+7-day measurement note in the runway doc.
+Plus: explicit risk + rollback (each lever is one-line revertable; python -c "import server" import check + manifest drift test must still pass).
+
+Task #598 — TTS / CW / Upstash / Sarvam / Pinecone / Lambda within-config cost trim
+Why this exists: six smaller non-Cloudflare lines that compound — TTS hits Azure Speech every call, CW log groups outside Terraform default to "never expire", Upstash REST is per-request priced and the L1 ring is undersized, the Assamese backfill sends full chapter context to Sarvam (paid line, no startup credits), Pinecone vectors carry redundant title strings as metadata, and all Lambdas use the default 512 MB without tuning.
+
+Done looks like:
+
+TTS server-side cache (R2-backed, 30-day TTL, in-process LRU on top) with paywall fired BEFORE the cache check.
+Every CloudWatch log group in the account has retention_in_days ≤ 30 + CI guard.
+Upstash L1 ring 2048 → 4096 + mget for batched-key paths.
+Sarvam Assamese backfill polish-context clamped to ≤2000 tokens (live /api/ai/chat Assamese not touched).
+Pinecone vector metadata stripped to ID-only; titles resolved via Mongo (already cached) at query time.
+AWS Lambda Power Tuning run for as-translation-backfill, embed-backfill, cache-effectiveness; memory set to cost-optimal point.
+Before/after numbers per lever appended to the runway doc.
+Out of scope: any provider/architecture migration, live chat hot path, raising any founder lock, voice paywall semantic changes, Atlas tier change, anything in #593 / #596 / #597.
+
+Steps (8):
+
+Server-side TTS cache in routes/voice.py, keyed by sha256(text|lang|voice), R2 backend. Paywall MUST stay first.
+CW log retention sweep + Terraform requirement + CI guard.
+Upstash L1 bump 2048 → 4096 + mget sweep in ai_cache.py.
+Sarvam backfill ≤2000-token context clamp.
+Pinecone metadata slim + one-shot re-upsert backfill + eval-harness rerank-quality check.
+Run Lambda Power Tuning + commit cost-optimal memory sizes per job.
+7-day measurement note in the runway doc.
+Per-lever risk + rollback table; tests/test_voice_paid_gate.py must still pass.
+How they fit with what's already proposed
+Task	Surface	Status
+#593	Cloudflare edge cache (TTLs, Tiered Cache, Cache Reserve, EdgeHitRate alarms)	Drafts
+#596	Cloudflare KV / AI Gateway / Workers Analytics Engine	Drafts
+#597	ACA + Mongo + Vertex within-config trim	Drafts
+#598	TTS + CW + Upstash + Sarvam + Pinecone + Lambda within-config trim	Drafts
+All four are independent — they touch different files and different cloud surfaces, so they can run in parallel without merge conflicts. None of them violate any founder lock.
+
+Combined estimated savings against your non-Cloudflare + Cloudflare infra spend: ~35–55 %, with #597's Vertex cachedContent row and #593's Tiered Cache + Cache Reserve being the two single biggest dollar items.
+
+Approve them in the side panel whenever you're ready, or tell me if you want any item moved between tasks / removed / scoped down further.
