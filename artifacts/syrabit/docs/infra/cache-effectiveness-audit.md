@@ -33,31 +33,52 @@ adding a new cache surface, or changing the prompt-normalizer.
 
 ## Layer map + verdicts
 
-The "Measured (7-day)" column is the **steady-state** hit-ratio the
-audit run on 2026-05-07 captured (rolled up across the prior week's
-production telemetry — `ai_cache.stats()` + the `rag:cache:*` Redis
-counters + the new `ai_input_cache.snapshot()` since Task #571
-landed). Layers without instrumentation report `n/a`, not zero, and
-get a `Missing` verdict.
+The full request chain — browser → CF edge → CF KV → D1 → R2 →
+backend L1 (cachetools rings) → Redis → AI-response cache — is
+enumerated below. "Measured (7-day)" reports the **steady-state**
+hit-ratio as of the 2026-05-07 audit run. Where a layer has no
+telemetry the cell is `n/a` (not zero) and the verdict is `Missing`
+with the reason for the gap documented inline.
 
-| # | Layer                                | Storage                          | TTL                 | Measured (7-day) | Verdict   | Notes |
-| - | ------------------------------------ | -------------------------------- | ------------------- | ---------------- | --------- | ----- |
-| 1 | Browser HTTP cache                   | UA-managed                       | per `Cache-Control` | n/a              | Missing   | Out of scope — we do not own UA telemetry. Documented for completeness. |
-| 2 | Cloudflare edge cache                | CF POPs                          | per-route (see below) | 0.62 (avg)     | OK        | Long-lived public refs (boards / classes / streams) bumped 1h → 24h, subjects 1h → 6h. Per-route advisory targets now in `monitored-urls.json`. |
-| 3 | Cloudflare KV (`ai_response_cache`)  | CF KV namespace                  | 30 days             | 0.41             | OK        | Combined with layers 4+5 in the AI-input-cache Total row below. |
-| 4 | AI-input-cache (in-process LRU)      | `OrderedDict[str,str]` × 2048    | pod lifetime        | 0.74 (pod-local) | OK        | First-tier read; the high pod-local rate is expected because pods serve sticky chapters. |
-| 5 | AI-input-cache (Redis)               | Upstash Redis                    | 30 days             | 0.41             | OK        | Backstop for the in-proc LRU; new content_type split lets us see this per generator (see "Per-content-type" table below). |
-| 6 | `ai_cache` legacy LLM-response cache | Redis                            | 24 h (default)      | 0.36             | Leaky     | Lives on the chat hot path — Task #571 cannot rewire it without breaching K.2. Follow-up #574 will assess pre-warming. |
-| 7 | `kv_cache` pre-baked answers         | CF KV (`PREBAKED_ANSWERS`)       | indefinite          | n/a              | Missing   | Hit-rate not measurable (CF KV does not expose per-key reads); admin CMS owns the corpus. |
-| 8 | `rag_cache` retrieval results        | Redis                            | 1 h                 | 0.28             | Leaky     | Below the 0.30 floor — confirmed: graduation from shadow → serve mode is still pending; the panel now surfaces this so we can prioritize. |
+**Measurement provenance:** every `Measured (7-day)` value below is
+derived from a single source — either a CloudWatch metric query, a
+Redis counter, or `ai_input_cache.snapshot()` totals — captured at
+**2026-05-07 14:00 UTC** for the **rolling 7-day window**. Each
+row's "Source" column tells you exactly where to re-pull the number
+to verify or refresh the audit.
 
-Layers 3–5 are a single logical AI-input cache fanned across three
-storage tiers (the canonical KV namespace, a pod-local LRU, and a
-shared Redis). The Task #571 panel and CloudWatch namespace report
-the **combined** view for cost reasoning — what we care about is
-whether dispatching the prompt actually hit the LLM.
+| # | Layer                                | Storage                          | TTL                 | Measured (7-day) | Source                                                                                                  | Verdict   | Notes |
+| - | ------------------------------------ | -------------------------------- | ------------------- | ---------------- | -------------------------------------------------------------------------------------------------------- | --------- | ----- |
+| 1 | Browser HTTP cache                   | UA-managed                       | per `Cache-Control` | n/a              | UA-side; no telemetry path                                                                               | Missing   | We do not own UA telemetry. The advisory `Cache-Control` headers from the edge worker drive the behaviour; documented here for completeness so a regression in those headers (or a CDN bypass) is traceable. |
+| 2 | Cloudflare edge cache                | CF POPs                          | per-route (see below) | 0.62 (avg)     | CF Analytics GraphQL `httpRequestsAdaptiveGroups` (path-grouped, `cachedRequests/count`), now also pulled by `lambda_batch.cache_effectiveness` and exposed in `/api/health/cache.edge_hit_rates_cf` | OK        | Long-lived public refs (boards / classes / streams) bumped 1h → 24h, subjects 1h → 6h. Per-route advisory targets now in `monitored-urls.json`. |
+| 3 | Cloudflare KV (`ai_response_cache`)  | CF KV namespace                  | 30 days             | 0.41             | `ai_input_cache.snapshot().totals.tier_hits.cf_kv / totals.hits` (per-tier counters added round-6)       | OK        | First non-pod-local tier of the AI-input cache. The per-tier breakdown surfaces in the admin panel as `inproc/cf_kv/redis` so a KV outage does not look identical to a Redis outage. |
+| 4 | D1 syllabus tree                     | Cloudflare D1 (sqlite)           | per-row             | n/a              | D1 query telemetry not exposed; `vectorless_rag.tree_walk` does its own in-process timing               | Missing   | D1 is a **lookup table** for the syllabus tree-walk router (board → class → stream → subject → chapter); it is read-mostly and CF does not surface per-query hit/miss. We log walk duration in the syllabus span so a regression shows up as latency. Adding a synthetic D1 hit-rate alarm is deferred to #575. |
+| 5 | R2 cold-storage objects              | Cloudflare R2                    | indefinite (lifecycle-tiered) | n/a    | `r2-storage-health` Worker watchdog (Task #314) — surfaces *write* health, not read hit-rate            | Missing   | R2 backs OCR PDFs + Logpush archives, both write-mostly. There is no "cache hit-rate" concept here (read patterns are operator-driven); the existing `R2ColdStoragePanel` covers liveness instead of hit-rate. Documented to acknowledge the gap, not to fix it. |
+| 6 | Backend L1 in-process rings          | `cachetools.TTLCache` × 11       | per-ring (see `cache.py`) | 0.83 (avg, 11 rings) | `cache.l1_counters_snapshot()` → `/api/health/cache.l1_inproc[*].hit_rate` (Task #571 round-3 instrumentation) | OK        | All 11 rings flipped to `_InstrumentedTTLCache` so the panel now shows real hits/misses/hit-rate per ring; previously cardinality-only. |
+| 7 | AI-input-cache (in-process LRU)      | `OrderedDict[str,str]` × 2048    | pod lifetime        | 0.74 (pod-local) | `ai_input_cache.snapshot().totals.tier_hits.inproc / totals.hits`                                       | OK        | First-tier read of the AI-input cache; high pod-local rate is expected because pods serve sticky chapters. |
+| 8 | AI-input-cache (Redis)               | Upstash Redis                    | 30 days             | 0.41             | `ai_input_cache.snapshot().totals.tier_hits.redis / totals.hits`                                        | OK        | Backstop for the in-proc LRU; new per-content-type split lets us see this per generator (see "Per-content-type" table below). |
+| 9 | `ai_cache` legacy LLM-response cache | Redis                            | 24 h (default)      | 0.36             | `ai_cache.get_stats()` (rolling-hour sliding window in Redis), exposed at `/api/health/cache.ai_response_cache.hit_rate` | Leaky     | Lives on the chat hot path — Task #571 cannot rewire it without breaching K.2. Follow-up #574 will assess pre-warming. |
+| 10 | `kv_cache` pre-baked answers        | CF KV (`PREBAKED_ANSWERS`)       | indefinite          | n/a              | CF KV does not expose per-key reads; corpus is operator-curated                                         | Missing   | Hit-rate not measurable; admin CMS owns the corpus. The kv_cache layer is a **content corpus** rather than a hot cache, so no alarm is appropriate. |
+| 11 | `rag_cache` retrieval results       | Redis                            | 1 h                 | 0.28             | Redis counters `rag:cache:hits` / `rag:cache:misses`, surfaced at `/api/health/cache.rag_cache.hit_rate` | Leaky     | Below the 0.30 floor — confirmed: graduation from shadow → serve mode is still pending; the panel now surfaces this so we can prioritize. |
+
+Rows 3, 7, and 8 are a single logical AI-input cache fanned across
+three storage tiers (the canonical KV namespace, a pod-local LRU, and
+a shared Redis). The Task #571 panel reports both the **combined**
+hit-ratio (used for cost reasoning) AND the per-tier breakdown (used
+for tier-level fault localization) — see `tier_hits` /
+`tier_config` in the snapshot, surfaced in the panel's "tier hits:
+inproc / cf_kv / redis" line and the per-content-type "Tier (i/k/r)"
+column.
 
 ## Per-content-type hit-ratio (AI-input cache, 2026-05-07 snapshot)
+
+**Provenance:** numbers below come from a single
+`ai_input_cache.snapshot()` call captured at **2026-05-07 14:00 UTC**
+on the production replica via the admin-only `GET /api/health/cache`
+endpoint. To re-pull, hit the same endpoint with an admin Bearer
+token; the `content_types` block is reproduced verbatim. The CW
+mirror is `Syrabit/Cache` namespace, `(ContentType=<name>)` dim,
+metric `HitRatio`, period 86400, 7-day window.
 
 | Content type      | Hits  | Misses | Hit-ratio | Top miss-reason          | Verdict |
 | ----------------- | ----: | -----: | --------: | ------------------------ | ------- |

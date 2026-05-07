@@ -156,6 +156,23 @@ export default function CacheHitRatioPanel({
               sets {fmtInt(totals.sets)} · keys24h {fmtInt(totals.unique_keys_24h)}
             </span>
           </div>
+          {/* Per-tier hit breakdown — answers "which tier is leaking?" */}
+          {totals.tier_hits && (
+            <div
+              className="text-[10px] text-gray-600 mt-1"
+              data-testid="cache-panel-tier-breakdown"
+            >
+              tier hits: inproc {fmtInt(totals.tier_hits.inproc)} ·
+              cf_kv {fmtInt(totals.tier_hits.cf_kv)}
+              {aic?.tier_config?.cf_kv_enabled === false && (
+                <span className="text-amber-600"> (disabled)</span>
+              )}
+              {' '}· redis {fmtInt(totals.tier_hits.redis)}
+              {aic?.tier_config?.redis_enabled === false && (
+                <span className="text-amber-600"> (disabled)</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -173,6 +190,7 @@ export default function CacheHitRatioPanel({
               <th className="text-right font-normal pr-2">Misses</th>
               <th className="text-right font-normal pr-2">Sets</th>
               <th className="text-right font-normal pr-2">Keys 24h</th>
+              <th className="text-right font-normal pr-2">Tier (i/k/r)</th>
               <th className="text-left font-normal">Top miss</th>
             </tr>
           </thead>
@@ -196,6 +214,11 @@ export default function CacheHitRatioPanel({
                   <td className="text-right tabular-nums pr-2">{fmtInt(row.sets)}</td>
                   <td className="text-right tabular-nums pr-2">
                     {fmtInt(row.unique_keys_24h)}
+                  </td>
+                  <td className="text-right tabular-nums pr-2 text-gray-500">
+                    {row.tier_hits
+                      ? `${fmtInt(row.tier_hits.inproc)}/${fmtInt(row.tier_hits.cf_kv)}/${fmtInt(row.tier_hits.redis)}`
+                      : '—'}
                   </td>
                   <td className="text-gray-500">
                     {top ? `${top.reason} (${top.count})` : '—'}

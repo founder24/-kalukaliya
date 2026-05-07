@@ -119,11 +119,30 @@ _MISS_REASONS = (
 )
 
 
+# Task #571 round-6 — per-tier hit/miss accounting. The §K.2 cache has
+# THREE storage tiers (in-process LRU → Cloudflare KV → Redis) and an
+# operator needs to see WHICH tier is leaking. Without a per-tier
+# breakdown a 0.4 hit-ratio could mean "KV is broken so we always fall
+# through to Redis" or "Redis is broken and KV is doing all the work" —
+# both look identical at the rolled-up level.
+_TIERS = ("inproc", "cf_kv", "redis")
+
+
 def _empty_ct_counters() -> dict:
     return {
         "hits": 0, "misses": 0, "sets": 0,
         "miss_reasons": {r: 0 for r in _MISS_REASONS},
         "unique_keys_24h": [],  # ring of (epoch_seconds, key) for cardinality
+        # Per-tier breakdown of `hits` above. `tier_hits["inproc"] +
+        # tier_hits["cf_kv"] + tier_hits["redis"] == hits` is an invariant
+        # asserted in tests/test_ai_input_cache_metrics.py.
+        "tier_hits": {t: 0 for t in _TIERS},
+        # Per-tier set-fanout counters. `inproc_sets` always equals `sets`
+        # (every set lands in-proc); `cf_kv_sets` / `redis_sets` only
+        # increment when the respective tier is actually configured (gated
+        # on _CF_KV_ENABLED / `_redis_client() is not None`). A 0 here vs
+        # nonzero `sets` is a config-leak signal.
+        "tier_sets": {t: 0 for t in _TIERS},
     }
 
 
@@ -180,6 +199,8 @@ def snapshot() -> dict:
         for ct, c in _COUNTERS.items():
             total = c["hits"] + c["misses"]
             hr = round(c["hits"] / total, 4) if total else 0.0
+            tier_hits = dict(c.get("tier_hits") or {t: 0 for t in _TIERS})
+            tier_sets = dict(c.get("tier_sets") or {t: 0 for t in _TIERS})
             out["content_types"][ct] = {
                 "hits": c["hits"],
                 "misses": c["misses"],
@@ -187,6 +208,8 @@ def snapshot() -> dict:
                 "hit_ratio": hr,
                 "unique_keys_24h": len({k for _, k in c["unique_keys_24h"]}),
                 "miss_reasons": dict(c["miss_reasons"]),
+                "tier_hits": tier_hits,
+                "tier_sets": tier_sets,
             }
             out["totals"]["hits"] += c["hits"]
             out["totals"]["misses"] += c["misses"]
@@ -196,6 +219,23 @@ def snapshot() -> dict:
         out["totals"]["unique_keys_24h"] = sum(
             entry["unique_keys_24h"] for entry in out["content_types"].values()
         )
+        # Per-tier rollup so the panel + CloudWatch alarms can show
+        # "where is the cache hitting" without summing across CTs.
+        out["totals"]["tier_hits"] = {
+            t: sum(entry["tier_hits"].get(t, 0)
+                   for entry in out["content_types"].values())
+            for t in _TIERS
+        }
+        out["totals"]["tier_sets"] = {
+            t: sum(entry["tier_sets"].get(t, 0)
+                   for entry in out["content_types"].values())
+            for t in _TIERS
+        }
+        out["tier_config"] = {
+            "inproc_enabled": True,
+            "cf_kv_enabled": bool(_CF_KV_ENABLED),
+            "redis_enabled": _redis_client() is not None,
+        }
     return out
 
 
@@ -352,6 +392,7 @@ def get_response(
     if val is not None:
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
+            _COUNTERS[ct]["tier_hits"]["inproc"] += 1
         return val
     # Tier 2: Cloudflare KV (canonical per V4 §K.2 — same namespace
     # the edge worker reads from). Tried before Redis so a worker-
@@ -361,6 +402,7 @@ def get_response(
         _inproc_set(key, cf_val)
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
+            _COUNTERS[ct]["tier_hits"]["cf_kv"] += 1
         return cf_val
     rc = _redis_client()
     if rc is not None:
@@ -371,6 +413,7 @@ def get_response(
                 _inproc_set(key, text)
                 with _COUNTERS_LOCK:
                     _COUNTERS[ct]["hits"] += 1
+                    _COUNTERS[ct]["tier_hits"]["redis"] += 1
                 return text
         except Exception as e:
             logger.debug("[ai_input_cache] redis get failed: %s", e)
@@ -424,6 +467,7 @@ def set_response(
     _inproc_set(key, text)
     with _COUNTERS_LOCK:
         _COUNTERS[ct]["sets"] += 1
+        _COUNTERS[ct]["tier_sets"]["inproc"] += 1
         _RECENT_SETS[key] = time.time()
         _RECENT_SETS.move_to_end(key)
         while len(_RECENT_SETS) > _RECENT_SETS_MAX:
@@ -433,11 +477,16 @@ def set_response(
     # §K.2 fan-out write: CF KV (canonical) + Redis (fast pod-local).
     # Both are best-effort and never raise from the cache hot path.
     _cf_kv_set(key, text, int(ttl))
+    if _CF_KV_ENABLED:
+        with _COUNTERS_LOCK:
+            _COUNTERS[ct]["tier_sets"]["cf_kv"] += 1
     rc = _redis_client()
     if rc is None:
         return
     try:
         rc.set(key, text, ex=int(ttl))
+        with _COUNTERS_LOCK:
+            _COUNTERS[ct]["tier_sets"]["redis"] += 1
     except Exception as e:
         logger.debug("[ai_input_cache] redis set failed: %s", e)
 
