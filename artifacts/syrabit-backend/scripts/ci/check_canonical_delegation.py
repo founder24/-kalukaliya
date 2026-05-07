@@ -518,11 +518,106 @@ TODO_558_PATTERN = (
 )
 
 
+# Narrow, canonical-delegation-relevant only. Hard-required vars are
+# the per-feature primaries that the canonical map §A names; we do
+# NOT re-check generic infra vars (`MONGO_URL`, `JWT_SECRET`, ...) —
+# those are owned by other guards. Avoids false positives on
+# unrelated env-line edits.
+REPLIT_REQUIRED_ENV_VARS = (
+    "SARVAM_API_KEY",                   # Assamese chat canonical primary
+    "WEB_PUSH_VAPID_PRIVATE_KEY",       # Task #557 — sole web-push path
+    "WEB_PUSH_CONTACT",                 # Task #557 — RFC-8292 sub claim
+)
+# At least ONE of these must be present (observability tier-1 sink).
+# Sentry-Developer free is the documented choice today, but the ADR
+# explicitly captures GlitchTip self-hosted as the rejected option
+# we'd swap to without code changes — so either DSN env satisfies
+# the canonical contract.
+REPLIT_REQUIRED_ANY_OF: tuple[tuple[str, ...], ...] = (
+    ("SENTRY_DSN", "GLITCHTIP_DSN"),
+)
+REPLIT_FORBIDDEN_ENV_VARS = (
+    "SENDGRID_API_KEY", "RESEND_API_KEY",
+    "FCM_SERVER_KEY", "FIREBASE_SERVICE_ACCOUNT",
+    "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT",
+    "ASSEMBLYAI_API_KEY",
+    "EMAIL_PROVIDER", "EMAIL_FALLBACK",
+)
+
+
+def _check_replit_env_line() -> list[str]:
+    """Task #559 — pin the canonical Required-env-vars contract in
+    `replit.md`. The umbrella owns the same env-line that operators
+    consult when wiring ACA secrets, so a drift between the canonical
+    map and the README cannot survive a PR.
+
+    Validates two things:
+    1. Every var in REPLIT_REQUIRED_ENV_VARS appears at least once on
+       the `Required env vars` line (backtick-wrapped).
+    2. No var in REPLIT_FORBIDDEN_ENV_VARS appears on that line as an
+       active requirement (we look for ``BACKTICK + NAME + BACKTICK``;
+       free prose mentioning the retired var name in the parenthetical
+       removal note is fine).
+    """
+    out: list[str] = []
+    p = ROOT / "replit.md"
+    if not p.exists():
+        return out
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return out
+    line = None
+    line_no = 0
+    for ln, raw in enumerate(text.splitlines(), 1):
+        if "**Required env vars" in raw:
+            line = raw
+            line_no = ln
+            break
+    if line is None:
+        out.append(
+            f"replit.md: Task #559 (canonical env contract) → "
+            f"missing `Required env vars` line"
+        )
+        return out
+    # Cut the line at the first parenthesis so the post-line removal
+    # note ("Task #556 done — ... SendGrid keys retired") doesn't
+    # falsely satisfy a forbidden-name check, AND so prose-only
+    # mentions of retired vars in the note don't count as active.
+    head, _, _ = line.partition("*(")
+    for required in REPLIT_REQUIRED_ENV_VARS:
+        token = f"`{required}`"
+        if token not in head:
+            out.append(
+                f"replit.md:{line_no}: Task #559 (canonical env contract) → "
+                f"required env var `{required}` missing from active "
+                f"`Required env vars` block"
+            )
+    for any_of in REPLIT_REQUIRED_ANY_OF:
+        if not any(f"`{name}`" in head for name in any_of):
+            out.append(
+                f"replit.md:{line_no}: Task #559 (canonical env contract) → "
+                f"at least one of {{{', '.join('`' + n + '`' for n in any_of)}}} "
+                f"must appear in the active `Required env vars` block"
+            )
+    for forbidden in REPLIT_FORBIDDEN_ENV_VARS:
+        token = f"`{forbidden}`"
+        if token in head:
+            out.append(
+                f"replit.md:{line_no}: Task #559 (canonical env contract) → "
+                f"retired env var `{forbidden}` still listed as active "
+                f"requirement (must live only in the parenthetical "
+                f"removal note)"
+            )
+    return out
+
+
 def _check_canonical_bank() -> list[str]:
     failures: list[str] = []
     failures.extend(_check_chat_chains())
     failures.extend(_check_chat_primary_selector())
     failures.extend(_check_voice_paywall())
+    failures.extend(_check_replit_env_line())
     # Task #556 — SES sole transactional email path has shipped; the
     # umbrella now bans SendGrid + Resend SDK names, env-var names,
     # helper names, and the legacy EMAIL_PROVIDER / EMAIL_FALLBACK

@@ -60,12 +60,80 @@ Bank B (new in #559):
 - `cost_caps._select_chat_primary` + `CHAT_PRIMARY_OVERRIDE` knob both present,
 - `routes/voice.py` `/tts` + `/stt` + `/voice/voice` all sit behind `Depends(require_paid_plan)`.
 
-Bank C (TODO-gated; documented in the canonical map but the regex stays commented out until the parent task merges):
+Bank C (parent-task-gated — `TODO_<n>_PATTERN` regexes are wired into `_check_canonical_bank()` and become hard failures the moment the parent task ships):
 
-- **Task #557** — SES sole tier-1 transactional email + self-hosted VAPID web-push (bans `sendgrid|SendGridAPIClient|SENDGRID_API_KEY|resend|RESEND_API_KEY|firebase_admin|FCM_SERVER_KEY|FIREBASE_SERVICE_ACCOUNT`).
-- **Task #558** — observability narrowing to GCP Cloud Trace single exporter (bans Sentry tracing literals + multiple OTEL exporters).
+- **Task #556 — SES sole tier-1 transactional email — ACTIVATED.** `TODO_556_PATTERN` is live and bans `sendgrid|SendGridAPIClient|SENDGRID_API_KEY|resend|RESEND_API_KEY` plus the `EMAIL_PROVIDER` / `EMAIL_FALLBACK` provider-flag env knobs across backend / frontend / IaC / lockfiles / Workers code.
+- **Task #557 — Self-hosted VAPID web-push — ACTIVATED.** `TODO_557_PATTERN` is live and bans `firebase_admin|FCM_SERVER_KEY|FIREBASE_SERVICE_ACCOUNT`.
+- **Task #558 — Observability narrowing to GCP Cloud Trace single exporter — ACTIVATED.** `TODO_558_PATTERN` is live and bans multi-exporter `OTEL_TRACES_EXPORTER=…,…`, positive `traces_sample_rate`, `enable_tracing=True`, `sentry_sdk.start_transaction`, `@sentry_sdk.trace`. The single allowed exporter literal is `googlecloud` (the upstream `opentelemetry-exporter-gcp-trace` package's documented exporter ID).
 
-The TODO regexes live in `TODO_557_PATTERN` / `TODO_558_PATTERN` in the umbrella; flipping them on is one comment-uncomment + one PR.
+All three Bank-C patterns currently produce hard failures on `main` if reintroduced; there is no commented-out / staged code path. The `TODO_<n>_PATTERN` naming is retained for grep continuity with the cutover runbook and the parent task threads.
+
+## Removed providers — per-row rollback risk + reversibility
+
+Each row below names a provider this map *retired* in the run-up to
+Task #559, the rollback risk of un-retiring it, and a rough
+engineer-day estimate of how long a re-introduction would take if
+the canonical primary collapses for an extended window. Estimates
+assume one engineer working full-time, no parallel work, and that the
+upstream account / billing relationship still exists.
+
+- **AssemblyAI (STT)** — retired by Task #552 §G. Rollback risk:
+  **low**. Re-introduction cost: **~1 engineer-day** (recreate the
+  thin `providers/assemblyai.py` adapter from the deleted file in git
+  history, restore the `ASSEMBLYAI_API_KEY` env knob, re-add the
+  provider to `PROVIDER_PRIORITY['stt']`). The Deepgram Nova-3 +
+  Google Chirp_2 pair has covered every failure mode AssemblyAI
+  previously absorbed; we keep the SDK in `requirements.txt` history
+  only.
+- **Deepgram Aura-2 (TTS)** — retired by Task #552 §G. Rollback risk:
+  **low**. Re-introduction cost: **~1 engineer-day** (restore the
+  `_tts_deepgram` dispatch branch + the `synthesize()` method on
+  `providers/deepgram.py`). The Deepgram STT half is unchanged so
+  the account + key are still live; only the TTS code path is gone.
+- **Azure OpenAI (chat / embed / Whisper / text-embedding-3-large)** —
+  retired by Task #554. Rollback risk: **medium** — Azure App Service
+  managed identities and Azure OpenAI quota are non-trivial to
+  re-provision once the resource group is torn down. Re-introduction
+  cost: **~5 engineer-days** (re-create the resource + redeploy the
+  `azure_openai` provider module from git history + re-wire the
+  `AZURE_OPENAI_*` secrets in Key Vault + run the dispatch chain
+  shape tests). Mitigated because Vertex Gemini 2.5 Flash and Workers
+  AI Llama-3.2-3B together cover both the Azure OpenAI chat surface
+  AND the long-context surface the old Whisper rollouts used.
+- **Cerebras / Cohere / Voyage-AI** — retired by Task #491. Rollback
+  risk: **low** for any single one, **medium** if the Pinecone rerank
+  also fails simultaneously. Re-introduction cost: **~2 engineer-days
+  per provider** (restore the `providers/<name>.py` adapter, key
+  plumbing, and rotate them into `PROVIDER_PRIORITY['embedding']` /
+  `['rerank']` per V4 §3 §B). The cache-only degraded mode on Workers
+  AI custom embed is the real fallback today; these adapters only
+  matter if Pinecone rerank goes down for more than the cache TTL.
+- **SendGrid / Resend (transactional email)** — retired by Task #556.
+  Rollback risk: **low**. Re-introduction cost: **~3 engineer-days**
+  (restore the SendGrid HTTP adapter, re-add the SES → SendGrid
+  fallback shim, re-wire the bulk-email worker). The 410-stub on the
+  `workers/email-worker/` historical surface stays in the repo so an
+  un-retirement is grep-able.
+- **Firebase Cloud Messaging / `firebase_admin` (web-push)** — retired
+  by Task #557. Rollback risk: **medium** — the FCM tombstone migration
+  is irreversible for any device that already rotated to VAPID
+  (`tombstoned → purged` is one-way once `purged`). Re-introduction
+  cost: **~4 engineer-days** (restore the `firebase_admin` SDK adapter,
+  re-add `FCM_SERVER_KEY` / `FIREBASE_SERVICE_ACCOUNT` to Key Vault,
+  prompt every active subscription to re-grant). Mitigated because
+  the W3C `PushSubscription` shape we now enforce is browser-native
+  and not Firebase-specific.
+- **Sentry tracing addon (Performance / `traces_sample_rate=0.1`)** —
+  retired by Task #558. Rollback risk: **low**. Re-introduction cost:
+  **~1 engineer-day** (flip `traces_sample_rate` back to a positive
+  number, re-add `enable_tracing=True`, re-introduce the `start_transaction`
+  call sites — Sentry SDK init shape is unchanged). GCP Cloud Trace
+  carries the trace surface in the meantime.
+
+If a re-introduction is ever requested, the ADR-decision log below
+(see "Decision log") gets a new row pointing at the relevant PR; the
+canonical map row in `infra/four-cloud-delegation.md` §A flips back
+to the multi-provider shape; the umbrella TODO patterns get re-armed.
 
 ## Consequences
 
