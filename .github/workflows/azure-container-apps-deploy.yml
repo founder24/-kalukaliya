@@ -56,6 +56,22 @@ env:
   AZURE_ACA_ENV:        ${{ vars.AZURE_ACA_ENV }}
 
 jobs:
+  budget_ceiling_gate:
+    # Task #549 — pre-deploy guard. Refuses to ship a backend image
+    # whose monthly cap defaults, chat-head, Assamese-head, degradation
+    # ladder, or /voice/* paid gate has drifted off the perpetual
+    # $100/mo budget contract.
+    name: Budget-ceiling guard (#549)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run guard
+        working-directory: artifacts/syrabit-backend
+        run: python scripts/check_budget_ceiling.py
+
   deploy:
     if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest

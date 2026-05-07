@@ -119,15 +119,13 @@ def _check_meter_d() -> None:
 
 
 def _check_chat_priority_head() -> None:
-    """PROVIDER_PRIORITY['english_rag_chat'][0] must be a workers_ai
-    variant or vertex (Task #549 acceptance criterion)."""
+    """PROVIDER_PRIORITY heads must match the Task #549 contract:
+      * english_rag_chat  → workers_ai variant or vertex
+      * assamese_rag_chat → sarvam (locked Indic specialist primary)
+    """
     src = CONFIG_PY.read_text(encoding="utf-8")
-    # Simple textual check — the dict literal is multi-line so we
-    # locate the english_rag_chat block and grab its first list item.
-    m = re.search(
-        r'"english_rag_chat"\s*:\s*\[\s*"([^"]+)"',
-        src,
-    )
+    # english chat head
+    m = re.search(r'"english_rag_chat"\s*:\s*\[\s*"([^"]+)"', src)
     if not m:
         _fail("could not locate PROVIDER_PRIORITY['english_rag_chat'] head in config.py")
     head = m.group(1)
@@ -135,6 +133,18 @@ def _check_chat_priority_head() -> None:
         _fail(
             f"PROVIDER_PRIORITY['english_rag_chat'] head must be one of "
             f"{sorted(ALLOWED_CHAT_HEADS)} (Task #549); got {head!r}"
+        )
+    # assamese chat head — must remain sarvam per project goal
+    # ("Sarvam stays Assamese primary unchanged").
+    m_as = re.search(r'"assamese_rag_chat"\s*:\s*\[\s*"([^"]+)"', src)
+    if not m_as:
+        _fail("could not locate PROVIDER_PRIORITY['assamese_rag_chat'] head in config.py")
+    as_head = m_as.group(1)
+    if as_head != "sarvam":
+        _fail(
+            f"PROVIDER_PRIORITY['assamese_rag_chat'] head must remain 'sarvam' "
+            f"(Task #549 — Sarvam is the locked Assamese-chat primary); "
+            f"got {as_head!r}"
         )
 
 

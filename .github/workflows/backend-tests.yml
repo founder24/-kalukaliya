@@ -99,6 +99,17 @@ jobs:
         run: |
           bash scripts/ci_grep_gate.sh
 
+      # Task #549 — perpetual $100/mo budget guard. Runs before pytest so
+      # a regression on the cap default, the Workers-AI chat head, the
+      # Sarvam Assamese head, the degradation-ladder thresholds, or the
+      # /voice/* paid gate fails the build in <1 s instead of waiting for
+      # the full pytest matrix.
+      - name: Budget-ceiling guard (#549)
+        id: budget_ceiling_gate
+        working-directory: ${{ github.workspace }}/artifacts/syrabit-backend
+        run: |
+          python scripts/check_budget_ceiling.py
+
       # Task #360 — surface the new credit-burn meter / SLO emitter /
       # validation sampler / chat-turn context test files explicitly
       # in the CI log so any rename/regression of e.g.
