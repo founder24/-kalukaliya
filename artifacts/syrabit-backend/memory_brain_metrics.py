@@ -156,6 +156,42 @@ _fleet_writer_started = False
 _fleet_writer_lock = threading.Lock()
 _fleet_dropped_events = 0  # diagnostics-only; surfaced in get_fleet_stats
 
+# ── Auto-recovery / degraded mode (Task #528) ───────────────────────
+#
+# When Upstash slows down, the per-event HSET round-trips (last_ok_ts /
+# last_fail_ts, both aggregate and per-worker) start dominating writer
+# latency. The queue then backs up, ``record_event`` starts dropping on
+# overflow, and the admin tile silently undercounts. To absorb a
+# transient Upstash slowdown without operator intervention we watch the
+# queue depth from inside the writer loop:
+#
+#   * Once ``_fleet_queue`` has been ≥ ``_FLEET_PRESSURE_HIGH_RATIO``
+#     full for at least ``_FLEET_PRESSURE_DURATION_SEC`` we flip into
+#     "essentials only" mode: drop the per-event ``last_*_ts`` HSETs
+#     (pure latency — they're convenience timestamps, not counters)
+#     and pipeline the remaining HINCRBYs into a single round-trip
+#     when the client supports it.
+#   * When the queue has drained back below
+#     ``_FLEET_PRESSURE_LOW_RATIO`` we exit degraded mode and resume
+#     full HSET writes on the very next event.
+#   * ``_fleet_degraded_events`` counts how many events were processed
+#     in essentials-only mode, surfaced via ``get_fleet_stats`` so the
+#     admin tile can render a "writer recovering" badge instead of a
+#     misleading green tile.
+#   * The companion alert in ``metrics._alerting_loop`` reads
+#     ``is_fleet_writer_recovering`` and skips paging while the writer
+#     is in degraded mode AND the queue is actively draining — only a
+#     truly stuck queue (degraded mode unable to recover) reaches
+#     on-call.
+_FLEET_PRESSURE_HIGH_RATIO = 0.5
+_FLEET_PRESSURE_LOW_RATIO = 0.25
+_FLEET_PRESSURE_DURATION_SEC = 30.0
+
+_fleet_pressure_started_at: Optional[float] = None  # monotonic
+_fleet_degraded_mode = False
+_fleet_degraded_since: Optional[float] = None  # wall-clock, for tile
+_fleet_degraded_events = 0  # monotonic per worker
+
 
 def _fleet_enabled() -> bool:
     """Fleet rollup is on iff Upstash Redis is configured and the
@@ -179,31 +215,90 @@ def _hour_bucket(ts: float) -> int:
     return (int(ts) // 3600) * 3600
 
 
-def _fleet_writer_loop() -> None:
-    """Daemon thread: drain ``_fleet_queue`` into Upstash Redis.
+def _update_fleet_pressure(qsize: int, now_monotonic: float) -> None:
+    """Sample queue depth and toggle ``_fleet_degraded_mode`` (Task #528).
 
-    Each event is one HINCRBY per affected counter (3 counters per
-    event: op, kind, reason-or-last-ts). Upstash REST round-trips are
-    ~30–80ms; queueing keeps the hot path off them entirely. On a
-    transient Upstash outage we just log + continue — the per-worker
-    deque still has the truth.
+    Called from the writer loop after each event. Uses a hysteresis
+    band so a queue oscillating around the high-water mark doesn't
+    flap in and out of degraded mode every iteration.
     """
-    while True:
+    global _fleet_pressure_started_at, _fleet_degraded_mode, _fleet_degraded_since
+    high = _FLEET_QUEUE_MAX * _FLEET_PRESSURE_HIGH_RATIO
+    low = _FLEET_QUEUE_MAX * _FLEET_PRESSURE_LOW_RATIO
+    if not _fleet_degraded_mode:
+        if qsize >= high:
+            if _fleet_pressure_started_at is None:
+                _fleet_pressure_started_at = now_monotonic
+            elif now_monotonic - _fleet_pressure_started_at >= _FLEET_PRESSURE_DURATION_SEC:
+                _fleet_degraded_mode = True
+                _fleet_degraded_since = _time.time()
+                logger.warning(
+                    "memory_brain fleet writer entering degraded mode "
+                    "(qsize=%d/%d, sustained for %.1fs) — dropping per-event "
+                    "last_*_ts HSETs and pipelining HINCRBYs to drain the queue",
+                    qsize, _FLEET_QUEUE_MAX,
+                    now_monotonic - _fleet_pressure_started_at,
+                )
+        else:
+            _fleet_pressure_started_at = None
+    else:
+        if qsize <= low:
+            _fleet_degraded_mode = False
+            _fleet_pressure_started_at = None
+            _fleet_degraded_since = None
+            logger.info(
+                "memory_brain fleet writer recovered (qsize=%d/%d) — "
+                "resuming full last_*_ts HSETs",
+                qsize, _FLEET_QUEUE_MAX,
+            )
+
+
+def _process_fleet_event(ts: float, op: str, kind: str, ok: bool, reason: Optional[str]) -> None:
+    """Write one event into Upstash. Splits on ``_fleet_degraded_mode``:
+
+    * Full mode (default): one HINCRBY per counter + per-event HSET
+      for ``last_ok_ts`` / ``last_fail_ts`` (aggregate + per-worker).
+    * Degraded mode (Task #528): essentials only — pipelined HINCRBYs,
+      no ``last_*_ts`` HSETs. The dashboard's "last ok / last fail"
+      timestamps will lag by however long the writer stayed degraded
+      but every counter remains accurate.
+    """
+    global _fleet_degraded_events
+    try:
+        from deps import redis_client as _rc
+        if _rc is None:
+            return
+        key = f"{_FLEET_KEY_PREFIX}{_hour_bucket(ts)}"
+        outcome = "ok" if ok else "fail"
+        # Resolve pid at write time, NOT module import time —
+        # gunicorn preloads this module in the master before
+        # forking (see ``_current_worker_pid`` docstring).
+        pid = _current_worker_pid()
         try:
-            ts, op, kind, ok, reason = _fleet_queue.get()
-        except Exception:
-            continue
-        try:
-            from deps import redis_client as _rc
-            if _rc is None:
-                continue
-            key = f"{_FLEET_KEY_PREFIX}{_hour_bucket(ts)}"
-            outcome = "ok" if ok else "fail"
-            # Resolve pid at write time, NOT module import time —
-            # gunicorn preloads this module in the master before
-            # forking (see ``_current_worker_pid`` docstring).
-            pid = _current_worker_pid()
-            try:
+            if _fleet_degraded_mode:
+                # Pipeline the HINCRBYs into a single round-trip when
+                # the client supports it (Upstash REST + redis-py both
+                # do); fall through to per-call writes otherwise.
+                pipe_factory = getattr(_rc, "pipeline", None)
+                pipe = None
+                if callable(pipe_factory):
+                    try:
+                        pipe = pipe_factory()
+                    except Exception:
+                        pipe = None
+                target = pipe if pipe is not None else _rc
+                target.hincrby(key, f"op:{op}:{outcome}", 1)
+                target.hincrby(key, f"kind:{kind}:{outcome}", 1)
+                if not ok and reason:
+                    target.hincrby(key, f"reason:{reason}", 1)
+                target.hincrby(key, f"worker:{pid}:op:{op}:{outcome}", 1)
+                target.expire(key, _FLEET_BUCKET_TTL_SECONDS)
+                if pipe is not None:
+                    exec_fn = getattr(pipe, "execute", None)
+                    if callable(exec_fn):
+                        exec_fn()
+                _fleet_degraded_events += 1
+            else:
                 _rc.hincrby(key, f"op:{op}:{outcome}", 1)
                 _rc.hincrby(key, f"kind:{kind}:{outcome}", 1)
                 if not ok and reason:
@@ -240,12 +335,37 @@ def _fleet_writer_loop() -> None:
                     _rc.expire(_FLEET_WORKERS_KEY, _FLEET_BUCKET_TTL_SECONDS)
                 except Exception as exc:
                     logger.debug("fleet seen-list write failed: %s", exc)
-            except Exception as exc:
-                # Don't spam — Upstash hiccups are common and the
-                # per-worker view is still authoritative.
-                logger.debug("fleet rollup write failed: %s", exc)
+        except Exception as exc:
+            # Don't spam — Upstash hiccups are common and the
+            # per-worker view is still authoritative.
+            logger.debug("fleet rollup write failed: %s", exc)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("fleet writer loop error: %s", exc)
+
+
+def _fleet_writer_loop() -> None:
+    """Daemon thread: drain ``_fleet_queue`` into Upstash Redis.
+
+    Each event is one HINCRBY per affected counter (3 counters per
+    event: op, kind, reason-or-last-ts). Upstash REST round-trips are
+    ~30–80ms; queueing keeps the hot path off them entirely. On a
+    transient Upstash outage we just log + continue — the per-worker
+    deque still has the truth.
+
+    Task #528: after each event we sample ``_fleet_queue.qsize()`` and
+    flip into degraded "essentials only" mode if the queue has been
+    sustained-full so the writer can drain instead of dropping.
+    """
+    while True:
+        try:
+            ts, op, kind, ok, reason = _fleet_queue.get()
+        except Exception:
+            continue
+        try:
+            _update_fleet_pressure(_fleet_queue.qsize(), _time.monotonic())
         except Exception as exc:  # pragma: no cover — defensive
-            logger.debug("fleet writer loop error: %s", exc)
+            logger.debug("fleet pressure sample error: %s", exc)
+        _process_fleet_event(ts, op, kind, ok, reason)
 
 
 def _snapshot_dropped_to_fleet() -> None:
@@ -668,6 +788,16 @@ def get_fleet_stats(window_seconds: int = _WINDOW_SECONDS) -> dict[str, Any]:
                 key=lambda kv: -kv[1],
             )
         ],
+        # Task #528 — degraded-mode visibility for the admin tile.
+        # ``writer_degraded`` lets the frontend render an amber
+        # "writer recovering" badge that distinguishes a healthy
+        # green fleet from a writer silently dropping per-event
+        # last_*_ts HSETs to drain the queue.
+        "writer_degraded": bool(_fleet_degraded_mode),
+        "writer_degraded_since": _fleet_degraded_since,
+        "writer_queue_size": _fleet_queue.qsize(),
+        "writer_queue_capacity": _FLEET_QUEUE_MAX,
+        "degraded_events_local": int(_fleet_degraded_events),
     }
 
 
@@ -909,6 +1039,48 @@ def get_fleet_dropped_events_total(hours: int = 24) -> int:
     return sum(by_pid.values())
 
 
+def get_fleet_degraded_events() -> int:
+    """Monotonic per-worker count of events processed in degraded
+    "essentials only" mode (Task #528).
+
+    The admin tile reads this to render a "writer recovering" badge:
+    a non-zero delta since the last poll means the writer is actively
+    self-healing through an Upstash slowdown rather than silently
+    dropping events.
+    """
+    return int(_fleet_degraded_events)
+
+
+def is_fleet_writer_degraded() -> bool:
+    """True iff the writer is currently in essentials-only mode
+    (Task #528). Used by the alerting loop to downgrade the
+    ``memory_brain_fleet_dropped`` page while auto-recovery is
+    actively draining the queue.
+    """
+    return bool(_fleet_degraded_mode)
+
+
+def is_fleet_writer_recovering() -> bool:
+    """True iff the writer is in degraded mode AND the queue is
+    actively draining (i.e. below the high-water mark).
+
+    Returning True signals the alerting loop to skip the
+    ``memory_brain_fleet_dropped`` page: drops happened, but the
+    self-healing path is working — on-call only needs to be paged
+    when degraded mode can't catch up (queue still ≥ high-water).
+    """
+    if not _fleet_degraded_mode:
+        return False
+    high = _FLEET_QUEUE_MAX * _FLEET_PRESSURE_HIGH_RATIO
+    try:
+        return _fleet_queue.qsize() < high
+    except Exception:
+        # ``qsize`` is documented as not-reliable on some platforms;
+        # if it raises we conservatively treat the writer as
+        # recovering so we don't over-page during degraded mode.
+        return True
+
+
 def get_fleet_dropped_events() -> int:
     """Return this worker's monotonic count of fleet-rollup queue
     drops (Task #482).
@@ -931,9 +1103,15 @@ def reset() -> None:
     touch Upstash (tests don't hit it; production has TTL eviction).
     """
     global _fleet_dropped_events
+    global _fleet_degraded_mode, _fleet_degraded_since
+    global _fleet_degraded_events, _fleet_pressure_started_at
     with _lock:
         _events.clear()
     _fleet_dropped_events = 0
+    _fleet_degraded_mode = False
+    _fleet_degraded_since = None
+    _fleet_degraded_events = 0
+    _fleet_pressure_started_at = None
     try:
         while True:
             _fleet_queue.get_nowait()
@@ -947,5 +1125,8 @@ __all__ = [
     "get_fleet_workers",
     "get_fleet_dropped_events",
     "get_fleet_dropped_events_total",
+    "get_fleet_degraded_events",
+    "is_fleet_writer_degraded",
+    "is_fleet_writer_recovering",
     "reset",
 ]

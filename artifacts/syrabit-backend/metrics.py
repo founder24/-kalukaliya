@@ -2765,7 +2765,29 @@ async def _alerting_loop():
                         # Counter reset (test isolation, worker
                         # restart). Re-baseline silently.
                         _fd_delta = 0
-                    if _fd_delta >= _fd_threshold:
+                    # Task #528 — suppress the page while the writer
+                    # is in degraded mode AND the queue is actively
+                    # draining. ``record_event`` may have dropped
+                    # events while the writer was catching up, but
+                    # the auto-recovery path is doing its job — only
+                    # a *truly stuck* queue (degraded mode unable to
+                    # bring the depth back below the high-water mark)
+                    # should reach on-call. We still advance the
+                    # high-water mark below so a later real stall
+                    # alerts on its own delta, not the suppressed one.
+                    _fd_recovering = False
+                    try:
+                        _fd_recovering = bool(_mbm_drop.is_fleet_writer_recovering())
+                    except Exception:
+                        _fd_recovering = False
+                    if _fd_delta >= _fd_threshold and _fd_recovering:
+                        logger.info(
+                            "memory_brain_fleet_dropped suppressed: writer "
+                            "in degraded mode and queue is draining "
+                            "(delta=%d, threshold=%d, total=%d)",
+                            _fd_delta, _fd_threshold, _fd_current,
+                        )
+                    if _fd_delta >= _fd_threshold and not _fd_recovering:
                         _worker_pid = os.getpid()
                         # Task #527: cross-worker dedup. The
                         # in-process ``_mb_fleet_dropped_last_seen``
