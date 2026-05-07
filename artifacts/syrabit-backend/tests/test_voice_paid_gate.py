@@ -8,31 +8,9 @@ bypass the gate; paying users pass through.
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI, HTTPException
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from auth_deps import require_paid_plan
-
-
-def _app_with(user: dict | None) -> TestClient:
-    app = FastAPI()
-
-    async def _fake_user():
-        return user
-
-    # Re-bind the dep to skip the JWT layer; only exercise the plan-gate
-    # logic so this test stays hermetic.
-    from fastapi import Depends
-    app.dependency_overrides[require_paid_plan] = (
-        lambda u=Depends(_fake_user): require_paid_plan.__wrapped__(u)
-        if hasattr(require_paid_plan, "__wrapped__") else None
-    )
-
-    @app.get("/protected")
-    async def protected(_: dict = Depends(require_paid_plan)):
-        return {"ok": True}
-
-    return TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.mark.asyncio
@@ -75,11 +53,16 @@ async def test_staff_and_educator_bypass():
         assert out["role"] == role
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_free_user_blocked_with_structured_402())
-    asyncio.run(test_missing_plan_blocked_with_402())
-    asyncio.run(test_paid_user_allowed())
-    asyncio.run(test_admin_bypass())
-    asyncio.run(test_staff_and_educator_bypass())
-    print("PASS")
+def test_voice_routes_wired_to_require_paid_plan():
+    """Static check — every /voice/* paid endpoint must declare
+    Depends(require_paid_plan). Mirrors the CI guard so a single
+    pytest run catches a forgotten gate before deploy."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "routes" / "voice.py").read_text()
+    assert "require_paid_plan" in src
+    for route in ("/voice/tts", "/voice/stt", "/voice/voice"):
+        idx = src.find(f'"{route}"')
+        assert idx >= 0, f"route decorator for {route} missing"
+        assert "Depends(require_paid_plan)" in src[idx: idx + 2000], (
+            f"{route} must use Depends(require_paid_plan)"
+        )

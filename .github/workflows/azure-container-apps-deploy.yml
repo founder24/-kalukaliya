@@ -73,6 +73,7 @@ jobs:
         run: python scripts/check_budget_ceiling.py
 
   deploy:
+    needs: budget_ceiling_gate
     if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 35
