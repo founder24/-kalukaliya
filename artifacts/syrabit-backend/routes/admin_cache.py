@@ -164,6 +164,86 @@ def _l1_inproc_stats() -> dict[str, Any]:
     return out
 
 
+# ── Cloudflare edge hit-rate ────────────────────────────────────────────────
+# Pulled from CF Analytics GraphQL on demand (and cached in-process for
+# 60 s so a tab refresh cannot DoS the panel into the CF rate limits).
+# Best-effort: missing CF_API_TOKEN / CF_ZONE_ID returns {} silently so
+# the panel still renders the AI-cache + L1 rows.
+import time as _time
+import urllib.request as _ur
+
+_CF_EDGE_CACHE: dict[str, Any] = {"ts": 0.0, "value": {}}
+_CF_EDGE_TTL_S = 60.0
+
+
+def _fetch_cf_edge_hit_rates(paths: list[str]) -> dict[str, float]:
+    if not paths:
+        return {}
+    now = _time.monotonic()
+    if now - float(_CF_EDGE_CACHE.get("ts", 0.0)) < _CF_EDGE_TTL_S:
+        return dict(_CF_EDGE_CACHE.get("value") or {})
+    token = os.environ.get("CF_API_TOKEN", "").strip()
+    zone = os.environ.get("CF_ZONE_ID", "").strip()
+    if not (token and zone):
+        return {}
+    end = _time.gmtime()
+    start_t = _time.gmtime(_time.time() - 86_400)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    query = (
+        "query($zone:String!,$start:Time!,$end:Time!){"
+        " viewer{ zones(filter:{zoneTag:$zone}){"
+        "  httpRequestsAdaptiveGroups(limit:1000,"
+        "   filter:{datetime_geq:$start,datetime_leq:$end},"
+        "   orderBy:[clientRequestPath_ASC]){"
+        "    count sum{cachedRequests}"
+        "    dimensions{clientRequestPath}"
+        "  } } }"
+        "}"
+    )
+    body = json.dumps({
+        "query": query,
+        "variables": {
+            "zone": zone,
+            "start": _time.strftime(fmt, start_t),
+            "end": _time.strftime(fmt, end),
+        },
+    }).encode("utf-8")
+    req = _ur.Request(
+        "https://api.cloudflare.com/client/v4/graphql",
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST",
+    )
+    try:
+        with _ur.urlopen(req, timeout=4.0) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        logger.debug("[admin_cache] CF GraphQL fetch failed: %s", e)
+        return {}
+    out: dict[str, tuple[int, int]] = {}
+    try:
+        groups = (
+            payload.get("data", {}).get("viewer", {})
+            .get("zones", [{}])[0].get("httpRequestsAdaptiveGroups", [])
+        )
+        wanted = set(paths)
+        for g in groups:
+            cf_path = (g.get("dimensions") or {}).get("clientRequestPath", "")
+            count = int(g.get("count") or 0)
+            cached = int((g.get("sum") or {}).get("cachedRequests") or 0)
+            for w in wanted:
+                if cf_path == w or cf_path.startswith(w):
+                    h = out.get(w, (0, 0))
+                    out[w] = (h[0] + cached, h[1] + count)
+        rates = {p: (c / t if t else 0.0) for p, (c, t) in out.items()}
+    except Exception as e:
+        logger.debug("[admin_cache] CF GraphQL parse failed: %s", e)
+        rates = {}
+    _CF_EDGE_CACHE["ts"] = now
+    _CF_EDGE_CACHE["value"] = rates
+    return rates
+
+
 @router.get("/api/health/cache")
 async def admin_cache_health(_admin: dict = Depends(get_admin_user)) -> dict[str, Any]:
     """Return per-layer cache stats + edge advisory targets.
@@ -180,12 +260,22 @@ async def admin_cache_health(_admin: dict = Depends(get_admin_user)) -> dict[str
           "alarm_thresholds":   { ai_cache_hit_ratio_floor, cardinality_multiplier }
         }
     """
+    edge_targets = _load_edge_targets()
+    edge_paths = [t["path"] for t in edge_targets if t.get("path")]
+    edge_hit_rates = _fetch_cf_edge_hit_rates(edge_paths)
+    # Decorate edge_targets with the live hit-rate so the panel can
+    # render advisory + actual side-by-side without a second pass.
+    for t in edge_targets:
+        rate = edge_hit_rates.get(t.get("path"))
+        if rate is not None:
+            t["live_hit_rate"] = rate
     return {
         "ai_input_cache": _ai_cache_snapshot(),
         "ai_response_cache": _ai_response_cache_stats(),
         "rag_cache": _rag_cache_stats(),
         "l1_inproc": _l1_inproc_stats(),
-        "edge_targets": _load_edge_targets(),
+        "edge_targets": edge_targets,
+        "edge_hit_rates_cf": edge_hit_rates,
         "alarm_thresholds": {
             # Surface the alarm thresholds so the admin panel can render
             # the same red lines the CloudWatch alarms enforce

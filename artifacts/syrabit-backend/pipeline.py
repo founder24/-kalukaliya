@@ -513,7 +513,12 @@ async def stage3_polish(
     # streamed chunks are rendered as they arrive and re-emitting from
     # cache would have to fake the chunk schedule.
     if _aic_is_det(messages, model_name, temperature=0.0, stream=False):
-        _cached = _aic_get(messages, model_name, max_tokens=max_tokens)
+        _cached = _aic_get(
+            messages, model_name, max_tokens=max_tokens,
+            content_type="stage3_polish",
+            template_version="stage3_polish_v1",
+            normalize_text=True,
+        )
         if _cached:
             logger.info(
                 "[PIPELINE][S3][CACHE-HIT] aic served %d chars (model=%s)",
@@ -542,7 +547,12 @@ async def stage3_polish(
         # in-process and `_DEFAULT_TTL_SEC=86 400` in Redis.
         try:
             if result and _aic_is_det(messages, model_name, temperature=0.0, stream=False):
-                _aic_set(messages, model_name, result, max_tokens=max_tokens)
+                _aic_set(
+                    messages, model_name, result, max_tokens=max_tokens,
+                    content_type="stage3_polish",
+                    template_version="stage3_polish_v1",
+                    normalize_text=True,
+                )
         except Exception:
             pass
         return result

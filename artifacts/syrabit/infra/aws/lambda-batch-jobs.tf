@@ -163,13 +163,20 @@ resource "aws_iam_role_policy" "batch_job_inline" {
       # leftover-doc-count alarm below can detect a stuck pass that the
       # built-in Lambda `Errors` metric would never see (a clean run that
       # produces zero translations is silent at the Lambda layer).
+      # Task #571 — additionally allow `Syrabit/Cache` so the nightly
+      # `cache-effectiveness` Lambda can publish the AI-input-cache /
+      # ai_response_cache / rag_cache / L1 / edge hit-rate rows it
+      # collects from /api/health/cache. Both namespaces are pinned via
+      # `StringEquals` so the role cannot drift to broader CloudWatch
+      # write access — adding a third namespace here requires another
+      # cap-policy review.
       {
         Effect   = "Allow"
         Action   = ["cloudwatch:PutMetricData"]
         Resource = "*"
         Condition = {
           StringEquals = {
-            "cloudwatch:namespace" = "Syrabit/BatchJobs"
+            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache"]
           }
         }
       },
@@ -466,13 +473,20 @@ resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
       dimensions  = { ContentType = each.key }
     }
   }
+  # Trailing 7-day moving average. The metric's period must equal the
+  # window length we want to average over — period=604800 + stat=Average
+  # over the alarm's evaluation window collapses into "average value of
+  # UniqueKeys24h across the last 7 days", which is the moving-average
+  # signal we need. (CloudWatch fetches `evaluation_periods × period`
+  # of data; with evaluation_periods=1 + period=604800 the alarm will
+  # always look at the last 7 days of data when computing `ma7`.)
   metric_query {
     id          = "ma7"
     return_data = false
     metric {
       namespace   = "Syrabit/Cache"
       metric_name = "UniqueKeys24h"
-      period      = 86400
+      period      = 604800
       stat        = "Average"
       dimensions  = { ContentType = each.key }
     }

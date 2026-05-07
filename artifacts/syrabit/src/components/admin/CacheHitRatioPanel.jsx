@@ -284,6 +284,7 @@ export default function CacheHitRatioPanel({
                 <th className="text-left font-normal pr-2">Path</th>
                 <th className="text-right font-normal pr-2">TTL (s)</th>
                 <th className="text-right font-normal pr-2">Target</th>
+                <th className="text-right font-normal pr-2">Live (CF)</th>
                 <th className="text-left font-normal">User-keyed</th>
               </tr>
             </thead>
@@ -296,6 +297,18 @@ export default function CacheHitRatioPanel({
                   </td>
                   <td className="text-right tabular-nums pr-2">
                     {fmtPct(t.cache_hit_ratio_target)}
+                  </td>
+                  <td
+                    className={`text-right tabular-nums pr-2 ${
+                      t.live_hit_rate != null &&
+                      t.cache_hit_ratio_target != null &&
+                      t.live_hit_rate < t.cache_hit_ratio_target
+                        ? 'text-red-600 font-medium'
+                        : ''
+                    }`}
+                    data-testid={`cache-panel-edge-live-${t.path}`}
+                  >
+                    {t.live_hit_rate == null ? '—' : fmtPct(t.live_hit_rate)}
                   </td>
                   <td>{t.user_keyed ? 'yes' : 'no'}</td>
                 </tr>

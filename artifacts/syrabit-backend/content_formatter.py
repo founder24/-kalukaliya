@@ -532,7 +532,12 @@ async def format_content(
         _aic_get = _aic_set = None  # type: ignore[assignment]
         _aic_enabled = False
     if _aic_enabled and _aic_get is not None:
-        _cached = _aic_get(_cache_msgs, _cache_model, max_tokens=max_tokens)
+        _cached = _aic_get(
+            _cache_msgs, _cache_model, max_tokens=max_tokens,
+            content_type="formatter",
+            template_version=f"content_formatter_v1:{style}:{lang}",
+            normalize_text=True,
+        )
         if _cached:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             logger.info(
@@ -581,7 +586,12 @@ async def format_content(
     # cache with raw input).
     if _aic_enabled and _aic_set is not None and formatted_by != "passthrough" and out_text:
         try:
-            _aic_set(_cache_msgs, _cache_model, str(out_text), max_tokens=max_tokens)
+            _aic_set(
+                _cache_msgs, _cache_model, str(out_text), max_tokens=max_tokens,
+                content_type="formatter",
+                template_version=f"content_formatter_v1:{style}:{lang}",
+                normalize_text=True,
+            )
         except Exception:
             pass
 
