@@ -56,12 +56,34 @@ env:
   AZURE_ACA_ENV:        ${{ vars.AZURE_ACA_ENV }}
 
 jobs:
+  canonical_delegation_gate:
+    # Task #559 — umbrella pre-deploy guard. Refuses to ship a backend
+    # image that violates the per-feature canonical specialist-
+    # delegation map (infra/four-cloud-delegation.md §A): English chat
+    # dynamic 2-chain, Assamese strict [sarvam, workers_ai_indic],
+    # Azure-OpenAI bare-token ban, voice paywall on /tts /stt
+    # /voice/voice, and the inherited dead-provider bank from Tasks
+    # #297 / #347 / #491 / #494 / #554. Runs BEFORE budget_ceiling_gate
+    # so a routing-contract drift fails the build before the budget
+    # gate even gets a chance to mask it.
+    name: Canonical-delegation guard (#559)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run umbrella guard
+        working-directory: artifacts/syrabit-backend
+        run: python scripts/ci/check_canonical_delegation.py
+
   budget_ceiling_gate:
     # Task #549 — pre-deploy guard. Refuses to ship a backend image
     # whose monthly cap defaults, chat-head, Assamese-head, degradation
     # ladder, or /voice/* paid gate has drifted off the perpetual
     # $100/mo budget contract.
     name: Budget-ceiling guard (#549)
+    needs: canonical_delegation_gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +95,7 @@ jobs:
         run: python scripts/check_budget_ceiling.py
 
   deploy:
-    needs: budget_ceiling_gate
+    needs: [canonical_delegation_gate, budget_ceiling_gate]
     if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 35

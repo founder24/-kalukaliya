@@ -1,6 +1,6 @@
 # V4 Locked Architecture — Final Multi-Cloud Configuration
 
-> **Status: LOCKED — 2026-05-05** (last spec-clarity pass: 2026-05-06, A1–A9)
+> **Status: LOCKED — 2026-05-05** (last spec-clarity pass: 2026-05-07 — see §17 canonical strict specialist delegation; previous pass 2026-05-06 A1–A9)
 > **Owner:** founder@syrabit.ai
 > **Supersedes:** v3 (`per-cloud-feature-delegation.md`, `provider-priority-map.md`, `credit-burn-runbook.md`).
 > The v3 docs remain on disk for diff/blame history but every section in
@@ -19,6 +19,8 @@
 | **GCP / Vertex** | Gen-AI validation + safety + observability | **Vertex Gemini 2.5 Flash** = default content-validation model + long-form `content` pool fallback (sits behind Workers-AI Mistral-7B / Llama-3.2-3B). **NOT in the chat hot path** (founder choice 2026-05-06, see §4). **Gemini RAI** = batch/async-only for `exam_model_paper` review (never blocks live chat). Web Risk API for malicious-URL checks. Cloud Trace for OTEL spans. **Vertex multilingual embedding** = embed-failover only, writes to a separate Pinecone namespace with a re-embed queue (see §3). | **10 %** |
 
 ✅ **Cost-share sum: 40 + 30 + 20 + 10 = 100 %** (single integers, no ranges).
+
+> **Task #559 amendment (2026-05-07):** the cost-share table above is now an **informational outcome** of the per-feature canonical map in `infra/four-cloud-delegation.md` §A, **not** a routing contract. The current snapshot (post-Task #549 `$100/mo` lock + post-Task #554 Azure-OpenAI retirement) is **40 % CF / 30 % GCP / 15 % Az / 10 % AWS / 5 % other** — see §17 below for the canonical strict specialist-delegation map and the umbrella CI guard that enforces it.
 
 ---
 
@@ -350,3 +352,60 @@ print('V4 §13 acceptance: PASS')
 
 - **#524** — wider banned-token sweep across docs / frontend / admin panels so the CI guard can ban `bedrock|gemini|xai|baseten|openai_direct` as bare tokens without breaking legitimate brand copy.
 - **#525** — pytest contract pinning that index-time and query-time syllabus embeddings share the same provider/model.
+
+---
+
+## §17 — Amendment: Canonical strict specialist-delegation map (Task #559, 2026-05-07)
+
+**Trigger:** Eight overlapping routing rules had accumulated across V4 §0 / §3 / §4 / §15 / §16 + the founder-locks (#549) + the AWS expansion (#551) + the Azure-OpenAI retirement (#554). Each rule was correct on its own; together they made "who owns feature X today" require reading three guards and four docs. #559 collapses the lot into a **single per-feature canonical map** + a **single umbrella CI guard**.
+
+### Decision
+
+Adopt **strict specialist delegation**: every production feature has **exactly one** canonical primary provider and **at most one** named, strict fallback. The cost-share table in §0 is now an *informational outcome* of that map, not a routing contract.
+
+- **Map (source of truth):** [`infra/four-cloud-delegation.md`](./four-cloud-delegation.md) §A — rewritten as a per-feature table superseding the old percentage matrix.
+- **ADR:** [`docs/architecture/adr/0003-canonical-strict-specialist-delegation.md`](../docs/architecture/adr/0003-canonical-strict-specialist-delegation.md).
+- **Cutover protocol (10 steps):** [`artifacts/syrabit/docs/infra/canonical-delegation-cutover.md`](../artifacts/syrabit/docs/infra/canonical-delegation-cutover.md).
+
+### Enforcement
+
+A single umbrella CI guard at `artifacts/syrabit-backend/scripts/ci/check_canonical_delegation.py` runs two banks of checks on every PR:
+
+1. **DEAD-PROVIDER BANK** — carried verbatim from Tasks #297 / #347 / #491 / #494 / #554 (bare-token bans on retired providers + vendored-SDK import bans + direct `vertex_format.format_with_vertex` ban + aca_jobs/* manifest completeness). Behaviour-preserving: any PR that previously passed `scripts/check_dead_providers.py` still passes the umbrella.
+2. **CANONICAL-DELEGATION BANK** — new in #559:
+   - `_check_chat_chains` — `PROVIDER_PRIORITY["english_rag_chat"]` ≡ `{vertex, workers_ai_llama32_3b}` and `PROVIDER_PRIORITY["assamese_rag_chat"]` ≡ `{sarvam, workers_ai_indic}` (set-equality; English head order is runtime-dynamic via `_select_chat_primary`).
+   - `_check_chat_primary_selector` — `cost_caps._select_chat_primary` + `CHAT_PRIMARY_OVERRIDE` knob both present.
+   - `_check_voice_paywall` — `routes/voice.py` `/tts` + `/stt` + `/voice/voice` all sit behind `Depends(require_paid_plan)` (mirrors `scripts/check_budget_ceiling.py`).
+   - **TODO-gated** (banned only after the parent task merges): `TODO_557_PATTERN` (SES sole tier-1 + self-hosted VAPID web-push, ban flips on with Task #557) and `TODO_558_PATTERN` (observability narrowing to GCP Cloud Trace single exporter, ban flips on with Task #558). The regex literals live in the umbrella; uncomment the matching `_scan_pattern_global` call to activate.
+
+The legacy `artifacts/syrabit-backend/scripts/check_dead_providers.py` is now a **thin shim** that imports `main` from the umbrella, so existing pre-deploy gates, pytest fixtures, and ops cron entries keep working without touching their command lines.
+
+### Deploy-workflow wiring
+
+`.github/workflows/azure-container-apps-deploy.yml` gains a new `canonical_delegation_gate` job that runs the umbrella **before** the existing `budget_ceiling_gate`. The `deploy` job depends on both. A routing-contract drift now fails the build before the budget gate even gets a chance to mask it.
+
+### Relationship to V4 §3 (embed failover) and §4 (chat dispatch)
+
+- §3 (cache-only degraded mode + AWS SQS reembed queue) is unchanged. The umbrella adds no new check here — V4 §15 §4 already names the strict fallback (cache-only) and the dead-provider bank already bans every embedder that is not Workers-AI custom.
+- §4 (chat dispatch) is **superseded** by the dynamic `_select_chat_primary`-driven 2-chain documented in §17 above and in the canonical map. The four old fallback legs (Mistral-7B / Llama-3.2-3B / generic Workers-AI / Vertex) have been collapsed into a single named strict fallback. Strict-chain exhaustion now surfaces 503 instead of silent advance to a third option (V4 §12 in code).
+
+### Acceptance gate
+
+```bash
+# 1. Umbrella guard passes.
+python artifacts/syrabit-backend/scripts/ci/check_canonical_delegation.py
+# expected: "Canonical-delegation guard OK — scanned <N> files."
+
+# 2. Legacy shim still passes (behaviour-preserving).
+python artifacts/syrabit-backend/scripts/check_dead_providers.py
+# expected: same output as above.
+
+# 3. Per-feature canonical map present.
+rg -c '^\| \*\*' infra/four-cloud-delegation.md
+# expected: ≥ 18 rows in §A.
+```
+
+### Out of scope (tracked separately)
+
+- **Task #557** — flip the `TODO_557_PATTERN` ban on (SES sole tier-1 + self-hosted VAPID web-push). One comment-uncomment in the umbrella + the SendGrid → SES + FCM → VAPID code migration.
+- **Task #558** — flip the `TODO_558_PATTERN` ban on (observability narrowing). One comment-uncomment + the Sentry → GCP Cloud Trace exporter migration.
