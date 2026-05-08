@@ -48,6 +48,30 @@
   "_task_571_doc": "Task #571 — `cache-effectiveness` is a *new* batch shipper, not an ACA-Jobs migration; it has no `aca_module` counterpart. Listed in `auxiliary_jobs` below so the dead-providers CI guard (which only walks `aca_jobs/*.py`) does not require an entry, while the lambda-batch-jobs.tf locals.batch_jobs table still mirrors it 1:1.",
   "auxiliary_jobs": [
     {
+      "name": "chat-credit-runway",
+      "lambda_function_name": "syrabit-chat-credit-runway",
+      "handler": "lambda_batch.chat_credit_runway.handler",
+      "schedule": "cron(30 3 * * ? *)",
+      "schedule_doc": "daily 03:30 UTC (after cache-effectiveness 03:15)",
+      "memory_mb": 256,
+      "timeout_s": 300,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "task": 565,
+      "notes": "Daily GCP credit-runway snapshot. Queries the GCP Billing BigQuery export, computes remaining_credits / (trailing_30d_burn / 30), writes the integer to Upstash Redis at chat:credit_runway_days (TTL 48h) so cost_caps._select_chat_primary's 60s cache picks it up on the next refresh. Publishes Syrabit/Cost::ChatCreditRunwayDays to CloudWatch; chat-credit-runway-stale alarm pages on-call when the metric is missing >24h."
+    },
+    {
+      "name": "chat-credit-runway-freshness",
+      "lambda_function_name": "syrabit-chat-credit-runway-freshness",
+      "handler": "lambda_batch.chat_credit_runway.freshness_handler",
+      "schedule": "rate(1 hour)",
+      "schedule_doc": "hourly Sentry-backed freshness probe",
+      "memory_mb": 128,
+      "timeout_s": 60,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "task": 565,
+      "notes": "Independent Sentry-backed >24h missing-runway alert. Reads chat:credit_runway_days from Upstash Redis directly (the publisher stamps a 48h TTL, so age = publish_ttl - remaining_pttl), and sentry_sdk.capture_message's when the value is missing or older than RUNWAY_FRESHNESS_THRESHOLD_S (default 24h). Hourly cadence × Sentry first-event dedup → on-call paged within ~1h of any publisher outage. Independence from the publisher matters: if the publisher Lambda fails to invoke, this probe is the only Sentry-side detector."
+    },
+    {
       "name": "cache-effectiveness",
       "lambda_function_name": "syrabit-cache-effectiveness",
       "handler": "lambda_batch.cache_effectiveness.handler",

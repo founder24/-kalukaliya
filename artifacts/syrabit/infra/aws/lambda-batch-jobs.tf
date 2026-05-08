@@ -57,6 +57,62 @@ data "aws_secretsmanager_secret" "admin_jwt" {
   depends_on = [aws_secretsmanager_secret.workers]
 }
 
+# Task #565 — `chat-credit-runway` Lambda writes the integer runway
+# estimate to Upstash Redis (selector reads it via the backend's
+# `deps.redis_client`) and captures Sentry events on compute /
+# publish failure. The REST URL + token come from the existing
+# `upstash/redis-rest-token` secret entry plus the new
+# `upstash/redis-rest-url` entry declared in `secrets.tf`. SENTRY_DSN
+# is the workers-scoped DSN already present at `sentry/dsn-workers`.
+data "aws_secretsmanager_secret" "upstash_redis_rest_url" {
+  name       = "${local.lz_project}/${local.lz_env}/upstash/redis-rest-url"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+data "aws_secretsmanager_secret" "upstash_redis_rest_token" {
+  name       = "${local.lz_project}/${local.lz_env}/upstash/redis-rest-token"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+data "aws_secretsmanager_secret" "sentry_dsn_workers" {
+  name       = "${local.lz_project}/${local.lz_env}/sentry/dsn-workers"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
+# Task #565 — GCP billing-export coordinates and credit-pool size for the
+# `chat-credit-runway` Lambda. Defaults are placeholder values; production
+# overrides via tfvars (e.g. infra/aws/terraform.tfvars) so a Lambda
+# redeploy is not required to roll a new credit grant.
+variable "gcp_billing_project" {
+  type        = string
+  description = "GCP project that owns the BigQuery billing export dataset (Task #565)."
+  default     = "syrabit-prod"
+}
+
+variable "gcp_billing_dataset" {
+  type        = string
+  description = "BigQuery dataset name containing the gcp_billing_export_v1_* tables (Task #565)."
+  default     = "billing_export"
+}
+
+variable "gcp_billing_table_prefix" {
+  type        = string
+  description = "Prefix of the per-billing-account export table; the Lambda wildcards on `<prefix>_*` (Task #565)."
+  default     = "gcp_billing_export_v1"
+}
+
+variable "gcp_total_credits_usd" {
+  type        = number
+  description = "Total GCP startup-credit pool size in USD; the Lambda computes remaining = this − cumulative_cost (Task #565)."
+  default     = 0
+}
+
+variable "gcp_credits_start_date" {
+  type        = string
+  description = "YYYY-MM-DD when the credit pool started accumulating burn (Task #565)."
+  default     = "2025-08-01"
+}
+
 # `pinecone` and `workers_embed` data sources are already declared in
 # `sqs-reembed.tf`. We reference them directly below.
 
@@ -98,6 +154,44 @@ locals {
       schedule          = "cron(15 3 * * ? *)" # daily 03:15 UTC (after as-translation-backfill 03:00)
       max_docs_per_run  = 0
       description       = "Task #571 — Daily AI-input-cache effectiveness shipper to Syrabit/Cache namespace."
+    }
+    # Task #565 — daily GCP credit-runway snapshot. Reads the GCP
+    # Billing BigQuery export, computes
+    # `remaining_credits / (trailing_30d_burn / 30)`, writes the
+    # integer to Upstash Redis at `chat:credit_runway_days` (TTL 48h)
+    # so `cost_caps._select_chat_primary`'s 60s in-process cache picks
+    # it up on the next refresh — flips the Vertex ↔ Workers-AI
+    # Llama-3.2-3B chain head when projected runway ≤ 90 days
+    # without a backend redeploy. CW alarm `chat-credit-runway-stale`
+    # below pages on-call when the metric is missing >24h.
+    "chat-credit-runway" = {
+      handler           = "lambda_batch.chat_credit_runway.handler"
+      memory_mb         = 256
+      timeout_s         = 300
+      schedule          = "cron(30 3 * * ? *)" # daily 03:30 UTC (after cache-effectiveness 03:15)
+      max_docs_per_run  = 0
+      description       = "Task #565 — Daily GCP credit-runway snapshot publisher (BigQuery → Upstash Redis + Syrabit/Cost CW namespace)."
+    }
+
+    # Task #565 — Sentry-backed freshness probe for the runway value.
+    # Acceptance criterion explicitly requires a Sentry alert when the
+    # Redis value is missing >24h. The CloudWatch `chat-credit-runway-stale`
+    # alarm catches the same condition on the SNS side, but Sentry is the
+    # founder's primary on-call channel (Task #558 — errors-only Sentry),
+    # so we run an *independent* hourly probe that reads the Redis key
+    # directly and `sentry_sdk.capture_message`s when the value is missing
+    # or has aged past `RUNWAY_FRESHNESS_THRESHOLD_S` (default 24h). Hourly
+    # cadence × Sentry first-event dedup → on-call sees the stale-runway
+    # condition within ~1h, well inside the 24h SLO. Independence from
+    # the publisher matters: if the publisher Lambda fails to even
+    # invoke, this probe is the only thing that detects it.
+    "chat-credit-runway-freshness" = {
+      handler           = "lambda_batch.chat_credit_runway.freshness_handler"
+      memory_mb         = 128
+      timeout_s         = 60
+      schedule          = "rate(1 hour)"
+      max_docs_per_run  = 0
+      description       = "Task #565 — Hourly Sentry-backed freshness probe for chat:credit_runway_days (>24h missing → Sentry alert)."
     }
   }
 }
@@ -166,17 +260,20 @@ resource "aws_iam_role_policy" "batch_job_inline" {
       # Task #571 — additionally allow `Syrabit/Cache` so the nightly
       # `cache-effectiveness` Lambda can publish the AI-input-cache /
       # ai_response_cache / rag_cache / L1 / edge hit-rate rows it
-      # collects from /api/health/cache. Both namespaces are pinned via
-      # `StringEquals` so the role cannot drift to broader CloudWatch
-      # write access — adding a third namespace here requires another
-      # cap-policy review.
+      # collects from /api/health/cache.
+      # Task #565 — additionally allow `Syrabit/Cost` so the daily
+      # `chat-credit-runway` Lambda can publish the
+      # `ChatCreditRunwayDays` metric the freshness alarm rides on.
+      # All three namespaces are pinned via `StringEquals` so the role
+      # cannot drift to broader CloudWatch write access — adding a
+      # fourth namespace requires another cap-policy review.
       {
         Effect   = "Allow"
         Action   = ["cloudwatch:PutMetricData"]
         Resource = "*"
         Condition = {
           StringEquals = {
-            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache"]
+            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache", "Syrabit/Cost"]
           }
         }
       },
@@ -251,6 +348,18 @@ resource "aws_lambda_function" "batch_job" {
       # vars they do not consume) and keeps the env block uniform.
       ADMIN_JWT_SECRET_ARN              = data.aws_secretsmanager_secret.admin_jwt.arn
       BACKEND_URL                       = "https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io"
+      # Task #565 — `chat-credit-runway` consumes Upstash REST creds +
+      # Sentry DSN. Other handlers harmlessly ignore them.
+      UPSTASH_REDIS_REST_URL_SECRET_ARN   = data.aws_secretsmanager_secret.upstash_redis_rest_url.arn
+      UPSTASH_REDIS_REST_TOKEN_SECRET_ARN = data.aws_secretsmanager_secret.upstash_redis_rest_token.arn
+      SENTRY_DSN_SECRET_ARN               = data.aws_secretsmanager_secret.sentry_dsn_workers.arn
+      # GCP billing-export coordinates. Operator overrides via Terraform
+      # tfvars or by editing the Lambda env directly post-apply.
+      GCP_BILLING_PROJECT                 = var.gcp_billing_project
+      GCP_BILLING_DATASET                 = var.gcp_billing_dataset
+      GCP_BILLING_TABLE_PREFIX            = var.gcp_billing_table_prefix
+      GCP_TOTAL_CREDITS_USD               = tostring(var.gcp_total_credits_usd)
+      GCP_CREDITS_START_DATE              = var.gcp_credits_start_date
     })
   }
 
@@ -504,6 +613,61 @@ resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
     return_data = true
     expression  = "today - 3 * ma7"
     label       = "UniqueKeys24h(${each.key}) - 3x 7d MA"
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# ── Task #565 — chat-credit-runway freshness + low-runway alarms ────────────
+# `chat-credit-runway-stale` rides on Syrabit/Cost::ChatCreditRunwayDays
+# with treat_missing_data=breaching so a >24h gap in the daily Lambda's
+# publish (Lambda failed to invoke, BQ outage, Upstash outage, …) pages
+# on-call via the existing ops_alerts SNS topic. The Lambda also captures
+# Sentry events directly on each compute / publish failure, but the CW
+# alarm is the safety net that catches the "Lambda silently never even
+# started" case the in-handler Sentry path cannot.
+resource "aws_cloudwatch_metric_alarm" "chat_credit_runway_stale" {
+  alarm_name          = "${local.lz_project}-chat-credit-runway-stale-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  metric_name         = "ChatCreditRunwayDays"
+  namespace           = "Syrabit/Cost"
+  period              = 86400
+  statistic           = "Maximum"
+  threshold           = 0
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #565 — Syrabit/Cost::ChatCreditRunwayDays has not been published for >24h. Either the daily `chat-credit-runway` Lambda failed to invoke, the GCP Billing BigQuery export query failed, or Upstash publish failed. The Vertex ↔ Workers-AI Llama-3.2-3B chain head will silently stay on the env-derived path until this is resolved (V4 §12 — fail loud)."
+
+  dimensions = {
+    Source = "lambda"
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# Early-warning: runway <60d is well past the 90d flip threshold; if
+# we see this without the chain having flipped, something is wrong
+# with the selector wiring.
+resource "aws_cloudwatch_metric_alarm" "chat_credit_runway_low" {
+  alarm_name          = "${local.lz_project}-chat-credit-runway-low-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  metric_name         = "ChatCreditRunwayDays"
+  namespace           = "Syrabit/Cost"
+  period              = 86400
+  statistic           = "Maximum"
+  threshold           = 60
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Task #565 — Projected GCP credit runway has dropped below 60 days for 2 consecutive daily publishes. The Task #554 chain should already have flipped to Workers-AI Llama-3.2-3B head at the 90d threshold; verify the flip via /api/admin/health and inspect cost_caps._select_chat_primary cache."
+
+  dimensions = {
+    Source = "lambda"
   }
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]

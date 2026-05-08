@@ -18,6 +18,10 @@ lupa>=2.8  # Task #765 — enables fakeredis Lua/EVAL execution for atomic credi
 google-auth==2.49.1
 google-auth-oauthlib==1.3.0
 google-api-core==2.30.0
+# Task #565 — required by `lambda_batch/chat_credit_runway.py` to query
+# the GCP Billing BigQuery export. Ships in the shared sqs_consumers
+# Lambda image (artifacts/syrabit/services/backend/sqs_consumers/Dockerfile).
+google-cloud-bigquery==3.27.0
 
 httpx==0.28.1
 aiohttp==3.13.5

@@ -34,6 +34,13 @@ locals {
     "cf-ai-gateway/account-id"  = "Cloudflare AI Gateway account-id used alongside the API token by `providers/workers_indic.py` (Task #551 §B)."
     "gemini/api-key"            = "Vertex/Gemini polish key used by the Assamese translate chain (`routes/ai_chat._assamese_translate_*`) inside the `as-translation-backfill` Lambda (Task #551 §B)."
     "gcp/sa-json"               = "GCP service-account JSON for Vertex polish fallback (`GOOGLE_APPLICATION_CREDENTIALS_JSON`) used by `as-translation-backfill` (Task #551 §B)."
+    # Task #565 — `chat-credit-runway` Lambda needs Upstash REST creds
+    # (writes the daily integer runway estimate to `chat:credit_runway_days`,
+    # TTL 48h) and the workers Sentry DSN (captures publish failures so
+    # the V4 §12 fail-loud contract holds). The Upstash REST URL is not
+    # actually a secret per se but lives alongside the token here so the
+    # bootstrap-env mapping in `lambda_batch/_db.py` is uniform.
+    "upstash/redis-rest-url"    = "Upstash Redis REST base URL used by `chat-credit-runway` Lambda (Task #565). Same value as the ACA backend's UPSTASH_REDIS_REST_URL env."
   }
 }
 

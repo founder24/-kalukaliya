@@ -121,16 +121,57 @@ _CHAT_PRIMARY_CACHE_TTL_S = 60.0
 _chat_primary_cache: dict = {"chain": None, "ts": 0.0}
 
 
+# Task #565 — Redis key the daily `chat-credit-runway` Lambda publishes
+# the integer runway estimate to (TTL 48 h). The selector reads it
+# between the operator env override and the env-derived computation so
+# a cron-published value flips the chain on the next 60 s cache refresh
+# without a backend redeploy. Two missed Lambda runs (>24 h) lets the
+# key expire, the selector falls back to the env path, and the
+# `chat-credit-runway-stale` CloudWatch alarm pages on-call.
+_RUNWAY_REDIS_KEY = "chat:credit_runway_days"
+
+
+def _runway_from_redis() -> float | None:
+    """Read the cron-published runway integer from Upstash Redis.
+
+    Returns None when:
+      * deps.redis_client is unavailable (no Upstash creds in env), OR
+      * the key is missing / expired (Lambda has not published in 48 h), OR
+      * the value cannot be parsed as a positive number.
+
+    Never raises — Redis hiccups must not break the chat hot path.
+    """
+    try:
+        from deps import redis_client as _rc  # type: ignore
+        if _rc is None:
+            return None
+        raw = _rc.get(_RUNWAY_REDIS_KEY)
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        decoded = raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw)
+        return max(0.0, float(decoded.strip()))
+    except (ValueError, AttributeError):
+        return None
+
+
 def _projected_chat_runway_days() -> float | None:
     """Return projected days of GCP credit runway, or None if unknown.
 
-    Inputs (env-driven so a runway-tracker cron can update them without a
-    redeploy):
-      * `GCP_CREDITS_REMAINING_USD` — operator-published current balance.
-      * `CHAT_CREDIT_RUNWAY_DAYS`   — direct override (cron-computed).
+    Resolution order (highest priority first):
+      1. `CHAT_CREDIT_RUNWAY_DAYS` env  — operator manual override.
+      2. Redis key `chat:credit_runway_days` — daily value published by
+         the Task #565 `chat-credit-runway` Lambda from the GCP Billing
+         BigQuery export. Auto-expires after 48 h so a stuck Lambda
+         falls back instead of pinning a stale number forever.
+      3. `GCP_CREDITS_REMAINING_USD` env + MeterD MTD burn — legacy
+         fallback retained so the selector still has a signal if both
+         the operator override and the Redis publisher are missing.
 
-    Returns None when neither signal is present, in which case callers
-    must fall back to the default chain (no silent flip).
+    Returns None when nothing is available, in which case callers must
+    fall back to the default chain (V4 §12 — no silent flip).
     """
     direct = (os.environ.get("CHAT_CREDIT_RUNWAY_DAYS") or "").strip()
     if direct:
@@ -138,6 +179,9 @@ def _projected_chat_runway_days() -> float | None:
             return max(0.0, float(direct))
         except ValueError:
             pass
+    redis_value = _runway_from_redis()
+    if redis_value is not None:
+        return redis_value
     pool_raw = (os.environ.get("GCP_CREDITS_REMAINING_USD") or "").strip()
     if not pool_raw:
         return None

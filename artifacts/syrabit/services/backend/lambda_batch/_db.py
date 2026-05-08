@@ -76,6 +76,13 @@ _SECRET_ENV_MAP: dict[str, tuple[str, ...]] = {
     "CF_AI_GATEWAY_ACCOUNT_ID_SECRET":                 ("CF_AI_GATEWAY_ACCOUNT_ID",),
     "GEMINI_API_KEY_SECRET_ARN":                       ("GEMINI_API_KEY",),
     "GOOGLE_APPLICATION_CREDENTIALS_JSON_SECRET_ARN":  ("GOOGLE_APPLICATION_CREDENTIALS_JSON",),
+    # Task #565 — `chat-credit-runway` Lambda publishes the integer
+    # runway estimate to Upstash Redis (selector reads it via the
+    # backend's `deps.redis_client` on a 60 s in-process cache) and
+    # captures Sentry events on compute / publish failure.
+    "UPSTASH_REDIS_REST_URL_SECRET_ARN":               ("UPSTASH_REDIS_REST_URL",),
+    "UPSTASH_REDIS_REST_TOKEN_SECRET_ARN":             ("UPSTASH_REDIS_REST_TOKEN",),
+    "SENTRY_DSN_SECRET_ARN":                           ("SENTRY_DSN",),
 }
 
 _bootstrapped = False
