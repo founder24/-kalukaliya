@@ -335,14 +335,18 @@ jobs:
                 "identity": "system"
               }]
               | .properties.configuration.secrets = [
-                  {"name":"aws-access-key-id",     "keyVaultUrl": ($kv + "/AWS-ACCESS-KEY-ID"),     "identity":"system"},
-                  {"name":"aws-secret-access-key", "keyVaultUrl": ($kv + "/AWS-SECRET-ACCESS-KEY"), "identity":"system"},
-                  {"name":"azure-openai-api-key",  "keyVaultUrl": ($kv + "/AZURE-OPENAI-API-KEY"),  "identity":"system"},
-                  {"name":"mongo-uri",             "keyVaultUrl": ($kv + "/MONGO-URI"),             "identity":"system"},
-                  {"name":"jwt-secret",            "keyVaultUrl": ($kv + "/JWT-SECRET"),            "identity":"system"},
-                  {"name":"admin-jwt-secret",      "keyVaultUrl": ($kv + "/ADMIN-JWT-SECRET"),      "identity":"system"},
-                  {"name":"razorpay-key-secret",   "keyVaultUrl": ($kv + "/RAZORPAY-KEY-SECRET"),   "identity":"system"},
-                  {"name":"workers-embed-secret",  "keyVaultUrl": ($kv + "/WORKERS-EMBED-SECRET"),  "identity":"system"}
+                  {"name":"aws-access-key-id",          "keyVaultUrl": ($kv + "/AWS-ACCESS-KEY-ID"),          "identity":"system"},
+                  {"name":"aws-secret-access-key",      "keyVaultUrl": ($kv + "/AWS-SECRET-ACCESS-KEY"),      "identity":"system"},
+                  {"name":"mongo-uri",                  "keyVaultUrl": ($kv + "/MONGO-URI"),                  "identity":"system"},
+                  {"name":"jwt-secret",                 "keyVaultUrl": ($kv + "/JWT-SECRET"),                 "identity":"system"},
+                  {"name":"admin-jwt-secret",           "keyVaultUrl": ($kv + "/ADMIN-JWT-SECRET"),           "identity":"system"},
+                  {"name":"razorpay-key-secret",        "keyVaultUrl": ($kv + "/RAZORPAY-KEY-SECRET"),        "identity":"system"},
+                  {"name":"workers-embed-secret",       "keyVaultUrl": ($kv + "/WORKERS-EMBED-SECRET"),       "identity":"system"},
+                  {"name":"origin-shared-secret",       "keyVaultUrl": ($kv + "/ORIGIN-SHARED-SECRET"),       "identity":"system"},
+                  {"name":"d1-sync-secret",             "keyVaultUrl": ($kv + "/D1-SYNC-SECRET"),             "identity":"system"},
+                  {"name":"sentry-dsn",                 "keyVaultUrl": ($kv + "/SENTRY-DSN"),                 "identity":"system"},
+                  {"name":"sarvam-api-key",             "keyVaultUrl": ($kv + "/SARVAM-API-KEY"),             "identity":"system"},
+                  {"name":"web-push-vapid-private-key", "keyVaultUrl": ($kv + "/WEB-PUSH-VAPID-PRIVATE-KEY"), "identity":"system"}
                 ]
               | .properties.configuration.ingress.traffic = [{"latestRevision": true, "weight": 100}]
               | .properties.configuration.ingress.targetPort = 8000
@@ -352,20 +356,28 @@ jobs:
                   "name":  "syrabit-backend",
                   "image": $image,
                   "env": [
-                    {"name":"AWS_ACCESS_KEY_ID",     "secretRef":"aws-access-key-id"},
-                    {"name":"AWS_SECRET_ACCESS_KEY", "secretRef":"aws-secret-access-key"},
-                    {"name":"SES_REGION",            "value":"us-east-1"},
-                    {"name":"AZURE_OPENAI_API_KEY",  "secretRef":"azure-openai-api-key"},
-                    {"name":"MONGO_URL",             "secretRef":"mongo-uri"},
-                    {"name":"JWT_SECRET",            "secretRef":"jwt-secret"},
-                    {"name":"ADMIN_JWT_SECRET",      "secretRef":"admin-jwt-secret"},
-                    {"name":"RAZORPAY_KEY_SECRET",   "secretRef":"razorpay-key-secret"},
-                    {"name":"WORKERS_EMBED_SECRET",  "secretRef":"workers-embed-secret"},
-                    {"name":"EMAIL_FROM",            "value":"Syrabit.ai <noreply@syrabit.ai>"},
-                    {"name":"ENV",                   "value":"production"},
-                    {"name":"PORT",                  "value":"8000"},
-                    {"name":"WORKERS_EMBED_URL",     "value":"https://embed.syrabit.ai"},
-                    {"name":"EMBED_PROVIDER_PRIMARY","value":"workers_ai_custom"}
+                    {"name":"AWS_ACCESS_KEY_ID",         "secretRef":"aws-access-key-id"},
+                    {"name":"AWS_SECRET_ACCESS_KEY",     "secretRef":"aws-secret-access-key"},
+                    {"name":"SES_REGION",                "value":"us-east-1"},
+                    {"name":"MONGO_URL",                 "secretRef":"mongo-uri"},
+                    {"name":"JWT_SECRET",                "secretRef":"jwt-secret"},
+                    {"name":"ADMIN_JWT_SECRET",          "secretRef":"admin-jwt-secret"},
+                    {"name":"RAZORPAY_KEY_SECRET",       "secretRef":"razorpay-key-secret"},
+                    {"name":"WORKERS_EMBED_SECRET",      "secretRef":"workers-embed-secret"},
+                    {"name":"ORIGIN_SHARED_SECRET",      "secretRef":"origin-shared-secret"},
+                    {"name":"D1_SYNC_SECRET",            "secretRef":"d1-sync-secret"},
+                    {"name":"SENTRY_DSN",                "secretRef":"sentry-dsn"},
+                    {"name":"SARVAM_API_KEY",            "secretRef":"sarvam-api-key"},
+                    {"name":"WEB_PUSH_VAPID_PRIVATE_KEY","secretRef":"web-push-vapid-private-key"},
+                    {"name":"WEB_PUSH_CONTACT",          "value":"mailto:admin@syrabit.ai"},
+                    {"name":"OTEL_TRACES_EXPORTER",      "value":"googlecloud"},
+                    {"name":"OTEL_EXPORTER_GCP_PROJECT_ID","value":"syrabit-prod"},
+                    {"name":"OTEL_SERVICE_NAME",         "value":"syrabit-backend"},
+                    {"name":"EMAIL_FROM",                "value":"Syrabit.ai <noreply@syrabit.ai>"},
+                    {"name":"ENV",                       "value":"production"},
+                    {"name":"PORT",                      "value":"8000"},
+                    {"name":"WORKERS_EMBED_URL",         "value":"https://embed.syrabit.ai"},
+                    {"name":"EMBED_PROVIDER_PRIMARY",    "value":"workers_ai_custom"}
                   ],
                   "resources": (.properties.template.containers[0].resources // {"cpu":1,"memory":"2Gi"}),
                   "probes": [
@@ -412,7 +424,7 @@ jobs:
           set -euo pipefail
           URL="${{ inputs.health_url }}"
           if [ -z "$URL" ]; then
-            URL="https://api.syrabit.ai/health"
+            URL="https://api.syrabit.ai/api/health"
           fi
           echo "Probing $URL (up to 8 min — covers ACA cold start + KV resolve + FastAPI imports)"
           for i in $(seq 1 32); do
@@ -463,7 +475,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Key Vault syrabit-prod-kv — required secret presence"
-          for s in AWS-ACCESS-KEY-ID AWS-SECRET-ACCESS-KEY AZURE-OPENAI-API-KEY MONGO-URI JWT-SECRET RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET; do
+          for s in AWS-ACCESS-KEY-ID AWS-SECRET-ACCESS-KEY MONGO-URI JWT-SECRET ADMIN-JWT-SECRET RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET ORIGIN-SHARED-SECRET D1-SYNC-SECRET SENTRY-DSN SARVAM-API-KEY WEB-PUSH-VAPID-PRIVATE-KEY; do
             if az keyvault secret show --vault-name syrabit-prod-kv --name "$s" --query id -o tsv 2>/dev/null; then
               echo "  ✓ $s present"
             else
