@@ -30,7 +30,7 @@ param image string
 @description('Azure region for the Container App. Vertex Gemini is now the chat HEAD (Task #554); the surviving Azure surfaces are Azure Speech and Azure Translator, both region-flexible.')
 param location string = 'eastus'
 
-@description('Azure Key Vault name that holds the runtime secrets (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, MONGO_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, AZURE_SPEECH_KEY, AZURE_TRANSLATOR_KEY, …). SendGrid was retired by Task #400 — Tier-2 email is now Amazon SES via boto3.')
+@description('Azure Key Vault name that holds the runtime secrets (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, MONGO_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, AZURE_SPEECH_KEY, AZURE_TRANSLATOR_KEY, …). Task #556 retired the prior dual-provider transactional email shape — Amazon SES via boto3 is now the sole transactional path (no fallback, no break-glass; V4 §12 "no silent fallbacks").')
 param keyVaultName string = 'syrabit-prod-kv'
 
 resource managedEnv 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
@@ -73,10 +73,11 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
       // `Key Vault Secrets User` role on keyVaultName (assigned out of
       // band; not part of this template).
       secrets: [
-        // Task #400 — Tier-2 email migrated from SendGrid → Amazon SES.
+        // Task #556 — Amazon SES is the SOLE transactional email path
+        // (legacy dual-provider shape from Task #400 fully retired).
         // The IAM principal these creds belong to needs `ses:SendEmail`
         // on the EMAIL_FROM identity (`noreply@syrabit.ai`). SES region
-        // is set as a plain env (AWS_SES_REGION) below, not a secret.
+        // is set as a plain env (SES_REGION) below, not a secret.
         { name: 'aws-access-key-id',     keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/AWS-ACCESS-KEY-ID',     identity: 'system' }
         { name: 'aws-secret-access-key', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/AWS-SECRET-ACCESS-KEY', identity: 'system' }
         // Task #554 — Azure OpenAI retired. Chat now routes Vertex Gemini
