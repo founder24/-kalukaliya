@@ -1,0 +1,200 @@
+name: sqs-consumers-release
+
+#
+# Task #560 — Build & push the multi-entrypoint Lambda container image
+# consumed by:
+#   • `infra/aws/lambda-workers.tf`     (Task #332 SQS consumers)
+#   • `infra/aws/lambda-batch-jobs.tf`  (Task #551 §B batch jobs)
+#
+# One image, one tag (`sqs-consumers-latest`), arm64 only — every
+# Lambda picks its handler via `image_config.command` so a code-only
+# change is a tag overwrite plus a `lambda:UpdateFunctionCode` per
+# function. Routine code-only deploys do NOT require `terraform apply`.
+#
+# Supply-chain hardening: every `uses:` is pinned to a 40-char SHA
+# with a `# vX.Y.Z` trailing comment (mirrors the policy enforced by
+# `pinned-actions-check.yml`). Top-level `permissions:` is
+# least-privilege; `id-token: write` is required for the AWS OIDC
+# federation declared in `infra/aws/iam-github-oidc.tf`.
+#
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "artifacts/syrabit-backend/**"
+      - "artifacts/syrabit/services/backend/lambda_batch/**"
+      - "artifacts/syrabit/services/backend/sqs_consumers/**"
+      - ".github/workflows/sqs-consumers-release.yml"
+  workflow_dispatch:
+    inputs:
+      skip_lambda_update:
+        description: "Build + push the image but do NOT update Lambda function code (use for staging-only image builds)."
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+concurrency:
+  group: sqs-consumers-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # OIDC federation -> aws_iam_role.github_deploy
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.SQS_CONSUMERS_ECR_REPOSITORY }}   # e.g. "syrabit/sqs-consumers"
+  IMAGE_TAG: sqs-consumers-latest
+  # Comma-separated list of every Lambda function backed by this
+  # image. The release workflow walks the list and runs
+  # `aws lambda update-function-code --image-uri ...` for each entry so
+  # a code-only change rolls out to every function in the family
+  # without a terraform apply. Source of truth:
+  #   • `infra/aws/lambda-batch-jobs.tf`  → `syrabit-<key>` (no suffix)
+  #     for as-translation-backfill, embed-backfill, comprehend-sampler,
+  #     cache-effectiveness.
+  #   • `infra/aws/lambda-workers.tf`     → `syrabit-<key>-consumer`
+  #     (the `-consumer` suffix is appended in the TF
+  #     `function_name = "${local.lz_project}-${each.key}-consumer"`)
+  #     for the seven SQS consumers.
+  # `email-fallback-consumer` is intentionally absent — that queue is
+  # drained by the existing `syrabit-email-worker` Lambda built from
+  # the separate `email-worker` ECR repo (lambda-email-worker.tf).
+  LAMBDA_FUNCTIONS: >-
+    syrabit-as-translation-backfill,syrabit-embed-backfill,syrabit-comprehend-sampler,syrabit-cache-effectiveness,syrabit-seo-indexnow-consumer,syrabit-seo-internal-linker-consumer,syrabit-discovery-engine-ingest-consumer,syrabit-bing-keyword-refresh-consumer,syrabit-bing-submit-consumer,syrabit-cf-bot-crosscheck-consumer,syrabit-unified-logs-cf-pull-consumer
+
+jobs:
+  build_and_push:
+    name: Build & push sqs-consumers-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image_uri: ${{ steps.image.outputs.image_uri }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate required env / vars
+        run: |
+          set -euo pipefail
+          missing=0
+          for var in AWS_REGION ECR_REPOSITORY; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::repo variable '$var' is empty — set it under Settings -> Variables -> Actions."
+              missing=1
+            fi
+          done
+          if [ -z "${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}" ]; then
+            echo "::error::secret 'AWS_GITHUB_DEPLOY_ROLE_ARN' is not configured (terraform output github_deploy_role_arn)."
+            missing=1
+          fi
+          [ "$missing" = "0" ]
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr_login
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Set up QEMU (arm64 emulation on x86_64 runner)
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Compute image URI
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr_login.outputs.registry }}
+        run: |
+          echo "image_uri=${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_uri_sha=${REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push (arm64)
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: artifacts/syrabit/services/backend/sqs_consumers/Dockerfile
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.image.outputs.image_uri }}
+            ${{ steps.image.outputs.image_uri_sha }}
+          cache-from: type=gha,scope=sqs-consumers
+          cache-to: type=gha,scope=sqs-consumers,mode=max
+
+  update_lambda_code:
+    name: Roll Lambda functions onto new image
+    needs: build_and_push
+    if: ${{ github.event.inputs.skip_lambda_update != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update function code for every Lambda in the family
+        env:
+          IMAGE_URI: ${{ needs.build_and_push.outputs.image_uri }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra FUNCS <<< "${LAMBDA_FUNCTIONS}"
+          missing=()
+          for fn in "${FUNCS[@]}"; do
+            fn_trimmed="$(echo "$fn" | xargs)"
+            [ -z "$fn_trimmed" ] && continue
+            echo "::group::update-function-code $fn_trimmed"
+            if ! aws lambda get-function --function-name "$fn_trimmed" >/dev/null 2>&1; then
+              # Hard-fail on a missing function. The Task #560 review
+              # made this explicit: silently skipping unknown functions
+              # let prior runs ship code that never actually rolled out
+              # to most SQS consumers (image-tag mutation alone does
+              # not update Lambda code). Either the function exists
+              # and we update it, or LAMBDA_FUNCTIONS is wrong and we
+              # fail loud so an operator fixes the list.
+              echo "::error::lambda function $fn_trimmed not found in account"
+              missing+=("$fn_trimmed")
+              echo "::endgroup::"
+              continue
+            fi
+            aws lambda update-function-code \
+              --function-name "$fn_trimmed" \
+              --image-uri "$IMAGE_URI" \
+              --publish \
+              --output json | jq '{FunctionName, Version, LastUpdateStatus, ImageUri: .Code.ImageUri}'
+            echo "::endgroup::"
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::${#missing[@]} expected function(s) missing in AWS — aborting deploy: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Wait for every function to reach Successful state
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra FUNCS <<< "${LAMBDA_FUNCTIONS}"
+          for fn in "${FUNCS[@]}"; do
+            fn_trimmed="$(echo "$fn" | xargs)"
+            [ -z "$fn_trimmed" ] && continue
+            if aws lambda get-function --function-name "$fn_trimmed" >/dev/null 2>&1; then
+              echo "::group::wait $fn_trimmed"
+              aws lambda wait function-updated-v2 --function-name "$fn_trimmed"
+              echo "::endgroup::"
+            fi
+          done

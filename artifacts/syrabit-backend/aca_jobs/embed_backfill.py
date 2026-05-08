@@ -547,6 +547,16 @@ async def run_backfill(
                                 "embedding_dim":    1024,
                                 "vector_store":     "pinecone",
                                 "embedded_at":      _dt.datetime.utcnow(),
+                                # Task #560 round-3 — per-chunk driver
+                                # tag for the shadow reconciliation
+                                # script. The single-state-doc fallback
+                                # was unreliable (last writer wins);
+                                # now the reconciler bins chunks by
+                                # `embedded_by` over the lookback window
+                                # and computes per-doc Jaccard parity.
+                                "embedded_by":      os.environ.get(
+                                    "BATCH_JOB_DRIVER", "aca",
+                                ),
                             }},
                             upsert=False,
                         ))
@@ -619,9 +629,16 @@ async def run_backfill(
             "budget":       max_chunks,
             "remaining":    await _count_remaining(db),
         }
+        # Task #560 — driver discriminator for shadow-mode reconciliation.
+        # Lambda wrapper sets `BATCH_JOB_DRIVER=lambda`; ACA loop leaves
+        # it unset → defaults to `aca`.
         await _write_state(db, {
             "running":  False,
-            "last_run": {**summary, "finished_at": _dt.datetime.utcnow()},
+            "last_run": {
+                **summary,
+                "finished_at": _dt.datetime.utcnow(),
+                "driver":      os.environ.get("BATCH_JOB_DRIVER", "aca"),
+            },
         })
         logger.info("[embed_backfill] pass complete: %s", summary)
         return summary

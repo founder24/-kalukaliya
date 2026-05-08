@@ -24,6 +24,10 @@ async def _run() -> dict:
     # Allow the per-run sample size to be tuned via the Lambda env so
     # we do not need a code re-deploy to throttle Comprehend spend.
     os.environ.setdefault("COMPREHEND_SAMPLE_SIZE", str(MAX_DOCS_PER_RUN))
+    # Task #560 — driver discriminator for shadow reconciliation. The
+    # sampler stamps every `content_analytics` row it writes with
+    # `scored_by=os.environ["BATCH_JOB_DRIVER"]`.
+    os.environ.setdefault("BATCH_JOB_DRIVER", "lambda")
     from aca_jobs.comprehend_sampler import _sample_once  # type: ignore
     db = _db.get_db()
     return await _sample_once(db)

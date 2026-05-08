@@ -22,6 +22,8 @@ MAX_DOCS_PER_RUN = int(os.environ.get("MAX_DOCS_PER_RUN", "500"))
 
 async def _run() -> dict:
     _db.bootstrap_env()
+    # Task #560 — driver discriminator for shadow reconciliation.
+    os.environ.setdefault("BATCH_JOB_DRIVER", "lambda")
     from aca_jobs.embed_backfill import run_backfill  # type: ignore
     db = _db.get_db()
     summary = await run_backfill(db, max_chunks=MAX_DOCS_PER_RUN)

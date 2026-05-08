@@ -373,6 +373,15 @@ async def _process_one_collection(
                 update_set[f"{field}_as"] = translated_text
                 update_set[f"{field}_as_src_hash"] = _hash_source(src)
                 update_set[f"{field}_as_translated_at"] = _dt.datetime.utcnow().isoformat() + "Z"
+                # Task #560 round-3 — per-doc driver tag so the
+                # reconciliation script can do real per-document key
+                # parity + hash parity, not just last_run aggregate
+                # counts. The `_as_src_hash` already gives us a stable
+                # output fingerprint to compare across the two drivers
+                # for the same `(collection, _id, field)` key.
+                update_set[f"{field}_as_translated_by"] = os.environ.get(
+                    "BATCH_JOB_DRIVER", "aca",
+                )
 
             if update_set:
                 ops.append(UpdateOne(
@@ -418,9 +427,19 @@ async def _process_one_collection(
         "duration_s":  round(duration, 2),
         "remaining":   await _count_remaining(db, collection),
     }
+    # Task #560 — stamp the driver discriminator the shadow-mode
+    # reconciliation script (`scripts/lambda_aca_shadow_reconcile.py`)
+    # reads to split per-driver outcomes during the 7-day cutover
+    # window. The Lambda wrapper sets `BATCH_JOB_DRIVER=lambda` before
+    # calling `run_backfill`; the in-process ACA loop leaves it unset
+    # so it defaults to `aca`.
     await _write_state(db, collection, {
         "running":  False,
-        "last_run": {**summary, "finished_at": _dt.datetime.utcnow()},
+        "last_run": {
+            **summary,
+            "finished_at": _dt.datetime.utcnow(),
+            "driver":      os.environ.get("BATCH_JOB_DRIVER", "aca"),
+        },
     })
     logger.info("[as_translation_backfill] %s pass complete: %s", collection, summary)
     return summary

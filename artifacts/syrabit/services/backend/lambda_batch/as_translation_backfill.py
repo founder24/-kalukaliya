@@ -47,6 +47,10 @@ JOB_DIMENSION_VALUE = os.environ.get(
 
 async def _run() -> dict:
     _db.bootstrap_env()
+    # Task #560 — tag every Mongo state write made by this pass as
+    # `driver=lambda` so `scripts/lambda_aca_shadow_reconcile.py` can
+    # split per-driver outcomes during the 7-day shadow window.
+    os.environ.setdefault("BATCH_JOB_DRIVER", "lambda")
     from aca_jobs.as_translation_backfill import run_backfill  # type: ignore
     db = _db.get_db()
     summary = await run_backfill(

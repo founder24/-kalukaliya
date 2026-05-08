@@ -79,6 +79,10 @@ async def _sample_once(db_handle) -> dict:
                     "pii_types":    sorted({(p.get("Type") or "") for p in pii if p.get("Type")}),
                     "scored_at":    now,
                     "source":       "comprehend",
+                    # Task #560 — driver discriminator for the shadow-mode
+                    # reconciliation script. Lambda wrapper sets
+                    # `BATCH_JOB_DRIVER=lambda`; ACA loop defaults to `aca`.
+                    "scored_by":    os.environ.get("BATCH_JOB_DRIVER", "aca"),
                 }},
                 upsert=True,
             )
