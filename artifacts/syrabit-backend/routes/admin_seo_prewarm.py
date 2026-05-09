@@ -86,6 +86,13 @@ async def admin_prewarm_coverage(admin: dict = Depends(get_admin_user)):
             "urls_warmed":     0,
             "urls_failed":     0,
             "success_rate":    0.0,
+            # Task #13 round-3 — split KV-prewarm health from the
+            # combined edge+KV success rate so a degraded materialization
+            # path is not masked by healthy edge-only legs.
+            "kv_attempted":    0,
+            "kv_warmed":       0,
+            "kv_failed":       0,
+            "kv_success_rate": 0.0,
             "season":          None,
             "by_board":        [],
             "samples_failed":  [],
@@ -100,6 +107,10 @@ async def admin_prewarm_coverage(admin: dict = Depends(get_admin_user)):
         "urls_warmed":    int(doc.get("urls_warmed") or 0),
         "urls_failed":    int(doc.get("urls_failed") or 0),
         "success_rate":   float(doc.get("success_rate") or 0.0),
+        "kv_attempted":   int(doc.get("kv_attempted") or 0),
+        "kv_warmed":      int(doc.get("kv_warmed") or 0),
+        "kv_failed":      int(doc.get("kv_failed") or 0),
+        "kv_success_rate": float(doc.get("kv_success_rate") or 0.0),
         "season":         doc.get("season"),
         "duration_s":     float(doc.get("duration_s") or 0.0),
         "by_board":       _per_board_rows(doc.get("by_board") or {}),

@@ -170,7 +170,7 @@ locals {
       timeout_s         = 900
       schedule          = "cron(0 1 * * ? *)"   # daily 01:00 UTC
       max_docs_per_run  = 0                       # 0 = walk every selected chapter
-      description       = "Task #13 — Daily SEO prewarm engine (chapter HEADs through Cloudflare → edge tiered cache + Syrabit/Cache::PrewarmSuccessRate)."
+      description       = "Task #13 — Daily SEO prewarm engine (chapter GETs through Cloudflare → edge tiered cache + KV materialization + Syrabit/Cache::{PrewarmSuccessRate,KvPrewarmSuccessRate})."
     }
     # Task #12 — daily AEO Answer-Card + FAQ materializer. Walks every
     # published chapter, mines the PYQ corpus + syllabus graph for
@@ -629,6 +629,31 @@ resource "aws_cloudwatch_metric_alarm" "cache_prewarm_success_rate_low" {
   threshold           = 0.90
   treat_missing_data  = "breaching"
   alarm_description   = "Task #13 — Syrabit/Cache::PrewarmSuccessRate dropped below 0.90 (or the daily prewarm-seo-routes Lambda failed to publish at all). Inspect /admin/seo/prewarm-coverage `samples_failed` for the offending URLs and verify Cloudflare worker health."
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# Task #13 round-3 — KvPrewarmSuccessRate < 0.90 → ops_alerts. Split
+# from the combined PrewarmSuccessRate alarm above so a degraded
+# materialization path (mcqs/flashcards/definitions/summary/pyqs)
+# pages on-call even when edge-only legs (notes/revision) stay
+# healthy. Without this split the combined ratio could remain above
+# 0.90 while KV hit-ratio collapses during exam windows — silently
+# violating the ≥95% KV hit-ratio target the spec mandates.
+resource "aws_cloudwatch_metric_alarm" "cache_kv_prewarm_success_rate_low" {
+  alarm_name          = "${local.lz_project}-cache-kv-prewarm-success-rate-low-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  metric_name         = "KvPrewarmSuccessRate"
+  namespace           = "Syrabit/Cache"
+  period              = 86400
+  statistic           = "Minimum"
+  threshold           = 0.90
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #13 — Syrabit/Cache::KvPrewarmSuccessRate dropped below 0.90 (materialization-eligible page-types failed to warm KV / ai_input_cache). Inspect /admin/seo/prewarm-coverage `samples_failed[?kv_eligible]` for the offending page_type."
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]
   ok_actions    = [aws_sns_topic.ops_alerts.arn]

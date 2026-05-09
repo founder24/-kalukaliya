@@ -83,6 +83,17 @@ DEFAULT_PUBLIC_BASE_URL = os.environ.get(
 
 CW_NAMESPACE = "Syrabit/Cache"
 CW_METRIC_NAME = "PrewarmSuccessRate"
+CW_KV_METRIC_NAME = "KvPrewarmSuccessRate"
+
+# Page-types whose render path is materialization-eligible per
+# replit.md ("K.2 deterministic cache scope") — issuing a GET (rather
+# than HEAD) against these URLs forces the backend to render the
+# deterministic-template body, which fills both the Cloudflare KV
+# `aic:fp:*` entry AND the Mongo `ai_input_cache` row. The remaining
+# page-types (e.g. ``revision``) only need an edge cache fill.
+KV_ELIGIBLE_PAGE_TYPES: Tuple[str, ...] = (
+    "mcqs", "flashcards", "definitions", "summary", "pyqs",
+)
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────
@@ -385,9 +396,18 @@ async def select_target_chapters(
 
 async def _warm_one_url(client, url: str, *, sem: asyncio.Semaphore,
                         timeout_s: float, recommended_ttl: int,
+                        method: str = "GET",
                         prewarm_auth: Optional[str] = None,
                         ) -> Tuple[bool, int, Optional[str]]:
     """Warm a single edge URL. Returns ``(ok, status_code, reason)``.
+
+    Issues a **GET** by default — a HEAD only fills Cloudflare's
+    tiered cache, but the deterministic-template renderer behind
+    materialization-eligible page-types (``mcqs`` / ``flashcards`` /
+    ``definitions`` / ``summary`` / ``pyqs``) only writes to KV +
+    ``ai_input_cache`` when a real body is produced. GET subsumes
+    HEAD: edge cache fills as a side-effect of the body roundtrip,
+    so a single request warms both layers per the Task #13 spec.
 
     A 2xx/3xx response counts as a successful warm — Cloudflare's
     worker writes the response into the tiered cache regardless of
@@ -411,8 +431,13 @@ async def _warm_one_url(client, url: str, *, sem: asyncio.Semaphore,
             # — public clients cannot manipulate cache TTL policy.
             headers["X-Prewarm-Auth"] = prewarm_auth
         try:
+            verb = method.upper()
+            if verb == "HEAD":
+                fn = client.head
+            else:
+                fn = client.get
             r = await asyncio.wait_for(
-                client.head(
+                fn(
                     url,
                     follow_redirects=True,
                     headers=headers,
@@ -420,6 +445,12 @@ async def _warm_one_url(client, url: str, *, sem: asyncio.Semaphore,
                 timeout=timeout_s,
             )
             sc = int(getattr(r, "status_code", 0))
+            # Discard body so memory does not balloon across the
+            # 5,000-chapter × 7-page-type fan-out.
+            try:
+                _ = getattr(r, "content", None) or b""
+            except Exception:
+                pass
             return (200 <= sc < 400), sc, None
         except asyncio.TimeoutError:
             return False, 0, "timeout"
@@ -456,6 +487,12 @@ async def run_prewarm(
         "urls_attempted": 0,
         "urls_warmed":    0,
         "urls_failed":    0,
+        # Task #13 round-3 — KV-eligible page-types are accounted
+        # separately so the admin tile and the second CW metric can
+        # surface KV-prewarm health independent of the edge-only legs.
+        "kv_attempted":   0,
+        "kv_warmed":      0,
+        "kv_failed":      0,
         "by_board":   {},
         "skip_reasons": {},
         "samples_failed": [],
@@ -477,16 +514,27 @@ async def run_prewarm(
         summary["selection_error"] = str(e)
         summary["finished_at"] = _now().isoformat()
         summary["success_rate"] = 0.0
+        # Selection failed → KV path also unhealthy. Emit 0.0 on the
+        # split metric so the `cache-kv-prewarm-success-rate-low`
+        # alarm (treat_missing_data=breaching) is not silently
+        # skipped on this exit path.
+        summary["kv_success_rate"] = 0.0
         await _persist_run(db, summary)
         await _emit_cw_metric(0.0)
+        await _emit_cw_metric(0.0, metric_name=CW_KV_METRIC_NAME)
         raise
     summary["scanned"] = len(chapters)
 
     if not chapters:
         summary["finished_at"] = _now().isoformat()
         summary["success_rate"] = 1.0  # nothing to warm = healthy
+        # Nothing to warm → KV path is trivially healthy. Emit on the
+        # split metric too so `treat_missing_data=breaching` does not
+        # falsely trip the KV alarm on quiet days.
+        summary["kv_success_rate"] = 1.0
         await _persist_run(db, summary)
         await _emit_cw_metric(summary["success_rate"])
+        await _emit_cw_metric(summary["kv_success_rate"], metric_name=CW_KV_METRIC_NAME)
         return summary
 
     sem = asyncio.Semaphore(max(1, concurrency))
@@ -505,14 +553,17 @@ async def run_prewarm(
                 board_name, {"warmed": 0, "failed": 0, "attempted": 0},
             )
 
-            urls = [
-                _build_url(
-                    public_base_url,
-                    board_slug=inputs["board_slug"],
-                    class_slug=inputs["class_slug"],
-                    subject_slug=inputs["subject_slug"],
-                    chapter_slug=inputs["chapter_slug"],
-                    page_type=pt,
+            url_pairs = [
+                (
+                    pt,
+                    _build_url(
+                        public_base_url,
+                        board_slug=inputs["board_slug"],
+                        class_slug=inputs["class_slug"],
+                        subject_slug=inputs["subject_slug"],
+                        chapter_slug=inputs["chapter_slug"],
+                        page_type=pt,
+                    ),
                 )
                 for pt in PAGE_TYPES
             ]
@@ -527,22 +578,32 @@ async def run_prewarm(
             results = await asyncio.gather(*[
                 _warm_one_url(client, u, sem=sem, timeout_s=timeout_s,
                               recommended_ttl=ttl,
+                              method="GET",
                               prewarm_auth=prewarm_auth)
-                for u in urls
+                for (_pt, u) in url_pairs
             ])
-            for url, (ok, sc, reason) in zip(urls, results):
+            for (pt, url), (ok, sc, reason) in zip(url_pairs, results):
                 summary["urls_attempted"] += 1
                 board_row["attempted"] += 1
+                is_kv = pt in KV_ELIGIBLE_PAGE_TYPES
+                if is_kv:
+                    summary["kv_attempted"] += 1
                 if ok:
                     summary["urls_warmed"] += 1
                     board_row["warmed"] += 1
+                    if is_kv:
+                        summary["kv_warmed"] += 1
                 else:
                     summary["urls_failed"] += 1
                     board_row["failed"] += 1
+                    if is_kv:
+                        summary["kv_failed"] += 1
                     if len(summary["samples_failed"]) < 10:
                         summary["samples_failed"].append({
                             "url": url, "status": sc,
                             "reason": reason or "non_2xx",
+                            "page_type": pt,
+                            "kv_eligible": is_kv,
                         })
     finally:
         if own_client:
@@ -558,9 +619,14 @@ async def run_prewarm(
     summary["success_rate"] = (
         round(summary["urls_warmed"] / attempted, 4) if attempted else 1.0
     )
+    kv_attempted = summary["kv_attempted"] or 0
+    summary["kv_success_rate"] = (
+        round(summary["kv_warmed"] / kv_attempted, 4) if kv_attempted else 1.0
+    )
 
     await _persist_run(db, summary)
     await _emit_cw_metric(summary["success_rate"])
+    await _emit_cw_metric(summary["kv_success_rate"], metric_name=CW_KV_METRIC_NAME)
     return summary
 
 
@@ -587,9 +653,13 @@ async def _persist_run(db, summary: Dict[str, Any]) -> None:
         logger.warning("[prewarm] persist failed: %s", e)
 
 
-async def _emit_cw_metric(success_rate: float) -> None:
-    """Push the per-run success rate to CloudWatch. No-op outside
-    AWS so dev runs don't try to authenticate."""
+async def _emit_cw_metric(success_rate: float,
+                          *, metric_name: str = CW_METRIC_NAME) -> None:
+    """Push a per-run success rate to CloudWatch. No-op outside
+    AWS so dev runs don't try to authenticate. ``metric_name``
+    defaults to the combined ``PrewarmSuccessRate``; the KV-only
+    leg passes ``CW_KV_METRIC_NAME`` so the dashboard can split
+    the two without re-deriving the ratio post-hoc."""
     if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         return
     try:
@@ -598,7 +668,7 @@ async def _emit_cw_metric(success_rate: float) -> None:
         cw.put_metric_data(
             Namespace=CW_NAMESPACE,
             MetricData=[{
-                "MetricName": CW_METRIC_NAME,
+                "MetricName": metric_name,
                 "Value": float(success_rate),
                 "Unit": "None",
             }],
@@ -632,9 +702,9 @@ async def run_loop() -> None:  # pragma: no cover — invoked from server.py
 
 
 __all__ = [
-    "PAGE_TYPES",
+    "PAGE_TYPES", "KV_ELIGIBLE_PAGE_TYPES",
     "DEFAULT_TOP_N", "DEFAULT_CONCURRENCY", "DEFAULT_HTTP_TIMEOUT_S",
     "DEFAULT_EXAM_LOOKAHEAD_DAYS",
     "select_target_chapters", "run_prewarm",
-    "CW_NAMESPACE", "CW_METRIC_NAME",
+    "CW_NAMESPACE", "CW_METRIC_NAME", "CW_KV_METRIC_NAME",
 ]

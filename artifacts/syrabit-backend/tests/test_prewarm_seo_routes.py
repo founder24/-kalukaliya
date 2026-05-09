@@ -199,10 +199,19 @@ class _FakeClient:
         self.status = status
         self.calls = []
         self.headers_seen = []
+        self.methods_seen = []
+
+    async def get(self, url, follow_redirects=True, headers=None):
+        self.calls.append(url)
+        self.headers_seen.append(dict(headers or {}))
+        self.methods_seen.append("GET")
+        sc = self.status(url) if callable(self.status) else self.status
+        return _FakeResp(sc)
 
     async def head(self, url, follow_redirects=True, headers=None):
         self.calls.append(url)
         self.headers_seen.append(dict(headers or {}))
+        self.methods_seen.append("HEAD")
         sc = self.status(url) if callable(self.status) else self.status
         return _FakeResp(sc)
 
@@ -332,11 +341,20 @@ def test_run_prewarm_warms_every_page_type(normal_calendar):
     assert sample_url.startswith(
         "https://example.test/board/ahsec/class/11/subject/biology/chapter/")
     assert sample_url.rsplit("/", 1)[-1] in prewarm_seo_routes.PAGE_TYPES
-    # X-Prewarm-Recommended-TTL header must be set on every HEAD so the
+    # X-Prewarm-Recommended-TTL header must be set on every request so the
     # worker can pin its tiered-cache entry to the season-aware TTL.
     assert all(
         "X-Prewarm-Recommended-TTL" in h for h in client.headers_seen
     )
+    # Task #13 round-3 — must be GET (not HEAD), otherwise the
+    # materialization-eligible page-types never produce a body and KV
+    # / ai_input_cache stays cold during exam windows.
+    assert client.methods_seen and set(client.methods_seen) == {"GET"}
+    # KV-eligible accounting: 5 of the 7 page-types per chapter × 2 chapters.
+    assert summary["kv_attempted"] == 10
+    assert summary["kv_warmed"] == 10
+    assert summary["kv_failed"] == 0
+    assert summary["kv_success_rate"] == 1.0
 
 
 def test_run_prewarm_emits_x_prewarm_auth_when_token_present(normal_calendar):
@@ -390,6 +408,33 @@ def test_run_prewarm_records_failures(normal_calendar):
     assert 0.85 < summary["success_rate"] < 0.86
     assert summary["samples_failed"]
     assert summary["samples_failed"][0]["status"] == 502
+    # `notes` is NOT KV-eligible — KV success rate must remain 1.0
+    # even though the combined success rate dipped.
+    assert summary["kv_attempted"] == 10
+    assert summary["kv_failed"] == 0
+    assert summary["kv_success_rate"] == 1.0
+
+
+def test_run_prewarm_kv_failure_isolated_to_kv_metric(normal_calendar):
+    """Task #13 round-3 — `mcqs` IS KV-eligible; failures must surface
+    on `kv_success_rate` so the split CW metric pages on-call when the
+    materialization path degrades even if the edge-only `notes` /
+    `revision` legs are healthy."""
+    db = _make_db()
+    client = _FakeClient(status=lambda url: 503 if url.endswith("/mcqs") else 200)
+    summary = _run(prewarm_seo_routes.run_prewarm(
+        db, top_n=10, concurrency=4, http_client=client,
+        public_base_url="https://example.test",
+        today=datetime(2026, 8, 15, tzinfo=timezone.utc),
+    ))
+    assert summary["kv_attempted"] == 10
+    assert summary["kv_failed"] == 2
+    assert summary["kv_warmed"] == 8
+    assert summary["kv_success_rate"] == 0.8
+    # Failure samples must label KV-eligibility so the admin tile can
+    # filter the queue by impacted layer.
+    kv_samples = [s for s in summary["samples_failed"] if s.get("kv_eligible")]
+    assert kv_samples and kv_samples[0]["page_type"] == "mcqs"
 
 
 def test_run_prewarm_no_chapters_marks_healthy(normal_calendar):
@@ -405,6 +450,10 @@ def test_run_prewarm_no_chapters_marks_healthy(normal_calendar):
     assert summary["scanned"] == 0
     assert summary["urls_attempted"] == 0
     assert summary["success_rate"] == 1.0
+    # Task #13 round-3 — no-chapters path must still publish the KV
+    # split metric, otherwise the cache-kv-prewarm-success-rate-low
+    # alarm (treat_missing_data=breaching) trips on quiet days.
+    assert summary["kv_success_rate"] == 1.0
     assert len(db.seo_prewarm_runs.inserted) == 1
 
 
@@ -428,4 +477,8 @@ def test_run_prewarm_fails_loud_on_selection_error(normal_calendar):
     assert len(db.seo_prewarm_runs.inserted) == 1
     persisted = db.seo_prewarm_runs.inserted[-1]
     assert persisted["success_rate"] == 0.0
+    # Task #13 round-3 — selection failure also flips the KV split
+    # metric to 0.0 so the new cache-kv-prewarm-success-rate-low alarm
+    # is not silently skipped.
+    assert persisted["kv_success_rate"] == 0.0
     assert "mongo down" in (persisted.get("selection_error") or "")
