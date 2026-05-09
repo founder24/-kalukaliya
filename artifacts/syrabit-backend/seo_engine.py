@@ -5606,8 +5606,15 @@ async def get_sitemap_chapters():
         sub = sub_map.get(ch.get("subject_id", ""))
         if not sub or not ch.get("slug"):
             continue
+        # Subjects can attach to a class either via stream_id or via a
+        # direct class_id. The original code only walked the stream path
+        # which silently dropped every direct-class_id subject from the
+        # chapter sitemap. Fall back to the direct edge so the Task #11
+        # fan-out advertises every published chapter.
         stream = lib_streams.get(sub.get("stream_id", ""))
         cls = lib_classes.get(stream.get("class_id", "")) if stream else None
+        if not cls and sub.get("class_id"):
+            cls = lib_classes.get(sub.get("class_id"))
         board = lib_boards.get(cls.get("board_id", "")) if cls else None
         if not board or not cls or not sub.get("slug"):
             continue
@@ -5631,6 +5638,36 @@ async def get_sitemap_chapters():
             # ?lang=as query string. Empty when not yet backfilled.
             "slug_as": (ch.get("slug_as") or "").strip(),
         })
+        # Task #11 — fan out the 7 canonical SEO page-types per chapter
+        # under the new ``/board/.../chapter/.../{type}`` URL pattern
+        # served by ``routes/seo_pages.render_seo_page``. Each row is a
+        # first-class SERP target so it gets its own sitemap entry.
+        try:
+            from routes.seo_pages import (
+                PAGE_TYPES as _T11_PAGE_TYPES,
+                BASE_URL as _T11_BASE_URL,
+            )
+            t11_base = (
+                f"{_T11_BASE_URL}/board/{b_slug}/class/{c_slug}"
+                f"/subject/{sub['slug']}/chapter/{ch_slug}"
+            )
+            entries.append({
+                "loc": t11_base, "lastmod": lastmod, "pri": pri, "freq": freq,
+                "has_assamese": bool((ch.get("content_as") or "").strip()),
+                "slug_as": (ch.get("slug_as") or "").strip(),
+            })
+            for _pt in _T11_PAGE_TYPES:
+                entries.append({
+                    "loc": f"{t11_base}/{_pt}",
+                    "lastmod": lastmod, "pri": pri, "freq": freq,
+                    "has_assamese": bool((ch.get("content_as") or "").strip()),
+                    "slug_as": (ch.get("slug_as") or "").strip(),
+                })
+        except Exception as _exc:
+            logger.warning(
+                "[T11][sitemap] page-type fan-out skipped for %s: %s",
+                ch_slug, _exc,
+            )
     # Task #291 — emit a sitemap-time WARNING when published English chapters
     # are missing their Assamese (content_as) sibling. The hreflang="as-IN"
     # alternate is rendered in _build_urlset for has_assamese=True only, so

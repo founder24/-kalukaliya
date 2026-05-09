@@ -2162,6 +2162,8 @@ if not (os.environ.get("GCP_OIDC_REQUIRED_AUDIENCE") or "").strip():
 
 api.include_router(auth_router)
 api.include_router(content_router)
+from routes.seo_pages import router as seo_pages_router  # Task #11
+api.include_router(seo_pages_router)
 api.include_router(topic_faq_jsonld_router)
 api.include_router(topic_answer_cards_router)
 api.include_router(admin_topic_audit_router)

@@ -792,11 +792,36 @@ async def notify_indexnow_for_page(page_doc: dict):
             "url": url,
             "page_id": page_doc.get("id") or page_doc.get("_id"),
         })
+        # Task #11 — Google Indexing API mirrors the IndexNow fan-out so
+        # GSC's URL Inspection picks up new chapter URLs in the same
+        # publish cycle. SQS-mode keeps the API tier enqueue-only — the
+        # ``seo-google-indexing`` consumer (sqs_consumers.google_indexing)
+        # owns the per-tier quota and DLQ behaviour.
+        try:
+            await _sqs_enqueue("seo-google-indexing", {
+                "url": url,
+                "page_id": page_doc.get("id") or page_doc.get("_id"),
+                "source": "publish_chain",
+            })
+        except Exception as _gexc:
+            logger.debug(
+                "Google Indexing enqueue failed for %s: %s", url, _gexc,
+            )
         return
     try:
         await push_indexnow([url])
     except Exception as e:
         logger.debug(f"IndexNow auto-push failed for {url}: {e}")
+    # Task #11 — Google Indexing API in-process publish for the
+    # non-SQS path. Quota / tier enforcement lives inside
+    # ``google_indexing_client.publish_url`` so this call is safe to
+    # fire on every page change; it short-circuits when disabled,
+    # quota-blocked, or no service-account is configured.
+    try:
+        from google_indexing_client import publish_url as _gpub
+        await _gpub(url, source="publish_chain")
+    except Exception as e:
+        logger.debug(f"Google Indexing publish failed for {url}: {e}")
 
 
 async def _log_indexnow_push(urls: List[str], source: str, results: dict):
