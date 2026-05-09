@@ -45,7 +45,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-_ACCOUNT_ID  = os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
+_ACCOUNT_ID  = (
+    os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
+    or os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+)
 _API_TOKEN   = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 _GW_ID       = os.environ.get("CF_AI_GATEWAY_ID", "").strip()
 _GW_TOKEN    = os.environ.get("CF_AI_GATEWAY_TOKEN", "").strip()

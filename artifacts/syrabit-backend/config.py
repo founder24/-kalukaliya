@@ -769,12 +769,16 @@ SARVAM_BASE_URL = 'https://api.sarvam.ai'
 WEB_PUSH_VAPID_PRIVATE_KEY = os.environ.get('WEB_PUSH_VAPID_PRIVATE_KEY', '').strip()
 WEB_PUSH_CONTACT = os.environ.get('WEB_PUSH_CONTACT', 'mailto:admin@syrabit.ai').strip()
 
-# Alias: CLOUDFLARE_ACCOUNT_ID → CF_AI_GATEWAY_ACCOUNT_ID when not set.
-# vectorize_client, wrangler scripts, and CF SDK all expect CLOUDFLARE_ACCOUNT_ID;
-# CF_AI_GATEWAY_ACCOUNT_ID holds the same value in Railway/Replit deployments.
+# Alias: CLOUDFLARE_ACCOUNT_ID ↔ CF_AI_GATEWAY_ACCOUNT_ID (bidirectional).
+# vectorize_client, wrangler scripts, and CF SDK expect CLOUDFLARE_ACCOUNT_ID;
+# providers/cloudflare_ai.py + R2/Workers-AI helpers expect CF_AI_GATEWAY_ACCOUNT_ID.
+# Both names hold the same value — sync whichever is set into the other.
 _cf_gw_account = os.environ.get('CF_AI_GATEWAY_ACCOUNT_ID', '').strip()
-if not os.environ.get('CLOUDFLARE_ACCOUNT_ID', '').strip() and _cf_gw_account:
+_cf_acc_id     = os.environ.get('CLOUDFLARE_ACCOUNT_ID', '').strip()
+if not _cf_acc_id and _cf_gw_account:
     os.environ['CLOUDFLARE_ACCOUNT_ID'] = _cf_gw_account
+elif not _cf_gw_account and _cf_acc_id:
+    os.environ['CF_AI_GATEWAY_ACCOUNT_ID'] = _cf_acc_id
 
 # ── Distributed cache — Upstash Redis (REST-based, serverless) ────────────────
 # Upstash is used for L2 cross-worker cache, anonymous chat history,
