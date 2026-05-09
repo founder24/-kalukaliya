@@ -203,3 +203,48 @@ no-silent-fallbacks, `pinecone_dim=1024`, `sarvam_assamese_head=true`
 the embed surface). Sub-cap is INSIDE the global cap; raising either
 requires the standard `# COST-CAP-OVERRIDE: <reason>` discipline,
 enforced by `scripts/check_budget_ceiling.py`.
+
+## Smart-router topic-score threshold (Task #39, 2026-05-09)
+
+`chat_router.route()` decides RAG vs. web by comparing the centroid
+similarity from `chat_router.probe_topic_score(...)` against a single
+configurable threshold (`_DEFAULT_TOPIC_THRESHOLD = 0.55`, override via
+`CHAT_ROUTER_TOPIC_THRESHOLD` env, hard-clamped to `(0, 1)` with a
+warn-and-default on out-of-range values). The probe itself is
+language-correct: English uses `wai_chapter_index.classify` (Workers-AI
+`@cf/baai/bge-small-en-v1.5` per-subject centroid index, returning the
+real `similarity` field in `[0, 1]`); Assamese uses
+`_probe_assamese_via_bedrock_cohere` (Cohere `embed-multilingual-v3`
+via AWS Bedrock per Task #27 → Pinecone `namespace="as"` top-1 cosine).
+
+Why 0.55: it's the legacy `rag_router` gate — preserved verbatim so
+existing traffic doesn't shift on the day this lands. The number is
+intentionally a starting point, not a tuned value. Iteration 1 of
+Task #37 used a stage1 high/low confidence proxy mapped to {0.8, 0.4}
+which made any threshold movement coarser than ±0.4. Task #39 wires
+the **real numeric similarity** through `_build_route_trace` and
+surfaces it on the dev-mode QA badge in `MessageBubble.jsx` as
+`score=<float> th=<float>` so the actual distribution is observable.
+
+Re-tune procedure (run after collecting ≥7 days of dev/staging
+traffic):
+
+1. Pull the per-turn `topic_score` values from the
+   `[NON-STREAM][ROUTER]` / `[STREAM][ROUTER]` log lines emitted by
+   `routes/ai_chat.py` (already include `score=<f>`).
+2. For each turn, label the user-perceived correct branch (RAG vs.
+   web) — easiest via human review of a 100-turn sample.
+3. Pick the threshold `t` that maximises (precision_rag *
+   recall_rag) on the labelled set. The legacy 0.55 is roughly the
+   point where bge-small-en-v1.5 within-chapter cosines start to
+   dominate cross-chapter ones.
+4. Set `CHAT_ROUTER_TOPIC_THRESHOLD=<t>` in the ACA app env (no
+   redeploy needed — `_topic_threshold()` reads on every call).
+   Roll back by removing the env var.
+
+Founder locks unaffected: the threshold only governs RAG-vs-web
+selection — it cannot disable the casual short-circuit, change the
+language-correct embed pool selection (English → Workers-AI custom;
+Assamese → Cohere-Bedrock per Task #27), bypass the $100/mo cap, or
+escape the no-silent-fallbacks rule (a probe failure surfaces as web,
+not as a silent rag-empty 503).

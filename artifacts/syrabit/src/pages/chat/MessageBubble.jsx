@@ -384,6 +384,25 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 {Array.isArray(msg.route_trace.provider_chain) && msg.route_trace.provider_chain.length > 0 && (
                   <span>head={msg.route_trace.provider_chain[0]}</span>
                 )}
+                {/* Task #39 — surface the real numeric centroid
+                    similarity + the configured threshold so the
+                    0.55 default can be eyeballed against actual
+                    traffic. ``topic_score`` is the value the
+                    dispatcher actually fed into the route() gate;
+                    ``topic_threshold`` is what it was compared
+                    against (CHAT_ROUTER_TOPIC_THRESHOLD env or
+                    0.55 default). Renders only when a probe ran
+                    (direct / casual paths leave it null). */}
+                {typeof msg.route_trace.topic_score === 'number' && (
+                  <span title="centroid similarity from chat_router.probe_topic_score">
+                    score=<b>{msg.route_trace.topic_score.toFixed(3)}</b>
+                  </span>
+                )}
+                {typeof msg.route_trace.topic_threshold === 'number' && (
+                  <span className="opacity-70" title="CHAT_ROUTER_TOPIC_THRESHOLD env / 0.55 default">
+                    th={msg.route_trace.topic_threshold.toFixed(2)}
+                  </span>
+                )}
                 {msg.route_trace.reason && (
                   <span className="opacity-70" title={msg.route_trace.reason}>
                     · {String(msg.route_trace.reason).slice(0, 48)}

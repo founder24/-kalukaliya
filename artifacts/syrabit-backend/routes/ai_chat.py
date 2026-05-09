@@ -70,7 +70,8 @@ import chat_router as _chat_router  # Task #37 — single-source-of-truth per-tu
 
 def _build_route_trace(message_text: str, response_lang: str | None,
                        intent: str | None, topic_metadata: dict | None,
-                       precomputed_decision=None) -> dict:
+                       precomputed_decision=None,
+                       topic_score: float | None = None) -> dict:
     """Task #37 — collapse the per-turn routing decision into a single
     serialisable dict. Called from both the non-stream and stream
     endpoints so the response payload + SSE syrabit_done event carry the
@@ -80,9 +81,24 @@ def _build_route_trace(message_text: str, response_lang: str | None,
     When *precomputed_decision* is provided (a `RouteDecision` already
     returned by the authoritative dispatcher gate above) it is used
     verbatim — this guarantees the QA badge cannot disagree with the
-    branch the dispatcher actually executed. Otherwise we fall back to
-    a stage1-confidence-derived score so casual / instant short-circuit
-    paths still get a useful trace.
+    branch the dispatcher actually executed. The precomputed decision
+    already carries the real numeric ``topic_score`` from
+    ``chat_router.probe_topic_score`` (which itself is the
+    ``wai_chapter_index.classify`` centroid similarity for English or
+    the Pinecone top-1 score for Assamese), so the QA badge sees the
+    actual sharp signal rather than a confidence proxy.
+
+    When no precomputed decision is available (the casual short-circuit
+    early-return path that fires BEFORE the authoritative router runs),
+    we use this preference order for the score (Task #39):
+
+      1. Explicit ``topic_score`` arg — caller already ran the probe.
+      2. ``topic_metadata['similarity']`` — real numeric similarity if
+         the upstream pipeline (e.g. ``wai_chapter_index.classify``)
+         deposited it on the topic-metadata dict.
+      3. ``topic_metadata['confidence']`` proxy (high=0.8, low=0.4) —
+         legacy fallback for stage1 results that only carry the
+         high/low flag. Deliberately last so we prefer real numbers.
     """
     if precomputed_decision is not None:
         try:
@@ -90,14 +106,28 @@ def _build_route_trace(message_text: str, response_lang: str | None,
         except Exception:  # pragma: no cover — defensive
             pass
     score: float | None = None
-    if topic_metadata and isinstance(topic_metadata, dict):
-        conf = (topic_metadata.get("confidence") or "").strip().lower()
-        if conf == "high":
-            score = 0.8
-        elif conf == "low":
-            score = 0.4
-        elif topic_metadata.get("search_keywords"):
-            score = 0.6
+    if topic_score is not None:
+        try:
+            score = max(0.0, min(1.0, float(topic_score)))
+        except (TypeError, ValueError):
+            score = None
+    if score is None and topic_metadata and isinstance(topic_metadata, dict):
+        # Task #39 — prefer a real numeric similarity if upstream
+        # classify() deposited one (sharper than the high/low proxy).
+        sim_raw = topic_metadata.get("similarity")
+        if sim_raw is not None:
+            try:
+                score = max(0.0, min(1.0, float(sim_raw)))
+            except (TypeError, ValueError):
+                score = None
+        if score is None:
+            conf = (topic_metadata.get("confidence") or "").strip().lower()
+            if conf == "high":
+                score = 0.8
+            elif conf == "low":
+                score = 0.4
+            elif topic_metadata.get("search_keywords"):
+                score = 0.6
     try:
         decision = _chat_router.route(
             message_text or "",
