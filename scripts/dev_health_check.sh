@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Task #14 — dev environment health check.
+#
+# Verifies the canonical dev workflow set is healthy:
+#   1. backend  `import server` smoke test (catches import-time regressions)
+#   2. backend  GET /api/health        (artifacts/syrabit: api on :8080)
+#   3. frontend GET /                  (artifacts/syrabit: web on :25144)
+#   4. mockup   GET /__mockup/         (artifacts/mockup-sandbox on :8081)
+#   5. frontend `pnpm build` (skipped when DEV_HEALTH_SKIP_BUILD=1)
+#
+# Wired as the `dev_health` validation step (validation skill).
+# Aggregates failures (does not exit on the first one) and returns a
+# non-zero status iff at least one probe failed.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WEB_PORT="${WEB_PORT:-25144}"
+API_PORT="${API_PORT:-8080}"
+MOCKUP_PORT="${MOCKUP_PORT:-8081}"
+TIMEOUT_S="${HEALTH_TIMEOUT_S:-10}"
+
+fail=0
+pass() { printf "  \033[32mPASS\033[0m  %s\n" "$1"; }
+warn() { printf "  \033[33mWARN\033[0m  %s\n" "$1"; }
+err()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail + 1)); }
+
+http_check() {
+  local label="$1" url="$2" expect="${3:-200}"
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_S" "$url" || echo 000)"
+  if [[ "$code" == "$expect" ]]; then
+    pass "$label ($url -> $code)"
+  else
+    err "$label ($url -> $code, expected $expect)"
+  fi
+}
+
+echo "[1/5] backend import smoke test"
+( cd "$REPO_ROOT/artifacts/syrabit-backend" && python3 -c "import server" >/dev/null 2>&1 ) \
+  && pass "python -c 'import server'" \
+  || err  "python -c 'import server' (cd artifacts/syrabit-backend && python -c 'import server')"
+
+echo "[2/5] backend /api/health"
+http_check "artifacts/syrabit: api" "http://localhost:${API_PORT}/api/health" 200
+
+echo "[3/5] frontend /"
+http_check "artifacts/syrabit: web" "http://localhost:${WEB_PORT}/" 200
+
+echo "[4/5] mockup sandbox /__mockup/"
+http_check "artifacts/mockup-sandbox" "http://localhost:${MOCKUP_PORT}/__mockup/" 200
+
+echo "[5/5] frontend build"
+if [[ "${DEV_HEALTH_SKIP_BUILD:-0}" == "1" ]]; then
+  warn "frontend build skipped (DEV_HEALTH_SKIP_BUILD=1)"
+else
+  # `scripts/check-build-env.mjs` (gate before vite build) requires the prod
+  # backend origin to be set so the bundle does not silently hard-code
+  # localhost:8000. In dev we point it at the canonical local api workflow.
+  export VITE_BACKEND_URL="${VITE_BACKEND_URL:-http://localhost:${API_PORT}}"
+  if ( cd "$REPO_ROOT" && pnpm --filter @workspace/syrabit run build >/tmp/dev_health_build.log 2>&1 ); then
+    pass "pnpm --filter @workspace/syrabit run build"
+  else
+    err "pnpm --filter @workspace/syrabit run build (see /tmp/dev_health_build.log)"
+    tail -n 40 /tmp/dev_health_build.log || true
+  fi
+fi
+
+echo
+if (( fail == 0 )); then
+  echo "dev_health_check: OK"
+  exit 0
+fi
+echo "dev_health_check: $fail failure(s)"
+exit 1

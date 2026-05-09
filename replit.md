@@ -8,10 +8,26 @@ This README is a **navigation index**. The canonical implementation map of the 2
 
 ## Run & operate
 
-- **Frontend dev:** `cd artifacts/syrabit && PORT=5000 pnpm dev`
-- **Backend dev:** `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
-- **Mockup sandbox:** `pnpm --filter @workspace/mockup-sandbox run dev`
-- **Health check:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
+The canonical Replit workspace workflow set is **driven by the per-artifact
+`.replit-artifact/artifact.toml` files** (see `artifacts/syrabit/...`,
+`artifacts/syrabit-backend/...`, `artifacts/mockup-sandbox/...`). The earlier
+duplicate `Start application` / `Start backend` workflows were removed in
+Task #14 — the artifact-managed entries are the single source of truth.
+
+- **Frontend dev** (`artifacts/syrabit: web`, port `25144`):
+  `pnpm --filter @workspace/syrabit run dev`
+- **Backend dev** (`artifacts/syrabit: api`, port `8080`):
+  `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
+  (the workflow exports `PORT=8080` so `gunicorn.conf.py`'s
+  `BACKEND_PORT||PORT||7766` chain binds the same port the vite dev proxy
+  defaults to via `BACKEND_TARGET`)
+- **Mockup sandbox** (`artifacts/mockup-sandbox: Component Preview Server`,
+  port `8081`): `pnpm --filter @workspace/mockup-sandbox run dev`
+- **Local health check:** `bash scripts/dev_health_check.sh` (also wired as
+  the `dev_health` validation step) — exercises backend `import server`,
+  `/api/health`, frontend `/`, mockup `/__mockup/`, and `pnpm build`.
+  Skip the build leg with `DEV_HEALTH_SKIP_BUILD=1` for fast iteration.
+- **Production health:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
 - **Backend import smoke test:** `cd artifacts/syrabit-backend && python -c "import server"` before pushing.
 
 ## Stack

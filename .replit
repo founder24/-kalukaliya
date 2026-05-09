@@ -18,39 +18,11 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start backend"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "tf-apply"
 
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
-
 [[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd artifacts/syrabit && PORT=5000 pnpm dev"
-waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow]]
-name = "Start backend"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd artifacts/syrabit-backend && python3 -m uvicorn server:app --host 0.0.0.0 --port 8080 --reload"
-waitForPort = 8080
-
-[workflows.workflow.metadata]
-outputType = "console"
+task = "workflow.run"
+args = "dev_health"
 
 [[workflows.workflow]]
 name = "tf-apply"
@@ -78,6 +50,17 @@ bash -c '
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "dev_health"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/dev_health_check.sh"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
