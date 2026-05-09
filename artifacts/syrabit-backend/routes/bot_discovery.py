@@ -4044,7 +4044,7 @@ async def _maybe_email_failing_csv(
         if not ok:
             return {
                 "sent": False, "to": admin_email,
-                "reason": "send_error:ses_non_2xx",  # Task #556 — was sendgrid_non_2xx
+                "reason": "send_error:ses_non_2xx",  # Task #556 — renamed from the legacy retired-vendor label
             }
         logger.info(
             f"[SEO deep-scan email] sent failing CSV → {admin_email} "

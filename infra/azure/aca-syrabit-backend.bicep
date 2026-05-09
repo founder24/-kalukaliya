@@ -156,8 +156,9 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // `SES_REGION=us-east-1` is the primary; flip to
             // `ap-south-1` (warm secondary, identity verified +
             // DKIM/SPF/DMARC aligned) and restart the revision to
-            // fail over. SendGrid + Resend are fully retired — the
-            // `EMAIL_PROVIDER` / `EMAIL_FALLBACK` flags no longer exist.
+            // fail over. The pre-#556 multi-vendor email path is fully
+            // retired — the `EMAIL_PROVIDER` / `EMAIL_FALLBACK` flags no
+            // longer exist.
             { name: 'AWS_ACCESS_KEY_ID',     secretRef: 'aws-access-key-id' }
             { name: 'AWS_SECRET_ACCESS_KEY', secretRef: 'aws-secret-access-key' }
             { name: 'SES_REGION',            value: 'us-east-1' }
@@ -170,10 +171,13 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'RAZORPAY_KEY_SECRET',   secretRef: 'razorpay-key-secret' }
             { name: 'EMAIL_FROM',            value: 'Syrabit.ai <noreply@syrabit.ai>' }
             { name: 'ENV',                   value: 'production' }
-            // Task #400 — route embeddings through the new Cloudflare worker
-            // (Gemma-300M + Qwen3-0.6B fused → 1024-dim) instead of Cohere.
-            // The provider is selected by `EMBED_PROVIDER_PRIMARY`; rolling
-            // back is a single env-var revert to `cohere`.
+            // Task #400 — route embeddings through the new Cloudflare
+            // worker (Gemma-300M + Qwen3-0.6B fused → 1024-dim) instead
+            // of the previously-retired managed embedding vendor. The
+            // provider is selected by `EMBED_PROVIDER_PRIMARY`; rollback
+            // is intentionally NOT supported (vendor SDK + env knob are
+            // retired in Task #347 and the umbrella canonical-delegation
+            // guard).
             { name: 'WORKERS_EMBED_URL',     value: 'https://embed.syrabit.ai' }
             { name: 'WORKERS_EMBED_SECRET',  secretRef: 'workers-embed-secret' }
             { name: 'EMBED_PROVIDER_PRIMARY', value: 'workers_ai_custom' }

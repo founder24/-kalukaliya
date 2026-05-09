@@ -1511,7 +1511,8 @@ function extractChapterIdFromPath(pathname: string): string {
 /**
  * Best-effort AI provider attribution from the request pathname.
  * The edge worker never reads the response body, so it cannot know which
- * backend provider (groq/gemini/cerebras) ultimately served the request.
+ * backend provider (vertex / sarvam / workers-ai per the current
+ * canonical-delegation map) ultimately served the request.
  * Only /api/ai/fallback/* is distinguishable — those route to Workers AI.
  *
  * NOTE: isAiPath() explicitly excludes /api/ai/fallback/* (it is exempt from

@@ -6798,7 +6798,7 @@ async def _send_seo_daily_summary_email(stats: dict, recipients: list) -> dict:
                 errors.append({
                     "admin_id": r.get("admin_id", ""),
                     "email": r.get("email", ""),
-                    "error": "ses_returned_false",  # Task #556 — was sendgrid_returned_false
+                    "error": "ses_returned_false",  # Task #556 — renamed from the legacy retired-vendor label
                 })
         except Exception as exc:
             failed += 1

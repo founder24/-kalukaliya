@@ -52,12 +52,13 @@ def _clamp_max_tokens(model: str, max_tokens: int) -> int:
     return min(max_tokens, cap) if cap else max_tokens
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
-# Task #6 (2026-05-09) — `emergentintegrations.llm.chat` (LlmChat / UserMessage)
-# was a Groq/OpenAI/Fireworks-AI shim. All three providers were retired in
-# Task #347 / V4 §0; the import + the two unreachable callsites below
-# (`_call_llm_raw` fall-through + the streaming else-branch) now raise
-# explicitly per V4 §12 "no silent fallbacks". The `emergentintegrations/`
-# package was deleted in the same purge.
+# Task #6 (2026-05-09) — the previous LLM-shim package (LlmChat /
+# UserMessage helpers) was a thin wrapper around three providers, all
+# retired in Task #347 / V4 §0. The import + the two unreachable
+# callsites below (`_call_llm_raw` fall-through + the streaming
+# else-branch) now raise explicitly per V4 §12 "no silent fallbacks".
+# The shim package itself was deleted in the same purge — see
+# `docs/cleanup/2026-purge-log.md` for the full retired-name list.
 from config import (
     LLM_PROVIDER, LLM_MODEL, OPENAI_API_KEY, SARVAM_THINK_BUFFER,
     _OPENAI_KEY,
@@ -82,7 +83,7 @@ _oai_client_cache: Dict[str, _oai.AsyncOpenAI] = {}
 # HTTP/2 multiplexes multiple requests over a single TCP connection, eliminating
 # per-request TLS handshake overhead for the CF AI Gateway.  Connection limits
 # are sized to cover the worst-case concurrency:
-#   chat pool: 5 WAI slots × 24 + Groq×4 + Cerebras×4 = 128
+#   chat pool: 5 WAI slots × 24 + (legacy burst slots, retired #347) = 128
 #   content pool: 2 WAI slots × 16 = 32
 #   total: ~160 — so 256 max_connections gives comfortable headroom.
 _OAI_HTTP_TRANSPORT = httpx.AsyncHTTPTransport(
@@ -143,7 +144,7 @@ _LLM_ROUTING_HISTORY_MAX_ENTRIES = 100_000
 # successful call (mark_ok → _reset_provider_429).
 #
 # Providers included: workers-ai, vertex, deepgram.  Others silently no-op.
-# Task #554 — azure_openai burst slot removed alongside the rest of the
+# Task #554 — the retired Azure-tenant LLM burst slot removed alongside the rest of the
 # Azure OpenAI tenant; Vertex Gemini is now the paid English chat head and
 # carries its own per-feature tracker via the gemini canonical key.
 _PROVIDER_429_BURST_WINDOW_S = 180   # shared lookback / Redis TTL for all providers
@@ -263,7 +264,7 @@ _PAID_RPM_REDIS_TTL_S      = 90        # keep the previous bucket alive
 def _record_paid_provider_request(provider: str) -> None:
     """Record one dispatched request for *provider*'s 60-second RPM window.
 
-    Called from ``_dispatch_llm_for_feature`` for the ``azure_openai`` and
+    Called from ``_dispatch_llm_for_feature`` for the (retired Azure-tenant) and
     ``sarvam`` branches BEFORE the upstream call so that timed-out / 429ed
     attempts still consume against the cap (matches what the provider's
     own quota meter sees).
@@ -854,7 +855,7 @@ if _SARVAM_LLM_KEY and _SARVAM_LLM_KEY not in (_SARVAM_LLM_KEY_3, _SARVAM_LLM_KE
 # ── Cloudflare Workers AI — PRIMARY provider (2026-04-29 upgrade) ──────────────
 # Workers AI is now Tier 1. With $5k Cloudflare startup credits and the
 # account on Enterprise, Workers AI is cheaper and lower-latency than
-# Groq/Cerebras/OpenRouter for our Assam-region user base.
+# the previously-retired LLM aggregators for our Assam-region user base.
 #
 # Provider key: "workers-ai" — uses providers/cloudflare_ai.py which calls
 # the CF REST API (or AI Gateway) directly without an edge worker round-trip.
@@ -863,7 +864,7 @@ if _SARVAM_LLM_KEY and _SARVAM_LLM_KEY not in (_SARVAM_LLM_KEY_3, _SARVAM_LLM_KE
 # Models in priority order:
 #   chat  → llama-3.3-70b-instruct-fp8-fast (70B, fp8 quantised, 16k context)
 #   admin → gpt-oss-120b (admin content gen, long-form notes, MCQ batches)
-# Gemini/Groq/Cerebras remain as secondary fallbacks below.
+# (legacy LLM tail, retired #347) remain as secondary fallbacks below.
 _CF_AI_ACCOUNT_ID = os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
 _CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 _CF_AI_ENABLED = bool(_CF_AI_ACCOUNT_ID and _CF_API_TOKEN)
@@ -1068,7 +1069,7 @@ class _SmartKeyPool:
     # as primary until 85% (8 500 RPM) before soft-shifting to fallbacks,
     # and hard-deprioritize only at 95% (9 500 RPM). Per-model quota is
     # independent so a single model saturating does not affect others.
-    # Groq removed in Task #347 / V4 §0; Cerebras removed in Task #491.
+    # the legacy LLM tail was removed in Task #347 / Task #491.
     _RPM_SOFT_THRESHOLD = 0.85
     _RPM_HARD_THRESHOLD = 0.95
 
@@ -1421,7 +1422,7 @@ def _record_aig_from_raw(raw: Any, *, base: str, provider: str, model: str) -> N
 
 
 async def _call_openai_compat(messages: list, api_key: str, model: str, max_tokens: int, provider: str, fallback_base: str) -> str:
-    """Non-streaming call via an OpenAI-compatible provider (OpenAI, xAI, Fireworks)."""
+    """Non-streaming call via an OpenAI-compatible provider (OpenAI / Workers AI / CF Gateway base-URL plumbing)."""
     base = get_provider_base_url(provider) or fallback_base
     client = _get_oai_client(api_key, base)
     raw = None
@@ -1491,10 +1492,10 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
     # in PROVIDER_PRIORITY; CF AI Gateway slug `groq/v1` is not configured.
     # Task #347: xAI/Grok dispatch branch removed — provider is no longer
     # in PROVIDER_PRIORITY and the SDK is uninstalled.
-    # Task #6 (2026-05-09) — `openrouter` dispatch branch removed. OpenRouter
-    # is in the matrix `retired_providers` list; no PROVIDER_PRIORITY entry
-    # routed to it after #347 / V4 §0. The unsupported-provider raise below
-    # now covers it.
+    # Task #6 (2026-05-09) — the previously-retired OpenAI-compatible
+    # routing-aggregator dispatch branch removed (matrix
+    # `retired_providers`; no PROVIDER_PRIORITY entry routed to it after
+    # #347 / V4 §0). The unsupported-provider raise below now covers it.
     if provider == "vertex":
         # Task #554 — Vertex Gemini 2.5 Flash is the English chat head
         # (default; swaps to fallback when GCP credit runway projects
@@ -1512,15 +1513,15 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
             user_msg = m["content"]
 
     # Task #6 (2026-05-09) — V4 §12 no-silent-fallbacks: the only providers
-    # the deleted LlmChat shim handled were groq / openai / fireworksai, all
-    # retired in #347. Reaching this branch means the caller passed an
+    # the deleted LLM-shim handled were three retired vendors (#347).
+    # Reaching this branch means the caller passed an
     # unknown provider; raise loudly so the dispatcher logs which feature
     # mis-routed instead of silently producing a stale response.
     raise HTTPException(
         status_code=500,
         detail=f"_call_llm_raw: provider {provider!r} is not supported "
-               f"(LlmChat shim + openrouter branch removed in Task #6; "
-               f"supported branch above is vertex)."
+               f"(retired-provider shim + aggregator branch removed in "
+               f"Task #6; supported branch above is vertex)."
     )
 
 async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 1024, provider_list=None, feature_key: str = "") -> str:
@@ -1689,7 +1690,7 @@ async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 102
                 last_err = err
     
     # Task #636 — last-resort Workers AI fallback. Only reached after every
-    # configured primary+fallback Cerebras/Gemini/etc provider has failed.
+    # configured primary+fallback the legacy LLM tail (retired #347) provider has failed.
     # Policy is strict (timeout/5xx/429/quota only) so 4xx bad-input bugs
     # still surface as 503 instead of being silently masked by a different
     # model's looser parser.
@@ -1727,9 +1728,9 @@ async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 102
 #
 # Task taxonomy:
 #   fast / classify / routing  → Workers AI 70B  (fastest, free under CF credits)
-#   chat                       → _LLM_PROVIDERS_CHAT pool (Workers AI → Cerebras qwen-3 → Groq)
+#   chat                       → _LLM_PROVIDERS_CHAT pool (Workers AI → (legacy tail, retired #347))
 #   rag_answer / synthesis     → Gemini 2.5 Flash primary (best multi-doc reasoning)
-#   content / notes / pyq      → _LLM_PROVIDERS_CONTENT pool (Workers AI 120B → Gemini → Cerebras)
+#   content / notes / pyq      → _LLM_PROVIDERS_CONTENT pool (Workers AI 120B → Gemini → (legacy tail, retired #347))
 #   embed                      → Workers AI BGE-large-en-v1.5 via vertex_services.embed_text()
 
 _TASK_ROUTE: dict[str, tuple] = {
@@ -1795,7 +1796,7 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     # workers_ai_indic (IndicTrans2) → workers_ai (generic LLM tail).
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — sole English TTS (Task #552 §G)
-    # Task #552 §G — assemblyai entry retired (provider module deleted).
+    # Task #552 §G — the third-party STT vendor entry retired (provider module deleted).
     "deepgram":         "nova-3",                                    # Deepgram STT — sole English STT primary (Aura-2 TTS branch retired by Task #552 §G)
     "pinecone_ai":      "llama-text-embed-v2",                       # Pinecone embed/rerank — primary rerank
     "exa_ai":           "exa",                                       # Exa neural search
@@ -1828,7 +1829,7 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     # Task #552 §G-R: azure_translator canonical entry removed.
     "sarvam":           "sarvam",
     "elevenlabs":       "elevenlabs",
-    # Task #552 §G — assemblyai canonical entry retired.
+    # Task #552 §G — the third-party STT vendor canonical entry retired.
     "deepgram":         "deepgram",
     "pinecone_ai":      "pinecone_ai",
     "exa_ai":           "exa_ai",
@@ -2437,7 +2438,7 @@ async def _dispatch_llm_for_feature(
             raise
 
     # workers_ai or any unknown provider → Workers-AI-only dispatch.
-    # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (Groq, Cerebras,
+    # Use _LLM_PROVIDERS_WORKERS_ONLY so deprecated providers (the retired LLM tail,
     # Gemini) cannot re-enter routing via this fallback path — they are absent
     # from PROVIDER_PRIORITY and must stay out of the weighted dispatch chain.
     if not _LLM_PROVIDERS_WORKERS_ONLY:
@@ -2989,7 +2990,7 @@ async def call_llm_api_chat(
       → Workers-AI Llama-3.2-3B (A9 #2) → generic Workers-AI (gpt-oss-20b, terminal).
     Vertex intentionally NOT in the chat hot path (founder rejected the V4-draft
     Vertex co-primary + CF Worker token-length / risk-score router).
-    Bedrock + Groq + direct Cerebras removed in Task #347.
+    (legacy direct providers, retired #347) removed in Task #347.
 
     Assamese chain (V4 §4, 2026-05-05 user instruction — strict primary/fallback):
       Sarvam (SOLE primary) → Workers-AI IndicTrans2 (en-indic neural MT, terminal).
@@ -3270,8 +3271,8 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
     """
     Real token-by-token streaming from the LLM provider.
     Uses native streaming APIs for instant first-token delivery.
-    Supports: Sarvam, Groq, Fireworks, Gemini, Cerebras, Workers AI, Vertex, Azure OpenAI.
-    'openai/gpt-oss-20b' triggers the smart SLM pool (Fireworks/Groq/Cerebras/Gemini).
+    Supports: Sarvam, Gemini, Workers AI, Vertex (legacy heads retired #347/#491/#554).
+    'openai/gpt-oss-20b' triggers the smart SLM pool (Fireworks/the previously-retired LLM tail).
     When response_lang is an Indic code (as/hi/etc), optimized Sarvam routing is applied.
     """
     _indic_mode = _is_indic_lang(response_lang)
@@ -3481,20 +3482,22 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         # _PROVIDER_429_WINDOWS) also dropped.
         # Task #347: xAI/Grok stream branch removed — _stream_xai is gone
         # and PROVIDER_PRIORITY no longer routes to "xai".
-        # Task #6 (2026-05-09) — `openrouter` stream branch removed
-        # (matrix retired_providers, no PROVIDER_PRIORITY entry).
+        # Task #6 (2026-05-09) — the previously-retired OpenAI-compatible
+        # routing-aggregator stream branch removed (matrix
+        # `retired_providers`, no PROVIDER_PRIORITY entry).
         # Task #347: bedrock stream branch removed — providers/bedrock.py and
         # _stream_bedrock are gone; PROVIDER_PRIORITY no longer lists bedrock.
         else:
-            # Task #6 (2026-05-09) — V4 §12 no-silent-fallbacks: the deleted
-            # LlmChat streaming shim only handled groq / openai / fireworksai
-            # (retired in #347). Reaching this branch means PROVIDER_PRIORITY
-            # listed an unknown streaming provider; surface it loudly.
-            logger.error(f"LLM stream: unsupported provider={p_name!r} (LlmChat shim removed in Task #6)")
+            # Task #6 (2026-05-09) — V4 §12 no-silent-fallbacks: the
+            # deleted LLM-shim streaming wrapper only handled three
+            # providers, all retired in #347. Reaching this branch means
+            # PROVIDER_PRIORITY listed an unknown streaming provider;
+            # surface it loudly.
+            logger.error(f"LLM stream: unsupported provider={p_name!r} (retired-provider shim removed in Task #6)")
             raise HTTPException(
                 status_code=500,
                 detail=f"streaming provider {p_name!r} is not supported "
-                       f"(LlmChat shim removed in Task #6)."
+                       f"(retired-provider shim removed in Task #6)."
             )
 
     # ── Syrabit SLM: concurrent smart pool ──────────────────────────────────────
@@ -3509,7 +3512,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         "sarvam": 12000,
         # groq removed in Task #347 / V4 §0
         "gemini": 500000,
-        # openrouter removed in Task #6 (2026-05-09) — matrix retired_providers
+        # the retired aggregator entry was removed in Task #6 (2026-05-09)
         "openai": 80000,
         # bedrock removed in Task #347
     }
@@ -4052,7 +4055,7 @@ def _embed_feature_for(text: str, lang: str) -> str:
     """Return the POOL_WEIGHTS key for an embed call given the *text* and
     caller-supplied *lang* hint.
 
-    Task #491 retired the Voyage/Cohere hybrid; both ``embed_en`` and
+    Task #491 retired the the legacy two-vendor embed hybrid; both ``embed_en`` and
     ``embed_indic`` now resolve to the same single-source primary
     (``workers_ai_custom`` — Gemma-300M + Qwen3-0.6B mean-pool, 1024-dim,
     multilingual). The two feature keys are kept so caller telemetry
@@ -4167,7 +4170,7 @@ async def call_embed_with_dispatch(
     # custom Workers-AI worker directly. A worker failure raises
     # `RuntimeError("embed: workers_ai_custom failed: …")` and the
     # caller decides how to handle it — we DO NOT silently fall back
-    # to legacy providers (Cohere / Voyage / Vertex / Pinecone
+    # to legacy providers ((retired vendors) / Vertex / Pinecone
     # Inference / generic workers_ai bge-m3). The legacy weighted
     # ladder is only reachable when the operator explicitly flips
     # EMBED_PROVIDER_PRIMARY to a legacy provider name, which is the
@@ -4276,7 +4279,7 @@ async def call_embed_with_dispatch(
                 return _vec_wai
             # Task #347: bedrock embed branch removed (providers/bedrock.py deleted).
             # Task #491 — legacy embed-provider branches removed.
-            # Task #554 — azure_openai embed branch removed (tenant decommissioned).
+            # Task #554 — the retired Azure-tenant embed branch removed (tenant decommissioned).
             else:
                 raise RuntimeError(f"embed: unknown provider {provider!r}")
         except Exception as exc:
@@ -4476,9 +4479,9 @@ async def call_rerank_with_dispatch(
 
     pinecone_ai: providers.pinecone_ai.rerank (bge-reranker-v2-m3, multilingual) — fully wired.
     workers_ai: no rerank endpoint — excluded gracefully.
-    (Task #554 removed the dormant azure_openai rerank branch alongside
+    (Task #554 removed the dormant Azure-tenant rerank branch alongside
      the rest of the Azure OpenAI tenant.)
-    (cohere rerank branch removed in Task #491.)
+    (the legacy reranker branch removed in Task #491.)
 
     Task #382 — when ``RERANK_PROVIDER=pinecone_only`` (the new default)
     the dispatcher short-circuits to pinecone_ai exclusively. Other
@@ -4547,7 +4550,7 @@ async def call_vision_with_dispatch(
 ) -> str:
     """Analyse *b64_image* via the weighted provider selected for 'vision'.
 
-    Priority (PROVIDER_PRIORITY['vision']) — Task #554 dropped azure_openai
+    Priority (PROVIDER_PRIORITY['vision']) — Task #554 dropped the Azure-tenant
     GPT-4o (tenant decommissioned). The vision pool collapses to:
       workers_ai(0) — no multimodal endpoint, surfaces RuntimeError.
 
@@ -4565,7 +4568,7 @@ async def call_vision_with_dispatch(
     for _ in range(max_attempts):
         provider = select_provider("vision", lang=lang, exclude=exclude)
         try:
-            # Task #490: vertex vision branch removed. Task #554: azure_openai
+            # Task #490: vertex vision branch removed. Task #554: the Azure-tenant
             # GPT-4o vision branch removed (tenant decommissioned). Workers
             # AI is the only remaining provider and surfaces RuntimeError.
             if provider == "workers_ai":
