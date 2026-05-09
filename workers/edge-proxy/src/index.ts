@@ -1431,6 +1431,28 @@ async function _forwardConfirms(ptrTarget: string, expectedIp: string): Promise<
   return aRecords.includes(expectedIp.toLowerCase());
 }
 
+// Counter keys for the rDNS-verification observability tile. The
+// admin tile rolls these up into a per-family miss-rate so an
+// operator can see when verifyBotIpWithKv is doing live PTR/A
+// lookups vs serving from the 24h KV cache.
+async function _bumpBotRdnsCounter(
+  env: Env,
+  ctx: ExecutionContext,
+  family: string,
+  outcome: "hit_pos" | "hit_neg" | "miss_pos" | "miss_neg",
+): Promise<void> {
+  if (!env.RATE_LIMIT) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `bot:rdns_ctr:${day}:${family}:${outcome}`;
+  ctx.waitUntil((async () => {
+    try {
+      const cur = await env.RATE_LIMIT.get(key);
+      const next = (cur ? parseInt(cur, 10) : 0) + 1;
+      await env.RATE_LIMIT.put(key, String(next), { expirationTtl: 172800 });
+    } catch { /* counter best-effort */ }
+  })());
+}
+
 async function verifyBotIpWithKv(
   env: Env,
   ctx: ExecutionContext,
@@ -1453,12 +1475,19 @@ async function verifyBotIpWithKv(
   const cacheKey = `bot:rdns:${family}:${hashIp(ip)}`;
   try {
     const cached = await env.RATE_LIMIT.get(cacheKey);
-    if (cached === "0") return false;
-    if (cached && cached.startsWith("1:")) return true;
+    if (cached === "0") {
+      await _bumpBotRdnsCounter(env, ctx, family, "hit_neg");
+      return false;
+    }
+    if (cached && cached.startsWith("1:")) {
+      await _bumpBotRdnsCounter(env, ctx, family, "hit_pos");
+      return true;
+    }
   } catch { /* KV read miss — fall through to live lookup */ }
   const ptr = await _resolveRdns(ip);
   if (!ptr || !suffixes.some((sfx) => ptr.endsWith(sfx))) {
     ctx.waitUntil(env.RATE_LIMIT.put(cacheKey, "0", { expirationTtl: BOT_RDNS_TTL_S }).catch(() => {}));
+    await _bumpBotRdnsCounter(env, ctx, family, "miss_neg");
     return false;
   }
   // Forward-confirm: PTR target must resolve back to the same IP.
@@ -1471,6 +1500,7 @@ async function verifyBotIpWithKv(
     confirmed ? `1:${ptr}` : "0",
     { expirationTtl: BOT_RDNS_TTL_S },
   ).catch(() => {}));
+  await _bumpBotRdnsCounter(env, ctx, family, confirmed ? "miss_pos" : "miss_neg");
   return confirmed;
 }
 

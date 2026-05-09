@@ -87,11 +87,69 @@ TARGETS: list[tuple[Path, list[str], re.Pattern[str]]] = [
 ]
 
 
+# Match a UA token at an actual regex-alternation boundary: preceded
+# by `|`, `(`, `"`, `'`, `\b`, or start; followed by `|`, `)`, `"`,
+# `'`, `\b`, or end. The Python `re.compile()` regex sources are
+# multiline raw-string concatenations such as
+# ``re.compile(r"(googlebot|" r"rogerbot|" ...)`` — so a token at
+# the start of a continuation segment is preceded by `"` or `'`,
+# not by `|` or `(`. Including the quote chars catches that case
+# (this was the gap the reviewer flagged: `rogerbot` slipping past
+# the boundary because it sat at the head of a raw-string segment).
+_REGEX_ALT_TOKEN = re.compile(
+    r"""(?:^|[|(\"']|\\b)\s*([A-Za-z][A-Za-z0-9_\-]{2,})\s*(?=[|)\"']|\\b|$)""",
+)
+# Strip Python `# …` comment lines from a multi-line capture before we
+# tokenise. The captured body for `re.compile(...)` may span comment
+# lines that contain words like `task` or `before` which would
+# otherwise look like extraneous regex tokens.
+_PY_COMMENT_LINE = re.compile(r"^\s*#.*$", re.MULTILINE)
+# Tokens we deliberately allow in regex sources even though they are
+# not in the YAML. Keep tiny; expand only with a comment justifying
+# the entry.
+_BENIGN_REGEX_TOKENS = {
+    # Generic preview / social-card crawlers — matched by SEARCH_BOT_UA
+    # so the worker can prerender for them, but they're neither
+    # search engines nor citation engines so they don't fit the four
+    # canonical buckets.
+    "twitterbot", "facebookbot", "facebookexternalhit", "linkedinbot",
+    "telegrambot", "whatsapp", "discordbot", "slackbot", "redditbot",
+    "pinterest", "vkshare", "w3c_validator", "embedly", "outbrain",
+    "quora", "showyoubot", "googleweblight",
+    # Historical training-AI aliases retained in the union regex.
+    "anthropic-ai", "anthropic_ai", "img2dataset", "omgili",
+    # Internet Archive — neither search, citation, training, nor
+    # abusive; kept in the SEARCH_BOT_UA union so the worker
+    # prerenders for archival snapshots.
+    "ia_archiver",
+    # Historical SEO/marketing crawlers retained in the union regex
+    # for log-classification (counted, never blocked, never on the
+    # 60K RPM fast path). Not in YAML because they're neither
+    # verified search nor citation engines.
+    "rogerbot", "ahrefsbot", "semrushbot", "mj12bot", "blexbot",
+    "dotbot", "exabot", "sogou", "yacy", "yacybot",
+    # JS regex flag / control-char detritus.
+    "true", "false", "null",
+}
+
+
+def _extract_regex_tokens(body: str) -> set[str]:
+    """Pull alternation-boundary tokens from a regex source body.
+    Strips Python `#` comment lines first so the wrapper code/notes
+    don't pollute the token set."""
+    cleaned = _PY_COMMENT_LINE.sub("", body)
+    return {m.group(1).lower() for m in _REGEX_ALT_TOKEN.finditer(cleaned)}
+
+
 def _check_one(
     path: Path, buckets: list[str], locator: re.Pattern[str],
     by_bucket: dict[str, list[str]],
 ) -> list[str]:
-    """Return a list of human-readable error strings; empty == ok."""
+    """Bidirectional check: every YAML token for the bucket(s) MUST
+    appear in the regex source, AND every UA-shaped token in the regex
+    source MUST appear in the YAML (or be on the small benign
+    allowlist above). Returns a list of human-readable errors; empty
+    list == in sync."""
     if not path.exists():
         return [f"{path.relative_to(ROOT)}: file missing"]
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -100,6 +158,8 @@ def _check_one(
         return [f"{path.relative_to(ROOT)}: regex literal not found "
                 f"(locator: {locator.pattern[:60]}…)"]
     body = m.group(1).lower()
+
+    # Forward direction: YAML → regex.
     expected: list[str] = []
     seen: set[str] = set()
     for b in buckets:
@@ -108,12 +168,40 @@ def _check_one(
                 expected.append(t)
                 seen.add(t)
     missing = [t for t in expected if t.lower() not in body]
-    if not missing:
-        return []
-    return [
-        f"{path.relative_to(ROOT)}: missing canonical tokens for "
-        f"{'+'.join(buckets)}: {', '.join(missing)}"
-    ]
+
+    # Reverse direction: regex → YAML. Anything matched by the regex
+    # but absent from EVERY bucket of the YAML is drift in the
+    # other direction (a runtime token that no longer corresponds to
+    # a bucket → either remove it from the regex or add it to the
+    # YAML). We compare against the union of ALL buckets, not just
+    # the buckets the regex is supposed to cover, because a
+    # _SEARCH_BOT_UA_RE may legitimately reference an abusive token
+    # if that token was added to the union for triage logging.
+    all_yaml_tokens = {t.lower() for toks in by_bucket.values() for t in toks}
+    regex_tokens = _extract_regex_tokens(body)
+    extras = sorted(
+        tok for tok in regex_tokens
+        if tok not in all_yaml_tokens
+        and tok not in _BENIGN_REGEX_TOKENS
+        # Skip tokens that are sub-strings of any YAML token (handles
+        # 'baidu' when YAML has 'baiduspider'); reverse drift is only
+        # meaningful for *standalone* identifiers.
+        and not any(tok in y for y in all_yaml_tokens)
+    )
+
+    errors: list[str] = []
+    if missing:
+        errors.append(
+            f"{path.relative_to(ROOT)}: missing canonical tokens for "
+            f"{'+'.join(buckets)}: {', '.join(missing)}"
+        )
+    if extras:
+        errors.append(
+            f"{path.relative_to(ROOT)}: extraneous tokens not in "
+            f"infra/bot-rules.yaml (add to YAML or to "
+            f"_BENIGN_REGEX_TOKENS): {', '.join(extras)}"
+        )
+    return errors
 
 
 def main() -> int:
