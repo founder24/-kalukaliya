@@ -96,26 +96,73 @@ def _schedule_indexnow_for_subject(subject_doc: dict):
         pass
 
 def _schedule_indexnow_for_chapter(chapter_doc: dict):
+    """On chapter publish/update, fan a SINGLE URL set out to every
+    discovery channel via ``publish_url_set`` — Bing IndexNow + Yandex
+    IndexNow + central api.indexnow.org + Google Indexing API in one
+    call. The URL set is the canonical Task #11 fan-out: the chapter
+    root plus all seven page-types
+    (``notes / mcqs / flashcards / pyqs / summary / definitions /
+    revision``) at the new
+    ``/board/{board}/class/{class}/subject/{subject}/chapter/{chapter}/{type}``
+    pattern, so every public-facing URL family for the chapter is
+    discovered together. Falls back to the legacy single-path push
+    only when the new SEO route family is unreachable (e.g. tests
+    running without ``routes.seo_pages`` imported)."""
     try:
-        from routes.bot_discovery import indexnow_batcher
         from deps import db
         subject_id = chapter_doc.get("subject_id", "")
         chapter_slug = chapter_doc.get("slug", "")
         if not subject_id or not chapter_slug:
             return
+
         async def _do():
             subj = await db.subjects.find_one(
                 {"id": subject_id},
                 {"_id": 0, "board_slug": 1, "class_slug": 1, "slug": 1},
             )
-            if subj:
-                bs = subj.get("board_slug", "")
-                cs = subj.get("class_slug", "")
-                ss = subj.get("slug", "")
-                if bs and cs and ss:
-                    path = f"/{bs}/{cs}/{ss}/{chapter_slug}"
-                    await indexnow_batcher.queue_raw_paths([path])
-                    await indexnow_batcher.flush(source="admin_chapter_update")
+            if not subj:
+                return
+            bs = subj.get("board_slug", "")
+            cs = subj.get("class_slug", "")
+            ss = subj.get("slug", "")
+            if not (bs and cs and ss):
+                return
+
+            # Task #11 — fan all 8 canonical SEO URLs out at once.
+            from routes.bot_discovery import (
+                publish_url_set, BASE_URL,
+            )
+            try:
+                from routes.seo_pages import list_seo_page_types
+                page_types = list_seo_page_types()
+            except Exception:
+                page_types = [
+                    "notes", "mcqs", "flashcards", "pyqs",
+                    "summary", "definitions", "revision",
+                ]
+            chapter_root = (
+                f"{BASE_URL}/board/{bs}/class/{cs}"
+                f"/subject/{ss}/chapter/{chapter_slug}"
+            )
+            urls = [chapter_root] + [
+                f"{chapter_root}/{pt}" for pt in page_types
+            ]
+            # Also keep the legacy short path for back-compat with the
+            # pre-Task-#11 SPA route until that surface is retired.
+            urls.append(f"{BASE_URL}/{bs}/{cs}/{ss}/{chapter_slug}")
+            try:
+                await publish_url_set(urls, source="admin_chapter_update")
+            except Exception as e:
+                logger.warning(
+                    f"[indexnow] publish_url_set failed for chapter "
+                    f"{chapter_slug}: {e}; falling back to legacy push"
+                )
+                from routes.bot_discovery import indexnow_batcher
+                await indexnow_batcher.queue_raw_paths(
+                    [u[len(BASE_URL):] for u in urls if u.startswith(BASE_URL)]
+                )
+                await indexnow_batcher.flush(source="admin_chapter_update")
+
         loop = asyncio.get_running_loop()
         loop.create_task(_do())
     except Exception:

@@ -1204,7 +1204,32 @@ async def _collect_current_sitemap_urls() -> List[str]:
                     ).strip("-")
                     if not ch_slug:
                         continue
+                    # Legacy short-path SPA URL — kept until the
+                    # pre-Task-#11 SPA chapter route is retired.
                     urls.append(f"{BASE_URL}/{sub['b']}/{sub['c']}/{sub['s']}/{ch_slug}")
+                    # Task #11 — canonical chapter SEO fan-out:
+                    # chapter root + all seven page-types under the
+                    # explicit ``/board/{board}/class/{class}/subject/{subject}
+                    # /chapter/{chapter}/{type}`` pattern. These are the
+                    # URLs `seo_engine.get_sitemap_chapters()` actually
+                    # serves at /sitemap-chapters.xml; mirroring them
+                    # here keeps the parity diff used by the IndexNow
+                    # cron + sitemap-changed audit accurate.
+                    try:
+                        from routes.seo_pages import list_seo_page_types as _lt
+                        _page_types = _lt()
+                    except Exception:
+                        _page_types = [
+                            "notes", "mcqs", "flashcards", "pyqs",
+                            "summary", "definitions", "revision",
+                        ]
+                    chapter_root = (
+                        f"{BASE_URL}/board/{sub['b']}/class/{sub['c']}"
+                        f"/subject/{sub['s']}/chapter/{ch_slug}"
+                    )
+                    urls.append(chapter_root)
+                    for _pt in _page_types:
+                        urls.append(f"{chapter_root}/{_pt}")
             except Exception as e:
                 logger.debug(f"sitemap diff: chapter fetch failed: {e}")
         except Exception as e:

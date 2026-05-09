@@ -383,15 +383,33 @@ def _build_jsonld(*, page_url: str, page_type: str, chapter_title: str,
     })
 
     # BreadcrumbList — every page.
+    # Critical: ``item`` URLs MUST be derived from URL slugs, not
+    # display names (e.g. ``/board/ahsec``, never ``/board/AHSEC``).
+    # The full ``page_url`` is the source of truth — peel each segment
+    # off it so breadcrumbs always link to canonical, crawlable paths.
+    # page_url shape:
+    #   {BASE_URL}/board/{board}/class/{class}/subject/{subject}
+    #             /chapter/{chapter}/{page_type}
+    _path_no_base = page_url[len(BASE_URL):] if page_url.startswith(BASE_URL) else page_url
+    _parts = _path_no_base.strip("/").split("/")
+    # Defensive defaults if the shape ever drifts.
+    _board_slug = _parts[1] if len(_parts) > 1 else ""
+    _class_slug = _parts[3] if len(_parts) > 3 else ""
+    _subject_slug = _parts[5] if len(_parts) > 5 else ""
+    board_url = f"{BASE_URL}/board/{_board_slug}"
+    subject_url = (
+        f"{BASE_URL}/board/{_board_slug}/class/{_class_slug}"
+        f"/subject/{_subject_slug}"
+    )
     graph.append({
         "@type": "BreadcrumbList",
         "itemListElement": [
             {"@type": "ListItem", "position": 1, "name": "Home",
-             "item": "https://syrabit.ai"},
+             "item": BASE_URL},
             {"@type": "ListItem", "position": 2, "name": board_name,
-             "item": f"https://syrabit.ai/board/{_e(board_name)}"},
+             "item": board_url},
             {"@type": "ListItem", "position": 3, "name": subject_name,
-             "item": canonical_chapter_url.rsplit("/chapter/", 1)[0]},
+             "item": subject_url},
             {"@type": "ListItem", "position": 4, "name": chapter_title,
              "item": canonical_chapter_url},
             {"@type": "ListItem", "position": 5,
