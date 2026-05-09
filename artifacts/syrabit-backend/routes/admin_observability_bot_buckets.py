@@ -30,6 +30,7 @@ poll on the ~30 s AdminHealth refresh interval.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,15 +46,22 @@ router = APIRouter()
 # startup doesn't pay the parse cost.
 _RULES_PATH = Path(__file__).resolve().parents[3] / "infra" / "bot-rules.yaml"
 
+# Wire the registry-loader import path ONCE at module init (round-13
+# reviewer suggestion). Repeated `sys.path.insert` on every request was
+# both a perf wart (O(N) prefix scan on every import lookup) and a
+# subtle mutability hazard. The path is idempotent — re-importing the
+# module (e.g. under reload) re-runs this block but stays a single
+# entry because we check before insert.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
 
 def _load_registry() -> dict[str, list[str]]:
     """Return ``{bucket: [token, ...]}`` from the YAML registry. Uses
     the same tolerant mini-parser as ``scripts/gen_bot_regex.py`` so
     the backend doesn't acquire a hard dependency on PyYAML at the
     import boundary."""
-    import sys
-    repo_root = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(repo_root / "scripts"))
     try:
         import gen_bot_regex  # type: ignore
         rules = gen_bot_regex._load_yaml()
