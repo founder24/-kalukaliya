@@ -189,6 +189,8 @@ Installable, offline shell, standalone, app shortcuts, low-data, bilingual UI, o
 - **AWS landing zone:** `artifacts/syrabit/docs/infra/aws-landing-zone.md`
 - **ACA cutover runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md`
 - **Cache-effectiveness audit (#571):** `artifacts/syrabit/docs/infra/cache-effectiveness-audit.md`
+- **Ranking playbook (#15):** `docs/architecture/ranking-playbook.md` (lever → impact matrix; weekly measurement loop)
+- **Task #15 deferral notes:** `docs/architecture/task-15-baseline-deferral.md` (what landed offline + what's gated on #5–#13 merging + 14 d of prod traffic)
 - **AWS Glacier restore runbook:** `artifacts/syrabit/docs/infra/glacier-restore-runbook.md`
 - **AWS Lambda batch-jobs manifest:** `infra/aws/lambda/manifest.json`
 - **2026 cleanup purge log:** `docs/cleanup/2026-purge-log.md`
