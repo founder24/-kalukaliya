@@ -1,0 +1,39 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/entry-server.jsx",
+    "index.html",
+    "scripts/inline-critical-css.mjs",
+    "scripts/prerender-chat.mjs",
+    "scripts/prerender-library.mjs",
+    "scripts/prerender-routes.mjs",
+    "scripts/prerender-static-routes.mjs",
+    "scripts/_prerender-data.mjs",
+    "scripts/_page-chunk-preload.mjs",
+    "scripts/apply-pages-config.mjs",
+    "scripts/verify-hydration.mjs",
+    "scripts/post-deploy-lighthouse.js",
+    "scripts/nightly-smoke.js",
+    "scripts/cloudflare-annual-review.js",
+    "scripts/cloudflare-full-audit.js",
+    "scripts/cloudflare-phase{2,3,4,5,6}-apply.js",
+    "scripts/enforce-branch-protection.js",
+    "public/_worker.js",
+    "public/sw.js",
+    "functions/_middleware.js",
+    "tests/**/*.{js,mjs,ts}",
+    "src/**/*.test.{js,jsx,ts,tsx}"
+  ],
+  "project": [
+    "src/**/*.{js,jsx,ts,tsx}",
+    "scripts/**/*.{js,mjs}",
+    "public/**/*.js",
+    "functions/**/*.js"
+  ],
+  "ignoreDependencies": [
+    "tailwindcss-animate"
+  ],
+  "ignore": [
+    "vite-plugins/**"
+  ]
+}
