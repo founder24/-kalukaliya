@@ -33,6 +33,8 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 
 ## Architecture decisions
 
+> **Architecture lock (Task #5, 2026-05-09):** [`infra/architecture-locked-2026.md`](infra/architecture-locked-2026.md) is the canonical implementation map of the 2026 blueprint — every section of the source spec is mirrored as `IMPLEMENTED | PARTIAL | MISSING | RETIRED` rows with source paths. The machine-readable companion is [`infra/architecture-matrix.json`](infra/architecture-matrix.json); CI guard [`scripts/check_architecture_lock.py`](scripts/check_architecture_lock.py) (wired into the umbrella `canonical_delegation_gate`) fails the build on source-path drift, retired-provider active reintroduction, or matrix schema drift. Future agents should read the lock doc first; this short index remains for at-a-glance navigation.
+
 Short index — full text in [`docs/architecture/decisions.md`](docs/architecture/decisions.md).
 
 - [Voice canonical specialists (#552 §G, reversed by §G-R)](docs/architecture/decisions.md#voice-canonical-specialists-task-552-g-2026-05-07-reversed-by-g-r-2026-05-09) — **Deepgram Aura-2 (English TTS primary) + ElevenLabs (named fallback)** + Google Neural2 (Indic TTS) + Deepgram Nova-3 (English STT) + Google Chirp_2 (Indic STT); AssemblyAI retired. (§G-R 2026-05-09 reversed the original §G Aura-2 retirement after the ElevenLabs free-plan API gate forced a $5/mo upgrade requirement.)
@@ -90,6 +92,7 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 
 ## Pointers
 
+- **2026 architecture lock (Task #5):** `infra/architecture-locked-2026.md` (+ `infra/architecture-matrix.json`)
 - **V4 spec:** `infra/v4-locked-architecture.md`
 - **Four-cloud delegation matrix:** `infra/four-cloud-delegation.md`
 - **GCP landing zone:** `artifacts/syrabit/docs/infra/gcp-landing-zone.md`

@@ -1,0 +1,322 @@
+{
+  "$schema": "./architecture-matrix.schema",
+  "version": "2026-05-09",
+  "source_blueprint": "attached_assets/Pasted--Syrabit-Full-Updated-Architecture-Provider-Breakdown-C_1778322896768.txt",
+  "owner": "founder@syrabit.ai",
+  "ci_guard": "scripts/check_architecture_lock.py",
+  "retired_provider_allowlist_paths": [
+    "artifacts/syrabit-backend/llm.py"
+  ],
+  "founder_locks": {
+    "monthly_usd_cap": 100,
+    "voice_paywall_routes": ["/voice/tts", "/voice/stt", "/voice/voice"],
+    "degradation_thresholds_pct": [60, 80, 95],
+    "supabase_sole_auth": true,
+    "no_silent_fallbacks": "V4 §12",
+    "sarvam_assamese_head": true,
+    "pinecone_dim": 1024
+  },
+  "retired_providers": [
+    "cerebras", "cohere", "voyage_ai", "voyageai", "cartesia", "groq",
+    "openrouter", "quge5", "azure_openai", "AzureOpenAI", "gpt-4.1-nano",
+    "AZURE_OPENAI_API_KEY", "azure_speech", "AZURE_SPEECH_KEY",
+    "azure_translator", "AZURE_TRANSLATOR_KEY", "assemblyai", "AssemblyAI",
+    "ASSEMBLYAI_API_KEY", "sendgrid", "SendGridAPIClient", "SENDGRID_API_KEY",
+    "resend_api", "RESEND_API_KEY", "firebase_admin", "FCM_SERVER_KEY",
+    "FIREBASE_SERVICE_ACCOUNT", "fireworks", "emergentintegrations",
+    "bedrock_proxy", "bedrock_runtime", "anthropic", "xai", "grok-",
+    "together"
+  ],
+  "retired_provider_allowlist_dirs": [
+    "scripts/",
+    "artifacts/syrabit-backend/scripts/",
+    "artifacts/syrabit-backend/tests/",
+    ".local/",
+    "node_modules/",
+    "infra/",
+    "docs/",
+    "attached_assets/"
+  ],
+  "sections": [
+    {
+      "id": 1,
+      "title": "Vision",
+      "summary": "AI-native educational infrastructure (retrieval > inference, curriculum constrains entropy, materialization compounds).",
+      "rows": [
+        {"item": "Vision statement", "status": "IMPLEMENTED", "source_paths": ["replit.md", "infra/v4-locked-architecture.md"]}
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Core Architectural Principles",
+      "rows": [
+        {"item": "Edge-first delivery (CF Pages + Workers + CDN)", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit/workers/embed-worker/"]},
+        {"item": "Retrieval-heavy AI (3-tier router + RRF fusion)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/rag_router.py", "artifacts/syrabit-backend/rag.py", "artifacts/syrabit-backend/retrieval_first.py"]},
+        {"item": "Deterministic caching (ai_input_cache, kv_cache)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/ai_input_cache.py", "artifacts/syrabit-backend/kv_cache.py", "artifacts/syrabit-backend/cache.py"]},
+        {"item": "Multi-provider orchestration (canonical map)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/config.py", "infra/four-cloud-delegation.md"]},
+        {"item": "Curriculum grounding (syllabus graph + linker)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/syllabus_linker.py", "artifacts/syrabit-backend/syllabus_embedder.py", "artifacts/syrabit-backend/routes/syllabus.py"]},
+        {"item": "Progressive degradation (60/80/95 ladder)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cost_caps.py", "artifacts/syrabit-backend/credit_burn_meter.py"]},
+        {"item": "Materialized educational outputs", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/seo_engine.py", "artifacts/syrabit-backend/seo_writes.py", "artifacts/syrabit-backend/seo_fanout.py"]},
+        {"item": "SEO-driven distribution", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/seo_engine.py", "artifacts/syrabit-backend/seo_internal_linker.py"], "note": "Engine present; #11 lifts H1=chapter-topic + schema.org coverage to #1-rank target."}
+      ]
+    },
+    {
+      "id": 3,
+      "title": "High-Level Architecture",
+      "rows": [
+        {"item": "PWA (React + Vite, service worker)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/", "artifacts/syrabit/public/sw.js"]},
+        {"item": "CF Edge Layer (Pages + CDN + Workers + KV + D1)", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/d1_mirror.py", "artifacts/syrabit-backend/d1_sync.py"]},
+        {"item": "Edge Gateway (auth, quota, traceparent, budget)", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/middleware.py", "artifacts/syrabit-backend/auth_deps.py"]},
+        {"item": "ACA FastAPI Core (eastus2)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/server.py", "infra/azure/aca-syrabit-backend.bicep"]},
+        {"item": "RAG Pipeline (vector + BM25 + graph)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/rag.py", "artifacts/syrabit-backend/rag_router.py"]},
+        {"item": "Provider Delegation Layer", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/llm.py", "artifacts/syrabit-backend/assamese_dispatch.py", "artifacts/syrabit-backend/free_tier_dispatch.py"]},
+        {"item": "Response Formatter + Materializer", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/content_formatter.py"]},
+        {"item": "Streaming SSE chat", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/ai_chat.py", "artifacts/syrabit-backend/do_chat.py"]}
+      ]
+    },
+    {
+      "id": "4.1",
+      "title": "Cloudflare Layer (Primary Edge)",
+      "rows": [
+        {"item": "CF Pages — PWA hosting", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/CLOUDFLARE_PAGES.md"]},
+        {"item": "Workers — edge compute", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit/workers/embed-worker/", "artifacts/syrabit/workers/email-worker/"]},
+        {"item": "CDN + tiered cache", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cf_tiered_cache.py", "artifacts/syrabit-backend/cf_cache_rules.py"]},
+        {"item": "KV — deterministic AI cache", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/kv_cache.py"]},
+        {"item": "D1 — syllabus graph + metadata", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/d1_mirror.py", "artifacts/syrabit-backend/d1_sync.py"]},
+        {"item": "R2 — assets + OCR documents + final backups", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/r2_storage.py"]},
+        {"item": "WAF + Bot Management", "status": "PARTIAL", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/cf_bot_report.py", "artifacts/syrabit-backend/cf_bot_crosscheck.py"], "note": "Single 3000-RPM bucket blocks Google/Perplexity/etc; Task #9 splits verified-bot bucket."},
+        {"item": "Turnstile — anti-abuse", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/turnstile.py", "artifacts/syrabit-backend/routes/turnstile_config.py"]},
+        {"item": "Cron Triggers — prewarming", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/cron_heartbeats.py"], "note": "Heartbeats present; #13 adds prewarm cron for chapter MCQs/notes."}
+      ]
+    },
+    {
+      "id": "4.2",
+      "title": "Azure Layer (Primary Backend Compute)",
+      "rows": [
+        {"item": "Azure Container Apps — FastAPI runtime", "status": "IMPLEMENTED", "source_paths": ["infra/azure/aca-syrabit-backend.bicep", ".github/workflows/azure-container-apps-deploy.yml"]},
+        {"item": "Azure Key Vault — secrets source of truth", "status": "IMPLEMENTED", "source_paths": ["docs/architecture/decisions.md"]},
+        {"item": "Azure Blob — temporary OCR/media", "status": "PARTIAL", "source_paths": [], "note": "R2 currently primary warm store; Azure Blob reserved for OCR scratch."},
+        {"item": "Azure Monitor + App Insights", "status": "RETIRED", "source_paths": [], "note": "Sentry + GCP Cloud Trace replace App Insights (Task #558)."}
+      ]
+    },
+    {
+      "id": "4.3",
+      "title": "AWS Layer (Cold + Async)",
+      "rows": [
+        {"item": "SQS — async queues", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/sqs_fanout.py"]},
+        {"item": "Lambda — scheduled jobs", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/infra/aws/lambda-batch-jobs.tf", "infra/aws/lambda/manifest.json", "artifacts/syrabit/services/backend/lambda_batch/"]},
+        {"item": "Glacier Deep Archive — 7-yr DPDP retention", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/infra/aws/glacier-archive.tf", "artifacts/syrabit-backend/routes/admin_archive.py"]},
+        {"item": "SES — transactional email (sole tier-1)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/email_templates.py", "artifacts/syrabit-backend/bulk_email.py"]}
+      ]
+    },
+    {
+      "id": "5.1",
+      "title": "AI Inference Providers — Chat",
+      "rows": [
+        {"item": "English chat: vertex → vertex_flash_lite → workers_ai_llama32_3b", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/config.py", "artifacts/syrabit-backend/cost_caps.py", "artifacts/syrabit-backend/providers/vertex_chat.py", "artifacts/syrabit-backend/providers/workers_ai.py"]},
+        {"item": "Assamese chat: sarvam → vertex_assamese → retrieval_only", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/assamese_dispatch.py", "artifacts/syrabit-backend/providers/sarvam.py"]},
+        {"item": "Content formatter (Vertex 2.5 Flash → Llama-3.3-70b → passthrough)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/content_formatter.py", "artifacts/syrabit-backend/vertex_format.py"]}
+      ]
+    },
+    {
+      "id": "5.2",
+      "title": "OCR Providers",
+      "rows": [
+        {"item": "Indic OCR — Google Vision", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/google_vision.py"]},
+        {"item": "General OCR — Workers AI Vision", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/workers_ai.py"]},
+        {"item": "Vertex Vision", "status": "RETIRED", "source_paths": [], "note": "Retired by Task #554 — Workers AI sole vision provider."}
+      ]
+    },
+    {
+      "id": "5.3",
+      "title": "Voice Stack",
+      "rows": [
+        {"item": "STT English — Deepgram Nova-3", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/deepgram.py", "artifacts/syrabit-backend/routes/voice.py"]},
+        {"item": "STT Assamese — Google Chirp_2 → Workers AI Whisper", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/google_stt.py"]},
+        {"item": "TTS English — ElevenLabs primary, Deepgram Aura-2 fallback", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/elevenlabs.py", "artifacts/syrabit-backend/providers/deepgram.py"]},
+        {"item": "TTS Assamese — Google Neural2", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/google_tts.py"]},
+        {"item": "Voice paywall on /tts /stt /voice/voice", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/voice.py", "artifacts/syrabit-backend/auth_deps.py"]}
+      ]
+    },
+    {
+      "id": "5.4",
+      "title": "Payments",
+      "rows": [
+        {"item": "Razorpay subscriptions (INR-only)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/admin_monetization.py", "artifacts/syrabit-backend/routes/admin_billing.py"]},
+        {"item": "Glacier — receipt archive (7-yr DPDP)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/infra/aws/glacier-archive.tf"]}
+      ]
+    },
+    {
+      "id": "5.5",
+      "title": "Analytics & Monitoring",
+      "rows": [
+        {"item": "PostHog — product analytics", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/posthog.py", "artifacts/syrabit/index.html"]},
+        {"item": "Cloudflare Analytics", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cf_web_analytics.py", "artifacts/syrabit-backend/routes/cf_web_analytics_config.py"]},
+        {"item": "Sentry — errors-only Developer tier", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/server.py"]},
+        {"item": "GCP Cloud Trace — sole tracing exporter", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/tracing.py", "artifacts/syrabit-backend/routes/health_otel.py"]}
+      ]
+    },
+    {
+      "id": "6.1",
+      "title": "MongoDB Atlas",
+      "rows": [
+        {"item": "Users, chat history, generated content, OCR results, metadata, moderation logs", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/db_ops.py", "artifacts/syrabit-backend/db_dualwrite.py", "artifacts/syrabit-backend/models.py"]}
+      ]
+    },
+    {
+      "id": "6.2",
+      "title": "Cloudflare D1",
+      "rows": [
+        {"item": "Syllabus graph + chapter metadata + edge lookup", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/d1_mirror.py", "artifacts/syrabit-backend/d1_sync.py"]}
+      ]
+    },
+    {
+      "id": "6.3",
+      "title": "Pinecone",
+      "rows": [
+        {"item": "Embeddings + semantic retrieval + rerank (1024-dim)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/providers/pinecone_ai.py", "artifacts/syrabit-backend/providers/workers_embed.py"]}
+      ]
+    },
+    {
+      "id": "6.4",
+      "title": "Cloudflare KV — Deterministic AI Cache",
+      "rows": [
+        {"item": "MCQs, flashcards, definitions, translation cache", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/kv_cache.py", "artifacts/syrabit-backend/ai_input_cache.py"]}
+      ]
+    },
+    {
+      "id": "6.5",
+      "title": "Upstash Redis — Hot Cache",
+      "rows": [
+        {"item": "Rate limiting + hot cache + quota tracking + sessions", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cache.py", "artifacts/syrabit-backend/rag_cache.py"]}
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Full AI Pipeline (8 stages)",
+      "rows": [
+        {"item": "Stage 1 — Request intake (auth/quota/trace/cache/budget at edge)", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/middleware.py"]},
+        {"item": "Stage 2 — Intent resolution (board/class/subject/chapter/lang)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/subject_router.py", "artifacts/syrabit-backend/recall_intent.py", "artifacts/syrabit-backend/prompt_normalizer.py"]},
+        {"item": "Stage 3 — Retrieval dispatch (8 sources)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/rag_router.py"]},
+        {"item": "Stage 4 — Retrieval fusion (RRF + syllabus weighting)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/rag.py", "artifacts/syrabit-backend/grounded_answer.py"]},
+        {"item": "Stage 5 — Prompt synthesis", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/prompts.py", "artifacts/syrabit-backend/chat_turn_context.py"]},
+        {"item": "Stage 6 — Model delegation", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/llm.py", "artifacts/syrabit-backend/free_tier_dispatch.py"]},
+        {"item": "Stage 7 — Response formatting", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/content_formatter.py"]},
+        {"item": "Stage 8 — Deterministic materialization", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/seo_engine.py", "artifacts/syrabit-backend/seo_writes.py"], "note": "Materialization wired; #13 prewarm + #12 FAQ panels close the loop."}
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Cache Architecture (5 layers)",
+      "rows": [
+        {"item": "L1 Browser — immutable assets + service worker offline shell", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/public/sw.js", "artifacts/syrabit/vite.config.js"]},
+        {"item": "L2 CF CDN — SEO pages + chapter notes + static APIs", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cf_cache_rules.py", "artifacts/syrabit-backend/cf_tiered_cache.py"]},
+        {"item": "L3 KV — deterministic AI outputs", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/kv_cache.py", "artifacts/syrabit-backend/ai_input_cache.py"]},
+        {"item": "L4 Redis — hot retrieval + quotas + sessions", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cache.py", "artifacts/syrabit-backend/rag_cache.py"]},
+        {"item": "L5 D1 — syllabus + SEO metadata + retrieval indexes", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/d1_mirror.py"]}
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Advanced Cache Optimization (Tasks #571-#577)",
+      "rows": [
+        {"item": "#571 Cache intelligence (admin /api/health/cache + nightly Lambda)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/admin_cache.py", "artifacts/syrabit/docs/infra/cache-effectiveness-audit.md"]},
+        {"item": "#572 Semantic query fingerprinting", "status": "MISSING", "source_paths": [], "note": "Task #10 introduces semantic-fingerprint normalizer for chat-adjacent caches."},
+        {"item": "#573 Deterministic educational rendering (templates)", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/content_formatter.py"], "note": "Task #10 ships fixed answer-structure templates."},
+        {"item": "#574 Prewarming engine", "status": "MISSING", "source_paths": [], "note": "Task #13 adds CF Cron prewarm of chapter MCQs/notes."},
+        {"item": "#575 Dynamic TTL engine (exam calendar 30→90→120d)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cache_calendar.py", "artifacts/syrabit-backend/config/exam_calendar.yaml", "artifacts/syrabit-backend/routes/admin_season.py"]},
+        {"item": "#576 Regional cache localization (ne-india vs global)", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/ai_input_cache.py", "artifacts/syrabit-backend/kv_cache.py"]},
+        {"item": "#577 Retrieval result cache (vector/BM25/fusion)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/rag_cache.py"]}
+      ]
+    },
+    {
+      "id": "10",
+      "title": "SEO Architecture",
+      "rows": [
+        {"item": "Programmatic route /board/class/subject/chapter/type", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/seo_engine.py", "artifacts/syrabit-backend/seo_fanout.py"]},
+        {"item": "Generated content types (notes, MCQs, flashcards, PYQs, summaries, definitions, revision)", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/seo_engine.py"], "note": "#11 adds H1=chapter-topic + schema.org LearningResource/Course/FAQPage/Quiz."},
+        {"item": "IndexNow submission (Bing wired)", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/bing_submit_client.py", "artifacts/syrabit-backend/google_indexing_client.py"], "note": "#11 extends IndexNow to Yandex + verifies Google Indexing API."},
+        {"item": "Internal linker + entity SEO", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/seo_internal_linker.py", "artifacts/syrabit-backend/entity_seo_health.py"]},
+        {"item": "AEO answer cards + FAQ JSON-LD", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/routes/topic_answer_cards.py", "artifacts/syrabit-backend/routes/topic_faq_jsonld.py"], "note": "#12 materializes 40-60 word Quick-Answer + FAQ panel per chapter."}
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Voice Architecture",
+      "rows": [
+        {"item": "Voice flow STT→Intent→Retrieval→Model→TTS→SSE", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/voice.py"]},
+        {"item": "Bilingual tutoring + Assamese explanations + exam revision mode", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/voice.py", "artifacts/syrabit-backend/assamese_dispatch.py"]}
+      ]
+    },
+    {
+      "id": "12",
+      "title": "OCR Architecture",
+      "rows": [
+        {"item": "PDF/Image upload → OCR → Indic routing → text extraction → indexing", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/pyq.py", "artifacts/syrabit-backend/providers/google_vision.py"]}
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Security Architecture",
+      "rows": [
+        {"item": "Authentication — Supabase sole IdP (replaces JWT/OAuth/bcrypt)", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/auth_deps.py", "artifacts/syrabit-backend/oidc_auth.py", "artifacts/syrabit-backend/routes/auth.py"], "note": "Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in routes/auth.py and JWT_SECRET user-session path in auth_deps.py still active. Cutover owned by a follow-up Supabase migration task; founder lock asserts the destination, this row tracks the in-flight reality."},
+        {"item": "Edge security — WAF + DDoS + rate limit + bot detection", "status": "PARTIAL", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/cf_bot_report.py"], "note": "#9 adds verified-bot KV fast path so Google/Perplexity/OAI-SearchBot stop hitting the 3000 RPM ban."},
+        {"item": "Secrets — Azure KV primary, AWS SM + CF Secrets read-only replicas", "status": "IMPLEMENTED", "source_paths": ["docs/architecture/decisions.md"]},
+        {"item": "OriginGate (X-Origin-Auth lock-step)", "status": "IMPLEMENTED", "source_paths": ["workers/edge-proxy/src/index.ts", "artifacts/syrabit-backend/middleware.py"]}
+      ]
+    },
+    {
+      "id": "14",
+      "title": "Observability",
+      "rows": [
+        {"item": "#569 W3C tracing + provider spans + cost telemetry + circuit-state", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/tracing.py", "artifacts/syrabit-backend/ai_gateway_observability.py", "artifacts/syrabit-backend/vertex_breaker.py"]},
+        {"item": "#570 Operational intelligence — synthetic journeys + SLA ledger + outage map + ops console", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/admin_ops_console.py", "artifacts/syrabit-backend/slo_emitter.py", "artifacts/syrabit-backend/routes/admin_observability_canary.py"]},
+        {"item": "Core metrics (cache hit, retrieval latency, spend, fallback freq, hallucination)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/metrics.py", "artifacts/syrabit-backend/chat_speedup_metrics.py", "artifacts/syrabit-backend/memory_brain_metrics.py"]}
+      ]
+    },
+    {
+      "id": "15",
+      "title": "Cost Governance",
+      "rows": [
+        {"item": "Hard budget controls — RPM caps + token caps + provider quotas", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/cost_caps.py"]},
+        {"item": "Progressive degradation 60/80/95 % ladder + paywall+cache-only at 100 %", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/credit_burn_meter.py", "artifacts/syrabit-backend/credit_burn_meter_runtime.py"]},
+        {"item": "Heavy-free user flow — chat→retrieval→cache→prewarm→edge", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/free_tier_dispatch.py", "artifacts/syrabit-backend/retrieval_first.py"], "note": "Task #13 prewarm closes the prewarm leg."}
+      ]
+    },
+    {
+      "id": "16",
+      "title": "PWA Experience",
+      "rows": [
+        {"item": "Installable + offline shell + standalone + low-data + bilingual UI + offline notes", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/public/sw.js", "artifacts/syrabit/public/manifest.json"]}
+      ]
+    },
+    {
+      "id": "17",
+      "title": "Build Phases",
+      "rows": [
+        {"item": "Phase 1 MVP (CF Pages + Workers + KV + FastAPI + Mongo + Gemini + RAG + syllabus graph)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit/", "artifacts/syrabit-backend/"]},
+        {"item": "Phase 2 Scale (Pinecone + Sarvam + Redis + prewarm + OCR + SEO)", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/seo_engine.py"], "note": "Prewarm pending (Task #13)."},
+        {"item": "Phase 3 AI Infra (observability, dynamic provider scoring, advanced cache analytics, ops console)", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/admin_ops_console.py", "artifacts/syrabit-backend/cliffhanger_engine.py"]}
+      ]
+    },
+    {
+      "id": "18",
+      "title": "Long-Term Strategic Moats",
+      "rows": [
+        {"item": "Syllabus graph — high", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/syllabus_linker.py"]},
+        {"item": "Assamese educational corpus — extremely high", "status": "PARTIAL", "source_paths": ["artifacts/syrabit-backend/aca_jobs/as_translation_backfill.py"], "note": "Backfill running; corpus growth ongoing."},
+        {"item": "Deterministic educational cache — very high", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/ai_input_cache.py", "artifacts/syrabit-backend/kv_cache.py"]},
+        {"item": "PYQ archive — high", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/routes/pyq.py"]},
+        {"item": "Multilingual educational retrieval — high", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/rag_router.py", "artifacts/syrabit-backend/providers/workers_indic.py"]},
+        {"item": "Edge materialization — extremely high", "status": "IMPLEMENTED", "source_paths": ["artifacts/syrabit-backend/seo_engine.py", "artifacts/syrabit-backend/seo_writes.py"]}
+      ]
+    },
+    {
+      "id": "19",
+      "title": "Final Architectural Positioning",
+      "rows": [
+        {"item": "Curriculum-constrained educational intelligence infrastructure", "status": "IMPLEMENTED", "source_paths": ["replit.md", "infra/v4-locked-architecture.md", "infra/architecture-locked-2026.md"]}
+      ]
+    }
+  ]
+}

@@ -835,5 +835,35 @@ def main() -> int:
     return 0
 
 
+def _check_architecture_lock() -> int:
+    """Task #5 — invoke the architecture-lock guard inline so the
+    existing ``canonical_delegation_gate`` workflow job enforces it
+    pre-deploy alongside the canonical-delegation + dead-provider
+    bank. Returns the architecture-lock guard's own exit code; the
+    umbrella's overall exit is the OR of both guards.
+    """
+    arch_guard = ROOT / "scripts" / "check_architecture_lock.py"
+    if not arch_guard.exists():
+        print(
+            "Architecture-lock guard missing — "
+            "scripts/check_architecture_lock.py not found "
+            "(Task #5 contract)."
+        )
+        return 1
+    import subprocess
+    proc = subprocess.run(
+        [sys.executable, str(arch_guard)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.stdout:
+        print(proc.stdout, end="")
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return proc.returncode
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    canonical_rc = main()
+    arch_rc = _check_architecture_lock()
+    sys.exit(canonical_rc or arch_rc)
