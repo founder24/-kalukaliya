@@ -41,6 +41,13 @@ locals {
     # actually a secret per se but lives alongside the token here so the
     # bootstrap-env mapping in `lambda_batch/_db.py` is uniform.
     "upstash/redis-rest-url"    = "Upstash Redis REST base URL used by `chat-credit-runway` Lambda (Task #565). Same value as the ACA backend's UPSTASH_REDIS_REST_URL env."
+    # Task #13 — `prewarm-seo-routes` Lambda presents this on every
+    # HEAD as `X-Prewarm-Auth` so the Cloudflare worker honors the
+    # `X-Prewarm-Recommended-TTL` cache TTL override (`getPrewarmOverrideTtl`
+    # in `workers/edge-proxy/src/index.ts`). MUST equal the worker's
+    # `BACKEND_ORIGIN_SECRET` binding — rotated lock-step with
+    # `OriginGate`'s `ORIGIN_SHARED_SECRET` per the gotcha in `replit.md`.
+    "origin/shared-secret"      = "Mirror of the worker's BACKEND_ORIGIN_SECRET / OriginGate ORIGIN_SHARED_SECRET. Used by `prewarm-seo-routes` Lambda to authenticate the X-Prewarm-Recommended-TTL override (Task #13). Rotate lock-step with the worker binding."
   }
 }
 

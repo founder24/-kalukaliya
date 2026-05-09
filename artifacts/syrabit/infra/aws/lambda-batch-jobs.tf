@@ -79,6 +79,17 @@ data "aws_secretsmanager_secret" "sentry_dsn_workers" {
   depends_on = [aws_secretsmanager_secret.workers]
 }
 
+# Task #13 — `prewarm-seo-routes` Lambda presents this on every HEAD as
+# `X-Prewarm-Auth` so the Cloudflare worker honours the
+# `X-Prewarm-Recommended-TTL` cache TTL override (`getPrewarmOverrideTtl`
+# in `workers/edge-proxy/src/index.ts`). MUST equal the worker's
+# `BACKEND_ORIGIN_SECRET` binding — rotate lock-step with `OriginGate`'s
+# `ORIGIN_SHARED_SECRET` (see `replit.md` gotcha).
+data "aws_secretsmanager_secret" "origin_shared_secret" {
+  name       = "${local.lz_project}/${local.lz_env}/origin/shared-secret"
+  depends_on = [aws_secretsmanager_secret.workers]
+}
+
 # Task #565 — GCP billing-export coordinates and credit-pool size for the
 # `chat-credit-runway` Lambda. Defaults are placeholder values; production
 # overrides via tfvars (e.g. infra/aws/terraform.tfvars) so a Lambda
@@ -141,6 +152,25 @@ locals {
       schedule          = "cron(0 4 ? * SUN *)" # weekly Sun 04:00 UTC
       max_docs_per_run  = 25
       description       = "Task #551 — Weekly AWS Comprehend sentiment + PII sampler over chapters."
+    }
+    # Task #13 — daily SEO prewarm engine (Spec §9 Tasks #574 + #575).
+    # Selects top-N chapters by 7-day analytics traffic UNION every
+    # chapter under a subject whose exam window starts within
+    # PREWARM_EXAM_LOOKAHEAD_DAYS, walks all 7 PAGE_TYPES per chapter,
+    # issues HEAD through Cloudflare so the worker fills its tiered
+    # cache, persists per-run summary to ``db.seo_prewarm_runs``
+    # (consumed by ``/api/admin/seo/prewarm-coverage``), and emits a
+    # ``Syrabit/Cache::PrewarmSuccessRate`` datapoint. Scheduled at
+    # 01:00 UTC so the cache is warm before the 02:00
+    # ``materialize-chapter-faqs`` job runs and the morning crawl
+    # arrives.
+    "prewarm-seo-routes" = {
+      handler           = "lambda_batch.prewarm_seo_routes.handler"
+      memory_mb         = 512
+      timeout_s         = 900
+      schedule          = "cron(0 1 * * ? *)"   # daily 01:00 UTC
+      max_docs_per_run  = 0                       # 0 = walk every selected chapter
+      description       = "Task #13 — Daily SEO prewarm engine (chapter HEADs through Cloudflare → edge tiered cache + Syrabit/Cache::PrewarmSuccessRate)."
     }
     # Task #12 — daily AEO Answer-Card + FAQ materializer. Walks every
     # published chapter, mines the PYQ corpus + syllabus graph for
@@ -292,6 +322,11 @@ resource "aws_iam_role_policy" "batch_job_inline" {
         Resource = "*"
         Condition = {
           StringEquals = {
+            # Task #13 — `prewarm-seo-routes` also publishes to
+            # `Syrabit/Cache` (`PrewarmSuccessRate`); the namespace
+            # was already in this allow-list for the cache-
+            # effectiveness shipper, so no additional entry is
+            # required.
             "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache", "Syrabit/Cost"]
           }
         }
@@ -372,6 +407,11 @@ resource "aws_lambda_function" "batch_job" {
       UPSTASH_REDIS_REST_URL_SECRET_ARN   = data.aws_secretsmanager_secret.upstash_redis_rest_url.arn
       UPSTASH_REDIS_REST_TOKEN_SECRET_ARN = data.aws_secretsmanager_secret.upstash_redis_rest_token.arn
       SENTRY_DSN_SECRET_ARN               = data.aws_secretsmanager_secret.sentry_dsn_workers.arn
+      # Task #13 — `prewarm-seo-routes` Lambda hydrates this ARN into
+      # `PREWARM_AUTH_TOKEN` at cold-start (see `lambda_batch/_db.py`),
+      # which becomes the `X-Prewarm-Auth` header value on every HEAD.
+      # Other handlers harmlessly ignore the env var.
+      PREWARM_AUTH_TOKEN_SECRET_ARN       = data.aws_secretsmanager_secret.origin_shared_secret.arn
       # GCP billing-export coordinates. Operator overrides via Terraform
       # tfvars or by editing the Lambda env directly post-apply.
       GCP_BILLING_PROJECT                 = var.gcp_billing_project
@@ -563,6 +603,32 @@ resource "aws_cloudwatch_metric_alarm" "cache_ai_hitratio_low" {
   dimensions = {
     ContentType = "Total"
   }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# Task #13 — PrewarmSuccessRate < 0.90 → ops_alerts. Catches the
+# regression where the nightly prewarm starts erroring through to
+# Cloudflare (origin 5xx, worker route disabled, edge 502 from a
+# Pages cold-start) — which would silently drain the warm cache and
+# put the morning crawl/student-traffic spike back on the FastAPI
+# origin. Single 24h window because the Lambda only publishes one
+# datapoint per run; `treat_missing_data=breaching` is the safety
+# net that pages on-call when the Lambda fails to start at all.
+resource "aws_cloudwatch_metric_alarm" "cache_prewarm_success_rate_low" {
+  alarm_name          = "${local.lz_project}-cache-prewarm-success-rate-low-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  metric_name         = "PrewarmSuccessRate"
+  namespace           = "Syrabit/Cache"
+  period              = 86400
+  statistic           = "Minimum"
+  threshold           = 0.90
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #13 — Syrabit/Cache::PrewarmSuccessRate dropped below 0.90 (or the daily prewarm-seo-routes Lambda failed to publish at all). Inspect /admin/seo/prewarm-coverage `samples_failed` for the offending URLs and verify Cloudflare worker health."
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]
   ok_actions    = [aws_sns_topic.ops_alerts.arn]

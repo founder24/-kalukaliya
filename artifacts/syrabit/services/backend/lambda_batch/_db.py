@@ -83,6 +83,11 @@ _SECRET_ENV_MAP: dict[str, tuple[str, ...]] = {
     "UPSTASH_REDIS_REST_URL_SECRET_ARN":               ("UPSTASH_REDIS_REST_URL",),
     "UPSTASH_REDIS_REST_TOKEN_SECRET_ARN":             ("UPSTASH_REDIS_REST_TOKEN",),
     "SENTRY_DSN_SECRET_ARN":                           ("SENTRY_DSN",),
+    # Task #13 — `prewarm-seo-routes` presents this on every HEAD as
+    # `X-Prewarm-Auth` so the Cloudflare worker honours the
+    # `X-Prewarm-Recommended-TTL` cache-TTL override. Other handlers
+    # harmlessly ignore the variable.
+    "PREWARM_AUTH_TOKEN_SECRET_ARN":                   ("PREWARM_AUTH_TOKEN",),
 }
 
 _bootstrapped = False

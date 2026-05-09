@@ -1540,6 +1540,52 @@ function safeCorsHeaders(origin: string | null): Record<string, string> {
   return getCorsHeaders(origin) || {};
 }
 
+/**
+ * Task #13 — TTL-override hook for the nightly SEO prewarm Lambda.
+ *
+ * The prewarm pass HEADs every chapter URL with two headers:
+ *   • `X-Prewarm-Recommended-TTL: <seconds>` — the season-aware TTL
+ *     computed by `cache_calendar.recommended_ttl_seconds()` in the
+ *     backend (single source of truth shared with the worker).
+ *   • `X-Prewarm-Auth: <token>` — must equal `BACKEND_ORIGIN_SECRET`.
+ *
+ * Without the auth match, the header is IGNORED so public clients
+ * cannot manipulate cache TTL policy. Returns `null` when no
+ * override applies; the caller falls back to `getCacheTtl(pathname)`.
+ */
+function getPrewarmOverrideTtl(
+  request: Request,
+  env: Env,
+): number | null {
+  const auth = request.headers.get("X-Prewarm-Auth");
+  const recommended = request.headers.get("X-Prewarm-Recommended-TTL");
+  if (!auth || !recommended) return null;
+  if (!env.BACKEND_ORIGIN_SECRET) return null;
+  if (auth !== env.BACKEND_ORIGIN_SECRET) return null;
+  const n = Number.parseInt(recommended, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // Hard ceiling of 90 days mirrors `cache_calendar`'s exam-mode
+  // stretch ceiling so a buggy header can't pin a year-long entry.
+  return Math.min(n, 90 * 24 * 60 * 60);
+}
+
+/**
+ * Rewrite the cache-controlling headers on a Response so that when
+ * Cloudflare stores it in the tiered cache, the entry honors the
+ * prewarm-supplied TTL instead of the default. The original Response
+ * (returned to the *current* requester) is left untouched.
+ */
+function withOverriddenTtl(resp: Response, ttl: number): Response {
+  const cacheControl =
+    `public, s-maxage=${ttl}, stale-while-revalidate=${ttl * 2}`;
+  const surrogate =
+    `public, max-age=${ttl}, stale-while-revalidate=${ttl * 2}`;
+  const stored = new Response(resp.body, resp);
+  stored.headers.set("Cache-Control", cacheControl);
+  stored.headers.set("Surrogate-Control", surrogate);
+  return stored;
+}
+
 function getCacheTtl(pathname: string): number {
   // Task #575 — `pickEffectiveTtl` checks the exam-mode override list
   // first when `_currentSeasonSnapshot.season` is `"exam"` or
@@ -4282,17 +4328,24 @@ async function _handleEdgeFetch(
         try {
           const d1Result = await tryD1Route(env, pathname, url.searchParams);
           if (d1Result !== null) {
+            const overrideTtl = getPrewarmOverrideTtl(request, env);
             if (d1Result.type === "xml") {
               const xmlResp = d1XmlResponse(d1Result.data, cors, remaining);
+              const stored = overrideTtl != null
+                ? withOverriddenTtl(xmlResp, overrideTtl)
+                : xmlResp;
               // Cache XML responses too so subsequent same-POP requests
               // hit cf-cache instead of re-running the D1 sitemap query.
-              ctx.waitUntil(cache.put(cacheKey, xmlResp.clone()));
+              ctx.waitUntil(cache.put(cacheKey, stored.clone()));
               return xmlResp;
             }
             const jsonResp = d1JsonResponse(d1Result.data, cors, remaining, pathname);
+            const storedJson = overrideTtl != null
+              ? withOverriddenTtl(jsonResp, overrideTtl)
+              : jsonResp;
             // Persist to CF cache. Subsequent requests within the TTL
             // window served by this POP skip D1 entirely.
-            ctx.waitUntil(cache.put(cacheKey, jsonResp.clone()));
+            ctx.waitUntil(cache.put(cacheKey, storedJson.clone()));
             return jsonResp;
           }
         } catch { /* fall through to backend */ }
@@ -4310,7 +4363,8 @@ async function _handleEdgeFetch(
         });
 
         if (backendResp.ok) {
-          const ttl = getCacheTtl(pathname);
+          const overrideTtl = getPrewarmOverrideTtl(request, env);
+          const ttl = overrideTtl != null ? overrideTtl : getCacheTtl(pathname);
           const respBody = await backendResp.arrayBuffer();
           const contentType = backendResp.headers.get("Content-Type") || "application/json";
           const cacheControl = `public, max-age=${ttl}, stale-while-revalidate=${ttl * 2}`;

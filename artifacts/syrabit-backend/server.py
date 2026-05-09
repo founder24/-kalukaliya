@@ -2062,6 +2062,7 @@ from routes.admin_seo_internal_linker import router as admin_seo_internal_linker
 from routes.admin_entity_seo import router as admin_entity_seo_router
 from routes.admin_seo_external import router as admin_seo_external_router
 from routes.admin_seo_aeo_coverage import router as admin_seo_aeo_coverage_router  # Task #12
+from routes.admin_seo_prewarm import router as admin_seo_prewarm_router  # Task #13
 from routes.admin_content_quality import router as admin_content_quality_router
 from routes.admin_security_external import router as admin_security_external_router
 from routes.admin_discovery import router as admin_discovery_router
@@ -2245,6 +2246,7 @@ api.include_router(admin_seo_internal_linker_router)
 api.include_router(admin_entity_seo_router)
 api.include_router(admin_seo_external_router)
 api.include_router(admin_seo_aeo_coverage_router)  # Task #12
+api.include_router(admin_seo_prewarm_router)  # Task #13
 api.include_router(admin_content_quality_router)
 api.include_router(admin_security_external_router)
 api.include_router(admin_discovery_router)

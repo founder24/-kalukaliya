@@ -289,6 +289,108 @@ def ai_cache_ttl_for(content_type: Optional[str], season: Optional[Season] = Non
     return NORMAL_TTL_SEC
 
 
+# ── Task #574 — per-route TTL recommendation ──────────────────────────
+#
+# Consumed by ``aca_jobs.prewarm_seo_routes`` (which sends an
+# ``X-Bypass-Cache`` HEAD followed by a normal GET so the worker
+# stores a freshly-warmed entry under the recommended TTL) and by the
+# Cloudflare worker's per-route override pass. Centralising the
+# decision here keeps the prewarm job, the worker, and the admin
+# coverage tile consistent — a single config edit propagates
+# everywhere without per-consumer drift.
+#
+# The function is **pure** (modulo the same one-time YAML load that
+# ``current_season`` uses) so tests pin behaviour by passing
+# ``today`` explicitly.
+
+# Per-content-type baseline + season-stretched TTL. The baseline is
+# the long-tail "this content does not change between admin edits"
+# value; the season-stretched TTL only applies when the active
+# calendar window is ``exam`` / ``results`` AND the content type is
+# in ``EXAM_STRETCH_CONTENT_TYPES``. Formatter / translate / OCR are
+# intentionally NOT in the stretch set — they are admin-edit driven
+# and the longer TTL would mask a freshly polished body for too long.
+_CONTENT_TYPE_TTL_NORMAL: dict = {
+    "mcq":        NORMAL_TTL_SEC,
+    "flashcard":  NORMAL_TTL_SEC,
+    "definition": NORMAL_TTL_SEC,
+    "pyq":        NORMAL_TTL_SEC,
+    "faq":        NORMAL_TTL_SEC,
+    "quick_answer": NORMAL_TTL_SEC,
+    "formatter":  NORMAL_TTL_SEC,
+    "translate":  NORMAL_TTL_SEC,
+    "ocr":        NORMAL_TTL_SEC,
+}
+
+# Per-route baseline + season-stretched edge TTL (seconds).
+# Mirrors the ``edge_cache.ttl_seconds`` / ``exam_ttl_seconds`` pairs
+# in ``workers/edge-proxy/monitored-urls.json``. Kept here so the
+# Lambda prewarm job has a single source of truth — the worker
+# applies the same numbers via its monitored-urls polling, and the
+# CI drift gate (``tests/test_monitoring_url_drift.py``) catches the
+# routes/content-types/edge-routes triad if any one of them strays.
+_ROUTE_TTL_TABLE: tuple = (
+    # SEO chapter pages — matched on prefix; the key is the suffix
+    # that uniquely identifies the route family. The full prewarm
+    # URL is built by ``aca_jobs.prewarm_seo_routes``; we only need
+    # to recognise it here.
+    ("/board/",                   3600,    21600),
+    ("/api/seo/",                  600,     3600),
+    ("/api/content/chapter-by-slug/", 3600, 21600),
+    ("/api/content/topic/",       3600,    21600),
+    ("/api/content/library-bundle", 1800,  14400),
+    ("/api/pyq/",                 3600,    86400),
+)
+
+
+def recommended_ttl_seconds(
+    content_type: Optional[str] = None,
+    route: Optional[str] = None,
+    today: Optional[datetime] = None,
+) -> int:
+    """Recommended TTL (seconds) for a single cache entry.
+
+    Resolution order (first non-``None`` wins):
+      1. ``route`` — longest-prefix match against ``_ROUTE_TTL_TABLE``
+         (mirrors ``monitored-urls.json``). The matched row exposes a
+         normal + ``exam_ttl_seconds`` pair; we pick the stretched
+         value when ``current_season(today)`` is exam/results.
+      2. ``content_type`` — looked up in ``_CONTENT_TYPE_TTL_NORMAL``;
+         stretched to ``EXAM_TTL_SEC`` when the type is in
+         ``EXAM_STRETCH_CONTENT_TYPES`` and the season is stretched.
+      3. Neither supplied — falls back to the deterministic-cache
+         default (``ai_cache_ttl_for(None)``) so the helper is safe to
+         call as a generic "what TTL should I use right now" probe.
+
+    Pure beyond the one-time YAML load.
+    """
+    season = current_season(today)
+    stretched = season in (SEASON_EXAM, SEASON_RESULTS)
+
+    if route:
+        # Longest-prefix match — the most specific route wins. The
+        # table is small (<10 rows) so a linear scan is fine; matches
+        # the lookup pattern in ``workers/edge-proxy/src/index.ts``.
+        match = max(
+            (row for row in _ROUTE_TTL_TABLE if route.startswith(row[0])),
+            key=lambda row: len(row[0]),
+            default=None,
+        )
+        if match is not None:
+            _, normal_ttl, stretched_ttl = match
+            return int(stretched_ttl if stretched else normal_ttl)
+
+    if content_type is not None:
+        if stretched and content_type in EXAM_STRETCH_CONTENT_TYPES:
+            return EXAM_TTL_SEC
+        # Unknown content_type → fall through to the deterministic
+        # cache default rather than 0; we'd rather over-cache by a
+        # few hours than serve a TTL of 0 and stampede the origin.
+        return int(_CONTENT_TYPE_TTL_NORMAL.get(content_type, NORMAL_TTL_SEC))
+
+    return ai_cache_ttl_for(None, season)
+
+
 def health_payload(now: Optional[datetime] = None) -> dict:
     """Shape consumed by ``GET /api/health/season`` and the admin
     Observability cache banner. Stable contract — any change MUST
@@ -321,6 +423,6 @@ __all__ = [
     "NORMAL_TTL_SEC", "EXAM_TTL_SEC", "EXAM_TTL_MULTIPLIER",
     "ExamWindow",
     "current_season", "next_transition", "active_window",
-    "ai_cache_ttl_for", "health_payload",
+    "ai_cache_ttl_for", "recommended_ttl_seconds", "health_payload",
     "load_windows", "reset_for_tests",
 ]
