@@ -29,6 +29,11 @@ Task #14 — the artifact-managed entries are the single source of truth.
   Skip the build leg with `DEV_HEALTH_SKIP_BUILD=1` for fast iteration.
 - **Production health:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
 - **Backend import smoke test:** `cd artifacts/syrabit-backend && python -c "import server"` before pushing.
+- **Workflow contract / browser-console triage:**
+  [`docs/dev/task-14-workflow-triage-2026-05-09.md`](docs/dev/task-14-workflow-triage-2026-05-09.md)
+  — explains the pivot from the original 5-workflow contract to the
+  current 3-service artifact-managed model and documents every browser
+  console line observed on `/`, `/library`, and a sample chapter page.
 
 ## Stack
 
