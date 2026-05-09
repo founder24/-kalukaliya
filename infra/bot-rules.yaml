@@ -92,7 +92,17 @@ verified_search:
     rdns_suffixes: [".seznam.cz"]
   - token: youbot
     canonical: YouBot
-    rdns_suffixes: []
+    rdns_suffixes: [".you.com", ".youbot.you.com"]
+    # Bucket placement note: YouBot is the You.com search/answer engine.
+    # Although it is LLM-powered like Perplexity, we classify it under
+    # `verified_search` (NOT `citation_ai`) because:
+    #   1. It identifies as a search crawler (no `*-User` interactive
+    #      variant), behaving like Bingbot/Googlebot operationally.
+    #   2. It cites sources and drives referral traffic — same SEO
+    #      benefit as a traditional search engine.
+    #   3. cf.verifiedBot recognizes it under the search-engine family.
+    # Functionally it gets the same 60K RPM verified fast path either
+    # way; the bucket label only affects the admin observability tile.
     note: "You.com search/answer engine — cites sources, drives referral traffic."
   - token: slurp
     canonical: Slurp
