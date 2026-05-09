@@ -216,6 +216,90 @@ def _check_one(
     return errors
 
 
+# ---------------------------------------------------------------------------
+# rDNS suffix parity (round-14 reviewer follow-up).
+# ---------------------------------------------------------------------------
+# The worker's `BOT_RDNS_SUFFIXES` map duplicates the `rdns_suffixes`
+# metadata from `infra/bot-rules.yaml` for every verified-bot family.
+# Drift here is silent: a YAML edit adds a new family with rdns
+# suffixes but the worker keeps the old map, so FCrDNS promotion
+# never fires for the new family. This check enforces token-level
+# parity (every YAML token with a non-empty rdns_suffixes list MUST
+# appear in the worker's BOT_RDNS_SUFFIXES map, and every suffix in
+# the YAML MUST appear in the worker's suffix list for that family).
+
+_WORKER_PATH = ROOT / "workers" / "edge-proxy" / "src" / "index.ts"
+_RDNS_BLOCK = re.compile(
+    r"const BOT_RDNS_SUFFIXES[\s\S]*?\n\];", re.MULTILINE,
+)
+_RDNS_ROW = re.compile(
+    r'\["[^"]+",\s*/[^/]+/i,\s*\[([^\]]*)\]\]',
+)
+_RDNS_FAMILY_PATTERN = re.compile(
+    r'\["([^"]+)",\s*/([^/]+)/i,\s*\[([^\]]*)\]\]',
+)
+
+
+def _check_rdns_suffix_parity(rules: dict) -> list[str]:
+    """Verify every YAML entry with rdns_suffixes has a matching row
+    in the worker's BOT_RDNS_SUFFIXES map covering all listed
+    suffixes (trailing-dot-normalised). Returns a list of errors
+    (empty list == in sync)."""
+    if not _WORKER_PATH.exists():
+        return []
+    block_match = _RDNS_BLOCK.search(_WORKER_PATH.read_text(encoding="utf-8"))
+    if not block_match:
+        return [f"{_WORKER_PATH.relative_to(ROOT)}: BOT_RDNS_SUFFIXES block not found"]
+    block_text = block_match.group(0)
+    # Build a flat set of (token, suffix) pairs from the worker
+    # (token is the regex source — we'll do substring match against
+    # YAML tokens). Lowercased + trailing-dot-normalised.
+    worker_pairs: list[tuple[str, set[str]]] = []
+    for m in _RDNS_FAMILY_PATTERN.finditer(block_text):
+        # group(2) is the regex body between `/.../i` slashes — match
+        # against YAML tokens via substring-on-alternation. Each
+        # alternation arm may carry anchors (`^yandex`) which we strip.
+        regex_src = m.group(2).lower().replace("^", "")
+        suffixes_raw = m.group(3)
+        suffixes = {
+            s.strip().strip('"').rstrip(".").lower()
+            for s in suffixes_raw.split(",") if s.strip()
+        }
+        worker_pairs.append((regex_src, suffixes))
+
+    errors: list[str] = []
+    for bucket_entries in rules.values():
+        if not isinstance(bucket_entries, list):
+            continue
+        for entry in bucket_entries:
+            if not isinstance(entry, dict):
+                continue
+            tok = entry.get("token", "").lower()
+            suffixes = entry.get("rdns_suffixes") or []
+            if not tok or not suffixes:
+                continue
+            yaml_suffixes = {s.strip().rstrip(".").lower() for s in suffixes}
+            # Find a worker row whose regex source contains this token.
+            matched = next(
+                (sfxs for src, sfxs in worker_pairs if tok in src),
+                None,
+            )
+            if matched is None:
+                errors.append(
+                    f"BOT_RDNS_SUFFIXES missing family covering YAML "
+                    f"token '{tok}' (suffixes: {sorted(yaml_suffixes)})"
+                )
+                continue
+            missing = yaml_suffixes - matched
+            if missing:
+                errors.append(
+                    f"BOT_RDNS_SUFFIXES family for '{tok}' missing "
+                    f"suffixes: {sorted(missing)} "
+                    f"(worker has {sorted(matched)})"
+                )
+    return errors
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -238,6 +322,7 @@ def main() -> int:
     errors: list[str] = []
     for path, buckets, locator in TARGETS:
         errors.extend(_check_one(path, buckets, locator, by_bucket))
+    errors.extend(_check_rdns_suffix_parity(rules))
 
     if errors:
         print("Bot-rules drift detected:", file=sys.stderr)

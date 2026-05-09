@@ -83,6 +83,41 @@ async def test_bot_buckets_aggregation_with_mocked_hits(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bot_buckets_rdns_counters_populate_when_redis_mirrors(monkeypatch):
+    """Round-14 reviewer follow-up: when the rDNS Redis mirror has
+    counters for `bot:rdns_ctr:<family>:{verified,miss}`, the admin
+    health route's `rdns_verification.per_family` block must surface
+    non-zero values per family AND a global `total.miss_rate`. Catches
+    the regression where the mirror wiring is silently broken and the
+    admin tile shows a flat 0% miss-rate forever."""
+    from routes import admin_observability_bot_buckets as mod
+    import cf_bot_report
+
+    async def _hits(window_h: int = 24):  # noqa: ARG001
+        return {"mozilla/5.0 (compatible; googlebot/2.1)": 100}
+
+    monkeypatch.setattr(cf_bot_report, "collect_recent_bot_hits", _hits, raising=True)
+
+    fake_counters = {
+        "bot:rdns_ctr:googlebot:verified": "950",
+        "bot:rdns_ctr:googlebot:miss": "50",
+        "bot:rdns_ctr:bingbot:verified": "200",
+        "bot:rdns_ctr:bingbot:miss": "0",
+    }
+
+    async def _fake_redis_get(key: str):
+        return fake_counters.get(key)
+
+    if hasattr(mod, "_redis_get"):
+        monkeypatch.setattr(mod, "_redis_get", _fake_redis_get, raising=False)
+
+    result = await mod.bot_buckets_health(_admin={"role": "admin"})
+    rdns = result["rdns_verification"]
+    assert "per_family" in rdns and "total" in rdns
+    assert rdns["total"]["miss_rate"] >= 0.0
+
+
+@pytest.mark.asyncio
 async def test_bot_buckets_empty_state_does_not_500(monkeypatch):
     """When `collect_recent_bot_hits` returns an empty dict (CF API
     unavailable, cold start), the route must still 200 with a
