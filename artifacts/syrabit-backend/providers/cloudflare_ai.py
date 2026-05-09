@@ -1,6 +1,6 @@
 """Cloudflare Workers AI — primary LLM / translate / vision provider.
 
-Replaces Groq, Cerebras, OpenRouter, Sarvam (translation), and
+Replaces the legacy LLM tail (retired #347), Sarvam (translation), and
 Vertex AI (legacy embeddings) as the primary tier. All calls go
 through the Cloudflare AI REST API (api.cloudflare.com/client/v4/
 accounts/{account_id}/ai/run/{model}) — no edge worker round-trip

@@ -3749,7 +3749,7 @@ footer{{margin-top:3rem;border-top:1px solid #e5e7eb;padding-top:1rem;font-size:
 <section id="features">
 <h2>What Syrabit Offers</h2>
 <ul>
-<li><strong>AI tutor</strong> — multi-model AI chat (Cerebras, Groq, Fireworks, Gemini, xAI) that answers your syllabus questions in English or Assamese, with sources cited.</li>
+<li><strong>AI tutor</strong> — multi-model AI chat (Vertex Gemini, Sarvam, Workers AI) that answers your syllabus questions in English or Assamese, with sources cited.</li>
 <li><strong>Syllabus-aligned notes</strong> — topic-wise study notes for AHSEC, SEBA, and NEP FYUGP Degree subjects.</li>
 <li><strong>Previous year questions (PYQs)</strong> — with full solutions, faithful HTML replicas of original board papers.</li>
 <li><strong>Mark-wise question banks</strong> — 1, 2, 3, 5, and 10-mark questions sorted by chapter.</li>
@@ -6758,7 +6758,7 @@ async def _resolve_seo_summary_recipients(db, now_utc: datetime) -> list:
 async def _send_seo_daily_summary_email(stats: dict, recipients: list) -> dict:
     """Send the rendered summary to each recipient via Amazon SES.
     Task #556 — single-path SES via ``email_templates.send_admin_email``;
-    SendGrid + Resend retired.
+    The pre-#556 multi-vendor email path is retired.
     Fire-and-forget — never raises; returns a small report dict."""
     if not stats:
         return {"sent": 0, "failed": 0, "total": 0, "reason": "no_stats"}

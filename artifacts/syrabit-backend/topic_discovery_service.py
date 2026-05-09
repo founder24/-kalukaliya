@@ -17,7 +17,7 @@ nightly cron that:
          scraper / RSS poller can drop rows in.
 
   2. Grades every candidate with an LLM grader (Workers-AI gpt-oss-120b
-     via ``llm.call_llm_api_content`` — V4-compliant; Groq/Cerebras direct
+     via ``llm.call_llm_api_content`` — V4-compliant; the legacy direct-LLM tail
      paths removed in Task #347) on four axes — intent fit,
      syllabus alignment, search difficulty (vs current Syrabit topical
      authority), and AEO readability.

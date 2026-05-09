@@ -355,7 +355,7 @@ CF_GATEWAY_BASE = (
 CF_CACHE_TTL = int(os.environ.get('CF_AI_GATEWAY_CACHE_TTL', '86400'))
 
 _CF_PROVIDER_SLUGS = {
-    # OpenAI / xAI-Grok / AWS Bedrock entries removed in Task #347 — those
+    # Several legacy provider SDK key entries were removed in Task #347 — those
     # providers were purged from PROVIDER_PRIORITY + POOL_WEIGHTS and from
     # the BYOK cf-aig-byok-key chain. Re-add only if a future task
     # explicitly re-enables them.
@@ -366,7 +366,7 @@ _CF_PROVIDER_SLUGS = {
     "sarvam":      "custom-sarvam",
     # New providers routed through CF AI Gateway
     # Task #491 — legacy embed-provider slugs removed.
-    # Task #552 §G — AssemblyAI fully retired (provider module deleted).
+    # Task #552 §G — the third-party STT vendor fully retired (provider module deleted).
     "elevenlabs":  "elevenlabs/v1",  # TTS — /v1/text-to-speech (sole English TTS, Task #552 §G)
     "deepgram":    "deepgram/v1",    # STT-only — Nova-3 (Aura-2 TTS branch retired by Task #552 §G)
     # Task #554 — Azure OpenAI fully removed; English chat is vertex →
@@ -374,7 +374,7 @@ _CF_PROVIDER_SLUGS = {
 }
 
 _DIRECT_PROVIDER_URLS = {
-    # openai / xai entries removed (Task #347 — providers decommissioned).
+    # Several legacy provider entries removed (Task #347 — providers decommissioned).
     # NOTE: "gemini" entry removed (vertex-only Gemini auth, 2026-05-03).
     # Task #490 then scoped Vertex to `content_format` only — Gemini is
     # now reachable solely via `vertex_format.format_with_vertex` for
@@ -430,7 +430,7 @@ def get_provider_base_url(provider: str) -> str | None:
 #   3. Upstream provider sees its real key and responds normally.
 #
 # Removing the provider env vars (GEMINI_API_KEY, GROQ_API_KEY,
-# OPENROUTER_API_KEY, SARVAM_API_KEY, …) is SAFE once BYOK is wired — the
+# (legacy aggregator key, SARVAM_API_KEY, …) is SAFE once BYOK is wired — the
 # backend sends placeholders and CF does the real auth. Keep the CF gateway
 # env vars themselves (CF_AI_GATEWAY_ACCOUNT_ID, CF_AI_GATEWAY_ID,
 # CF_AI_GATEWAY_TOKEN) — those bootstrap the gateway connection itself.
@@ -492,7 +492,7 @@ _GEMINI_KEY = ""
 _GEMINI_KEY_2 = ""
 _GEMINI_KEY_RAW = ""
 _GEMINI_KEY_2_RAW = ""
-# Task #347 — OpenAI and xAI-Grok decommissioned. The keys are no
+# Task #347 — the legacy direct-vendor providers decommissioned. The keys are no
 # longer read from the environment; the symbols are kept bound to ""
 # so any in-flight ``from config import _XAI_KEY / _OPENAI_KEY`` import
 # degrades gracefully (the ``if _XAI_KEY:`` guards become False and the

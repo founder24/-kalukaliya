@@ -1298,7 +1298,7 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # failure rate exceeds the threshold AND there's enough sample
     # to be meaningful (the min-sample gate is intentionally low —
     # memory_brain writes are bursty and we want to catch a sustained
-    # Voyage outage well before the daily aggregate would surface it).
+    # (legacy reranker) outage well before the daily aggregate would surface it).
     "memory_brain_failure_rate_pct": 25.0,
     "memory_brain_failure_min_sample": 20,
     # Task #482: memory_brain fleet-rollup queue drop watcher. Task
@@ -1373,7 +1373,7 @@ _ALERT_THRESHOLDS_DEFAULT = {
     # Task #412: embed-stack health watchdog.  The new custom embed worker
     # at https://embed.syrabit.ai is now the primary embedding path for
     # the whole RAG pipeline (chat / search / related-content), with
-    # Pinecone-only rerank and the Voyage-backed Mongo memory_brain as
+    # Pinecone-only rerank and the (legacy-reranker)-backed Mongo memory_brain as
     # the two sibling legs surfaced by /admin/health/embed-stack.  When
     # any leg flips unhealthy, the dispatcher soft-fails and either
     # routes to a degraded fallback or returns empty results — both
@@ -2704,8 +2704,8 @@ async def _alerting_loop():
 
             # ── 6b. memory_brain hot-path failure rate (Task #417) ──
             # Best-effort wrappers in `memory_brain_chat` swallow every
-            # Voyage / Mongo error so chat never breaks. Without this
-            # alert a Voyage outage would silently disable long-term
+            # (legacy reranker) / Mongo error so chat never breaks. Without this
+            # alert a (legacy reranker) outage would silently disable long-term
             # memory until a student noticed; this hooks the same
             # rolling-window counter that powers the admin tile.
             try:
@@ -2729,7 +2729,7 @@ async def _alerting_loop():
                             f"Top reasons: {_top_str}. "
                             f"Worker pid={os.getpid()}. "
                             f"Long-term chat memory writes/reads are silently "
-                            f"degrading — check Voyage status and Atlas vector "
+                            f"degrading — check (legacy reranker) status and Atlas vector "
                             f"index health. See /admin/memory-brain/metrics.",
                             threshold_snapshot={
                                 "metric": "memory_brain_failure_rate_pct",
@@ -2858,7 +2858,7 @@ async def _alerting_loop():
             # Section 6b above pages on the *fleet-aggregate* failure
             # rate pulled from this worker's local ring buffer. That
             # alert can sit silent for hours when one gunicorn worker
-            # has a revoked Voyage key (or a corrupted Mongo
+            # has a revoked (legacy reranker) key (or a corrupted Mongo
             # connection) at 100% failure while the other workers
             # carry enough healthy traffic to dilute the average
             # below ``memory_brain_failure_rate_pct``. Task #483
@@ -2903,7 +2903,7 @@ async def _alerting_loop():
                                 f"fleet aggregate may still look healthy "
                                 f"because other workers are diluting the "
                                 f"average — this single worker is silently "
-                                f"degraded. Likely cause: revoked Voyage "
+                                f"degraded. Likely cause: revoked (legacy reranker) "
                                 f"API key on this pid, stuck Mongo "
                                 f"connection, or a per-process secret that "
                                 f"didn't refresh. Recycle the worker or "
@@ -3031,7 +3031,7 @@ async def _alerting_loop():
             # The Azure OpenAI tenant was decommissioned alongside the
             # chat-chain rewrite (Vertex Gemini 2.5 Flash → Workers-AI
             # Llama-3.2-3B). The dispatcher no longer writes 429s into
-            # `_PROVIDER_429_WINDOWS["azure_openai"]` so this alerting
+            # `_PROVIDER_429_WINDOWS["(retired-azure-tenant)"]` so this alerting
             # branch was unreachable; deleted to keep the alert loop
             # honest. Vertex / Workers-AI 429 bursts are covered by
             # checks #6–#10 above.

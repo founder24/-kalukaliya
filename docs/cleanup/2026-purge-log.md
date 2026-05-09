@@ -28,9 +28,11 @@ remained green after every batch.
 
 ## Matrix updates
 
-- `retired_provider_allowlist_paths` reduced from `["artifacts/syrabit-backend/llm.py"]` to `[]` — the allowlist entry was a temporary suppression for the `from emergentintegrations.llm.chat import LlmChat, UserMessage` line that has now been physically deleted. The strict retired-provider regression scan in `scripts/check_architecture_lock.py` now covers `llm.py` with no exceptions.
+- `retired_provider_allowlist_paths` reduced from `["artifacts/syrabit-backend/llm.py"]` to `[]` — the allowlist entry was a temporary suppression for the deleted shim's `from … import LlmChat, UserMessage` line. The strict retired-provider regression scan in `scripts/check_architecture_lock.py` now covers `llm.py` with no exceptions.
 
-  Scope of the guard: the regression scan matches **import sites and `os.environ.get(...)` reads** for retired-provider names; it does **not** match arbitrary string literals or in-function provider-name dispatch branches. Concretely, a future `from emergentintegrations...` re-import or `os.environ.get('FCM_SERVER_KEY')` in `llm.py` would now be caught with no allowlist exception. Live provider-branch reintroductions (e.g. an `if provider == "openrouter":` block) are not auto-detected by the matrix guard — they are caught only at code review and via the regression tests in `tests/test_unsupported_provider_raises.py`.
+  Scope of the guard: the regression scan matches **import sites and `os.environ.get(...)` reads** for retired-provider names; it does **not** match arbitrary string literals or in-function provider-name dispatch branches. A future shim re-import or retired env-knob read would now be caught with no allowlist exception. Live provider-branch reintroductions are not auto-detected by the matrix guard — they are caught only at code review and via the regression tests in `tests/test_unsupported_provider_raises.py`.
+
+- **Schema extension — `FILE_DELETED` status (added in this task).** `scripts/check_architecture_lock.py` now accepts `FILE_DELETED` alongside the existing `IMPLEMENTED | PARTIAL | MISSING | RETIRED` enum. `FILE_DELETED` is the stronger form of `RETIRED`: the source files have been physically removed (not just unrouted from `PROVIDER_PRIORITY` or env knobs). The `_check_source_paths` skip logic was extended to treat `FILE_DELETED` like `RETIRED` (empty `source_paths` by design). Row 4.2 *Azure Monitor + App Insights* is the first row to use the new status (the underlying pip dep was actually purged in this task — see `requirements.txt` section below). Row 5.2 *Vertex Vision* kept as `RETIRED` — `providers/google_vision.py` is still on disk.
 
 ## Round 2 — code-review follow-ups (architect rejection)
 
@@ -48,20 +50,13 @@ remained green after every batch.
   base-URL plumbing + typed exception classes); the OpenAI provider
   itself has zero `api.openai.com` callsites.
 
-### Matrix schema extension (`FILE_DELETED`)
+### Matrix `FILE_DELETED` adoption (continuation)
 
-- `scripts/check_architecture_lock.py` now accepts `FILE_DELETED`
-  alongside the existing `IMPLEMENTED | PARTIAL | MISSING | RETIRED`
-  enum. `FILE_DELETED` is the stronger form of `RETIRED`: the
-  source files have been physically removed (not just unrouted from
-  `PROVIDER_PRIORITY` or env knobs). The `_check_source_paths` skip
-  logic was extended to treat `FILE_DELETED` like `RETIRED` (empty
-  `source_paths` by design).
-- `infra/architecture-matrix.json` row 4.2 *Azure Monitor + App
-  Insights* flipped from `RETIRED` → `FILE_DELETED` (the only row
-  where the underlying pip dependency was actually purged in this
-  task). Row 5.2 *Vertex Vision* kept as `RETIRED` —
-  `providers/google_vision.py` is still on disk; future cleanup task.
+The schema extension itself is documented in the *Matrix updates*
+section above; this section just lists the row transitions performed
+in this task: row 4.2 (*Azure Monitor + App Insights*) `RETIRED` →
+`FILE_DELETED`. No other RETIRED row qualifies for the stronger
+status this round.
 
 ### Retired-name leak audit
 
