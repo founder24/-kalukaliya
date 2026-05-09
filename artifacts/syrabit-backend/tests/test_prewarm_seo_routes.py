@@ -346,15 +346,52 @@ def test_run_prewarm_warms_every_page_type(normal_calendar):
     assert all(
         "X-Prewarm-Recommended-TTL" in h for h in client.headers_seen
     )
-    # Task #13 round-3 — must be GET (not HEAD), otherwise the
-    # materialization-eligible page-types never produce a body and KV
-    # / ai_input_cache stays cold during exam windows.
-    assert client.methods_seen and set(client.methods_seen) == {"GET"}
+    # Task #13 — two-phase warm contract: GET on KV-eligible page-
+    # types (mcqs/flashcards/definitions/summary/pyqs) so the
+    # deterministic-template renderer fills KV + ai_input_cache;
+    # HEAD on edge-only legs (notes/revision) which only need a
+    # tiered-cache entry. Verify both verbs were issued AND that the
+    # GETs landed on KV-eligible URLs only.
+    assert set(client.methods_seen) == {"GET", "HEAD"}
+    get_urls = [u for (u, m) in zip(client.calls, client.methods_seen) if m == "GET"]
+    head_urls = [u for (u, m) in zip(client.calls, client.methods_seen) if m == "HEAD"]
+    # 5 KV-eligible × 2 chapters = 10 GETs; 2 edge-only × 2 = 4 HEADs.
+    assert len(get_urls) == 10
+    assert len(head_urls) == 4
+    for u in get_urls:
+        assert u.rsplit("/", 1)[-1] in prewarm_seo_routes.KV_ELIGIBLE_PAGE_TYPES
+    for u in head_urls:
+        assert u.rsplit("/", 1)[-1] in {"notes", "revision"}
     # KV-eligible accounting: 5 of the 7 page-types per chapter × 2 chapters.
     assert summary["kv_attempted"] == 10
     assert summary["kv_warmed"] == 10
     assert summary["kv_failed"] == 0
     assert summary["kv_success_rate"] == 1.0
+
+
+def test_run_prewarm_per_page_type_ttl_diverges_in_exam_mode(exam_calendar):
+    """Task #13 — `pyqs` (EXAM_STRETCH_CONTENT_TYPES → 90d) MUST stretch
+    harder than `notes` (route-table → 6h) during exam mode. A
+    regression here would flatten every page-type onto the catch-all
+    `/board/` TTL and silently under-cache the highest-value
+    materialization legs during the exam spike."""
+    db = _make_db()
+    client = _FakeClient(status=200)
+    _run(prewarm_seo_routes.run_prewarm(
+        db, top_n=10, concurrency=4, http_client=client,
+        public_base_url="https://example.test",
+        today=datetime(2026, 5, 10, tzinfo=timezone.utc),
+    ))
+    by_url = {
+        u: int(h["X-Prewarm-Recommended-TTL"])
+        for u, h in zip(client.calls, client.headers_seen)
+    }
+    pyq_ttls = {ttl for u, ttl in by_url.items() if u.endswith("/pyqs")}
+    notes_ttls = {ttl for u, ttl in by_url.items() if u.endswith("/notes")}
+    assert pyq_ttls == {cache_calendar.EXAM_TTL_SEC}, pyq_ttls
+    # `/board/` route entry: 21600s (6h) during exam stretch.
+    assert notes_ttls == {21600}, notes_ttls
+    assert pyq_ttls != notes_ttls
 
 
 def test_run_prewarm_emits_x_prewarm_auth_when_token_present(normal_calendar):

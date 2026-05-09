@@ -18,11 +18,20 @@ What the job does
      ``routes/seo_pages.PAGE_TYPES`` set:
        * Computes the public URL
          ``/board/{board}/class/{class}/subject/{subject}/chapter/{chapter}/{page_type}``.
-       * Issues a HEAD through the public Cloudflare edge so the
-         worker fills its tiered cache.
-       * Issues a GET against ``/api/admin/seo/aeo-coverage``-style
-         pre-render hints (the FAQ + Quick-Answer payloads) so the
-         deterministic ``ai_input_cache`` KV entries are warm too.
+       * Two-phase warm contract:
+           - HEAD on edge-only legs (``notes`` / ``revision``) so the
+             Cloudflare worker fills its tiered cache without paying
+             the renderer cost.
+           - GET on materialization-eligible legs
+             (``KV_ELIGIBLE_PAGE_TYPES`` =
+             mcqs / flashcards / definitions / summary / pyqs) so the
+             deterministic-template renderer fires and the response
+             body lands in KV (``aic:fp:*``) + Mongo
+             ``ai_input_cache``.
+       * Per-URL TTL via ``cache_calendar.recommended_ttl_seconds(
+         route=..., content_type=...)`` (single source of truth shared
+         with the Cloudflare worker per-route override pass) advertised
+         to the worker as ``X-Prewarm-Recommended-TTL``.
   3. Writes a ``db.seo_prewarm_runs`` row with the per-board success
      count (consumed by the ``/api/admin/seo/prewarm-coverage`` tile)
      and emits ``Syrabit/Cache::PrewarmSuccessRate`` to CloudWatch.
@@ -33,11 +42,14 @@ reason in the per-run summary. We never paper over a failed warm.
 
 Concurrency
 -----------
-The default concurrency is 32 simultaneous HEAD/GET requests via
-``asyncio.Semaphore``. CloudFlare's free-tier global rate limit
-(1200 req/min/IP) gives us comfortable headroom — 32 * 7 page-types
-* 5000 chapters / 32 concurrency ≈ 1,094 requests in flight max,
-spread across the 900 s Lambda timeout.
+The default concurrency is 32 simultaneous HEAD/GET requests via a
+single global ``asyncio.Semaphore``. ``run_prewarm`` flattens every
+(chapter × page_type) pair into ONE task list and issues a single
+``asyncio.gather`` so the configured fan-out is achieved end-to-end
+— a per-chapter inner gather would cap real concurrency at the
+7-page-type batch width regardless of the sem size. CloudFlare's
+free-tier global rate limit (1200 req/min/IP) gives us comfortable
+headroom inside the 900 s Lambda timeout.
 
 Lambda handler lives at
 ``artifacts/syrabit/services/backend/lambda_batch/prewarm_seo_routes.py``.
@@ -94,6 +106,33 @@ CW_KV_METRIC_NAME = "KvPrewarmSuccessRate"
 KV_ELIGIBLE_PAGE_TYPES: Tuple[str, ...] = (
     "mcqs", "flashcards", "definitions", "summary", "pyqs",
 )
+
+# Page-type → ai_input_cache `content_type` (singular form used by
+# `cache_calendar.recommended_ttl_seconds` and `ai_input_cache`).
+# The non-KV-eligible page-types (`notes`, `revision`) have no
+# materialization analogue and intentionally map to `None` — their
+# TTL is resolved purely from the route prefix table.
+PAGE_TYPE_CONTENT_TYPE: Dict[str, Optional[str]] = {
+    "mcqs":        "mcq",
+    "flashcards":  "flashcard",
+    "definitions": "definition",
+    "pyqs":        "pyq",
+    "summary":     "chapter_summary",
+    "notes":       None,
+    "revision":    None,
+}
+
+# Two-phase warm contract (Task #13):
+#   • HEAD on edge-only SEO routes (`notes`, `revision`) — these only
+#     need their tiered-cache entry filled; the renderer is fast and
+#     does not write to KV / `ai_input_cache`.
+#   • GET on materialization-eligible routes (KV_ELIGIBLE_PAGE_TYPES)
+#     — these MUST execute the deterministic-template renderer so
+#     the body lands in KV (`aic:fp:*`) + Mongo `ai_input_cache`.
+# This split is the spec contract; do not collapse to a single verb
+# without re-reading `.local/tasks/task-13.md`.
+def _method_for_page_type(page_type: str) -> str:
+    return "GET" if page_type in KV_ELIGIBLE_PAGE_TYPES else "HEAD"
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────
@@ -541,6 +580,14 @@ async def run_prewarm(
     own_client = http_client is None
     client = http_client or _make_default_client(timeout_s=timeout_s)
     try:
+        # Phase 1 — flatten every (chapter × page_type) into a single
+        # task list. Without this flattening, the previous nested
+        # `for chapter: gather(7 page-types)` shape capped real
+        # in-flight requests at ~7 regardless of `concurrency=32` and
+        # turned the 5,000-chapter pass into a 5,000-chapter
+        # serial-batch loop. The global semaphore inside
+        # `_warm_one_url` keeps the actual fan-out at `concurrency`.
+        warm_tasks: List[Tuple[Dict[str, Any], str, str, str, int]] = []
         for chapter in chapters:
             inputs = await _resolve_chapter_url_inputs(db, chapter)
             if not inputs:
@@ -549,62 +596,87 @@ async def run_prewarm(
                 )
                 continue
             board_name = inputs["board_name"] or "Unknown"
-            board_row = summary["by_board"].setdefault(
+            summary["by_board"].setdefault(
                 board_name, {"warmed": 0, "failed": 0, "attempted": 0},
             )
-
-            url_pairs = [
-                (
-                    pt,
-                    _build_url(
-                        public_base_url,
-                        board_slug=inputs["board_slug"],
-                        class_slug=inputs["class_slug"],
-                        subject_slug=inputs["subject_slug"],
-                        chapter_slug=inputs["chapter_slug"],
-                        page_type=pt,
-                    ),
+            for pt in PAGE_TYPES:
+                url = _build_url(
+                    public_base_url,
+                    board_slug=inputs["board_slug"],
+                    class_slug=inputs["class_slug"],
+                    subject_slug=inputs["subject_slug"],
+                    chapter_slug=inputs["chapter_slug"],
+                    page_type=pt,
                 )
-                for pt in PAGE_TYPES
-            ]
-            # Compute the per-URL TTL once (the path is the same family
-            # for every page-type so the route prefix wins the lookup
-            # consistently). Unifying via cache_calendar means the worker
-            # and the Lambda agree on the season-stretched value without
-            # per-call-site config drift.
-            ttl = cache_calendar.recommended_ttl_seconds(
-                route="/board/", today=today,
-            )
-            results = await asyncio.gather(*[
-                _warm_one_url(client, u, sem=sem, timeout_s=timeout_s,
-                              recommended_ttl=ttl,
-                              method="GET",
-                              prewarm_auth=prewarm_auth)
-                for (_pt, u) in url_pairs
-            ])
-            for (pt, url), (ok, sc, reason) in zip(url_pairs, results):
-                summary["urls_attempted"] += 1
-                board_row["attempted"] += 1
-                is_kv = pt in KV_ELIGIBLE_PAGE_TYPES
-                if is_kv:
-                    summary["kv_attempted"] += 1
-                if ok:
-                    summary["urls_warmed"] += 1
-                    board_row["warmed"] += 1
-                    if is_kv:
-                        summary["kv_warmed"] += 1
+                # Per-page-type TTL. `recommended_ttl_seconds` is
+                # documented as "first non-None wins" with route taking
+                # precedence over content_type — and every SEO chapter
+                # URL matches the catch-all ``/board/`` prefix, so
+                # passing route alone would collapse PYQ + notes onto
+                # the same TTL during exam mode. We split the lookup
+                # by page-type semantics:
+                #   • Materialization-eligible pages (mcqs / flashcards
+                #     / definitions / pyqs / summary) resolve via
+                #     ``content_type`` so they pick up the
+                #     ``EXAM_STRETCH_CONTENT_TYPES`` 90-day stretch
+                #     (PYQ + MCQ + flashcard + definition) during
+                #     exam / results windows. The unstretched
+                #     ``chapter_summary`` content_type still falls
+                #     through to its own normal-season default.
+                #   • Edge-only pages (notes / revision) resolve via
+                #     the route prefix table so they keep the
+                #     ``/board/`` entry's 1h normal / 6h exam TTL.
+                ct = PAGE_TYPE_CONTENT_TYPE.get(pt)
+                if ct is not None:
+                    ttl = cache_calendar.recommended_ttl_seconds(
+                        content_type=ct, today=today,
+                    )
                 else:
-                    summary["urls_failed"] += 1
-                    board_row["failed"] += 1
-                    if is_kv:
-                        summary["kv_failed"] += 1
-                    if len(summary["samples_failed"]) < 10:
-                        summary["samples_failed"].append({
-                            "url": url, "status": sc,
-                            "reason": reason or "non_2xx",
-                            "page_type": pt,
-                            "kv_eligible": is_kv,
-                        })
+                    route_path = (
+                        url[len(public_base_url):]
+                        if url.startswith(public_base_url) else url
+                    )
+                    ttl = cache_calendar.recommended_ttl_seconds(
+                        route=route_path, today=today,
+                    )
+                method = _method_for_page_type(pt)
+                warm_tasks.append((inputs, pt, url, method, ttl))
+
+        # Phase 2 — single global gather across ALL warm targets so
+        # `concurrency` is achieved end-to-end, not per chapter.
+        results = await asyncio.gather(*[
+            _warm_one_url(client, url, sem=sem, timeout_s=timeout_s,
+                          recommended_ttl=ttl,
+                          method=method,
+                          prewarm_auth=prewarm_auth)
+            for (_inp, _pt, url, method, ttl) in warm_tasks
+        ])
+
+        for (inputs, pt, url, _method, _ttl), (ok, sc, reason) in zip(warm_tasks, results):
+            board_name = inputs["board_name"] or "Unknown"
+            board_row = summary["by_board"][board_name]
+            summary["urls_attempted"] += 1
+            board_row["attempted"] += 1
+            is_kv = pt in KV_ELIGIBLE_PAGE_TYPES
+            if is_kv:
+                summary["kv_attempted"] += 1
+            if ok:
+                summary["urls_warmed"] += 1
+                board_row["warmed"] += 1
+                if is_kv:
+                    summary["kv_warmed"] += 1
+            else:
+                summary["urls_failed"] += 1
+                board_row["failed"] += 1
+                if is_kv:
+                    summary["kv_failed"] += 1
+                if len(summary["samples_failed"]) < 10:
+                    summary["samples_failed"].append({
+                        "url": url, "status": sc,
+                        "reason": reason or "non_2xx",
+                        "page_type": pt,
+                        "kv_eligible": is_kv,
+                    })
     finally:
         if own_client:
             try:
