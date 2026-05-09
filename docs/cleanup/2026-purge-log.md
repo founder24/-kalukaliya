@@ -279,6 +279,13 @@ stay reachable on the local filesystem but exit the tracked tree.
 Gitignoring (rather than `git rm`) preserves the local archive without
 re-bloating the index on every clone.
 
+> **Maintainer note:** `docs/archive/attached/` is **untracked by
+> design**. It exists only on the workspace where this purge ran. Fresh
+> clones will not have it; that is intentional. If a future agent needs
+> one of the archived snippets they should pull it from git history
+> (the file existed at `attached_assets/<name>` prior to commit Task #8)
+> rather than expecting the archive directory to be present.
+
 ## C — `infra/v4-locked-architecture.md` collapsed to 3-line redirect
 
 Original file was 429+ lines mirroring the V4 source blueprint. The

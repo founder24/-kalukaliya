@@ -34,32 +34,97 @@ This README is a **navigation index**. The canonical implementation map of the 2
 - **2026 architecture lock:** `infra/architecture-locked-2026.md`, `infra/architecture-matrix.json`, `scripts/check_architecture_lock.py`
 - **Four-cloud delegation matrix:** `infra/four-cloud-delegation.md`
 
-## Architecture summary (mirrors `infra/architecture-locked-2026.md`)
+## Architecture summary (mirrors `infra/architecture-locked-2026.md` section-by-section)
 
-Section numbers below mirror the lock document section-for-section. For full status (`IMPLEMENTED | PARTIAL | MISSING | RETIRED`) and per-row source paths, read the lock.
+Section headers below mirror the lock document 1:1. For per-row status (`IMPLEMENTED | PARTIAL | MISSING | RETIRED`) and source paths, read the lock.
 
-- **§2 Core principles** — edge-first delivery, retrieval-heavy AI, deterministic caching, multi-provider orchestration, curriculum grounding, progressive degradation, materialized educational outputs, SEO-driven distribution.
-- **§3 High-level architecture** — PWA → CF Edge (Pages + CDN + Workers + KV + D1) → Edge Gateway (auth/quota/trace/budget) → ACA FastAPI core (eastus2) → RAG pipeline (vector + BM25 + graph) → provider delegation → response formatter → SSE streaming.
-- **§4.1 Cloudflare layer** — Pages (PWA), Workers (edge compute), CDN + tiered cache, KV (deterministic AI cache), D1 (syllabus graph), R2 (assets + OCR + final backups), WAF + Bot Management, Turnstile, Cron Triggers.
-- **§4.2 Azure layer** — Container Apps (FastAPI runtime, eastus2 → westus3 DR), Key Vault (secrets source of truth — AWS SM + CF Secrets are read-only replicas), Blob (OCR scratch).
-- **§4.3 AWS layer** — SQS (async queues), Lambda (scheduled jobs), Glacier Deep Archive (7-yr DPDP), SES (sole transactional email tier-1).
-- **§5.1 Chat providers (canonical)** — English: strict 3-position chain `vertex → vertex_flash_lite → workers_ai_llama32_3b` (head flips on ≤90d runway). Assamese: strict 3-position chain `sarvam → vertex_assamese → retrieval_only`. Content formatter: Vertex 2.5 Flash → Llama-3.3-70b → passthrough; every doc carries `formatted_by` audit field.
-- **§5.2 OCR** — Indic OCR via Google Vision; general OCR via Workers AI Vision.
-- **§5.3 Voice** — STT English: Deepgram Nova-3. STT Assamese: Google Chirp_2 → Workers AI Whisper. TTS English: ElevenLabs primary, Deepgram Aura-2 fallback. TTS Assamese: Google Neural2. Voice paywall on `/voice/tts /voice/stt /voice/voice`.
-- **§5.4 Payments** — Razorpay INR-only subscriptions; Glacier 7-yr receipt archive.
-- **§5.5 Analytics & monitoring** — PostHog (LCP-gated SDK); Cloudflare Analytics; Sentry errors-only Developer tier (Performance retired); GCP Cloud Trace as sole tracing exporter.
-- **§6 Databases** — MongoDB Atlas (users/chat/content/OCR/metadata); Cloudflare D1 (syllabus graph + edge metadata); Pinecone (1024-dim, `aws-ap-south-1`); Cloudflare KV (deterministic AI cache: MCQs/flashcards/definitions/translations/precomputed notes); Upstash Redis (rate limit + hot retrieval cache + quota).
-- **§7 AI pipeline (8 stages)** — request intake → intent resolution → 8-source retrieval dispatch → RRF fusion → prompt synthesis → model delegation → response formatting → deterministic materialization.
-- **§8 Cache architecture (5 layers)** — L1 browser → L2 CF CDN → L3 KV AI cache → L4 Redis hot cache → L5 D1 metadata cache.
-- **§9 Advanced cache optimization (#571 → #577)** — cache intelligence (#571) live; semantic fingerprinting (#572) and prewarming engine (#574) MISSING (Tasks #10 / #13); deterministic rendering (#573) PARTIAL (Task #10); dynamic-TTL exam-window stretch (#575) live; regional cache `X-Cache-Region: ne-india` (#576) live; retrieval-result cache (#577) live.
-- **§10 SEO** — programmatic `/board/class/subject/chapter/type` routes; generated content types PARTIAL (Task #11 lifts H1=chapter-topic + schema.org + hreflang `as-IN/en-IN` + `geo.region=IN-AS`); IndexNow PARTIAL (Task #11 extends to Yandex + verifies Google Indexing API); internal linker + entity SEO health live; AEO answer cards + FAQ JSON-LD PARTIAL (Task #12).
-- **§11 Voice flow** — Student Voice → STT → Intent Resolution → Retrieval → Model Delegation → TTS → Streamed Audio (bilingual + Assamese explanations + exam revision + spoken summaries + accessibility).
-- **§12 OCR flow** — PDF/Image upload → OCR detection → Indic routing → text extraction → structure parsing → retrieval indexing → PYQ materialization.
-- **§13 Security** — auth: **Supabase sole IdP** (Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in `routes/auth.py` and the `JWT_SECRET` user-session path PARTIAL pending cutover; `JWT_SECRET` / `ADMIN_JWT_SECRET` remain only for short-lived service-to-service tokens, never for user sessions); edge security WAF + DDoS + rate-limit + bot detection (Task #9 splits verified-bot KV fast path); Azure KV primary secrets (AWS SM + CF Secrets read-only replicas); OriginGate `X-Origin-Auth` lock-step rotation.
-- **§14 Observability (#569, #570)** — W3C tracing + provider spans + latency + cost telemetry + cache metrics + circuit-state + canaries; synthetic user journeys + SLA ledger + blast-radius + provider outage map + admin Ops Console.
-- **§15 Cost governance** — `MONTHLY_TOTAL_USD_CAP = $100` (founder-locked); progressive degradation 60/80/95 % ladder + paywall + cache-only at 100 %; heavy-free user flow PARTIAL (Task #13 closes prewarm leg).
-- **§16 PWA** — installable, offline shell, standalone, app shortcuts, low-data, bilingual UI, offline revision notes.
-- **§19 Positioning** — *“Curriculum-constrained educational intelligence infrastructure”* — retrieval compounds, cache compounds, SEO compounds, educational artifacts compound, inference dependency decreases over time.
+### §2 Core principles
+
+Edge-first delivery, retrieval-heavy AI, deterministic caching, multi-provider orchestration, curriculum grounding, progressive degradation, materialized educational outputs, SEO-driven distribution.
+
+### §3 High-level architecture
+
+PWA → CF Edge (Pages + CDN + Workers + KV + D1) → Edge Gateway (auth / quota / trace / budget) → ACA FastAPI core (eastus2) → RAG pipeline (vector + BM25 + graph) → provider delegation → response formatter → SSE streaming.
+
+### §4.1 Cloudflare layer
+
+Pages (PWA), Workers (edge compute), CDN + tiered cache, KV (deterministic AI cache), D1 (syllabus graph), R2 (assets + OCR + final backups), WAF + Bot Management, Turnstile, Cron Triggers.
+
+### §4.2 Azure layer
+
+Container Apps (FastAPI runtime, eastus2 → westus3 DR), Key Vault (secrets source of truth — AWS SM + CF Secrets are read-only replicas), Blob (OCR scratch).
+
+### §4.3 AWS layer
+
+SQS (async queues), Lambda (scheduled jobs), Glacier Deep Archive (7-yr DPDP), SES (sole transactional email tier-1).
+
+### §5.1 Chat providers (canonical)
+
+English: strict 3-position chain `vertex → vertex_flash_lite → workers_ai_llama32_3b` (head flips on ≤90d runway). Assamese: strict 3-position chain `sarvam → vertex_assamese → retrieval_only`. Content formatter: Vertex 2.5 Flash → Llama-3.3-70b → passthrough; every doc carries `formatted_by` audit field.
+
+### §5.2 OCR
+
+Indic OCR via Google Vision; general OCR via Workers AI Vision.
+
+### §5.3 Voice
+
+STT English: Deepgram Nova-3. STT Assamese: Google Chirp_2 → Workers AI Whisper. TTS English: ElevenLabs primary, Deepgram Aura-2 fallback. TTS Assamese: Google Neural2. Voice paywall on `/voice/tts /voice/stt /voice/voice`.
+
+### §5.4 Payments
+
+Razorpay INR-only subscriptions; Glacier 7-yr receipt archive.
+
+### §5.5 Analytics & monitoring
+
+PostHog (LCP-gated SDK); Cloudflare Analytics; Sentry errors-only Developer tier (Performance retired); GCP Cloud Trace as sole tracing exporter.
+
+### §6 Databases
+
+MongoDB Atlas (users / chat / content / OCR / metadata); Cloudflare D1 (syllabus graph + edge metadata); Pinecone (1024-dim, `aws-ap-south-1`); Cloudflare KV (deterministic AI cache: MCQs / flashcards / definitions / translations / precomputed notes); Upstash Redis (rate limit + hot retrieval cache + quota).
+
+### §7 AI pipeline (8 stages)
+
+Request intake → intent resolution → 8-source retrieval dispatch → RRF fusion → prompt synthesis → model delegation → response formatting → deterministic materialization.
+
+### §8 Cache architecture (5 layers)
+
+L1 browser → L2 CF CDN → L3 KV AI cache → L4 Redis hot cache → L5 D1 metadata cache.
+
+### §9 Advanced cache optimization (#571 → #577)
+
+Cache intelligence (#571) live; semantic fingerprinting (#572) and prewarming engine (#574) MISSING (Tasks #10 / #13); deterministic rendering (#573) PARTIAL (Task #10); dynamic-TTL exam-window stretch (#575) live; regional cache `X-Cache-Region: ne-india` (#576) live; retrieval-result cache (#577) live.
+
+### §10 SEO
+
+Programmatic `/board/class/subject/chapter/type` routes; generated content types PARTIAL (Task #11 lifts H1=chapter-topic + schema.org + hreflang `as-IN/en-IN` + `geo.region=IN-AS`); IndexNow PARTIAL (Task #11 extends to Yandex + verifies Google Indexing API); internal linker + entity SEO health live; AEO answer cards + FAQ JSON-LD PARTIAL (Task #12).
+
+### §11 Voice flow
+
+Student Voice → STT → Intent Resolution → Retrieval → Model Delegation → TTS → Streamed Audio (bilingual + Assamese explanations + exam revision + spoken summaries + accessibility).
+
+### §12 OCR flow
+
+PDF/Image upload → OCR detection → Indic routing → text extraction → structure parsing → retrieval indexing → PYQ materialization.
+
+### §13 Security
+
+Auth: **Supabase sole IdP** (Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in `routes/auth.py` and the `JWT_SECRET` user-session path PARTIAL pending cutover; `JWT_SECRET` / `ADMIN_JWT_SECRET` remain only for short-lived service-to-service tokens, never for user sessions). Edge security: WAF + DDoS + rate-limit + bot detection (Task #9 splits verified-bot KV fast path). Secrets: Azure KV primary (AWS SM + CF Secrets read-only replicas). OriginGate `X-Origin-Auth` lock-step rotation.
+
+### §14 Observability (#569, #570)
+
+W3C tracing + provider spans + latency + cost telemetry + cache metrics + circuit-state + canaries; synthetic user journeys + SLA ledger + blast-radius + provider outage map + admin Ops Console.
+
+### §15 Cost governance
+
+`MONTHLY_TOTAL_USD_CAP = $100` (founder-locked); progressive degradation 60 / 80 / 95 % ladder + paywall + cache-only at 100 %; heavy-free user flow PARTIAL (Task #13 closes prewarm leg).
+
+### §16 PWA
+
+Installable, offline shell, standalone, app shortcuts, low-data, bilingual UI, offline revision notes.
+
+### §19 Positioning
+
+*“Curriculum-constrained educational intelligence infrastructure”* — retrieval compounds, cache compounds, SEO compounds, educational artifacts compound, inference dependency decreases over time.
 
 ## Founder locks (always win)
 
