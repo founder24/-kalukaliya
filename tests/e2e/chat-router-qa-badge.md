@@ -41,10 +41,29 @@ No login is required — anonymous chat is supported.
 
 V4 §12 (no silent fallbacks): if the router commits to `web` but
 `web_results == 0`, OR commits to `rag` but Pinecone returns 0
-chunks, the stream raises HTTP 503 before `syrabit_done` is emitted.
-This is intentional. In dev environments without seeded Pinecone
-vectors / a working web-search tool, RAG-eligible turns may always
-exercise this fail-loud path.
+chunks, the stream still fails loud — the user sees the AI-unavailable
+card and no ungrounded LLM answer is produced. Task #41 kept the
+HTTP 503 status but **enriched the detail body** so the router
+decision survives the failure. The 503 body is now:
+
+```json
+{
+  "detail": {
+    "message": "Web search returned no results …",
+    "error_kind": "web_empty" | "rag_empty",
+    "route_trace": { "decision": "web|rag", "lang": "...", … }
+  }
+}
+```
+
+`ChatPage.jsx` recognises `error_kind in {web_empty, rag_empty}` in
+its `!response.ok` branch, attaches `route_trace` to the failed
+message, and renders the AI-unavailable card. The dev-only
+`chat-router-qa-badge` then renders alongside that card so the
+canonical 3-turn plan below runs green in dev even without seeded
+Pinecone vectors: badge text on a fail-loud turn shows the router
+decision (`route=web` / `route=rag`) even though the bubble carries
+the "unavailable" UI instead of a real answer.
 
 ## Plan A — canonical 3-turn test (prod + data-rich envs)
 
@@ -127,10 +146,16 @@ ad-hoc dev verification, run these three smaller plans separately.
 ```
 
 > In dev without seeded Pinecone vectors / working web search, B-3
-> exposes the V4 §12 fail-loud 503. The router decision is still
-> verifiable via backend logs (`[STREAM][ROUTER=web|rag]`). To run
-> B-3 as a green test, set `<seeded-subject-id>` to a subject whose
-> chapters have Pinecone embeddings, OR run against staging/prod.
+> still exercises the V4 §12 fail-loud path — but as of Task #41 the
+> error is delivered as an HTTP 503 with a structured JSON `detail`
+> body that carries `route_trace` (no SSE error chunk; the stream
+> never opens for these two branches because the raise happens
+> before `StreamingResponse` is returned). The QA badge renders on
+> the failed message bubble alongside the AI-unavailable card and
+> reads `route=web ns=∅ …` (or `route=rag ns=en …`) even when the
+> answer body is empty. Backend log line
+> `[STREAM][ROUTER=web|rag] ... failing loud` remains the source of
+> truth for cross-checking.
 
 ## How to invoke
 
@@ -151,14 +176,16 @@ console.log(result.status, result.testOutput);
 |---|---|---|
 | B-1 (English casual) | PASS | `QA route=direct lang=en ns=∅ embed=∅ head=vertex th=0.55 · intent=casual → casual short-circuit` |
 | B-2 (Assamese casual) | PASS | `QA route=direct lang=as ns=∅ embed=∅ head=sarvam · intent=casual → casual short-circuit` |
-| B-3 (English study Q, no seeded subject) | EXPECTED-DEV-LIMITATION | router log: `[STREAM][ROUTER=web] web search returned 0 results — failing loud (no silent ungrounded fallback)` |
+| B-3 (English study Q, no seeded subject) | PASS-VIA-503-DETAIL (Task #41) | badge alongside AI-unavailable card, e.g. `QA route=web lang=en ns=∅ embed=workers_ai_custom head=vertex th=0.55 · web_results=0 → fail-loud (no silent ungrounded fallback)` |
 
 ## Related code
 
 - `artifacts/syrabit-backend/routes/ai_chat.py` — four early-return
   fast-paths now emit `route_trace` via `_build_route_trace(...)`
   (Task #40 fix — guardrail-blocked, instant Assamese, instant
-  casual, early-cache).
+  casual, early-cache). The two streaming fail-loud branches
+  (`web_empty`, `rag_empty`) raise HTTP 503 with a structured
+  detail body that carries `route_trace` (Task #41).
 - `artifacts/syrabit-backend/chat_router.py` — `route()` +
   `probe_topic_score()` (0.55 threshold).
 - `artifacts/syrabit/src/pages/chat/MessageBubble.jsx` — badge

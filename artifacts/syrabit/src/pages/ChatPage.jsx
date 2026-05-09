@@ -383,6 +383,50 @@ export default function ChatPage() {
           ));
           return;
         }
+        // Task #41 — V4 §12 fail-loud router branches (web_empty,
+        // rag_empty) ship a structured detail body
+        // ``{message, error_kind, route_trace}``. Render the
+        // generic AI-unavailable card AND attach route_trace to
+        // the failed message so the dev-only QA badge surfaces
+        // the router decision (route=web / route=rag) on the
+        // failed bubble. Without this, dev environments with no
+        // seeded Pinecone vectors / empty web tool would never
+        // show the badge for fail-loud turns even though the
+        // routing decision is exactly what engineers want to
+        // inspect.
+        if (
+          response.status === 503 &&
+          errData &&
+          errData.detail &&
+          typeof errData.detail === 'object' &&
+          (errData.detail.error_kind === 'web_empty' ||
+            errData.detail.error_kind === 'rag_empty')
+        ) {
+          if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+          setMessages((prev) => prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  content: '',
+                  isAiUnavailable: true,
+                  isAssameseUnavailable: false,
+                  retryText: text,
+                  streaming: false,
+                  route_trace: errData.detail.route_trace || null,
+                }
+              : m
+          ));
+          // Auto-retry once after 8s, mirroring the in-stream
+          // error path. A second fail-loud will simply re-render
+          // the same card with the same badge, which is the
+          // intended dev signal.
+          autoRetryTimerRef.current = setTimeout(() => {
+            autoRetryTimerRef.current = null;
+            setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+            sendMsgRef.current?.(text);
+          }, 8000);
+          return;
+        }
         if (response.status === 429) {
           const detail = String(errData.detail || '');
           const isAnonWall = !user && /daily request ceiling|sign in|anon/i.test(detail);
@@ -483,6 +527,14 @@ export default function ChatPage() {
           }
           if (parsed.error) {
             meta.hasError = true;
+            // Task #41 — even on a fail-loud error chunk the backend
+            // now ships the per-turn router decision so the dev-only
+            // QA badge can render alongside the AI-unavailable card.
+            // Without this, route=web/route=rag turns that 503 in dev
+            // (no seeded Pinecone vectors / empty web tool) leave the
+            // QA badge invisible even though the routing decision is
+            // exactly what engineers want to inspect.
+            if (parsed.route_trace) meta.routeTrace = parsed.route_trace;
             // Clear any previous auto-retry timer before scheduling a new one.
             if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
             // Task #370 — Assamese chat strict-chain exhaustion is a

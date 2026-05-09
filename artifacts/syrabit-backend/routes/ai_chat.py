@@ -2991,9 +2991,30 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             "failing loud (no silent ungrounded fallback)",
             (msg.message or "")[:80],
         )
+        # Task #41 — V4 §12 fail-loud preserved (no ungrounded LLM
+        # answer), but ship the router decision inside the HTTP
+        # 503 detail body so the dev-only QA badge can render on
+        # the failed message bubble. ``_chat_stream_impl`` is a
+        # coroutine (it later RETURNS a StreamingResponse for the
+        # success path), so we cannot yield the error here without
+        # turning it into an async generator — hence the structured
+        # detail body. The frontend's !response.ok branch
+        # (ChatPage.jsx) reads ``detail.route_trace`` and stores
+        # it on the failed message.
+        _web_empty_trace = _build_route_trace(
+            msg.message or "",
+            msg.response_lang,
+            _stream_intent,
+            _stream_topic_metadata,
+            precomputed_decision=_s_route_decision_obj,
+        )
         raise HTTPException(
             status_code=503,
-            detail="Web search returned no results for this query. Please try again or rephrase.",
+            detail={
+                "message": "Web search returned no results for this query. Please try again or rephrase.",
+                "error_kind": "web_empty",
+                "route_trace": _web_empty_trace,
+            },
         )
 
     # Task #37 — V4 §12 fail-loud guard for the stream RAG branch.
@@ -3009,9 +3030,22 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             "0 chunks for %r — failing loud (no silent ungrounded fallback)",
             (msg.message or "")[:80],
         )
+        # Task #41 — see sibling web-empty branch above for why this
+        # is a structured 503 detail rather than an SSE error chunk.
+        _rag_empty_trace = _build_route_trace(
+            msg.message or "",
+            msg.response_lang,
+            _stream_intent,
+            _stream_topic_metadata,
+            precomputed_decision=_s_route_decision_obj,
+        )
         raise HTTPException(
             status_code=503,
-            detail="No grounded sources were found for this query in your syllabus. Please rephrase or try a different topic.",
+            detail={
+                "message": "No grounded sources were found for this query in your syllabus. Please rephrase or try a different topic.",
+                "error_kind": "rag_empty",
+                "route_trace": _rag_empty_trace,
+            },
         )
 
     if _syllabus_task.done():
