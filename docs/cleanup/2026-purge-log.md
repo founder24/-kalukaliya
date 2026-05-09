@@ -32,6 +32,50 @@ remained green after every batch.
 
   Scope of the guard: the regression scan matches **import sites and `os.environ.get(...)` reads** for retired-provider names; it does **not** match arbitrary string literals or in-function provider-name dispatch branches. Concretely, a future `from emergentintegrations...` re-import or `os.environ.get('FCM_SERVER_KEY')` in `llm.py` would now be caught with no allowlist exception. Live provider-branch reintroductions (e.g. an `if provider == "openrouter":` block) are not auto-detected by the matrix guard — they are caught only at code review and via the regression tests in `tests/test_unsupported_provider_raises.py`.
 
+## Round 2 — code-review follow-ups (architect rejection)
+
+### `requirements.txt`
+
+- Dropped `azure-monitor-opentelemetry-exporter==1.0.0b30` and
+  `opentelemetry-exporter-otlp-proto-http==1.27.0` (the App Insights
+  + Axiom OTLP/HTTP dual-export from Task #333). Task #558 made
+  GCP Cloud Trace the sole OTEL destination; `tracing.py` contains
+  no Azure Monitor refs (verified via `rg -n azure_monitor`), so the
+  packages were dead weight on the ACA image.
+- Retained `openai>=1.51.0,<3.0.0` — Task #347's comment in
+  `requirements.txt` documents that the SDK class is kept as a
+  generic OpenAI-compatible HTTP client (Workers AI / CF AI Gateway
+  base-URL plumbing + typed exception classes); the OpenAI provider
+  itself has zero `api.openai.com` callsites.
+
+### Matrix schema extension (`FILE_DELETED`)
+
+- `scripts/check_architecture_lock.py` now accepts `FILE_DELETED`
+  alongside the existing `IMPLEMENTED | PARTIAL | MISSING | RETIRED`
+  enum. `FILE_DELETED` is the stronger form of `RETIRED`: the
+  source files have been physically removed (not just unrouted from
+  `PROVIDER_PRIORITY` or env knobs). The `_check_source_paths` skip
+  logic was extended to treat `FILE_DELETED` like `RETIRED` (empty
+  `source_paths` by design).
+- `infra/architecture-matrix.json` row 4.2 *Azure Monitor + App
+  Insights* flipped from `RETIRED` → `FILE_DELETED` (the only row
+  where the underlying pip dependency was actually purged in this
+  task). Row 5.2 *Vertex Vision* kept as `RETIRED` —
+  `providers/google_vision.py` is still on disk; future cleanup task.
+
+### Retired-name leak audit
+
+The umbrella guard (`scripts/ci/check_canonical_delegation.py`) is
+the source of truth for "what counts as a retired-name violation."
+It uses bare-token regex + comment-skip / removal-note heuristics so
+that Task #347-style retirement *comments* do not regress to
+violations. After this task it scans 1268 files green. Stray
+mentions of retired provider names in `artifacts/syrabit-backend/`
+(`grep -i cohere|cerebras|...`) all live in retirement comments,
+the matrix's own `retired_providers` array, the umbrella guard's
+banned-token regex, or test files exercising the dead-provider
+guard itself — all intentionally preserved.
+
 ## Additional `llm.py` cleanup (architect follow-up)
 
 - `if provider == "openrouter": ...` dispatch branch (was `_call_single_provider:1494-1495`) — removed. OpenRouter is in `infra/architecture-matrix.json` `retired_providers`; no `PROVIDER_PRIORITY` entry routes to it after #347. Unsupported-provider raise covers it.

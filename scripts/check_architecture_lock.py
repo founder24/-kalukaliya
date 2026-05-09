@@ -174,7 +174,7 @@ def _check_schema(matrix: dict) -> list[str]:
                     f"architecture-matrix.json: section {sec.get('id')} row "
                     f"{row.get('item','?')!r} missing status/source_paths."
                 )
-            if row.get("status") not in ("IMPLEMENTED", "PARTIAL", "MISSING", "RETIRED"):
+            if row.get("status") not in ("IMPLEMENTED", "PARTIAL", "MISSING", "RETIRED", "FILE_DELETED"):
                 failures.append(
                     f"architecture-matrix.json: section {sec.get('id')} row "
                     f"{row.get('item','?')!r} has invalid status "
@@ -189,8 +189,11 @@ def _check_source_paths(matrix: dict) -> list[str]:
     failures: list[str] = []
     for sec in matrix.get("sections", []) or []:
         for row in sec.get("rows", []) or []:
-            if row.get("status") in ("RETIRED", "MISSING"):
-                # Retired/missing rows have empty source_paths by design.
+            if row.get("status") in ("RETIRED", "MISSING", "FILE_DELETED"):
+                # Retired / missing / file-deleted rows have empty
+                # source_paths by design (FILE_DELETED is the stronger
+                # form of RETIRED — Task #6 marker meaning the source
+                # files were physically removed, not just unrouted).
                 continue
             for sp in row.get("source_paths") or []:
                 p = ROOT / sp
