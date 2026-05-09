@@ -446,10 +446,24 @@ def _build_jsonld(*, page_url: str, page_type: str, chapter_title: str,
             "inLanguage": ["en-IN", "as-IN"],
         })
 
-    return json.dumps(
+    serialised = json.dumps(
         {"@context": "https://schema.org", "@graph": graph},
         ensure_ascii=False,
     )
+    # Critical: prevent ``</script>`` (or any ``</…>``) inside DB-backed
+    # strings (chapter title, FAQ Q/A, quick-answer, sub-topic titles)
+    # from breaking out of the surrounding ``<script
+    # type="application/ld+json">`` block. ``json.dumps`` does NOT
+    # escape ``</`` by default, so unsanitised content like
+    # ``<script>alert(1)</script>`` would otherwise terminate the
+    # script context and execute. Replacing ``</`` with ``<\/``
+    # produces JSON that browsers parse identically while keeping the
+    # script tag intact (the canonical fix used by Django's
+    # ``json_script`` and Rails' ``escape_javascript``).
+    return (serialised
+            .replace("</", "<\\/")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
 
 
 def _render_html(*, page_url: str, page_type: str,
@@ -468,7 +482,15 @@ def _render_html(*, page_url: str, page_type: str,
         f"{chapter_title} — {class_name} {subject_name} {board_name} "
         f"{TYPE_LABEL.get(page_type, page_type)}"
     )
-    meta_desc = _truncate_meta(description)
+    # Task #11 contract: <meta name="description"> MUST include the
+    # chapter topic. If the upstream ``chapter.description`` row
+    # already mentions the topic we keep it as-is (after truncation);
+    # otherwise we prepend the chapter title so the contract holds
+    # regardless of what's stored in Mongo.
+    meta_source = description or ""
+    if chapter_title and chapter_title.lower() not in meta_source.lower():
+        meta_source = f"{chapter_title} — {meta_source}".strip(" —")
+    meta_desc = _truncate_meta(meta_source)
     as_url = f"{BASE_URL}/as{page_url[len(BASE_URL):]}"
     related = related_keywords or []
     meta_keywords = ", ".join(related) if related else ""

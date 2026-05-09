@@ -446,6 +446,81 @@ def test_hreflang_always_emits_both_languages(monkeypatch):
     assert "data-content-as" not in body
 
 
+def test_meta_description_always_includes_chapter_topic(monkeypatch):
+    """Task #11 spec: <meta name="description"> MUST include the
+    chapter topic. Many production chapter rows store a generic
+    description that does not name the topic — the renderer is
+    responsible for prepending it before truncation."""
+    sp, db = _patch_deps(monkeypatch)
+    db.chapters = _FakeCollection([
+        {"id": "ch-1", "slug": "photosynthesis", "subject_id": "sub-bio",
+         "title": "Photosynthesis",
+         # Description deliberately omits the chapter title.
+         "description": "A high-yield exam chapter covering chloroplast biology.",
+         "updated_at": "2026-04-30T00:00:00Z", "content_as": ""},
+    ])
+    if "routes.seo_pages" in sys.modules:
+        sys.modules["routes.seo_pages"].db = db
+    resp = _run(sp.render_seo_page(
+        board="ahsec", class_slug="class-11", subject_slug="biology",
+        chapter_slug="photosynthesis", page_type="notes",
+    ))
+    body = resp.body.decode("utf-8")
+    md = re.search(r'<meta name="description" content="([^"]*)"', body)
+    assert md, "meta description missing"
+    content = md.group(1)
+    assert "Photosynthesis" in content, \
+        f"meta description must include chapter topic, got: {content!r}"
+    assert len(content) <= 160, f"meta description > 160 chars: {len(content)}"
+
+
+def test_jsonld_does_not_break_out_of_script_tag(monkeypatch):
+    """Security: DB-backed FAQ / chapter strings containing
+    ``</script>`` (or any ``</…>``) MUST NOT break out of the
+    surrounding ``<script type=\"application/ld+json\">`` block.
+
+    Without escaping, a malicious chapter title like
+    ``<script>alert(1)</script>`` would let the FAQ JSON-LD payload
+    terminate the script context and inject arbitrary JS into every
+    public chapter page."""
+    sp, db = _patch_deps(monkeypatch)
+    payload = "</script><script>alert('xss')</script>"
+    db.chapters = _FakeCollection([
+        {"id": "ch-1", "slug": "photosynthesis", "subject_id": "sub-bio",
+         "title": f"Photosynthesis {payload}",
+         "description": f"Photosynthesis chapter {payload}",
+         "updated_at": "2026-04-30T00:00:00Z", "content_as": ""},
+    ])
+    db.aeo_faq_entries = _FakeCollection([
+        {"chapter_id": "ch-1", "page_type": "notes",
+         "question": f"What about {payload}?",
+         "answer": f"It is {payload} dangerous.", "position": 1},
+    ])
+    if "routes.seo_pages" in sys.modules:
+        sys.modules["routes.seo_pages"].db = db
+    resp = _run(sp.render_seo_page(
+        board="ahsec", class_slug="class-11", subject_slug="biology",
+        chapter_slug="photosynthesis", page_type="notes",
+    ))
+    body = resp.body.decode("utf-8")
+    # Extract every <script type="application/ld+json"> block. There
+    # MUST be exactly ONE — if `</script>` leaked through, the regex
+    # would terminate the first block early and find a second one.
+    blocks = re.findall(
+        r'<script type="application/ld\+json">(.*?)</script>',
+        body, flags=re.DOTALL,
+    )
+    assert len(blocks) == 1, (
+        f"JSON-LD script tag escape broken: found {len(blocks)} script "
+        f"blocks instead of 1 — DB content broke out of <script>"
+    )
+    # The serialised JSON MUST still parse — even with escaped `</`
+    # browsers (and the Google linter) treat the block as valid JSON.
+    raw = blocks[0].replace("<\\/", "</")
+    data = json.loads(raw)
+    assert data.get("@context") == "https://schema.org"
+
+
 def test_publish_url_set_fans_out_to_indexnow_and_google(monkeypatch):
     """Task #11 step 7 — the unified publish helper must call BOTH
     the IndexNow endpoint set (Bing + Yandex + central) and the
