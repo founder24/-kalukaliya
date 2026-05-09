@@ -309,7 +309,7 @@ resource "aws_lambda_function" "batch_job" {
   # Same VPC + SG as the SQS consumers — keeps Mongo/Pinecone egress
   # off the public NAT and reuses the interface VPC endpoints.
   vpc_config {
-    subnet_ids         = aws_subnet.workers_private[*].id
+    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
     security_group_ids = [aws_security_group.workers_egress.id]
   }
 

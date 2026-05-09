@@ -15,31 +15,14 @@
 # • CloudWatch Contributor Insights — top-N model × user spend breakdown
 # • AWS Cost Anomaly Detection alert on Bedrock spend > $50/day
 
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 5.0"
-    }
-  }
-}
 
-locals {
-  aws_region   = "us-east-1"
-  project_name = "syrabit"
-  env          = "prod"
-}
 
-provider "aws" {
-  region = local.aws_region
-  alias  = "us_east_1"
-}
 
 # ─── IAM ─────────────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "bedrock_proxy" {
   provider = aws.us_east_1
-  name     = "${local.project_name}-bedrock-proxy-${local.env}"
+  name     = "${local.lz_project}-bedrock-proxy-${local.lz_env}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -69,8 +52,8 @@ resource "aws_iam_role_policy" "bedrock_proxy_invoke" {
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
         Resource = [
-          "arn:aws:bedrock:${local.aws_region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
-          "arn:aws:bedrock:${local.aws_region}::foundation-model/amazon.titan-text-premier-v1:0",
+          "arn:aws:bedrock:${local.lz_secondary_region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+          "arn:aws:bedrock:${local.lz_secondary_region}::foundation-model/amazon.titan-text-premier-v1:0",
         ]
       },
       {
@@ -86,7 +69,7 @@ resource "aws_iam_role_policy" "bedrock_proxy_invoke" {
       {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${local.aws_region}:*:parameter/${local.project_name}/*"
+        Resource = "arn:aws:ssm:${local.lz_secondary_region}:*:parameter/${local.lz_project}/*"
       }
     ]
   })
@@ -108,11 +91,11 @@ resource "aws_cloudwatch_log_group" "bedrock_proxy" {
 
 resource "aws_lambda_function" "bedrock_proxy" {
   provider      = aws.us_east_1
-  function_name = "${local.project_name}-bedrock-proxy"
+  function_name = "${local.lz_project}-bedrock-proxy"
   role          = aws_iam_role.bedrock_proxy.arn
 
   package_type  = "Image"
-  image_uri     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${local.aws_region}.amazonaws.com/${local.project_name}/bedrock-proxy:latest"
+  image_uri     = "${data.aws_caller_identity.current_use1.account_id}.dkr.ecr.${local.lz_secondary_region}.amazonaws.com/${local.lz_project}/bedrock-proxy:latest"
   architectures = ["arm64"]
 
   timeout     = 60
@@ -125,7 +108,7 @@ resource "aws_lambda_function" "bedrock_proxy" {
   environment {
     variables = {
       NODE_ENV             = "production"
-      BEDROCK_REGION       = local.aws_region
+      BEDROCK_REGION       = local.lz_secondary_region
       GUARDRAIL_ID         = aws_bedrock_guardrail.content_filter.guardrail_id
       GUARDRAIL_VERSION    = "DRAFT"
       CACHE_TTL_SECONDS    = "300"
@@ -140,10 +123,10 @@ resource "aws_lambda_function" "bedrock_proxy" {
       OTEL_LOGS_EXPORTER              = "otlp"
       OTEL_EXPORTER_OTLP_PROTOCOL     = "http/protobuf"
       OTEL_EXPORTER_OTLP_ENDPOINT     = "http://localhost:4318"
-      OTEL_SERVICE_NAME               = "${local.project_name}-bedrock-proxy"
+      OTEL_SERVICE_NAME               = "${local.lz_project}-bedrock-proxy"
       AWS_LAMBDA_EXEC_WRAPPER         = "/opt/otel-instrument"
-      APP_INSIGHTS_SSM_PARAM          = "/${local.project_name}/${local.env}/app-insights-conn-string"
-      AXIOM_TOKEN_SSM_PARAM           = "/${local.project_name}/${local.env}/axiom-api-token"
+      APP_INSIGHTS_SSM_PARAM          = "/${local.lz_project}/${local.lz_env}/app-insights-conn-string"
+      AXIOM_TOKEN_SSM_PARAM           = "/${local.lz_project}/${local.lz_env}/axiom-api-token"
       AXIOM_DATASET                   = "syrabit-aws-lambda-prod"
     }
   }
@@ -155,8 +138,8 @@ resource "aws_lambda_function" "bedrock_proxy" {
   }
 
   tags = {
-    project       = local.project_name
-    environment   = local.env
+    project       = local.lz_project
+    environment   = local.lz_env
     managed-by    = "terraform"
     credit-source = "aws-activate"
   }
@@ -196,17 +179,14 @@ resource "aws_lambda_function_url" "bedrock_proxy" {
   }
 }
 
-data "aws_caller_identity" "current" {
-  provider = aws.us_east_1
-}
 
 # ─── Bedrock Guardrails ───────────────────────────────────────────────────────
 
 resource "aws_bedrock_guardrail" "content_filter" {
   provider     = aws.us_east_1
-  name         = "${local.project_name}-content-filter"
+  name         = "${local.lz_project}-content-filter"
   description  = "Block harmful content from Bedrock responses"
-  blocked_inputs_messaging  = "I'm sorry, I can't help with that."
+  blocked_input_messaging  = "I'm sorry, I can't help with that."
   blocked_outputs_messaging = "I'm sorry, I can't respond to that."
 
   content_policy_config {
@@ -223,7 +203,7 @@ resource "aws_bedrock_guardrail" "content_filter" {
   }
 
   tags = {
-    project = local.project_name
+    project = local.lz_project
   }
 }
 
@@ -275,14 +255,14 @@ resource "aws_cloudfront_distribution" "bedrock_proxy" {
   }
 
   tags = {
-    project       = local.project_name
+    project       = local.lz_project
     credit-source = "aws-activate"
   }
 }
 
 resource "aws_cloudfront_cache_policy" "bedrock" {
   provider = aws.us_east_1
-  name     = "${local.project_name}-bedrock-cache"
+  name     = "${local.lz_project}-bedrock-cache"
 
   default_ttl = 300
   max_ttl     = 300
@@ -306,14 +286,14 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
 
 resource "aws_ce_anomaly_monitor" "bedrock" {
   provider         = aws.us_east_1
-  name             = "${local.project_name}-bedrock-spend"
+  name             = "${local.lz_project}-bedrock-spend"
   monitor_type     = "DIMENSIONAL"
   monitor_dimension = "SERVICE"
 }
 
 resource "aws_ce_anomaly_subscription" "bedrock_alert" {
   provider       = aws.us_east_1
-  name           = "${local.project_name}-bedrock-anomaly-alert"
+  name           = "${local.lz_project}-bedrock-anomaly-alert"
   monitor_arn_list = [aws_ce_anomaly_monitor.bedrock.arn]
   frequency      = "DAILY"
   threshold_expression {

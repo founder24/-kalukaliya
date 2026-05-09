@@ -17,14 +17,6 @@
 # • Route 53 Resolver DNS Firewall blocks known malicious domains at the
 #   resolver level — zero cost, zero latency impact.
 
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 5.0"
-    }
-  }
-}
 
 variable "azure_aca_backend_ip" {
   description = "Static IP of the Azure Container Apps backend (eastus2)"

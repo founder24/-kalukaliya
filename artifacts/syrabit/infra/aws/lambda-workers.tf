@@ -44,7 +44,7 @@ locals {
   # an apply for routine code-only deploys (the ops_alerts SNS will
   # page if a release breaks SQS drain rate, and `terraform apply`
   # is the documented rollback path).
-  sqs_consumer_image_uri = "${aws_ecr_repository.workers.repository_url}:sqs-consumers-latest"
+  sqs_consumer_image_uri = "${aws_ecr_repository.workers["queue-fanout"].repository_url}:sqs-consumers-latest"
 }
 
 # ─── Shared IAM role ─────────────────────────────────────────────────────────

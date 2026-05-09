@@ -12,29 +12,13 @@
 # • CloudWatch EMF metrics — zero-cost structured latency / error tracking
 # • X-Ray active tracing — per-invocation flame graphs in AWS Console
 
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 5.0"
-    }
-  }
-}
 
-locals {
-  aws_region   = "ap-south-1"
-  project_name = "syrabit"
-  env          = "prod"
-}
 
-provider "aws" {
-  region = local.aws_region
-}
 
 # ─── IAM role ────────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "email_worker" {
-  name = "${local.project_name}-email-worker-${local.env}"
+  name = "${local.lz_project}-email-worker-${local.lz_env}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -71,7 +55,7 @@ resource "aws_iam_role_policy" "email_worker_ses" {
       {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:GetParametersByPath"]
-        Resource = "arn:aws:ssm:${local.aws_region}:*:parameter/${local.project_name}/*"
+        Resource = "arn:aws:ssm:${local.lz_primary_region}:*:parameter/${local.lz_project}/*"
       }
     ]
   })
@@ -92,11 +76,11 @@ resource "aws_cloudwatch_log_group" "email_worker" {
 }
 
 resource "aws_lambda_function" "email_worker" {
-  function_name = "${local.project_name}-email-worker"
+  function_name = "${local.lz_project}-email-worker"
   role          = aws_iam_role.email_worker.arn
 
   package_type = "Image"
-  image_uri    = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${local.aws_region}.amazonaws.com/${local.project_name}/email-worker:latest"
+  image_uri    = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${local.lz_primary_region}.amazonaws.com/${local.lz_project}/email-worker:latest"
 
   architectures = ["arm64"]
 
@@ -110,7 +94,7 @@ resource "aws_lambda_function" "email_worker" {
   environment {
     variables = merge(local.otel_env, {
       NODE_ENV               = "production"
-      SES_REGION             = local.aws_region
+      SES_REGION             = local.lz_primary_region
       SES_FROM_ADDRESS       = "no-reply@syrabit.ai"
       SES_CONFIG_SET         = aws_ses_configuration_set.main.name
       LOG_LEVEL              = "info"
@@ -128,8 +112,8 @@ resource "aws_lambda_function" "email_worker" {
   }
 
   tags = {
-    project     = local.project_name
-    environment = local.env
+    project     = local.lz_project
+    environment = local.lz_env
     managed-by  = "terraform"
     credit-source = "aws-activate"
   }
@@ -157,12 +141,11 @@ resource "aws_lambda_function_url" "email_worker" {
   authorization_type = "AWS_IAM"
 }
 
-data "aws_caller_identity" "current" {}
 
 # ─── SES configuration ────────────────────────────────────────────────────────
 
 resource "aws_ses_configuration_set" "main" {
-  name = "${local.project_name}-${local.env}"
+  name = "${local.lz_project}-${local.lz_env}"
 
   delivery_options {
     tls_policy = "Require"
@@ -179,7 +162,7 @@ resource "aws_ses_email_identity" "noreply" {
 # ─── SNS → CF Worker webhook topic ───────────────────────────────────────────
 
 resource "aws_sns_topic" "ses_events" {
-  name = "${local.project_name}-ses-events"
+  name = "${local.lz_project}-ses-events"
 }
 
 resource "aws_ses_identity_notification_topic" "bounces" {
@@ -199,7 +182,7 @@ resource "aws_ses_identity_notification_topic" "complaints" {
 # ─── CloudWatch alarms ────────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_metric_alarm" "email_errors" {
-  alarm_name          = "${local.project_name}-email-worker-errors"
+  alarm_name          = "${local.lz_project}-email-worker-errors"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "Errors"
@@ -217,7 +200,7 @@ resource "aws_cloudwatch_metric_alarm" "email_errors" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_duration_p95" {
-  alarm_name          = "${local.project_name}-email-worker-duration-p95"
+  alarm_name          = "${local.lz_project}-email-worker-duration-p95"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   extended_statistic  = "p95"
