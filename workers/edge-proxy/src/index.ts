@@ -1391,6 +1391,7 @@ const BOT_RDNS_SUFFIXES: Array<[string, RegExp, string[]]> = [
   ["baiduspider", /baiduspider/i, [".baidu.com.", ".baidu.jp."]],
   ["petalbot", /petalbot/i, [".petalsearch.com.", ".aspiegel.com."]],
   ["yeti", /yeti/i, [".naver.com."]],
+  ["mojeekbot", /mojeekbot/i, [".mojeek.com."]],
   ["seznambot", /seznambot/i, [".seznam.cz."]],
   ["yahoo-slurp", /slurp/i, [".crawl.yahoo.net."]],
   ["perplexitybot", /perplexitybot|perplexity-user/i, [".perplexity.ai."]],

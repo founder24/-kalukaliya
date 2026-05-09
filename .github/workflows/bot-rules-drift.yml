@@ -73,3 +73,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/check_bot_rules_drift.py
+
+      - name: Live golden bot-unblock probe (gated)
+        # Runs the live-gated subset of `tests/test_bot_unblock.py`
+        # against a deployed preview when `BOT_UNBLOCK_TEST_URL` is
+        # set in repo secrets. The 4 live tests assert: googlebot &
+        # perplexitybot get prerendered HTML (h1 + schema.org JSON-LD),
+        # gptbot is hard-403'd, and a Googlebot UA from a non-Google
+        # IP is hard-403'd with `X-Bot-Verify: spoofed`. When the
+        # secret is unset the tests skip cleanly so this step never
+        # blocks PRs from forks or the initial drift gate.
+        if: ${{ env.BOT_UNBLOCK_TEST_URL != '' }}
+        env:
+          BOT_UNBLOCK_TEST_URL: ${{ secrets.BOT_UNBLOCK_TEST_URL }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pytest httpx
+          python3 -m pytest -q tests/test_bot_unblock.py -k 'live'

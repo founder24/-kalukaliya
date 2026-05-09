@@ -81,7 +81,12 @@ verified_search:
     rdns_suffixes: [".naver.com"]
   - token: mojeekbot
     canonical: MojeekBot
-    rdns_suffixes: []
+    # Mojeek's published crawler PTRs end in `.mojeek.com`
+    # (https://www.mojeek.com/about/crawler.html). Adding the suffix
+    # gives Mojeek the FCrDNS fast-path promotion route alongside
+    # cf.verifiedBot, addressing round-9 review comment about
+    # cf.verifiedBot-only gating.
+    rdns_suffixes: [".mojeek.com"]
   - token: seznambot
     canonical: SeznamBot
     rdns_suffixes: [".seznam.cz"]
