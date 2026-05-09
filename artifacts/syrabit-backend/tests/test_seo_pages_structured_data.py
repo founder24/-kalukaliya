@@ -347,6 +347,38 @@ def test_quick_answer_uses_materialised_when_present(monkeypatch):
         "renderer must surface the materialised AEO answer card verbatim"
 
 
+def test_seo_routes_mounted_at_canonical_path_not_under_api(monkeypatch):
+    """Task #11 spec: public SEO pages MUST be served at the canonical
+    ``/board/{board}/class/{class}/subject/{subject}/chapter/{chapter}/{type}``
+    URL — NOT under the ``/api`` JSON prefix. The canonical link
+    elements + sitemap fan-out are emitted at this exact path, so any
+    accidental re-mount under ``/api`` would point Google at 404s."""
+    sp, db = _patch_deps(monkeypatch)
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    app = FastAPI()
+    app.include_router(sp.router)
+    client = TestClient(app)
+
+    canonical_path = (
+        "/board/ahsec/class/class-11/subject/biology"
+        "/chapter/photosynthesis/notes"
+    )
+    resp = client.get(canonical_path)
+    assert resp.status_code == 200, (
+        f"canonical SEO path must serve 200 at {canonical_path}, "
+        f"got {resp.status_code}"
+    )
+    assert "<h1>" in resp.text and "Photosynthesis" in resp.text
+
+    # And the same path under /api MUST NOT be a SEO render.
+    resp_api = client.get("/api" + canonical_path)
+    assert resp_api.status_code == 404, (
+        "SEO pages must NOT be reachable under /api — that prefix is "
+        "reserved for JSON routes and would split crawl signal"
+    )
+
+
 def test_indexnow_endpoints_include_yandex_and_central():
     """Yandex IndexNow + central api.indexnow.org are wired alongside
     Bing — the only IndexNow endpoint Task #11 explicitly requires

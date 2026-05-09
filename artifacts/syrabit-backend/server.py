@@ -2163,7 +2163,13 @@ if not (os.environ.get("GCP_OIDC_REQUIRED_AUDIENCE") or "").strip():
 api.include_router(auth_router)
 api.include_router(content_router)
 from routes.seo_pages import router as seo_pages_router  # Task #11
-api.include_router(seo_pages_router)
+# Task #11 — public SEO pages MUST live at the canonical
+# /board/{board}/class/{class}/subject/{subject}/chapter/{chapter}/{type}
+# URL pattern (matches the canonicals + sitemap fan-out emitted by
+# routes/seo_pages.py and seo_engine.py). Mounting under `app`
+# bypasses the `/api` prefix that `api = APIRouter(prefix="/api")`
+# applies to every authenticated/JSON router.
+app.include_router(seo_pages_router)
 api.include_router(topic_faq_jsonld_router)
 api.include_router(topic_answer_cards_router)
 api.include_router(admin_topic_audit_router)
