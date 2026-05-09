@@ -401,6 +401,7 @@ re-apply.
 | Azure Front Door, Cosmos DB cache       | `front-door.tf` / `cosmos-db-cache.tf` (predate this LZ; separate RG) |
 | Azure OpenAI / AI Speech / Translator   | "Azure-native advanced features" task      |
 | Production DNS apex (`syrabit.ai`)      | Cloudflare                                 |
+| OCR scratch storage                     | **Not persisted** — OCR is in-memory Vertex Vision round-trip (`routes/ai_chat.py /ai/ocr-image`, `routes/pyq.py /pyq/process`). Warm media lives on Cloudflare R2 (`r2_storage.py`). See `docs/architecture/decisions.md` Task #46. |
 
 ## 11. Decommission notes
 

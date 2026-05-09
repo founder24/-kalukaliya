@@ -339,9 +339,9 @@
         },
         {
           "item": "Azure Blob — temporary OCR/media",
-          "status": "PARTIAL",
+          "status": "RETIRED",
           "source_paths": [],
-          "note": "R2 currently primary warm store; Azure Blob reserved for OCR scratch."
+          "note": "Task #46 (2026-05-09): OCR is in-memory Vertex Vision round-trip (routes/ai_chat.py /ai/ocr-image + routes/pyq.py /pyq/process); no persisted scratch tier. Warm media on R2 (§4.1, r2_storage.py). Re-introduction requires a fresh threat-model pass."
         },
         {
           "item": "Azure Monitor + App Insights",

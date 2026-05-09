@@ -84,7 +84,7 @@ When the blueprint and this matrix disagree, **this matrix wins** and the bluepr
 |---|---|---|---|
 | Azure Container Apps — FastAPI runtime | IMPLEMENTED | `infra/azure/aca-syrabit-backend.bicep`, `.github/workflows/azure-container-apps-deploy.yml` | DR cutover `eastus2 → westus3` per V4 §8. |
 | Azure Key Vault — secrets source of truth | IMPLEMENTED | `docs/architecture/decisions.md` | AWS SM + CF Secrets are read-only replicas. |
-| Azure Blob — temporary OCR/media | PARTIAL | — | R2 carries warm-store today; Azure Blob reserved as OCR scratch. |
+| Azure Blob — temporary OCR/media | RETIRED | — | Task #46 (2026-05-09): OCR runs as an in-memory Vertex Vision round-trip in `routes/ai_chat.py` (`/ai/ocr-image`) + `routes/pyq.py` (`/pyq/process`); no persisted scratch tier exists or is needed. Warm media lives on R2 (§4.1, `r2_storage.py`). Future re-introduction would require a fresh threat-model pass + a `# COST-CAP-OVERRIDE` style task entry. |
 | Azure Monitor + Application Insights | RETIRED | — | Sentry + GCP Cloud Trace replace App Insights (Task #558). |
 
 ---
