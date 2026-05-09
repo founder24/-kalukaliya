@@ -399,6 +399,42 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Task #28 archival contract: before overwriting the canonical
+    # baseline JSON, snapshot the *previous* file's contents to
+    # ``docs/seo/history/baseline-<prev_generated_date>.json`` so the
+    # repo carries a per-run history alongside Mongo's
+    # ``db.seo_baseline_runs``. The Lambda also writes to Mongo, which
+    # is the authoritative trail for the admin tile; this filesystem
+    # path is the engineer-facing offline-diff trail Task #28 §"Done
+    # looks like" calls out explicitly. Idempotent: re-archiving the
+    # same prev-date is a no-op.
+    if args.out.exists():
+        try:
+            prev_blob = json.loads(args.out.read_text(encoding="utf-8"))
+            prev_generated = prev_blob.get("generated_at_utc") or ""
+            # Use the prev report's own `generated_at_utc` so the
+            # archive filename reflects when *that* baseline was
+            # captured (not when it was archived).
+            prev_date = (prev_generated[:10] if prev_generated
+                         else datetime.now(tz=timezone.utc).date().isoformat())
+            history_dir = args.out.parent / "history"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            archive_path = history_dir / f"baseline-{prev_date}.json"
+            if not archive_path.exists():
+                archive_path.write_text(
+                    json.dumps(prev_blob, indent=2), encoding="utf-8",
+                )
+                print(f"seo_baseline: archived prior baseline → {archive_path}")
+        except Exception as exc:
+            # V4 §12 — fail loud. A broken prior JSON should not be
+            # silently overwritten because that loses the history
+            # leg the reviewer/spec explicitly requires.
+            sys.exit(
+                f"seo_baseline: refusing to overwrite {args.out} — failed to "
+                f"archive prior baseline: {exc}"
+            )
+
     args.out.write_text(json.dumps(_to_dict(report), indent=2), encoding="utf-8")
     print(f"seo_baseline: wrote {report.sampled_pages} pages to {args.out}")
     return 0

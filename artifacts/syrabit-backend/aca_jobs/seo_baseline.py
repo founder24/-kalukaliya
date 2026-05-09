@@ -182,9 +182,17 @@ async def run_baseline_publish(
     # backfilled / out-of-order docs do not poison the comparison.
     prior_summary: Optional[Dict[str, Any]] = None
     prior_started_at: Optional[datetime] = None
+    current_report_date = started_at.date().isoformat()
     try:
+        # Reviewer fix (round-2): exclude any doc that shares this
+        # run's `report_date` so a manual same-Monday re-run does
+        # NOT compare its delta against an earlier same-day run
+        # (which would always look like a near-zero WoW move and
+        # silently mask a real regression). The strict `$ne` filter
+        # is enough — we still take the most recent surviving doc.
         prior_doc = await db.seo_baseline_runs.find_one(
-            {}, sort=[("started_at", -1)],
+            {"report_date": {"$ne": current_report_date}},
+            sort=[("started_at", -1)],
         )
         if prior_doc:
             prior_summary = prior_doc.get("summary") or {}

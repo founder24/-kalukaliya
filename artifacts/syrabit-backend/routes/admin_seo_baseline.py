@@ -32,7 +32,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from auth_deps import get_admin_user
 from deps import db
@@ -59,6 +61,60 @@ def _samples_failed(pages: List[Dict[str, Any]], limit: int = 10) -> List[Dict[s
         if len(out) >= limit:
             break
     return out
+
+
+@router.post("/api/admin/seo/baseline-publish")
+async def admin_baseline_publish(
+    payload: dict = Body(...),
+    admin: dict = Depends(get_admin_user),
+):
+    """Receive a weekly SEO baseline summary from the Lambda.
+
+    The seo-baseline Lambda mints a short-lived admin JWT (same
+    pattern the cache-effectiveness Lambda uses against
+    ``/api/health/cache``) and POSTs the full report here so the
+    admin dashboard has a single, explicit "publish" semantics —
+    the brief asks for the Lambda to *post results to the admin
+    observability tile*, not just persist to Mongo behind it.
+
+    Body shape mirrors ``aca_jobs.seo_baseline`` ``run_baseline_publish``
+    return + a ``pages`` array. Idempotent upsert on ``report_date``.
+    """
+    report_date = (payload.get("report_date") or "").strip()
+    if not report_date:
+        raise HTTPException(
+            status_code=400,
+            detail="missing required field: report_date",
+        )
+    started_at = payload.get("started_at") or datetime.now(tz=timezone.utc)
+    finished_at = payload.get("finished_at") or started_at
+    doc = {
+        "report_date":         report_date,
+        "started_at":          started_at,
+        "finished_at":         finished_at,
+        "duration_s":          float(payload.get("duration_s") or 0.0),
+        "public_base_url":     payload.get("public_base_url"),
+        "sampled_pages":       int(payload.get("sampled_pages") or 0),
+        "summary":             payload.get("summary") or {},
+        "pages":               payload.get("pages") or [],
+        "wow_delta_seo_score": payload.get("wow_delta_seo_score"),
+        "prior_started_at":    payload.get("prior_started_at"),
+        "task":                28,
+        "published_via":       "post",
+    }
+    try:
+        await db.seo_baseline_runs.update_one(
+            {"report_date": report_date},
+            {"$set": doc},
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.exception("admin_baseline_publish: persistence failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"seo_baseline_runs write failed: {type(exc).__name__}",
+        )
+    return {"ok": True, "report_date": report_date}
 
 
 @router.get("/api/admin/seo/baseline-latest")

@@ -90,6 +90,10 @@ class _FakeCollection:
         if "started_at" in query and isinstance(query["started_at"], dict):
             cutoff = query["started_at"].get("$lt")
             rows = [d for d in rows if d.get("started_at") and d["started_at"] < cutoff]
+        if "report_date" in query and isinstance(query["report_date"], dict):
+            ne = query["report_date"].get("$ne")
+            if ne is not None:
+                rows = [d for d in rows if d.get("report_date") != ne]
         if not rows:
             return None
         if sort:
@@ -157,6 +161,41 @@ def test_second_run_computes_negative_wow_delta(monkeypatch):
     assert summary["median_seo_score"] == 84
     assert summary["wow_delta_seo_score"] == pytest.approx(-7.0)
     assert summary["pages_with_failures"] == 3  # alarm trip on >2
+
+
+def test_same_day_rerun_compares_against_prior_week_not_self(monkeypatch):
+    """Reviewer fix (round-2): a manual same-Monday re-run must NOT
+    compare its delta against the earlier same-day run; it must
+    skip past it to last week's doc.
+    """
+    today = datetime.now(tz=timezone.utc)
+    today_date = today.date().isoformat()
+    last_week = today - timedelta(days=7)
+    db = _FakeDb(seeded=[
+        # Last week: median 90.
+        {"report_date": last_week.date().isoformat(),
+         "started_at":  last_week,
+         "summary":     {"median_seo_score": 90, "pages_with_failures": 0}},
+        # Earlier today: median 84 (the row we must NOT compare against).
+        {"report_date": today_date,
+         "started_at":  today - timedelta(hours=2),
+         "summary":     {"median_seo_score": 84, "pages_with_failures": 1}},
+    ])
+    monkeypatch.setattr(job, "_publish_metrics", lambda *a, **kw: None)
+    summary = asyncio.run(job.run_baseline_publish(
+        db,
+        base_url="https://syrabit.ai",
+        boards=("ahsec",),
+        chapters_per_board=2,
+        page_type="notes",
+        runner=_make_runner(median=82, failures=0),
+    ))
+    # WoW delta is 82 - 90 = -8 (vs last week), NOT 82 - 84 = -2.
+    assert summary["wow_delta_seo_score"] == pytest.approx(-8.0)
+    # Same-day row was overwritten in place (idempotent upsert).
+    same_day_rows = [d for d in db.seo_baseline_runs.docs
+                     if d.get("report_date") == today_date]
+    assert len(same_day_rows) == 1
 
 
 def test_publish_metrics_emits_three_datapoints():

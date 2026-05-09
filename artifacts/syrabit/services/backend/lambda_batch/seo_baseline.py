@@ -48,6 +48,71 @@ def _ensure_scripts_on_path() -> None:
             sys.path.insert(0, str(c))
 
 
+def _mint_admin_jwt() -> str:
+    """Mint a short-lived admin JWT — same pattern as cache_effectiveness.
+
+    The Lambda env exposes ``ADMIN_JWT_SECRET`` (hydrated by
+    ``_db.bootstrap_env`` from ``ADMIN_JWT_SECRET_ARN``). We sign a
+    60-second claim so the POST cannot be replayed by a stale token.
+    """
+    import time
+    secret = os.environ.get("ADMIN_JWT_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError("ADMIN_JWT_SECRET not hydrated; cannot POST baseline")
+    import jwt  # type: ignore
+    now = int(time.time())
+    return jwt.encode(
+        {"sub": "lambda:seo-baseline", "is_admin": True, "iat": now, "exp": now + 60},
+        secret,
+        algorithm="HS256",
+    )
+
+
+def _post_to_admin(summary_doc: dict) -> None:
+    """POST the persisted-shape summary doc to /api/admin/seo/baseline-publish.
+
+    The Lambda has already done the canonical Mongo write inside
+    ``run_baseline_publish``; this POST satisfies the brief's
+    "post results to the admin observability tile" contract and
+    serves as a deterministic write-through to the same collection
+    in case the Lambda's MongoDB egress path differs from the ACA
+    primary (different VPC, different replica set node, etc.). The
+    backend handler is idempotent on ``report_date``.
+    """
+    import urllib.request as _ur
+    import urllib.error as _ue
+    backend = os.environ.get("BACKEND_URL", "").rstrip("/")
+    if not backend:
+        logger.warning("seo_baseline: BACKEND_URL unset — skipping admin POST")
+        return
+    try:
+        token = _mint_admin_jwt()
+    except Exception as exc:
+        logger.warning("seo_baseline: admin JWT mint failed (%s) — skipping POST", exc)
+        return
+    body = json.dumps(summary_doc, default=str).encode("utf-8")
+    req = _ur.Request(
+        f"{backend}/api/admin/seo/baseline-publish",
+        data=body,
+        method="POST",
+        headers={
+            "content-type": "application/json",
+            "authorization": f"Bearer {token}",
+        },
+    )
+    try:
+        with _ur.urlopen(req, timeout=15) as resp:
+            logger.info("seo_baseline: admin POST status=%s", resp.status)
+    except _ue.HTTPError as exc:
+        # V4 §12: log loud but do not raise — Mongo write was the
+        # canonical persistence path. The backend POST is the
+        # write-through replica.
+        logger.warning("seo_baseline: admin POST failed http=%s body=%s",
+                       exc.code, exc.read()[:200])
+    except Exception as exc:
+        logger.warning("seo_baseline: admin POST errored: %s", exc)
+
+
 async def _run() -> dict:
     _db.bootstrap_env()
     os.environ.setdefault("BATCH_JOB_DRIVER", "lambda")
@@ -61,7 +126,7 @@ async def _run() -> dict:
     db = _db.get_db()
     boards_env = (os.environ.get("SEO_BASELINE_BOARDS") or "").strip()
     boards = tuple(b.strip() for b in boards_env.split(",") if b.strip()) or DEFAULT_BOARDS
-    return await run_baseline_publish(
+    summary = await run_baseline_publish(
         db,
         boards=boards,
         chapters_per_board=int(os.environ.get(
@@ -70,6 +135,11 @@ async def _run() -> dict:
         )),
         page_type=os.environ.get("SEO_BASELINE_PAGE_TYPE", DEFAULT_PAGE_TYPE),
     )
+    # Reviewer fix (round-2): explicit POST to the admin observability
+    # tile in addition to the canonical Mongo write inside
+    # ``run_baseline_publish``. The brief asks for both legs.
+    _post_to_admin(summary)
+    return summary
 
 
 def handler(event, context):  # noqa: ARG001
