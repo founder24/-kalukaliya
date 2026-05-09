@@ -293,10 +293,18 @@ def _toggles() -> dict[str, Any]:
                 )
     except Exception as e:
         logger.debug("[ops_console] admin_routing_config unavailable: %s", e)
+    observability: dict[str, Any] = {}
+    try:
+        from providers.posthog import get_posthog_health as _ph_health
+        observability["posthog"] = _ph_health()
+    except Exception as e:
+        logger.debug("[ops_console] posthog health unavailable: %s", e)
+        observability["posthog"] = {"available": False, "reason": str(e)}
     return {
         "env_knobs": rows,
         "founder_locked_thresholds": thresholds,
         "routing_pools": routing_pools,
+        "observability": observability,
     }
 
 

@@ -22,6 +22,7 @@
     "firebase": "^10.14.1",
     "lamejs": "^1.2.1",
     "lucide-react": "catalog:",
+    "posthog-js": "^1.372.10",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-helmet-async": "3.0.0",

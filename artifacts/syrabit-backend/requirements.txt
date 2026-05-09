@@ -87,4 +87,10 @@ opentelemetry-exporter-gcp-trace==1.7.0
 # `observability/sentry_setup.py` for the init shape and the
 # `before_send` noise filter.
 sentry-sdk[fastapi]==2.18.0
+# PostHog server-side capture (Task #2 follow-up). Companion to the
+# LCP-gated browser SDK in `artifacts/syrabit/index.html`; the backend
+# client owns events the browser can't observe (Razorpay webhook,
+# voice paywall, ACA-job emissions). No-ops when POSTHOG_API_KEY is
+# unset — see `providers/posthog.py`.
+posthog==7.14.0
 pydantic-settings>=2.0.0

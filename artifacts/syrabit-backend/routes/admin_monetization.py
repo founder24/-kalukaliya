@@ -645,6 +645,13 @@ async def razorpay_webhook(request: Request):
                             )
                     _redis_invalidate_session(user_id)
                     logger.info(f"Razorpay topup webhook: user={user_id} credits+={topup_credits}")
+                    from providers.posthog import capture as _ph_capture
+                    _ph_capture(user_id, "purchase_verified", {
+                        "plan": "topup",
+                        "credits_added": topup_credits,
+                        "amount_paise": entity.get("amount", 0),
+                        "razorpay_payment_id": rp_payment_id,
+                    })
             elif plan and plan in PLAN_CREDITS:
                 credits = PLAN_CREDITS[plan]
                 doc_acc = PLAN_DOC_ACCESS[plan]
@@ -693,6 +700,14 @@ async def razorpay_webhook(request: Request):
                         _wh_pg_updated = True
                         _redis_invalidate_session(user_id)
                         logger.info(f"Razorpay webhook: user={user_id} plan={plan} credits+={credits}")
+                        from providers.posthog import capture as _ph_capture
+                        _ph_capture(user_id, "purchase_verified", {
+                            "plan": plan,
+                            "credits_added": credits,
+                            "document_access": doc_acc,
+                            "amount_paise": entity.get("amount", 0),
+                            "razorpay_payment_id": rp_payment_id,
+                        })
                     except Exception as wh_err:
                         logger.error(
                             f"Razorpay webhook activation failed for user={user_id} "

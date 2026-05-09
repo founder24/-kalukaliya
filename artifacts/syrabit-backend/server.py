@@ -1926,6 +1926,12 @@ async def lifespan(app):
         await asyncio.to_thread(_speedup.flush_to_store)
     except Exception as _sp_shutdown_err:
         logger.warning(f"chat_speedup_metrics shutdown flush failed: {_sp_shutdown_err}")
+    # Flush buffered PostHog events so analytics survive a graceful redeploy.
+    try:
+        from providers.posthog import shutdown_posthog as _shutdown_posthog
+        await asyncio.to_thread(_shutdown_posthog)
+    except Exception as _ph_shutdown_err:
+        logger.debug(f"[posthog] shutdown flush swallowed: {_ph_shutdown_err}")
     try:
         import ai_cache as _ai_cache_close
         await _ai_cache_close.close_async_client()
@@ -1998,6 +2004,16 @@ try:
     _init_sentry()
 except Exception as _sentry_err:
     logger.warning(f"[sentry] init_sentry failed (non-fatal): {_sentry_err}")
+
+# PostHog server-side capture (Task #2 follow-up). Browser SDK is loaded
+# LCP-gated from `artifacts/syrabit/index.html`; this init covers the
+# server-emitted events (Razorpay webhook, voice paywall, ACA jobs).
+# No-op when POSTHOG_API_KEY is unset.
+try:
+    from providers.posthog import init_posthog as _init_posthog
+    _init_posthog()
+except Exception as _ph_err:
+    logger.warning(f"[posthog] init_posthog failed (non-fatal): {_ph_err}")
 
 
 # Task #558 §D — weekly observability digest loop. Sleeps 7 days
