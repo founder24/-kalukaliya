@@ -345,7 +345,7 @@
             "artifacts/syrabit-backend/routes/ai_chat.py",
             "artifacts/syrabit-backend/routes/pyq.py"
           ],
-          "note": "Task #46 (2026-05-09) Path A: R2 is the canonical OCR-scratch + warm-media surface (r2_storage.r2_upload/r2_presign/r2_delete). OCR endpoints (/ai/ocr-image, /pyq/process) currently run in-memory Vertex Vision round-trips (no persistence); any future 'save scratch' feature MUST land on R2, not Azure Blob. Azure Blob OCR/media is retired for this row."
+          "note": "Task #46 (2026-05-09) Path A: R2 is the canonical OCR-scratch + warm-media surface (r2_storage.r2_upload/r2_presign/r2_delete). OCR endpoints (POST /api/ai/ocr-image, POST /api/admin/pyq/agentic-process) currently run in-memory Vertex Vision round-trips (no persistence); any future 'save scratch' feature MUST land on R2, not Azure Blob. Azure Blob OCR/media is retired for this row."
         },
         {
           "item": "Azure Monitor + App Insights",

@@ -401,7 +401,7 @@ re-apply.
 | Azure Front Door, Cosmos DB cache       | `front-door.tf` / `cosmos-db-cache.tf` (predate this LZ; separate RG) |
 | Azure OpenAI / AI Speech / Translator   | "Azure-native advanced features" task      |
 | Production DNS apex (`syrabit.ai`)      | Cloudflare                                 |
-| OCR scratch storage + warm media        | **Cloudflare R2** (`artifacts/syrabit-backend/r2_storage.py`) is the canonical surface — Azure Blob is **retired** for this row (Task #46, 2026-05-09, Path A). OCR endpoints (`routes/ai_chat.py /ai/ocr-image`, `routes/pyq.py /pyq/process`) currently run as in-memory Vertex Vision round-trips with no persistence; if scratch is ever persisted it MUST go to R2. See `docs/architecture/decisions.md`. |
+| OCR scratch storage + warm media        | **Cloudflare R2** (`artifacts/syrabit-backend/r2_storage.py`) is the canonical surface — Azure Blob is **retired** for this row (Task #46, 2026-05-09, Path A). OCR endpoints (`POST /api/ai/ocr-image` in `routes/ai_chat.py`, `POST /api/admin/pyq/agentic-process` in `routes/pyq.py`) currently run as in-memory Vertex Vision round-trips with no persistence; if scratch is ever persisted it MUST go to R2. See `docs/architecture/decisions.md`. |
 
 ## 11. Decommission notes
 
