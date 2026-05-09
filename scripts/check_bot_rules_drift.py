@@ -159,7 +159,12 @@ def _check_one(
                 f"(locator: {locator.pattern[:60]}…)"]
     body = m.group(1).lower()
 
-    # Forward direction: YAML → regex.
+    # Forward direction: YAML → regex. Use alternation-boundary
+    # matching (token must be preceded/followed by `|`, `(`, `)`, `/`,
+    # `"`, `'`, `^`, `$`, or string boundary) — NOT plain substring —
+    # so a YAML token like `yandex` can't be falsely satisfied by the
+    # presence of `yandexbot` in the regex body. Closes the audit
+    # comment from the round-6 review.
     expected: list[str] = []
     seen: set[str] = set()
     for b in buckets:
@@ -167,7 +172,14 @@ def _check_one(
             if t not in seen:
                 expected.append(t)
                 seen.add(t)
-    missing = [t for t in expected if t.lower() not in body]
+    # `:` is included so tokens inside JS non-capturing groups
+    # (`/\b(?:gptbot|ccbot|...)\b/`) are counted as boundary-aligned.
+    _BOUNDARY = r'(?:^|[|()/"\'\\\^\$:])'
+    _BOUNDARY_END = r'(?:[|()/"\'\\\^\$:]|$)'
+    missing = [
+        t for t in expected
+        if not re.search(_BOUNDARY + re.escape(t.lower()) + _BOUNDARY_END, body)
+    ]
 
     # Reverse direction: regex → YAML. Anything matched by the regex
     # but absent from EVERY bucket of the YAML is drift in the

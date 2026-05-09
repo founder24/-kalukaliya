@@ -65,9 +65,11 @@ verified_search:
   - token: yandexbot
     canonical: YandexBot
     rdns_suffixes: [".yandex.ru", ".yandex.net", ".yandex.com"]
-  - token: yandex
-    canonical: Yandex
-    rdns_suffixes: [".yandex.ru", ".yandex.net", ".yandex.com"]
+    # NOTE: bare `yandex` token deliberately removed (round-7 review).
+    # Yandex's actual UA is `YandexBot/3.0`; the standalone `yandex`
+    # token would only be redundant inside the runtime regex
+    # (`yandexbot` already matches it) and the round-6 boundary fix
+    # surfaced it as forward drift.
   - token: baiduspider
     canonical: Baiduspider
     rdns_suffixes: [".baidu.com", ".baidu.jp"]

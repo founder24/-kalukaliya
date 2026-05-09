@@ -49,7 +49,6 @@
       "duckduckbot",
       "applebot",
       "yandexbot",
-      "yandex",
       "baiduspider",
       "petalbot",
       "yeti",
@@ -63,8 +62,8 @@
   "targets": {
     "abusive": "scrapy|wget|curl|python\\-requests|go\\-http\\-client|java/|okhttp|ahrefsbot|semrushbot|nmap|masscan|zgrab|heritrix|dotbot|mj12bot",
     "citation": "perplexitybot|perplexity\\-user|oai\\-searchbot|chatgpt\\-user",
-    "search": "googlebot|google\\-extended|googleother|google\\-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|yandex|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot|perplexitybot|perplexity\\-user|oai\\-searchbot|chatgpt\\-user|gptbot|claudebot|claude\\-web|anthropic\\-ai|applebot\\-extended|ccbot|cohere\\-ai|bytespider|amazonbot|diffbot|meta\\-externalagent",
+    "search": "googlebot|google\\-extended|googleother|google\\-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot|perplexitybot|perplexity\\-user|oai\\-searchbot|chatgpt\\-user|gptbot|claudebot|claude\\-web|anthropic\\-ai|applebot\\-extended|ccbot|cohere\\-ai|bytespider|amazonbot|diffbot|meta\\-externalagent",
     "training": "gptbot|claudebot|claude\\-web|anthropic\\-ai|google\\-extended|applebot\\-extended|ccbot|cohere\\-ai|bytespider|amazonbot|diffbot|meta\\-externalagent",
-    "verified": "googlebot|google\\-extended|googleother|google\\-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|yandex|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot"
+    "verified": "googlebot|google\\-extended|googleother|google\\-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot"
   }
 }

@@ -182,10 +182,29 @@ def render_manifest(tokens: dict[str, list[str]]) -> str:
     ``infra/bot-regex.generated.json``. CI runs ``--apply`` and then
     ``git diff --exit-code`` on this file — that's the lock-step
     codegen contract: a YAML edit MUST produce a regenerated artifact
-    in the same commit, otherwise CI fails. We deliberately don't
-    overwrite the four runtime sources directly because each carries
-    hand-curated benign tokens (social-card crawlers, IA archiver,
-    legacy SEO bots) that aren't owned by the registry."""
+    in the same commit, otherwise CI fails.
+
+    Codegen model — INTENTIONAL DESIGN (see review comment round 6):
+
+      We use a "manifest + drift guard" model, NOT full in-place
+      source overwrite of the four runtime regex files. Rationale:
+      each runtime regex carries hand-curated benign tokens
+      (social-card crawlers like Twitterbot/FacebookExternalHit,
+      IA archiver, legacy SEO crawlers like rogerbot/ahrefsbot) that
+      are deliberately NOT owned by the YAML registry — the YAML
+      defines the canonical *floor* (every token in YAML must
+      appear in every runtime regex), while the runtime regexes are
+      free to add additional benign UAs. Full source overwrite
+      would clobber that benign list on every CI run.
+
+      Enforcement is bidirectional via
+      ``scripts/check_bot_rules_drift.py``:
+        * forward — every YAML token MUST be present in each runtime
+          regex (alternation-boundary match, not substring);
+        * reverse — every UA-shaped token in each runtime regex MUST
+          be in the YAML OR on the explicit ``_BENIGN_REGEX_TOKENS``
+          allowlist.
+    """
     import json
     payload = {
         "_generator": "scripts/gen_bot_regex.py --apply",
