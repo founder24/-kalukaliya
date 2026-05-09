@@ -29,17 +29,24 @@ Allow: /
 # notes appear in Perplexity / ChatGPT browse / OpenAI SearchGPT answers.
 # Training-only crawlers (GPTBot, ClaudeBot, Google-Extended, etc.) remain
 # disallowed below — we want citations, not silent corpus ingestion.
+# Task #9: Crawl-delay: 0 — verified-bot fast path (≥60K RPM bucket)
+# is the real ceiling; the polite default (~1 RPS) would needlessly
+# slow citation pickup.
 User-agent: ChatGPT-User
 Allow: /
+Crawl-delay: 0
 
 User-agent: OAI-SearchBot
 Allow: /
+Crawl-delay: 0
 
 User-agent: PerplexityBot
 Allow: /
+Crawl-delay: 0
 
 User-agent: Perplexity-User
 Allow: /
+Crawl-delay: 0
 
 # --- AI training crawlers: explicitly disallowed. ---
 # Mirrors `_AI_BOT_NAMES` in artifacts/syrabit-backend/cf_bot_report.py
@@ -95,4 +102,35 @@ Disallow: /
 User-agent: Diffbot
 Disallow: /
 
+# --- Task #9: Crawl-delay: 0 for the major verified search bots ---
+# Verified search bots (cf.verifiedBot=true) are routed at the edge
+# through a separate ≥60 000 RPM bucket — see `VERIFIED_BOT_RATE_LIMIT_RPM`
+# in workers/edge-proxy/src/index.ts. Cloudflare Bot Fight Mode is
+# explicitly DISABLED on the syrabit.ai zone (see
+# docs/infra/cloudflare-bot-config.md) so this advisory is the only
+# pacing signal well-behaved bots see. `Crawl-delay: 0` tells them
+# we have no per-request throttle; the edge bucket is the real ceiling.
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 0
+
+# --- Task #9: explicit per-shard sitemap discovery ---
+# Some long-tail crawlers (Yandex, Baidu, smaller answer engines) only
+# parse top-level `Sitemap:` lines from robots.txt and never fetch
+# nested sitemap-index <loc> entries. Listing every shard here
+# guarantees they discover the full URL inventory even without an
+# index parser.
 Sitemap: https://syrabit.ai/sitemap-index.xml
+Sitemap: https://syrabit.ai/sitemap-pages.xml
+Sitemap: https://syrabit.ai/sitemap-subjects.xml
+Sitemap: https://syrabit.ai/sitemap-chapters.xml
+Sitemap: https://syrabit.ai/sitemap-notes.xml
+Sitemap: https://syrabit.ai/sitemap-mcqs.xml
+Sitemap: https://syrabit.ai/sitemap-pyqs.xml
+Sitemap: https://syrabit.ai/sitemap-examples.xml
+Sitemap: https://syrabit.ai/sitemap-definitions.xml
+Sitemap: https://syrabit.ai/sitemap-learn.xml

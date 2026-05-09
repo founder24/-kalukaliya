@@ -2244,6 +2244,9 @@ from routes.admin_billing import router as admin_billing_router
 api.include_router(admin_billing_router)
 from routes.admin_observability_canary import router as admin_observability_canary_router
 api.include_router(admin_observability_canary_router)
+# Task #9 — verified-bot fast-path observability tile.
+from routes.admin_observability_bot_buckets import router as admin_observability_bot_buckets_router
+api.include_router(admin_observability_bot_buckets_router)
 
 from llm import call_llm_api_content
 from auth_deps import get_admin_user

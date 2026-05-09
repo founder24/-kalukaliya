@@ -1049,7 +1049,33 @@ function isAiPath(p: string): boolean {
 // edge-proxy analytics to count them even though we don't always serve
 // them prerendered HTML (that decision is made downstream).
 // ────────────────────────────────────────────────────────────────────────────
-const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|duckduckbot|slurp|baiduspider|applebot|applebot-extended|chatgpt-user|oai-searchbot|gptbot|perplexitybot|perplexity-user|claudebot|claude-web|anthropic-ai|meta-externalagent|bytespider|ccbot|amazonbot|facebookexternalhit|facebookbot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|youbot/i;
+// Task #9 — canonical bot registry lives at `infra/bot-rules.yaml`.
+// CI guard `scripts/check_bot_rules_drift.py` enforces that every token
+// from the verified_search + citation_ai + training_ai buckets appears
+// in the regex below.
+const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|duckduckbot|slurp|baiduspider|applebot|applebot-extended|petalbot|yeti|mojeekbot|seznambot|msnbot|chatgpt-user|oai-searchbot|gptbot|perplexitybot|perplexity-user|claudebot|claude-web|anthropic-ai|meta-externalagent|bytespider|ccbot|cohere-ai|amazonbot|diffbot|facebookexternalhit|facebookbot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|youbot/i;
+
+// Task #9 — Verified-search + citation-AI fast path.
+// `VERIFIED_BOT_UA` covers the union of the verified_search and
+// citation_ai buckets in `infra/bot-rules.yaml`. When CF marks the
+// request `verifiedBot=true` (or our KV-cached rDNS confirms one of
+// the published PTR suffixes — see `verifyBotIpKV` below) AND the UA
+// matches this regex, we route the request through a separate
+// high-RPM bucket (`VERIFIED_BOT_RATE_LIMIT_RPM`, 60 000 RPM) instead
+// of the default 3 000 RPM bot bucket. Without this, AHSEC's exam-
+// week recrawl burst (Googlebot pulling thousands of refreshed
+// chapter pages back-to-back) trips the old 3 000 RPM ceiling and
+// returns 429 to a verified search engine — the exact failure this
+// task was opened to fix.
+//
+// Citation-AI bots (PerplexityBot, OAI-SearchBot, ChatGPT-User,
+// Perplexity-User) belong in this bucket per registry policy: they
+// cite sources and drive referral traffic, so we want them to crawl
+// freely. Training-only AI bots (GPTBot, ClaudeBot, CCBot, …) are
+// 403'd unconditionally below via `AI_BOT_UA` and never reach this
+// fast path — verification status does not bypass the block.
+const VERIFIED_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|msnbot|slurp|perplexitybot|perplexity-user|oai-searchbot|chatgpt-user/i;
+const VERIFIED_BOT_RATE_LIMIT_RPM = 60000;
 
 // ─── AI CRAWLER BLOCK LIST — DO NOT DRIFT ───────────────────────────────────
 // Blocks pure AI *training* crawlers that scrape content to train LLMs
@@ -1301,6 +1327,109 @@ function logBotErrorResponse(
 
 function isVerifiedSearchBot(ua: string, request: Request, clientIp: string): boolean {
   return verifySearchBot(ua, request, clientIp).verified;
+}
+
+// ─── Task #9 — KV-cached rDNS verification for verified-bot fast path ───────
+// `verifyBotIpWithKv` extends bot trust to UAs whose reverse DNS PTR
+// matches one of the canonical suffixes in `infra/bot-rules.yaml`,
+// caching the lookup for 24 h in the RATE_LIMIT KV namespace. This
+// closes the gap where a verified search bot on a freshly-rotated IP
+// has not yet been flagged by Cloudflare's `cf.verifiedBot` (the
+// primary trust gate, checked first in the caller).
+//
+// Cache contract:
+//   key   : bot:rdns:<ipHash>
+//   value : "1:<bot-token>" on hit, "0" on negative cache (still 24h)
+//   ttl   : 86 400 s (24 h) — matches the upstream PTR TTL conventions
+//
+// The Cloudflare Workers runtime does not expose a built-in DNS
+// resolver, so this function uses the Cloudflare DNS-over-HTTPS
+// endpoint at https://cloudflare-dns.com/dns-query for the actual
+// PTR fetch. The lookup is short-circuited when env.RATE_LIMIT is
+// missing (preview environment) or when the IP is non-IPv4 — IPv6
+// PTR lookups have a different ARPA layout we don't currently
+// support, and v6 traffic from verified bots is rare enough to fall
+// back to the base 3 000 RPM bucket without harm.
+//
+// Per `infra/bot-rules.yaml`, only bots in the verified_search +
+// citation_ai buckets carry rdns_suffixes. The mapping below is
+// hand-rolled in TypeScript so the worker has zero parse-time
+// dependency on the YAML file (which is not bundled into the
+// worker). Drift between this map and the YAML is caught by Task #9's
+// `scripts/check_bot_rules_drift.py` checking the YAML's token set;
+// changes to suffix sets are infrequent enough that a manual
+// matching review is acceptable. Add a TODO when introducing a new
+// suffix here.
+const BOT_RDNS_SUFFIXES: Array<[RegExp, string[]]> = [
+  [/googlebot|google-extended|googleother|google-inspectiontool/i, [".googlebot.com.", ".google.com."]],
+  [/bingbot|msnbot/i, [".search.msn.com."]],
+  [/duckduckbot/i, [".duckduckgo.com."]],
+  [/applebot/i, [".applebot.apple.com."]],
+  [/yandexbot|^yandex/i, [".yandex.ru.", ".yandex.net.", ".yandex.com."]],
+  [/baiduspider/i, [".baidu.com.", ".baidu.jp."]],
+  [/petalbot/i, [".petalsearch.com.", ".aspiegel.com."]],
+  [/yeti/i, [".naver.com."]],
+  [/seznambot/i, [".seznam.cz."]],
+  [/slurp/i, [".crawl.yahoo.net."]],
+  [/perplexitybot|perplexity-user/i, [".perplexity.ai."]],
+  [/oai-searchbot|chatgpt-user/i, [".openai.com."]],
+];
+
+const BOT_RDNS_TTL_S = 86400;
+
+async function _resolveRdns(ip: string): Promise<string | null> {
+  // IPv4 only — see header note. Returns the PTR target (with
+  // trailing dot) on success, or null on any failure.
+  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) return null;
+  const parts = ip.split(".").reverse().join(".");
+  const arpa = `${parts}.in-addr.arpa`;
+  try {
+    const dnsResp = await fetch(
+      `https://cloudflare-dns.com/dns-query?name=${arpa}&type=PTR`,
+      { headers: { Accept: "application/dns-json" }, cf: { cacheTtl: BOT_RDNS_TTL_S } as unknown as RequestInitCfProperties },
+    );
+    if (!dnsResp.ok) return null;
+    const data = await dnsResp.json() as { Answer?: Array<{ data: string }> };
+    const ptr = data.Answer?.find((a) => typeof a.data === "string");
+    return ptr ? ptr.data.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyBotIpWithKv(
+  env: Env,
+  ctx: ExecutionContext,
+  ua: string,
+  ip: string,
+): Promise<boolean> {
+  if (!env.RATE_LIMIT) return false;
+  // Match the UA against the suffix table FIRST so we don't burn a
+  // KV read for UAs (e.g. Twitterbot) we don't have a verified-bot
+  // policy for.
+  let suffixes: string[] | null = null;
+  for (const [pattern, sfx] of BOT_RDNS_SUFFIXES) {
+    if (pattern.test(ua)) { suffixes = sfx; break; }
+  }
+  if (!suffixes) return false;
+  const cacheKey = `bot:rdns:${hashIp(ip)}`;
+  try {
+    const cached = await env.RATE_LIMIT.get(cacheKey);
+    if (cached === "0") return false;
+    if (cached && cached.startsWith("1:")) return true;
+  } catch { /* KV read miss — fall through to live lookup */ }
+  const ptr = await _resolveRdns(ip);
+  if (!ptr) {
+    ctx.waitUntil(env.RATE_LIMIT.put(cacheKey, "0", { expirationTtl: BOT_RDNS_TTL_S }).catch(() => {}));
+    return false;
+  }
+  const matched = suffixes.some((sfx) => ptr.endsWith(sfx));
+  ctx.waitUntil(env.RATE_LIMIT.put(
+    cacheKey,
+    matched ? `1:${ptr}` : "0",
+    { expirationTtl: BOT_RDNS_TTL_S },
+  ).catch(() => {}));
+  return matched;
 }
 
 const BASE_URL = "https://syrabit.ai";
@@ -3870,19 +3999,32 @@ async function _handleEdgeFetch(
 
     if (!isApiRoute && (request.method === "GET" || request.method === "HEAD")) {
       if (isSearchBot && request.method === "GET") {
-        // Verified bots (cf.verifiedBot === true): rate-cap at BOT_RATE_LIMIT_RPM (3000 RPM)
-        // per IP to prevent aggressive re-crawl from overwhelming the backend.
-        const botRlKey = `rl:bot:${clientIp}`;
-        const botRl = await checkRateLimitWithDO(botRlKey, env, BOT_RATE_LIMIT_RPM);
+        // Task #9 — Verified-search + citation-AI bots get the high-RPM
+        // bucket (VERIFIED_BOT_RATE_LIMIT_RPM, 60 000 RPM). Other
+        // verified UAs (Twitterbot, FacebookExternalHit, …) stay on
+        // the standard BOT_RATE_LIMIT_RPM (3 000 RPM) bucket — they're
+        // verified but they're crawling for previews, not indexing,
+        // so the lower ceiling is appropriate. `verifyBotIpWithKv`
+        // also extends trust to bots whose rDNS PTR matches one of
+        // the canonical suffixes in `infra/bot-rules.yaml` (24h KV
+        // cache) when cf.verifiedBot was false.
+        const isFastPath = VERIFIED_BOT_UA.test(ua) && (
+          (request as unknown as { cf?: { verifiedBot?: boolean } }).cf?.verifiedBot === true ||
+          await verifyBotIpWithKv(env, ctx, ua, clientIp)
+        );
+        const botCap = isFastPath ? VERIFIED_BOT_RATE_LIMIT_RPM : BOT_RATE_LIMIT_RPM;
+        const botScope = isFastPath ? "verified_bot" : "bot";
+        const botRlKey = isFastPath ? `rl:vbot:${clientIp}` : `rl:bot:${clientIp}`;
+        const botRl = await checkRateLimitWithDO(botRlKey, env, botCap);
         if (!botRl.allowed) {
           return new Response("Too Many Requests", {
             status: 429,
             headers: {
               ...cors,
               "Retry-After": String(RATE_LIMIT_WINDOW_S),
-              "X-RateLimit-Limit": String(BOT_RATE_LIMIT_RPM),
+              "X-RateLimit-Limit": String(botCap),
               "X-RateLimit-Remaining": "0",
-              "X-RateLimit-Scope": "bot",
+              "X-RateLimit-Scope": botScope,
             },
           });
         }

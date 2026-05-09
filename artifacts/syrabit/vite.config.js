@@ -21,7 +21,11 @@ const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY
 // When you add a new crawler here, grep for the next-most-recent neighbour
 // in the list (e.g. `perplexitybot`) across the repo and add it there too.
 // ────────────────────────────────────────────────────────────────────────────
-const BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|yandex|duckduckbot|slurp|baiduspider|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|applebot|applebot-extended|ia_archiver|msnbot|ahrefsbot|semrushbot|petalbot|gptbot|oai-searchbot|chatgpt-user|claudebot|claude-web|anthropic-ai|perplexitybot|perplexity-user|meta-externalagent|cohere-ai|bytespider|ccbot|amazonbot|discordbot/i;
+// Task #9 — canonical bot registry lives at `infra/bot-rules.yaml`.
+// CI guard `scripts/check_bot_rules_drift.py` enforces that every token
+// from the verified_search + citation_ai + training_ai buckets appears
+// in the regex below.
+const BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|yandex|duckduckbot|slurp|baiduspider|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|applebot|applebot-extended|ia_archiver|msnbot|ahrefsbot|semrushbot|petalbot|yeti|mojeekbot|seznambot|youbot|gptbot|oai-searchbot|chatgpt-user|claudebot|claude-web|anthropic-ai|perplexitybot|perplexity-user|meta-externalagent|cohere-ai|bytespider|ccbot|amazonbot|diffbot|discordbot/i;
 
 const SKIP_ROUTES = new Set([
   'library', 'chat', 'history', 'profile', 'pricing', 'signup', 'login',

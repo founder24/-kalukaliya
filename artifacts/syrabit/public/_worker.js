@@ -33,7 +33,11 @@
 // Bytespider, …) are included so we can serve them llms.txt via this
 // same prerender path instead of the SPA shell.
 // ────────────────────────────────────────────────────────────────────────────
-const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|duckduckbot|slurp|baiduspider|applebot|applebot-extended|chatgpt-user|oai-searchbot|gptbot|perplexitybot|perplexity-user|claudebot|claude-web|anthropic-ai|meta-externalagent|bytespider|ccbot|amazonbot|facebookexternalhit|facebookbot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot/i;
+// Task #9 — canonical bot registry lives at `infra/bot-rules.yaml`.
+// CI guard `scripts/check_bot_rules_drift.py` enforces that every token
+// from the verified_search + citation_ai + training_ai buckets appears
+// in the regex below.
+const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|duckduckbot|slurp|baiduspider|applebot|applebot-extended|petalbot|yeti|mojeekbot|seznambot|youbot|msnbot|chatgpt-user|oai-searchbot|gptbot|perplexitybot|perplexity-user|claudebot|claude-web|anthropic-ai|meta-externalagent|bytespider|ccbot|cohere-ai|amazonbot|diffbot|facebookexternalhit|facebookbot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot/i;
 
 // Backend that serves bot-rendered HTML. Configured at build time via
 // the BACKEND_BOT_URL env var on the Pages project; falls back to the

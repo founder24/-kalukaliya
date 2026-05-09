@@ -192,6 +192,12 @@ async def get_library_analytics(days: int = 30):
 
 
 # ── Bot/crawler User-Agent patterns (canonical source) ────────────────────────
+# Task #9 — canonical bot registry lives at `infra/bot-rules.yaml`.
+# CI guard `scripts/check_bot_rules_drift.py` enforces that every token
+# from the verified_search + citation_ai + training_ai buckets appears
+# in the regex below, and every abusive-bucket token appears in
+# `_ABUSIVE_SCRAPER_UA_RE`. Adding a bot to the YAML without updating
+# this regex (or vice versa) fails the drift gate.
 _SEARCH_BOT_UA_RE = re.compile(
     r"googlebot|google-extended|googleother|google-inspectiontool|"
     r"bingbot|yandexbot|yandex|duckduckbot|slurp|baiduspider|"
@@ -200,6 +206,13 @@ _SEARCH_BOT_UA_RE = re.compile(
     r"gptbot|oai-searchbot|chatgpt-user|claudebot|claude-web|perplexitybot|"
     r"perplexity-user|anthropic-ai|meta-externalagent|"
     r"youbot|"  # You.com search/answer engine — cites sources, drives referral traffic
+    # Task #9 — long-tail verified search bots (Allow in robots.txt;
+    # cf.verifiedBot or KV-cached rDNS is the trust gate at the edge)
+    r"petalbot|yeti|mojeekbot|seznambot|"
+    # Task #9 — training-AI crawlers (still recognised here so the
+    # union counts them in analytics; the worker hard-403s the bucket
+    # via AI_BOT_UA before they reach the origin)
+    r"ccbot|cohere-ai|bytespider|amazonbot|diffbot|"
     r"rogerbot|embedly|quora link preview|showyoubot|"
     r"outbrain|pinterest/0\.|developers\.google\.com/\+/web/snippet|slackbot|"
     r"vkshare|w3c_validator|redditbot|googleweblight",
@@ -223,7 +236,9 @@ _TRAINING_SCRAPER_UA_RE = re.compile(
 
 _ABUSIVE_SCRAPER_UA_RE = re.compile(
     r"scrapy|wget|curl|python-requests|go-http-client|java/|okhttp|"
-    r"ahrefsbot|semrushbot|nmap|masscan|zgrab|heritrix",
+    r"ahrefsbot|semrushbot|nmap|masscan|zgrab|heritrix|"
+    # Task #9 — generic SEO/scraper bots; see infra/bot-rules.yaml
+    r"dotbot|mj12bot",
     re.IGNORECASE,
 )
 
