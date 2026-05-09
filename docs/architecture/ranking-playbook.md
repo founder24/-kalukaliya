@@ -63,3 +63,85 @@ When a lever moves rank in the expected direction, mark the row
 in the *opposite* direction, mark **Reverted** with the same
 metadata. Either way, update this file in the same PR — the
 playbook only stays useful if it carries the truth.
+
+## §6 Cache hit-ratio verification window (Task #29)
+
+This section replaces the qualitative "Expected impact" column for
+the **cache levers** (rows 1, 2, 7) with the post-merge KV
+hit-ratio numbers actually observed in production after Tasks #10
+(semantic-fingerprint cache + deterministic templates) and #12
+(AEO answer-card edge cache) have been live for **14 days**.
+
+### Window provenance
+
+- **#10 merged:** `2026-05-09` (commit `Task #10 — semantic cache
+  fingerprint & deterministic render` per `git log --grep="Task #10"`).
+- **#12 merged:** `2026-05-09` (commit `Task #12 — AEO Answer-Card
+  & FAQ materialization (review fixes)` `2b4e8a6`).
+- **Window opens:** `2026-05-09` 00:00 UTC.
+- **Window closes:** `2026-05-23` 00:00 UTC (14 d).
+- **Verification owner:** the engineer assigned the follow-up
+  *"Fill in the §6 cache hit-ratio numbers on 2026-05-23"* (queued
+  by Task #29).
+
+> As of the PR that introduced this section, the window has just
+> opened (today **is** `2026-05-09`). The measurement table below
+> ships **empty on purpose** — filling it requires real production
+> traffic that does not yet exist. Do **not** backfill with
+> synthetic numbers; an empty cell here is honest information,
+> a synthetic number is misinformation.
+
+### Where the numbers come from
+
+Per-content-type hit ratios are surfaced live by the existing
+admin route — no new instrumentation needed:
+
+1. **`GET /api/health/cache`** → `ai_input_cache.per_content_type`
+   carries the `fingerprint_hit_ratio` + `legacy_hit_ratio` rows
+   per content_type (route declared in
+   `artifacts/syrabit-backend/routes/admin_cache.py:248`).
+2. **`Syrabit/Cache::KvPrewarmSuccessRate`** CloudWatch metric
+   (emitted by the nightly `prewarm-seo-routes` Lambda — see
+   `aca_jobs/prewarm_seo_routes.py`) — read 14-d average via
+   `aws cloudwatch get-metric-statistics --namespace Syrabit/Cache
+   --metric-name KvPrewarmSuccessRate --period 86400
+   --statistics Average --start-time 2026-05-09T00:00:00Z
+   --end-time 2026-05-23T00:00:00Z`.
+3. **AEO answer-card edge cache** (Task #12) — pull the per-route
+   hit-rate via the `edge_targets[*].live_hit_rate` field on the
+   same `/api/health/cache` snapshot (decorated by
+   `_fetch_cf_edge_hit_rates` against the Cloudflare GraphQL
+   `httpRequestsAdaptiveGroups` endpoint).
+
+### Measurement table (FILL ON 2026-05-23)
+
+Target: ≥ 70 % KV hit-ratio for every materialization-eligible
+`content_type` (`mcq` / `flashcard` / `definition` / `glossary` /
+`chapter_summary`). Below 70 % → file a follow-up to either raise
+prewarm coverage (`PREWARM_TOP_N`) or extend TTL via
+`cache_calendar.recommended_ttl_seconds(...)`.
+
+| content_type        | fingerprint_hit_ratio | legacy_hit_ratio | KvPrewarmSuccessRate (14-d avg) | Verdict (≥ 70 %?) | Action |
+| ------------------- | --------------------- | ---------------- | ------------------------------- | ----------------- | ------ |
+| `mcq`               | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
+| `flashcard`         | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
+| `definition`        | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
+| `glossary`          | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
+| `chapter_summary`   | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
+| **AEO answer-card** | n/a (edge layer)      | n/a              | _pending_ (edge `live_hit_rate`) | _pending_         | _pending_ |
+
+When this table is filled in, also update the **Expected impact**
+column for rows 1, 2 and 7 in §"Levers" above to the qualitative
+verdict (small / medium / large) implied by the measured deltas.
+
+### Architecture-matrix sync
+
+Rows `#572` (Semantic query fingerprinting), `#574` (Prewarming
+engine) and `#577` (Retrieval result cache) in
+[`infra/architecture-matrix.json`](../../infra/architecture-matrix.json)
+were already flipped to `IMPLEMENTED` by Tasks #10 / #13 / #15 —
+no status flip is needed in this PR. The 14-day verification
+gate is documented inline on each of those rows under the new
+`verification_window` key (start / end / playbook section), so a
+future audit can answer *"was the implemented status backed by
+real production numbers?"* in one read.
