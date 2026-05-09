@@ -83,6 +83,7 @@ VITE_SUPABASE_URL = "https://czeznmqogtwecidhpysa.supabase.co"
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6ZXpubXFvZ3R3ZWNpZGhweXNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxMjI1NDUsImV4cCI6MjA4NzY5ODU0NX0.7J2dlwfibjTArT6J4N3AnJ90OfgW4nYsym4T8kJ81u4"
 PINECONE_INDEX = "syrabit-ahsec"
 PINECONE_WRITE = "true"
+CLOUDFLARE_ACCOUNT_ID = "d66e40eac539fff1db270fddf384a5ec"
 
 [userenv.development]
 
