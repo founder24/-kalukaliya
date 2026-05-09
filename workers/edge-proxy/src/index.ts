@@ -3849,12 +3849,18 @@ async function _handleEdgeFetch(
     let remaining = 999999;
 
     // Run forward-confirmed rDNS once per request for any unverified
-    // CRITICAL_BOT_UA (spoofed OR no-CIDR-list case e.g. YouBot). The
-    // result drives BOTH the spoof-403 gate below AND the fast-path
-    // promotion that follows. Caching is in `verifyBotIpWithKv` (24 h
-    // KV, family-scoped key), so re-using the result across both
-    // branches doesn't double-charge DoH calls.
-    if (!isSearchBot && CRITICAL_BOT_UA.test(ua)) {
+    // VERIFIED_BOT_UA candidate — that is the full search/citation
+    // family (Googlebot, Bingbot, Yandex, YouBot, Yeti/Naver,
+    // SeznamBot, MojeekBot, Slurp, etc.), NOT just CRITICAL_BOT_UA.
+    // YouBot in particular publishes no static CIDR list and isn't
+    // covered by CRITICAL_BOT_UA, so without this expanded gate it
+    // would never reach the 60 000 RPM fast path. The result drives
+    // BOTH the spoof-403 gate below (gated on the narrower
+    // CRITICAL_BOT_UA) AND the fast-path promotion that follows.
+    // Caching is in `verifyBotIpWithKv` (24 h KV, family-scoped
+    // key), so re-using the result across both branches doesn't
+    // double-charge DoH calls.
+    if (!isSearchBot && VERIFIED_BOT_UA.test(ua)) {
       fcrDnsAlreadyConfirmed = await verifyBotIpWithKv(env, ctx, ua, clientIp);
       if (fcrDnsAlreadyConfirmed) {
         isSearchBot = true;
@@ -4154,17 +4160,24 @@ async function _handleEdgeFetch(
         const botResp = await handleBotContentRequest(env, pathname, clientIp, request, ctx);
         if (botResp) return botResp;
       } else if (botResult.claimsBot && !isSearchBot && request.method === "GET") {
-        // Unverified claimed bots (UA matches bot pattern but cf.verifiedBot is false):
-        // enforce the same 120 RPM ceiling as general API traffic to prevent scraping.
-        const unverifiedBotRlKey = `rl:${clientIp}`;
-        const unverifiedBotRl = await checkRateLimitWithDO(unverifiedBotRlKey, env, RATE_LIMIT_RPM);
+        // Unverified claimed bots (UA matches bot pattern but
+        // neither cf.verifiedBot nor FCrDNS confirmed): per task #9
+        // requirement, fall back to the SHARED bot bucket
+        // (BOT_RATE_LIMIT_RPM = 3 000 RPM) — NOT the general
+        // 120 RPM ceiling — so legitimate crawlers caught in
+        // verification edge cases (cold KV, transient DoH failure)
+        // are not throttled to user-API limits. This is still a
+        // 20× tighter bucket than the verified-bot fast path, so
+        // a real spoofer cannot abuse it for scraping.
+        const unverifiedBotRlKey = `rl:ubot:${clientIp}`;
+        const unverifiedBotRl = await checkRateLimitWithDO(unverifiedBotRlKey, env, BOT_RATE_LIMIT_RPM);
         if (!unverifiedBotRl.allowed) {
           return new Response("Too Many Requests", {
             status: 429,
             headers: {
               ...cors,
               "Retry-After": String(RATE_LIMIT_WINDOW_S),
-              "X-RateLimit-Limit": String(RATE_LIMIT_RPM),
+              "X-RateLimit-Limit": String(BOT_RATE_LIMIT_RPM),
               "X-RateLimit-Remaining": "0",
               "X-RateLimit-Scope": "unverified_bot",
             },

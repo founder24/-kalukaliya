@@ -163,6 +163,57 @@ def test_spoofed_critical_bot_returns_403():
     )
 
 
+def test_fcrdns_promotion_covers_full_verified_bot_family():
+    """The FCrDNS promotion gate MUST run for the FULL VERIFIED_BOT_UA
+    family — not the narrower CRITICAL_BOT_UA. YouBot, Yeti, SeznamBot,
+    MojeekBot, Slurp etc. don't all publish static CIDR lists, so the
+    sole path to the 60 000 RPM fast path for them is FCrDNS. Without
+    expanding the gate from CRITICAL_BOT_UA to VERIFIED_BOT_UA those
+    bots would silently fall through to the unverified bucket."""
+    src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
+    # The promotion block's `if` MUST gate on VERIFIED_BOT_UA, not
+    # CRITICAL_BOT_UA. Locate the promotion block and assert.
+    m = re.search(
+        r"if\s*\(\s*!isSearchBot\s*&&\s*([A-Z_]+)\.test\(ua\)\s*\)\s*\{[\s\S]{0,400}?isSearchBot\s*=\s*true",
+        src,
+    )
+    assert m, "could not locate FCrDNS→isSearchBot promotion block"
+    assert m.group(1) == "VERIFIED_BOT_UA", (
+        f"FCrDNS promotion gate uses {m.group(1)!r} but must use "
+        f"VERIFIED_BOT_UA so YouBot/Yeti/Seznam/Mojeek can reach the "
+        f"verified-bot fast path."
+    )
+    # And YouBot + Yeti must actually be in VERIFIED_BOT_UA.
+    vbot_def = re.search(r"const\s+VERIFIED_BOT_UA\s*=\s*/(.+?)/i", src)
+    assert vbot_def
+    body = vbot_def.group(1).lower()
+    for bot in ("youbot", "yeti", "seznambot", "mojeekbot", "slurp", "msnbot"):
+        assert bot in body, (
+            f"VERIFIED_BOT_UA missing {bot!r} — long-tail verified bot "
+            f"would never enter the fast-path branch"
+        )
+
+
+def test_unverified_bot_fallback_uses_shared_bot_bucket():
+    """Per task #9: when a bot UA fails BOTH cf.verifiedBot AND FCrDNS,
+    it must fall back to the SHARED bot bucket (BOT_RATE_LIMIT_RPM,
+    3 000 RPM) — not the general 120 RPM user limit. The previous
+    code routed unverified bots to RATE_LIMIT_RPM which throttled
+    legitimate crawlers caught in verification edge cases."""
+    src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
+    # Locate the unverified-bot 429 branch.
+    m = re.search(
+        r"botResult\.claimsBot\s*&&\s*!isSearchBot[\s\S]{0,800}?"
+        r"checkRateLimitWithDO\([^,]+,\s*env,\s*([A-Z_]+)\s*\)",
+        src,
+    )
+    assert m, "could not locate unverified-bot rate-limit branch"
+    assert m.group(1) == "BOT_RATE_LIMIT_RPM", (
+        f"unverified-bot bucket uses {m.group(1)!r} but task #9 requires "
+        f"BOT_RATE_LIMIT_RPM (3 000 RPM shared bot bucket)."
+    )
+
+
 def test_fcrdns_promotes_to_verified_bot_fast_path():
     """Task #9 core: a CRITICAL_BOT_UA from an IP that misses the static
     CIDR list but PASSES forward-confirmed rDNS MUST be promoted to the
