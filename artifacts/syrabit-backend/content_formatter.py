@@ -460,9 +460,8 @@ async def format_content_batched(
     return await batcher.submit((text, style, lang, max_tokens))
 
 
-_DETERMINISTIC_TEMPLATES_DIR = (
-    __import__("os").path.join(__import__("os").path.dirname(__file__),
-                                "templates", "deterministic")
+_DETERMINISTIC_TEMPLATES_DIR = os.path.join(
+    os.path.dirname(__file__), "templates", "deterministic",
 )
 _MATERIALIZATION_QUERY_TYPES = frozenset({
     "definition", "mcq", "flashcard", "glossary", "chapter_summary",
@@ -476,9 +475,8 @@ def _load_template(query_type: str) -> "str | None":
     files baked into the wheel."""
     if query_type in _TEMPLATE_CACHE:
         return _TEMPLATE_CACHE[query_type]
-    import os as _os
-    path = _os.path.join(_DETERMINISTIC_TEMPLATES_DIR, f"{query_type}.md")
-    if not _os.path.isfile(path):
+    path = os.path.join(_DETERMINISTIC_TEMPLATES_DIR, f"{query_type}.md")
+    if not os.path.isfile(path):
         return None
     try:
         with open(path, "r", encoding="utf-8") as fh:
