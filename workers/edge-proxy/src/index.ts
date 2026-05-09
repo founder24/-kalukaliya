@@ -1053,7 +1053,7 @@ function isAiPath(p: string): boolean {
 // CI guard `scripts/check_bot_rules_drift.py` enforces that every token
 // from the verified_search + citation_ai + training_ai buckets appears
 // in the regex below.
-const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|duckduckbot|slurp|baiduspider|applebot|applebot-extended|petalbot|yeti|mojeekbot|seznambot|msnbot|chatgpt-user|oai-searchbot|gptbot|perplexitybot|perplexity-user|claudebot|claude-web|anthropic-ai|meta-externalagent|bytespider|ccbot|cohere-ai|amazonbot|diffbot|facebookexternalhit|facebookbot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|youbot/i;
+const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot|perplexitybot|perplexity-user|oai-searchbot|chatgpt-user|gptbot|claudebot|claude-web|anthropic-ai|applebot-extended|ccbot|cohere-ai|bytespider|amazonbot|diffbot|meta-externalagent|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|discordbot|slackbot|redditbot/i;
 
 // Task #9 — Verified-search + citation-AI fast path.
 // `VERIFIED_BOT_UA` covers the union of the verified_search and
@@ -1107,7 +1107,7 @@ const VERIFIED_BOT_RATE_LIMIT_RPM = 60000;
 // Task #287: ClaudeBot, Claude-Web, anthropic-ai added — keep training
 // crawlers blocked while still allowing answer bots (PerplexityBot,
 // ChatGPT-User, OAI-SearchBot) which are intentionally absent here.
-const AI_BOT_UA = /\b(?:GPTBot|CCBot|Google-Extended|Applebot-Extended|Meta-ExternalAgent|Bytespider|Amazonbot|Cohere-AI|Diffbot|ClaudeBot|Claude-Web|anthropic-ai)\b/i;
+const AI_BOT_UA = /\b(?:gptbot|claudebot|claude-web|anthropic-ai|google-extended|applebot-extended|ccbot|cohere-ai|bytespider|amazonbot|diffbot|meta-externalagent)\b/i;
 
 interface CidrRange { network: number; mask: number }
 

@@ -37,7 +37,7 @@
 // CI guard `scripts/check_bot_rules_drift.py` enforces that every token
 // from the verified_search + citation_ai + training_ai buckets appears
 // in the regex below.
-const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|duckduckbot|slurp|baiduspider|applebot|applebot-extended|petalbot|yeti|mojeekbot|seznambot|youbot|msnbot|chatgpt-user|oai-searchbot|gptbot|perplexitybot|perplexity-user|claudebot|claude-web|anthropic-ai|meta-externalagent|bytespider|ccbot|cohere-ai|amazonbot|diffbot|facebookexternalhit|facebookbot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot/i;
+const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot|perplexitybot|perplexity-user|oai-searchbot|chatgpt-user|gptbot|claudebot|claude-web|anthropic-ai|applebot-extended|ccbot|cohere-ai|bytespider|amazonbot|diffbot|meta-externalagent|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|discordbot|slackbot|redditbot/i;
 
 // Backend that serves bot-rendered HTML. Configured at build time via
 // the BACKEND_BOT_URL env var on the Pages project; falls back to the

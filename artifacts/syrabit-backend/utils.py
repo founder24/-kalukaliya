@@ -199,23 +199,17 @@ async def get_library_analytics(days: int = 30):
 # `_ABUSIVE_SCRAPER_UA_RE`. Adding a bot to the YAML without updating
 # this regex (or vice versa) fails the drift gate.
 _SEARCH_BOT_UA_RE = re.compile(
-    r"googlebot|google-extended|googleother|google-inspectiontool|"
-    r"bingbot|yandexbot|yandex|duckduckbot|slurp|baiduspider|"
-    r"facebookexternalhit|twitterbot|linkedinbot|telegrambot|whatsapp|"
-    r"applebot|applebot-extended|ia_archiver|msnbot|"
-    r"gptbot|oai-searchbot|chatgpt-user|claudebot|claude-web|perplexitybot|"
-    r"perplexity-user|anthropic-ai|meta-externalagent|"
-    r"youbot|"  # You.com search/answer engine — cites sources, drives referral traffic
-    # Task #9 — long-tail verified search bots (Allow in robots.txt;
-    # cf.verifiedBot or KV-cached rDNS is the trust gate at the edge)
-    r"petalbot|yeti|mojeekbot|seznambot|"
-    # Task #9 — training-AI crawlers (still recognised here so the
-    # union counts them in analytics; the worker hard-403s the bucket
-    # via AI_BOT_UA before they reach the origin)
-    r"ccbot|cohere-ai|bytespider|amazonbot|diffbot|"
-    r"rogerbot|embedly|quora link preview|showyoubot|"
-    r"outbrain|pinterest/0\.|developers\.google\.com/\+/web/snippet|slackbot|"
-    r"vkshare|w3c_validator|redditbot|googleweblight",
+    r"googlebot|google-extended|googleother|google-inspectiontool|bingbot|"
+    r"duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|"
+    r"seznambot|youbot|slurp|msnbot|perplexitybot|perplexity-user|"
+    r"oai-searchbot|chatgpt-user|gptbot|claudebot|claude-web|anthropic-ai|"
+    r"applebot-extended|ccbot|cohere-ai|bytespider|amazonbot|diffbot|"
+    r"meta-externalagent|facebookexternalhit|facebookbot|twitterbot|"
+    r"linkedinbot|telegrambot|whatsapp|discordbot|slackbot|redditbot|"
+    r"ia_archiver|ahrefsbot|semrushbot|rogerbot|mj12bot|dotbot|embedly|"
+    r"quora link preview|showyoubot|outbrain|pinterest/0\.|"
+    r"developers\.google\.com/\+/web/snippet|vkshare|w3c_validator|"
+    r"googleweblight",
     re.IGNORECASE,
 )
 
@@ -236,9 +230,7 @@ _TRAINING_SCRAPER_UA_RE = re.compile(
 
 _ABUSIVE_SCRAPER_UA_RE = re.compile(
     r"scrapy|wget|curl|python-requests|go-http-client|java/|okhttp|"
-    r"ahrefsbot|semrushbot|nmap|masscan|zgrab|heritrix|"
-    # Task #9 — generic SEO/scraper bots; see infra/bot-rules.yaml
-    r"dotbot|mj12bot",
+    r"ahrefsbot|semrushbot|nmap|masscan|zgrab|heritrix|dotbot|mj12bot",
     re.IGNORECASE,
 )
 

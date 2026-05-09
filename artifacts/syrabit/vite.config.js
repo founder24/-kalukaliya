@@ -25,7 +25,7 @@ const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY
 // CI guard `scripts/check_bot_rules_drift.py` enforces that every token
 // from the verified_search + citation_ai + training_ai buckets appears
 // in the regex below.
-const BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|yandexbot|yandex|duckduckbot|slurp|baiduspider|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|applebot|applebot-extended|ia_archiver|msnbot|ahrefsbot|semrushbot|petalbot|yeti|mojeekbot|seznambot|youbot|gptbot|oai-searchbot|chatgpt-user|claudebot|claude-web|anthropic-ai|perplexitybot|perplexity-user|meta-externalagent|cohere-ai|bytespider|ccbot|amazonbot|diffbot|discordbot/i;
+const BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot|perplexitybot|perplexity-user|oai-searchbot|chatgpt-user|gptbot|claudebot|claude-web|anthropic-ai|applebot-extended|ccbot|cohere-ai|bytespider|amazonbot|diffbot|meta-externalagent|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|discordbot|slackbot|redditbot|ia_archiver|ahrefsbot|semrushbot|rogerbot|mj12bot|dotbot/i;
 
 const SKIP_ROUTES = new Set([
   'library', 'chat', 'history', 'profile', 'pricing', 'signup', 'login',

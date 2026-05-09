@@ -180,30 +180,19 @@ def render_target(target: str, tokens: dict[str, list[str]]) -> str:
 def render_manifest(tokens: dict[str, list[str]]) -> str:
     """Render the canonical regex artifact committed at
     ``infra/bot-regex.generated.json``. CI runs ``--apply`` and then
-    ``git diff --exit-code`` on this file — that's the lock-step
-    codegen contract: a YAML edit MUST produce a regenerated artifact
-    in the same commit, otherwise CI fails.
+    ``git diff --exit-code`` on this file AND on the four runtime
+    regex sources — that's the lock-step codegen contract: a YAML
+    edit MUST produce a regenerated artifact AND regenerated runtime
+    regex literals in the same commit, otherwise CI fails.
 
-    Codegen model — INTENTIONAL DESIGN (see review comment round 6):
-
-      We use a "manifest + drift guard" model, NOT full in-place
-      source overwrite of the four runtime regex files. Rationale:
-      each runtime regex carries hand-curated benign tokens
-      (social-card crawlers like Twitterbot/FacebookExternalHit,
-      IA archiver, legacy SEO crawlers like rogerbot/ahrefsbot) that
-      are deliberately NOT owned by the YAML registry — the YAML
-      defines the canonical *floor* (every token in YAML must
-      appear in every runtime regex), while the runtime regexes are
-      free to add additional benign UAs. Full source overwrite
-      would clobber that benign list on every CI run.
-
-      Enforcement is bidirectional via
-      ``scripts/check_bot_rules_drift.py``:
-        * forward — every YAML token MUST be present in each runtime
-          regex (alternation-boundary match, not substring);
-        * reverse — every UA-shaped token in each runtime regex MUST
-          be in the YAML OR on the explicit ``_BENIGN_REGEX_TOKENS``
-          allowlist.
+    Codegen model — IN-PLACE SOURCE OVERWRITE (round-11 reviewer
+    requirement). ``--apply`` walks ``APPLY_SPECS`` and rewrites the
+    body of each runtime regex literal from YAML buckets +
+    per-target benign extras (declared in ``APPLY_SPECS`` itself,
+    not in YAML, because they are not crawlers under bucket
+    semantics — they are social-card / archival / legacy-SEO UAs
+    that historically appeared in the union regex). The bidirectional
+    drift guard remains as belt-and-braces enforcement.
     """
     import json
     payload = {
@@ -220,13 +209,191 @@ def render_manifest(tokens: dict[str, list[str]]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# In-place codegen (round-11 requirement).
+# ---------------------------------------------------------------------------
+# Each spec rewrites the body of one runtime regex literal. The body is
+# computed as the concatenation, in this order, of:
+#   1. tokens from the YAML buckets listed in ``buckets``,
+#   2. the ``extras`` list (per-target benign UAs that are not crawlers
+#      under the four canonical buckets — social-card crawlers, archival,
+#      legacy SEO — kept here so YAML stays a pure crawler registry).
+# ``locator`` is a regex with three capturing groups: prefix, body,
+# suffix. ``--apply`` replaces ``body`` with the rendered alternation,
+# preserving prefix/suffix verbatim.
+
+# Social/preview crawlers + archival + legacy SEO. Order is the order
+# they appear in the alternation (after the YAML tokens).
+_SOCIAL_PREVIEW = [
+    "facebookexternalhit", "facebookbot", "twitterbot", "linkedinbot",
+    "telegrambot", "whatsapp", "discordbot", "slackbot", "redditbot",
+]
+_ARCHIVAL = ["ia_archiver"]
+_LEGACY_SEO = ["ahrefsbot", "semrushbot", "rogerbot", "mj12bot", "dotbot"]
+_SOCIAL_EXTRAS = [
+    "embedly", "quora link preview", "showyoubot", "outbrain",
+    r"pinterest/0\.", r"developers\.google\.com/\+/web/snippet",
+    "vkshare", "w3c_validator", "googleweblight",
+]
+# Generic abusive-bucket extras (not in YAML; legacy SEO bots that
+# share the abusive bucket's 120 RPM ceiling).
+_ABUSIVE_EXTRAS: list[str] = []
+
+APPLY_SPECS: list[dict] = [
+    # ---- artifacts/syrabit-backend/utils.py: _SEARCH_BOT_UA_RE ----
+    {
+        "name": "utils._SEARCH_BOT_UA_RE",
+        "path": ROOT / "artifacts" / "syrabit-backend" / "utils.py",
+        "locator": re.compile(
+            r"(_SEARCH_BOT_UA_RE\s*=\s*re\.compile\(\n)"
+            r"((?:[ \t]+(?:r\"[^\"]*\",?\s*(?:#[^\n]*)?|#[^\n]*)\n)+)"
+            r"([ \t]+re\.IGNORECASE,\n\))",
+        ),
+        "buckets": ["verified_search", "citation_ai", "training_ai"],
+        "extras": (
+            _SOCIAL_PREVIEW + _ARCHIVAL + _LEGACY_SEO + _SOCIAL_EXTRAS
+        ),
+        "render": "python_raw_string_block",
+    },
+    # ---- artifacts/syrabit-backend/utils.py: _ABUSIVE_SCRAPER_UA_RE ----
+    {
+        "name": "utils._ABUSIVE_SCRAPER_UA_RE",
+        "path": ROOT / "artifacts" / "syrabit-backend" / "utils.py",
+        "locator": re.compile(
+            r"(_ABUSIVE_SCRAPER_UA_RE\s*=\s*re\.compile\(\n)"
+            r"((?:[ \t]+(?:r\"[^\"]*\",?\s*(?:#[^\n]*)?|#[^\n]*)\n)+)"
+            r"([ \t]+re\.IGNORECASE,\n\))",
+        ),
+        "buckets": ["abusive"],
+        "extras": _ABUSIVE_EXTRAS,
+        "render": "python_raw_string_block",
+    },
+    # ---- artifacts/syrabit/vite.config.js: BOT_UA ----
+    {
+        "name": "vite.BOT_UA",
+        "path": ROOT / "artifacts" / "syrabit" / "vite.config.js",
+        "locator": re.compile(r"(const BOT_UA = /)([^/\n]+)(/i;)"),
+        "buckets": ["verified_search", "citation_ai", "training_ai"],
+        "extras": _SOCIAL_PREVIEW + _ARCHIVAL + _LEGACY_SEO,
+        "render": "js_alternation",
+    },
+    # ---- artifacts/syrabit/public/_worker.js: SEARCH_BOT_UA ----
+    {
+        "name": "_worker.SEARCH_BOT_UA",
+        "path": ROOT / "artifacts" / "syrabit" / "public" / "_worker.js",
+        "locator": re.compile(r"(const SEARCH_BOT_UA = /)([^/\n]+)(/i;)"),
+        "buckets": ["verified_search", "citation_ai", "training_ai"],
+        "extras": _SOCIAL_PREVIEW,
+        "render": "js_alternation",
+    },
+    # ---- workers/edge-proxy/src/index.ts: SEARCH_BOT_UA ----
+    {
+        "name": "edge.SEARCH_BOT_UA",
+        "path": ROOT / "workers" / "edge-proxy" / "src" / "index.ts",
+        "locator": re.compile(r"(const SEARCH_BOT_UA = /)([^/\n]+)(/i;)"),
+        "buckets": ["verified_search", "citation_ai", "training_ai"],
+        "extras": _SOCIAL_PREVIEW,
+        "render": "js_alternation",
+    },
+    # ---- workers/edge-proxy/src/index.ts: AI_BOT_UA ----
+    {
+        "name": "edge.AI_BOT_UA",
+        "path": ROOT / "workers" / "edge-proxy" / "src" / "index.ts",
+        "locator": re.compile(r"(const AI_BOT_UA = /)([^/\n]+)(/i;)"),
+        "buckets": ["training_ai"],
+        "extras": [],
+        "render": "js_word_boundary_group",
+    },
+]
+
+
+def _render_body(spec: dict, tokens: dict[str, list[str]]) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for b in spec["buckets"]:
+        for t in tokens.get(b, []):
+            if t not in seen:
+                merged.append(t)
+                seen.add(t)
+    for t in spec["extras"]:
+        if t not in seen:
+            merged.append(t)
+            seen.add(t)
+    if spec["render"] == "js_alternation":
+        # Bot tokens are mostly safe — only `/` needs escaping for JS
+        # regex literals. We keep extras that already contain regex
+        # metachars (e.g. `pinterest/0\.`) verbatim.
+        return "|".join(_js_token(t) for t in merged)
+    if spec["render"] == "js_word_boundary_group":
+        return r"\b(?:" + "|".join(_js_token(t) for t in merged) + r")\b"
+    if spec["render"] == "python_raw_string_block":
+        # Multi-line raw-string concatenation. 4-space indent, 75-col
+        # soft wrap.
+        chunks: list[str] = []
+        cur = ""
+        for tok in merged:
+            piece = tok + "|"
+            if len(cur) + len(piece) > 70 and cur:
+                chunks.append(cur)
+                cur = piece
+            else:
+                cur += piece
+        if cur:
+            chunks.append(cur)
+        # Drop trailing `|` from last chunk.
+        chunks[-1] = chunks[-1].rstrip("|")
+        # Trailing comma on the LAST raw-string segment — required so
+        # the surrounding `re.compile(...)` arglist stays valid Python
+        # (without it `re.IGNORECASE` becomes implicit string
+        # concatenation rather than a separate positional arg, raising
+        # SyntaxError at import time).
+        out_lines = [f'    r"{c}"' for c in chunks]
+        out_lines[-1] += ","
+        return "\n".join(out_lines) + "\n"
+    raise ValueError(f"unknown render: {spec['render']}")
+
+
+def _js_token(tok: str) -> str:
+    """Escape a token for embedding inside a JS regex literal. We only
+    escape `/` (the literal terminator) — every other char in our token
+    set is regex-safe, and pre-escaped sequences like ``pinterest/0\\.``
+    are intentionally preserved verbatim by callers."""
+    if "\\" in tok:  # already-escaped extras pass through
+        return tok
+    return tok.replace("/", r"\/")
+
+
+def apply_in_place(tokens: dict[str, list[str]]) -> list[str]:
+    """Rewrite the body of each runtime regex literal from YAML +
+    extras. Returns a list of human-readable change descriptions
+    (one per spec). Raises ``RuntimeError`` if a locator misses."""
+    changes: list[str] = []
+    for spec in APPLY_SPECS:
+        path: Path = spec["path"]
+        text = path.read_text(encoding="utf-8")
+        m = spec["locator"].search(text)
+        if not m:
+            raise RuntimeError(
+                f"apply: locator missed in {path.relative_to(ROOT)} "
+                f"for {spec['name']}",
+            )
+        new_body = _render_body(spec, tokens)
+        new_text = text[:m.start()] + m.group(1) + new_body + m.group(3) + text[m.end():]
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
+            changes.append(f"rewrote {spec['name']} in {path.relative_to(ROOT)}")
+        else:
+            changes.append(f"unchanged {spec['name']} in {path.relative_to(ROOT)}")
+    return changes
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("target", nargs="?", choices=TARGETS)
     ap.add_argument(
         "--apply", action="store_true",
-        help="Write the generated regex manifest to "
-             "infra/bot-regex.generated.json (CI lock-step codegen).",
+        help="Rewrite the four runtime regex sources in-place from YAML "
+             "and emit infra/bot-regex.generated.json (CI lock-step codegen).",
     )
     args = ap.parse_args()
     rules = _load_yaml()
@@ -237,6 +404,8 @@ def main() -> int:
         print(f"wrote {out_path.relative_to(ROOT)} "
               f"({sum(len(v) for v in tokens.values())} tokens, "
               f"{len(TARGETS)} targets)")
+        for line in apply_in_place(tokens):
+            print(line)
         return 0
     if args.target:
         print(render_target(args.target, tokens))
