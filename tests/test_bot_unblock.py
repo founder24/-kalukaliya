@@ -246,14 +246,29 @@ def test_dashboard_runbook_documents_bot_fight_mode_off():
 # ─── Live checks (gated on BOT_UNBLOCK_TEST_URL) ───────────────────────────────
 
 
+def _assert_prerendered(html: str, ua: str) -> None:
+    """Body-level prerender contract: the worker must serve SSR'd HTML
+    (not the SPA shell) for verified search/citation crawlers. SPA-shell
+    responses lack both an <h1> AND a schema.org JSON-LD block — checking
+    for both catches the failure mode where the worker returns 200 but
+    cache rules bypassed prerender."""
+    assert re.search(r"<h1[^>]*>", html, re.IGNORECASE), (
+        f"{ua}: response missing <h1> — looks like SPA shell, not prerender"
+    )
+    assert re.search(
+        r'application/ld\+json[\s\S]*?schema\.org', html, re.IGNORECASE,
+    ), f"{ua}: response missing schema.org JSON-LD — prerender skipped"
+
+
 @pytest.mark.skipif(
     not LIVE_URL,
     reason="set BOT_UNBLOCK_TEST_URL to enable live verified-bot probe",
 )
-def test_live_googlebot_not_blocked():
+def test_live_googlebot_not_blocked_and_prerendered():
     """A request from a Googlebot UA must NOT receive a 4xx that would
-    drop it from the index. 429 is the one we're specifically testing
-    for — the verified-bot fast path is supposed to prevent it for any
+    drop it from the index, AND the response body must be the
+    prerendered HTML (h1 + schema.org JSON-LD) — not the SPA shell.
+    The verified-bot fast path is supposed to deliver both for any
     sane crawl rate."""
     import httpx
     r = httpx.get(LIVE_URL, headers={"User-Agent": GOOGLEBOT_UA}, timeout=15.0, follow_redirects=True)
@@ -261,19 +276,25 @@ def test_live_googlebot_not_blocked():
         f"Googlebot got 429 — verified-bot fast path regressed. "
         f"Body: {r.text[:200]}"
     )
-    # 200 / 304 / 301 are all fine — anything else (403, 451) is a bug.
     assert r.status_code in (200, 301, 302, 304), f"unexpected {r.status_code}"
+    if r.status_code == 200:
+        _assert_prerendered(r.text, "Googlebot")
 
 
 @pytest.mark.skipif(
     not LIVE_URL,
     reason="set BOT_UNBLOCK_TEST_URL to enable live citation-AI probe",
 )
-def test_live_perplexity_not_blocked():
+def test_live_perplexity_not_blocked_and_prerendered():
+    """PerplexityBot is in the citation_ai bucket: must be 200 with
+    prerendered HTML (the answer engine cites sources, so we want the
+    full <h1>+JSON-LD payload to land in its index)."""
     import httpx
     r = httpx.get(LIVE_URL, headers={"User-Agent": PERPLEXITY_UA}, timeout=15.0, follow_redirects=True)
     assert r.status_code != 403, "PerplexityBot must be allowed (cites sources)"
     assert r.status_code != 429
+    if r.status_code == 200:
+        _assert_prerendered(r.text, "PerplexityBot")
 
 
 @pytest.mark.skipif(
@@ -288,4 +309,31 @@ def test_live_gptbot_blocked():
     r = httpx.get(LIVE_URL, headers={"User-Agent": GPTBOT_UA}, timeout=15.0, follow_redirects=True)
     assert r.status_code == 403, (
         f"GPTBot was NOT blocked at the edge: status={r.status_code}"
+    )
+
+
+@pytest.mark.skipif(
+    not LIVE_URL,
+    reason="set BOT_UNBLOCK_TEST_URL to enable live spoofed-bot probe",
+)
+def test_live_spoofed_googlebot_hard_403():
+    """A Googlebot UA from a non-Google IP (the test runner) MUST get
+    a hard-403 from the worker's CRITICAL_BOT_UA branch after FCrDNS
+    fails to confirm. The response carries `X-Bot-Verify: spoofed` —
+    that header is the contract the admin tile keys off."""
+    import httpx
+    # Use no_proxy + a bare httpx client so CI runners that route
+    # through a corporate proxy don't accidentally come from a
+    # CF-trusted egress block.
+    r = httpx.get(
+        LIVE_URL, headers={"User-Agent": GOOGLEBOT_UA},
+        timeout=15.0, follow_redirects=False,
+    )
+    assert r.status_code == 403, (
+        f"spoofed Googlebot from non-Google IP must be 403d "
+        f"(got {r.status_code}; X-Bot-Verify={r.headers.get('X-Bot-Verify')!r})"
+    )
+    assert r.headers.get("X-Bot-Verify") == "spoofed", (
+        "missing X-Bot-Verify: spoofed marker — CRITICAL_BOT_UA branch "
+        "did not fire as expected"
     )

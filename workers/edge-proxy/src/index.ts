@@ -1395,6 +1395,11 @@ const BOT_RDNS_SUFFIXES: Array<[string, RegExp, string[]]> = [
   ["yahoo-slurp", /slurp/i, [".crawl.yahoo.net."]],
   ["perplexitybot", /perplexitybot|perplexity-user/i, [".perplexity.ai."]],
   ["openai-search", /oai-searchbot|chatgpt-user/i, [".openai.com."]],
+  // YouBot (you.com) — citation-driving answer engine; per task #9
+  // policy it gets the verified-bot fast path when FCrDNS confirms.
+  // You.com publishes no static CIDR list, so rDNS is the sole gate
+  // here (cf.verifiedBot would also accept it but isn't relied on).
+  ["youbot", /youbot/i, [".you.com.", ".youbot.you.com."]],
 ];
 
 const BOT_RDNS_TTL_S = 86400;

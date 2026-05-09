@@ -23,6 +23,7 @@ on:
     branches: [Replit-agent, master, main]
     paths:
       - "infra/bot-rules.yaml"
+      - "infra/bot-regex.generated.json"
       - "scripts/check_bot_rules_drift.py"
       - "scripts/gen_bot_regex.py"
       - "artifacts/syrabit-backend/utils.py"
@@ -53,6 +54,21 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Regenerate canonical regex manifest from YAML
+        # Lock-step codegen: every edit to infra/bot-rules.yaml must
+        # produce a regenerated infra/bot-regex.generated.json in the
+        # same commit. The `git diff --exit-code` below fails CI if
+        # the committed manifest is stale.
+        run: |
+          set -euo pipefail
+          python3 scripts/gen_bot_regex.py --apply
+      - name: Fail if generated manifest is stale
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- infra/bot-regex.generated.json; then
+            echo "::error::infra/bot-regex.generated.json is stale. Run 'python3 scripts/gen_bot_regex.py --apply' and commit the result."
+            exit 1
+          fi
       - name: Run bot-rules drift guard
         run: |
           set -euo pipefail
