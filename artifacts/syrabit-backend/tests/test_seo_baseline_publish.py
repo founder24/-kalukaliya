@@ -254,6 +254,64 @@ def test_publish_endpoint_does_not_blank_canonical_doc(monkeypatch):
     assert persisted["published_via"] == "post"  # merge applied
 
 
+def test_lambda_handler_resolves_admin_secret_from_arn(monkeypatch):
+    """Round-3 reviewer fix: the Lambda must hydrate ADMIN_JWT_SECRET
+    from ADMIN_JWT_SECRET_ARN via Secrets Manager when the direct
+    env var is unset (Terraform injects only the ARN). Regression
+    guard: if a future refactor breaks the SM fetch path, this test
+    fails fast instead of silently skipping the POST every Monday.
+    """
+    import sys
+    import os
+    import importlib
+
+    # Ensure the lambda_batch module path resolves under tests.
+    sys.path.insert(
+        0,
+        os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "..", "syrabit", "services", "backend",
+        ),
+    )
+
+    # Stub `boto3` + `jwt` BEFORE the lambda module is (re)imported.
+    fake_secret_returned = {"value": None}
+
+    class _StubSm:
+        def get_secret_value(self, SecretId):
+            fake_secret_returned["value"] = SecretId
+            return {"SecretString": "test-secret-from-sm"}
+
+    class _StubBoto3:
+        @staticmethod
+        def client(name):
+            assert name == "secretsmanager"
+            return _StubSm()
+
+    class _StubJwt:
+        @staticmethod
+        def encode(claims, secret, algorithm):
+            assert secret == "test-secret-from-sm"
+            assert claims["role"] == "admin"
+            return "signed.jwt.token"
+
+    sys.modules["boto3"] = _StubBoto3  # type: ignore
+    sys.modules["jwt"] = _StubJwt      # type: ignore
+
+    monkeypatch.delenv("ADMIN_JWT_SECRET", raising=False)
+    monkeypatch.setenv("ADMIN_JWT_SECRET_ARN", "arn:aws:secretsmanager:test")
+
+    try:
+        mod = importlib.import_module("lambda_batch.seo_baseline")
+        importlib.reload(mod)
+        token = mod._mint_admin_jwt()
+        assert token == "signed.jwt.token"
+        assert fake_secret_returned["value"] == "arn:aws:secretsmanager:test"
+    finally:
+        sys.modules.pop("boto3", None)
+        sys.modules.pop("jwt", None)
+
+
 def test_publish_metrics_emits_three_datapoints():
     """Exercises the boto3 stub path: median + failures + delta."""
     seen: dict = {}

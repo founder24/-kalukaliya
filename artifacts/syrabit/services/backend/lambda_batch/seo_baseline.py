@@ -48,21 +48,50 @@ def _ensure_scripts_on_path() -> None:
             sys.path.insert(0, str(c))
 
 
-def _mint_admin_jwt() -> str:
-    """Mint a short-lived admin JWT — same pattern as cache_effectiveness.
+def _load_admin_jwt_secret() -> str:
+    """Resolve ADMIN_JWT_SECRET via the same dual-source path that
+    ``cache_effectiveness.py`` uses (round-3 reviewer fix):
 
-    The Lambda env exposes ``ADMIN_JWT_SECRET`` (hydrated by
-    ``_db.bootstrap_env`` from ``ADMIN_JWT_SECRET_ARN``). We sign a
-    60-second claim so the POST cannot be replayed by a stale token.
+      1. If ``ADMIN_JWT_SECRET`` is already in the env (local dev /
+         pre-hydrated), use it directly.
+      2. Otherwise fetch the secret value from Secrets Manager
+         using ``ADMIN_JWT_SECRET_ARN`` (the Terraform-injected env
+         var on this Lambda — see ``lambda-batch-jobs.tf`` line 428).
+
+    The shared ``_db.bootstrap_env`` helper does NOT map this ARN
+    automatically (its ``_SECRET_ENV_MAP`` covers Mongo/origin/
+    prewarm secrets only); the cache-effectiveness Lambda hydrates
+    on-demand for the same reason, and this handler mirrors it.
     """
+    direct = os.environ.get("ADMIN_JWT_SECRET", "").strip()
+    if direct:
+        return direct
+    arn = os.environ.get("ADMIN_JWT_SECRET_ARN", "").strip()
+    if not arn:
+        raise RuntimeError(
+            "ADMIN_JWT_SECRET / ADMIN_JWT_SECRET_ARN not set on Lambda env"
+        )
+    import boto3  # type: ignore
+    sm = boto3.client("secretsmanager")
+    raw = (sm.get_secret_value(SecretId=arn).get("SecretString") or "").strip()
+    if raw.startswith("{"):
+        return json.loads(raw).get("secret", raw)
+    return raw
+
+
+def _mint_admin_jwt() -> str:
+    """Mint a 60-second admin JWT for the POST to the admin tile."""
     import time
-    secret = os.environ.get("ADMIN_JWT_SECRET", "").strip()
-    if not secret:
-        raise RuntimeError("ADMIN_JWT_SECRET not hydrated; cannot POST baseline")
     import jwt  # type: ignore
+    secret = _load_admin_jwt_secret()
     now = int(time.time())
     return jwt.encode(
-        {"sub": "lambda:seo-baseline", "is_admin": True, "iat": now, "exp": now + 60},
+        {
+            "sub":   "lambda-seo-baseline",
+            "role":  "admin",
+            "iat":   now,
+            "exp":   now + 60,
+        },
         secret,
         algorithm="HS256",
     )
