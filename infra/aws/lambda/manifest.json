@@ -57,6 +57,21 @@
       "cutover_status": "pending_shadow"
     },
     {
+      "aca_module": "aca_jobs.seo_baseline",
+      "lambda_function_name": "syrabit-seo-baseline",
+      "handler": "lambda_batch.seo_baseline.handler",
+      "schedule": "cron(0 2 ? * MON *)",
+      "schedule_doc": "weekly Mondays 02:00 UTC (sits inside the daily cache-prewarm + FAQ-materialize window so measured pages are already warm)",
+      "memory_mb": 1024,
+      "timeout_s": 900,
+      "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
+      "task": 28,
+      "notes": "Weekly SEO baseline runner (Task #28). Wraps scripts/seo_baseline.py — Lighthouse + JSON-LD validator + Google Rich Results sampler over 20 chapter pages (4 boards × 5 chapters × notes page-type) — persists the full report to db.seo_baseline_runs (consumed by /api/admin/seo/baseline-latest), pre-computes the WoW median-SEO-score delta against the prior run, and emits Syrabit/SEO::{MedianSeoScore,PagesWithFailures,MedianSeoScoreWoWDelta} to CloudWatch. Two alarms ride on these metrics: seo-baseline-score-regression (WoW delta < -5) + seo-baseline-failures-high (>2 sampled pages with per-leg failures). Memory bumped to 1024 MB because Lighthouse + headless Chromium burns ~600 MB resident.",
+      "shadow_start": "2026-05-09",
+      "shadow_end": "2026-05-16",
+      "cutover_status": "pending_shadow"
+    },
+    {
       "aca_module": "aca_jobs.materialize_chapter_faqs",
       "lambda_function_name": "syrabit-materialize-chapter-faqs",
       "handler": "lambda_batch.materialize_chapter_faqs.handler",

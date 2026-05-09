@@ -242,6 +242,26 @@ locals {
       max_docs_per_run  = 0
       description       = "Task #565 — Hourly Sentry-backed freshness probe for chat:credit_runway_days (>24h missing → Sentry alert)."
     }
+    # Task #28 — weekly SEO baseline runner (Spec §10 measurement
+    # loop). Wraps `scripts/seo_baseline.py` (Lighthouse + JSON-LD
+    # validator + Google Rich Results sampler) across 20 chapter
+    # pages (4 boards × 5 chapters), persists the full report to
+    # `db.seo_baseline_runs` (consumed by `/api/admin/seo/baseline-latest`),
+    # pre-computes the WoW median-SEO-score delta against the prior
+    # run, and emits `Syrabit/SEO::{MedianSeoScore,PagesWithFailures,
+    # MedianSeoScoreWoWDelta}` so the two alarms below can fire on a
+    # >5pt regression or >2 failing sampled pages. Memory bumped to
+    # 1024 MB because Lighthouse + headless Chromium burns ~600 MB
+    # resident; timeout left at 900 s because the Google Rich Results
+    # leg paces itself at 1 req/5 s × 20 pages = ~100 s minimum.
+    "seo-baseline" = {
+      handler           = "lambda_batch.seo_baseline.handler"
+      memory_mb         = 1024
+      timeout_s         = 900
+      schedule          = "cron(0 2 ? * MON *)" # weekly Mondays 02:00 UTC
+      max_docs_per_run  = 0
+      description       = "Task #28 — Weekly SEO baseline runner (Lighthouse + JSON-LD + Google Rich Results → db.seo_baseline_runs + Syrabit/SEO CloudWatch namespace)."
+    }
   }
 }
 
@@ -327,7 +347,12 @@ resource "aws_iam_role_policy" "batch_job_inline" {
             # was already in this allow-list for the cache-
             # effectiveness shipper, so no additional entry is
             # required.
-            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache", "Syrabit/Cost"]
+            # Task #28 — `seo-baseline` publishes to `Syrabit/SEO`
+            # (`MedianSeoScore`, `PagesWithFailures`,
+            # `MedianSeoScoreWoWDelta`); two alarms below ride on
+            # this namespace. Adding a fifth namespace requires
+            # another cap-policy review.
+            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache", "Syrabit/Cost", "Syrabit/SEO"]
           }
         }
       },
@@ -707,6 +732,65 @@ resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
     label       = "UniqueKeys24h(${each.key}) anomaly band (k=3)"
     return_data = true
   }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# ── Task #28 — weekly SEO-baseline alarms ───────────────────────────────────
+# Two alarms ride on Syrabit/SEO (published by `seo-baseline` every
+# Monday 02:00 UTC):
+#
+#   * `seo-baseline-score-regression` — fires when this week's median
+#     Lighthouse SEO score is more than 5 points below last week's
+#     (i.e. `MedianSeoScoreWoWDelta < -5`). The metric is pre-computed
+#     by the Lambda so the alarm logic stays a single comparison;
+#     deriving the WoW delta from two CloudWatch datapoints would
+#     require metric math against a 7-day-prior offset and AWS
+#     anomaly detection does not expose that primitive cleanly.
+#
+#   * `seo-baseline-failures-high` — fires when more than 2 of the
+#     20 sampled pages carried a per-leg failure (Lighthouse timeout,
+#     schema parse error, Rich Results 5xx). Signals a structural
+#     regression that would otherwise be averaged out of the median
+#     SEO score.
+#
+# Both alarms use `treat_missing_data=breaching` with a 7-day period,
+# so a Lambda that fails to invoke (or fails to publish) trips the
+# alarm on its own — the safety net the task brief explicitly calls
+# out (alarm fires when median SEO score drops > 5 points week-over-
+# week or when `pages_with_failures` > 2).
+resource "aws_cloudwatch_metric_alarm" "seo_baseline_score_regression" {
+  alarm_name          = "${local.lz_project}-seo-baseline-score-regression-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  metric_name         = "MedianSeoScoreWoWDelta"
+  namespace           = "Syrabit/SEO"
+  period              = 604800  # 7 days
+  statistic           = "Minimum"
+  threshold           = -5
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #28 — Syrabit/SEO::MedianSeoScoreWoWDelta < -5 (weekly Lighthouse SEO score regressed > 5 points vs last week) OR the weekly seo-baseline Lambda failed to publish at all. Inspect /api/admin/seo/baseline-latest `samples_failed` for the offending URLs and diff against the prior `report_date`."
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "seo_baseline_failures_high" {
+  alarm_name          = "${local.lz_project}-seo-baseline-failures-high-${local.lz_env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  metric_name         = "PagesWithFailures"
+  namespace           = "Syrabit/SEO"
+  period              = 604800
+  statistic           = "Maximum"
+  threshold           = 2
+  treat_missing_data  = "breaching"
+  alarm_description   = "Task #28 — Syrabit/SEO::PagesWithFailures > 2 (more than 2 of the 20 sampled pages hit a per-leg failure: Lighthouse timeout / schema parse error / Rich Results 5xx). Inspect /api/admin/seo/baseline-latest `samples_failed` for the offending URLs."
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]
   ok_actions    = [aws_sns_topic.ops_alerts.arn]
