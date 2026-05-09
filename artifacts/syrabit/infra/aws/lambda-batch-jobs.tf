@@ -352,7 +352,13 @@ resource "aws_iam_role_policy" "batch_job_inline" {
             # `MedianSeoScoreWoWDelta`); two alarms below ride on
             # this namespace. Adding a fifth namespace requires
             # another cap-policy review.
-            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache", "Syrabit/Cost", "Syrabit/SEO"]
+            # Task #45 — `as-translation-backfill` additionally publishes the
+            # per-collection coverage gauge to `Syrabit/Corpus`
+            # (`AssameseCoverage`, `AssameseCoverageOverall`); the
+            # `assamese-corpus-coverage-low` alarm below rides on this
+            # namespace. Adding a sixth namespace requires another
+            # cap-policy review.
+            "cloudwatch:namespace" = ["Syrabit/BatchJobs", "Syrabit/Cache", "Syrabit/Cost", "Syrabit/SEO", "Syrabit/Corpus"]
           }
         }
       },
@@ -588,6 +594,46 @@ resource "aws_cloudwatch_metric_alarm" "as_backfill_failed_spike" {
   threshold           = 50
   treat_missing_data  = "notBreaching"
   alarm_description   = "Task #516 — as-translation-backfill Failed > 50 in a single daily pass. Likely Workers-AI IndicTrans2 quota exhaustion or a Vertex polish outage; docs auto-retry on next pass but corpus freshness is degraded."
+
+  dimensions = {
+    Job = "as-translation-backfill"
+  }
+
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = local.lz_common_tags
+}
+
+# ── Task #45 — Assamese corpus coverage floor (Syrabit/Corpus namespace) ────
+# Fires when ANY tracked collection's coverage ratio drops below the
+# 0.80 floor for two consecutive nightly passes (the lock §6 row stays
+# `PARTIAL` until coverage stays at or above 0.85 for 14d). The metric
+# is a per-collection ratio in [0,1]; we use Minimum across the
+# evaluation window so a single sticky collection (e.g. seo_pages) is
+# enough to page on-call rather than getting averaged out by the
+# healthy three. The two-datapoint requirement matches the spec ("two
+# consecutive nightly runs") so a single transient coverage dip from
+# a slow run does not page.
+resource "aws_cloudwatch_metric_alarm" "assamese_corpus_coverage_low" {
+  alarm_name          = "${local.lz_project}-assamese-corpus-coverage-low-${local.lz_env}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  # `AssameseCoverageMin` is a Job-only datum that the Lambda emits
+  # alongside the per-collection `AssameseCoverage` series; it carries
+  # the worst-collection ratio so a single sticky collection
+  # (e.g. seo_pages) is enough to page on-call. Per-collection rows
+  # stay published under {Job, Collection} for the admin dashboard,
+  # but CloudWatch treats (MetricName, full Dimensions) as the metric
+  # identity — an alarm scoped to `Job` alone could not resolve the
+  # {Job, Collection} series, so we ride on the Min rollup instead.
+  metric_name         = "AssameseCoverageMin"
+  namespace           = "Syrabit/Corpus"
+  period              = 86400
+  statistic           = "Minimum"
+  threshold           = 0.80
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Task #45 — Assamese corpus coverage for at least one tracked collection (subjects/chapters/seo_pages/pyq_html_pages) dropped below 0.80 for 2 consecutive nightly backfill passes. Threshold is the alarm floor below the 0.85 SLO target (`COVERAGE_ALARM_FLOOR` in `aca_jobs/as_translation_backfill.py`). Inspect /api/health/corpus/assamese for per-collection ratio + reject reasons."
 
   dimensions = {
     Job = "as-translation-backfill"

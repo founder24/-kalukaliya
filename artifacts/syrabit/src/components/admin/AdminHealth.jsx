@@ -8,6 +8,7 @@ import EdgeProxyDeployCronPill from './EdgeProxyDeployCronPill';
 import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
 import EmbedBackfillPill from './EmbedBackfillPill';
 import EmbedStackHealthPill from './EmbedStackHealthPill';
+import AssameseCorpusCoveragePill from './AssameseCorpusCoveragePill';
 import SarvamHealthCard from './SarvamHealthCard';
 import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
@@ -3686,6 +3687,19 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           latches firing=true.
         */}
         <EmbedStackHealthPill adminToken={adminToken} />
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="Assamese Corpus Coverage">
+        {/*
+          Task #45 — surface per-collection Assamese coverage against
+          the 0.85 script-ratio gate so the lock §6 row's health is
+          observable instead of inferred. Reads
+          /api/health/corpus/assamese which aggregates the four
+          tracked collections (subjects, chapters, seo_pages,
+          pyq_html_pages) and the latest run report's accept/reject
+          counts so on-call can see WHY a collection isn't moving.
+        */}
+        <AssameseCorpusCoveragePill adminToken={adminToken} />
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="AI Gateway Cache by Model">

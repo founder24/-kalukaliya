@@ -62,7 +62,30 @@ MIN_SOURCE_CHARS = 8
 # non-empty and ≥ this fraction of letters must be in the Bengali block
 # (Assamese script, U+0980–U+09FF). Anything below means the field is
 # either empty or still leaking English prose, so re-translate.
-MIN_AS_SCRIPT_RATIO = 0.60
+#
+# Task #45 — bumped from 0.60 → 0.85 so the backfill stops accepting
+# heavily code-mixed output that lets the row count look healthy while
+# real Assamese coverage stays low. The same constant is used in two
+# places (the skip-decision in :func:`_doc_needs_translation` and the
+# accept-decision in :func:`_process_one_collection`), which means the
+# bump doubles as the "ratio drift" detector the task spec calls for:
+# any previously-accepted row whose stored ``_as`` text falls below
+# 0.85 now fails the skip check on the next pass and gets re-queued
+# automatically — no separate drift bookkeeping required because the
+# threshold IS the drift line. The matching coverage endpoint
+# (`/api/health/corpus/assamese`) and CloudWatch alarm
+# (`assamese-corpus-coverage-low`) measure progress against this same
+# 0.85 gate via the persisted ``<field>_as_script_ratio``.
+MIN_AS_SCRIPT_RATIO = 0.85
+
+# Coverage SLO for the four largest collections — admin tile renders
+# this as a target line and the CloudWatch alarm fires when any
+# tracked collection's coverage drops below it for two consecutive
+# nightly runs. Lives next to MIN_AS_SCRIPT_RATIO so anyone bumping
+# the gate sees both numbers together.
+COVERAGE_TARGET_RATIO = 0.85
+COVERAGE_ALARM_FLOOR  = 0.80
+ASSAMESE_BACKFILL_RUNS_COLLECTION = "assamese_backfill_runs"
 
 # Per-pass tunables (env-overridable so ops can throttle without a
 # deploy if Sarvam / Workers-AI rate-limits start firing).
@@ -304,6 +327,12 @@ async def _process_one_collection(
     })
 
     processed = translated = failed = skipped = 0
+    # Task #45 — surface accept/reject counts + reject reasons in the
+    # run report so the admin tile can render *why* a collection's
+    # coverage isn't moving (e.g. translator returning low-ratio output
+    # vs translator timing out vs source already passes).
+    reject_reasons: dict[str, int] = {}
+    accepted = rejected_low_ratio = rejected_empty = rejected_exception = 0
     try:
         from pymongo import UpdateOne
     except Exception as exc:  # pragma: no cover
@@ -346,6 +375,7 @@ async def _process_one_collection(
             update_set: dict[str, Any] = {}
             doc_failed = False
             for field, src in pending:
+                translate_exc = False
                 try:
                     translated_text = await _translate_to_assamese(src)
                 except Exception as exc:
@@ -354,24 +384,41 @@ async def _process_one_collection(
                         collection, field, exc,
                     )
                     translated_text = ""
+                    translate_exc = True
                 if not translated_text:
                     doc_failed = True
+                    reason = "translator_exception" if translate_exc else "empty_translation"
+                    reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
+                    if translate_exc:
+                        rejected_exception += 1
+                    else:
+                        rejected_empty += 1
                     logger.info(
-                        "[as_translation_backfill] empty translation — "
-                        "skipping %s._id=%s field=%s",
-                        collection, last_id, field,
+                        "[as_translation_backfill] %s — skipping %s._id=%s field=%s",
+                        reason, collection, last_id, field,
                     )
                     continue
-                if _bengali_letter_ratio(translated_text[:1024]) < MIN_AS_SCRIPT_RATIO:
+                ratio = _bengali_letter_ratio(translated_text[:1024])
+                if ratio < MIN_AS_SCRIPT_RATIO:
                     doc_failed = True
+                    rejected_low_ratio += 1
+                    reject_reasons["script_ratio_below_threshold"] = (
+                        reject_reasons.get("script_ratio_below_threshold", 0) + 1
+                    )
                     logger.info(
                         "[as_translation_backfill] translation insufficient "
-                        "Assamese script ratio — skipping %s._id=%s field=%s",
-                        collection, last_id, field,
+                        "Assamese script ratio (%.2f < %.2f) — "
+                        "skipping %s._id=%s field=%s",
+                        ratio, MIN_AS_SCRIPT_RATIO, collection, last_id, field,
                     )
                     continue
+                accepted += 1
                 update_set[f"{field}_as"] = translated_text
                 update_set[f"{field}_as_src_hash"] = _hash_source(src)
+                # Task #45 — persist the script ratio so the coverage
+                # endpoint can `$match` per-collection without scanning
+                # every doc body. Rounded to 4dp to keep the BSON cheap.
+                update_set[f"{field}_as_script_ratio"] = round(ratio, 4)
                 update_set[f"{field}_as_translated_at"] = _dt.datetime.utcnow().isoformat() + "Z"
                 # Task #560 round-3 — per-doc driver tag so the
                 # reconciliation script can do real per-document key
@@ -426,6 +473,12 @@ async def _process_one_collection(
         "skipped":     skipped,
         "duration_s":  round(duration, 2),
         "remaining":   await _count_remaining(db, collection),
+        # Task #45 — accept/reject breakdown for the admin tile.
+        "accepted":             accepted,
+        "rejected_low_ratio":   rejected_low_ratio,
+        "rejected_empty":       rejected_empty,
+        "rejected_exception":   rejected_exception,
+        "reject_reasons":       reject_reasons,
     }
     # Task #560 — stamp the driver discriminator the shadow-mode
     # reconciliation script (`scripts/lambda_aca_shadow_reconcile.py`)
@@ -467,6 +520,7 @@ async def run_backfill(
             return {"error": "unknown_collection", "unknown": bad}
         max_docs = max(1, int(max_docs))
         batch_size = max(1, int(batch_size))
+        run_started = _dt.datetime.utcnow()
         results = []
         for collection in targets:
             summary = await _process_one_collection(
@@ -475,4 +529,324 @@ async def run_backfill(
                 batch_size=batch_size,
             )
             results.append(summary)
-        return {"results": results}
+        # Task #45 — coverage snapshot + per-run report persisted to
+        # ``db.assamese_backfill_runs`` so the admin tile can render
+        # the latest accept/reject breakdown side-by-side with the
+        # current per-collection coverage ratio. The Lambda handler
+        # additionally pushes ``Syrabit/Corpus::AssameseCoverage`` to
+        # CloudWatch so the ``assamese-corpus-coverage-low`` alarm can
+        # fire on two consecutive sub-floor passes.
+        coverage = {}
+        try:
+            coverage = await compute_assamese_coverage(db)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "[as_translation_backfill] coverage snapshot failed: %s", exc,
+            )
+        run_doc = {
+            "started_at":  run_started,
+            "finished_at": _dt.datetime.utcnow(),
+            "driver":      os.environ.get("BATCH_JOB_DRIVER", "aca"),
+            "min_script_ratio":     MIN_AS_SCRIPT_RATIO,
+            "coverage_target":      COVERAGE_TARGET_RATIO,
+            "coverage_alarm_floor": COVERAGE_ALARM_FLOOR,
+            "results":     results,
+            "coverage":    coverage,
+        }
+        try:
+            await db[ASSAMESE_BACKFILL_RUNS_COLLECTION].insert_one(dict(run_doc))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "[as_translation_backfill] run report persist failed: %s", exc,
+            )
+        return {"results": results, "coverage": coverage}
+
+
+# ── Coverage helpers (Task #45) ─────────────────────────────────────────────
+
+# Fields the coverage gate keys off, per collection. Picked as the
+# *primary* user-facing field per collection — `_doc_needs_translation`
+# requires *every* mapped field to pass, but for the dashboard we want
+# a single ratio per collection and the primary field is the one
+# students actually read in the Assamese SSR view.
+COVERAGE_PRIMARY_FIELD: dict[str, str] = {
+    "subjects":       "name",
+    "chapters":       "title",
+    "seo_pages":      "title",
+    "pyq_html_pages": "title",
+}
+
+# Materialized content types that ship Assamese variants through the
+# Redis-backed ``ai_input_cache`` rather than a Mongo source +
+# ``<field>_as`` sibling. They are listed in the coverage payload so the
+# admin tile can render them next to the four Mongo-backed collections,
+# but their ratio is sourced from the deterministic-cache surface
+# (``/api/health/cache``) — there is no English-source-with-_as_sibling
+# shape for them and so the 0.85 script-ratio gate does not apply.
+# When the underlying Mongo collection is missing (the common case in
+# this stack) the row degrades to ``total_docs=0`` with
+# ``status="ai_input_cache_only"`` so the dashboard can render an
+# explanatory pill instead of a misleading 0.0 ratio that would page
+# on-call.
+COVERAGE_AI_CACHE_CONTENT_TYPES: tuple[str, ...] = (
+    "mcq",
+    "flashcards",
+    "definitions",
+)
+
+
+# How many "ratio missing" docs to compute on-the-fly per coverage call.
+# Bounded so the admin endpoint stays fast even on the first call after
+# the Task #45 deploy when historical translations have no persisted
+# `_as_script_ratio` yet.
+COVERAGE_INLINE_BACKFILL_LIMIT = int(
+    os.environ.get("AS_COVERAGE_INLINE_BACKFILL_LIMIT", "2000") or "2000"
+)
+
+
+async def _coverage_for_collection(db: Any, collection: str) -> dict:
+    """Compute per-collection Assamese coverage against the 0.85 gate.
+
+    Counts:
+      total_docs      = docs whose primary English field has ≥
+                        ``MIN_SOURCE_CHARS`` characters (the only docs
+                        the backfill ever considers).
+      translated_docs = subset of ``total_docs`` whose ``<field>_as_script_ratio``
+                        is ≥ ``MIN_AS_SCRIPT_RATIO``.
+      ratio           = translated_docs / total_docs, 0.0 when total = 0.
+
+    Task #45 — first-call undercount fix
+    ------------------------------------
+    Historical rows that were translated under the old 0.60 gate carry
+    a ``<field>_as`` value but no ``<field>_as_script_ratio`` (the
+    ratio field was introduced by this task). Without a fallback the
+    admin tile would under-report on day one and only climb as the
+    nightly job re-evaluated each row. To make coverage reflect the
+    actual on-disk corpus from the first call, we opportunistically
+    compute the ratio for up to ``COVERAGE_INLINE_BACKFILL_LIMIT``
+    docs per call that have a non-empty ``_as`` value but no
+    persisted ratio, persist the result, and fold the qualifying
+    rows into the translated count for this call.
+    """
+    field = COVERAGE_PRIMARY_FIELD.get(collection)
+    if not field:
+        return {
+            "collection": collection,
+            "field":      None,
+            "total_docs": 0,
+            "translated_docs": 0,
+            "ratio":      0.0,
+            "inline_backfilled": 0,
+            "inline_backfill_pending": 0,
+        }
+    # Mirror `_doc_needs_translation`'s eligibility: only docs whose
+    # primary English field is a string of ≥ MIN_SOURCE_CHARS characters
+    # are ever translated, so the coverage denominator must use the
+    # same gate. Without `$strLenCP` the count includes empty / very
+    # short rows that the backfill correctly skips, dragging the
+    # ratio down and tripping false alarms.
+    total_filter = {
+        field: {"$type": "string"},
+        "$expr": {
+            "$gte": [{"$strLenCP": f"${field}"}, MIN_SOURCE_CHARS],
+        },
+    }
+    translated_filter = {
+        **total_filter,
+        f"{field}_as_script_ratio": {"$gte": MIN_AS_SCRIPT_RATIO},
+    }
+    try:
+        total = int(await db[collection].count_documents(total_filter))
+    except Exception as exc:
+        logger.debug(
+            "[as_translation_backfill] coverage total count(%s) failed: %s",
+            collection, exc,
+        )
+        total = 0
+    try:
+        translated = int(
+            await db[collection].count_documents(translated_filter)
+        )
+    except Exception as exc:
+        logger.debug(
+            "[as_translation_backfill] coverage translated count(%s) failed: %s",
+            collection, exc,
+        )
+        translated = 0
+
+    # Opportunistic inline ratio backfill for historical rows.
+    inline_backfilled = 0
+    inline_pending = 0
+    missing_filter = {
+        **total_filter,
+        f"{field}_as": {"$type": "string", "$ne": ""},
+        f"{field}_as_script_ratio": {"$exists": False},
+    }
+    try:
+        inline_pending = int(
+            await db[collection].count_documents(missing_filter)
+        )
+    except Exception:
+        inline_pending = 0
+    if inline_pending and COVERAGE_INLINE_BACKFILL_LIMIT > 0:
+        try:
+            from pymongo import UpdateOne  # type: ignore
+        except Exception:  # pragma: no cover
+            UpdateOne = None  # type: ignore
+        try:
+            cursor = (
+                db[collection]
+                .find(missing_filter, projection={"_id": 1, f"{field}_as": 1})
+                .limit(COVERAGE_INLINE_BACKFILL_LIMIT)
+            )
+            ops = []
+            inline_translated = 0
+            scanned = 0
+            async for doc in cursor:
+                scanned += 1
+                as_text = doc.get(f"{field}_as") or ""
+                if not isinstance(as_text, str):
+                    continue
+                ratio_val = round(_bengali_letter_ratio(as_text[:1024]), 4)
+                if UpdateOne is not None:
+                    ops.append(UpdateOne(
+                        {"_id": doc["_id"]},
+                        {"$set": {f"{field}_as_script_ratio": ratio_val}},
+                    ))
+                if ratio_val >= MIN_AS_SCRIPT_RATIO:
+                    inline_translated += 1
+            if ops:
+                try:
+                    await db[collection].bulk_write(ops, ordered=False)
+                except Exception as exc:
+                    logger.debug(
+                        "[as_translation_backfill] inline ratio bulk_write(%s) failed: %s",
+                        collection, exc,
+                    )
+            inline_backfilled = scanned
+            translated += inline_translated
+            inline_pending = max(inline_pending - scanned, 0)
+        except Exception as exc:
+            logger.debug(
+                "[as_translation_backfill] inline coverage backfill(%s) failed: %s",
+                collection, exc,
+            )
+
+    ratio = round((translated / total), 4) if total else 0.0
+    return {
+        "collection":              collection,
+        "field":                   field,
+        "total_docs":              total,
+        "translated_docs":         translated,
+        "ratio":                   ratio,
+        "inline_backfilled":       inline_backfilled,
+        "inline_backfill_pending": inline_pending,
+    }
+
+
+async def _coverage_for_ai_cache_content_type(db: Any, content_type: str) -> dict:
+    """Best-effort coverage row for a materialized content type.
+
+    These types (mcq / flashcards / definitions) ride on the Redis-backed
+    ``ai_input_cache`` so there is no Mongo source field + ``_as``
+    sibling to gate on. If a same-named Mongo collection exists in this
+    deployment we report a simple `<docs with non-empty `*_as` text>` /
+    `<total>` count so the admin tile has a number to render; otherwise
+    the row degrades to ``status="ai_input_cache_only"`` so the UI can
+    point operators at ``/api/health/cache`` for the deterministic-cache
+    hit ratio that actually governs Assamese delivery for these types.
+    """
+    try:
+        names = await db.list_collection_names()
+    except Exception:
+        names = []
+    if content_type not in names:
+        return {
+            "collection":      content_type,
+            "field":           None,
+            "total_docs":      0,
+            "translated_docs": 0,
+            "ratio":           0.0,
+            "status":          "ai_input_cache_only",
+            "note":            (
+                "No Mongo collection — this content type lives in the "
+                "Redis-backed ai_input_cache. Track via /api/health/cache."
+            ),
+        }
+    try:
+        total = int(await db[content_type].count_documents({}))
+    except Exception:
+        total = 0
+    translated = 0
+    if total:
+        # Heuristic: any string field on the doc whose name ends in
+        # `_as` and is non-empty counts as a translated leg.
+        try:
+            translated = int(await db[content_type].count_documents({
+                "$or": [
+                    {"text_as":    {"$type": "string", "$ne": ""}},
+                    {"content_as": {"$type": "string", "$ne": ""}},
+                    {"answer_as":  {"$type": "string", "$ne": ""}},
+                ],
+            }))
+        except Exception:
+            translated = 0
+    ratio = round((translated / total), 4) if total else 0.0
+    return {
+        "collection":      content_type,
+        "field":           "<any *_as>",
+        "total_docs":      total,
+        "translated_docs": translated,
+        "ratio":           ratio,
+        "status":          "mongo_collection_present",
+    }
+
+
+async def compute_assamese_coverage(db: Any) -> dict:
+    """Return per-collection Assamese coverage + the overall ratio.
+
+    The four backfill-owned collections in ``COVERAGE_PRIMARY_FIELD``
+    are the ones the 0.85 script-ratio gate measures and the only
+    rows folded into ``overall_ratio`` (the gate doesn't apply to
+    materialized content types). The three
+    ``COVERAGE_AI_CACHE_CONTENT_TYPES`` rows are appended for the
+    admin tile so ops can see them next to the gated four; their
+    real observability surface is ``/api/health/cache``.
+    """
+    rows: list[dict] = []
+    for collection in COVERAGE_PRIMARY_FIELD:
+        rows.append(await _coverage_for_collection(db, collection))
+    gated_total = sum(r["total_docs"] for r in rows)
+    gated_translated = sum(r["translated_docs"] for r in rows)
+    overall = round((gated_translated / gated_total), 4) if gated_total else 0.0
+
+    for content_type in COVERAGE_AI_CACHE_CONTENT_TYPES:
+        rows.append(await _coverage_for_ai_cache_content_type(db, content_type))
+
+    return {
+        "collections":          rows,
+        "overall_ratio":        overall,
+        "gated_collections":    list(COVERAGE_PRIMARY_FIELD.keys()),
+        "ai_cache_collections": list(COVERAGE_AI_CACHE_CONTENT_TYPES),
+        "target_ratio":         COVERAGE_TARGET_RATIO,
+        "alarm_floor":          COVERAGE_ALARM_FLOOR,
+        "min_script_ratio":     MIN_AS_SCRIPT_RATIO,
+        "computed_at":          _dt.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+async def latest_run_report(db: Any) -> Optional[dict]:
+    """Return the most recent ``assamese_backfill_runs`` doc (or None)."""
+    try:
+        doc = await db[ASSAMESE_BACKFILL_RUNS_COLLECTION].find_one(
+            {}, sort=[("started_at", -1)],
+        )
+    except Exception as exc:
+        logger.warning(
+            "[as_translation_backfill] latest_run_report read failed: %s", exc,
+        )
+        return None
+    if not doc:
+        return None
+    doc.pop("_id", None)
+    return doc

@@ -40,6 +40,13 @@ MAX_DOCS_PER_RUN = int(os.environ.get("MAX_DOCS_PER_RUN", "1000"))
 METRIC_NAMESPACE = os.environ.get(
     "AS_BACKFILL_METRIC_NAMESPACE", "Syrabit/BatchJobs"
 )
+# Task #45 — separate namespace for the corpus-coverage gauge so the
+# `assamese-corpus-coverage-low` alarm rides on its own (Namespace,
+# MetricName, Dimensions) identity and isn't accidentally evaluated
+# against the `Syrabit/BatchJobs` per-doc counters.
+COVERAGE_METRIC_NAMESPACE = os.environ.get(
+    "AS_COVERAGE_METRIC_NAMESPACE", "Syrabit/Corpus"
+)
 JOB_DIMENSION_VALUE = os.environ.get(
     "AS_BACKFILL_METRIC_JOB", "as-translation-backfill"
 )
@@ -113,25 +120,113 @@ def _build_metric_data(summary: dict) -> list[dict[str, Any]]:
     return data
 
 
+def _build_coverage_metric_data(summary: dict) -> list[dict[str, Any]]:
+    """Translate the run-coverage block into CloudWatch datums.
+
+    One ``AssameseCoverage`` datum per (collection) plus an
+    ``AssameseCoverageOverall`` rollup (Job-only dimension) so the
+    alarm can ride either on a single sticky collection or on the
+    fleet-wide ratio without changing dimension shape.
+    """
+    coverage = (summary or {}).get("coverage") or {}
+    rows = coverage.get("collections") or []
+    # Only the gated collections feed CloudWatch — the AI-cache content
+    # types live behind the deterministic-cache surface and the 0.85
+    # script-ratio gate doesn't apply to them, so emitting their 0.0
+    # ratios as `AssameseCoverage` would create persistent false-low
+    # alarm fodder.
+    gated_set = set(coverage.get("gated_collections") or [])
+    gated_rows = [
+        row for row in rows
+        if row.get("status") != "ai_input_cache_only"
+        and (not gated_set or row.get("collection") in gated_set)
+    ]
+    data: list[dict[str, Any]] = []
+    for row in gated_rows:
+        try:
+            ratio = float(row.get("ratio", 0) or 0)
+        except (TypeError, ValueError):
+            ratio = 0.0
+        collection = str(row.get("collection") or "unknown")
+        data.append({
+            "MetricName": "AssameseCoverage",
+            "Dimensions": [
+                {"Name": "Job", "Value": JOB_DIMENSION_VALUE},
+                {"Name": "Collection", "Value": collection},
+            ],
+            "Unit":  "None",
+            "Value": ratio,
+        })
+    try:
+        overall = float(coverage.get("overall_ratio", 0) or 0)
+    except (TypeError, ValueError):
+        overall = 0.0
+    if gated_rows:
+        data.append({
+            "MetricName": "AssameseCoverageOverall",
+            "Dimensions": [{"Name": "Job", "Value": JOB_DIMENSION_VALUE}],
+            "Unit":  "None",
+            "Value": overall,
+        })
+        # Job-only minimum across the gated collections — this is the
+        # metric identity the `assamese-corpus-coverage-low` CloudWatch
+        # alarm evaluates. We can't alarm directly on the per-collection
+        # `AssameseCoverage` series above because CloudWatch treats
+        # (MetricName, full Dimensions) as the identity key — an alarm
+        # scoped to `Job` alone would never see the {Job, Collection}
+        # series. Emitting the worst-collection ratio under a Job-only
+        # dimension lets a single sticky collection (e.g. seo_pages)
+        # page on-call without dimension juggling or metric-math. The
+        # AI-cache content types are excluded from the Min so an empty
+        # mcq/flashcards/definitions Mongo collection doesn't sit at 0.0
+        # forever and pin the alarm.
+        ratios: list[float] = []
+        for row in gated_rows:
+            try:
+                ratios.append(float(row.get("ratio", 0) or 0))
+            except (TypeError, ValueError):
+                ratios.append(0.0)
+        data.append({
+            "MetricName": "AssameseCoverageMin",
+            "Dimensions": [{"Name": "Job", "Value": JOB_DIMENSION_VALUE}],
+            "Unit":  "None",
+            "Value": min(ratios) if ratios else 0.0,
+        })
+    return data
+
+
 def _emit_metrics(summary: dict) -> None:
     """Best-effort PutMetricData. Never raises — a metrics outage must
     not mask the actual translation work that already succeeded."""
     try:
         data = _build_metric_data(summary)
-        if not data:
-            return
-        import boto3  # type: ignore
-        cw = boto3.client("cloudwatch")
-        # CloudWatch caps PutMetricData at 1000 datums per call; we'll
-        # never approach that (5 metrics × 4 collections + 1 rollup = 21)
-        # but chunk defensively in case FIELD_MAP grows.
-        for i in range(0, len(data), 20):
-            cw.put_metric_data(
-                Namespace=METRIC_NAMESPACE,
-                MetricData=data[i:i + 20],
-            )
+        if data:
+            import boto3  # type: ignore
+            cw = boto3.client("cloudwatch")
+            # CloudWatch caps PutMetricData at 1000 datums per call; we'll
+            # never approach that (5 metrics × 4 collections + 1 rollup = 21)
+            # but chunk defensively in case FIELD_MAP grows.
+            for i in range(0, len(data), 20):
+                cw.put_metric_data(
+                    Namespace=METRIC_NAMESPACE,
+                    MetricData=data[i:i + 20],
+                )
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("as_translation_backfill metric emit failed: %s", exc)
+    # Task #45 — coverage gauge published into its own namespace so the
+    # `assamese-corpus-coverage-low` alarm has a stable metric identity.
+    try:
+        cov_data = _build_coverage_metric_data(summary)
+        if cov_data:
+            import boto3  # type: ignore
+            cw = boto3.client("cloudwatch")
+            for i in range(0, len(cov_data), 20):
+                cw.put_metric_data(
+                    Namespace=COVERAGE_METRIC_NAMESPACE,
+                    MetricData=cov_data[i:i + 20],
+                )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("as_translation_backfill coverage metric emit failed: %s", exc)
 
 
 def handler(event, context):  # noqa: ARG001
