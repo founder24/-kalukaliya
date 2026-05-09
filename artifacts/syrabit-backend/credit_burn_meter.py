@@ -445,6 +445,13 @@ class MeterC:
 CHAT_CHEAPONLY_KEY = "chat:cheaponly"
 CHAT_CHEAPONLY_PIN_KEY = "chat:cheaponly:pin"
 MONTHLY_USD_KEY_PREFIX = "rule_d:usd"  # rule_d:usd:YYYY-MM
+# Task #27 — sub-bucket inside Rule D for Indic-only embed spend
+# (Cohere via AWS Bedrock). Counts the SAME dollars as the global
+# Rule D bucket but is also tracked separately so a sub-cap breach
+# can shut down ONLY the Indic Bedrock route without touching English
+# chat or the global cheaponly lock.
+MONTHLY_USD_INDIC_KEY_PREFIX = "rule_d:usd_indic"        # rule_d:usd_indic:YYYY-MM
+INDIC_EMBED_PAUSED_KEY = "embed:indic:paused"            # set when sub-cap breached
 
 
 @dataclass
@@ -563,6 +570,77 @@ class MeterD:
                        {"meter": "D", "usd": new_v, "month": month,
                         "notify_only": True})
 
+    def record_usd_indic_bedrock(
+        self, amount: float,
+        subcap_usd: float = 5.0,
+        now: Optional[float] = None,
+    ) -> None:
+        """Task #27 — meter Indic-route Bedrock-Cohere spend into BOTH
+        the global Rule D bucket AND a dedicated Indic sub-bucket.
+
+        When the Indic sub-bucket crosses ``subcap_usd`` we set
+        ``embed:indic:paused=1`` (TTL until the next UTC month start)
+        so ``credit_burn_meter_runtime.is_indic_embed_paused()``
+        flips True and the dispatcher routes Indic queries to Workers
+        AI for the rest of the month. Founder lock $100/mo global cap
+        is unaffected — same dollars only count once toward Rule D.
+        """
+        if amount <= 0:
+            return
+        # Fold into the global Rule D bucket so the cheaponly lock and
+        # the 60/80/95 ladder still see the same dollars.
+        self.record_usd(amount, now=now)
+        month = self._month_key(now)
+        ikey = f"{MONTHLY_USD_INDIC_KEY_PREFIX}:{month}"
+        try:
+            cur = self.redis.get(ikey)
+            cur_v = float(cur.decode() if isinstance(cur, (bytes, bytearray))
+                          else (cur or 0.0))
+        except Exception:
+            cur_v = 0.0
+        new_v = cur_v + float(amount)
+        try:
+            self.redis.set(ikey, f"{new_v:.6f}",
+                           ex=self._seconds_to_next_utc_month_start(now))
+        except Exception:
+            pass
+        if subcap_usd > 0 and new_v >= float(subcap_usd):
+            try:
+                self.redis.set(
+                    INDIC_EMBED_PAUSED_KEY, "1",
+                    ex=self._seconds_to_next_utc_month_start(now),
+                )
+            except Exception:
+                pass
+            self.alert(
+                "warning",
+                f"Task #27 Indic-embed sub-cap breached: ${new_v:.4f} >= "
+                f"${float(subcap_usd):.2f} for {month}; routing Indic "
+                f"queries to workers_ai_custom for the rest of the month.",
+                {"meter": "D", "subcap": "indic_embed",
+                 "usd": new_v, "month": month,
+                 "action": "indic_embed_paused"},
+            )
+
+    def indic_monthly_usd(self, now: Optional[float] = None) -> float:
+        """Return the running Indic-embed sub-bucket total for the
+        current calendar month (USD). 0.0 on Redis errors."""
+        month = self._month_key(now)
+        try:
+            raw = self.redis.get(f"{MONTHLY_USD_INDIC_KEY_PREFIX}:{month}")
+            if raw is None:
+                return 0.0
+            return float(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+        except Exception:
+            return 0.0
+
+    def is_indic_embed_paused(self) -> bool:
+        """True iff the Indic-embed sub-cap has tripped this month."""
+        try:
+            return bool(self.redis.get(INDIC_EMBED_PAUSED_KEY))
+        except Exception:
+            return False
+
     def is_cheaponly_active(self) -> bool:
         """True iff the chat tier-router is currently locked to the
         cheap pool. Pin survives auto-clear."""
@@ -578,6 +656,8 @@ __all__ = [
     "AlertSink",
     "CHAT_FALLBACK_KEY", "CHAT_FALLBACK_PIN_KEY", "EMAIL_FALLBACK_KEY",
     "CHAT_CHEAPONLY_KEY", "CHAT_CHEAPONLY_PIN_KEY",
+    "MONTHLY_USD_KEY_PREFIX", "MONTHLY_USD_INDIC_KEY_PREFIX",
+    "INDIC_EMBED_PAUSED_KEY",
     "FallbackFlag",
     "MeterA", "MeterAConfig",
     "MeterB", "MeterBConfig",

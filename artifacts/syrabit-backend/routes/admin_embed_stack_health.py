@@ -150,6 +150,58 @@ async def admin_embed_stack_health(
     # Task #438: only the production embed env counts toward overall ok.
     # Staging is a canary — its failures surface as a yellow row but do
     # not flip the page-level red banner.
+    # ── Task #27 — Bedrock-Cohere Indic embed leg ──────────────────────────
+    # Reports the Indic-only embed route (Cohere Embed Multilingual v3 via
+    # AWS Bedrock). Unlike the other legs this is `configured` true even
+    # when MeterD's $5/mo Indic sub-cap has tripped — the route degrades
+    # to Workers AI but the leg itself is healthy infra-wise; the tile
+    # surfaces the paused-state explicitly so on-call sees WHY traffic
+    # has shifted off Bedrock without paging.
+    bedrock_indic: dict[str, Any] = {
+        "ok": False, "configured": False,
+        "provider": "cohere_multilingual_v3_bedrock",
+    }
+    try:
+        from providers import cohere_bedrock_embed as _cb
+        from credit_burn_meter_runtime import (
+            is_indic_embed_paused as _indic_paused,
+            indic_monthly_usd as _indic_usd,
+        )
+        from cost_caps import INDIC_EMBED_MONTHLY_USD_SUBCAP as _SUBCAP
+        from config import EMBED_INDIC_PROVIDER as _EIP, BEDROCK_EMBED_REGION as _BER
+        _is_paused = bool(_indic_paused())
+        _spend = float(_indic_usd())
+        _kill = (_EIP or "").strip().lower() != "cohere_multilingual_v3_bedrock"
+        _force = (os.environ.get("RAG_EMBEDDING_PROVIDER_FORCE", "") or "").strip().lower()
+        _force_off = _force == "workers_ai_custom"
+        bedrock_indic = {
+            "ok": _cb.is_configured() and not _is_paused and not _kill and not _force_off,
+            "configured": _cb.is_configured(),
+            "provider": _cb.PROVIDER_NAME,
+            "model_id": _cb.MODEL_ID,
+            "region": _BER,
+            "subcap_usd": float(_SUBCAP),
+            "monthly_usd": _spend,
+            "paused": _is_paused,
+            "effective_route": (
+                "workers_ai_custom" if (_kill or _force_off or _is_paused)
+                else "cohere_multilingual_v3_bedrock"
+            ),
+            "kill_switch": {
+                "EMBED_INDIC_PROVIDER": _EIP,
+                "RAG_EMBEDDING_PROVIDER_FORCE": _force or None,
+            },
+        }
+    except Exception as exc:
+        bedrock_indic = {
+            "ok": False, "configured": False,
+            "provider": "cohere_multilingual_v3_bedrock",
+            "reason": str(exc)[:200],
+        }
+    bedrock_indic["flag"] = {"name": "EMBED_INDIC_PROVIDER",
+                             "value": bedrock_indic.get("kill_switch", {}).get("EMBED_INDIC_PROVIDER")}
+    _attach_alert_state(bedrock_indic, "bedrock_indic")
+
     return {
         "ok": all([
             embed_health.get("ok"),
@@ -160,6 +212,11 @@ async def admin_embed_stack_health(
         "embed_environments": embed_environments,
         "rerank": rerank_health,
         "memory": memory_health,
+        # Task #27 — Indic-only Bedrock-Cohere leg. Excluded from the
+        # top-level `ok` because a paused/degraded Indic route is by
+        # design (V4 §12 — fail loud, route to Workers AI) and must not
+        # turn the entire health pill red on a healthy Workers-AI primary.
+        "bedrock_indic": bedrock_indic,
         "backfill": backfill,
         # Task #436 — full per-leg watchdog snapshot for the dashboard
         # badge ("N/3 consecutive failures", red when firing).

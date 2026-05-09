@@ -105,16 +105,144 @@ async def _workers_custom_embed_batch(texts: list[str]) -> list[Optional[list[fl
     return [None] * len(texts)
 
 
+async def _bedrock_indic_embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
+    """Embed a batch of Indic-language chunk texts via the Task #27
+    Bedrock-Cohere route. One InvokeModel call per text (the provider
+    module's ``embed_one`` does not yet batch — Bedrock Cohere v3
+    accepts batches of up to 96 inputs but our wrapper currently
+    targets the single-text query path). Returns ``None`` slots on
+    failure so the caller can mark the chunk as failed and retry it
+    on the next run; there is NO silent fallback to Workers-AI here
+    (that would re-introduce the cache-key mixing the dispatcher
+    already guards against — provider-correctness > availability for
+    the indexing path)."""
+    from providers import cohere_bedrock_embed as _cb
+    out: list[Optional[list[float]]] = []
+    for t in texts:
+        try:
+            v = await asyncio.wait_for(
+                _cb.embed_one(t, task_type="RETRIEVAL_DOCUMENT"),
+                timeout=30.0,
+            )
+            out.append(v)
+        except _cb.BedrockEmbedAccessDenied as exc:
+            logger.warning(
+                "[chunk_embedder] bedrock indic embed IAM/access denied — "
+                "leaving slot None for retry: %s", exc,
+            )
+            out.append(None)
+        except Exception as exc:
+            logger.warning("[chunk_embedder] bedrock indic embed failed: %s", exc)
+            out.append(None)
+    return out
+
+
+def _is_indic_text(content_as: str, content: str, lang: str | None = None) -> bool:
+    """Task #27 — language gate for the bulk indexing path.
+
+    Order of precedence:
+      1. If the chunk carries an explicit ``lang`` (e.g. ``"as"``,
+         ``"as-IN"``, ``"hi"``), defer to the shared
+         ``llm._is_indic_lang`` classifier so the indexing route
+         contract matches the chat-path dispatcher exactly.
+      2. Otherwise fall back to a length heuristic on the bilingual
+         ``content_as`` field — Indic-dominant when the Assamese
+         variant is present AND at least 30 % of the English content
+         length AND ≥ 40 chars (avoids false positives on stub fields).
+    """
+    if lang:
+        try:
+            from llm import _is_indic_lang as _shared_is_indic
+            return bool(_shared_is_indic(lang))
+        except Exception:
+            pass
+    return bool(content_as) and len(content_as) >= max(40, int(0.30 * max(1, len(content))))
+
+
 async def _embed_batch(texts: list[str]) -> list[Optional[list[float]]]:
     """Dispatch a chunk batch to the workers_ai_custom embed worker.
 
     STRICT provider isolation (Task #382, hardened by Task #491): the
-    chunk path is single-source workers_ai_custom. A worker failure
-    surfaces as None slots so ``embed_chunks_bulk`` can mark those
-    chunks as failed and retry them on the next run; there is NO
-    silent fallback to retired legacy embed providers.
+    English / unknown-language chunk path is single-source
+    workers_ai_custom. A worker failure surfaces as None slots so
+    ``embed_chunks_bulk`` can mark those chunks as failed and retry
+    them on the next run; there is NO silent fallback to retired
+    legacy embed providers.
+
+    Task #27 — language-gated split lives in ``_embed_batch_split`` so
+    Indic chunks route to Bedrock-Cohere at indexing time too. This
+    helper is kept for the legacy single-language code path and tests
+    that monkey-patch it directly.
     """
     return await _workers_custom_embed_batch(texts)
+
+
+async def _embed_batch_split(
+    items: list[tuple[int, str, bool]],
+) -> tuple[list[Optional[list[float]]], list[str]]:
+    """Task #27 — language-gated indexing split.
+
+    ``items`` is a list of ``(slot_idx, text, is_indic)`` tuples. We
+    partition by the ``is_indic`` flag, embed each leg through its
+    canonical provider (Bedrock-Cohere for Indic, Workers-AI custom
+    for English / unknown), and reassemble vectors back into the
+    caller's slot order along with a parallel list of per-slot
+    ``embed_provider`` tags so the Pinecone metadata write reflects
+    the provider that ACTUALLY produced each vector.
+
+    A pre-call check against MeterD's Indic sub-cap (``$5/mo`` inside
+    the global ``$100`` cap) routes Indic texts back to Workers-AI
+    when the sub-cap has tripped — this matches the runtime
+    dispatcher's behaviour in ``llm.call_embed_with_dispatch`` and
+    prevents the bulk indexer from busting the sub-cap in a single
+    nightly run.
+    """
+    n = len(items)
+    vecs: list[Optional[list[float]]] = [None] * n
+    tags: list[str] = ["workers_ai_custom"] * n
+
+    # Pre-call sub-cap pause check.
+    _indic_paused = False
+    try:
+        from credit_burn_meter_runtime import is_indic_embed_paused as _ip
+        _indic_paused = bool(_ip())
+    except Exception:
+        _indic_paused = False
+
+    indic_idx: list[int] = []
+    indic_texts: list[str] = []
+    eng_idx: list[int] = []
+    eng_texts: list[str] = []
+    for slot, text, is_indic in items:
+        if is_indic and not _indic_paused:
+            indic_idx.append(slot)
+            indic_texts.append(text)
+        else:
+            eng_idx.append(slot)
+            eng_texts.append(text)
+
+    if eng_texts:
+        eng_vecs = await _embed_batch(eng_texts)
+        for slot, v in zip(eng_idx, eng_vecs):
+            vecs[slot] = v
+            tags[slot] = "workers_ai_custom"
+
+    if indic_texts:
+        ind_vecs = await _bedrock_indic_embed_batch(indic_texts)
+        # MeterD ingest for Bedrock spend (1 token ≈ 4 chars heuristic;
+        # reconciled by the daily Cost Explorer ingestion — Task #513 §J).
+        try:
+            from cost_caps import BEDROCK_COHERE_EMBED_USD_PER_1K_TOKENS as _RATE
+            from credit_burn_meter_runtime import ingest_meter_d_usd_indic as _meter_indic
+            _approx = sum(max(1, len(t) // 4) for t in indic_texts)
+            _meter_indic((_approx / 1000.0) * float(_RATE))
+        except Exception as _meter_exc:
+            logger.debug("[chunk_embedder] meter D indic ingest failed: %s", _meter_exc)
+        for slot, v in zip(indic_idx, ind_vecs):
+            vecs[slot] = v
+            tags[slot] = "cohere_multilingual_v3_bedrock"
+
+    return vecs, tags
 
 
 async def embed_chunks_bulk(
@@ -159,7 +287,10 @@ async def embed_chunks_bulk(
     cursor = db.chunks.find(
         query,
         {"_id": 1, "id": 1, "chapter_id": 1, "subject_id": 1, "board_id": 1,
-         "chapter_title": 1, "topic_name": 1, "content": 1, "content_as": 1},
+         "chapter_title": 1, "topic_name": 1, "content": 1, "content_as": 1,
+         # Task #27 — pull `lang` so the language gate can defer to the
+         # shared `_is_indic_lang` classifier when present.
+         "lang": 1, "language": 1},
     )
     if limit:
         cursor = cursor.limit(limit)
@@ -174,11 +305,13 @@ async def embed_chunks_bulk(
         batch = chunks[batch_start: batch_start + batch_size]
 
         texts = []
+        is_indic_flags: list[bool] = []
         for ch in batch:
             content = (ch.get("content") or "").strip()
             if not content:
                 skipped += 1
                 texts.append(None)
+                is_indic_flags.append(False)
                 continue
             # Bilingual: append Assamese content if available
             content_as = (ch.get("content_as") or "").strip()
@@ -186,6 +319,14 @@ async def embed_chunks_bulk(
             embed_text = f"{topic_prefix}\n\n{content}"
             if content_as:
                 embed_text += f"\n\n{content_as[:400]}"
+            # Task #27 — flag Indic-dominant chunks so the language-gated
+            # split can route them to Bedrock-Cohere v3. Defers to the
+            # shared `_is_indic_lang` classifier when the chunk carries
+            # an explicit `lang` / `language` field.
+            _chunk_lang = (ch.get("lang") or ch.get("language") or "").strip() or None
+            is_indic_flags.append(
+                _is_indic_text(content_as, content, lang=_chunk_lang)
+            )
             # Task #513 §B — clamp at the §B-locked `embed` budget
             # (`_EMBED_CHARS_CAP`, derived from cost_caps.TOKEN_BUDGETS),
             # not the legacy hard-coded 2048 ceiling. The two are equal
@@ -194,13 +335,20 @@ async def embed_chunks_bulk(
             # changes propagate without a manual edit here.
             texts.append(embed_text[:_EMBED_CHARS_CAP])
 
-        # Embed non-None texts
+        # Embed non-None texts via the language-gated split (Task #27).
         to_embed = [(i, t) for i, t in enumerate(texts) if t is not None]
         if not to_embed:
             continue
 
         idxs, embed_texts = zip(*to_embed)
-        vecs = await _embed_batch(list(embed_texts))
+        # Build (slot, text, is_indic) tuples preserving the original
+        # batch order so the per-slot provider tag below lines up with
+        # the chunk metadata we write to Pinecone.
+        split_items = [
+            (k, embed_texts[k], is_indic_flags[idxs[k]])
+            for k in range(len(embed_texts))
+        ]
+        vecs, vec_provider_tags = await _embed_batch_split(split_items)
 
         # Update MongoDB (source of truth — always written)
         from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -227,11 +375,17 @@ async def embed_chunks_bulk(
         # so we can write the completion marker after the upsert succeeds.
         pinecone_chunk_ids: list = []
         _embed_model_tag, _embed_source_tag = _embed_source_for_primary()
-        for i, vec in zip(idxs, vecs):
+        for k, (i, vec) in enumerate(zip(idxs, vecs)):
             if vec is None:
                 failed += 1
                 continue
             chunk = batch[i]
+            # Task #27 — per-slot provider tag from the language-gated
+            # split. Falls back to the chunk-path default if the split
+            # somehow didn't tag this slot (defensive).
+            _slot_provider_tag = (
+                vec_provider_tags[k] if k < len(vec_provider_tags) else _embed_source_tag
+            )
             filter_q = {"_id": chunk["_id"]}
             if not _skip_mongo_embed:
                 ops.append(UpdateOne(
@@ -256,6 +410,21 @@ async def embed_chunks_bulk(
                         "chapter_title":   chunk.get("chapter_title", ""),
                         "topic_name":      chunk.get("topic_name", ""),
                         "embedding_model": _embed_model_tag,
+                        # Task #27 — provider-tag every Pinecone vector so
+                        # retrieval can filter by `embed_provider` and
+                        # never mix Workers-AI vectors with Bedrock-Cohere
+                        # vectors in a single result set. Default mirrors
+                        # `chunk_embedder`'s embed source (Workers-AI
+                        # custom worker); the language-gated dispatcher
+                        # in `llm.call_embed_with_dispatch` writes the
+                        # `cohere_multilingual_v3_bedrock` tag for the
+                        # Indic route. Bulk indexing now also routes
+                        # Indic-dominant chunks via Bedrock-Cohere
+                        # (`_embed_batch_split`), so this tag reflects
+                        # the provider that ACTUALLY produced the
+                        # vector for this chunk, not the chunk-path
+                        # default.
+                        "embed_provider":  _slot_provider_tag,
                     },
                 })
                 pinecone_chunk_ids.append(chunk["_id"])

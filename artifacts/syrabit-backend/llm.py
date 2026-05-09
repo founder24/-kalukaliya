@@ -4088,16 +4088,47 @@ async def call_embed_with_dispatch(
     in Tasks #347 / #491 / #554.)
     Returns a float list on success, raises RuntimeError if all providers fail.
     """
-    from config import PROVIDER_PRIORITY as _PP, EMBED_PROVIDER_PRIMARY as _EPP
+    from config import (
+        PROVIDER_PRIORITY as _PP,
+        EMBED_PROVIDER_PRIMARY as _EPP,
+        EMBED_INDIC_PROVIDER as _EIP,
+        BEDROCK_EMBED_REGION as _BER,
+    )
     feature = _embed_feature_for(text, lang)
 
+    # Task #27 — language-gated Indic embed route resolver. Indic queries
+    # MAY route to Cohere via AWS Bedrock; English / unknown always use
+    # the Workers-AI custom worker. The operator overrides:
+    #   * RAG_EMBEDDING_PROVIDER_FORCE=workers_ai_custom — pin EVERYTHING
+    #     (Indic included) to Workers AI; ultimate kill-switch for the
+    #     Bedrock route without a code change.
+    #   * EMBED_INDIC_PROVIDER=workers_ai_custom — downgrade ONLY the
+    #     Indic route back to Workers AI without touching the force knob.
+    _force = (os.environ.get("RAG_EMBEDDING_PROVIDER_FORCE", "") or "").strip().lower()
+    _indic_provider_choice = (
+        "workers_ai_custom"
+        if (
+            feature != "embed_indic"
+            or _force == "workers_ai_custom"
+            or (_EIP or "").strip().lower() != "cohere_multilingual_v3_bedrock"
+        )
+        else "cohere_multilingual_v3_bedrock"
+    )
+
     # Task #361 §2 — embedding cache lookup. Vectors are deterministic
-    # for the same (text, task_type, lang); a cache hit can be served
-    # immediately. Soft-fail: any cache error falls through to the
-    # normal weighted dispatch.
+    # for the same (text, task_type, lang, provider); a cache hit can
+    # be served immediately. Task #27 — fold the provider into the key
+    # so a Workers-AI vector and a Bedrock-Cohere vector for the same
+    # text never cross-pollinate. Soft-fail: any cache error falls
+    # through to the normal weighted dispatch.
     try:
         from embed_cache import get_cached_embedding as _embed_cache_get, set_cached_embedding as _embed_cache_set
-        _cached_vec = _embed_cache_get(text, task_type=task_type, lang=lang)
+        _cached_vec = _embed_cache_get(
+            text,
+            task_type=task_type,
+            lang=lang,
+            embed_provider=_indic_provider_choice,
+        )
     except Exception:
         _cached_vec = None
         _embed_cache_set = None  # type: ignore[assignment]
@@ -4156,13 +4187,92 @@ async def call_embed_with_dispatch(
             chunk_id=_chunk_id,
         )
 
-    def _persist_early(_vec):
+    def _persist_early(_vec, *, _provider: str):
+        # Task #27 — `_provider` is REQUIRED (no default). Defaulting it
+        # to a name captured at function-definition time would let a
+        # post-fallthrough Workers-AI vector be cached under the
+        # Cohere provider key, poisoning provider isolation.
         if _embed_cache_set is None or not _vec:
             return
         try:
-            _embed_cache_set(text, _vec, task_type=task_type, lang=lang)
+            _embed_cache_set(
+                text, _vec,
+                task_type=task_type, lang=lang,
+                embed_provider=_provider,
+            )
         except Exception:
             pass
+
+    # Task #27 — Indic-route Bedrock-Cohere short-circuit. Sits BEFORE
+    # the Workers-AI strict-isolation branch so an Indic query never
+    # hits the English path. IAM/model-access denial degrades to
+    # Workers AI for this single call (loud Sentry breadcrumb,
+    # `degraded_to_workers_ai`); throttling / dim-mismatch also
+    # degrades. Cost is metered into MeterD's Indic sub-cap via
+    # `credit_burn_meter_runtime.ingest_meter_d_usd_indic`.
+    # Task #27 — final pre-call gate: if MeterD's Indic sub-cap has
+    # tripped this month, skip Bedrock entirely (no extra spend, no
+    # alert spam). The dispatcher falls through to the Workers-AI
+    # strict-isolation branch below.
+    if _indic_provider_choice == "cohere_multilingual_v3_bedrock":
+        try:
+            from credit_burn_meter_runtime import is_indic_embed_paused as _indic_paused
+            if _indic_paused():
+                logger.info(
+                    "embed_indic: indic sub-cap tripped — routing to workers_ai_custom"
+                )
+                _indic_provider_choice = "workers_ai_custom"
+        except Exception:
+            pass
+
+    if _indic_provider_choice == "cohere_multilingual_v3_bedrock":
+        from providers import cohere_bedrock_embed as _cb
+        from embed_degraded_controller import record_probe as _embed_record_probe
+        import time as _time_mod
+        _t0 = _time_mod.perf_counter()
+        try:
+            _vec_indic = await _cb.embed_one(
+                text, task_type=task_type, region=_BER,
+            )
+        except _cb.BedrockEmbedAccessDenied as _denied:
+            logger.warning(
+                "embed_indic: bedrock cohere IAM/model-access denied — "
+                "degrading this call to workers_ai_custom: %s", _denied,
+            )
+            try:
+                import sentry_sdk as _sentry  # type: ignore
+                _sentry.add_breadcrumb(
+                    category="embed.indic.fallback",
+                    message="bedrock_cohere_access_denied → workers_ai_custom",
+                    level="warning",
+                    data={"region": _BER, "feature": feature},
+                )
+            except Exception:
+                pass
+        except _cb.BedrockEmbedError as _exc_indic:
+            _embed_record_probe(False, (_time_mod.perf_counter() - _t0) * 1000.0)
+            logger.warning(
+                "embed_indic: bedrock cohere call failed (%s) — degrading to workers_ai_custom",
+                _exc_indic,
+            )
+        else:
+            # Charge MeterD's Indic sub-cap. Token estimate is
+            # 1 token ≈ 4 chars (Cohere Embed v3 tokenizer rough heuristic);
+            # exact billing is reconciled by the daily Cost Explorer
+            # ingestion (Task #513 §J).
+            try:
+                from cost_caps import BEDROCK_COHERE_EMBED_USD_PER_1K_TOKENS as _RATE
+                from credit_burn_meter_runtime import ingest_meter_d_usd_indic as _meter_indic
+                _approx_tokens = max(1, len(text) // 4)
+                _meter_indic((_approx_tokens / 1000.0) * float(_RATE))
+            except Exception as _meter_exc:
+                logger.debug("embed_indic: meter D indic ingest failed: %s", _meter_exc)
+            _persist_early(_vec_indic, _provider="cohere_multilingual_v3_bedrock")
+            return _vec_indic
+        # Fall through to the Workers-AI strict-isolation branch below
+        # so the call still completes — the Indic route silently
+        # degraded but the caller does not see an exception.
+        _indic_provider_choice = "workers_ai_custom"
 
     # Task #382 — STRICT provider isolation under the new default flag.
     # When EMBED_PROVIDER_PRIMARY=workers_ai_custom we short-circuit
@@ -4204,7 +4314,7 @@ async def call_embed_with_dispatch(
             _embed_record_probe(False, (_time_mod.perf_counter() - _t0) * 1000.0)
             raise RuntimeError("embed: workers_ai_custom returned no vectors")
         _embed_record_probe(True, (_time_mod.perf_counter() - _t0) * 1000.0)
-        _persist_early(_strict_vecs[0])
+        _persist_early(_strict_vecs[0], _provider="workers_ai_custom")
         return _strict_vecs[0]
 
     exclude: frozenset = frozenset()
@@ -4215,11 +4325,14 @@ async def call_embed_with_dispatch(
     pool = _PP.get(feature) or _PP.get("embed", [])
     max_attempts = len(pool) + 1
 
-    def _persist(_vec):
+    def _persist(_vec, _provider: str):
         # Reuse the early-persist closure so cache writes are
         # consistent across both the strict-isolation short-circuit
-        # and the rollback weighted-draw loop.
-        _persist_early(_vec)
+        # and the rollback weighted-draw loop. Provider is threaded
+        # explicitly from the loop variable so the cache key always
+        # reflects the provider that actually produced the vector
+        # (Task #27 — no default-bound provider names).
+        _persist_early(_vec, _provider=_provider)
 
     # Task #490 — record every primary-provider attempt's outcome so the
     # auto-trip controller sees real traffic. We only feed probes for the
@@ -4270,12 +4383,12 @@ async def call_embed_with_dispatch(
                     )
                 if _is_primary:
                     _embed_record_probe(True, (_time_mod.perf_counter() - _t0) * 1000.0)
-                _persist(_we_vecs[0])
+                _persist(_we_vecs[0], provider)
                 return _we_vecs[0]
             elif provider == "workers_ai":
                 from providers.cloudflare_ai import embed as _cf_embed
                 _vec_wai = await _cf_embed(text)
-                _persist(_vec_wai)
+                _persist(_vec_wai, provider)
                 return _vec_wai
             # Task #347: bedrock embed branch removed (providers/bedrock.py deleted).
             # Task #491 — legacy embed-provider branches removed.

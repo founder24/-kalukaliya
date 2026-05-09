@@ -39,9 +39,17 @@ EMBED_CACHE_ENABLED_DEFAULT = os.environ.get("EMBED_CACHE_ENABLED", "1").strip()
 # vector. 1024-dim float32 ≈ 8 KB JSON; cap at 64 KB for safety.
 _MAX_ENTRY_BYTES = 64 * 1024
 
-_KEY_TMPL = "embed:question:{task}:{lang}:{h}"
+_KEY_TMPL = "embed:question:{task}:{lang}:{provider}:{h}"
 _HIT_COUNTER = "embed:cache:hits"
 _MISS_COUNTER = "embed:cache:misses"
+# Task #27 — per-provider counters so the admin cache panel can show
+# Workers-AI vs. Cohere-via-Bedrock effectiveness independently.
+_HIT_COUNTER_PROVIDER = "embed:cache:{provider}:hits"
+_MISS_COUNTER_PROVIDER = "embed:cache:{provider}:misses"
+# Default provider tag — pre-Task-#27 callers (and tests) that don't
+# pass `embed_provider` get the historical default. Live dispatch
+# always passes the explicit provider name.
+_DEFAULT_PROVIDER = "workers_ai_custom"
 _KILL_FLAG = "cache:embed_enabled"
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -82,11 +90,12 @@ def _normalize(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", (text or "")).strip().lower()
 
 
-def _key(text: str, task_type: str, lang: str) -> str:
+def _key(text: str, task_type: str, lang: str, provider: str) -> str:
     h = hashlib.sha256(_normalize(text).encode("utf-8")).hexdigest()[:32]
     t = (task_type or "default").strip().lower()[:24]
     l = (lang or "en").strip().lower()[:8]
-    return _KEY_TMPL.format(task=t, lang=l, h=h)
+    p = (provider or _DEFAULT_PROVIDER).strip().lower()[:48]
+    return _KEY_TMPL.format(task=t, lang=l, provider=p, h=h)
 
 
 def _bump(counter: str) -> None:
@@ -103,10 +112,15 @@ def get_cached_embedding(
     text: str,
     task_type: str = "RETRIEVAL_DOCUMENT",
     lang: str = "en",
+    embed_provider: str = _DEFAULT_PROVIDER,
 ) -> Optional[list]:
     """Return the cached vector for *text* if present, else None.
 
     Soft-fail: returns None on any Redis / decode error.
+
+    Task #27 — `embed_provider` is folded into the key so a
+    Workers-AI vector and a Bedrock-Cohere vector for the same text
+    are stored under distinct slots and never cross-pollinate.
     """
     if not text or not text.strip():
         return None
@@ -115,7 +129,8 @@ def get_cached_embedding(
     r = _r()
     if not r:
         return None
-    key = _key(text, task_type, lang)
+    key = _key(text, task_type, lang, embed_provider)
+    _provider_tag = (embed_provider or _DEFAULT_PROVIDER).strip().lower()[:48]
     try:
         raw = r.get(key)
     except Exception as exc:
@@ -123,12 +138,14 @@ def get_cached_embedding(
         return None
     if not raw:
         _bump(_MISS_COUNTER)
+        _bump(_MISS_COUNTER_PROVIDER.format(provider=_provider_tag))
         return None
     try:
         vec = json.loads(raw)
         if not isinstance(vec, list) or not vec:
             return None
         _bump(_HIT_COUNTER)
+        _bump(_HIT_COUNTER_PROVIDER.format(provider=_provider_tag))
         return vec
     except Exception as exc:
         logger.debug("embed_cache: decode failed key=%s: %s", key, exc)
@@ -140,8 +157,9 @@ def set_cached_embedding(
     vector: list,
     task_type: str = "RETRIEVAL_DOCUMENT",
     lang: str = "en",
+    embed_provider: str = _DEFAULT_PROVIDER,
 ) -> bool:
-    """Persist *vector* against (text, task_type, lang). Soft-fail on errors."""
+    """Persist *vector* against (text, task_type, lang, provider). Soft-fail on errors."""
     if not text or not text.strip():
         return False
     if not isinstance(vector, list) or not vector:
@@ -159,7 +177,7 @@ def set_cached_embedding(
     if len(payload) > _MAX_ENTRY_BYTES:
         logger.debug("embed_cache: entry too large (%d B) — skip cache", len(payload))
         return False
-    key = _key(text, task_type, lang)
+    key = _key(text, task_type, lang, embed_provider)
     try:
         r.set(key, payload, ex=EMBED_CACHE_TTL_S)
         return True

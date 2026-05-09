@@ -541,6 +541,30 @@ ELEVENLABS_MODEL_ID = os.environ.get('ELEVENLABS_MODEL_ID', 'eleven_multilingual
 EMBED_PROVIDER_PRIMARY = os.environ.get(
     'EMBED_PROVIDER_PRIMARY', 'workers_ai_custom'
 ).strip().lower() or 'workers_ai_custom'
+
+# Task #27 — Indic-only embed route knob. When set to
+# `cohere_multilingual_v3_bedrock` (the default) and the language
+# detector classifies the input as Assamese / Indic, the embed
+# dispatcher routes via `providers.cohere_bedrock_embed` (AWS Bedrock,
+# `cohere.embed-multilingual-v3`, 1024-dim). Any other value (in
+# practice `workers_ai_custom`) downgrades the Indic route back to the
+# Workers-AI custom embed worker WITHOUT touching English routing —
+# this is the operator kill-switch separate from
+# `RAG_EMBEDDING_PROVIDER_FORCE`. English / unknown-language inputs
+# always use `workers_ai_custom`. Task #27 keeps the Cohere SDK and
+# the `COHERE_API_KEY` env-var retired on either path (Bedrock-only
+# enforcement — `scripts/ci/check_canonical_delegation.py` bans both).
+EMBED_INDIC_PROVIDER = os.environ.get(
+    'EMBED_INDIC_PROVIDER', 'cohere_multilingual_v3_bedrock'
+).strip().lower() or 'cohere_multilingual_v3_bedrock'
+# Region the Bedrock InvokeModel call is pinned to. Bedrock Cohere
+# Embed Multilingual v3 is on-demand priced in `us-east-1`; flip this
+# to roll out to a different region without a code change. The route
+# does NOT cross-region failover — on outage it falls back to Workers
+# AI per the Task #27 §10 "no cross-region failover" scope.
+BEDROCK_EMBED_REGION = os.environ.get(
+    'BEDROCK_EMBED_REGION', 'us-east-1'
+).strip() or 'us-east-1'
 RERANK_PROVIDER = os.environ.get(
     'RERANK_PROVIDER', 'pinecone_only'
 ).strip().lower() or 'pinecone_only'

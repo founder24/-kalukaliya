@@ -24,9 +24,10 @@ const adminHeaders = (token) => {
 };
 
 const LEGS = [
-  { key: 'embed',  label: 'Embed',        sub: 'Workers-AI custom worker' },
-  { key: 'rerank', label: 'Rerank',       sub: 'Pinecone /rerank' },
-  { key: 'memory', label: 'Memory brain', sub: 'Voyage + Atlas' },
+  { key: 'embed',         label: 'Embed (en)',     sub: 'Workers-AI custom worker' },
+  { key: 'bedrock_indic', label: 'Embed (indic)',  sub: 'Cohere Embed v3 / AWS Bedrock' },
+  { key: 'rerank',        label: 'Rerank',         sub: 'Pinecone /rerank' },
+  { key: 'memory',        label: 'Memory brain',   sub: 'Voyage + Atlas' },
 ];
 
 // Task #438 — one row per embed-worker environment (production + staging,
@@ -306,9 +307,10 @@ export default function EmbedStackHealthPill({ adminToken }) {
     : { tile: 'bg-rose-50 border-rose-200',       icon: 'bg-rose-100 text-rose-500',       heading: 'text-rose-700' };
 
   const pills = {
-    embed:  data?.embed,
-    rerank: data?.rerank,
-    memory: data?.memory,
+    embed:         data?.embed,
+    bedrock_indic: data?.bedrock_indic,
+    rerank:        data?.rerank,
+    memory:        data?.memory,
   };
 
   // Task #438 — staging worker side-by-side with production. Falls back
@@ -354,10 +356,63 @@ export default function EmbedStackHealthPill({ adminToken }) {
       )}
 
       {!error && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {LEGS.map((leg) => (
             <LegPill key={leg.key} leg={leg} pill={pills[leg.key]} />
           ))}
+        </div>
+      )}
+
+      {!error && data?.bedrock_indic && (
+        <div
+          className="mt-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2"
+          data-testid="embed-bedrock-indic-detail"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold text-sky-800">
+              Indic embed route (Task #27)
+            </p>
+            <span
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border tabular-nums ${
+                data.bedrock_indic.paused
+                  ? 'bg-amber-100 text-amber-700 border-amber-300'
+                  : (data.bedrock_indic.effective_route === 'cohere_multilingual_v3_bedrock'
+                      ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                      : 'bg-slate-100 text-slate-600 border-slate-200')
+              }`}
+              data-testid="embed-bedrock-indic-effective-route"
+              title="Effective route after kill-switch + sub-cap evaluation"
+            >
+              {data.bedrock_indic.effective_route || '—'}
+            </span>
+          </div>
+          <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-gray-600 tabular-nums">
+            <span title="AWS Bedrock region">
+              region: <span className="font-semibold">{data.bedrock_indic.region || '—'}</span>
+            </span>
+            <span title="Bedrock model id">
+              model: <span className="font-semibold truncate">{data.bedrock_indic.model_id || '—'}</span>
+            </span>
+            <span title="MeterD Indic sub-bucket monthly spend">
+              spend:{' '}
+              <span className="font-semibold">
+                ${Number(data.bedrock_indic.monthly_usd ?? 0).toFixed(4)}
+              </span>{' '}
+              / ${Number(data.bedrock_indic.subcap_usd ?? 0).toFixed(2)}
+            </span>
+            <span title="EMBED_INDIC_PROVIDER kill-switch">
+              switch:{' '}
+              <span className="font-semibold truncate">
+                {data.bedrock_indic.kill_switch?.EMBED_INDIC_PROVIDER || '—'}
+              </span>
+            </span>
+          </div>
+          {data.bedrock_indic.paused && (
+            <p className="mt-1 text-[10px] text-amber-700">
+              Indic sub-cap tripped — Bedrock paused for the rest of the calendar month;
+              Indic queries are routing through workers_ai_custom.
+            </p>
+          )}
         </div>
       )}
 

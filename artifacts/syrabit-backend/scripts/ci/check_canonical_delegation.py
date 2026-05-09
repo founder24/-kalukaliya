@@ -76,7 +76,7 @@ FRONTEND = ROOT / "artifacts" / "syrabit"
 # A. DEAD-PROVIDER BANK (carried verbatim from Task #297 → #554)
 # ──────────────────────────────────────────────────────────────────────
 BANNED_LITERAL = re.compile(
-    r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5|"
+    r"\b(cerebras|voyage_ai|cartesia|groq|openrouter|quge5|"
     r"azure_openai|AzureOpenAI|gpt-4\.1-nano|"
     # Task #552 §G — AssemblyAI fully retired (provider module deleted).
     # Task #552 §G-R (2026-05-09 reversal) — Deepgram Aura-2 TTS surface
@@ -86,8 +86,19 @@ BANNED_LITERAL = re.compile(
     # longer banned. ElevenLabs was demoted to the named fallback per
     # the canonical-delegation rule (one primary + one named fallback).
     r"assemblyai|AssemblyAI|ASSEMBLYAI_API_KEY|ASSEMBLYAI_STT_MODEL)\b|"
-    r"\bAZURE_OPENAI_[A-Z0-9_]+\b",
-    re.IGNORECASE,
+    r"\bAZURE_OPENAI_[A-Z0-9_]+\b|"
+    # Task #27 (2026-05-09) — partial reversal of the Task #491 Cohere
+    # ban. The `cohere` token is no longer banned as a bare literal
+    # (the Bedrock model id `cohere.embed-multilingual-v3` and the
+    # provider module name `cohere_bedrock_embed` are legitimate uses
+    # of the bare token). What REMAINS banned is the Cohere PYTHON SDK
+    # (`import cohere`, `from cohere ...`) and the `COHERE_API_KEY`
+    # env-var — both would imply a non-Bedrock route which violates
+    # Task #27's Bedrock-only enforcement.
+    r"^\s*import\s+cohere\b|"
+    r"^\s*from\s+cohere\b|"
+    r"\bCOHERE_API_KEY\b",
+    re.IGNORECASE | re.MULTILINE,
 )
 BANNED_VENDOR_USES = re.compile(
     r"(import\s+stripe\b|from\s+stripe\s+import|stripe\.(?:api_key|Webhook|checkout|Customer)|"
@@ -182,6 +193,13 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/tests/test_ai_discoverability_policy.py",
     "artifacts/syrabit/vite.config.js",
     "artifacts/syrabit-backend/providers/workers_embed.py",
+    # Task #27 — Cohere Embed Multilingual v3 via AWS Bedrock. The
+    # module name and Bedrock model id literal `cohere.embed-multilingual-v3`
+    # are the only references to "cohere" left in the runtime; the
+    # scoped BANNED_LITERAL above already lets these survive, but the
+    # umbrella allowlist is the belt-and-braces complement.
+    "artifacts/syrabit-backend/providers/cohere_bedrock_embed.py",
+    "artifacts/syrabit-backend/tests/test_cohere_bedrock_embed.py",
     "artifacts/syrabit-backend/tests/test_admin_aws_native_route.py",
     "artifacts/syrabit-backend/tests/test_admin_dashboard_metrics_throttle_tiles.py",
     "artifacts/syrabit-backend/tests/test_assamese_rag_namespace.py",
@@ -267,6 +285,7 @@ def _scan_file(p: Path) -> list[str]:
         is_removal_note = (
             "Task #347" in line or "Task #491" in line or "Task #554" in line
             or "Task #556" in line or "Task #559" in line or "Task #552" in line
+            or "Task #27" in line
             or "removed" in line.lower() or "deprecated" in line.lower()
             or "retired" in line.lower() or "decommission" in line.lower()
             or "REMOVED" in line or "retired" in line.lower()

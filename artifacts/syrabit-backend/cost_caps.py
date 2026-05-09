@@ -57,6 +57,24 @@ CONSERVATIVE_OUTPUT_TOKENS = 600      # output cap once free user crosses 15 tur
 # `scripts/check_budget_ceiling.py`.
 _DEFAULT_MONTHLY_TOTAL_USD_CAP = 100.0
 
+# ── Task #27 — Cohere `embed-multilingual-v3` via AWS Bedrock ──────────────
+# On-demand price for `cohere.embed-multilingual-v3` in `us-east-1` is
+# $0.0001 per 1k input tokens (AWS pricing page sampled 2026-05-09).
+# `llm.call_embed_with_dispatch` charges this rate against MeterD's
+# Indic sub-cap on every successful Bedrock call. Raising this rate
+# constant requires a "# COST-CAP-OVERRIDE: <reason>" comment on the
+# changed line — `scripts/check_budget_ceiling.py` enforces.
+BEDROCK_COHERE_EMBED_USD_PER_1K_TOKENS = 0.0001
+# Sub-cap dedicated to the Indic embed route. Sits INSIDE the $100
+# global cap (counts against it) but tripping THIS sub-cap shuts down
+# only the Bedrock route — `is_indic_embed_paused()` returns True and
+# the dispatcher routes Indic queries to Workers AI for the rest of
+# the calendar month. Default $5/mo headroom is ample for the
+# expected Assamese embed volume (≤50M tokens/mo at $0.0001/1k =
+# $5/mo) while staying safely below the global cap. Raising this
+# requires a `# COST-CAP-OVERRIDE: <reason>` comment.
+INDIC_EMBED_MONTHLY_USD_SUBCAP = 5.0
+
 # Three-stage degradation ladder (Task #549). Operators / dispatchers
 # read these to decide what to shed at each spend percentage of the
 # monthly cap:

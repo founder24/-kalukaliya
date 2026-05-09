@@ -132,3 +132,74 @@ Long, multi-paragraph operational gotchas previously inlined in `replit.md`. Sho
 
 **Founder locks unchanged by this knob:** `/api/me/quota` 5 s edge cache TTL, `/api/ai/chat` edge bypass (live chat hot-path NEVER cached — K.2 gotcha still applies), `$100/mo` monthly USD cap (`cost_caps._DEFAULT_MONTHLY_TOTAL_USD_CAP` + `MeterDConfig.cap_usd`), and `TOKEN_BUDGETS` ceilings. The exam-mode TTL stretch only applies to the deterministic input cache + the four opted-in public content routes; nothing in the chat dispatch chain or the cost-cap ladder is touched.
 
+
+## Task #27 — Cohere `embed-multilingual-v3` via AWS Bedrock (2026-05-09)
+
+**Partial reversal of Task #491.** Task #491 retired Cohere outright after a
+single English-only A/B against the Workers-AI custom embed worker. The
+A/B never measured Indic recall — Cohere had no Assamese training data
+weighting at the time of #491 — and the broad ban swept up the
+multilingual-v3 model that AWS later released on Bedrock with first-class
+Indic coverage. Task #27 narrows #491 to a language-gated re-introduction:
+Cohere stays banned as a SaaS SDK / `COHERE_API_KEY` route, but
+`cohere.embed-multilingual-v3` is allowed **exclusively** via AWS Bedrock
+(`bedrock-runtime:InvokeModel`, reuses the existing per-feature OIDC role —
+no new credentials, no new vendor relationship).
+
+**Routing.** `llm.call_embed_with_dispatch` resolves the embed provider by
+detected language tag:
+
+  * `lang ∈ {as, as-IN, indic, hi, bn, ...}` → `cohere_multilingual_v3_bedrock`
+    (1024-dim, must match `pinecone_dim` founder-lock).
+  * everything else → `workers_ai_custom` (English / unknown / mixed).
+
+A successful Bedrock call charges `BEDROCK_COHERE_EMBED_USD_PER_1K_TOKENS
+= 0.0001` (`us-east-1` on-demand price sampled 2026-05-09) into both the
+global Rule-D bucket AND a dedicated Indic sub-bucket via
+`MeterD.record_usd_indic_bedrock`. When the sub-bucket crosses
+`INDIC_EMBED_MONTHLY_USD_SUBCAP=$5/mo`, `embed:indic:paused=1` is set
+(TTL = next UTC month start) and `is_indic_embed_paused()` flips True;
+the dispatcher then routes Indic queries to Workers-AI for the rest of
+the calendar month. The same dollars only count once toward the global
+$100 cap, so the sub-cap does not artificially inflate Rule-D.
+
+**Failure handling (V4 §12 no silent fallbacks).** Bedrock failures
+(`AccessDeniedException`, `ThrottlingException`, dim-mismatch) DO NOT
+silently degrade — they record a Sentry breadcrumb (`degraded_to_workers_ai`)
++ flip the `embed_degraded_controller` probe + per-call route to Workers-AI
+for the single request only; the next call retries Bedrock. Operator
+kill-switches: `EMBED_INDIC_PROVIDER=workers_ai_custom` (per-deployment)
+or `RAG_EMBEDDING_PROVIDER_FORCE=workers_ai_custom` (per-call).
+
+**Cache + Pinecone isolation.** `embed_cache.py` folds `embed_provider`
+into the Redis key (`emb:cohere_multilingual_v3_bedrock:<sha256>` vs
+`emb:workers_ai_custom:<sha256>`) so paraphrased / bilingual variants
+never cross-contaminate. `chunk_embedder.py` stamps every Pinecone vector
+with a top-level `embed_provider` metadata field for the same reason —
+Pinecone filtering can isolate by provider when comparing recall.
+
+**Admin surface.** `/admin/health/embed-stack` returns a 4-leg payload
+(`embed`, `bedrock_indic`, `rerank`, `memory`). The Indic leg is
+**excluded** from the top-level `ok` aggregate because a paused or
+kill-switched Indic route degrades to Workers-AI by design and must not
+turn the entire health pill red on a healthy English primary. The
+dedicated detail card surfaces region, model id, monthly spend vs sub-cap,
+the `EMBED_INDIC_PROVIDER` switch, and a paused-state amber notice.
+
+**CI guards.** `scripts/ci/check_canonical_delegation.py` removed the
+bare `cohere` token from `BANNED_LITERAL` (it would otherwise fire on
+the Bedrock model id and the provider module name) and added scoped
+patterns: `^\s*import\s+cohere\b`, `^\s*from\s+cohere\b`,
+`\bCOHERE_API_KEY\b` — the SaaS-route surface remains banned.
+`infra/architecture-matrix.json` removed `cohere` from
+`retired_providers` and added two new §5.1 rows (`embed.default` +
+`embed.indic`); the architecture-lock guard's strict patterns are
+import/env-var scoped so the runtime references in
+`providers/cohere_bedrock_embed.py` don't trigger.
+
+**Founder locks (unchanged).** `MONTHLY_TOTAL_USD_CAP=$100`, V4 §12
+no-silent-fallbacks, `pinecone_dim=1024`, `sarvam_assamese_head=true`
+(Sarvam remains the sole Assamese chat head — Task #27 only touches
+the embed surface). Sub-cap is INSIDE the global cap; raising either
+requires the standard `# COST-CAP-OVERRIDE: <reason>` discipline,
+enforced by `scripts/check_budget_ceiling.py`.

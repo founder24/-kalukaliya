@@ -263,6 +263,57 @@ def is_chat_cheaponly_active() -> bool:
         return False
 
 
+# ── Task #27 — Indic-route Bedrock-Cohere sub-cap helpers ───────────────
+def ingest_meter_d_usd_indic(usd: float) -> None:
+    """Record `usd` against BOTH the global Rule D bucket and the
+    dedicated Indic sub-bucket (Task #27).
+
+    Called from `llm.call_embed_with_dispatch` on every successful
+    Bedrock-Cohere Indic-embed call. The sub-cap default is sourced
+    from `cost_caps.INDIC_EMBED_MONTHLY_USD_SUBCAP` (currently $5/mo)
+    so a runaway Indic embed volume shuts down ONLY the Bedrock route
+    via `is_indic_embed_paused()` without touching English chat or
+    triggering the global cheaponly lock prematurely. Never raises.
+    """
+    _ensure_meters()
+    if _METER_D is None:
+        return
+    try:
+        from cost_caps import INDIC_EMBED_MONTHLY_USD_SUBCAP as _SUBCAP
+    except Exception:
+        _SUBCAP = 5.0
+    try:
+        _METER_D.record_usd_indic_bedrock(float(usd), subcap_usd=float(_SUBCAP))
+    except Exception as _exc:
+        logger.debug("[credit-burn] meter D indic ingest failed: %s", _exc)
+
+
+def is_indic_embed_paused() -> bool:
+    """True when the Indic embed sub-cap (Task #27) has tripped this
+    month. The dispatcher reads this via the standard import in
+    `llm.call_embed_with_dispatch` so an outage routes Indic queries
+    to Workers AI for the rest of the calendar month.
+    """
+    _ensure_meters()
+    if _METER_D is None:
+        return False
+    try:
+        return bool(_METER_D.is_indic_embed_paused())
+    except Exception:
+        return False
+
+
+def indic_monthly_usd() -> float:
+    """Current-month Indic embed spend in USD (0.0 on errors)."""
+    _ensure_meters()
+    if _METER_D is None:
+        return 0.0
+    try:
+        return float(_METER_D.indic_monthly_usd())
+    except Exception:
+        return 0.0
+
+
 def get_meter_d():
     """Test/admin helper — returns the singleton MeterD (or None)."""
     _ensure_meters()

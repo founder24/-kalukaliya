@@ -24,7 +24,6 @@
   },
   "retired_providers": [
     "cerebras",
-    "cohere",
     "voyage",
     "voyage_ai",
     "voyageai",
@@ -414,7 +413,25 @@
           ]
         },
         {
-          "item": "Content formatter (Vertex 2.5 Flash → Llama-3.3-70b → passthrough)",
+          "item": "Embed.default (English / unknown lang): workers_ai_custom (1024-dim Gemma-300M + Qwen3-0.6B mean-pool)",
+          "status": "IMPLEMENTED",
+          "source_paths": [
+            "artifacts/syrabit-backend/providers/workers_embed.py",
+            "artifacts/syrabit-backend/llm.py"
+          ]
+        },
+        {
+          "item": "Embed.indic (Assamese / Indic lang-gated): cohere_multilingual_v3_bedrock \u2192 workers_ai_custom (Bedrock-only, no SDK, no COHERE_API_KEY; Task #27 partial-reversal of #491)",
+          "status": "IMPLEMENTED",
+          "source_paths": [
+            "artifacts/syrabit-backend/providers/cohere_bedrock_embed.py",
+            "artifacts/syrabit-backend/llm.py",
+            "artifacts/syrabit-backend/cost_caps.py",
+            "artifacts/syrabit-backend/credit_burn_meter.py"
+          ]
+        },
+        {
+          "item": "Content formatter (Vertex 2.5 Flash \u2192 Llama-3.3-70b \u2192 passthrough)",
           "status": "IMPLEMENTED",
           "source_paths": [
             "artifacts/syrabit-backend/content_formatter.py",
