@@ -104,20 +104,22 @@ class EndpointResolverTests(unittest.TestCase):
         self.assertEqual(all_calls, 1)
 
     def test_endpoint_for_distinct_features(self):
+        # Task #552 §G-R — Azure Speech + Translator retired; the
+        # resolver only sees the surviving Azure surfaces now.
         env = {"AZURE_CRON_OBS_KV_URI": "https://kv.vault.azure.net/"}
         with mock.patch.dict("os.environ", env, clear=True):
             self.resolver.endpoint_for("openai")
-            self.resolver.endpoint_for("speech")
-            self.resolver.endpoint_for("translator")
+            self.resolver.endpoint_for("document_intel")
+            self.resolver.endpoint_for("vision")
         all_calls = sorted(
             name for c in self._fake_client_cls.instances for name in c.calls
         )
         self.assertEqual(
             all_calls,
             [
+                "azure-ai-document_intel-endpoint",
                 "azure-ai-openai-endpoint",
-                "azure-ai-speech-endpoint",
-                "azure-ai-translator-endpoint",
+                "azure-ai-vision-endpoint",
             ],
         )
 

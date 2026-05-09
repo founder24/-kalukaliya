@@ -1781,10 +1781,9 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     # untouched.
     # bedrock removed in Task #347
     "vertex":           "gemini-2.5-flash",
-    # Azure Translator (separate Azure resource — the OpenAI tenant is
-    # gone). Translation default-model id is descriptive only; the
-    # provider client picks the actual REST route.
-    "azure_translator": "azure-translator-rest",
+    # Task #552 §G-R: azure_translator entry removed — Azure Translator
+    # is fully retired alongside Azure Speech. Translate chain is now
+    # workers_ai_indic (IndicTrans2) → workers_ai (generic LLM tail).
     "sarvam":           "sarvam-m",                                  # Sarvam LLM (Indic) — primary for assamese_rag_chat
     "elevenlabs":       "eleven_multilingual_v2",                    # ElevenLabs TTS — sole English TTS (Task #552 §G)
     # Task #552 §G — assemblyai entry retired (provider module deleted).
@@ -1817,7 +1816,7 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     # generativelanguage.googleapis.com path the backend can't reach).
     # bedrock removed in Task #347
     "vertex":           "vertex",
-    "azure_translator": "azure_translator",   # Task #554 — translate fallback only
+    # Task #552 §G-R: azure_translator canonical entry removed.
     "sarvam":           "sarvam",
     "elevenlabs":       "elevenlabs",
     # Task #552 §G — assemblyai canonical entry retired.
@@ -4295,13 +4294,12 @@ async def call_translate_with_dispatch(
 
     Priority (PROVIDER_PRIORITY['translate']):
       workers_ai_indic (IndicTrans2 en→indic-1b, sole primary)
-      → azure_translator (Azure Translator REST, fallback when admin toggle on;
-                           Task #554 split this off from the now-removed
-                           azure_openai provider key)
       → workers_ai (generic translate prompt, last resort)
 
     Sarvam was removed by Task #492 (V4 §15 amendment); the Sarvam
     translate REST branch below is gone. Vertex was removed by Task #490.
+    Azure Translator was removed by Task #552 §G-R (Azure Speech +
+    Translator fully retired).
     Returns the translated string or raises RuntimeError if all providers fail.
     """
     from config import PROVIDER_PRIORITY as _PP, TRANSLATE_PROVIDER as _TP
@@ -4338,25 +4336,9 @@ async def call_translate_with_dispatch(
                 )
             # Task #490: vertex translate branch removed.
             # Task #347: bedrock translate branch removed.
-            if provider == "azure_translator":
-                # Azure Translator REST API (AZURE_TRANSLATOR_KEY) — Task #256.
-                # Task #338: gated by the azure.translator.enabled admin
-                # toggle so ops can drop the Azure path without a redeploy
-                # when MI auth/quotas misbehave. Disabled => raise to the
-                # outer loop which moves to the next provider in pool.
-                # Task #554 — split off from the decommissioned
-                # `azure_openai` provider key into its own dedicated
-                # client module so the Azure OpenAI removal doesn't
-                # collapse the translate fallback.
-                from azure_ai_runtime import is_enabled as _az_enabled
-                if not await _az_enabled("translator"):
-                    raise RuntimeError(
-                        "azure translator disabled via admin toggle "
-                        "(azure.translator.enabled=false) — routing to next provider"
-                    )
-                from providers.azure_speech import call_translate as _az_translate
-                return await _az_translate(text, target_lang=target_lang, source_lang=source_lang)
-            elif provider == "workers_ai_indic":
+            # Task #552 §G-R: azure_translator branch removed — Azure
+            # Translator is fully retired.
+            if provider == "workers_ai_indic":
                 # IndicTrans2 en→indic-1b — Assamese translation pool (Task #267).
                 # Task #386 widened the guard to all FLORES-200-supported Indic
                 # targets so the workers_indic-only mode can serve hi/bn as
@@ -4373,7 +4355,7 @@ async def call_translate_with_dispatch(
                 if _rpc_metric:
                     _rpc_metric('workers_indic', True)
                 return _result
-            elif provider == "workers_ai":
+            if provider == "workers_ai":
                 prompt = [
                     {"role": "system", "content": f"Translate from {source_lang} to {target_lang}. Output only the translation."},
                     {"role": "user", "content": text},

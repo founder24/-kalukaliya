@@ -215,7 +215,6 @@ ALLOWLIST_FILES = {
     "artifacts/syrabit-backend/tests/observability/test_todo_558_regex.py",
     "artifacts/syrabit-backend/tests/observability/test_no_sentry_tracing.py",
     "artifacts/syrabit-backend/tests/observability/test_otel_exporter_locked.py",
-    "artifacts/syrabit-backend/providers/azure_speech.py",
     "artifacts/syrabit-backend/azure_ai_metrics.py",
     "artifacts/syrabit-backend/RUNBOOK.md",
     "artifacts/syrabit-backend/CREDITS.md",

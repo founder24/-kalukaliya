@@ -24,9 +24,6 @@ Submodules:
 
 * ``openai`` — GPT-4o / GPT-4o-mini / o-series under Azure quota,
   registered in the AI Gateway as ``llm/azure-openai``.
-* ``speech`` — Indic STT + Neural TTS, plus the opt-in branded
-  ``Syra`` voice via Custom Neural Voice.
-* ``translator`` — Indic <-> English fallback when Sarvam throttles.
 * ``document_intelligence`` — Layout-aware OCR for past papers and
   marks sheets.
 * ``vision`` — General image analysis (tags, captions, OCR) used as

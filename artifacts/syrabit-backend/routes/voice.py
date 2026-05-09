@@ -272,26 +272,9 @@ async def _synthesize_with_fallback(
                 raise RuntimeError("TTS not supported by 'vertex' — no Cloud TTS client wired (Task #490: vertex removed from tts pool)")
             # Task #347: bedrock TTS branch removed (providers/bedrock.py deleted).
             # AWS Polly survives via the explicit ``_tts_aws_polly`` fallback below.
-            elif provider == "azure_speech":
-                # Task #554 — Azure Neural TTS via providers.azure_speech.
-                # Gated by azure.speech.enabled admin toggle (legacy).
-                from azure_ai_runtime import is_enabled as _az_enabled
-                if not await _az_enabled("speech"):
-                    raise RuntimeError(
-                        "azure speech disabled via admin toggle "
-                        "(azure.speech.enabled=false) — routing to next provider"
-                    )
-                from providers.azure_speech import call_tts as _az_tts
-                from azure_ai_metrics import record_latency as _rl, record_error as _re
-                import time as _t
-                _t0 = _t.perf_counter()
-                try:
-                    audio = await _az_tts(text, voice=voice_id)
-                    _rl("speech", (_t.perf_counter() - _t0) * 1000)
-                    return audio
-                except Exception as _exc:
-                    _re("speech", f"{type(_exc).__name__}: {_exc}")
-                    raise
+            # Task #552 §G-R: azure_speech TTS branch removed — Azure Speech is
+            # fully retired. ElevenLabs is the canonical English-TTS primary,
+            # Deepgram Aura-2 is the named fallback, Workers-AI is the tail.
             else:
                 raise RuntimeError(f"TTS: unknown provider {provider!r}")
         except Exception as exc:

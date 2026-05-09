@@ -1,4 +1,4 @@
-"""Admin proxy for the ten Azure-native AI features (Task #338).
+"""Admin proxy for the eight Azure-native AI features (Task #338, post Task #552 §G-R).
 
 The React `AdminAzureAiPanel` polls `GET /admin/azure/ai/health`
 and POSTs `/admin/azure/ai/toggle`. This module backs both routes.
@@ -52,22 +52,8 @@ FEATURES: list[dict[str, Any]] = [
         "failureMode": "Falls back to direct OpenAI \u2192 Bedrock-Cohere \u2192 Groq \u2192 Gemini",
         "spendBudgetUsd": 50.0,
     },
-    {
-        "key": "speech",
-        "displayName": "Azure AI Speech",
-        "purpose": "Indic STT/TTS fallback + Custom Neural Voice 'Syra'",
-        "settingKey": "azure.speech.enabled",
-        "failureMode": "Falls back to Google STT/TTS",
-        "spendBudgetUsd": 30.0,
-    },
-    {
-        "key": "translator",
-        "displayName": "Azure AI Translator",
-        "purpose": "Indic <-> English translation fallback",
-        "settingKey": "azure.translator.enabled",
-        "failureMode": "Falls back to Bhashini \u2192 cached translations \u2192 English passthrough",
-        "spendBudgetUsd": 20.0,
-    },
+    # Task #552 §G-R — `speech` and `translator` rows removed (Azure
+    # Speech and Azure Translator fully retired).
     {
         "key": "document_intel",
         "displayName": "Azure Document Intelligence",

@@ -636,27 +636,16 @@ BEDROCK_POLLY_VOICE = ""
 # Workers-AI Llama-3.2-3B (fallback, swaps to head when GCP credit runway
 # projects ≤ 90 days). The `AZURE_OPENAI_*` env vars are intentionally NOT
 # read here any more — `scripts/check_dead_providers.py` bans the literal
-# from new code so a regression is impossible. Azure SPEECH (Neural TTS) and
-# Azure TRANSLATOR remain in active use; their config lives below.
+# from new code so a regression is impossible.
 
-# ── Azure Speech & Translator (Task #256, kept under Task #554) ──────────────
-# Azure Speech Services — used for Azure Neural TTS (call_tts in
-# providers/azure_speech.py) and Azure Whisper STT via CF BYOK.
-AZURE_SPEECH_KEY = os.environ.get('AZURE_SPEECH_KEY', '').strip()
-AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', '').strip()
-# Default Azure Neural TTS voice — Indian English expressive neural voice.
-AZURE_TTS_VOICE = (
-    os.environ.get('AZURE_TTS_VOICE', 'en-IN-NeerjaExpressiveNeural').strip()
-    or 'en-IN-NeerjaExpressiveNeural'
-)
-# Azure Translator — used for providers.azure_speech.call_translate().
-# Separate Azure resource from the (now-removed) Azure OpenAI tenant; set
-# AZURE_TRANSLATOR_KEY in Railway/Replit Secrets.
-AZURE_TRANSLATOR_KEY = os.environ.get('AZURE_TRANSLATOR_KEY', '').strip()
-AZURE_TRANSLATOR_ENDPOINT = (
-    os.environ.get('AZURE_TRANSLATOR_ENDPOINT', 'https://api.cognitive.microsofttranslator.com').strip()
-    or 'https://api.cognitive.microsofttranslator.com'
-)
+# ── Azure Speech + Translator fully retired (Task #552 §G-R) ─────────────────
+# Azure Speech (Neural TTS / Whisper STT) and Azure Translator REST were
+# both retired alongside the Azure OpenAI tenant. Voice chains are now
+# ElevenLabs (TTS primary) → Deepgram Aura-2 (TTS fallback) → Workers-AI;
+# Deepgram Nova-3 (STT primary) → Workers-AI Whisper. Translate is
+# IndicTrans2 → generic Workers-AI. The `AZURE_SPEECH_*`,
+# `AZURE_TRANSLATOR_*`, and `AZURE_TTS_VOICE` env vars are no longer
+# consulted; remove them from cloud secrets.
 
 # ── Google Cloud Platform credentials (Task #247) ────────────────────────────
 # A single service account JSON (GOOGLE_APPLICATION_CREDENTIALS_JSON) is used
@@ -1227,13 +1216,10 @@ PROVIDER_PRIORITY: dict = {
     "vector_search":     ["pinecone_ai", "mongodb_atlas", "workers_ai"],
     # Translation (English→Assamese):
     #   workers_ai_indic   (IndicTrans2, primary)
-    #   → azure_translator (Azure Translator REST, paid fallback, gated by
-    #                       `azure.translator.enabled` admin toggle)
     #   → workers_ai       (generic LLM translate prompt, last-resort)
-    # Task #554 — replaced the legacy `azure_openai` translate leg with
-    # a dedicated `azure_translator` provider key (separate Azure resource;
-    # Azure OpenAI tenant is decommissioned).
-    "translate":         ["workers_ai_indic", "azure_translator", "workers_ai"],
+    # Task #552 §G-R — `azure_translator` leg removed (Azure Translator
+    # fully retired alongside Azure Speech).
+    "translate":         ["workers_ai_indic", "workers_ai"],
     # Vision / OCR: Workers AI only (Task #554 — Azure OpenAI vision removed
     # alongside the rest of the tenant; vertex remains content_format only).
     "vision":            ["workers_ai"],
@@ -1260,7 +1246,7 @@ PROVIDER_CREDITS: dict = {
     "retrieval_only":      0,
     # bedrock entry removed in Task #347 (provider decommissioned).
     # azure_openai entry removed in Task #554 (Azure OpenAI tenant decommissioned).
-    "azure_translator":    0,   # Azure Translator (separate Azure resource) — paid fallback for `translate`
+    # azure_translator entry removed in Task #552 §G-R (Azure Translator retired).
     "sarvam":            500,   # Sarvam startup credits — $500
     "elevenlabs":        500,   # ElevenLabs startup credits — $500; sole English TTS (Task #552 §G)
     # assemblyai entry retired in Task #552 §G (provider decommissioned).
@@ -1375,14 +1361,13 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_indic": 10000,
     },
     "translate": {
-        # Task #492 (V4 §15) / Task #554: IndicTrans2 stays the dominant
-        # primary; Azure Translator (separate `azure_translator` provider
-        # key — Azure OpenAI tenant is gone) + generic Workers-AI carry
-        # weight-1/0 so `select_provider` actually advances on outage
-        # rather than raising "translate: all providers exhausted" on a
-        # single IndicTrans2 hiccup.
+        # Task #492 (V4 §15) / Task #552 §G-R: IndicTrans2 is the dominant
+        # primary; generic Workers-AI carries weight-0 so `select_provider`
+        # advances on outage rather than raising "translate: all providers
+        # exhausted" on a single IndicTrans2 hiccup. Azure Translator
+        # was removed when the Azure Speech + Translator surfaces were
+        # retired together.
         "workers_ai_indic":   1000,
-        "azure_translator":      1,
         "workers_ai":            0,
     },
     # embed/tts/stt explicit overrides so the established primaries

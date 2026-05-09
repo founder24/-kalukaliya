@@ -11,7 +11,7 @@ Toggles live in the Mongo collection ``azure_ai_settings``,
 keyed by the ``settingKey`` documented in
 ``routes/admin_azure_ai.FEATURES``. Documents look like::
 
-    {"key": "azure.translator.enabled", "value": false,
+    {"key": "azure.openai.enabled", "value": false,
      "updatedAt": "2026-05-04T10:30:00+00:00"}
 
 For string-valued toggles (``rag.retriever``,

@@ -27,10 +27,10 @@ param acrName string
 @description('Initial container image tag to bootstrap the revision with. CI swaps this on every deploy.')
 param image string
 
-@description('Azure region for the Container App. Vertex Gemini is now the chat HEAD (Task #554); the surviving Azure surfaces are Azure Speech and Azure Translator, both region-flexible.')
+@description('Azure region for the Container App. Vertex Gemini is now the chat HEAD (Task #554); Task #552 §G-R retired the surviving Azure Speech + Translator surfaces, so the backend no longer has any Azure data-plane dependency on a specific region.')
 param location string = 'eastus'
 
-@description('Azure Key Vault name that holds the runtime secrets (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, MONGO_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, AZURE_SPEECH_KEY, AZURE_TRANSLATOR_KEY, …). Task #556 retired the prior dual-provider transactional email shape — Amazon SES via boto3 is now the sole transactional path (no fallback, no break-glass; V4 §12 "no silent fallbacks").')
+@description('Azure Key Vault name that holds the runtime secrets (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, MONGO_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, …). Task #556 retired the prior dual-provider transactional email shape — Amazon SES via boto3 is now the sole transactional path (no fallback, no break-glass; V4 §12 "no silent fallbacks"). Task #552 §G-R retired AZURE_SPEECH_KEY + AZURE_TRANSLATOR_KEY alongside the rest of the Azure AI surfaces.')
 param keyVaultName string = 'syrabit-prod-kv'
 
 resource managedEnv 'Microsoft.App/managedEnvironments@2024-03-01' existing = {

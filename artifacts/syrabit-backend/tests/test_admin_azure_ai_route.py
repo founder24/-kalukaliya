@@ -4,7 +4,7 @@ Guards four contracts:
 
 1. ``FEATURES`` catalogue and ``azure_ai_metrics.FEATURE_KEYS`` stay
    in lockstep — drift was the most likely silent regression.
-2. ``GET /admin/azure/ai/health`` renders all 10 rows even when
+2. ``GET /admin/azure/ai/health`` renders all 8 rows even when
    Mongo is absent (degraded-but-not-blank invariant).
 3. ``POST /admin/azure/ai/toggle`` writes to ``db.azure_ai_settings``
    via upsert and invalidates the runtime cache.
@@ -113,15 +113,18 @@ class AdminAzureAiRouteTests(unittest.IsolatedAsyncioTestCase):
         catalogue = sorted(f["key"] for f in self.route.FEATURES)
         self.assertEqual(catalogue, sorted(self.metrics.FEATURE_KEYS))
 
-    def test_catalogue_has_ten_features(self):
-        self.assertEqual(len(self.route.FEATURES), 10)
+    def test_catalogue_has_eight_features(self):
+        # Task #552 §G-R — `speech` and `translator` rows removed
+        # (Azure Speech + Translator fully retired); catalogue dropped
+        # from 10 → 8.
+        self.assertEqual(len(self.route.FEATURES), 8)
         for f in self.route.FEATURES:
             for required in ("displayName", "settingKey", "failureMode", "spendBudgetUsd"):
                 self.assertIn(required, f)
 
     async def test_health_renders_with_empty_mongo(self):
         payload = await self.route.get_health(_admin=_FakeAdmin())
-        self.assertEqual(len(payload["features"]), 10)
+        self.assertEqual(len(payload["features"]), 8)
         self.assertTrue(all(f["enabled"] for f in payload["features"]))
         self.assertEqual(payload["compositeAlert"], "ok")
         self.assertEqual(payload["anomalies"], [])
@@ -132,18 +135,18 @@ class AdminAzureAiRouteTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(self.route, "_get_db", _no_db):
             payload = await self.route.get_health(_admin=_FakeAdmin())
-        self.assertEqual(len(payload["features"]), 10)
+        self.assertEqual(len(payload["features"]), 8)
         self.assertTrue(all(f["enabled"] for f in payload["features"]))
 
     async def test_toggle_persists_to_collection(self):
         result = await self.route.toggle(
-            self.route.ToggleRequest(feature="translator", enabled=False),
+            self.route.ToggleRequest(feature="openai", enabled=False),
             _admin=_FakeAdmin(),
         )
         self.assertTrue(result["ok"])
-        self.assertEqual(result["settingKey"], "azure.translator.enabled")
+        self.assertEqual(result["settingKey"], "azure.openai.enabled")
         self.assertEqual(result["value"], False)
-        stored = self.db.azure_ai_settings.docs["azure.translator.enabled"]
+        stored = self.db.azure_ai_settings.docs["azure.openai.enabled"]
         self.assertEqual(stored["value"], False)
         self.assertIn("updatedAt", stored)
 
@@ -170,20 +173,20 @@ class AdminAzureAiRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_toggle_invalidates_runtime_cache(self):
         # Seed the cache as if a chain just read it.
-        self.runtime._seed_for_tests("azure.translator.enabled", True)
-        self.assertTrue(self.runtime.is_enabled_sync("translator"))
+        self.runtime._seed_for_tests("azure.vision.enabled", True)
+        self.assertTrue(self.runtime.is_enabled_sync("vision"))
         await self.route.toggle(
-            self.route.ToggleRequest(feature="translator", enabled=False),
+            self.route.ToggleRequest(feature="vision", enabled=False),
             _admin=_FakeAdmin(),
         )
         # Cache should be flushed by the toggle handler.
-        self.assertNotIn("azure.translator.enabled", self.runtime._cache)
+        self.assertNotIn("azure.vision.enabled", self.runtime._cache)
         # The next async call would re-read from deps.db; we point
         # deps.db at our fake to confirm the value lands as False.
         fake_deps = mock.MagicMock()
         fake_deps.db = self.db
         with mock.patch.dict(sys.modules, {"deps": fake_deps}):
-            is_on = await self.runtime.is_enabled("translator")
+            is_on = await self.runtime.is_enabled("vision")
         self.assertFalse(is_on)
 
     async def test_toggle_unknown_feature_404(self):
@@ -224,8 +227,8 @@ class MetricsCounterTests(unittest.TestCase):
 
     def test_latency_percentiles(self):
         for value in (50, 100, 200, 500, 800):
-            self.metrics.record_latency("speech", value)
-        snap = self.metrics.SNAPSHOT["speech"]
+            self.metrics.record_latency("openai", value)
+        snap = self.metrics.SNAPSHOT["openai"]
         self.assertIsNotNone(snap["latencyP50Ms"])
         self.assertIsNotNone(snap["latencyP95Ms"])
         self.assertGreaterEqual(snap["latencyP95Ms"], snap["latencyP50Ms"])

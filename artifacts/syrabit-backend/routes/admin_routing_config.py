@@ -54,14 +54,9 @@ def _key_status_for(name: str) -> dict[str, Any]:
             "configured": bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()),
             "source": "GOOGLE_APPLICATION_CREDENTIALS_JSON",
         }
-    # Task #554 — Azure OpenAI provider retired. Surviving Azure surface
-    # (Speech / Translator) reports configuration via the AZURE_SPEECH_KEY
-    # / AZURE_TRANSLATOR_KEY env vars instead.
-    if name == "azure_speech":
-        return {
-            "configured": bool(os.environ.get("AZURE_SPEECH_KEY") or os.environ.get("AZURE_TRANSLATOR_KEY")),
-            "source": "AZURE_SPEECH_KEY",
-        }
+    # Task #554 — Azure OpenAI provider retired. Task #552 §G-R — the
+    # remaining Azure Speech + Translator surfaces are also retired, so
+    # there is no `azure_speech` admin row to report on any more.
     if name == "vertex" or name == "vertex_chat":
         return {
             "configured": bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()),

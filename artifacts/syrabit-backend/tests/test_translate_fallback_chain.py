@@ -1,20 +1,19 @@
-"""Task #554 — translate dispatch fallback chain.
+"""Task #554 / Task #552 §G-R — translate dispatch fallback chain.
 
-Task #554 retired the legacy ``providers/azure_openai.py`` module; the
-surviving Azure Translator surface lives in ``providers/azure_speech.py``
-(``call_translate``). Dispatch chain is now
-``workers_ai_indic → azure_translator``.
+Task #554 retired the legacy ``providers/azure_openai.py`` module. Task
+#552 §G-R subsequently retired the surviving Azure Speech + Translator
+surfaces, so the translate dispatch chain is now
+``workers_ai_indic → workers_ai`` (no Azure leg).
 
   1. Pool is multi-leg so dispatch can advance on outage.
-  2. When primary IndicTrans2 leg fails, dispatch advances to
-     ``azure_translator`` (Azure Translator REST) and returns its result.
+  2. Azure providers are absent from both the pool and the weights.
   3. Sarvam is never selected.
 """
 from unittest.mock import patch, AsyncMock
 import pytest
 
 
-def test_translate_pool_is_multi_leg_no_sarvam():
+def test_translate_pool_is_multi_leg_no_sarvam_no_azure():
     from config import PROVIDER_PRIORITY, POOL_WEIGHTS
 
     pool = PROVIDER_PRIORITY["translate"]
@@ -23,40 +22,49 @@ def test_translate_pool_is_multi_leg_no_sarvam():
     assert "vertex" not in pool
     # Task #554 — legacy azure_openai must not appear in translate pool.
     assert "azure_openai" not in pool
+    # Task #552 §G-R — Azure Translator is fully retired.
+    assert "azure_translator" not in pool
     assert len(pool) >= 2
 
     weights = POOL_WEIGHTS["translate"]
     assert "sarvam" not in weights
-    assert weights["workers_ai_indic"] >= max(weights[p] for p in weights if p != "workers_ai_indic")
+    assert "azure_translator" not in weights
+    assert weights["workers_ai_indic"] >= max(
+        weights[p] for p in weights if p != "workers_ai_indic"
+    )
 
 
 @pytest.mark.asyncio
-async def test_translate_advances_to_azure_when_indictrans_fails():
-    """When workers_ai_indic raises, dispatch must advance to the
-    surviving Azure Translator leg (``azure_translator``)."""
+async def test_translate_indic_failure_falls_through_to_workers_ai():
+    """Task #552 §G-R regression: when the IndicTrans2 primary fails,
+    `call_translate_with_dispatch` must advance to the generic Workers-AI
+    leg (not raise "all providers exhausted") because the post-purge
+    chain is exactly two legs: workers_ai_indic → workers_ai."""
     from llm import call_translate_with_dispatch
 
-    seq = iter(["workers_ai_indic", "azure_translator"])
+    seq = iter(["workers_ai_indic", "workers_ai"])
 
     def _fake_select(pool, lang=None, exclude=None):
         return next(seq)
 
-    async def _boom_indic(text, direction="en-indic"):
-        raise RuntimeError("simulated IndicTrans2 outage")
+    async def _indic_fail(text, direction="en-indic"):
+        raise RuntimeError("workers_ai_indic: simulated 5xx")
 
-    async def _ok_az(text, target_lang=None, source_lang=None):
-        return "অসম"
-
-    async def _enabled(_):
-        return True
+    # workers_ai branch in call_translate_with_dispatch invokes
+    # llm.dispatch() with a chat prompt; patch dispatch so we don't have
+    # to wire a full LLM mock chain.
+    async def _ok_dispatch(*args, **kwargs):
+        return {"text": "namaskar"}
 
     with patch("config.TRANSLATE_PROVIDER", "auto"), \
          patch("llm.select_provider", side_effect=_fake_select), \
-         patch("providers.workers_indic.call_indic_trans", new=AsyncMock(side_effect=_boom_indic)), \
-         patch("providers.azure_speech.call_translate", new=AsyncMock(side_effect=_ok_az)), \
-         patch("azure_ai_runtime.is_enabled", new=AsyncMock(side_effect=_enabled)):
-        out = await call_translate_with_dispatch("Assam", "en-IN", "as-IN", lang="as")
-        assert out == "অসম"
+         patch("providers.workers_indic.call_indic_trans", new=AsyncMock(side_effect=_indic_fail)), \
+         patch("llm.dispatch", new=AsyncMock(side_effect=_ok_dispatch)):
+        out = await call_translate_with_dispatch("hello", "en-IN", "as-IN", lang="as")
+        assert out == "namaskar", (
+            "post-purge translate chain must reach workers_ai when "
+            "workers_ai_indic raises"
+        )
 
 
 @pytest.mark.asyncio

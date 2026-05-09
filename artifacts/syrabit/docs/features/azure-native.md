@@ -10,9 +10,17 @@
 
 ---
 
+> **Task #552 §G-R note (2026-05-09):** The original ten-service
+> catalogue dropped to **eight** when Azure Speech + Azure Translator
+> were retired. Voice (TTS/STT) chains now run ElevenLabs / Deepgram /
+> Workers-AI; translate now runs IndicTrans2 → Workers-AI. The
+> `speech` and `translator` rows below are kept only as historical
+> context — they are removed from `FEATURES`, `FEATURE_KEYS`, and the
+> request-path wiring.
+
 ## 1. Scope
 
-This runbook covers the ten Azure-native AI services lit up on top of
+This runbook covers the eight Azure-native AI services lit up on top of
 the Phase 1c landing zone (Task #329) and the Phase 4 cron port (Task
 #332). Every service is an **additional path** in an existing chain —
 none of them replaces an existing GCP / Sarvam / Cohere / Pinecone /
@@ -37,8 +45,6 @@ carry over verbatim:
 | Key | Service | Role in chain | Failure mode | Admin toggle |
 |-----|---------|---------------|--------------|--------------|
 | `openai` | Azure OpenAI | Additional LLM target in the AI Gateway routing (`llm/azure-openai`); primary for GPT-4.1-mini chat/content roles | Falls back to direct OpenAI → Bedrock-Cohere → Groq → Gemini per the gateway ladder | `azure.openai.enabled` |
-| `speech` | Azure AI Speech | Tier in TTS + STT chains; opt-in "Syra" voice via Custom Neural Voice | Falls back to Google STT/TTS; "Syra" voice silently rolls forward to Neural voice for the locale | `azure.speech.enabled`, `azure.speech.syra_voice` |
-| `translator` | Azure AI Translator | Indic ↔ English fallback when Sarvam throttles | Falls back to Bhashini → cached translations → English passthrough | `azure.translator.enabled` |
 | `document_intel` | Azure Document Intelligence | Layout-aware OCR for past papers + marks sheets | Falls back to Textract → AI Vision; bulk PDF path stays on Textract | `azure.docintel.enabled` |
 | `vision` | Azure AI Vision | Tier in OCR + image-understanding chain | Falls back to Google Vision; OCR-only path falls back to Tesseract | `azure.vision.enabled` |
 | `content_safety` | Azure Content Safety | Sync moderation on chat I/O, comments, uploaded text | Borderline scores route to admin moderation queue; Content Safety alone never auto-blocks | `azure.content_safety.enabled` |
@@ -75,8 +81,6 @@ matching router; the Azure path is never selected unilaterally:
 ```
 artifacts/syrabit-backend/
 ├── ai_gateway/registry.py    → registers azure_ai.openai as `llm/azure-openai`
-├── voice/router.py           → adds azure_ai.speech as a TTS + STT tier
-├── lang/router.py            → adds azure_ai.translator as Sarvam fallback
 ├── ocr/router.py             → adds azure_ai.document_intelligence + azure_ai.vision
 ├── moderation/queue.py       → consumes azure_ai.content_safety verdicts
 ├── seo/enrich.py             → consumes azure_ai.language outputs

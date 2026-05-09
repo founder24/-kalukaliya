@@ -32,9 +32,9 @@ _latencies: dict[str, deque[float]] = {}
 _last_error: dict[str, dict[str, Any]] = {}
 
 FEATURE_KEYS = (
+    # Task #552 §G-R — speech + translator removed (Azure Speech and
+    # Azure Translator fully retired).
     "openai",
-    "speech",
-    "translator",
     "document_intel",
     "vision",
     "content_safety",
