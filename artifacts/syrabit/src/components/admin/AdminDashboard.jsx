@@ -725,7 +725,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
         dashRes, metricsRes,
         ragAccRes, fallbackRes, vectorRes, latencyRes,
         queriesRes, tokenRes, funnelRes, coverageRes, pwaRes, botRes, cfCrawlRes, indexNowRes, indexNowHistRes,
-        alertHistRes, seoHealthRes, prewarmRes,
+        prewarmRes, alertHistRes, seoHealthRes,
       ] = await Promise.allSettled([
         adminGetDashboard(adminToken),
         axios.get(`${API_BASE}/admin/dashboard/metrics`, adminHdr(adminToken)),
