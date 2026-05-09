@@ -149,7 +149,21 @@ def _key(
     normalize_text: bool = False,
     template_version: str = "",
     region: str = "global",
+    fingerprint: Optional[str] = None,
 ) -> str:
+    """Compute the cache key for this call.
+
+    Task #10 — when ``fingerprint`` is provided, the key uses the
+    semantic fingerprint as the digest so paraphrased / bilingual
+    variants collapse onto a single entry. Otherwise (legacy path) we
+    fall back to the literal SHA256 of (canon-json messages, model,
+    template_version, region, max_tokens).
+    """
+    if fingerprint:
+        # `_REDIS_KEY_PREFIX` stays the same so the edge worker's KV
+        # binding still resolves both shapes; the ``fp:`` infix is the
+        # discriminator the legacy-key reader uses.
+        return f"{_REDIS_KEY_PREFIX}:fp:{region}:{model}:{fingerprint}"
     canon = _canonical_messages(messages, normalize_text=normalize_text)
     # `template_version` is folded into the key so a prompt-template bump
     # invalidates the cache without touching the messages payload — the
@@ -233,6 +247,19 @@ _TIERS = ("inproc", "cf_kv", "redis")
 def _empty_ct_counters() -> dict:
     return {
         "hits": 0, "misses": 0, "sets": 0,
+        # Task #10 — fingerprint vs legacy-key accounting. ``fingerprint_hits``
+        # counts hits served from a semantic-fingerprint key; ``legacy_hits``
+        # counts hits served by the dual-read fallback to the literal SHA256
+        # key (kept on for 30 days behind ``CACHE_FINGERPRINT_DUAL_READ``).
+        # Both counters are subsets of ``hits`` — invariant
+        # ``fingerprint_hits + legacy_hits <= hits`` (the remainder are
+        # callers that never passed a ``fingerprint=`` arg). The snapshot
+        # derives ``fingerprint_hit_ratio`` + ``legacy_hit_ratio`` so the
+        # admin panel can show the bridge collapsing as the literal-key
+        # tier ages out.
+        "fingerprint_hits": 0,
+        "fingerprint_misses": 0,
+        "legacy_hits": 0,
         # Lifetime miss-reason counters (kept for backwards compat with
         # existing tests + dashboards). The 24h-windowed view used by the
         # new "Top miss reasons (24h)" tile lives in `miss_reasons_24h`
@@ -427,6 +454,22 @@ def snapshot() -> dict:
             m24 = int(ct_hr24.get("misses", 0))
             t24 = h24 + m24
             hr24_ratio = round(h24 / t24, 4) if t24 else 0.0
+            # Task #10 — derive the per-CT fingerprint vs legacy-key
+            # ratios. ``fingerprint_lookups`` counts every read that
+            # carried a ``fingerprint=`` arg (hit or miss); the
+            # ``legacy_hit_ratio`` is computed off the same denominator
+            # so the two ratios are directly comparable in the admin
+            # panel as the legacy tier ages out over the 30-day bridge.
+            fp_hits = int(c.get("fingerprint_hits", 0))
+            fp_misses = int(c.get("fingerprint_misses", 0))
+            legacy_hits = int(c.get("legacy_hits", 0))
+            # Denominator includes legacy_hits so the two ratios sum to
+            # at most 1.0 across the bridge: a legacy_hit short-circuits
+            # before the miss counter would have fired, so we have to add
+            # it back into the lookup denominator explicitly.
+            fp_lookups = fp_hits + fp_misses + legacy_hits
+            fp_ratio = round(fp_hits / fp_lookups, 4) if fp_lookups else 0.0
+            legacy_ratio = round(legacy_hits / fp_lookups, 4) if fp_lookups else 0.0
             out["content_types"][ct] = {
                 "hits": c["hits"],
                 "misses": c["misses"],
@@ -440,6 +483,11 @@ def snapshot() -> dict:
                 "miss_reasons_24h": mr24,
                 "tier_hits": tier_hits,
                 "tier_sets": tier_sets,
+                "fingerprint_hits": fp_hits,
+                "fingerprint_misses": fp_misses,
+                "legacy_hits": legacy_hits,
+                "fingerprint_hit_ratio": fp_ratio,
+                "legacy_hit_ratio": legacy_ratio,
             }
             out["totals"]["hits"] += c["hits"]
             out["totals"]["misses"] += c["misses"]
@@ -456,6 +504,31 @@ def snapshot() -> dict:
         out["totals"]["hr24_source"] = "redis_hourly_buckets" if hr24 else "redis_unavailable"
         out["totals"]["unique_keys_24h"] = sum(
             entry["unique_keys_24h"] for entry in out["content_types"].values()
+        )
+        # Task #10 — global fingerprint vs legacy-key rollup. Drives the
+        # admin "fingerprint adoption" tile and the alarm that flips to
+        # `WARN` if the legacy ratio stays > 0 after the 30-day bridge
+        # has passed (`scripts/check_cache_fingerprint_drain.py`).
+        fp_h_total = sum(int(e.get("fingerprint_hits", 0)) for e in out["content_types"].values())
+        fp_m_total = sum(int(e.get("fingerprint_misses", 0)) for e in out["content_types"].values())
+        legacy_h_total = sum(int(e.get("legacy_hits", 0)) for e in out["content_types"].values())
+        # Mirror the per-CT denominator: include legacy_hits so a
+        # bridge-only workload reports `legacy_hit_ratio == 1.0`
+        # instead of 0.0 (legacy hits short-circuit before
+        # `fingerprint_misses` would have been bumped).
+        fp_lookups_total = fp_h_total + fp_m_total + legacy_h_total
+        out["totals"]["fingerprint_hits"] = fp_h_total
+        out["totals"]["fingerprint_misses"] = fp_m_total
+        out["totals"]["legacy_hits"] = legacy_h_total
+        out["totals"]["fingerprint_hit_ratio"] = (
+            round(fp_h_total / fp_lookups_total, 4) if fp_lookups_total else 0.0
+        )
+        out["totals"]["legacy_hit_ratio"] = (
+            round(legacy_h_total / fp_lookups_total, 4) if fp_lookups_total else 0.0
+        )
+        out["totals"]["fingerprint_dual_read_enabled"] = bool(
+            (os.environ.get("CACHE_FINGERPRINT_DUAL_READ") or "true")
+            .strip().lower() not in ("0", "false", "no", "off")
         )
         # Per-tier rollup so the panel + CloudWatch alarms can show
         # "where is the cache hitting" without summing across CTs.
@@ -666,6 +739,7 @@ def get_response(
     template_version: str = "",
     normalize_text: bool = False,
     region: Optional[str] = None,
+    fingerprint: Optional[str] = None,
 ) -> Optional[str]:
     """Return the cached completion for this (model, messages,
     max_tokens) tuple, or None on miss. Never raises.
@@ -676,13 +750,20 @@ def get_response(
     `normalize_text=True` to apply prompt-normalization. The miss path
     bumps a per-content-type miss-reason counter exposed via
     `snapshot()` and surfaced through `/api/health/cache`.
+
+    Task #10 additions: when `fingerprint` is provided, the primary
+    lookup uses the semantic-fingerprint key (`aic:fp:<region>:<model>:
+    <fingerprint>`). On miss, if `CACHE_FINGERPRINT_DUAL_READ` is on
+    (default), we also probe the legacy literal-hash key — a hit there
+    is still served and counted as a `legacy_hits` event so the bridge
+    is observable in `/api/health/cache`.
     """
     msgs = list(messages)
     ct = content_type if content_type in _KNOWN_CONTENT_TYPES else "unknown"
     region = _effective_region(content_type, region)
     key = _key(msgs, model, max_tokens=max_tokens,
                normalize_text=normalize_text, template_version=template_version,
-               region=region)
+               region=region, fingerprint=fingerprint)
     with _COUNTERS_LOCK:
         _bump_unique_key(ct, key)
     val = _inproc_get(key)
@@ -690,6 +771,8 @@ def get_response(
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
             _COUNTERS[ct]["tier_hits"]["inproc"] += 1
+            if fingerprint:
+                _COUNTERS[ct]["fingerprint_hits"] += 1
         _record_24h_event(ct, "hits")
         _bump_region(region, "hits")
         _record_cf_region(region, True)
@@ -703,6 +786,8 @@ def get_response(
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
             _COUNTERS[ct]["tier_hits"]["cf_kv"] += 1
+            if fingerprint:
+                _COUNTERS[ct]["fingerprint_hits"] += 1
         _record_24h_event(ct, "hits")
         _bump_region(region, "hits")
         _record_cf_region(region, True)
@@ -717,12 +802,60 @@ def get_response(
                 with _COUNTERS_LOCK:
                     _COUNTERS[ct]["hits"] += 1
                     _COUNTERS[ct]["tier_hits"]["redis"] += 1
+                    if fingerprint:
+                        _COUNTERS[ct]["fingerprint_hits"] += 1
                 _record_24h_event(ct, "hits")
                 _bump_region(region, "hits")
                 _record_cf_region(region, True)
                 return text
         except Exception as e:
             logger.debug("[ai_input_cache] redis get failed: %s", e)
+    # Task #10 — fingerprint MISS. Before we accept the miss, dual-read
+    # the legacy literal-hash key for the 30-day bridge so an entry
+    # written by an older build is still served. A legacy hit is
+    # promoted into the fingerprint key on the next `set_response` call.
+    if fingerprint:
+        try:
+            from cache_fingerprint import dual_read_enabled as _dr
+        except Exception:
+            _dr = lambda: True  # noqa: E731
+        if _dr():
+            legacy_key = _key(msgs, model, max_tokens=max_tokens,
+                              normalize_text=normalize_text,
+                              template_version=template_version,
+                              region=region)
+            legacy_val = _inproc_get(legacy_key)
+            if legacy_val is None:
+                legacy_val = _cf_kv_get(legacy_key, region=region)
+            if legacy_val is None and rc is not None:
+                try:
+                    raw = rc.get(legacy_key)
+                    if raw:
+                        legacy_val = (
+                            raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                        )
+                except Exception as e:
+                    logger.debug("[ai_input_cache] redis legacy get failed: %s", e)
+            if legacy_val:
+                # Attribute the legacy hit to the tier it was actually
+                # served from so `sum(tier_hits.values()) == hits` stays
+                # invariant even after a dual-read promotion.
+                if _inproc_get(legacy_key) is not None:
+                    legacy_tier = "inproc"
+                elif _cf_kv_get(legacy_key, region=region):
+                    legacy_tier = "cf_kv"
+                else:
+                    legacy_tier = "redis"
+                with _COUNTERS_LOCK:
+                    _COUNTERS[ct]["hits"] += 1
+                    _COUNTERS[ct]["legacy_hits"] += 1
+                    _COUNTERS[ct]["tier_hits"][legacy_tier] += 1
+                _record_24h_event(ct, "hits")
+                _bump_region(region, "hits")
+                _record_cf_region(region, True)
+                return legacy_val
+        with _COUNTERS_LOCK:
+            _COUNTERS[ct]["fingerprint_misses"] += 1
     # Genuine miss — attribute it to a reason and bump the counter.
     # For normalization-mismatch detection we also compute what the
     # key WOULD have been with normalize_text flipped, so an unnormalized
@@ -772,6 +905,7 @@ def set_response(
     template_version: str = "",
     normalize_text: bool = False,
     region: Optional[str] = None,
+    fingerprint: Optional[str] = None,
 ) -> None:
     """Store the completion for this (model, messages) tuple.
 
@@ -800,9 +934,13 @@ def set_response(
         except Exception:
             ttl = _DEFAULT_TTL_SEC
     region = _effective_region(content_type, region)
+    # Task #10 — when a fingerprint is supplied, write ONLY to the
+    # fingerprint key. The legacy literal-hash key is read-through for
+    # the 30-day bridge but is no longer written, so the legacy tier
+    # ages out via TTL expiry.
     key = _key(msgs, model, max_tokens=max_tokens,
                normalize_text=normalize_text, template_version=template_version,
-               region=region)
+               region=region, fingerprint=fingerprint)
     _inproc_set(key, text)
     _bump_region(region, "sets")
     with _COUNTERS_LOCK:

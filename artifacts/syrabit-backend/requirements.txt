@@ -13,6 +13,7 @@ supabase==2.28.0
 upstash-redis>=1.3.0  # Serverless Redis REST client — primary L2 cache + atomic rate limiting
 redis>=5.0.1
 fakeredis>=2.20  # Task #631 — in-memory Redis for ai_cache integration tests
+blake3>=1.0  # Task #10 — semantic cache fingerprint (16-byte BLAKE3) in cache_fingerprint.py
 lupa>=2.8  # Task #765 — enables fakeredis Lua/EVAL execution for atomic credit deduct test
 
 google-auth==2.49.1

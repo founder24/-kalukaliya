@@ -460,12 +460,80 @@ async def format_content_batched(
     return await batcher.submit((text, style, lang, max_tokens))
 
 
+_DETERMINISTIC_TEMPLATES_DIR = (
+    __import__("os").path.join(__import__("os").path.dirname(__file__),
+                                "templates", "deterministic")
+)
+_MATERIALIZATION_QUERY_TYPES = frozenset({
+    "definition", "mcq", "flashcard", "glossary", "chapter_summary",
+})
+_TEMPLATE_CACHE: dict[str, str] = {}
+
+
+def _load_template(query_type: str) -> "str | None":
+    """Return the raw template body for ``query_type`` or ``None`` if no
+    template ships for it. Cached per process — templates are static
+    files baked into the wheel."""
+    if query_type in _TEMPLATE_CACHE:
+        return _TEMPLATE_CACHE[query_type]
+    import os as _os
+    path = _os.path.join(_DETERMINISTIC_TEMPLATES_DIR, f"{query_type}.md")
+    if not _os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            body = fh.read()
+        _TEMPLATE_CACHE[query_type] = body
+        return body
+    except Exception as e:
+        logger.warning("[content-format] template load failed (%s): %s", query_type, e)
+        return None
+
+
+class DeterministicTemplateError(RuntimeError):
+    """Raised when ``_render_deterministic_template`` cannot fully render
+    a materialization-eligible request. V4 §12 ("no silent fallbacks")
+    requires the caller to surface this explicitly rather than degrade
+    into an LLM polish pass that would mask the materialization gap.
+    """
+
+
+def _render_deterministic_template(
+    query_type: str, data: "dict[str, str]"
+) -> "str | None":
+    """Task #10 / blueprint #573 — deterministic, LLM-free render for
+    materialization-eligible content types.
+
+    Returns ``None`` only when ``query_type`` is itself outside the
+    materialization set — that case is "this caller does not want the
+    template path", not a failure. For an eligible ``query_type`` with
+    a missing template file or missing placeholder we raise
+    ``DeterministicTemplateError`` so the caller sees the gap loud
+    instead of silently falling back to Vertex / Workers-AI.
+    """
+    if not query_type or query_type not in _MATERIALIZATION_QUERY_TYPES:
+        return None
+    body = _load_template(query_type)
+    if body is None:
+        raise DeterministicTemplateError(
+            f"deterministic template missing for query_type={query_type!r}",
+        )
+    try:
+        return body.format(**(data or {}))
+    except (KeyError, IndexError, ValueError) as e:
+        raise DeterministicTemplateError(
+            f"deterministic template {query_type!r} placeholder error: {e}"
+        ) from e
+
+
 async def format_content(
     text: str,
     *,
     style: FormatterStyle = "notebook_lm",
     lang: FormatterLang = "en",
     max_tokens: int = 4000,
+    query_type: "str | None" = None,
+    template_data: "dict[str, str] | None" = None,
 ) -> dict:
     """Polish ``text`` via Vertex Gemini 2.5 Flash → Workers-AI Llama-3.3-70b
     fallback. See module docstring for the full contract.
@@ -475,6 +543,24 @@ async def format_content(
     """
     trace_id = uuid.uuid4().hex[:12]
     t0 = time.perf_counter()
+
+    # Task #10 / blueprint #573 — deterministic-template short-circuit.
+    # When the caller passes a materialization-eligible ``query_type``
+    # AND a ``template_data`` dict that satisfies every placeholder,
+    # we render the template directly and skip the LLM dispatch entirely.
+    # ``formatted_by="deterministic_template"`` makes the audit field
+    # explicit so downstream stats can separate template-rendered output
+    # from Vertex / Workers-AI polish.
+    if query_type and query_type in _MATERIALIZATION_QUERY_TYPES and template_data:
+        rendered = _render_deterministic_template(query_type, template_data)
+        if rendered is not None:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            return {
+                "text": rendered,
+                "formatted_by": "deterministic_template",
+                "duration_ms": duration_ms,
+                "trace_id": trace_id,
+            }
 
     if not text or not str(text).strip():
         return {
