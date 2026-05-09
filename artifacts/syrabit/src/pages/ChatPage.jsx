@@ -316,7 +316,11 @@ export default function ChatPage() {
       class_id: user?.class_id || null, class_name: user?.class_name || null,
       stream_name: user?.stream_name || null, model,
       card_context: cardContext || null, document_id: documentId || null,
-      response_lang: responseLang !== 'en' ? responseLang : undefined,
+      // Task #37 — language selector is the SINGLE source of truth for
+      // provider chain + Pinecone namespace + embed provider, so always
+      // send it (not only when non-English). Backend's `chat_router`
+      // collapses unknown codes to ``en`` deterministically.
+      response_lang: responseLang || 'en',
     };
     // Task #610 — Firebase Performance custom traces + W3C trace propagation.
     // `chat_send_total` covers the full send→done lifecycle; `chat_send_first_token`
@@ -523,6 +527,9 @@ export default function ChatPage() {
           }
           if (parsed.event === 'syrabit_done') {
             if (parsed.sources) meta.libSources = parsed.sources;
+            // Task #37 — capture the per-turn router trace so the
+            // dev-mode QA badge can show decision/provider/namespace.
+            if (parsed.route_trace) meta.routeTrace = parsed.route_trace;
             if (parsed.credits_used_total != null) {
               setCredits((c) => ({ ...c, used: parsed.credits_used_total }));
             }
@@ -554,7 +561,7 @@ export default function ChatPage() {
       } else { setConversationId(meta.convId); }
       setMessages((prev) => prev.map((m) =>
         m.id === aiMsgId
-          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources }
+          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, route_trace: meta.routeTrace || null }
           : m
       ));
       setSyncState('idle');

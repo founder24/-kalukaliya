@@ -361,6 +361,37 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               </div>
             )}
 
+            {/* Task #37 — dev-only QA badge surfacing the per-turn
+                router decision (decision / lang / namespace / embed
+                provider / chain head). Mounted only when Vite is in
+                dev mode AND the backend emitted a route_trace, so it
+                never ships to production users. */}
+            {!msg.streaming && msg.route_trace && import.meta.env.DEV && (
+              <div
+                className="mt-2 inline-flex flex-wrap items-center gap-1.5 rounded-md border border-dashed border-amber-400/60 bg-amber-50/70 px-2 py-1 text-[10px] font-mono text-amber-900 dark:border-amber-300/40 dark:bg-amber-900/20 dark:text-amber-200"
+                title="Task #37 router trace (dev only)"
+                data-testid="chat-router-qa-badge"
+              >
+                <span className="font-semibold uppercase">QA</span>
+                <span>route=<b>{msg.route_trace.decision}</b></span>
+                <span>lang={msg.route_trace.lang}</span>
+                {msg.route_trace.pinecone_namespace
+                  ? <span>ns={msg.route_trace.pinecone_namespace}</span>
+                  : <span className="opacity-60">ns=∅</span>}
+                {msg.route_trace.embed_provider
+                  ? <span>embed={msg.route_trace.embed_provider}</span>
+                  : <span className="opacity-60">embed=∅</span>}
+                {Array.isArray(msg.route_trace.provider_chain) && msg.route_trace.provider_chain.length > 0 && (
+                  <span>head={msg.route_trace.provider_chain[0]}</span>
+                )}
+                {msg.route_trace.reason && (
+                  <span className="opacity-70" title={msg.route_trace.reason}>
+                    · {String(msg.route_trace.reason).slice(0, 48)}
+                  </span>
+                )}
+              </div>
+            )}
+
             {!msg.streaming && msg.content && (() => {
               const subjectLabel = msg.rag_subject_name || msg.ctx_subject_name || null;
               const boardLabel = msg.rag_board_name || null;

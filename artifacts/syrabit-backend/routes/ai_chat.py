@@ -65,6 +65,51 @@ from rag import (
     web_search_with_fallback,
 )
 from prompts import classify_intent, _is_out_of_scope_response, extract_semester_number, compute_answer_budget
+import chat_router as _chat_router  # Task #37 — single-source-of-truth per-turn router
+
+
+def _build_route_trace(message_text: str, response_lang: str | None,
+                       intent: str | None, topic_metadata: dict | None,
+                       precomputed_decision=None) -> dict:
+    """Task #37 — collapse the per-turn routing decision into a single
+    serialisable dict. Called from both the non-stream and stream
+    endpoints so the response payload + SSE syrabit_done event carry the
+    same trace shape (consumed by the dev-mode QA badge in
+    `MessageBubble.jsx` and by GCP Cloud Trace span attributes).
+
+    When *precomputed_decision* is provided (a `RouteDecision` already
+    returned by the authoritative dispatcher gate above) it is used
+    verbatim — this guarantees the QA badge cannot disagree with the
+    branch the dispatcher actually executed. Otherwise we fall back to
+    a stage1-confidence-derived score so casual / instant short-circuit
+    paths still get a useful trace.
+    """
+    if precomputed_decision is not None:
+        try:
+            return precomputed_decision.to_dict()
+        except Exception:  # pragma: no cover — defensive
+            pass
+    score: float | None = None
+    if topic_metadata and isinstance(topic_metadata, dict):
+        conf = (topic_metadata.get("confidence") or "").strip().lower()
+        if conf == "high":
+            score = 0.8
+        elif conf == "low":
+            score = 0.4
+        elif topic_metadata.get("search_keywords"):
+            score = 0.6
+    try:
+        decision = _chat_router.route(
+            message_text or "",
+            lang=response_lang or "en",
+            intent=intent,
+            topic_score=score,
+        )
+        return decision.to_dict()
+    except Exception as _exc:  # pragma: no cover — never break chat
+        logger.warning("chat_router: route() raised non-fatally: %s", _exc)
+        return {"decision": "rag", "reason": f"router error: {_exc}",
+                "lang": (response_lang or "en"), "intent": intent or ""}
 from tracing import (
     record_chat_attrs,
     record_first_token,
@@ -724,6 +769,12 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
             "rag_source": "none",
             "rag_chunks_used": 0,
             "sources": [],
+            # Task #37 — Instant casual short-circuit: route trace must
+            # advertise `direct` so the QA badge confirms no Pinecone /
+            # web call happened on this turn.
+            "route_trace": _build_route_trace(
+                msg.message, _ns_resp_lang, _detected_intent, None,
+            ),
         }
 
     if not is_anon:
@@ -866,6 +917,57 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         if _rag_query != msg.message:
             logger.info(f"[PIPELINE][S1] Enhanced search query: '{_rag_query[:80]}'")
 
+    # ── Task #37 — authoritative per-turn router ─────────────────────────────
+    # Two-phase contract (reviewer iteration 4 ask: "casual MUST NOT
+    # pay for the probe"):
+    #
+    #   Phase A: call ``chat_router.route(...)`` with topic_score=None.
+    #     The router short-circuits ``casual`` / ``syllabus`` / etc. to
+    #     ``decision=direct`` WITHOUT touching the probe — so casual
+    #     turns never embed, never query Pinecone, never hit the web.
+    #   Phase B: ONLY when route() returns the probe-pending sentinel
+    #     (``decision=rag, extra.probe_pending=True``) do we run the
+    #     language-correct topic probe and re-route with the score.
+    #
+    # The decision is then authoritative for the rest of this handler:
+    #   * direct → skip ``resolve_rag_context`` AND skip web fetch.
+    #   * web    → skip ``resolve_rag_context``; force web; 503 on empty.
+    #   * rag    → existing path (Pinecone in language-correct namespace).
+    _route_decision_obj = _chat_router.route(
+        msg.message or "",
+        lang=_ns_resp_lang or "en",
+        intent=_detected_intent,
+        topic_score=None,
+    )
+    _route_topic_score: Optional[float] = None
+    if (_route_decision_obj.decision == "rag"
+            and (_route_decision_obj.extra or {}).get("probe_pending")):
+        _route_topic_score = await _chat_router.probe_topic_score(
+            _rag_query, subject_id=msg.subject_id, lang=_ns_resp_lang or "en",
+            timeout_s=0.25,  # ≤250ms probe budget.
+        )
+        # Probe-unavailable (no subject context, no embed pool, or
+        # transient failure) → treat as no-strong-match → web. This is
+        # the explicit mapping for the "routable-but-unscoped" path
+        # (reviewer iteration 5 ask) so we never serve a 503 just
+        # because the probe couldn't run.
+        _route_decision_obj = _chat_router.route(
+            msg.message or "",
+            lang=_ns_resp_lang or "en",
+            intent=_detected_intent,
+            topic_score=_route_topic_score if _route_topic_score is not None else 0.0,
+        )
+    _route_skip_retrieval = _route_decision_obj.decision in ("direct", "web")
+    _route_force_web = _route_decision_obj.decision == "web"
+    _route_skip_web = _route_decision_obj.decision == "direct"
+    logger.info(
+        "[NON-STREAM][ROUTER] decision=%s lang=%s intent=%s score=%s reason=%s",
+        _route_decision_obj.decision, _route_decision_obj.lang,
+        _route_decision_obj.intent,
+        f"{_route_topic_score:.3f}" if _route_topic_score is not None else "n/a",
+        _route_decision_obj.reason,
+    )
+
     async def _ns_fetch_syllabus():
         if not (ctx_board_id and _syl_class_id):
             return None
@@ -929,32 +1031,65 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
     # so the namespace="as" Pinecone lookup uses the correct vector space.
     if _ns_resp_lang == "as" and _rag_query and not _detect_is_assamese_script(_rag_query):
         _rag_query = await ensure_question_in_assamese(_rag_query)
-    rag_ctx = await resolve_rag_context(
-        _rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
-        document_text=document_text, intent=_detected_intent,
-        prefetched_chapters=_use_prefetched,
-        max_content_chars=_rag_content_budget,
-        lang=_ns_resp_lang or "en",
-    )
-    if _s1_subject_str:
-        rag_ctx["_stage1_subject"] = _s1_subject_str
+    # Task #37 — only call ``resolve_rag_context`` when the router said
+    # ``rag``. ``direct`` / ``web`` decisions skip Pinecone + the embed
+    # round-trip entirely. ``rag_ctx`` keeps the empty-stub shape so the
+    # rest of the handler (system-prompt builder, source plumbing, SSE
+    # event) doesn't need a parallel branch.
+    if _route_skip_retrieval:
+        logger.info(
+            "[NON-STREAM][ROUTER] decision=%s — skipping resolve_rag_context "
+            "(no Pinecone, no embed)", _route_decision_obj.decision,
+        )
+    else:
+        rag_ctx = await resolve_rag_context(
+            _rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
+            document_text=document_text, intent=_detected_intent,
+            prefetched_chapters=_use_prefetched,
+            max_content_chars=_rag_content_budget,
+            lang=_ns_resp_lang or "en",
+        )
+        if _s1_subject_str:
+            rag_ctx["_stage1_subject"] = _s1_subject_str
 
     _has_internal = rag_ctx.get("_has_internal_content") or rag_ctx.get("source") in ("document", "internal")
 
     async def _ns_fetch_web():
-        if _is_casual_sync or document_text or _has_internal:
+        # Task #37 — router-driven web gate. ONLY the explicit ``web``
+        # decision triggers a web fetch. Both ``direct`` (casual /
+        # metadata-only) and ``rag`` (strong topic match) MUST NOT
+        # silently fall back to web — V4 §12 no silent fallbacks.
+        # When the rag branch's Pinecone retrieval comes back empty
+        # the right answer is "fail loud + LLM general knowledge",
+        # NOT a hidden DDG/Exa round-trip the user never asked for.
+        if not _route_force_web:
             return []
+        # Stage budget: web branch has ≤1.5s to return so the 3s p95
+        # first-token target stays achievable. Timeout is treated as a
+        # hard miss; the post-merge fail-loud guard then raises 503.
         try:
-            return await web_search_with_fallback(
-                _rag_query,
-                board_name=ctx_board_name or "",
-                class_name=ctx_class_name or "",
-                subject_name=msg.subject_name or "",
-                chapter_name=msg.chapter_name or "",
-                enrich_top_n=2,
+            return await asyncio.wait_for(
+                web_search_with_fallback(
+                    _rag_query,
+                    board_name=ctx_board_name or "",
+                    class_name=ctx_class_name or "",
+                    subject_name=msg.subject_name or "",
+                    chapter_name=msg.chapter_name or "",
+                    enrich_top_n=2,
+                ),
+                timeout=1.2,
             )
+        except asyncio.TimeoutError:
+            logger.error(
+                "[NON-STREAM][ROUTER=web] web search timed out (>1.2s) — "
+                "failing loud (no silent ungrounded fallback)",
+            )
+            return []
         except Exception as _ws_err:
-            logger.warning(f"[NON-STREAM] Web search failed (non-fatal): {_ws_err}")
+            logger.error(
+                "[NON-STREAM][ROUTER=web] web_search_with_fallback raised: %s",
+                _ws_err,
+            )
             return []
 
     _ns_phase2 = await asyncio.gather(
@@ -977,6 +1112,44 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
     for _pi, _pr in enumerate(_ns_phase2):
         if isinstance(_pr, BaseException):
             logger.warning(f"[NON-STREAM] Phase 2 task {_pi} failed: {_pr}")
+
+    # Task #37 — V4 §12 fail-loud guard for the web branch. When the
+    # router commanded ``web`` (weak topic match) we MUST have actual
+    # web results to ground the answer; otherwise the LLM would
+    # hallucinate. Surface 503 so the client retries instead of showing
+    # an ungrounded answer.
+    if _route_force_web and not web_results:
+        logger.error(
+            "[NON-STREAM][ROUTER=web] web search returned 0 results for "
+            "%r — failing loud (no silent ungrounded fallback)",
+            (msg.message or "")[:80],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Web search returned no results for this query. Please try again or rephrase.",
+        )
+
+    # Task #37 — V4 §12 fail-loud guard for the RAG branch. When the
+    # router commanded ``rag`` (strong topic match) but Pinecone +
+    # internal retrieval returned zero chunks AND the request carries
+    # no inline document_text to ground on, the LLM would answer from
+    # general knowledge with no source attribution. Surface 503 so the
+    # client can retry / rephrase instead of receiving an ungrounded
+    # answer disguised as grounded.
+    if (_route_decision_obj.decision == "rag"
+            and not _has_internal
+            and not (rag_ctx.get("chunks") or [])
+            and not (document_text or "").strip()):
+        logger.error(
+            "[NON-STREAM][ROUTER=rag] strong-topic match but Pinecone "
+            "returned 0 chunks for %r — failing loud (no silent "
+            "ungrounded fallback)",
+            (msg.message or "")[:80],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="No grounded sources were found for this query in your syllabus. Please rephrase or try a different topic.",
+        )
 
     # ── Build system prompt with web search context ───────────────────────────
     # Task #409 — relabel card-context payloads from "document" → "library"
@@ -1577,6 +1750,14 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         "rag_board_slug": _src_board_slug_nr,
         "rag_class_slug": _src_class_slug_nr,
         "rag_subject_slug": _src_subject_slug_nr,
+        # Task #37 — single-source-of-truth router decision for the
+        # dev-mode QA badge + GCP Cloud Trace export. Intent + topic
+        # signals are already resolved at this point, so this call is
+        # pure logic with no extra IO.
+        "route_trace": _build_route_trace(
+            msg.message, _ns_resp_lang, _detected_intent, _topic_metadata,
+            precomputed_decision=_route_decision_obj,
+        ),
     }
 
 async def _refund_credit(uid: str, credits_used: int) -> None:
@@ -2555,15 +2736,114 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
     # Task #291 — same Assamese question-language guard for the streaming path.
     if _resp_lang == "as" and _s_rag_query and not _detect_is_assamese_script(_s_rag_query):
         _s_rag_query = await ensure_question_in_assamese(_s_rag_query)
-    rag_ctx = await resolve_rag_context(
-        _s_rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
-        document_text=document_text, intent=_stream_intent,
-        prefetched_chapters=_s_use_prefetched,
-        max_content_chars=_s_rag_content_budget,
+
+    # ── Task #37 — authoritative per-turn router (stream variant) ────────────
+    # Same gate as the non-stream handler, applied here so a casual /
+    # metadata-only stream turn doesn't pay for the Pinecone embed +
+    # query, and a weak-topic-match turn forces the web branch instead
+    # of pretending to ground on an empty rag_ctx.
+    #
+    # **Two-phase router (reviewer iteration 4 ask).** Phase A asks the
+    # router to decide WITHOUT a probe — casual / syllabus short-circuit
+    # to ``decision=direct`` here, paying nothing. Phase B only runs the
+    # language-correct probe when route() returned the probe-pending
+    # sentinel; we then re-route with the score.
+    _s_route_lang = (_resp_lang or "en").strip().lower()
+    _s_route_decision_obj = _chat_router.route(
+        msg.message or "",
         lang=_resp_lang or "en",
+        intent=_stream_intent,
+        topic_score=None,
     )
-    if _s1_subject_str:
-        rag_ctx["_stage1_subject"] = _s1_subject_str
+    _s_route_topic_score: Optional[float] = None
+    if (_s_route_decision_obj.decision == "rag"
+            and (_s_route_decision_obj.extra or {}).get("probe_pending")):
+        # Reviewer iteration 4 timeout semantics: timeout / cancel MUST
+        # surface as ``None`` (probe-pending → rag) to match the
+        # non-stream handler. NEVER coerce a slow/cancelled probe to
+        # ``0.0`` — that would silently downgrade a valid study turn
+        # to the web branch.
+        if _s_route_lang == "as":
+            # Language-correct multilingual probe (NOT the English-only
+            # ``_wai_chapter_task`` / bge-small-en-v1.5 path).
+            _s_route_topic_score = await _chat_router.probe_topic_score(
+                _s_rag_query, subject_id=msg.subject_id,
+                lang="as", timeout_s=0.25,
+            )
+        elif _wai_chapter_task is not None:
+            # Embed-once: reuse the in-flight English classifier task
+            # so the router doesn't pay for a second round-trip. A
+            # timeout here is treated as probe-pending (None), NOT as
+            # a hard miss (0.0).
+            try:
+                _s_wai_match_for_router = await asyncio.wait_for(
+                    asyncio.shield(_wai_chapter_task), timeout=0.25,
+                )
+                _s_route_topic_score = _chat_router.score_from_classify_result(
+                    _s_wai_match_for_router
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                _s_route_topic_score = None  # probe-pending → rag
+            except Exception as _wai_probe_err:
+                logger.debug(
+                    "[STREAM][ROUTER] _wai_chapter_task probe await failed: %s",
+                    _wai_probe_err,
+                )
+                _s_route_topic_score = None
+        # Probe-unavailable (no subject, no embed pool, timeout) →
+        # treat as no-strong-match → web. Mirrors non-stream handler.
+        _s_route_decision_obj = _chat_router.route(
+            msg.message or "",
+            lang=_resp_lang or "en",
+            intent=_stream_intent,
+            topic_score=_s_route_topic_score if _s_route_topic_score is not None else 0.0,
+        )
+    _s_route_skip_retrieval = _s_route_decision_obj.decision in ("direct", "web")
+    _s_route_force_web = _s_route_decision_obj.decision == "web"
+    _s_route_skip_web = _s_route_decision_obj.decision == "direct"
+    # Stash for the syrabit_done route_trace surface (read via
+    # ``locals().get(...)`` from the existing trace builder above).
+    _stream_topic_metadata = _s_topic_meta
+    logger.info(
+        "[STREAM][ROUTER] decision=%s lang=%s intent=%s score=%s reason=%s",
+        _s_route_decision_obj.decision, _s_route_decision_obj.lang,
+        _s_route_decision_obj.intent,
+        f"{_s_route_topic_score:.3f}" if _s_route_topic_score is not None else "n/a",
+        _s_route_decision_obj.reason,
+    )
+
+    # Authoritative web gate: ``direct`` MUST hard-disable the
+    # speculative web fetch (cancel the task) so a non-casual direct
+    # decision can never sneak a web round-trip past the router.
+    # ``web`` MUST force-enable it. ``rag`` keeps its existing
+    # speculative behaviour — but the post-merge guard below will drop
+    # web_results if the rag branch's internal retrieval missed, so we
+    # never silently fall back to web on a strong-topic-match turn.
+    if _s_route_skip_web:
+        _stream_skip_web = True
+        if _early_web_task is not None and not _early_web_task.done():
+            _early_web_task.cancel()
+    elif _s_route_force_web:
+        _stream_skip_web = False
+
+    if _s_route_skip_retrieval:
+        logger.info(
+            "[STREAM][ROUTER] decision=%s — skipping resolve_rag_context "
+            "(no Pinecone, no embed)", _s_route_decision_obj.decision,
+        )
+        # Mirror the non-stream rag_ctx empty-stub shape (already set
+        # above) and skip straight to the post-retrieval merge.
+        pass
+    else:
+        rag_ctx = await resolve_rag_context(
+            _s_rag_query, subject_id=msg.subject_id, subject_name=msg.subject_name,
+            document_text=document_text, intent=_stream_intent,
+            prefetched_chapters=_s_use_prefetched,
+            max_content_chars=_s_rag_content_budget,
+            lang=_resp_lang or "en",
+        )
+        if _s1_subject_str:
+            rag_ctx["_stage1_subject"] = _s1_subject_str
 
     # ── Internal-first web fallback (Task #282 T003 + T005) ──────────────────
     # Phase 0 already kicked off web search in parallel with the internal
@@ -2614,6 +2894,54 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             _speedup.record_speculative_web(used=bool(web_results), discarded=False)
         except Exception:
             pass
+
+    # Task #37 — V4 §12 no-silent-fallback guard for the rag branch.
+    # When the router decided ``rag`` and Pinecone returned nothing
+    # useful, we MUST NOT silently swap in speculative web results to
+    # disguise the miss. The LLM gets the empty rag_ctx and answers
+    # from general knowledge (clearly logged), per the founder lock
+    # against silent fallbacks. Web is only available on an explicit
+    # ``web`` decision.
+    if _s_route_decision_obj.decision == "rag" and web_results:
+        logger.info(
+            "[STREAM][ROUTER=rag] discarding %d speculative web result(s) — "
+            "rag branch must not silently fall back to web",
+            len(web_results),
+        )
+        web_results = []
+
+    # Task #37 — V4 §12 fail-loud guard for the stream web branch.
+    # Mirrors the non-stream handler: if the router commanded ``web``
+    # but the speculative web fetch came back empty, raise 503 instead
+    # of streaming an ungrounded LLM answer.
+    if _s_route_force_web and not web_results:
+        logger.error(
+            "[STREAM][ROUTER=web] web search returned 0 results for %r — "
+            "failing loud (no silent ungrounded fallback)",
+            (msg.message or "")[:80],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Web search returned no results for this query. Please try again or rephrase.",
+        )
+
+    # Task #37 — V4 §12 fail-loud guard for the stream RAG branch.
+    # Mirrors the non-stream guard: rag-decision + zero internal hits
+    # + no inline document_text → 503, NOT a silent ungrounded LLM
+    # answer.
+    if (_s_route_decision_obj.decision == "rag"
+            and not _has_internal_stream
+            and not (rag_ctx.get("chunks") or [])
+            and not (document_text or "").strip()):
+        logger.error(
+            "[STREAM][ROUTER=rag] strong-topic match but Pinecone returned "
+            "0 chunks for %r — failing loud (no silent ungrounded fallback)",
+            (msg.message or "")[:80],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="No grounded sources were found for this query in your syllabus. Please rephrase or try a different topic.",
+        )
 
     if _syllabus_task.done():
         try:
@@ -3402,6 +3730,18 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
                     "fallback_reason": "",
                     "fallback": locals().get("_stream_provider", "") == "workers-ai",
                 },
+                # Task #37 — emit the same router trace shape as the
+                # non-stream path so the dev-mode QA badge can read
+                # `decision`, `provider_chain`, `pinecone_namespace`
+                # and `embed_provider` from a single field on either
+                # endpoint.
+                "route_trace": _build_route_trace(
+                    msg.message,
+                    locals().get("_resp_lang") or msg.response_lang,
+                    locals().get("_stream_intent"),
+                    locals().get("_stream_topic_metadata") or locals().get("_topic_metadata"),
+                    precomputed_decision=locals().get("_s_route_decision_obj"),
+                ),
             }
             if content_card_meta:
                 done_payload["content_card_name"] = content_card_meta.get("card_name", "")
