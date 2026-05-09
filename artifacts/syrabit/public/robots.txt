@@ -11,18 +11,39 @@ Disallow: /api/
 # --- Long-tail search engines: explicitly invited. ---
 User-agent: Applebot
 Allow: /
+Crawl-delay: 0
 
 User-agent: PetalBot
 Allow: /
+Crawl-delay: 0
 
 User-agent: MojeekBot
 Allow: /
+Crawl-delay: 0
 
 User-agent: SeznamBot
 Allow: /
+Crawl-delay: 0
 
 User-agent: Yeti
 Allow: /
+Crawl-delay: 0
+
+User-agent: DuckDuckBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: YandexBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Baiduspider
+Allow: /
+Crawl-delay: 0
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 0
 
 # --- AI ANSWER bots (cite sources, drive referral traffic): allowed. ---
 # Task #287 policy: invite citation-driving LLM crawlers so AHSEC HS1/HS2

@@ -98,23 +98,35 @@ async def test_bot_buckets_rdns_counters_populate_when_redis_mirrors(monkeypatch
 
     monkeypatch.setattr(cf_bot_report, "collect_recent_bot_hits", _hits, raising=True)
 
+    # Real route key format is `bot:rdns_ctr:<YYYY-MM-DD>:<family>:<outcome>`
+    # where outcome ∈ {hit_pos, hit_neg, miss_pos, miss_neg}. Build today's
+    # keys so the test exercises the actual format the edge worker writes.
+    from datetime import datetime, timezone
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     fake_counters = {
-        "bot:rdns_ctr:googlebot:verified": "950",
-        "bot:rdns_ctr:googlebot:miss": "50",
-        "bot:rdns_ctr:bingbot:verified": "200",
-        "bot:rdns_ctr:bingbot:miss": "0",
+        f"bot:rdns_ctr:{day}:googlebot:hit_pos": "900",
+        f"bot:rdns_ctr:{day}:googlebot:miss_pos": "50",
+        f"bot:rdns_ctr:{day}:googlebot:miss_neg": "10",
+        f"bot:rdns_ctr:{day}:bingbot:hit_pos": "200",
     }
 
-    async def _fake_redis_get(key: str):
-        return fake_counters.get(key)
+    class _FakeRedisClient:
+        def get(self, key):  # upstash_redis sync API
+            return fake_counters.get(key)
 
-    if hasattr(mod, "_redis_get"):
-        monkeypatch.setattr(mod, "_redis_get", _fake_redis_get, raising=False)
+    import deps
+    monkeypatch.setattr(deps, "redis_client", _FakeRedisClient(), raising=False)
 
     result = await mod.bot_buckets_health(_admin={"role": "admin"})
     rdns = result["rdns_verification"]
     assert "per_family" in rdns and "total" in rdns
-    assert rdns["total"]["miss_rate"] >= 0.0
+    google = rdns["per_family"]["googlebot"]
+    assert google["hits"] == 900, f"hit_pos not surfaced: {google}"
+    assert google["misses"] == 60, f"miss_pos+miss_neg not surfaced: {google}"
+    assert 0.0 < google["miss_rate"] < 1.0, (
+        f"miss_rate must reflect mocked counters: {google}"
+    )
+    assert rdns["per_family"]["bingbot"]["hits"] == 200
 
 
 @pytest.mark.asyncio
