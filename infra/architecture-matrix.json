@@ -949,9 +949,14 @@
           "source_paths": [
             "artifacts/syrabit-backend/auth_deps.py",
             "artifacts/syrabit-backend/oidc_auth.py",
-            "artifacts/syrabit-backend/routes/auth.py"
+            "artifacts/syrabit-backend/routes/auth.py",
+            "artifacts/syrabit-backend/supabase_jwks.py",
+            "artifacts/syrabit-backend/aca_jobs/supabase_auth_canary.py",
+            "artifacts/syrabit-backend/scripts/verify_supabase_mirror.py",
+            "artifacts/syrabit-backend/tests/test_supabase_jwks.py",
+            "docs/runbooks/task-47-supabase-auth-cutover.md"
           ],
-          "note": "Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in routes/auth.py and JWT_SECRET user-session path in auth_deps.py still active. Cutover owned by a follow-up Supabase migration task; founder lock asserts the destination, this row tracks the in-flight reality."
+          "note": "Task #47 (2026-05-09) prep PR: JWKS local verifier with 1h fresh + 5min stale-on-error cache (supabase_jwks.verify_supabase_jwt), synthetic 5-min canary (aca_jobs/supabase_auth_canary.py), and Mongo↔Supabase reconciliation script (scripts/verify_supabase_mirror.py) landed. Nothing in the request hot path calls the new verifier yet — routes/auth.py:supabase_session still HTTPs _supa_client.auth.get_user(token) and still mints JWT_SECRET-signed syrabit_session cookies. Destructive cutover (delete the four legacy /auth/* endpoints, swap to verify_supabase_jwt, rotate cookie to syrabit_session_v2 behind SUPABASE_ONLY_AUTH=1 with 48h dual-cookie grace) runs in the weeknight 23:00-01:00 IST window per docs/runbooks/task-47-supabase-auth-cutover.md. Row stays PARTIAL until that destructive PR merges. JWT_SECRET retained ONLY for short-lived service-to-service tokens after cutover."
         },
         {
           "item": "Edge security — WAF + DDoS + rate limit + bot detection",

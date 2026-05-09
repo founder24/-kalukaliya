@@ -2,6 +2,34 @@
 
 Full, verbatim record of every architecture decision previously inlined under `## Architecture decisions` in `replit.md`. The README now keeps only a short index pointing back here.
 
+## Supabase-only auth cutover — split into prep + destructive PRs (Task #47, 2026-05-09)
+
+**Decision: split Task #47 into two PRs at user direction.** The original task spec rolled the full Supabase-sole-auth cutover into one ticket: delete the four legacy email/password endpoints in `routes/auth.py`, replace `_supa_client.auth.get_user(token)` with a JWKS-local verifier across `auth_deps.py`, rotate the cookie name to `syrabit_session_v2`, drop the frontend signup form, and execute it all during a weeknight 23:00–01:00 IST maintenance window. That diff is ~500 lines across 4+ files on the highest-risk surface in the codebase (a wrong move locks every active user out). Per founder guidance on 2026-05-09 the work was split:
+
+1. **Prep PR (this entry — non-destructive, safe to merge any time).** Lands the JWKS local verifier with cache, the synthetic canary, the Mongo↔Supabase reconciliation script, the cutover/rollback runbook, and the lock §13 + matrix annotations. **Nothing in the request hot path calls the new verifier yet** — `routes/auth.py:supabase_session` still HTTPs `_supa_client.auth.get_user(token)` and still mints `JWT_SECRET`-signed `syrabit_session` cookies via `create_access_token`. The lock §13 row stays PARTIAL.
+2. **Destructive PR (next task — lands during the maintenance window).** Replaces `auth.get_user(token)` with `supabase_jwks.verify_supabase_jwt(token)` in `routes/auth.py:supabase_session` and every authed dep in `auth_deps.py`; rotates the cookie name to `syrabit_session_v2`; deletes the four legacy email/password endpoints; removes the frontend signup form. Gated behind `SUPABASE_ONLY_AUTH=1` with a 48h dual-cookie grace so a single env-var flip rolls back without a redeploy.
+
+**Why JWKS local verify (vs `auth.get_user` round-trip).** The current production path makes one outbound HTTPS call to Supabase per authed request:
+
+| Lever | `auth.get_user(token)` (today) | `verify_supabase_jwt(token)` (post-cutover) |
+|---|---|---|
+| Per-request latency | ~30–80ms | ~0.5ms RSA verify |
+| Supabase auth-API outage blast radius | every authed request 401s | invisible until a key actually rotates (5min stale-grace) |
+| Free-tier request budget | counts every authed call | zero (verify is local) |
+| Crypto guarantee | identical (Supabase signs the JWT either way) | identical |
+
+**Cache windows (founder-locked at the defaults).** 1h fresh + 5min stale-on-error. Inside the fresh window, no network. Inside the stale window, refresh is attempted but a failure serves the existing cache (and emits `Syrabit/Auth::SupabaseJwksStale=1`). Outside both windows, `SupabaseJWKSError` raised → 401. The 1h fresh window is the upper bound on how long a revoked Supabase signing key keeps validating tokens after rotation; Supabase rotates signing keys on the order of years, so 1h is well inside the cadence and matches the `google.auth.jwt` default.
+
+**Reconciliation contract (`scripts/verify_supabase_mirror.py`).** Run pre-cutover. Pulls every active Mongo user with an email, intersects against `supabase.auth.admin.list_users`. Two failure buckets:
+- **HARD BLOCK** — `auth_provider != 'google'` users with no Supabase row. Cutover cannot proceed; run `scripts/sync_users_to_supabase.py` first.
+- **SOFT WARN** — `auth_provider == 'google'` users with no Supabase row yet. Pre-cutover this is fine (Supabase auto-creates them on first OAuth sign-in). Post-cutover they will be silently locked out until they sign in again, which is acceptable given they were already going through Google.
+
+**Canary (`aca_jobs/supabase_auth_canary.py`).** Mints a token via a dedicated `SUPABASE_CANARY_EMAIL/PASSWORD` user, verifies it through `supabase_jwks.verify_supabase_jwt`, emits `Syrabit/Auth::SupabaseAuthCanary` (1=pass, 0=fail). EventBridge `rate(5 minutes)` wiring is deferred to the destructive PR (alongside the alarm rule) so this PR has zero TF churn. The cutover runbook treats 3 consecutive red passes as a hard go/no-go.
+
+**`JWT_SECRET` survives.** Retained ONLY for short-lived service-to-service tokens (e.g. the edge-proxy → backend OriginGate handshake, internal admin signing). Never for user sessions after cutover. `ADMIN_JWT_SECRET` and the Cloudflare-Access-gated admin path are explicitly out of scope for Task #47.
+
+**Rollback drill.** Documented in `docs/runbooks/task-47-supabase-auth-cutover.md` §"Rollback drill". Single env-var flip (`SUPABASE_ONLY_AUTH=0` via `az containerapp update`), rolling restart, ~60s back to the legacy `JWT_SECRET` cookie path. The 48h dual-cookie grace means users holding `syrabit_session_v2` re-login once on rollback (same UX as the cutover).
+
 ## OCR scratch storage — keep on R2, retire Azure Blob row (Task #46, 2026-05-09)
 
 **Decision: Path A.** The 2026 lock §4.2 row "Azure Blob — temporary OCR/media" had been PARTIAL since the lock was written, on the assumption that OCR scratch bytes would land in an Azure Blob container co-located with ACA. Audit during Task #46 found two facts that change the answer:
