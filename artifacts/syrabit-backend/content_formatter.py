@@ -536,8 +536,17 @@ async def format_content(
     """Polish ``text`` via Vertex Gemini 2.5 Flash → Workers-AI Llama-3.3-70b
     fallback. See module docstring for the full contract.
 
-    Never raises. Returns a dict with the polished text, the audit field
+    Returns a dict with the polished text, the audit field
     ``formatted_by``, the wallclock duration, and a uuid4 trace id.
+
+    Raises ``DeterministicTemplateError`` (Task #10 / V4 §12) when
+    ``query_type`` is one of the materialization-eligible types
+    (``definition`` / ``mcq`` / ``flashcard`` / ``glossary`` /
+    ``chapter_summary``) but ``template_data`` is missing or fails to
+    satisfy the template's placeholders. This is intentional fail-loud
+    behavior — silent fallback to the LLM polish path is forbidden for
+    deterministic-eligible calls. All other code paths (LLM dispatch,
+    cache lookups, etc.) are wrapped and never raise.
     """
     trace_id = uuid.uuid4().hex[:12]
     t0 = time.perf_counter()

@@ -182,6 +182,37 @@ def test_render_deterministic_template_unknown_query_type_returns_none():
     assert _render_deterministic_template("freeform", {"x": 1}) is None
 
 
+def test_fingerprint_key_ignores_template_version_and_max_tokens():
+    """Pin the intentional behavior of `_key()` in fingerprint mode:
+    `template_version` and `max_tokens` are NOT folded into the key
+    when a fingerprint is provided. The fingerprint already encodes
+    every semantic discriminator (canonical text + scope + verb +
+    query_type). Bumping the template version in fingerprint mode is
+    an intentional cache-bust no-op — callers must flush the keyspace
+    or bump a fingerprint input (e.g. query_type) to invalidate.
+    The legacy literal-hash path retains `template_version` folding so
+    the `template_version_bump` miss-reason still works there."""
+    from ai_input_cache import _key
+    msgs = [{"role": "user", "content": "Explain photosynthesis"}]
+    fp = "a" * 32
+    k_v1 = _key(msgs, "vertex-2.5-flash", max_tokens=512,
+                template_version="v1", fingerprint=fp)
+    k_v2 = _key(msgs, "vertex-2.5-flash", max_tokens=512,
+                template_version="v2", fingerprint=fp)
+    k_mt = _key(msgs, "vertex-2.5-flash", max_tokens=1024,
+                template_version="v1", fingerprint=fp)
+    assert k_v1 == k_v2 == k_mt, (
+        "fingerprint-mode keys must collapse template_version and "
+        f"max_tokens differences: {k_v1!r} vs {k_v2!r} vs {k_mt!r}"
+    )
+    # Sanity: legacy path (no fingerprint) still folds template_version.
+    legacy_v1 = _key(msgs, "vertex-2.5-flash", max_tokens=512,
+                     template_version="v1")
+    legacy_v2 = _key(msgs, "vertex-2.5-flash", max_tokens=512,
+                     template_version="v2")
+    assert legacy_v1 != legacy_v2
+
+
 def test_format_content_eligible_query_type_without_template_data_raises():
     """V4 §12 — `format_content` must fail loud when caller declares
     a materialization-eligible `query_type` but omits `template_data`,

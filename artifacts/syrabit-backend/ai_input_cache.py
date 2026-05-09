@@ -155,9 +155,17 @@ def _key(
 
     Task #10 — when ``fingerprint`` is provided, the key uses the
     semantic fingerprint as the digest so paraphrased / bilingual
-    variants collapse onto a single entry. Otherwise (legacy path) we
-    fall back to the literal SHA256 of (canon-json messages, model,
-    template_version, region, max_tokens).
+    variants of the same query collapse onto one cache entry. In
+    fingerprint mode, ``template_version`` and ``max_tokens`` are
+    intentionally NOT folded into the key — the fingerprint already
+    encodes everything that semantically distinguishes one input
+    (canonical query text + scope + verb + query_type). To invalidate
+    after a template bump in fingerprint mode, callers should either
+    (a) bump a component already inside the fingerprint inputs (e.g.
+    ``query_type``) or (b) flush the keyspace via the admin cache
+    route. The legacy literal-hash key path still folds
+    ``template_version`` for callers that have not migrated, so the
+    ``template_version_bump`` miss-reason continues to work there.
     """
     if fingerprint:
         # `_REDIS_KEY_PREFIX` stays the same so the edge worker's KV
