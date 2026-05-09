@@ -66,6 +66,7 @@ Syrabit.ai is an AI-powered educational platform for AHSEC Class 11/12 and Degre
 - Prioritize modularity and maintainability.
 - Treat vectorless RAG and vector RAG as **complementary layers** — vector for semantic/paraphrased exam-Q search, vectorless (BM25 + tree-walk) for exact-term/formula/navigation queries.
 - **No silent fallbacks** — fail loud, document trade-offs explicitly (V4 §12).
+- **Supabase is the sole auth provider** — student, staff, and admin identity (sign-up, sign-in, OAuth, password reset, email verification, MFA) all flow through Supabase Auth. The legacy email/password JWT path in `routes/auth.py` and the standalone Google OAuth flow are retired in favor of Supabase. Backend verifies Supabase JWTs via the Supabase JWKS; `JWT_SECRET` / `ADMIN_JWT_SECRET` remain only for short-lived internal service-to-service tokens (e.g. edge-proxy → backend), never for user sessions. The `GOOGLE_OAUTH_CLIENT_SECRET` knob is no longer required since Supabase brokers the Google IdP.
 
 ## Gotchas
 
