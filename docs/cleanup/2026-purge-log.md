@@ -226,3 +226,133 @@ this task.
 deps gone), `knip` is wired into CI, and the brief's bundle-size
 target is documented as not achievable from a package-only purge
 without a feature-deletion mandate that the brief explicitly excluded.
+
+---
+
+# Repo trim & replit.md rewrite — Task #8 (2026-05-09)
+
+Mirror of the Tasks #6 / #7 cleanup at the **repository root**. Driven by
+the Task #5 architecture lock (`infra/architecture-locked-2026.md` +
+`infra/architecture-matrix.json`). CI guard
+(`scripts/check_architecture_lock.py`) re-run after every batch and
+remained green (`Architecture-lock guard OK — 29 sections, 105 rows
+verified.`).
+
+## A — Stale top-level docs archived
+
+Moved to `docs/archive/2026-pre-task8/` (kept in-tree under archive so
+the originals remain reachable for blame / grep history; deleting them
+outright would orphan two inbound links from the older PR-history
+doc-set without saving any meaningful disk space).
+
+| Path (was) | One-line obit |
+| --- | --- |
+| `CLOUDFLARE_DEPLOYMENT_CHECKLIST.md` | Pydantic-settings rollout checklist that targeted **Cloud Run** (`gcloud run deploy syrabit-backend`); backend has been on **ACA** since Task #410 — checklist is wholly inapplicable. |
+| `CRITICAL_ISSUES_RESOLUTION_PLAN.md` | 2026-04-28 audit naming **Railway / Cloud Run** as the deploy target and a long-retired sequential-LLM-fallback shape; both fixes shipped before the canonical-delegation lock (Task #559). |
+| `CRITICAL_ISSUES_VERIFICATION.md` | Companion verification doc to the resolution plan above; lists the retired Cerebras / OpenRouter / Groq providers as the active fallback chain. |
+| `DEPLOYMENT_BLOCKERS.md` | Pre-cutover blocker list for the **Neural Mesh Rust core + edge worker duplication**; both code paths were deleted in Tasks #6 / #347, no Rust core ships in the production tree any more. |
+| `IMPLEMENTATION_SUMMARY.md` | Status report for the same Neural-Mesh / Railway / Groq-Cerebras-OpenRouter shipment that was retired by #347 / #559. |
+| `NEURAL_MESH_IMPLEMENTATION.md` | Architecture write-up for a **Rust + gRPC** core on Railway with a PostgreSQL + pgvector primary; production runs Python FastAPI on ACA + MongoDB Atlas + Pinecone (matrix §3 / §6). |
+| `PHASE1_COMPLETE.md` | Phase-1 status of the Neural-Mesh shipment above. |
+| `PR_1_D1_WARMUP.md` | PR description for a D1 warm-up patch that was superseded by `d1_sync.py` + the cron heartbeat in the current code. |
+| `PR_2_PARALLEL_LLM_FALLBACK.md` | PR description for the parallel-LLM-fallback patch over the now-retired Groq / Cerebras / OpenRouter chain. |
+| `deploy-neural-mesh.sh` | Bash deploy harness for the same retired Rust core + edge-worker duplicate. |
+| `D1_SYNC_SECRET` | Empty 0-byte file at the repo root from a prior accidental `touch` — never read by anything. |
+
+11 files moved. 0 files deleted outright (preserves blame); future
+agents must not write new content into `docs/archive/2026-pre-task8/`.
+
+## B — `attached_assets/` shrunk from 49 MB / 306 files → 20 KB / 1 file
+
+Audit found exactly **one** asset still referenced from the canonical
+doc set (`replit.md`, `threat_model.md`,
+`infra/architecture-locked-2026.md`):
+
+- `attached_assets/Pasted--Syrabit-Full-Updated-Architecture-Provider-Breakdown-C_1778322896768.txt`
+  — cited by `infra/architecture-locked-2026.md` as the **source
+  blueprint** the matrix mirrors. Kept.
+
+The remaining **305 files** (300 pasted snippets + 1 `screenshots/`
+directory of 5 PNGs, 580 KB) were moved to `docs/archive/attached/` and
+that path was added to `.gitignore` (Task #8 marker comment) so they
+stay reachable on the local filesystem but exit the tracked tree.
+Gitignoring (rather than `git rm`) preserves the local archive without
+re-bloating the index on every clone.
+
+## C — `infra/v4-locked-architecture.md` collapsed to 3-line redirect
+
+Original file was 429+ lines mirroring the V4 source blueprint. The
+2026 lock (`infra/architecture-locked-2026.md`) is the canonical
+mirror of the same blueprint and is the file the CI guard reads. The
+V4 doc is now a 3-line redirect pointing to the 2026 lock. The file is
+**retained** (not deleted) because:
+
+- `infra/architecture-matrix.json` lists `infra/v4-locked-architecture.md`
+  in the `source_paths` of two §1 / §19 rows (the CI guard fails on
+  source-path drift).
+- `scripts/check_architecture_lock.py:84` adds it to `SCAN_SKIP_FILES`
+  for the retired-provider scan.
+- Several decision-log entries in `docs/architecture/decisions.md`
+  cite it.
+
+Future agents must not add new content to the redirect file.
+
+## D — `replit.md` rewritten to mirror the 2026 lock
+
+The previous `replit.md` carried inline architecture decisions that
+duplicated (and in places contradicted) the lock — for example it
+re-cited Aura-2 as the English-TTS primary (the lock §5.3 has
+ElevenLabs primary + Aura-2 fallback after the §G-R 2026-05-09
+reversal). The rewrite collapses the body to:
+
+1. A "**Source of truth**" banner that names the lock as canonical.
+2. Run / operate / stack / where-things-live (operational, not
+   architectural).
+3. A section-numbered (§2 → §19) architecture summary that mirrors
+   the lock row-for-row at one-sentence granularity. No retired
+   providers (Aura-2-as-primary, Cerebras, Groq, OpenRouter, Cloud
+   Run, Railway, Postgres, Neural-Mesh Rust core) are mentioned in
+   the active path; ElevenLabs primary + Aura-2 fallback now reads
+   correctly per lock §5.3.
+4. Founder locks, user preferences, gotchas (operational ones only;
+   architectural gotchas migrated to `docs/architecture/decisions.md`
+   long ago and are linked, not duplicated).
+5. Pointers to the lock + matrix + decision log + landing zones.
+
+## E — Tracked-file count drop
+
+| | Count |
+| --- | --- |
+| `git ls-files \| wc -l` before Task #8 | **8 373** |
+| Working-tree deletions staged (`git status --porcelain \| grep -c '^ D'`) | 316 |
+| Newly tracked files under `docs/archive/2026-pre-task8/` | 11 |
+| `docs/archive/attached/` (gitignored — does **not** add to tracked tree) | 0 |
+| Modifications (`replit.md`, `infra/v4-locked-architecture.md`, `.gitignore`) | 3 |
+| Net post-commit `git ls-files` count (projected) | **≈ 8 068** |
+| Net drop | **≈ 305** (target ≥ 200) |
+
+## F — CI guard re-run
+
+`python3 scripts/check_architecture_lock.py` →
+`Architecture-lock guard OK — 29 sections, 105 rows verified.`
+Source-path drift, retired-provider regression, and matrix schema
+checks all pass. (The two §1 / §19 rows whose `source_paths` cite
+`infra/v4-locked-architecture.md` continue to resolve because the
+file is retained as a redirect.)
+
+## What was deliberately NOT done (scope discipline)
+
+- **Did not touch** `.local/tasks/` (out of scope per the task brief).
+- **Did not move** production code — all moves are docs / docs-shaped
+  files.
+- **Did not delete** the 11 stale top-level docs outright; archived
+  them under `docs/archive/2026-pre-task8/` to preserve blame.
+- **Did not delete** `infra/v4-locked-architecture.md`; collapsed to a
+  redirect because the matrix and CI guard still cite the path.
+- **Did not propose** an "End-to-end validation & ranking baseline"
+  follow-up — already queued downstream per the task brief.
+- **Did not archive** the other V4-locked top-level docs the brief did
+  not list (`CLOUDFLARE_DEPLOYMENT_WIRING.md`,
+  `ENVIRONMENT_VARIABLES.md`, `SETUP_GUIDE.md`, `setup.sh`,
+  `WIRING_EXECUTION_PROMPT.md`); they are equally stale but moving
+  them was not in the brief's enumerated list and would extend scope.
