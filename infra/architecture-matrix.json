@@ -338,10 +338,14 @@
           ]
         },
         {
-          "item": "Azure Blob — temporary OCR/media",
-          "status": "RETIRED",
-          "source_paths": [],
-          "note": "Task #46 (2026-05-09): OCR is in-memory Vertex Vision round-trip (routes/ai_chat.py /ai/ocr-image + routes/pyq.py /pyq/process); no persisted scratch tier. Warm media on R2 (§4.1, r2_storage.py). Re-introduction requires a fresh threat-model pass."
+          "item": "OCR scratch + warm media (Cloudflare R2 — Azure Blob retired)",
+          "status": "IMPLEMENTED",
+          "source_paths": [
+            "artifacts/syrabit-backend/r2_storage.py",
+            "artifacts/syrabit-backend/routes/ai_chat.py",
+            "artifacts/syrabit-backend/routes/pyq.py"
+          ],
+          "note": "Task #46 (2026-05-09) Path A: R2 is the canonical OCR-scratch + warm-media surface (r2_storage.r2_upload/r2_presign/r2_delete). OCR endpoints (/ai/ocr-image, /pyq/process) currently run in-memory Vertex Vision round-trips (no persistence); any future 'save scratch' feature MUST land on R2, not Azure Blob. Azure Blob OCR/media is retired for this row."
         },
         {
           "item": "Azure Monitor + App Insights",
