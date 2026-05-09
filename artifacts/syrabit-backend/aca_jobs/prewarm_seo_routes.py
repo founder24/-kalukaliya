@@ -599,6 +599,24 @@ async def run_prewarm(
             summary["by_board"].setdefault(
                 board_name, {"warmed": 0, "failed": 0, "attempted": 0},
             )
+            # Per-chapter FAQ JSON-LD warm leg. The materialization-
+            # eligible SEO page-types (mcqs / flashcards / etc.) cover
+            # the chapter body cache, but the schema.org FAQPage block
+            # served at ``/content/chapters/{chapter_id}/faq-jsonld``
+            # is a SEPARATE renderer with its own 1h server-side
+            # cache + edge cache. Without an explicit GET here the
+            # first crawler hit after a TTL boundary stampedes the
+            # FAQ aggregation query on Mongo. GET (never HEAD) so the
+            # response body is rendered + populates the renderer's
+            # in-memory cache.
+            chapter_id = chapter.get("id")
+            if chapter_id:
+                faq_url = f"{public_base_url}/content/chapters/{chapter_id}/faq-jsonld"
+                faq_ttl = cache_calendar.recommended_ttl_seconds(
+                    content_type="chapter_summary", today=today,
+                )
+                warm_tasks.append((inputs, "faq_jsonld", faq_url, "GET", faq_ttl))
+
             for pt in PAGE_TYPES:
                 url = _build_url(
                     public_base_url,
@@ -657,7 +675,13 @@ async def run_prewarm(
             board_row = summary["by_board"][board_name]
             summary["urls_attempted"] += 1
             board_row["attempted"] += 1
-            is_kv = pt in KV_ELIGIBLE_PAGE_TYPES
+            # Task #13 round-9 — FAQ JSON-LD leg is a GET that fills
+            # KV (the schema.org FAQPage block has its own edge-cached
+            # body identical in profile to the KV-eligible SEO page-
+            # types). Account it under kv_attempted/warmed/failed so a
+            # FAQ regression cannot hide behind a healthy
+            # kv_success_rate while only dragging the combined rate.
+            is_kv = pt in KV_ELIGIBLE_PAGE_TYPES or pt == "faq_jsonld"
             if is_kv:
                 summary["kv_attempted"] += 1
             if ok:

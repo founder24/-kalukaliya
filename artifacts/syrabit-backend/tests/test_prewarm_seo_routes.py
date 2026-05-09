@@ -331,40 +331,44 @@ def test_run_prewarm_warms_every_page_type(normal_calendar):
         today=datetime(2026, 8, 15, tzinfo=timezone.utc),
     ))
     assert summary["scanned"] == 2
-    assert summary["urls_attempted"] == 14
-    assert summary["urls_warmed"] == 14
+    # 7 SEO page-types + 1 FAQ JSON-LD leg per chapter × 2 chapters = 16.
+    assert summary["urls_attempted"] == 16
+    assert summary["urls_warmed"] == 16
     assert summary["urls_failed"] == 0
     assert summary["success_rate"] == 1.0
-    assert summary["by_board"]["AHSEC"]["warmed"] == 14
+    assert summary["by_board"]["AHSEC"]["warmed"] == 16
     assert len(db.seo_prewarm_runs.inserted) == 1
-    sample_url = client.calls[0]
-    assert sample_url.startswith(
+    seo_calls = [u for u in client.calls if "/board/" in u]
+    assert seo_calls and seo_calls[0].startswith(
         "https://example.test/board/ahsec/class/11/subject/biology/chapter/")
-    assert sample_url.rsplit("/", 1)[-1] in prewarm_seo_routes.PAGE_TYPES
+    assert seo_calls[0].rsplit("/", 1)[-1] in prewarm_seo_routes.PAGE_TYPES
     # X-Prewarm-Recommended-TTL header must be set on every request so the
     # worker can pin its tiered-cache entry to the season-aware TTL.
     assert all(
         "X-Prewarm-Recommended-TTL" in h for h in client.headers_seen
     )
     # Task #13 — two-phase warm contract: GET on KV-eligible page-
-    # types (mcqs/flashcards/definitions/summary/pyqs) so the
-    # deterministic-template renderer fills KV + ai_input_cache;
-    # HEAD on edge-only legs (notes/revision) which only need a
-    # tiered-cache entry. Verify both verbs were issued AND that the
-    # GETs landed on KV-eligible URLs only.
+    # types (mcqs/flashcards/definitions/summary/pyqs) AND on the FAQ
+    # JSON-LD leg so the deterministic-template / FAQPage renderer
+    # fills KV + ai_input_cache; HEAD on edge-only legs
+    # (notes/revision) which only need a tiered-cache entry.
     assert set(client.methods_seen) == {"GET", "HEAD"}
     get_urls = [u for (u, m) in zip(client.calls, client.methods_seen) if m == "GET"]
     head_urls = [u for (u, m) in zip(client.calls, client.methods_seen) if m == "HEAD"]
-    # 5 KV-eligible × 2 chapters = 10 GETs; 2 edge-only × 2 = 4 HEADs.
-    assert len(get_urls) == 10
+    # 5 KV-eligible SEO + 1 FAQ × 2 chapters = 12 GETs; 2 edge-only × 2 = 4 HEADs.
+    assert len(get_urls) == 12
     assert len(head_urls) == 4
-    for u in get_urls:
+    faq_urls = [u for u in get_urls if "/content/chapters/" in u and u.endswith("/faq-jsonld")]
+    seo_get_urls = [u for u in get_urls if "/board/" in u]
+    assert len(faq_urls) == 2
+    assert len(seo_get_urls) == 10
+    for u in seo_get_urls:
         assert u.rsplit("/", 1)[-1] in prewarm_seo_routes.KV_ELIGIBLE_PAGE_TYPES
     for u in head_urls:
         assert u.rsplit("/", 1)[-1] in {"notes", "revision"}
-    # KV-eligible accounting: 5 of the 7 page-types per chapter × 2 chapters.
-    assert summary["kv_attempted"] == 10
-    assert summary["kv_warmed"] == 10
+    # KV-eligible accounting: 5 SEO page-types + 1 FAQ leg per chapter × 2.
+    assert summary["kv_attempted"] == 12
+    assert summary["kv_warmed"] == 12
     assert summary["kv_failed"] == 0
     assert summary["kv_success_rate"] == 1.0
 
@@ -411,8 +415,8 @@ def test_run_prewarm_emits_x_prewarm_auth_when_token_present(normal_calendar):
         today=datetime(2026, 8, 15, tzinfo=timezone.utc),
         prewarm_auth="shared-secret-xyz",
     ))
-    assert summary["urls_warmed"] == 14
-    assert client.headers_seen, "no HEAD requests captured"
+    assert summary["urls_warmed"] == 16
+    assert client.headers_seen, "no requests captured"
     for h in client.headers_seen:
         assert h.get("X-Prewarm-Auth") == "shared-secret-xyz"
         assert "X-Prewarm-Recommended-TTL" in h
@@ -439,15 +443,18 @@ def test_run_prewarm_records_failures(normal_calendar):
         public_base_url="https://example.test",
         today=datetime(2026, 8, 15, tzinfo=timezone.utc),
     ))
-    assert summary["urls_attempted"] == 14
+    # 7 SEO page-types + 1 FAQ leg per chapter × 2 chapters = 16.
+    assert summary["urls_attempted"] == 16
     assert summary["urls_failed"] == 2
-    assert summary["urls_warmed"] == 12
-    assert 0.85 < summary["success_rate"] < 0.86
+    assert summary["urls_warmed"] == 14
+    assert 0.87 < summary["success_rate"] < 0.88
     assert summary["samples_failed"]
     assert summary["samples_failed"][0]["status"] == 502
     # `notes` is NOT KV-eligible — KV success rate must remain 1.0
-    # even though the combined success rate dipped.
-    assert summary["kv_attempted"] == 10
+    # even though the combined success rate dipped. KV-attempted
+    # totals 5 SEO + 1 FAQ × 2 chapters = 12 (Task #13 round-9
+    # accounts the FAQ leg as KV-eligible).
+    assert summary["kv_attempted"] == 12
     assert summary["kv_failed"] == 0
     assert summary["kv_success_rate"] == 1.0
 
@@ -464,10 +471,12 @@ def test_run_prewarm_kv_failure_isolated_to_kv_metric(normal_calendar):
         public_base_url="https://example.test",
         today=datetime(2026, 8, 15, tzinfo=timezone.utc),
     ))
-    assert summary["kv_attempted"] == 10
+    # KV-attempted: 5 SEO + 1 FAQ × 2 chapters = 12; mcqs failure
+    # injects 2 failures (1 per chapter) so 10 warmed, 2 failed.
+    assert summary["kv_attempted"] == 12
     assert summary["kv_failed"] == 2
-    assert summary["kv_warmed"] == 8
-    assert summary["kv_success_rate"] == 0.8
+    assert summary["kv_warmed"] == 10
+    assert abs(summary["kv_success_rate"] - 10 / 12) < 1e-4
     # Failure samples must label KV-eligibility so the admin tile can
     # filter the queue by impacted layer.
     kv_samples = [s for s in summary["samples_failed"] if s.get("kv_eligible")]

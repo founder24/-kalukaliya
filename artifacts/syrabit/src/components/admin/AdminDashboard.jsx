@@ -337,6 +337,12 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   const [cfRange, setCfRange] = useState('7d');
   const [cfOverview, setCfOverview] = useState(null);
   const [cfOverviewLoading, setCfOverviewLoading] = useState(false);
+  // Task #13 — nightly SEO prewarm coverage tile. Sourced from
+  // /admin/seo/prewarm-coverage which returns the most recent
+  // aca_jobs.prewarm_seo_routes run summary (combined success_rate
+  // + KV-only kv_success_rate so a degraded materialization path is
+  // visible even when edge-only legs stay healthy).
+  const [prewarmCoverage, setPrewarmCoverage] = useState(null);
   const [indexNowStats, setIndexNowStats] = useState(null);
   const [indexNowHistory, setIndexNowHistory] = useState(null);
   const [retryingEndpoint, setRetryingEndpoint] = useState(null);
@@ -719,7 +725,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
         dashRes, metricsRes,
         ragAccRes, fallbackRes, vectorRes, latencyRes,
         queriesRes, tokenRes, funnelRes, coverageRes, pwaRes, botRes, cfCrawlRes, indexNowRes, indexNowHistRes,
-        alertHistRes, seoHealthRes,
+        alertHistRes, seoHealthRes, prewarmRes,
       ] = await Promise.allSettled([
         adminGetDashboard(adminToken),
         axios.get(`${API_BASE}/admin/dashboard/metrics`, adminHdr(adminToken)),
@@ -736,6 +742,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
         axios.get(`${API_BASE}/admin/analytics/cf-ai-crawl-control?days=7`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/indexnow/stats`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/indexnow/history?limit=20`, adminHdr(adminToken)),
+        axios.get(`${API_BASE}/admin/seo/prewarm-coverage`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/alerts?limit=50${showSyntheticAlerts ? '&include_synthetic=true' : ''}`, adminHdr(adminToken)),
         adminSeoHealthHistory(adminToken, 168),
       ]);
@@ -757,6 +764,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
       if (indexNowHistRes.status === 'fulfilled') setIndexNowHistory(indexNowHistRes.value.data); else setIndexNowHistory(null);
       if (alertHistRes.status === 'fulfilled') setAlertHistory(alertHistRes.value.data); else { failed.push('alerts'); setAlertHistory(null); }
       if (seoHealthRes.status === 'fulfilled') setSeoHealth(seoHealthRes.value.data); else { failed.push('seo-health'); setSeoHealth(null); }
+      if (prewarmRes.status === 'fulfilled') setPrewarmCoverage(prewarmRes.value.data); else { failed.push('prewarm-coverage'); setPrewarmCoverage(null); }
       seoHealthLive()
         .then((r) => { setSeoLive(r.data); setSeoLiveError(null); })
         .catch((e) => { setSeoLive(null); setSeoLiveError(e?.message || 'Failed to load SEO health'); });
@@ -4147,6 +4155,112 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
               </p>
             )}
           </div>
+          )}
+        </GlassCard>
+      )}
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary name="SEO Prewarm Coverage">
+      {prewarmCoverage && (
+        <GlassCard className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Search size={16} className="text-orange-500" />
+            <h3 className="text-gray-700 font-semibold">SEO Prewarm Coverage</h3>
+            {prewarmCoverage.season && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${
+                prewarmCoverage.season === 'exam'
+                  ? 'bg-red-100 text-red-700 border border-red-200'
+                  : prewarmCoverage.season === 'results'
+                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                    : 'bg-gray-100 text-gray-600 border border-gray-200'
+              }`}>
+                {prewarmCoverage.season}
+              </span>
+            )}
+            {prewarmCoverage.last_run_at && (
+              <span className="ml-auto text-[10px] text-gray-400">
+                Last run: {new Date(prewarmCoverage.last_run_at).toLocaleString()}
+                {prewarmCoverage.duration_s ? ` · ${Math.round(prewarmCoverage.duration_s)}s` : ''}
+              </span>
+            )}
+          </div>
+          {!prewarmCoverage.last_run_at ? (
+            <div className="text-[11px] text-gray-500 italic">
+              No prewarm run recorded yet — the nightly Lambda fires at 01:00 UTC.
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="rounded-lg p-3 bg-orange-50 border border-orange-200 text-center">
+                  <p className="text-orange-700 font-bold text-lg">{(prewarmCoverage.scanned ?? 0).toLocaleString()}</p>
+                  <p className="text-[10px] text-gray-500">Chapters Scanned</p>
+                </div>
+                <div className="rounded-lg p-3 bg-blue-50 border border-blue-200 text-center">
+                  <p className="text-blue-700 font-bold text-lg">{(prewarmCoverage.urls_warmed ?? 0).toLocaleString()}<span className="text-xs text-gray-400">/{(prewarmCoverage.urls_attempted ?? 0).toLocaleString()}</span></p>
+                  <p className="text-[10px] text-gray-500">URLs Warmed (combined)</p>
+                </div>
+                <div className={`rounded-lg p-3 border text-center ${
+                  (prewarmCoverage.success_rate ?? 0) >= 0.95 ? 'bg-green-50 border-green-200'
+                    : (prewarmCoverage.success_rate ?? 0) >= 0.90 ? 'bg-amber-50 border-amber-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  <p className={`font-bold text-lg ${
+                    (prewarmCoverage.success_rate ?? 0) >= 0.95 ? 'text-green-700'
+                      : (prewarmCoverage.success_rate ?? 0) >= 0.90 ? 'text-amber-700'
+                      : 'text-red-700'
+                  }`}>{((prewarmCoverage.success_rate ?? 0) * 100).toFixed(2)}%</p>
+                  <p className="text-[10px] text-gray-500">Combined Success Rate</p>
+                </div>
+                <div className={`rounded-lg p-3 border text-center ${
+                  (prewarmCoverage.kv_success_rate ?? 0) >= 0.95 ? 'bg-green-50 border-green-200'
+                    : (prewarmCoverage.kv_success_rate ?? 0) >= 0.90 ? 'bg-amber-50 border-amber-200'
+                    : 'bg-red-50 border-red-200'
+                }`} title="KV-eligible page-types only (mcqs / flashcards / definitions / summary / pyqs)">
+                  <p className={`font-bold text-lg ${
+                    (prewarmCoverage.kv_success_rate ?? 0) >= 0.95 ? 'text-green-700'
+                      : (prewarmCoverage.kv_success_rate ?? 0) >= 0.90 ? 'text-amber-700'
+                      : 'text-red-700'
+                  }`}>{((prewarmCoverage.kv_success_rate ?? 0) * 100).toFixed(2)}%</p>
+                  <p className="text-[10px] text-gray-500">KV Success Rate <span className="text-gray-400">({(prewarmCoverage.kv_warmed ?? 0).toLocaleString()}/{(prewarmCoverage.kv_attempted ?? 0).toLocaleString()})</span></p>
+                </div>
+              </div>
+              {prewarmCoverage.by_board?.length > 0 && (
+                <div className="mb-4">
+                  <div className="text-[10px] text-gray-400 font-semibold mb-1.5 uppercase tracking-wider">Per-Board Coverage</div>
+                  <div className="space-y-1">
+                    {prewarmCoverage.by_board.map((row, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[10px] py-1.5 px-3 rounded bg-white border border-gray-200">
+                        <span className="text-gray-700 font-medium min-w-[100px]">{row.board}</span>
+                        <span className="text-gray-500">warmed <span className="font-mono font-semibold text-gray-700">{(row.warmed ?? 0).toLocaleString()}</span></span>
+                        <span className="text-gray-500">failed <span className="font-mono font-semibold text-amber-700">{(row.failed ?? 0).toLocaleString()}</span></span>
+                        <span className={`ml-auto font-mono font-semibold ${
+                          (row.success_rate ?? 0) >= 0.95 ? 'text-green-700'
+                            : (row.success_rate ?? 0) >= 0.90 ? 'text-amber-700'
+                            : 'text-red-700'
+                        }`}>{((row.success_rate ?? 0) * 100).toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {prewarmCoverage.samples_failed?.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-gray-400 font-semibold mb-1.5 uppercase tracking-wider">Recent Failure Samples</div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {prewarmCoverage.samples_failed.slice(0, 10).map((s, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[10px] py-1 px-2 rounded bg-red-50 border border-red-100">
+                        {s.kv_eligible && (
+                          <span className="text-[9px] px-1 py-0 rounded bg-orange-100 text-orange-700 border border-orange-200 font-semibold">KV</span>
+                        )}
+                        <span className="text-gray-500 font-mono">{s.status || '—'}</span>
+                        <span className="text-gray-700 truncate flex-1" title={s.url}>{s.url}</span>
+                        <span className="text-red-700 ml-auto">{s.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </GlassCard>
       )}
