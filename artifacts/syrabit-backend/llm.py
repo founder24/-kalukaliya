@@ -52,7 +52,12 @@ def _clamp_max_tokens(model: str, max_tokens: int) -> int:
     return min(max_tokens, cap) if cap else max_tokens
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# Task #6 (2026-05-09) — `emergentintegrations.llm.chat` (LlmChat / UserMessage)
+# was a Groq/OpenAI/Fireworks-AI shim. All three providers were retired in
+# Task #347 / V4 §0; the import + the two unreachable callsites below
+# (`_call_llm_raw` fall-through + the streaming else-branch) now raise
+# explicitly per V4 §12 "no silent fallbacks". The `emergentintegrations/`
+# package was deleted in the same purge.
 from config import (
     LLM_PROVIDER, LLM_MODEL, OPENAI_API_KEY, SARVAM_THINK_BUFFER,
     _OPENAI_KEY,
@@ -1486,8 +1491,10 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
     # in PROVIDER_PRIORITY; CF AI Gateway slug `groq/v1` is not configured.
     # Task #347: xAI/Grok dispatch branch removed — provider is no longer
     # in PROVIDER_PRIORITY and the SDK is uninstalled.
-    if provider == "openrouter":
-        return await _call_openai_compat(messages, api_key, model, max_tokens, "openrouter", "https://openrouter.ai/api/v1")
+    # Task #6 (2026-05-09) — `openrouter` dispatch branch removed. OpenRouter
+    # is in the matrix `retired_providers` list; no PROVIDER_PRIORITY entry
+    # routed to it after #347 / V4 §0. The unsupported-provider raise below
+    # now covers it.
     if provider == "vertex":
         # Task #554 — Vertex Gemini 2.5 Flash is the English chat head
         # (default; swaps to fallback when GCP credit runway projects
@@ -1504,15 +1511,17 @@ async def _call_single_provider(messages: list, provider: str, api_key: str, mod
         elif m["role"] == "user":
             user_msg = m["content"]
 
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=str(uuid.uuid4()),
-        system_message=system_msg or "You are a helpful AI tutor.",
-    ).with_model(provider, model)
-
-    response = await chat.send_message(UserMessage(text=user_msg))
-    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
-    return response
+    # Task #6 (2026-05-09) — V4 §12 no-silent-fallbacks: the only providers
+    # the deleted LlmChat shim handled were groq / openai / fireworksai, all
+    # retired in #347. Reaching this branch means the caller passed an
+    # unknown provider; raise loudly so the dispatcher logs which feature
+    # mis-routed instead of silently producing a stale response.
+    raise HTTPException(
+        status_code=500,
+        detail=f"_call_llm_raw: provider {provider!r} is not supported "
+               f"(LlmChat shim + openrouter branch removed in Task #6; "
+               f"supported branch above is vertex)."
+    )
 
 async def _call_llm_raw(messages: list, model: str = None, max_tokens: int = 1024, provider_list=None, feature_key: str = "") -> str:
     # Task #513 §B — token-budget clamp. Resolve a coarse call_type from
@@ -3472,17 +3481,21 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         # _PROVIDER_429_WINDOWS) also dropped.
         # Task #347: xAI/Grok stream branch removed — _stream_xai is gone
         # and PROVIDER_PRIORITY no longer routes to "xai".
-        elif p_name == "openrouter":
-            logger.info(f"LLM stream: provider=openrouter, model={p_model}")
-            async for token in _stream_openai_compat(messages, p_key, p_model, _mt, "openrouter", "https://openrouter.ai/api/v1"):
-                yield token
+        # Task #6 (2026-05-09) — `openrouter` stream branch removed
+        # (matrix retired_providers, no PROVIDER_PRIORITY entry).
         # Task #347: bedrock stream branch removed — providers/bedrock.py and
         # _stream_bedrock are gone; PROVIDER_PRIORITY no longer lists bedrock.
         else:
-            logger.info(f"LLM stream: provider={p_name}, model={p_model}")
-            chat = LlmChat(api_key=p_key or OPENAI_API_KEY, session_id=str(uuid.uuid4())).with_model(p_name, p_model)
-            async for token in chat.stream_messages(messages, max_tokens=_mt):
-                yield token
+            # Task #6 (2026-05-09) — V4 §12 no-silent-fallbacks: the deleted
+            # LlmChat streaming shim only handled groq / openai / fireworksai
+            # (retired in #347). Reaching this branch means PROVIDER_PRIORITY
+            # listed an unknown streaming provider; surface it loudly.
+            logger.error(f"LLM stream: unsupported provider={p_name!r} (LlmChat shim removed in Task #6)")
+            raise HTTPException(
+                status_code=500,
+                detail=f"streaming provider {p_name!r} is not supported "
+                       f"(LlmChat shim removed in Task #6)."
+            )
 
     # ── Syrabit SLM: concurrent smart pool ──────────────────────────────────────
     # pick() returns the fastest available slot (by speed tier) with spare capacity.
@@ -3496,7 +3509,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         "sarvam": 12000,
         # groq removed in Task #347 / V4 §0
         "gemini": 500000,
-        "openrouter": 200000,
+        # openrouter removed in Task #6 (2026-05-09) — matrix retired_providers
         "openai": 80000,
         # bedrock removed in Task #347
     }

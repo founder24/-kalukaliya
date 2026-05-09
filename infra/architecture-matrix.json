@@ -4,9 +4,7 @@
   "source_blueprint": "attached_assets/Pasted--Syrabit-Full-Updated-Architecture-Provider-Breakdown-C_1778322896768.txt",
   "owner": "founder@syrabit.ai",
   "ci_guard": "scripts/check_architecture_lock.py",
-  "retired_provider_allowlist_paths": [
-    "artifacts/syrabit-backend/llm.py"
-  ],
+  "retired_provider_allowlist_paths": [],
   "founder_locks": {
     "monthly_usd_cap": 100,
     "voice_paywall_routes": ["/voice/tts", "/voice/stt", "/voice/voice"],

@@ -110,51 +110,15 @@ def test_cf_cache_headers_empty_when_gateway_down(llm_module):
     assert llm_mod._cf_cache_headers() == {}
 
 
-def _emergent_chat_module(monkeypatch):
-    monkeypatch.setenv("CF_AI_GATEWAY_ACCOUNT_ID", "test-acct")
-    monkeypatch.setenv("CF_AI_GATEWAY_ID", "test-gw")
-    monkeypatch.setenv("CF_AI_GATEWAY_TOKEN", "test-cf-token")
-    import config as cfg
-    importlib.reload(cfg)
-    cfg._cf_gw_healthy = True
-    from emergentintegrations.llm import chat as chat_mod
-    importlib.reload(chat_mod)
-    return chat_mod, cfg
-
-
-def test_emergent_real_key_does_not_clear_authorization(monkeypatch):
-    """Same regression for the LlmChat path (different module, same
-    bug). LlmChat decides per-instance from ``self.api_key``."""
-    chat_mod, _ = _emergent_chat_module(monkeypatch)
-    inst = chat_mod.LlmChat(
-        api_key="real-provider-key",
-        session_id="t",
-        system_message="t",
-    ).with_model("gemini", "gemini-2.5-flash")
-    h = inst._cf_cache_headers() or {}
-    assert "Authorization" not in h, (
-        f"emergent LlmChat with REAL api_key MUST NOT include "
-        f"Authorization in extra_headers; got: {h!r}"
-    )
-    assert h.get("cf-aig-byok-key") == "true", h
-
-
-def test_emergent_byok_placeholder_clears_authorization(monkeypatch):
-    """Architect-flagged BYOK regression: ``LlmChat`` with the placeholder
-    api_key MUST clear Authorization so CF substitutes the stored key."""
-    chat_mod, cfg = _emergent_chat_module(monkeypatch)
-    inst = chat_mod.LlmChat(
-        api_key=cfg.BYOK_PLACEHOLDER,
-        session_id="t",
-        system_message="t",
-    ).with_model("gemini", "gemini-2.5-flash")
-    h = inst._cf_cache_headers() or {}
-    assert h.get("Authorization") == "", (
-        f"emergent LlmChat with BYOK_PLACEHOLDER MUST emit "
-        f"Authorization='' so CF injects the dashboard-stored key; "
-        f"got: {h!r}"
-    )
-    assert h.get("cf-aig-byok-key") == "true", h
+# Task #6 (2026-05-09) — the two `test_emergent_*` cases that exercised
+# `emergentintegrations.llm.chat.LlmChat._cf_cache_headers` were removed
+# alongside the deletion of the `emergentintegrations/` shim package
+# (Groq/OpenAI/Fireworks-AI providers were retired in #347; the shim's
+# only consumers in `llm.py` were two unreachable fall-through branches
+# now raising `HTTPException(500)` per V4 §12 no-silent-fallbacks).
+# The `_cf_cache_headers` contract is still guarded by the five
+# `test_cf_cache_headers_*` cases above, which exercise the same helper
+# directly on `llm.py`.
 
 
 # ───────────────────────────────────────────────────────────────────────────
