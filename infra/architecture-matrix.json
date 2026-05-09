@@ -17,12 +17,13 @@
     "pinecone_dim": 1024
   },
   "retired_providers": [
-    "cerebras", "cohere", "voyage_ai", "voyageai", "cartesia", "groq",
-    "openrouter", "quge5", "azure_openai", "AzureOpenAI", "gpt-4.1-nano",
-    "AZURE_OPENAI_API_KEY", "azure_speech", "AZURE_SPEECH_KEY",
-    "azure_translator", "AZURE_TRANSLATOR_KEY", "assemblyai", "AssemblyAI",
-    "ASSEMBLYAI_API_KEY", "sendgrid", "SendGridAPIClient", "SENDGRID_API_KEY",
-    "resend_api", "RESEND_API_KEY", "firebase_admin", "FCM_SERVER_KEY",
+    "cerebras", "cohere", "voyage", "voyage_ai", "voyageai", "cartesia",
+    "groq", "openrouter", "quge5", "azure_openai", "AzureOpenAI",
+    "gpt-4.1-nano", "AZURE_OPENAI_API_KEY", "azure_speech",
+    "AZURE_SPEECH_KEY", "azure_translator", "AZURE_TRANSLATOR_KEY",
+    "assemblyai", "AssemblyAI", "ASSEMBLYAI_API_KEY", "sendgrid",
+    "SendGridAPIClient", "SENDGRID_API_KEY", "resend", "resend_api",
+    "RESEND_API_KEY", "firebase_admin", "fcm_server", "FCM_SERVER_KEY",
     "FIREBASE_SERVICE_ACCOUNT", "fireworks", "emergentintegrations",
     "bedrock_proxy", "bedrock_runtime", "anthropic", "xai", "grok-",
     "together"
