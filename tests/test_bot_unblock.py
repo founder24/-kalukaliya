@@ -88,6 +88,64 @@ def test_verified_bot_fast_path_constant_present():
     assert "verifyBotIpWithKv" in src
 
 
+def test_spoofed_critical_bot_returns_403():
+    """Worker must hard-403 spoofed Googlebot/Bingbot/Perplexity/etc.
+    (UA matches a critical bot family but neither cf.verifiedBot nor
+    forward-confirmed rDNS confirmed the IP). Without this gate an
+    attacker can scrape pre-rendered HTML the SPA gates by spoofing the
+    UA from any IP."""
+    src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
+    # Contract: there must be a CRITICAL_BOT_UA regex AND a code path
+    # that returns 403 with X-Bot-Verify: spoofed when the UA matches
+    # but FCrDNS does not confirm.
+    assert "CRITICAL_BOT_UA" in src, "missing CRITICAL_BOT_UA regex (spoofed-bot 403 gate)"
+    assert "X-Bot-Verify" in src and "spoofed" in src
+    # The two must appear together in a 403 branch.
+    m = re.search(
+        r"if\s*\(\s*CRITICAL_BOT_UA\.test\(ua\)\s*\)\s*\{[\s\S]{0,800}?status:\s*403",
+        src,
+    )
+    assert m, (
+        "expected `if (CRITICAL_BOT_UA.test(ua)) { ... status: 403 ... }` "
+        "branch in worker — spoofed critical bots must be 403'd"
+    )
+
+
+def test_forward_confirmed_rdns_implementation():
+    """The KV-cached rDNS verification MUST be forward-confirmed:
+    after the PTR lookup we must round-trip through an A-record query
+    and assert the original IP is in the answer set. PTR-only
+    verification is forgeable by an attacker who controls the
+    in-addr.arpa zone for a leased IP block.
+
+    The cache key MUST also be scoped by bot family so a positive
+    cache for googlebot from a shared NAT IP does not elevate trust
+    for an unrelated UA hitting the same IP later."""
+    src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
+    assert "_forwardConfirms" in src or "_forwardConfirm" in src, (
+        "verifyBotIpWithKv must do forward-confirmed rDNS, not PTR-only"
+    )
+    # A-record lookup must appear.
+    assert re.search(r'"A"', src), "missing A-record DoH query"
+    # Family-scoped cache key.
+    assert re.search(r"bot:rdns:\$\{family\}", src), (
+        "KV cache key must be family-scoped (`bot:rdns:${family}:${hashIp(ip)}`)"
+    )
+
+
+def test_drift_check_wired_to_ci():
+    """The drift checker must run as a CI gate, not just an ad-hoc script."""
+    wf = REPO_ROOT / ".github" / "workflows" / "bot-rules-drift.yml"
+    assert wf.exists(), "missing .github/workflows/bot-rules-drift.yml"
+    body = wf.read_text(encoding="utf-8")
+    assert "scripts/check_bot_rules_drift.py" in body, (
+        "CI workflow must invoke scripts/check_bot_rules_drift.py"
+    )
+    assert "pull_request" in body and "push" in body, (
+        "drift check must run on both pull_request and push"
+    )
+
+
 def test_robots_advertises_all_sitemap_shards():
     """All 9 sitemap shards + the master index must be listed in
     robots.txt so long-tail crawlers without a sitemap-index parser

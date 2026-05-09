@@ -1329,10 +1329,28 @@ function isVerifiedSearchBot(ua: string, request: Request, clientIp: string): bo
   return verifySearchBot(ua, request, clientIp).verified;
 }
 
-// ─── Task #9 — KV-cached rDNS verification for verified-bot fast path ───────
+// ─── Task #9 — Critical bot UA list (hard-403 on spoofed) ──────────────────
+// UAs whose impersonation is high-impact enough that we 403 the request
+// when the IP fails *forward-confirmed* rDNS. The set is the union of
+// verified_search and citation_ai families that drive
+// search-engine indexing or LLM citation surfaces — i.e. the audience
+// whose pre-rendered HTML an attacker would scrape by spoofing.
+const CRITICAL_BOT_UA = /(googlebot|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|perplexitybot|perplexity-user|oai-searchbot|chatgpt-user)/i;
+
+// ─── Task #9 — KV-cached forward-confirmed rDNS verification ──────────────
 // `verifyBotIpWithKv` extends bot trust to UAs whose reverse DNS PTR
-// matches one of the canonical suffixes in `infra/bot-rules.yaml`,
-// caching the lookup for 24 h in the RATE_LIMIT KV namespace. This
+// matches one of the canonical suffixes in `infra/bot-rules.yaml` AND
+// the PTR target's forward A/AAAA record contains the original
+// request IP (forward-confirmed reverse DNS / FCrDNS, RFC 8499 §5).
+// PTR alone is forgeable by anyone who controls a reverse-DNS zone for
+// an IP block; FCrDNS closes that gap because it requires control of
+// both the reverse zone (to set the PTR) AND the forward zone
+// (to ensure the PTR target resolves back to the same IP).
+//
+// The result is cached for 24 h in RATE_LIMIT KV. Cache keys are
+// scoped by bot FAMILY so a positive cache for `googlebot` cannot be
+// reused to elevate trust for an unrelated UA hitting the same IP
+// (the typical NAT case where multiple crawlers exit a shared egress). This
 // closes the gap where a verified search bot on a freshly-rotated IP
 // has not yet been flagged by Cloudflare's `cf.verifiedBot` (the
 // primary trust gate, checked first in the caller).
@@ -1360,41 +1378,57 @@ function isVerifiedSearchBot(ua: string, request: Request, clientIp: string): bo
 // changes to suffix sets are infrequent enough that a manual
 // matching review is acceptable. Add a TODO when introducing a new
 // suffix here.
-const BOT_RDNS_SUFFIXES: Array<[RegExp, string[]]> = [
-  [/googlebot|google-extended|googleother|google-inspectiontool/i, [".googlebot.com.", ".google.com."]],
-  [/bingbot|msnbot/i, [".search.msn.com."]],
-  [/duckduckbot/i, [".duckduckgo.com."]],
-  [/applebot/i, [".applebot.apple.com."]],
-  [/yandexbot|^yandex/i, [".yandex.ru.", ".yandex.net.", ".yandex.com."]],
-  [/baiduspider/i, [".baidu.com.", ".baidu.jp."]],
-  [/petalbot/i, [".petalsearch.com.", ".aspiegel.com."]],
-  [/yeti/i, [".naver.com."]],
-  [/seznambot/i, [".seznam.cz."]],
-  [/slurp/i, [".crawl.yahoo.net."]],
-  [/perplexitybot|perplexity-user/i, [".perplexity.ai."]],
-  [/oai-searchbot|chatgpt-user/i, [".openai.com."]],
+// Each entry: [family-name, ua-pattern, [PTR suffixes]].
+// `family-name` becomes part of the KV cache key so a positive
+// verification for one family doesn't leak trust to others on a
+// shared egress IP.
+const BOT_RDNS_SUFFIXES: Array<[string, RegExp, string[]]> = [
+  ["googlebot", /googlebot|google-extended|googleother|google-inspectiontool/i, [".googlebot.com.", ".google.com."]],
+  ["bingbot", /bingbot|msnbot/i, [".search.msn.com."]],
+  ["duckduckbot", /duckduckbot/i, [".duckduckgo.com."]],
+  ["applebot", /applebot/i, [".applebot.apple.com."]],
+  ["yandexbot", /yandexbot|^yandex/i, [".yandex.ru.", ".yandex.net.", ".yandex.com."]],
+  ["baiduspider", /baiduspider/i, [".baidu.com.", ".baidu.jp."]],
+  ["petalbot", /petalbot/i, [".petalsearch.com.", ".aspiegel.com."]],
+  ["yeti", /yeti/i, [".naver.com."]],
+  ["seznambot", /seznambot/i, [".seznam.cz."]],
+  ["yahoo-slurp", /slurp/i, [".crawl.yahoo.net."]],
+  ["perplexitybot", /perplexitybot|perplexity-user/i, [".perplexity.ai."]],
+  ["openai-search", /oai-searchbot|chatgpt-user/i, [".openai.com."]],
 ];
 
 const BOT_RDNS_TTL_S = 86400;
 
-async function _resolveRdns(ip: string): Promise<string | null> {
-  // IPv4 only — see header note. Returns the PTR target (with
-  // trailing dot) on success, or null on any failure.
-  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) return null;
-  const parts = ip.split(".").reverse().join(".");
-  const arpa = `${parts}.in-addr.arpa`;
+async function _dohQuery(name: string, type: "PTR" | "A" | "AAAA"): Promise<string[]> {
+  // Returns the lowercased Answer.data values, or [] on any failure.
   try {
     const dnsResp = await fetch(
-      `https://cloudflare-dns.com/dns-query?name=${arpa}&type=PTR`,
+      `https://cloudflare-dns.com/dns-query?name=${name}&type=${type}`,
       { headers: { Accept: "application/dns-json" }, cf: { cacheTtl: BOT_RDNS_TTL_S } as unknown as RequestInitCfProperties },
     );
-    if (!dnsResp.ok) return null;
-    const data = await dnsResp.json() as { Answer?: Array<{ data: string }> };
-    const ptr = data.Answer?.find((a) => typeof a.data === "string");
-    return ptr ? ptr.data.toLowerCase() : null;
-  } catch {
-    return null;
-  }
+    if (!dnsResp.ok) return [];
+    const data = await dnsResp.json() as { Answer?: Array<{ data: string; type?: number }> };
+    return (data.Answer || [])
+      .filter((a) => typeof a.data === "string")
+      .map((a) => a.data.toLowerCase());
+  } catch { return []; }
+}
+
+async function _resolveRdns(ip: string): Promise<string | null> {
+  // IPv4 only. Returns the PTR target (with trailing dot) or null.
+  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) return null;
+  const arpa = `${ip.split(".").reverse().join(".")}.in-addr.arpa`;
+  const ans = await _dohQuery(arpa, "PTR");
+  return ans[0] || null;
+}
+
+async function _forwardConfirms(ptrTarget: string, expectedIp: string): Promise<boolean> {
+  // Forward-confirmed rDNS: the PTR target's A record must include
+  // the IP we started from. Strips the DoH trailing dot before query.
+  const name = ptrTarget.endsWith(".") ? ptrTarget.slice(0, -1) : ptrTarget;
+  if (!name) return false;
+  const aRecords = await _dohQuery(name, "A");
+  return aRecords.includes(expectedIp.toLowerCase());
 }
 
 async function verifyBotIpWithKv(
@@ -1404,32 +1438,40 @@ async function verifyBotIpWithKv(
   ip: string,
 ): Promise<boolean> {
   if (!env.RATE_LIMIT) return false;
-  // Match the UA against the suffix table FIRST so we don't burn a
+  // Match the UA against the family table FIRST so we don't burn a
   // KV read for UAs (e.g. Twitterbot) we don't have a verified-bot
   // policy for.
+  let family: string | null = null;
   let suffixes: string[] | null = null;
-  for (const [pattern, sfx] of BOT_RDNS_SUFFIXES) {
-    if (pattern.test(ua)) { suffixes = sfx; break; }
+  for (const [name, pattern, sfx] of BOT_RDNS_SUFFIXES) {
+    if (pattern.test(ua)) { family = name; suffixes = sfx; break; }
   }
-  if (!suffixes) return false;
-  const cacheKey = `bot:rdns:${hashIp(ip)}`;
+  if (!family || !suffixes) return false;
+  // Family-scoped cache key — a positive cache for googlebot from a
+  // shared NAT IP must NOT elevate trust for a UA in a different
+  // family hitting the same IP later.
+  const cacheKey = `bot:rdns:${family}:${hashIp(ip)}`;
   try {
     const cached = await env.RATE_LIMIT.get(cacheKey);
     if (cached === "0") return false;
     if (cached && cached.startsWith("1:")) return true;
   } catch { /* KV read miss — fall through to live lookup */ }
   const ptr = await _resolveRdns(ip);
-  if (!ptr) {
+  if (!ptr || !suffixes.some((sfx) => ptr.endsWith(sfx))) {
     ctx.waitUntil(env.RATE_LIMIT.put(cacheKey, "0", { expirationTtl: BOT_RDNS_TTL_S }).catch(() => {}));
     return false;
   }
-  const matched = suffixes.some((sfx) => ptr.endsWith(sfx));
+  // Forward-confirm: PTR target must resolve back to the same IP.
+  // PTR-only verification is forgeable by an attacker who controls
+  // the in-addr.arpa zone for a leased IP; the forward A round-trip
+  // requires control of the bot vendor's authoritative forward zone.
+  const confirmed = await _forwardConfirms(ptr, ip);
   ctx.waitUntil(env.RATE_LIMIT.put(
     cacheKey,
-    matched ? `1:${ptr}` : "0",
+    confirmed ? `1:${ptr}` : "0",
     { expirationTtl: BOT_RDNS_TTL_S },
   ).catch(() => {}));
-  return matched;
+  return confirmed;
 }
 
 const BASE_URL = "https://syrabit.ai";
@@ -3766,6 +3808,37 @@ async function _handleEdgeFetch(
       const ipH = hashIp(clientIp);
       const colo = (request as unknown as { cf?: { colo?: string } }).cf?.colo || "unknown";
       ctx.waitUntil(logSpoofedBot(env.RATE_LIMIT, ipH, ua, clientIp, colo));
+
+      // Task #9 — hard-403 spoofed critical search/citation bots.
+      // `botResult.spoofed=true` means: UA matches one of our canonical
+      // search/citation tokens AND the request IP is NOT in the
+      // hard-coded CIDR list for that bot family. Before slamming the
+      // door we give the request one last chance via forward-confirmed
+      // rDNS (PTR + A round-trip, KV-cached 24 h, family-scoped key)
+      // so legitimate bots crawling from a freshly-rotated IP that
+      // hasn't been added to the CIDR list yet are still served.
+      // If FCrDNS also fails for a critical UA, the request is denied —
+      // serving anything to a spoofed Googlebot is an integrity bug
+      // because attackers use the cf.cache.reactsToBot hint to scrape
+      // pre-rendered HTML the SPA gates.
+      if (CRITICAL_BOT_UA.test(ua)) {
+        const fcrDnsConfirmed = await verifyBotIpWithKv(env, ctx, ua, clientIp);
+        if (!fcrDnsConfirmed) {
+          return new Response(
+            "Forbidden: User-Agent claims to be a verified search bot, but the " +
+            "request IP did not pass forward-confirmed reverse-DNS verification.\n",
+            {
+              status: 403,
+              headers: {
+                ...cors,
+                "Content-Type": "text/plain; charset=utf-8",
+                "Cache-Control": "no-store",
+                "X-Bot-Verify": "spoofed",
+              },
+            },
+          );
+        }
+      }
     }
 
     // AI crawler hard-block.

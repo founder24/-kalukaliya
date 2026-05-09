@@ -1,0 +1,59 @@
+name: bot-rules-drift
+
+#
+# Task #9 — mechanical enforcement of the canonical bot registry at
+# `infra/bot-rules.yaml`. This gate fails the build when any of the
+# four runtime regex sources drifts out of sync with the registry:
+#
+#   * artifacts/syrabit-backend/utils.py   (_SEARCH_BOT_UA_RE, _ABUSIVE_SCRAPER_UA_RE)
+#   * artifacts/syrabit/vite.config.js     (BOT_UA)
+#   * artifacts/syrabit/public/_worker.js  (SEARCH_BOT_UA)
+#   * workers/edge-proxy/src/index.ts      (SEARCH_BOT_UA, AI_BOT_UA)
+#
+# Add a token to the YAML → this gate fails until every regex source
+# above contains the token. Remove a token from the YAML → same.
+# Without this gate the four sources can diverge silently and either
+# (a) Googlebot stops getting the verified-bot fast path, or (b) a
+# training-only crawler stops getting hard-403'd.
+#
+# This file is itself SHA-pinned per pinned-actions-check.yml.
+
+on:
+  pull_request:
+    branches: [Replit-agent, master, main]
+    paths:
+      - "infra/bot-rules.yaml"
+      - "scripts/check_bot_rules_drift.py"
+      - "scripts/gen_bot_regex.py"
+      - "artifacts/syrabit-backend/utils.py"
+      - "artifacts/syrabit/vite.config.js"
+      - "artifacts/syrabit/public/_worker.js"
+      - "workers/edge-proxy/src/index.ts"
+      - ".github/workflows/bot-rules-drift.yml"
+  push:
+    branches: [Replit-agent, master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Verify bot-rules registry sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e9aba2c848f5ebd159c070c61ea2c4e2b122355e # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Run bot-rules drift guard
+        run: |
+          set -euo pipefail
+          python3 scripts/check_bot_rules_drift.py
