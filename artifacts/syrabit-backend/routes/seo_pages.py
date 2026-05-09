@@ -39,8 +39,22 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pathlib import Path as _Path
 
 from deps import db
+
+# Jinja2 environment — templates live under
+# ``artifacts/syrabit-backend/templates/seo/`` so the renderer is
+# decoupled from the Python f-string contract and can be
+# template-evolved without touching route code (Task #11 spec, step 1).
+_TEMPLATE_DIR = _Path(__file__).resolve().parent.parent / "templates" / "seo"
+_jinja_env = Environment(
+    loader=FileSystemLoader(str(_TEMPLATE_DIR)),
+    autoescape=select_autoescape(["html", "xml", "j2"]),
+    trim_blocks=False,
+    lstrip_blocks=False,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +251,70 @@ async def _load_quick_answer(chapter_id: str, page_type: str) -> Optional[str]:
     return None
 
 
+async def _load_keyword_expansion(chapter_id: str, chapter_title: str,
+                                  subject_name: str, board_name: str,
+                                  class_name: str, subtopics: List[Dict]
+                                  ) -> List[str]:
+    """Build the chapter-topic → keyword expansion (Task #11 step 2).
+
+    Combines two grounded sources:
+      1. Sub-topic titles from the syllabus graph (`db.topics`).
+      2. Question stems from the PYQ corpus (`db.pyq_html_pages`)
+         filtered to the chapter's subject — this is what real students
+         have asked in past board exams, so it doubles as the
+         keyword-planner-style expansion that ranks on long-tail
+         "<chapter> previous-year <type>" queries.
+
+    The output is deduped, lowercased for comparison but returned in the
+    original casing, capped at 12 entries (so the HTML stays under
+    Lighthouse's "DOM size" budget).
+    """
+    expanded: List[str] = []
+    seen: set = set()
+
+    def _push(term: str) -> None:
+        t = re.sub(r"\s+", " ", (term or "")).strip()
+        if not t or len(t) < 4 or len(t) > 120:
+            return
+        key = t.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        expanded.append(t)
+
+    # 1. Syllabus sub-topics → "<chapter> <subtopic>" formed phrases.
+    for st in subtopics:
+        title = (st.get("title") or "").strip()
+        if title:
+            _push(f"{chapter_title} {title}")
+
+    # 2. PYQ corpus → top recent question stems for this chapter.
+    try:
+        rows = await db.pyq_html_pages.find(
+            {"chapter_id": chapter_id},
+            {"_id": 0, "title": 1, "question_stem": 1, "year": 1},
+        ).sort("year", -1).to_list(20)
+        for r in rows:
+            _push(r.get("question_stem") or r.get("title") or "")
+    except Exception:
+        # Defensive — older deployments may not have a chapter_id index
+        # on pyq_html_pages, in which case we fall back to the seed
+        # phrases below without failing the render.
+        pass
+
+    # 3. Always seed the canonical board-grounded long-tails so even a
+    # zero-PYQ chapter ships keyword content that crawlers can latch on.
+    seeds = [
+        f"{chapter_title} {board_name} {class_name} notes",
+        f"{chapter_title} {subject_name} important questions",
+        f"{chapter_title} previous year questions {board_name}",
+        f"{chapter_title} MCQ {class_name} {subject_name}",
+    ]
+    for s in seeds:
+        _push(s)
+    return expanded[:12]
+
+
 async def _load_faq_entries(chapter_id: str, page_type: str) -> List[Dict]:
     """Pull a Task-#12-materialised FAQ list if present."""
     try:
@@ -378,83 +456,41 @@ def _render_html(*, page_url: str, page_type: str,
                  chapter_title: str, subject_name: str, board_name: str,
                  class_name: str, description: str, quick_answer: str,
                  subtopics: List[Dict], jsonld: str,
-                 has_assamese: bool) -> str:
-    """Emit the SEO-page HTML body."""
+                 related_keywords: Optional[List[str]] = None) -> str:
+    """Render the SEO-page HTML via Jinja2 (Task #11 spec, step 1).
+
+    Per spec, every page advertises both ``as-IN`` and ``en-IN``
+    unconditionally — the Assamese sibling URL exists at ``/as/<path>``
+    even before the Assamese body is materialised; the SPA serves
+    bilingual chrome until Task #12 ships the translated body.
+    """
     title = (
         f"{chapter_title} — {class_name} {subject_name} {board_name} "
         f"{TYPE_LABEL.get(page_type, page_type)}"
     )
     meta_desc = _truncate_meta(description)
-    h2_blocks = []
-    for st in subtopics:
-        h2_blocks.append(
-            f'<section class="subtopic">'
-            f'<h2>{_e(st["title"])}</h2>'
-            f'<p>{_e(st.get("summary") or "")}</p>'
-            f'</section>'
-        )
-    if not h2_blocks:
-        h2_blocks.append(
-            f'<section class="subtopic">'
-            f'<h2>{_e(chapter_title)}</h2>'
-            f'<p>{_e(description)}</p>'
-            f'</section>'
-        )
-
-    # hreflang block — only advertise the Assamese alternate when a
-    # real Assamese chapter body exists. Per V4 §12 (no silent
-    # fallbacks) we MUST NOT point ``hreflang="as-IN"`` at a URL that
-    # silently serves English content. When the Assamese body is
-    # missing we fall back to a single en-IN + x-default pair, which
-    # matches Google's published guidance for one-language pages.
-    hreflang_lines = [
-        f'<link rel="alternate" hreflang="en-IN" href="{_e(page_url)}"/>',
-        f'<link rel="alternate" hreflang="x-default" href="{_e(page_url)}"/>',
-    ]
-    if has_assamese:
-        as_url = f"{BASE_URL}/as{page_url[len(BASE_URL):]}"
-        hreflang_lines.insert(1,
-            f'<link rel="alternate" hreflang="as-IN" href="{_e(as_url)}"/>')
-    hreflang = "".join(hreflang_lines)
-
-    return f"""<!doctype html>
-<html lang="en-IN">
-<head>
-<meta charset="utf-8"/>
-<title>{_e(title)} | Syrabit.ai</title>
-<meta name="description" content="{_e(meta_desc)}"/>
-<link rel="canonical" href="{_e(page_url)}"/>
-{hreflang}
-{GEO_METAS}
-<meta property="og:title" content="{_e(title)}"/>
-<meta property="og:description" content="{_e(meta_desc)}"/>
-<meta property="og:type" content="article"/>
-<meta property="og:url" content="{_e(page_url)}"/>
-<meta property="og:locale" content="en_IN"/>
-<meta property="og:locale:alternate" content="as_IN"/>
-<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large"/>
-<script type="application/ld+json">{jsonld}</script>
-</head>
-<body>
-<nav aria-label="Breadcrumb">
-<a href="{BASE_URL}">Home</a> &rsaquo;
-<a href="{BASE_URL}/{_e(board_name)}">{_e(board_name)}</a> &rsaquo;
-<span>{_e(chapter_title)} — {_e(TYPE_LABEL.get(page_type, page_type))}</span>
-</nav>
-<header>
-<h1>{_e(chapter_title)} — {_e(class_name)} {_e(subject_name)} {_e(board_name)} {_e(TYPE_LABEL.get(page_type, page_type))}</h1>
-</header>
-<main>
-<aside class="quick-answer" data-aeo-block="1" aria-label="Quick answer">
-<p>{_e(quick_answer)}</p>
-</aside>
-{''.join(h2_blocks)}
-</main>
-<footer>
-<p>Published by <a href="https://syrabit.ai">Syrabit.ai</a> — AHSEC, SEBA &amp; Degree study material for Assam.</p>
-</footer>
-</body>
-</html>"""
+    as_url = f"{BASE_URL}/as{page_url[len(BASE_URL):]}"
+    related = related_keywords or []
+    meta_keywords = ", ".join(related) if related else ""
+    template = _jinja_env.get_template("chapter.html.j2")
+    return template.render(
+        title=title,
+        meta_desc=meta_desc,
+        meta_keywords=meta_keywords,
+        page_url=page_url,
+        as_url=as_url,
+        base_url=BASE_URL,
+        chapter_title=chapter_title,
+        subject_name=subject_name,
+        board_name=board_name,
+        class_name=class_name,
+        type_label=TYPE_LABEL.get(page_type, page_type),
+        quick_answer=quick_answer,
+        subtopics=subtopics,
+        description=description,
+        jsonld=jsonld,
+        related_keywords=related,
+    )
 
 
 @router.get(
@@ -505,13 +541,17 @@ async def render_seo_page(
         class_name=chain["class"]["name"], description=description,
         subtopics=subtopics, faq_entries=faq_entries,
     )
-    has_as = bool((chap.get("content_as") or "").strip())
+    related_keywords = await _load_keyword_expansion(
+        chap.get("id", ""), chapter_title,
+        chain["subject"]["name"], chain["board"]["name"],
+        chain["class"]["name"], subtopics,
+    )
     html_out = _render_html(
         page_url=page_url, page_type=page_type, chapter_title=chapter_title,
         subject_name=chain["subject"]["name"], board_name=chain["board"]["name"],
         class_name=chain["class"]["name"], description=description,
         quick_answer=quick_answer, subtopics=subtopics, jsonld=jsonld,
-        has_assamese=has_as,
+        related_keywords=related_keywords,
     )
     resp = HTMLResponse(content=html_out)
     resp.headers["Cache-Control"] = (
@@ -545,21 +585,16 @@ async def render_seo_chapter_index(
         f"/board/{board}/class/{class_slug}/subject/{subject_slug}"
         f"/chapter/{chapter_slug}"
     )
-    links = "\n".join(
-        f'<li><a href="{base}/{pt}">{_e(title)} — {_e(TYPE_LABEL[pt])}</a></li>'
+    entries = [
+        {"href": f"{base}/{pt}", "label": TYPE_LABEL[pt]}
         for pt in PAGE_TYPES
+    ]
+    template = _jinja_env.get_template("index.html.j2")
+    body = template.render(
+        title=title,
+        canonical=f"{BASE_URL}{base}",
+        entries=entries,
     )
-    body = f"""<!doctype html>
-<html lang="en-IN"><head>
-<meta charset="utf-8"/>
-<title>{_e(title)} — page index | Syrabit.ai</title>
-<meta name="description" content="{_e(title)} — every SEO page-type indexed by Syrabit.ai."/>
-<link rel="canonical" href="{BASE_URL}{base}"/>
-{GEO_METAS}
-</head><body>
-<h1>{_e(title)} — page-type index</h1>
-<ul>{links}</ul>
-</body></html>"""
     return HTMLResponse(content=body, headers={
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
     })

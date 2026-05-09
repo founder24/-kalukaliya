@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8"/>
+<title>{{ title|e }} | Syrabit.ai</title>
+<meta name="description" content="{{ meta_desc|e }}"/>
+{% if meta_keywords %}<meta name="keywords" content="{{ meta_keywords|e }}"/>{% endif %}
+<link rel="canonical" href="{{ page_url|e }}"/>
+{# Task #11 spec — every page emits BOTH as-IN and en-IN unconditionally
+   so SearchGPT / Perplexity / Bing Copilot can pick the right locale
+   variant. The Assamese variant URL stays under /as/<path>; the SPA
+   degrades to bilingual chrome when the body translation is still in
+   the Task #12 backlog. #}
+<link rel="alternate" hreflang="en-IN" href="{{ page_url|e }}"/>
+<link rel="alternate" hreflang="as-IN" href="{{ as_url|e }}"/>
+<link rel="alternate" hreflang="x-default" href="{{ page_url|e }}"/>
+<meta name="geo.region" content="IN-AS"/>
+<meta name="geo.placename" content="Assam, India"/>
+<meta name="geo.position" content="26.2006;92.9376"/>
+<meta name="ICBM" content="26.2006, 92.9376"/>
+<meta property="og:title" content="{{ title|e }}"/>
+<meta property="og:description" content="{{ meta_desc|e }}"/>
+<meta property="og:type" content="article"/>
+<meta property="og:url" content="{{ page_url|e }}"/>
+<meta property="og:locale" content="en_IN"/>
+<meta property="og:locale:alternate" content="as_IN"/>
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large"/>
+<script type="application/ld+json">{{ jsonld|safe }}</script>
+</head>
+<body>
+<nav aria-label="Breadcrumb">
+<a href="{{ base_url|e }}">Home</a> &rsaquo;
+<a href="{{ base_url|e }}/{{ board_name|e }}">{{ board_name|e }}</a> &rsaquo;
+<span>{{ chapter_title|e }} — {{ type_label|e }}</span>
+</nav>
+<header>
+<h1>{{ chapter_title|e }} — {{ class_name|e }} {{ subject_name|e }} {{ board_name|e }} {{ type_label|e }}</h1>
+</header>
+<main>
+<aside class="quick-answer" data-aeo-block="1" aria-label="Quick answer">
+<p>{{ quick_answer|e }}</p>
+</aside>
+{% for st in subtopics %}
+<section class="subtopic">
+<h2>{{ st.title|e }}</h2>
+<p>{{ (st.summary or "")|e }}</p>
+</section>
+{% else %}
+<section class="subtopic">
+<h2>{{ chapter_title|e }}</h2>
+<p>{{ description|e }}</p>
+</section>
+{% endfor %}
+{% if related_keywords %}
+<section class="related-keywords" data-keyword-expansion="1" aria-label="Related search terms">
+<h3>Related questions students search for</h3>
+<ul>{% for kw in related_keywords %}<li>{{ kw|e }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+</main>
+<footer>
+<p>Published by <a href="https://syrabit.ai">Syrabit.ai</a> — AHSEC, SEBA &amp; Degree study material for Assam.</p>
+</footer>
+</body>
+</html>

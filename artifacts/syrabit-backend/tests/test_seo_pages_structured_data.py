@@ -338,11 +338,12 @@ def test_quick_answer_uses_materialised_when_present(monkeypatch):
         chapter_slug="photosynthesis", page_type="notes",
     ))
     body = resp.body.decode("utf-8")
-    # The renderer HTML-escapes the answer body before injection, so
-    # compare against the same transform — `Earth's` becomes
-    # `Earth&#x27;s`, which is the contract the SPA / GSC linter sees.
-    import html as _h
-    assert _h.escape(materialised, quote=True) in body, \
+    # Jinja2's autoescape uses markupsafe, which encodes apostrophes as
+    # ``&#39;`` (vs. ``html.escape`` which emits ``&#x27;``). Either is
+    # valid HTML; assert against the markupsafe form the renderer
+    # actually produces.
+    from markupsafe import escape as _ms_escape
+    assert str(_ms_escape(materialised)) in body, \
         "renderer must surface the materialised AEO answer card verbatim"
 
 
@@ -407,18 +408,25 @@ def test_resolver_rejects_subject_slug_under_wrong_class(monkeypatch):
     assert "Photosynthesis (Class 12)" in body
 
 
-def test_assamese_hreflang_omitted_when_no_translation(monkeypatch):
-    """V4 §12 (no silent fallbacks): we must NOT advertise an
-    Assamese alternate that points at a URL serving English content,
-    and must NOT leak `data-content-as=\"pending\"` into public HTML."""
+def test_hreflang_always_emits_both_languages(monkeypatch):
+    """Task #11 spec: every rendered page MUST advertise both
+    ``as-IN`` and ``en-IN`` hreflang alternates unconditionally — even
+    when the Assamese chapter body is still in the Task #12 backlog.
+
+    The Assamese sibling URL lives at ``/as/<path>`` and the SPA
+    serves bilingual chrome until the body translation lands; this
+    matches how Google's hreflang validator expects locale variants
+    to be advertised at the URL level rather than gated on body
+    materialisation."""
     sp, db = _patch_deps(monkeypatch)
-    # Strip Assamese body from the chapter fixture.
+    # Strip the Assamese body from the chapter fixture so we exercise
+    # the "no translation yet" branch.
     db.chapters = _FakeCollection([
         {"id": "ch-1", "slug": "photosynthesis", "subject_id": "sub-bio",
          "title": "Photosynthesis",
          "description": "Photosynthesis converts light to chemical energy.",
          "updated_at": "2026-04-30T00:00:00Z",
-         "content_as": ""},  # ← no Assamese yet
+         "content_as": ""},
     ])
     if "routes.seo_pages" in sys.modules:
         sys.modules["routes.seo_pages"].db = db
@@ -427,12 +435,51 @@ def test_assamese_hreflang_omitted_when_no_translation(monkeypatch):
         chapter_slug="photosynthesis", page_type="notes",
     ))
     body = resp.body.decode("utf-8")
-    assert 'hreflang="as-IN"' not in body, \
-        "as-IN hreflang must NOT be emitted without a real Assamese body"
-    assert "data-content-as" not in body, \
-        "internal translation backlog state must NOT leak into HTML"
-    # en-IN + x-default must still be present.
-    assert 'hreflang="en-IN"' in body and 'hreflang="x-default"' in body
+    assert 'hreflang="en-IN"' in body, "en-IN hreflang missing"
+    assert 'hreflang="as-IN"' in body, \
+        "as-IN hreflang must be emitted unconditionally per Task #11 spec"
+    assert 'hreflang="x-default"' in body, "x-default hreflang missing"
+    # The Assamese alternate must point at the /as/ sibling URL.
+    assert ('hreflang="as-IN" href="https://syrabit.ai/as/board/ahsec/'
+            in body), "as-IN must link to /as/ sibling path"
+    # Internal translation-backlog state must NOT leak into the public HTML.
+    assert "data-content-as" not in body
+
+
+def test_publish_url_set_fans_out_to_indexnow_and_google(monkeypatch):
+    """Task #11 step 7 — the unified publish helper must call BOTH
+    the IndexNow endpoint set (Bing + Yandex + central) and the
+    Google Indexing API in a single invocation, so callers no longer
+    need to manage the two pipelines separately."""
+    import asyncio as _aio
+    from routes import bot_discovery as bd
+
+    indexnow_calls: list[list[str]] = []
+    google_calls: list[str] = []
+
+    async def _fake_push(urls, source="auto", target_endpoints=None):
+        indexnow_calls.append(list(urls))
+        return {ep: True for ep in (target_endpoints or bd.INDEXNOW_ENDPOINTS)}
+
+    async def _fake_gpub(url, source="publish_chain"):
+        google_calls.append(url)
+        return True
+
+    monkeypatch.setattr(bd, "push_indexnow", _fake_push)
+    import sys as _sys
+    fake_gi = type(_sys)("google_indexing_client")
+    fake_gi.publish_url = _fake_gpub
+    monkeypatch.setitem(_sys.modules, "google_indexing_client", fake_gi)
+
+    urls = [
+        "https://syrabit.ai/board/ahsec/class/class-11/subject/biology/chapter/photosynthesis/notes",
+        "https://syrabit.ai/board/ahsec/class/class-11/subject/biology/chapter/photosynthesis/mcqs",
+    ]
+    result = _aio.run(bd.publish_url_set(urls, source="task11-test"))
+    assert indexnow_calls == [urls], "IndexNow must receive the URL set once"
+    assert google_calls == urls, "Google Indexing must be called per URL"
+    assert "indexnow" in result and "google_indexing" in result
+    assert all(r.get("ok") for r in result["google_indexing"])
 
 
 def test_structured_data_linter_rejects_malformed():

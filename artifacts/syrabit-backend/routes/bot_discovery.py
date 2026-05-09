@@ -771,6 +771,41 @@ async def prewarm_bot_cache(urls: list[str], rps: float = _PREWARM_RPS) -> bool:
     return success > 0
 
 
+async def publish_url_set(urls: List[str], *, source: str = "publish_chain"
+                          ) -> Dict[str, object]:
+    """Task #11 — single helper that fans a URL set out to every
+    discovery endpoint we own:
+
+      * IndexNow → Bing + Yandex + central api.indexnow.org
+        (already wired through ``INDEXNOW_ENDPOINTS`` /
+        ``push_indexnow``).
+      * Google Indexing API → in-process publish via
+        ``google_indexing_client.publish_url`` per URL (Google does NOT
+        support IndexNow; the Indexing API is the equivalent push
+        channel for Search Console).
+
+    Returns a structured result so callers (publish webhook,
+    sitemap-changed cron) can record per-engine success in one place
+    rather than calling the IndexNow + Google paths separately.
+    """
+    if not urls:
+        return {"indexnow": {}, "google_indexing": []}
+    indexnow_result = await push_indexnow(list(urls), source=source)
+    google_results: List[Dict[str, object]] = []
+    try:
+        from google_indexing_client import publish_url as _gpub
+        for u in dict.fromkeys(urls):
+            try:
+                ok = await _gpub(u, source=source)
+                google_results.append({"url": u, "ok": bool(ok)})
+            except Exception as ge:
+                logger.debug("Google Indexing publish failed for %s: %s", u, ge)
+                google_results.append({"url": u, "ok": False, "error": str(ge)})
+    except Exception as imp_exc:
+        logger.debug("google_indexing_client import failed: %s", imp_exc)
+    return {"indexnow": indexnow_result, "google_indexing": google_results}
+
+
 async def notify_indexnow_for_page(page_doc: dict):
     url = _page_doc_to_url(page_doc)
     if not url:

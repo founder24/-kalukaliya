@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en-IN"><head>
+<meta charset="utf-8"/>
+<title>{{ title|e }} — page index | Syrabit.ai</title>
+<meta name="description" content="{{ title|e }} — every SEO page-type indexed by Syrabit.ai."/>
+<link rel="canonical" href="{{ canonical|e }}"/>
+<meta name="geo.region" content="IN-AS"/>
+<meta name="geo.placename" content="Assam, India"/>
+<meta name="geo.position" content="26.2006;92.9376"/>
+<meta name="ICBM" content="26.2006, 92.9376"/>
+</head><body>
+<h1>{{ title|e }} — page-type index</h1>
+<ul>
+{% for entry in entries %}
+<li><a href="{{ entry.href|e }}">{{ title|e }} — {{ entry.label|e }}</a></li>
+{% endfor %}
+</ul>
+</body></html>
