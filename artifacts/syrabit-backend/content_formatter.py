@@ -465,6 +465,10 @@ _DETERMINISTIC_TEMPLATES_DIR = os.path.join(
 )
 _MATERIALIZATION_QUERY_TYPES = frozenset({
     "definition", "mcq", "flashcard", "glossary", "chapter_summary",
+    # Task #12 — AEO Answer-Card + FAQ materialization. Both render via
+    # ``templates/deterministic/{faq,quick_answer}.md`` and feed
+    # ``routes/seo_pages._load_faq_entries`` / ``_load_quick_answer``.
+    "faq", "quick_answer",
 })
 _TEMPLATE_CACHE: dict[str, str] = {}
 

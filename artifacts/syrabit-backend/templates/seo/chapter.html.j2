@@ -51,6 +51,17 @@
 <p>{{ description|e }}</p>
 </section>
 {% endfor %}
+{% if faq_entries %}
+<section class="faq" data-aeo-block="faq" aria-label="Frequently asked questions">
+<h2>Frequently asked questions about {{ chapter_title|e }}</h2>
+{% for faq in faq_entries %}
+<details class="faq-entry">
+<summary>{{ faq.question|e }}</summary>
+<div class="faq-answer"><p>{{ faq.answer|e }}</p></div>
+</details>
+{% endfor %}
+</section>
+{% endif %}
 {% if related_keywords %}
 <section class="related-keywords" data-keyword-expansion="1" aria-label="Related search terms">
 <h3>Related questions students search for</h3>

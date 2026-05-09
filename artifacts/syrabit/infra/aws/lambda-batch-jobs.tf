@@ -142,6 +142,25 @@ locals {
       max_docs_per_run  = 25
       description       = "Task #551 — Weekly AWS Comprehend sentiment + PII sampler over chapters."
     }
+    # Task #12 — daily AEO Answer-Card + FAQ materializer. Walks every
+    # published chapter, mines the PYQ corpus + syllabus graph for
+    # 5–10 deterministic Q→A pairs + a 40–60-word Quick-Answer, renders
+    # them via the new ``content_formatter.format_content(query_type=
+    # 'faq' | 'quick_answer')`` deterministic-template path, and writes
+    # to ``db.chapter_faqs`` (authoritative) + ``db.aeo_faq_entries`` /
+    # ``db.aeo_quick_answers`` (renderer views read by
+    # ``routes/seo_pages.py``) + Cloudflare KV / Redis under the
+    # Task #6 fingerprint key. Scheduled at 02:00 UTC so the freshly
+    # materialised English text is available before the 03:00
+    # as-translation-backfill mirrors it into Assamese.
+    "materialize-chapter-faqs" = {
+      handler           = "lambda_batch.materialize_chapter_faqs.handler"
+      memory_mb         = 512
+      timeout_s         = 900
+      schedule          = "cron(0 2 * * ? *)"   # daily 02:00 UTC
+      max_docs_per_run  = 0                       # 0 = walk every chapter
+      description       = "Task #12 — Daily AEO Answer-Card + FAQ materializer (chapter_faqs + aeo_faq_entries + aeo_quick_answers + KV)."
+    }
     # Task #571 — daily AI-cache-effectiveness shipper. Scrapes
     # /api/health/cache (admin-only, JWT minted from ADMIN_JWT_SECRET)
     # and emits per-content-type counters to the `Syrabit/Cache`

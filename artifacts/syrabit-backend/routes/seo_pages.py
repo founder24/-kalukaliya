@@ -466,7 +466,8 @@ def _render_html(*, page_url: str, page_type: str,
                  chapter_title: str, subject_name: str, board_name: str,
                  class_name: str, description: str, quick_answer: str,
                  subtopics: List[Dict], jsonld: str,
-                 related_keywords: Optional[List[str]] = None) -> str:
+                 related_keywords: Optional[List[str]] = None,
+                 faq_entries: Optional[List[Dict]] = None) -> str:
     """Render the SEO-page HTML via Jinja2 (Task #11 spec, step 1).
 
     Per spec, every page advertises both ``as-IN`` and ``en-IN``
@@ -515,6 +516,10 @@ def _render_html(*, page_url: str, page_type: str,
         description=description,
         jsonld=jsonld,
         related_keywords=related,
+        # Task #12 — visible FAQ accordion (paired with the FAQPage
+        # JSON-LD block already emitted via ``jsonld``). Both surfaces
+        # share the same materialised pairs from ``aeo_faq_entries``.
+        faq_entries=faq_entries or [],
     )
 
 
@@ -577,6 +582,7 @@ async def render_seo_page(
         class_name=chain["class"]["name"], description=description,
         quick_answer=quick_answer, subtopics=subtopics, jsonld=jsonld,
         related_keywords=related_keywords,
+        faq_entries=faq_entries,
     )
     resp = HTMLResponse(content=html_out)
     resp.headers["Cache-Control"] = (

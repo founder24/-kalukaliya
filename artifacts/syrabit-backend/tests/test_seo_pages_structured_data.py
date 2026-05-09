@@ -251,6 +251,52 @@ def test_all_seven_page_types_render(monkeypatch):
             f"{pt}: Quick-Answer must be 40-60 words, got {len(words)}"
 
 
+def test_faq_accordion_renders_when_materialised(monkeypatch):
+    """Task #12 — when ``aeo_faq_entries`` carries materialised pairs,
+    the chapter template MUST emit a visible ``<details>`` accordion in
+    addition to the FAQPage JSON-LD block. Earlier the renderer fed
+    the entries only into JSON-LD, so the visible-FAQ contract from
+    task-12.md step 4 went silently unfulfilled."""
+    sp, fake_db = _patch_deps(monkeypatch)
+    fake_db.aeo_faq_entries = _FakeCollection([
+        {"chapter_id": "ch-1", "page_type": "notes",
+         "question": "What is photosynthesis?",
+         "answer":   "Photosynthesis is the process by which green "
+                     "plants convert light energy into chemical "
+                     "energy stored in glucose.",
+         "position": 0},
+        {"chapter_id": "ch-1", "page_type": "notes",
+         "question": "Where do the light reactions take place?",
+         "answer":   "The light reactions take place in the thylakoid "
+                     "membranes of the chloroplast.",
+         "position": 1},
+    ])
+    resp = _run(sp.render_seo_page(
+        board="ahsec", class_slug="class-11", subject_slug="biology",
+        chapter_slug="photosynthesis", page_type="notes",
+    ))
+    body = resp.body.decode("utf-8")
+    assert 'data-aeo-block="faq"' in body, \
+        "visible FAQ section is missing from the rendered HTML"
+    detail_blocks = re.findall(
+        r'<details class="faq-entry">.*?</details>', body, flags=re.DOTALL,
+    )
+    assert len(detail_blocks) == 2, (
+        f"expected one <details> per materialised FAQ pair (got {len(detail_blocks)})"
+    )
+    assert "What is photosynthesis?" in body
+    assert "Where do the light reactions take place?" in body
+    # FAQPage JSON-LD must reference the same materialised questions.
+    blocks = _extract_jsonld(body)
+    faq_qs = []
+    for blk in blocks:
+        for node in (blk.get("@graph") or [blk]):
+            if node.get("@type") == "FAQPage":
+                faq_qs.extend(q.get("name") for q in node.get("mainEntity") or [])
+    assert "What is photosynthesis?" in faq_qs
+    assert "Where do the light reactions take place?" in faq_qs
+
+
 def test_unknown_page_type_404s(monkeypatch):
     sp, _ = _patch_deps(monkeypatch)
     from fastapi import HTTPException
