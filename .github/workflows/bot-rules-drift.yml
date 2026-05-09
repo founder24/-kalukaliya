@@ -74,7 +74,24 @@ jobs:
           set -euo pipefail
           python3 scripts/check_bot_rules_drift.py
 
-      - name: Live golden bot-unblock probe (gated)
+      - name: Live golden bot-unblock probe — Playwright matrix (gated)
+        # Canonical golden test for Task #9 lives at
+        # `artifacts/syrabit/tests/bot-unblock.spec.ts` (Playwright,
+        # exercises real-browser prerender assertions). Runs against
+        # `BOT_UNBLOCK_PREVIEW_URL` when configured. The httpx
+        # contract probes below are the secondary, header-only fast
+        # check.
+        if: ${{ secrets.BOT_UNBLOCK_PREVIEW_URL != '' }}
+        env:
+          BOT_UNBLOCK_PREVIEW_URL: ${{ secrets.BOT_UNBLOCK_PREVIEW_URL }}
+        working-directory: artifacts/syrabit
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright test tests/bot-unblock.spec.ts
+
+      - name: Live golden bot-unblock probe — httpx contract (gated)
         # Runs the live-gated subset of `tests/test_bot_unblock.py`
         # against a deployed preview when `BOT_UNBLOCK_TEST_URL` is
         # set in repo secrets. The live tests assert: perplexitybot

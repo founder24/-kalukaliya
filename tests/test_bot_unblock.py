@@ -395,8 +395,14 @@ def test_live_googlebot_not_blocked_and_prerendered():
 
 
 @pytest.mark.skipif(
-    not LIVE_URL,
-    reason="set BOT_UNBLOCK_TEST_URL to enable live citation-AI probe",
+    not LIVE_URL or RUNNER_MODE != "verified",
+    reason=(
+        "set BOT_UNBLOCK_TEST_URL and BOT_UNBLOCK_RUNNER_MODE=verified "
+        "(runner must egress from a Perplexity-trusted vantage; "
+        "PerplexityBot is in CRITICAL_BOT_UA so spoof-mode runners "
+        "would also be hard-403'd by FCrDNS, which is policy-correct "
+        "but not the assertion this test makes — round-12 review fix)"
+    ),
 )
 def test_live_perplexity_not_blocked_and_prerendered():
     """PerplexityBot is in the citation_ai bucket: must be 200 with
