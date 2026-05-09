@@ -306,7 +306,7 @@ def test_golden_snapshot_notes(monkeypatch):
         '<link rel="alternate" hreflang="en-IN" href="https://syrabit.ai/board/ahsec/class/class-11/subject/biology/chapter/photosynthesis/notes"/>',
         '<link rel="alternate" hreflang="as-IN" href="https://syrabit.ai/as/board/ahsec/class/class-11/subject/biology/chapter/photosynthesis/notes"',
         '<meta name="geo.region" content="IN-AS"/>',
-        '<meta name="geo.placename" content="Assam, India"/>',
+        '<meta name="geo.placename" content="Assam"/>',
         '<h1>Photosynthesis — Class 11 Biology AHSEC notes</h1>',
         '<h2>Light reactions</h2>',
         '<h2>Calvin cycle</h2>',

@@ -512,6 +512,12 @@ def _render_html(*, page_url: str, page_type: str,
     as_url = f"{BASE_URL}/as{page_url[len(BASE_URL):]}"
     related = related_keywords or []
     meta_keywords = ", ".join(related) if related else ""
+    # Peel slugs off the canonical page_url so the visible breadcrumb
+    # links (and any future template surface) point at the canonical
+    # slug paths rather than display-name URLs like ``/board/AHSEC``.
+    _path = page_url[len(BASE_URL):] if page_url.startswith(BASE_URL) else page_url
+    _parts = _path.strip("/").split("/")
+    _board_slug = _parts[1] if len(_parts) > 1 else ""
     template = _jinja_env.get_template("chapter.html.j2")
     return template.render(
         title=title,
@@ -523,6 +529,7 @@ def _render_html(*, page_url: str, page_type: str,
         chapter_title=chapter_title,
         subject_name=subject_name,
         board_name=board_name,
+        board_slug=_board_slug,
         class_name=class_name,
         type_label=TYPE_LABEL.get(page_type, page_type),
         quick_answer=quick_answer,
