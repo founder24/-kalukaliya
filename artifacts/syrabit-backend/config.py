@@ -1146,16 +1146,19 @@ PROVIDER_PRIORITY: dict = {
     # checks and admin/health surfaces.
     "english_rag_chat":  [
         "vertex",
+        "vertex_flash_lite",
         "workers_ai_llama32_3b",
     ],
-    # Assamese chat (2026-05-05 user instruction — strict primary/fallback):
-    # Sarvam is the SOLE primary; Workers AI IndicTrans2 (en-indic neural
-    # MT) is the pure fallback (weight 0 — only reached when Sarvam is
-    # exhausted/throttled). Vertex REMOVED from the Assamese chat chain
-    # entirely. Strict-chain exhaustion still surfaces 503 (no silent
-    # downgrade to generic workers_ai / workers_ai_llama31_8b for Assamese
-    # prompts — both emit wrong-language output).
-    "assamese_rag_chat": ["sarvam", "workers_ai_indic"],
+    # Task #2 (2026 blueprint) — Assamese chat is now a 3-leg chain:
+    # Sarvam (canonical Indic primary) → vertex_assamese (Vertex Gemini
+    # 2.5 Flash with an Assamese system-prompt prefix; named fallback) →
+    # retrieval_only (deterministic synthesis from RAG snippets, no LLM
+    # call). Strict-chain exhaustion still surfaces 503 — `retrieval_only`
+    # is the last in-chain leg, but it can also exhaust when no RAG
+    # snippets are retrievable for the prompt (V4 §12 — no silent
+    # downgrade to workers_ai_llama31_8b / generic workers_ai which emit
+    # wrong-language output).
+    "assamese_rag_chat": ["sarvam", "vertex_assamese", "retrieval_only"],
     # English long-form content / notes generation (2026-05-05 user
     # instruction): Workers AI variants (PRIMARY) + Vertex / Gemini
     # (FALLBACK). Sarvam removed — it stays on the Assamese conversational
@@ -1175,19 +1178,24 @@ PROVIDER_PRIORITY: dict = {
     # the SOLE allowed fallback (V4 §15 §6). No third-party formatter is
     # added. Vertex remains the only direct GCP surface in syrabit-backend.
     "content_format":    ["vertex", "workers_ai_llama33_70b"],
-    # Text-to-speech (post-Task-#552 §G): ElevenLabs (sole primary) → Workers AI.
-    # Task #552 §G-R (2026-05-09 reversal): Deepgram Aura-2 un-retired as
-    # English-TTS primary; ElevenLabs demoted to named fallback (free-plan
-    # gate would have required a $5/mo upgrade). workers_ai stays as the
-    # locked free-tier tail (test_tts_stt_voice_have_workers_ai_tail).
-    "tts":               ["deepgram", "elevenlabs", "workers_ai"],
+    # Text-to-speech (Task #2 — 2026 blueprint): ElevenLabs restored as
+    # English-TTS PRIMARY (richest English voice library, $5/mo Starter
+    # is now budgeted), Deepgram Aura-2 retained as named fallback,
+    # workers_ai is the locked free-tier tail
+    # (test_tts_stt_voice_have_workers_ai_tail).
+    "tts":               ["elevenlabs", "deepgram", "workers_ai"],
     # Speech-to-text (post-Task-#552 §G): Deepgram Nova-3 (sole primary) → Workers AI.
     # AssemblyAI fully retired (provider module deleted). Indic STT routes
     # through Google Chirp_2 directly in routes/voice.py before this pool
     # is consulted (V4 §12 — no silent downgrade for Indic).
     "stt":               ["deepgram", "workers_ai"],
     # Combined voice pipeline: Deepgram → ElevenLabs → Workers AI.
-    "voice":             ["deepgram", "elevenlabs", "workers_ai"],
+    # Task #2 — 2026 blueprint: ElevenLabs is the canonical English-TTS
+    # primary across both the bare `tts` pool and the wider `voice`
+    # pipeline pool. Deepgram Aura-2 named fallback; workers_ai
+    # weight-0 last-resort tail. Keeping the two pools out of sync
+    # caused the round-2 review reject — they are now lock-step.
+    "voice":             ["elevenlabs", "deepgram", "workers_ai"],
     # Embeddings: Workers AI (@cf/baai/bge-m3, 1024-dim) only.
     # Direct legacy embed providers were removed per user
     # instruction (2026-05-04 rollback) — both required externally-hosted
@@ -1239,6 +1247,17 @@ PROVIDER_PRIORITY: dict = {
 
 PROVIDER_CREDITS: dict = {
     "vertex":           2000,   # Google Cloud for Startups — $2k; english_rag_chat head + content_format primary
+    # Task #2 — Vertex Flash Lite (cheaper SKU; same SA, same tenant)
+    # second leg of the 3-tier English chat chain. No separate credit
+    # pool — draws from the same $2k Vertex bucket as `vertex`.
+    "vertex_flash_lite": 2000,
+    # Task #2 — Vertex Gemini 2.5 Flash with Assamese system-prompt
+    # prefix. Second leg of the 3-tier Assamese chat chain. Same Vertex
+    # tenant / credit pool.
+    "vertex_assamese":  2000,
+    # Task #2 — deterministic retrieval-only synthesis. Zero credit cost
+    # (no LLM call); third leg of the Assamese chat chain.
+    "retrieval_only":      0,
     # bedrock entry removed in Task #347 (provider decommissioned).
     # azure_openai entry removed in Task #554 (Azure OpenAI tenant decommissioned).
     "azure_translator":    0,   # Azure Translator (separate Azure resource) — paid fallback for `translate`
@@ -1296,6 +1315,10 @@ PROVIDER_MAX_CONCURRENT: dict[str, int] = {
 # tier slot, vertex/workers_ai stubs in tts/stt that are not actually
 # wired) — they only fire when every active provider is exhausted.
 POOL_WEIGHTS: dict[str, dict[str, int]] = {
+    # Task #2 — `tts` pool weights live in the canonical entry below
+    # (line ~1396). The earlier duplicate has been removed so the
+    # locked-config hygiene rule "exactly one POOL_WEIGHTS row per
+    # feature" holds.
     "content": {
         # English content generation — STAGE 1 (GENERATE) (2026-05-05).
         # Worker AI variants generate raw notes (each weight 10000).
@@ -1318,26 +1341,31 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
         "workers_ai_llama33_70b":   100,
     },
     "english_rag_chat": {
-        # Task #554 — pure 2-position chain (vertex ↔ workers_ai_llama32_3b).
-        # Order is decided dynamically per turn by
-        # `cost_caps._select_chat_primary()` (60 s cache, swaps when
-        # projected GCP credit runway ≤ 90 days). Both legs carry weight
-        # 10000 here so `select_provider`'s membership / saturation logic
-        # treats them as first-class; the actual head is enforced by the
-        # ordered walk in `select_provider("english_rag_chat", ...)`.
+        # Task #2 — 3-position chain (vertex → vertex_flash_lite →
+        # workers_ai_llama32_3b). Order is decided dynamically per turn
+        # by `cost_caps._select_chat_primary()` (60 s cache, swaps when
+        # projected GCP credit runway ≤ 90 days). All three legs carry
+        # weight 10000 here so `select_provider`'s membership /
+        # saturation logic treats them as first-class; the actual head
+        # is enforced by the ordered walk in
+        # `select_provider("english_rag_chat", ...)`.
         "vertex":                 10000,
+        "vertex_flash_lite":      10000,
         "workers_ai_llama32_3b":  10000,
     },
     "assamese_rag_chat": {
-        # Strict primary/fallback (2026-05-05 user instruction): Sarvam
-        # is the SOLE primary at weight 10000, Workers AI IndicTrans2
-        # sits at weight 0 as the pure fallback reached only when
-        # Sarvam exhausts. Vertex REMOVED entirely from the Assamese
-        # chat chain. Strict 2-leg exhaustion still surfaces 503 (no
-        # silent downgrade to generic workers_ai / workers_ai_llama31_8b
-        # for Assamese prompts — both emit wrong-language output).
+        # Task #2 — 3-leg Assamese chat chain (sarvam → vertex_assamese
+        # → retrieval_only). Sarvam is the canonical Indic primary;
+        # vertex_assamese is the named LLM fallback (Vertex Gemini 2.5
+        # Flash with an Assamese system-prompt prefix); retrieval_only
+        # is the deterministic last-resort synthesizer (no LLM call,
+        # weight 0 so it only fires after both LLM legs exhaust).
+        # Strict-chain exhaustion still surfaces 503 — no silent
+        # downgrade to wrong-language tails like workers_ai_llama31_8b
+        # or generic workers_ai for Assamese prompts.
         "sarvam":                 10000,
-        "workers_ai_indic":           0,  # fallback (sarvam-exhausted only)
+        "vertex_assamese":        10000,
+        "retrieval_only":             0,  # last-resort, no LLM cost
     },
     "assamese_content": {
         # Assamese content generation — STAGE 1 (GENERATE) (2026-05-05).
@@ -1367,12 +1395,14 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "embed_en":    {"workers_ai_custom": 10000, "workers_ai": 0},
     "embed_indic": {"workers_ai_custom": 10000, "workers_ai": 0},
     "tts": {
-        # Task #552 §G-R (2026-05-09 reversal) — Deepgram Aura-2 is the
-        # English-TTS primary; ElevenLabs is the named fallback (free-plan
-        # gate would otherwise require a $5/mo upgrade).
-        "deepgram":   1000,
-        "elevenlabs":  100,
-        "workers_ai":   0,   # last-resort
+        # Task #2 — 2026 blueprint: ElevenLabs is restored as the
+        # canonical English-TTS primary (richest voice library; the
+        # $5/mo Starter gate is now budgeted into the $100 ceiling).
+        # Deepgram Aura-2 is the named fallback. Workers-AI tail
+        # weight-0 so a 0/100/1000 draw never silently downgrades.
+        "elevenlabs": 1000,
+        "deepgram":    100,
+        "workers_ai":    0,   # last-resort
     },
     "stt": {
         # Task #552 §G — Deepgram Nova-3 is sole English STT primary;

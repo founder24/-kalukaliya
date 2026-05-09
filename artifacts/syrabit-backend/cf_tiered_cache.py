@@ -158,10 +158,73 @@ async def hit_ratio_snapshot(window_minutes: int = 60) -> dict[str, Any]:
     }
 
 
+# Task #2 — Assamese-aware per-region tag counters. The edge proxy
+# stamps the inbound region in `X-Cache-Region` (default "global";
+# "ne-india" for Assam-served requests). We track hit / miss counts in
+# process so `routes/admin_cache.py` can render a per-region tile
+# alongside the global zone hit-ratio.
+_REGION_TAG_COUNTERS: dict[str, dict[str, int]] = {}
+
+
+def colo_bias_for_region(region: str) -> tuple[str, ...]:
+    """Task #2 — return the Cloudflare colo bias intended for a given
+    cache region. `ne-india` resolves to the two AP-South colos closest
+    to Assam (Mumbai = BOM, Chennai = MAA); every other region is
+    served via the global tier. The edge proxy stamps these as
+    `X-Backend-Colo-Bias` so the backend Ops Console can flag requests
+    that landed outside the intended bias."""
+    if (region or "global").strip().lower() == "ne-india":
+        return ("BOM", "MAA")
+    return ("global",)
+
+
+def tier_cache_tag_for(region: str) -> str:
+    """Task #2 — the CF cache tag stamped on every entry written for
+    this region. Cloudflare Tiered Cache + Argo route requests for a
+    given tag-prefix consistently to the same upper-tier colo, so by
+    using `tier:ne-india` for Assamese reads we bias all upper-tier
+    fetches into the AP-South (BOM/MAA) topology that already serves
+    those edge POPs. `tier:global` for everyone else."""
+    r = (region or "global").strip().lower()
+    if r == "ne-india":
+        return "tier:ne-india"
+    return "tier:global"
+
+
+def kv_namespace_for_region(region: str) -> str:
+    """Task #2 — namespace prefix used by the backend cache when
+    writing into Cloudflare KV. ne-india entries land in
+    `ai_response_cache:v1:ne-india:` so they can be routed to the
+    AP-South KV replica without touching the global namespace."""
+    r = (region or "global").strip().lower()
+    return r if r in ("ne-india",) else "global"
+
+
+def record_region_event(region: str, hit: bool) -> None:
+    region = region or "global"
+    row = _REGION_TAG_COUNTERS.setdefault(region, {"hits": 0, "misses": 0})
+    row["hits" if hit else "misses"] += 1
+
+
+def per_region_snapshot() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for region, row in _REGION_TAG_COUNTERS.items():
+        hits = int(row.get("hits", 0))
+        misses = int(row.get("misses", 0))
+        total = hits + misses
+        out[region] = {
+            "hits": hits,
+            "misses": misses,
+            "hit_ratio": (round(hits / total, 4) if total else None),
+        }
+    return out
+
+
 async def snapshot() -> dict[str, Any]:
     """Aggregate snapshot for ``/admin/cf-health``."""
     enabled = is_enabled()
-    out: dict[str, Any] = {"enabled": enabled, "status": None, "hit_ratio": None}
+    out: dict[str, Any] = {"enabled": enabled, "status": None, "hit_ratio": None,
+                           "per_region": per_region_snapshot()}
     if enabled:
         try:
             from cf_enterprise import tiered_cache_status

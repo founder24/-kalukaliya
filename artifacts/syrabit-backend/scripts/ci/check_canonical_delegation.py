@@ -343,42 +343,48 @@ def _check_chat_chains() -> list[str]:
         return failures
     src = cfg.read_text(encoding="utf-8", errors="ignore")
 
-    # english_rag_chat — must contain exactly {"vertex", "workers_ai_llama32_3b"}.
+    # Task #2 (2026 blueprint) — english_rag_chat is now a 3-leg chain:
+    # {"vertex", "vertex_flash_lite", "workers_ai_llama32_3b"}.
     en_match = re.search(
         r'"english_rag_chat"\s*:\s*\[(.*?)\]', src, re.DOTALL,
     )
     if not en_match:
         failures.append(
             "config.py: PROVIDER_PRIORITY['english_rag_chat'] missing — "
-            "Task #559 canonical map requires the dynamic 2-list head."
+            "Task #2 canonical map requires the dynamic 3-list head."
         )
     else:
         items = {tok.strip().strip(',').strip("'\"") for tok in en_match.group(1).split() if tok.strip().strip(',')}
         items = {x for x in items if x}
-        if items != {"vertex", "workers_ai_llama32_3b"}:
+        expected = {"vertex", "vertex_flash_lite", "workers_ai_llama32_3b"}
+        if items != expected:
             failures.append(
                 f"config.py: PROVIDER_PRIORITY['english_rag_chat'] must be exactly "
-                f"{{'vertex', 'workers_ai_llama32_3b'}}; found {items}. "
-                f"(Task #559 — see infra/four-cloud-delegation.md row 'English chat dispatch')."
+                f"{sorted(expected)}; found {items}. "
+                f"(Task #2 — 3-tier English chat chain: vertex → "
+                f"vertex_flash_lite → workers_ai_llama32_3b)."
             )
 
-    # assamese_rag_chat — must contain exactly {"sarvam", "workers_ai_indic"}.
+    # Task #2 — assamese_rag_chat is now a 3-leg chain:
+    # {"sarvam", "vertex_assamese", "retrieval_only"}.
     as_match = re.search(
         r'"assamese_rag_chat"\s*:\s*\[(.*?)\]', src, re.DOTALL,
     )
     if not as_match:
         failures.append(
             "config.py: PROVIDER_PRIORITY['assamese_rag_chat'] missing — "
-            "Task #559 canonical map requires Sarvam primary + IndicTrans2 fallback."
+            "Task #2 canonical map requires Sarvam primary + Vertex "
+            "Assamese fallback + retrieval_only tail."
         )
     else:
         items = {tok.strip().strip(',').strip("'\"") for tok in as_match.group(1).split() if tok.strip().strip(',')}
         items = {x for x in items if x}
-        if items != {"sarvam", "workers_ai_indic"}:
+        expected = {"sarvam", "vertex_assamese", "retrieval_only"}
+        if items != expected:
             failures.append(
                 f"config.py: PROVIDER_PRIORITY['assamese_rag_chat'] must be exactly "
-                f"{{'sarvam', 'workers_ai_indic'}}; found {items}. "
-                f"(Task #559 — Assamese chain is locked: Sarvam primary, IndicTrans2 last resort)."
+                f"{sorted(expected)}; found {items}. "
+                f"(Task #2 — 3-tier Assamese chat chain)."
             )
     return failures
 

@@ -29,37 +29,41 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def test_assamese_rag_chat_falls_over_from_sarvam_to_indic():
-    """Strict 2-leg primary/fallback pool (2026-05-05 user instruction):
-    sarvam (primary) → workers_ai_indic (fallback). Vertex REMOVED from
-    the Assamese chat chain entirely.
-
-    Strict-chain exhaustion surfaces None when BOTH legs are excluded so
-    the caller errors out cleanly rather than silently routing to a
-    wrong-language last-resort (workers_ai_llama31_8b / generic workers_ai
-    / vertex on an English-prompt path).
+    """Task #2 — 2026 blueprint: 3-leg primary/fallback chain
+    sarvam → vertex_assamese → retrieval_only. Wrong-language tails
+    (workers_ai_llama31_8b / generic workers_ai / workers_ai_indic on
+    the chat hot path) MUST NEVER be selected for the Assamese
+    conversational path.
     """
     from llm import select_provider
 
-    # Sarvam excluded → only workers_ai_indic remains.
+    # Sarvam excluded → next leg must be vertex_assamese.
     for _ in range(40):
         chosen = select_provider("assamese_rag_chat", lang="as",
                                  exclude=frozenset({"sarvam"}))
-        assert chosen == "workers_ai_indic", (
-            f"Expected workers_ai_indic as the sole fallback when sarvam is "
-            f"excluded, got {chosen!r}. Vertex must NOT appear (removed from chat)."
+        assert chosen == "vertex_assamese", (
+            f"Expected vertex_assamese as the named fallback when sarvam is "
+            f"excluded, got {chosen!r}."
         )
 
-    # Both legs excluded — pool exhausted, must NOT degrade to
-    # workers_ai_llama31_8b / generic workers_ai / vertex (wrong-language
-    # or removed-from-chat).
+    # Sarvam + vertex_assamese excluded → retrieval_only is the last leg.
     chosen = select_provider("assamese_rag_chat", lang="as",
-                             exclude=frozenset({"sarvam", "workers_ai_indic"}))
-    assert chosen in (None, ""), (
-        f"Expected None when both legs excluded (strict-chain); got {chosen!r}. "
-        f"workers_ai_llama31_8b / generic workers_ai / vertex must NEVER be "
-        f"selected for the Assamese chat path."
+                             exclude=frozenset({"sarvam", "vertex_assamese"}))
+    assert chosen == "retrieval_only", (
+        f"Expected retrieval_only as the deterministic tail when both LLM "
+        f"legs are excluded; got {chosen!r}."
     )
-    print("  PASS: assamese_rag_chat 2-leg primary/fallback verified (no wrong-language / vertex downgrade)")
+
+    # All three legs excluded — pool exhausted.
+    chosen = select_provider(
+        "assamese_rag_chat", lang="as",
+        exclude=frozenset({"sarvam", "vertex_assamese", "retrieval_only"}),
+    )
+    assert chosen in (None, ""), (
+        f"Expected None when all three legs excluded (strict-chain); "
+        f"got {chosen!r}."
+    )
+    print("  PASS: assamese_rag_chat 3-leg chain verified (no wrong-language downgrade)")
 
 
 def test_assamese_rag_chat_logs_locked_chain_order_on_fallback():
@@ -80,25 +84,22 @@ def test_assamese_rag_chat_logs_locked_chain_order_on_fallback():
     llm.logger.propagate = False
     logging.disable(logging.NOTSET)
     try:
-        # Strict 2-leg failover (2026-05-05): with sarvam excluded the
-        # only remaining draw is workers_ai_indic.
+        # Task #2 — 3-leg failover: with sarvam excluded the next draw
+        # is vertex_assamese.
         llm.select_provider("assamese_rag_chat", lang="as",
                             exclude=frozenset({"sarvam"}))
     finally:
         llm.logger.removeHandler(h)
 
     msgs = [r.getMessage() for r in handler_records]
-    # 2-leg chain (2026-05-05): with sarvam excluded the chosen provider
-    # must be workers_ai_indic and it must appear alongside the assamese
-    # feature key in some log record so on-call can audit.
     assert any(
-        "workers_ai_indic" in m and "assamese_rag_chat" in m
+        "vertex_assamese" in m and "assamese_rag_chat" in m
         for m in msgs
     ), (
-        f"Expected select_provider to log fallback to workers_ai_indic for "
+        f"Expected select_provider to log fallback to vertex_assamese for "
         f"assamese_rag_chat; captured records were: {msgs!r}"
     )
-    print("  PASS: select_provider logs assamese_rag_chat 2-leg fallback")
+    print("  PASS: select_provider logs assamese_rag_chat 3-leg fallback")
 
 
 def test_english_question_in_assamese_mode_triggers_cross_lang_translation():

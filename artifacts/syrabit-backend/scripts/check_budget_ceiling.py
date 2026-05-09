@@ -31,7 +31,7 @@ CONFIG_PY  = ROOT / "config.py"
 VOICE_PY   = ROOT / "routes" / "voice.py"
 
 ALLOWED_CHAT_HEADS = {"workers_ai_llama32_3b", "workers_ai_mistral_7b",
-                      "workers_ai", "vertex"}
+                      "workers_ai", "vertex", "vertex_flash_lite"}
 PAID_VOICE_ROUTES  = {"/voice/tts", "/voice/stt", "/voice/voice"}
 
 CEILING_USD = 100.0

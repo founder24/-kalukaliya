@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends
 
 from auth_deps import get_admin_user
 from ai_input_cache import snapshot as _ai_cache_snapshot
+from ai_input_cache import per_region_snapshot as _ai_cache_per_region_snapshot
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -269,6 +270,23 @@ async def admin_cache_health(_admin: dict = Depends(get_admin_user)) -> dict[str
         rate = edge_hit_rates.get(t.get("path"))
         if rate is not None:
             t["live_hit_rate"] = rate
+    # Task #2 — Assamese-aware per-region tile. Rolls per-region
+    # counters from every cache layer that supports the new `region`
+    # arg (ai_input_cache, kv_cache, cf_tiered_cache) into a single
+    # `per_region` field the admin panel renders side-by-side.
+    per_region: dict[str, Any] = {
+        "ai_input_cache": _ai_cache_per_region_snapshot(),
+    }
+    try:
+        from kv_cache import default_cache as _kv_default
+        per_region["kv_cache"] = _kv_default().per_region_snapshot()
+    except Exception as e:
+        logger.debug("[admin_cache] kv_cache per-region unavailable: %s", e)
+    try:
+        from cf_tiered_cache import per_region_snapshot as _cf_per_region
+        per_region["cf_tiered_cache"] = _cf_per_region()
+    except Exception as e:
+        logger.debug("[admin_cache] cf_tiered_cache per-region unavailable: %s", e)
     return {
         "ai_input_cache": _ai_cache_snapshot(),
         "ai_response_cache": _ai_response_cache_stats(),
@@ -276,6 +294,7 @@ async def admin_cache_health(_admin: dict = Depends(get_admin_user)) -> dict[str
         "l1_inproc": _l1_inproc_stats(),
         "edge_targets": edge_targets,
         "edge_hit_rates_cf": edge_hit_rates,
+        "per_region": per_region,
         "alarm_thresholds": {
             # Surface the alarm thresholds so the admin panel can render
             # the same red lines the CloudWatch alarms enforce

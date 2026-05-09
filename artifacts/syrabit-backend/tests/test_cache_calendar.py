@@ -245,8 +245,9 @@ def test_set_response_uses_calendar_ttl(monkeypatch):
     def fake_inproc_set(key, text):
         captured["inproc"] = (key, text)
 
-    def fake_cf_kv_set(key, text, ttl):
+    def fake_cf_kv_set(key, text, ttl, region=None):
         captured["cf_ttl"] = ttl
+        captured["cf_region"] = region
 
     monkeypatch.setattr(ai_input_cache, "_inproc_set", fake_inproc_set)
     monkeypatch.setattr(ai_input_cache, "_cf_kv_set", fake_cf_kv_set)

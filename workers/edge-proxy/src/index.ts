@@ -1544,6 +1544,44 @@ function buildProxyHeaders(request: Request, clientIp: string, env?: Env): Heade
   if (env && env.BACKEND_ORIGIN_SECRET) {
     headers.set("X-Origin-Auth", env.BACKEND_ORIGIN_SECRET);
   }
+  // Task #2 — 2026 blueprint: stamp an Assamese-aware cache region on
+  // every proxied request. The backend's `ai_input_cache` / `kv_cache`
+  // / `cf_tiered_cache` layers fold this into their cache keys + per-
+  // region hit-ratio counters so the admin cache panel can render
+  // `global` vs `ne-india` side by side. Default is "global"; we flip
+  // to "ne-india" when Cloudflare's geo-IP lookup says the request
+  // originated in IN-AS (Assam) or one of the surrounding North-East
+  // Indian states (`AS|ML|TR|MN|MZ|NL|AR`). The header is advisory —
+  // backend defaults to "global" if it's missing.
+  const cf = (request as Request & { cf?: { country?: string; regionCode?: string } }).cf;
+  let region = "global";
+  if (cf) {
+    const country = (cf.country || "").toUpperCase();
+    const regionCode = (cf.regionCode || "").toUpperCase();
+    const NE_INDIA = new Set(["AS", "ML", "TR", "MN", "MZ", "NL", "AR"]);
+    if (country === "IN" && NE_INDIA.has(regionCode)) {
+      region = "ne-india";
+    }
+  }
+  headers.set("X-Cache-Region", region);
+  // Task #2 — Mumbai/Chennai colo bias for ne-india. Cloudflare's
+  // colo selection is governed by Anycast + Argo, but for ne-india
+  // requests we surface the *intended* colo bias (BOM = Mumbai,
+  // MAA = Chennai — the two AP-South colos closest to Assam) and the
+  // *observed* colo (cf.colo) so the admin telemetry can flag any
+  // request that landed outside the intended bias and so the origin
+  // can route the matching read-replica path. The hint headers are
+  // advisory — the backend uses them for the per-region cache
+  // counters and admin Ops Console outage map only.
+  const observedColo =
+    (request as unknown as { cf?: { colo?: string } }).cf?.colo || "";
+  if (region === "ne-india") {
+    headers.set("X-Backend-Colo-Bias", "BOM,MAA");
+    headers.set("X-Backend-Colo-Observed", observedColo);
+  } else {
+    headers.set("X-Backend-Colo-Bias", "global");
+    headers.set("X-Backend-Colo-Observed", observedColo);
+  }
   return headers;
 }
 

@@ -120,20 +120,53 @@ class KvCache:
         self.kv_writes = 0
         self.kv_reads = 0
         self.kv_failures = 0
+        # Task #2 — Assamese-aware region counters (see _bump_region).
+        self._region_counters: dict[str, dict[str, int]] = {}
+
+    # ── Task #2 — per-region (Assamese-aware) counters ─────────────────
+    # Mirrors `ai_input_cache.per_region_snapshot()` shape so the admin
+    # cache tile can render `kv_cache.per_region` side-by-side. Default
+    # region is "global"; the edge proxy stamps `region="ne-india"` for
+    # Assam-served requests.
+    def _bump_region(self, region: str, kind: str) -> None:
+        with self._lru._lock:
+            row = self._region_counters.setdefault(
+                region or "global", {"hits": 0, "misses": 0, "sets": 0},
+            )
+            row[kind] = int(row.get(kind, 0)) + 1
+
+    def per_region_snapshot(self) -> dict[str, dict[str, Any]]:
+        with self._lru._lock:
+            out: dict[str, dict[str, Any]] = {}
+            for region, row in self._region_counters.items():
+                hits = int(row.get("hits", 0))
+                misses = int(row.get("misses", 0))
+                total = hits + misses
+                out[region] = {
+                    "hits": hits,
+                    "misses": misses,
+                    "sets": int(row.get("sets", 0)),
+                    "hit_ratio": (round(hits / total, 4) if total else None),
+                }
+            return out
 
     # ── Public API ───────────────────────────────────────────────────────
-    def get_local(self, key: str) -> Optional[Any]:
+    def get_local(self, key: str, region: str = "global") -> Optional[Any]:
         """Synchronous LRU lookup. Use for the hot path where you want
         to avoid even an event-loop tick."""
-        return self._lru.get(key)
+        v = self._lru.get(key)
+        self._bump_region(region, "hits" if v is not None else "misses")
+        return v
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str, region: str = "global") -> Optional[Any]:
         """Get with KV fallback. Local LRU first; on miss, when the KV
         mirror is active, try the worker. Successful KV reads warm the
         local LRU."""
         v = self._lru.get(key)
         if v is not None:
+            self._bump_region(region, "hits")
             return v
+        self._bump_region(region, "misses")
         if not self._edge_active():
             return None
         try:
@@ -157,10 +190,11 @@ class KvCache:
             return None
 
     async def set(self, key: str, value: Any,
-                  ttl_s: Optional[int] = None) -> None:
+                  ttl_s: Optional[int] = None, region: str = "global") -> None:
         """Write-through: LRU first, then mirror to KV when active."""
         ttl = int(ttl_s if ttl_s is not None else self._default_ttl)
         self._lru.set(key, value, ttl)
+        self._bump_region(region, "sets")
         if not self._edge_active():
             return
         try:
@@ -215,6 +249,8 @@ class KvCache:
             "kv_reads": self.kv_reads,
             "kv_writes": self.kv_writes,
             "kv_failures": self.kv_failures,
+            # Task #2 — Assamese-aware per-region tile.
+            "per_region": self.per_region_snapshot(),
         }
 
     def reset(self) -> None:

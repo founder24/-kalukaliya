@@ -105,17 +105,22 @@ def _monthly_total_usd_cap() -> float:
 
 import time as _t_runway
 
-# ── Task #554 — credit-runway-aware english chat dispatch chain ────────────
-# Default order is Vertex Gemini 2.5 Flash (drains GCP startup credits) →
-# Workers-AI Llama-3.2-3B (free-tier fallback). When projected GCP credit
-# runway falls to ≤ 90 days the order swaps so the free-tier head conserves
-# what's left of the credit pool and Vertex stays in the chain as the paid
-# fallback (V4 §12 — no silent removal). The result is cached for 60 s on a
-# monotonic clock so a hot dispatch loop never thrashes the env / redis
-# reads. Manual override knob is `CHAT_PRIMARY_OVERRIDE=vertex|workers_ai`
-# for ops; unrecognised values log + are ignored.
-_CHAT_CHAIN_DEFAULT: tuple[str, str] = ("vertex", "workers_ai_llama32_3b")
-_CHAT_CHAIN_FLIPPED: tuple[str, str] = ("workers_ai_llama32_3b", "vertex")
+# ── Task #2 — 2026 blueprint: 3-tier credit-runway-aware english chat chain ─
+# Default order: Vertex Gemini 2.5 Flash (drains GCP startup credits) →
+# Vertex Gemini 2.5 Flash Lite (cheaper Vertex SKU; same SA, same tenant,
+# half the per-token cost) → Workers-AI Llama-3.2-3B (free-tier tail). When
+# projected GCP credit runway falls to ≤ 90 days the order flips so the
+# free-tier head conserves credits while Vertex stays in the chain as the
+# paid fallback (V4 §12 — no silent removal). The result is cached for 60 s
+# on a monotonic clock so a hot dispatch loop never thrashes env / redis
+# reads. Operator override: `CHAT_PRIMARY_OVERRIDE=vertex|workers_ai`;
+# unrecognised values log + are ignored.
+_CHAT_CHAIN_DEFAULT: tuple[str, str, str] = (
+    "vertex", "vertex_flash_lite", "workers_ai_llama32_3b",
+)
+_CHAT_CHAIN_FLIPPED: tuple[str, str, str] = (
+    "workers_ai_llama32_3b", "vertex_flash_lite", "vertex",
+)
 _CHAT_RUNWAY_FLIP_DAYS = 90.0
 _CHAT_PRIMARY_CACHE_TTL_S = 60.0
 _chat_primary_cache: dict = {"chain": None, "ts": 0.0}
@@ -215,8 +220,8 @@ def _projected_chat_runway_days() -> float | None:
     return pool_remaining / daily_burn
 
 
-def _compute_chat_chain() -> tuple[str, str]:
-    """Pure (env+meter only) computation of the 2-position chain."""
+def _compute_chat_chain() -> tuple[str, str, str]:
+    """Pure (env+meter only) computation of the 3-position chain (Task #2)."""
     override = (os.environ.get("CHAT_PRIMARY_OVERRIDE", "") or "").strip().lower()
     if override:
         if override == "vertex":
@@ -239,16 +244,17 @@ def _compute_chat_chain() -> tuple[str, str]:
 
 
 def _select_chat_primary() -> list[str]:
-    """Credit-runway-aware ordered chain for english_rag_chat (Task #554).
+    """Credit-runway-aware ordered chain for english_rag_chat (Task #2).
 
-    Returns a 2-position list of provider names. Position 0 is the head
-    used by `_select_chat_model` and `select_provider`; position 1 is the
-    explicit fallback that `call_with_provider_fallback` advances to on
-    primary 5xx / 429 / breaker-open. Default order is
-    ``["vertex", "workers_ai_llama32_3b"]``; swaps to
-    ``["workers_ai_llama32_3b", "vertex"]`` when projected GCP credit
-    runway is ≤ 90 days. Cached for 60 s on a monotonic clock so the
-    hot dispatch path never re-reads env / redis per turn.
+    Returns a 3-position list of provider names: position 0 is the head;
+    positions 1 and 2 are the explicit fallbacks that
+    `call_with_provider_fallback` advances to on primary 5xx / 429 /
+    breaker-open. Default order is
+    ``["vertex", "vertex_flash_lite", "workers_ai_llama32_3b"]``; swaps
+    to ``["workers_ai_llama32_3b", "vertex_flash_lite", "vertex"]`` when
+    projected GCP credit runway is ≤ 90 days. Cached for 60 s on a
+    monotonic clock so the hot dispatch path never re-reads env / redis
+    per turn.
     """
     now = _t_runway.monotonic()
     cached = _chat_primary_cache.get("chain")

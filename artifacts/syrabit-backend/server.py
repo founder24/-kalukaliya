@@ -2034,6 +2034,30 @@ except Exception as _hz_err:
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
+# Task #2 — 2026 blueprint: Assamese-aware regional cache ingest.
+# The Cloudflare edge proxy stamps `X-Cache-Region` (default "global";
+# "ne-india" for Assam + NE-India geo per `workers/edge-proxy/src/index.ts`)
+# and the request lands in one of the Mumbai/Chennai colos for that
+# cohort. This middleware reads the header on every backend request
+# and binds it into `ai_input_cache._REGION_CTX` (a contextvar) so all
+# downstream cache call sites pick up the correct region without
+# threading `region=` through every signature. Falls back to "global"
+# silently when the header is absent (e.g. local curl, internal probe).
+@app.middleware("http")
+async def cache_region_middleware(request, call_next):
+    try:
+        region = request.headers.get("X-Cache-Region", "global") or "global"
+        request.state.cache_region = region.strip().lower() or "global"
+        try:
+            from ai_input_cache import set_request_region as _set_region
+            _set_region(request.state.cache_region)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return await call_next(request)
+
+
 @app.exception_handler(_StarletteHTTPException)
 async def _starlette_http_exception_handler(request, exc):
     return JSONResponse(
@@ -2174,6 +2198,7 @@ from routes.admin_health import router as admin_health_router
 from routes.admin_sarvam_health import router as admin_sarvam_health_router  # Task #553
 from routes.health_otel import router as health_otel_router  # Task #558
 from routes.admin_cache import router as admin_cache_router  # Task #571
+from routes.admin_ops_console import router as admin_ops_console_router  # Task #2 — 2026 blueprint Ops Console
 from routes.admin_season import router as admin_season_router  # Task #575
 from routes.admin_free_tier import router as admin_free_tier_router  # Task #581
 from routes.admin_cf_health import router as admin_cf_health_router  # Task #383
@@ -2352,6 +2377,7 @@ api.include_router(admin_health_router)
 api.include_router(admin_sarvam_health_router)  # Task #553 — /api/admin/health/sarvam
 app.include_router(health_otel_router)  # Task #558 — /api/health/otel (no /api prefix; route declares its own)
 app.include_router(admin_cache_router)  # Task #571 — /api/health/cache (admin-only; route declares its own /api prefix)
+app.include_router(admin_ops_console_router)  # Task #2 — /api/admin/ops/console (admin-only; SLA ledger + outage map + toggle viewer)
 app.include_router(admin_season_router)  # Task #575 — /api/health/season (public; route declares its own /api prefix)
 app.include_router(admin_free_tier_router)  # Task #581 — /api/health/free-tier-dispatch (admin-only)
 api.include_router(admin_cf_health_router)  # Task #383 — unified CF wins panel

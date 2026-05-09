@@ -76,16 +76,34 @@ When `embed.syrabit.ai` is down or returning 5xx:
 ## §4 — Per-turn dispatch order (chat hot path, locked — Task #554 amendment 2026-05-07)
 
 ```
-English chat (2-position chain, credit-runway-aware)
-  Vertex Gemini 2.5 Flash (drains GCP startup credits)   ← default head
+English chat (3-position chain, credit-runway-aware — Task #2 2026 blueprint)
+  Vertex Gemini 2.5 Flash  (drains GCP startup credits)        ← default head
     ↓ on 5xx / 429 / exhaust
-  Workers-AI Llama-3.2-3B (Cloudflare free tier)         ← terminal fallback
+  Vertex Flash-Lite        (mid-tier GCP cost cushion, shares Vertex RPM bucket)
+    ↓ on 5xx / 429 / exhaust
+  Workers-AI Llama-3.2-3B  (Cloudflare free tier)              ← terminal tail
 
   When projected GCP credit runway ≤ 90 days, the chain FLIPS:
-  Workers-AI Llama-3.2-3B  →  Vertex Gemini 2.5 Flash
+  Workers-AI Llama-3.2-3B  →  Vertex Flash-Lite  →  Vertex Gemini 2.5 Flash
   (no silent removal — V4 §12; selector lives in
    `artifacts/syrabit-backend/cost_caps.py::_select_chat_primary`,
    60 s monotonic cache so the hot path never thrashes env / redis.)
+
+Assamese chat (3-position chain — Task #2 2026 blueprint)
+  Sarvam-M                 (Indic specialist primary)
+    ↓ on 5xx / 429 / exhaust
+  Vertex Gemini 2.5 Flash  (with Assamese system-prompt prefix — named LLM fallback)
+    ↓ on 5xx / 429 / exhaust
+  retrieval_only           (deterministic — returns top RAG snippet verbatim;
+                            never crosses into a wrong-language model — V4 §12)
+
+Voice TTS (3-position chain — Task #2 2026 blueprint)
+  ElevenLabs               (canonical English-TTS primary; $5/mo Starter
+                            budgeted into the $100 ceiling)
+    ↓ on 5xx / 429 / exhaust
+  Deepgram Aura-2          (named English-TTS fallback)
+    ↓ on 5xx / 429 / exhaust
+  Workers-AI               (weight-0 last-resort tail)
 ```
 
 **Task #554 retirement (2026-05-07):** Azure OpenAI (chat / embed / Whisper / text-embedding-3-large) is REMOVED from the dispatch chain. `providers/azure_openai.py`, `gpt-4.1-nano`, the legacy A3 SKU table, the third-tier `Workers-AI Mistral-7B` and `Workers-AI generic gpt-oss-20b` legs are all retired from `PROVIDER_PRIORITY["english_rag_chat"]`. The surviving Azure surfaces are **Azure Speech** (TTS / STT) and **Azure Translator**, both wired through `providers/azure_speech.py` on `AZURE_SPEECH_*` / `AZURE_TRANSLATOR_*` keys. CI guard `scripts/check_dead_providers.py` bans `azure_openai|AzureOpenAI|AZURE_OPENAI_*|gpt-4.1-nano` bare-token across the tree.
@@ -373,7 +391,7 @@ A single umbrella CI guard at `artifacts/syrabit-backend/scripts/ci/check_canoni
 
 1. **DEAD-PROVIDER BANK** — carried verbatim from Tasks #297 / #347 / #491 / #494 / #554 (bare-token bans on retired providers + vendored-SDK import bans + direct `vertex_format.format_with_vertex` ban + aca_jobs/* manifest completeness). Behaviour-preserving: any PR that previously passed `scripts/check_dead_providers.py` still passes the umbrella.
 2. **CANONICAL-DELEGATION BANK** — new in #559:
-   - `_check_chat_chains` — `PROVIDER_PRIORITY["english_rag_chat"]` ≡ `{vertex, workers_ai_llama32_3b}` and `PROVIDER_PRIORITY["assamese_rag_chat"]` ≡ `{sarvam, workers_ai_indic}` (set-equality; English head order is runtime-dynamic via `_select_chat_primary`).
+   - `_check_chat_chains` — `PROVIDER_PRIORITY["english_rag_chat"]` ≡ `{vertex, vertex_flash_lite, workers_ai_llama32_3b}` and `PROVIDER_PRIORITY["assamese_rag_chat"]` ≡ `{sarvam, vertex_assamese, retrieval_only}` (set-equality; English head order is runtime-dynamic via `_select_chat_primary`). Updated by Task #2 (2026-05-09).
    - `_check_chat_primary_selector` — `cost_caps._select_chat_primary` + `CHAT_PRIMARY_OVERRIDE` knob both present.
    - `_check_voice_paywall` — `routes/voice.py` `/tts` + `/stt` + `/voice/voice` all sit behind `Depends(require_paid_plan)` (mirrors `scripts/check_budget_ceiling.py`).
    - **TODO-gated** (banned only after the parent task merges): `TODO_557_PATTERN` (SES sole tier-1 + self-hosted VAPID web-push, ban flips on with Task #557) and `TODO_558_PATTERN` (observability narrowing to GCP Cloud Trace single exporter, ban flips on with Task #558). The regex literals live in the umbrella; uncomment the matching `_scan_pattern_global` call to activate.

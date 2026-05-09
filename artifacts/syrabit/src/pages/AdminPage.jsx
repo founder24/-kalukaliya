@@ -5,7 +5,7 @@ import {
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
   Crown, Cpu, Activity, ShieldAlert, Cloud,
-  ExternalLink,
+  ExternalLink, Gauge,
 } from 'lucide-react';
 import axios from 'axios';
 import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlertCount, API_BASE } from '@/utils/api';
@@ -33,6 +33,7 @@ const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSe
 const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
 const AdminGcpPanel        = lazy(() => import('@/components/admin/AdminGcpPanel'));
 const AdminAwsNativePanel  = lazy(() => import('@/components/admin/AdminAwsNativePanel'));
+const AdminOpsConsole      = lazy(() => import('@/components/admin/AdminOpsConsole'));
 const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
 import { SyraProvider } from '@/components/admin/syra/SyraContext';
 
@@ -50,6 +51,7 @@ const SECTIONS = [
   { id: 'security',      icon: ShieldAlert,     label: 'Access & Security', group: 'system'     },
   { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
   { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
+  { id: 'ops',           icon: Gauge,           label: 'Ops Console',       group: 'system'     },
   { id: 'gcp',           icon: Cloud,           label: 'GCP Integrations',  group: 'system'     },
   { id: 'awsnative',     icon: Cloud,           label: 'AWS-Native Features', group: 'system'   },
   { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
@@ -77,6 +79,7 @@ const SECTION_COMPONENTS = {
   security:      AdminAccessSecurity,
   logs:          AdminLogsExplorer,
   health:        AdminHealth,
+  ops:           AdminOpsConsole,
   gcp:           AdminGcpPanel,
   awsnative:     AdminAwsNativePanel,
   settings:      AdminSettings,

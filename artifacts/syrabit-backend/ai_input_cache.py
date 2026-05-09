@@ -36,6 +36,7 @@ text + style + lang).
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import logging
@@ -46,6 +47,64 @@ from collections import OrderedDict
 from typing import Any, Iterable, Mapping, Optional
 
 logger = logging.getLogger(__name__)
+
+# Task #2 — Assamese-aware regional cache. The edge proxy stamps
+# `X-Cache-Region` (default "global"; "ne-india" for Assam + NE-India
+# geo). The backend middleware (`server.py::cache_region_middleware`)
+# reads the header and binds the value to this contextvar so cache
+# call sites don't need to plumb `region=` through every signature.
+# Routing intent: ne-india requests should resolve out of the
+# Mumbai/Chennai colos; the contextvar is the in-process echo of that
+# decision and is folded into the cache key + per-region counters so
+# the two cohorts never share entries.
+_REGION_CTX: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "syrabit_cache_region", default="global",
+)
+
+
+def set_request_region(region: str) -> None:
+    """Bind the per-request cache region (called from the middleware)."""
+    _REGION_CTX.set((region or "global").strip().lower() or "global")
+
+
+def _current_region(explicit: Optional[str] = None) -> str:
+    if explicit:
+        return (explicit or "global").strip().lower() or "global"
+    try:
+        return _REGION_CTX.get()
+    except LookupError:
+        return "global"
+
+
+# Task #2 — Regional partitioning is intentionally NARROW. Only
+# Assamese-language deterministic outputs (`as_chat`), Assamese
+# explanation reflows (`explanation`), and the en→as translate cache
+# (`translate`) are region-pinned, because those are the surfaces where
+# a Mumbai/Chennai-served Assamese cohort can produce a meaningfully
+# different cached payload than the global default. English content
+# (formatter, mcq, flashcard, definition, OCR, pyq) is intentionally
+# kept globally distributed so a single cache entry serves every
+# region — partitioning English would multiply cardinality without
+# improving hit-ratio. A round-3 review reject called this out.
+_REGIONAL_CONTENT_TYPES = frozenset({
+    "as_chat",
+    "explanation",
+    "translate",
+})
+
+
+def _effective_region(content_type: Optional[str], explicit: Optional[str]) -> str:
+    """Region used to scope a cache key.
+
+    Returns "global" for every English / language-agnostic content type
+    so those entries stay shared across regions; returns the per-request
+    region (from the contextvar / explicit kwarg) only for the
+    Assamese-relevant set above.
+    """
+    ct = content_type if content_type in _KNOWN_CONTENT_TYPES else "unknown"
+    if ct not in _REGIONAL_CONTENT_TYPES:
+        return "global"
+    return _current_region(explicit)
 
 _REDIS_KEY_PREFIX = "ai_response_cache:v1"
 _DEFAULT_TTL_SEC = 30 * 24 * 60 * 60
@@ -89,15 +148,52 @@ def _key(
     max_tokens: Optional[int],
     normalize_text: bool = False,
     template_version: str = "",
+    region: str = "global",
 ) -> str:
     canon = _canonical_messages(messages, normalize_text=normalize_text)
     # `template_version` is folded into the key so a prompt-template bump
     # invalidates the cache without touching the messages payload — the
     # `template_version_bump` miss-reason below recognises this case.
+    # Task #2 — `region` (default "global") is folded into the key so
+    # an Assamese-aware region (e.g. "ne-india") shares cache entries
+    # with itself but never collides with the global / non-Assamese
+    # cohort.
     digest = hashlib.sha256(
-        f"{model}|{template_version}|{max_tokens or ''}|{canon}".encode("utf-8")
+        f"{model}|{template_version}|{region}|{max_tokens or ''}|{canon}".encode("utf-8")
     ).hexdigest()
-    return f"{_REDIS_KEY_PREFIX}:{model}:{digest}"
+    return f"{_REDIS_KEY_PREFIX}:{region}:{model}:{digest}"
+
+
+# Task #2 — per-region counters for the admin cache panel. Tracked in-
+# process; rolled into `snapshot()` under the `per_region` key so the
+# admin tile can render hit-ratio side-by-side for "global" and
+# "ne-india".
+_REGION_COUNTERS: dict[str, dict[str, int]] = {}
+_REGION_LOCK = threading.Lock()
+
+
+def _bump_region(region: str, kind: str) -> None:
+    """Increment a per-region counter (`kind` ∈ {hits, misses, sets})."""
+    with _REGION_LOCK:
+        row = _REGION_COUNTERS.setdefault(region or "global", {"hits": 0, "misses": 0, "sets": 0})
+        row[kind] = int(row.get(kind, 0)) + 1
+
+
+def per_region_snapshot() -> dict[str, dict[str, Any]]:
+    """Return per-region {hits, misses, sets, hit_ratio} for admin panel."""
+    with _REGION_LOCK:
+        out: dict[str, dict[str, Any]] = {}
+        for region, row in _REGION_COUNTERS.items():
+            hits = int(row.get("hits", 0))
+            misses = int(row.get("misses", 0))
+            total = hits + misses
+            out[region] = {
+                "hits": hits,
+                "misses": misses,
+                "sets": int(row.get("sets", 0)),
+                "hit_ratio": (round(hits / total, 4) if total else None),
+            }
+        return out
 
 
 # ── Task #571 — per-content-type counters + miss-reason tagging ───────
@@ -108,7 +204,13 @@ def _key(
 # alarms live.
 _KNOWN_CONTENT_TYPES = (
     "mcq", "flashcard", "definition", "pyq", "formatter",
-    "translate", "ocr", "stage3_polish", "unknown",
+    "translate", "ocr", "stage3_polish",
+    # Task #2 — Assamese-aware regional cache: these three content
+    # types are the ONLY ones whose cache entries are region-pinned
+    # (see `_REGIONAL_CONTENT_TYPES` above). They must be in the
+    # known set so the gate doesn't downgrade them to "unknown".
+    "as_chat", "explanation",
+    "unknown",
 )
 _MISS_REASONS = (
     "normalization_mismatch",
@@ -465,25 +567,64 @@ def _redis_client():  # pragma: no cover — wires to deps at call time
 _CF_ACCOUNT_ID    = os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 _CF_API_TOKEN     = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN")
 _CF_KV_NAMESPACE  = os.environ.get("AI_RESPONSE_CACHE_KV_ID")
+# Task #2 — region-routed KV namespaces. When `AI_RESPONSE_CACHE_KV_ID_NE_INDIA`
+# is set, ne-india writes/reads land in the AP-South KV namespace so they
+# take the Mumbai/Chennai tier path; otherwise we fall back to the global
+# namespace and the request still benefits from the in-key region prefix
+# (which keeps CF Tiered Cache's upper-tier picker consistent per region).
+_CF_KV_NAMESPACES = {
+    "global":   _CF_KV_NAMESPACE,
+    "ne-india": (
+        os.environ.get("AI_RESPONSE_CACHE_KV_ID_NE_INDIA")
+        or _CF_KV_NAMESPACE
+    ),
+}
 _CF_KV_ENABLED    = bool(_CF_ACCOUNT_ID and _CF_API_TOKEN and _CF_KV_NAMESPACE)
 
 
-def _cf_kv_url(key: str) -> str:
+def _cf_kv_namespace_for(region: Optional[str]) -> str:
+    """Pick the KV namespace id based on `region`. ne-india routes
+    through the AP-South namespace when configured, falling back to
+    the global namespace otherwise."""
+    try:
+        from cf_tiered_cache import kv_namespace_for_region as _knsfr
+        ns_key = _knsfr(region or "global")
+    except Exception:
+        ns_key = "global"
+    return _CF_KV_NAMESPACES.get(ns_key) or _CF_KV_NAMESPACE
+
+
+def _cf_kv_url(key: str, region: Optional[str] = None) -> str:
+    ns = _cf_kv_namespace_for(region)
     return (
         f"https://api.cloudflare.com/client/v4/accounts/{_CF_ACCOUNT_ID}"
-        f"/storage/kv/namespaces/{_CF_KV_NAMESPACE}/values/{key}"
+        f"/storage/kv/namespaces/{ns}/values/{key}"
     )
 
 
-def _cf_kv_get(key: str) -> Optional[str]:
+def _cf_cache_tag_for(region: Optional[str]) -> str:
+    try:
+        from cf_tiered_cache import tier_cache_tag_for as _tctf
+        return _tctf(region or "global")
+    except Exception:
+        return "tier:global"
+
+
+def _cf_kv_get(key: str, region: Optional[str] = None) -> Optional[str]:
     if not _CF_KV_ENABLED:
         return None
     try:
         import urllib.request as _ur
         req = _ur.Request(
-            _cf_kv_url(key),
+            _cf_kv_url(key, region=region),
             method="GET",
-            headers={"Authorization": f"Bearer {_CF_API_TOKEN}"},
+            headers={
+                "Authorization": f"Bearer {_CF_API_TOKEN}",
+                # Task #2 — propagate the per-region cache tag so CF
+                # Tiered Cache routes upper-tier fetches consistently
+                # to the AP-South topology for ne-india reads.
+                "Cache-Tag": _cf_cache_tag_for(region),
+            },
         )
         with _ur.urlopen(req, timeout=2.0) as resp:
             if resp.status != 200:
@@ -495,18 +636,19 @@ def _cf_kv_get(key: str) -> Optional[str]:
         return None
 
 
-def _cf_kv_set(key: str, value: str, ttl: int) -> None:
+def _cf_kv_set(key: str, value: str, ttl: int, region: Optional[str] = None) -> None:
     if not _CF_KV_ENABLED or not value:
         return
     try:
         import urllib.request as _ur
         # CF KV PUT honours `expiration_ttl` as a query-string param.
-        url = f"{_cf_kv_url(key)}?expiration_ttl={int(ttl)}"
+        url = f"{_cf_kv_url(key, region=region)}?expiration_ttl={int(ttl)}"
         req = _ur.Request(
             url, method="PUT", data=value.encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {_CF_API_TOKEN}",
                 "Content-Type":  "text/plain; charset=utf-8",
+                "Cache-Tag":     _cf_cache_tag_for(region),
             },
         )
         with _ur.urlopen(req, timeout=2.0) as resp:
@@ -523,6 +665,7 @@ def get_response(
     content_type: Optional[str] = None,
     template_version: str = "",
     normalize_text: bool = False,
+    region: Optional[str] = None,
 ) -> Optional[str]:
     """Return the cached completion for this (model, messages,
     max_tokens) tuple, or None on miss. Never raises.
@@ -536,8 +679,10 @@ def get_response(
     """
     msgs = list(messages)
     ct = content_type if content_type in _KNOWN_CONTENT_TYPES else "unknown"
+    region = _effective_region(content_type, region)
     key = _key(msgs, model, max_tokens=max_tokens,
-               normalize_text=normalize_text, template_version=template_version)
+               normalize_text=normalize_text, template_version=template_version,
+               region=region)
     with _COUNTERS_LOCK:
         _bump_unique_key(ct, key)
     val = _inproc_get(key)
@@ -546,17 +691,21 @@ def get_response(
             _COUNTERS[ct]["hits"] += 1
             _COUNTERS[ct]["tier_hits"]["inproc"] += 1
         _record_24h_event(ct, "hits")
+        _bump_region(region, "hits")
+        _record_cf_region(region, True)
         return val
     # Tier 2: Cloudflare KV (canonical per V4 §K.2 — same namespace
     # the edge worker reads from). Tried before Redis so a worker-
     # written entry is honoured even if the backend Redis is cold.
-    cf_val = _cf_kv_get(key)
+    cf_val = _cf_kv_get(key, region=region)
     if cf_val:
         _inproc_set(key, cf_val)
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["hits"] += 1
             _COUNTERS[ct]["tier_hits"]["cf_kv"] += 1
         _record_24h_event(ct, "hits")
+        _bump_region(region, "hits")
+        _record_cf_region(region, True)
         return cf_val
     rc = _redis_client()
     if rc is not None:
@@ -569,6 +718,8 @@ def get_response(
                     _COUNTERS[ct]["hits"] += 1
                     _COUNTERS[ct]["tier_hits"]["redis"] += 1
                 _record_24h_event(ct, "hits")
+                _bump_region(region, "hits")
+                _record_cf_region(region, True)
                 return text
         except Exception as e:
             logger.debug("[ai_input_cache] redis get failed: %s", e)
@@ -593,7 +744,21 @@ def get_response(
         _COUNTERS[ct]["miss_reasons"][reason] += 1
         _bump_miss_reason_24h(ct, reason)
     _record_24h_event(ct, "misses")
+    _bump_region(region, "misses")
+    _record_cf_region(region, False)
     return None
+
+
+def _record_cf_region(region: str, hit: bool) -> None:
+    """Mirror the hit/miss into `cf_tiered_cache.record_region_event` so
+    the per-region CF tile (`cf_tiered_cache.per_region_snapshot`) stays
+    populated alongside `ai_input_cache.per_region_snapshot`. Best
+    effort — never raises from the cache hot path."""
+    try:
+        from cf_tiered_cache import record_region_event as _rre
+        _rre(region or "global", bool(hit))
+    except Exception:
+        pass
 
 
 def set_response(
@@ -606,6 +771,7 @@ def set_response(
     content_type: Optional[str] = None,
     template_version: str = "",
     normalize_text: bool = False,
+    region: Optional[str] = None,
 ) -> None:
     """Store the completion for this (model, messages) tuple.
 
@@ -633,9 +799,12 @@ def set_response(
             ttl = _aic_ttl(ct)
         except Exception:
             ttl = _DEFAULT_TTL_SEC
+    region = _effective_region(content_type, region)
     key = _key(msgs, model, max_tokens=max_tokens,
-               normalize_text=normalize_text, template_version=template_version)
+               normalize_text=normalize_text, template_version=template_version,
+               region=region)
     _inproc_set(key, text)
+    _bump_region(region, "sets")
     with _COUNTERS_LOCK:
         _COUNTERS[ct]["sets"] += 1
         _COUNTERS[ct]["tier_sets"]["inproc"] += 1
@@ -647,7 +816,7 @@ def set_response(
             _LAST_TEMPLATE_VERSION[ct] = template_version
     # §K.2 fan-out write: CF KV (canonical) + Redis (fast pod-local).
     # Both are best-effort and never raise from the cache hot path.
-    _cf_kv_set(key, text, int(ttl))
+    _cf_kv_set(key, text, int(ttl), region=region)
     if _CF_KV_ENABLED:
         with _COUNTERS_LOCK:
             _COUNTERS[ct]["tier_sets"]["cf_kv"] += 1
@@ -665,4 +834,5 @@ def set_response(
 __all__ = [
     "get_response", "set_response", "is_deterministic",
     "snapshot", "reset_for_tests",
+    "set_request_region", "per_region_snapshot",
 ]

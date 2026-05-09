@@ -240,14 +240,14 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"] (post-Task-#552 §G-R, 2026-05-09 reversal):
-    deepgram(primary) → elevenlabs(named fallback) → workers_ai(last-resort tail).
-    Deepgram Aura-2 was un-retired as the canonical English-TTS primary;
-    ElevenLabs was demoted to named fallback because the free-plan API gate
-    would otherwise block all TTS without a $5/mo Starter upgrade. The
-    unreachable `vertex` dispatch branch below is retained as a defensive
-    guard so a future re-introduction without a wired Cloud TTS client
-    raises immediately rather than silently selecting a missing backend.
+    PROVIDER_PRIORITY["tts"] (Task #2 — 2026 blueprint):
+    elevenlabs(primary) → deepgram(named fallback, Aura-2) → workers_ai(last-resort tail).
+    ElevenLabs is restored as the canonical English-TTS primary (richest
+    voice library, $5/mo Starter is now budgeted into the $100 ceiling);
+    Deepgram Aura-2 retained as named fallback. The unreachable `vertex`
+    dispatch branch below is retained as a defensive guard so a future
+    re-introduction without a wired Cloud TTS client raises immediately
+    rather than silently selecting a missing backend.
     """
     from llm import select_provider
 
@@ -379,15 +379,16 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 @router.post(
     "/voice/tts",
     response_class=Response,
-    summary="Text-to-speech (Indic: Google Neural2 ONLY; English: Deepgram Aura-2 → ElevenLabs → Workers AI)",
+    summary="Text-to-speech (Indic: Google Neural2 ONLY; English: ElevenLabs → Deepgram Aura-2 → Workers AI)",
     description=(
         "Convert text to speech. For Indic languages (hi, bn, as) uses "
         "Google Cloud TTS Neural2 — on Neural2 failure the request returns "
         "503 (V4 §12, no silent fallback to non-Indic-capable providers). "
         "For English/other, uses the PROVIDER_PRIORITY weighted round-robin "
         "with fallback-without-replacement. "
-        "Weighted pool (post-Task-#552 §G-R): Deepgram Aura-2(primary) → "
-        "ElevenLabs(named fallback) → Workers AI(last-resort). "
+        "Weighted pool (Task #2 — 2026 blueprint): ElevenLabs(canonical "
+        "primary; $5/mo Starter budgeted into the $100 ceiling) → "
+        "Deepgram Aura-2(named fallback) → Workers AI(weight-0 last-resort tail). "
         "Returns mp3 audio bytes."
     ),
 )
@@ -570,7 +571,7 @@ async def _transcribe_with_indic_first(audio_bytes: bytes, language: str) -> str
         "**LLM** — generate reply via call_llm_api_chat\n\n"
         "**Leg 2 — TTS** (Google Neural2 for Indic; weighted round-robin for others):\n"
         "  Indic: Google Neural2 → ElevenLabs → Workers AI(last-resort)\n"
-        "  English/other (post-Task-#552 §G-R): Deepgram Aura-2(primary) → ElevenLabs(named fallback) → Workers AI(last-resort)\n\n"
+        "  English/other (Task #2 — 2026 blueprint): ElevenLabs(canonical primary) → Deepgram Aura-2(named fallback) → Workers AI(weight-0 last-resort tail)\n\n"
         "Returns { transcript, reply_text, audio_b64, language }."
     ),
 )

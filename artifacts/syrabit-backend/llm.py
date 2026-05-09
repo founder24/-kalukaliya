@@ -1802,6 +1802,10 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "workers_ai_mistral_7b": "@cf/mistral/mistral-7b-instruct-v0.3",   # balanced English fallback
     "workers_ai_llama32_3b": "@cf/meta/llama-3.2-3b-instruct",         # ultrafast 3B for burst / fast-mode
     "workers_ai_llama31_8b": "@cf/meta/llama-3.1-8b-instruct-fp8",     # Indic chat fallback tail
+    # Task #2 — 2026 blueprint canonical chat-chain extensions.
+    "vertex_flash_lite":   "gemini-2.5-flash-lite",                    # cheaper Vertex SKU; 2nd leg of English chat
+    "vertex_assamese":     "gemini-2.5-flash",                         # Vertex Flash + Assamese system prefix; 2nd leg of Assamese chat
+    "retrieval_only":      "retrieval-only",                           # deterministic RAG synthesis; no LLM call
 }
 
 # Maps provider names to the canonical provider string used by _call_single_provider.
@@ -1830,6 +1834,13 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     "workers_ai_mistral_7b": "workers-ai",
     "workers_ai_llama32_3b": "workers-ai",
     "workers_ai_llama31_8b": "workers-ai",
+    # Task #2 — Vertex variants both canonicalize to "vertex" so
+    # `_PAID_PROVIDER_RPM_WINDOWS` / saturation tracking treats them as
+    # the same upstream tenant. `retrieval_only` has no upstream — it's
+    # a deterministic in-process synthesizer.
+    "vertex_flash_lite":     "vertex",
+    "vertex_assamese":       "vertex",
+    "retrieval_only":        "retrieval_only",
 }
 
 # CF AI Gateway saturation threshold — providers above this RPM ratio are
@@ -1949,26 +1960,48 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
             if saturation >= _CHAT_RPM_SOFT_SHED_THRESHOLD:
                 logger.info(
                     "select_provider[english_rag_chat]: skipping %s — at %.0f%% RPM "
-                    "(threshold %.0f%%, advancing in 2-position chain)",
+                    "(threshold %.0f%%, advancing in 3-position chain)",
                     p, saturation * 100, _CHAT_RPM_SOFT_SHED_THRESHOLD * 100,
                 )
                 continue
             return p
         logger.warning(
-            "select_provider[english_rag_chat]: 2-position chain exhausted "
+            "select_provider[english_rag_chat]: 3-position chain exhausted "
             "(chain=%s, exclude=%s) — returning None per V4 §12 (no silent "
             "downgrade to a non-chain provider).",
             ordered_chain, sorted(exclude),
         )
         return None
 
-    # 2-leg allowlist for assamese_rag_chat (Task #490 — Vertex was removed
-    # from the chat hot path and dropped from this third leg): sarvam →
-    # workers_ai_indic. workers_ai_llama31_8b is still excluded because it
-    # produces non-Assamese (English/Hindi) output for Assamese prompts;
-    # only the IndicTrans2 neural-MT path is whitelisted as a fallback.
+    # Task #2 — 3-leg deterministic walk for assamese_rag_chat:
+    # sarvam → vertex_assamese → retrieval_only. workers_ai_indic /
+    # workers_ai_llama31_8b / generic workers_ai are NOT on this chain
+    # (they produce wrong-language output for Assamese conversational
+    # prompts).
     if feature == "assamese_rag_chat":
-        candidates = [p for p in candidates if p in ("sarvam", "workers_ai_indic")]
+        ordered_chain = ["sarvam", "vertex_assamese", "retrieval_only"]
+        for p in ordered_chain:
+            if p in exclude:
+                continue
+            saturation = _get_provider_saturation(p)
+            if saturation >= _CHAT_RPM_SOFT_SHED_THRESHOLD:
+                logger.info(
+                    "select_provider[assamese_rag_chat]: skipping %s — at %.0f%% RPM "
+                    "(threshold %.0f%%, advancing in 3-position chain)",
+                    p, saturation * 100, _CHAT_RPM_SOFT_SHED_THRESHOLD * 100,
+                )
+                continue
+            logger.debug(
+                "select_provider[assamese_rag_chat]: chose %s (chain=%s, exclude=%s)",
+                p, ordered_chain, sorted(exclude),
+            )
+            return p
+        logger.warning(
+            "select_provider[assamese_rag_chat]: 3-position chain exhausted "
+            "(chain=%s, exclude=%s) — returning None per V4 §12.",
+            ordered_chain, sorted(exclude),
+        )
+        return None
 
     # Per-pool weight overrides take precedence over global PROVIDER_CREDITS.
     # Providers not listed in the override fall back to PROVIDER_CREDITS as usual.
@@ -2034,7 +2067,7 @@ def select_provider(feature: str, lang: str = "", exclude: frozenset = frozenset
     # to llama/gpt-oss for an Assamese answer would produce
     # English/garbled output. Return None so the caller errors out
     # cleanly instead of serving a wrong-language response.
-    _STRICT_CHAIN_FEATURES = ("assamese_rag_chat",)
+    _STRICT_CHAIN_FEATURES = ("assamese_rag_chat", "english_rag_chat")
     if feature in _STRICT_CHAIN_FEATURES:
         logger.warning("select_provider: feature=%s — strict chain exhausted, returning None (no silent downgrade)", feature)
         return None
@@ -2171,25 +2204,131 @@ async def _dispatch_llm_for_feature(
     # Dispatched via providers.vertex_chat.call_chat (SA OAuth →
     # generateContent). The formatter polish path is independent and
     # still goes through vertex_format.format_with_vertex.
-    if provider == "vertex":
+    #
+    # Task #2 — `vertex_flash_lite` and `vertex_assamese` are extra
+    # legs on the same Vertex tenant; both reuse `vertex_chat.call_chat`
+    # with a different model id (and an Assamese system-prompt prefix
+    # for the latter).
+    if provider in ("vertex", "vertex_flash_lite", "vertex_assamese"):
         from providers.vertex_chat import call_chat as _vx_chat
         _record_paid_provider_request("vertex")
+        if provider == "vertex_flash_lite":
+            _vx_model = "gemini-2.5-flash-lite"
+            _vx_messages = messages
+        elif provider == "vertex_assamese":
+            _vx_model = "gemini-2.5-flash"
+            _ASSAMESE_PREFIX = (
+                "You are Syrabit's Assamese tutor. Answer ONLY in Assamese "
+                "script (অসমীয়া). Never reply in English unless quoting "
+                "an English term. Keep answers grounded in the supplied "
+                "context."
+            )
+            _vx_messages = [{"role": "system", "content": _ASSAMESE_PREFIX}] + list(messages)
+        else:
+            _vx_model = "gemini-2.5-flash"
+            _vx_messages = messages
         _t0 = _dp_t.perf_counter()
         try:
-            result = await _vx_chat(messages, model="gemini-2.5-flash", max_tokens=max_tokens)
+            result = await _vx_chat(_vx_messages, model=_vx_model, max_tokens=max_tokens)
             _record_llm_call(
-                "vertex", "gemini-2.5-flash",
+                provider, _vx_model,
                 int((_dp_t.perf_counter() - _t0) * 1000),
                 True, len(result.split()), feature_key=feature,
             )
             return result
         except Exception as _exc:
             _record_llm_call(
-                "vertex", "gemini-2.5-flash",
+                provider, _vx_model,
                 int((_dp_t.perf_counter() - _t0) * 1000),
                 False, 0, error_type=type(_exc).__name__, feature_key=feature,
             )
             raise
+
+    # Task #2 — `retrieval_only` is the deterministic last-resort leg of
+    # the Assamese chat chain. It does NOT call an LLM — it builds a
+    # short Assamese-script answer by concatenating the most relevant
+    # RAG snippets the dispatcher has already collected (passed in via
+    # the conversation as a system message tagged `[CONTEXT]`). Returns
+    # a generic "no context available" Assamese sentence when no
+    # snippets are present, so the caller treats it as exhaustion.
+    if provider == "retrieval_only":
+        _t0 = _dp_t.perf_counter()
+        # Task #2 — retrieval-only context resolution. Try, in order:
+        #   (a) explicit `[CONTEXT]` / `Context:` / `RAG context:`
+        #       marker in any system message (set by callers that
+        #       already ran retrieval upstream — preferred path);
+        #   (b) live retrieval against the active retriever using the
+        #       latest user message as the query. This makes the leg
+        #       useful even when callers didn't pre-fuse a snippet,
+        #       which is the common case for the Assamese chat path.
+        _ctx = ""
+        _markers = ("[CONTEXT]", "Context:", "RAG context:")
+        for m in messages:
+            content = str(m.get("content") or "")
+            if m.get("role") != "system":
+                continue
+            for mk in _markers:
+                if mk in content:
+                    _ctx = content.split(mk, 1)[1].strip()
+                    break
+            if _ctx:
+                break
+        if not _ctx:
+            # Live retriever fallback. Best-effort: any retriever
+            # exception leaves _ctx empty so the no-context branch
+            # raises and the caller sees the loud chain-exhausted
+            # error (V4 §12, no silent downgrade).
+            _user_q = ""
+            for m in reversed(list(messages)):
+                if m.get("role") == "user":
+                    _user_q = str(m.get("content") or "").strip()
+                    break
+            if _user_q:
+                try:
+                    from retrievers.factory import get_active_retriever as _gar
+                    _retriever = _gar()
+                    if _retriever is not None:
+                        _hits = await _retriever.query(_user_q, top_k=1)
+                        if _hits:
+                            _top = _hits[0]
+                            _ctx = (
+                                _top.get("text")
+                                or _top.get("chunk_text")
+                                or _top.get("content")
+                                or ""
+                            ).strip()
+                except Exception as _re:
+                    logger.debug(
+                        "[retrieval_only] live retriever fallback failed: %s", _re,
+                    )
+        if not _ctx:
+            _record_llm_call(
+                "retrieval_only", "retrieval-only",
+                int((_dp_t.perf_counter() - _t0) * 1000),
+                False, 0, error_type="NoContext", feature_key=feature,
+            )
+            raise RuntimeError(
+                "retrieval_only: no RAG context available (no upstream "
+                "marker AND live retriever returned no hits) — chain "
+                "exhausted (V4 §12, no silent downgrade)."
+            )
+        # Task #2 — retrieval-only banner: prepend an explicit "no LLM"
+        # banner so the UI surfaces the deterministic fallback rather than
+        # passing a truncated RAG snippet off as a real LLM completion
+        # (V4 §12 — fail loud).
+        _banner = (
+            "[অসমীয়া LLM অনুপলব্ধ — তলৰ পাঠটো আপোনাৰ অধ্যায়ৰ পৰা প্ৰাসংগিক "
+            "অংশ] "
+            "(no-LLM fallback: top RAG snippet served verbatim — "
+            "Sarvam + Vertex Assamese both exhausted)\n\n"
+        )
+        _result = (_banner + _ctx[:1500]).strip()
+        _record_llm_call(
+            "retrieval_only", "retrieval-only",
+            int((_dp_t.perf_counter() - _t0) * 1000),
+            True, len(_result.split()), feature_key=feature,
+        )
+        return _result
 
     if provider == "sarvam":
         sarvam_slot = _SARVAM_PROVIDERS[0] if _SARVAM_PROVIDERS else None
