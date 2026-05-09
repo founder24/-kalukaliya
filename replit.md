@@ -35,7 +35,7 @@ Syrabit.ai is an AI-powered educational platform providing bilingual localized l
 
 Short index — full text in [`docs/architecture/decisions.md`](docs/architecture/decisions.md).
 
-- [Voice canonical specialists (#552 §G)](docs/architecture/decisions.md#voice-canonical-specialists-task-552-g-2026-05-07) — ElevenLabs (English TTS) + Google Neural2 (Indic TTS) + Deepgram Nova-3 (English STT) + Google Chirp_2 (Indic STT); AssemblyAI and Deepgram Aura-2 retired.
+- [Voice canonical specialists (#552 §G, reversed by §G-R)](docs/architecture/decisions.md#voice-canonical-specialists-task-552-g-2026-05-07-reversed-by-g-r-2026-05-09) — **Deepgram Aura-2 (English TTS primary) + ElevenLabs (named fallback)** + Google Neural2 (Indic TTS) + Deepgram Nova-3 (English STT) + Google Chirp_2 (Indic STT); AssemblyAI retired. (§G-R 2026-05-09 reversed the original §G Aura-2 retirement after the ElevenLabs free-plan API gate forced a $5/mo upgrade requirement.)
 - [Sarvam Assamese-chat facade (#553)](docs/architecture/decisions.md#sarvam-assamese-chat-facade-task-553-2026-05-07) — Typed `providers/sarvam.py:chat()` with per-user monthly cap, success-rate health tile, and `<95%/1h` Sentry alert.
 - [Cost split snapshot (#559)](docs/architecture/decisions.md#cost-split-post-task-559-snapshot-2026-05-07) — 40 % CF / 30 % GCP / 15 % Az / 10 % AWS / 5 % other (informational outcome of the canonical map, not a routing target).
 - [Canonical specialist delegation (#559)](docs/architecture/decisions.md#canonical-specialist-delegation-task-559-2026-05-07) — One canonical primary + at most one named fallback per feature, enforced by the umbrella CI guard `check_canonical_delegation.py`.

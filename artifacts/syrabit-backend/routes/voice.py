@@ -7,7 +7,7 @@ POST /api/voice/tts
     Falls back to PROVIDER_PRIORITY weighted round-robin on failure.
   - English/other: PROVIDER_PRIORITY weighted round-robin with
     fallback-without-replacement.
-    Weighted pool (post-Task-#552 §G): ElevenLabs(primary) → Workers AI.
+    Weighted pool (post-Task-#552 §G-R): Deepgram Aura-2(primary) → ElevenLabs(fallback) → Workers AI.
   Returns audio/mpeg bytes (mp3).
 
 POST /api/voice/stt
@@ -29,11 +29,14 @@ GET  /api/voice/health
   Workers AI, Google TTS/STT).
 
 Task #552 §G — the third-party transcription vendor previously listed
-as the STT fallback is fully retired (provider module deleted) and the
-Deepgram Aura-2 TTS branch is removed (Deepgram remains STT-only). The
-canonical specialist map is: ElevenLabs sole English TTS; Google Neural2
-sole Indic TTS; Deepgram Nova-3 sole English STT; Google Chirp_2 sole
-Indic STT. Workers AI is the absolute last-resort tail in both pools.
+as the STT fallback is fully retired (provider module deleted).
+
+Task #552 §G-R (2026-05-09 reversal) — Deepgram Aura-2 un-retired as the
+sole English-TTS primary; ElevenLabs demoted to named fallback. The
+canonical specialist map is now: Deepgram Aura-2 sole English TTS primary
++ ElevenLabs eleven_multilingual_v2 named English-TTS fallback; Google
+Neural2 sole Indic TTS; Deepgram Nova-3 sole English STT; Google Chirp_2
+sole Indic STT. Workers AI is the absolute last-resort tail in both pools.
 """
 from __future__ import annotations
 
@@ -81,8 +84,30 @@ class VoiceRequest(BaseModel):
 
 # ── Individual provider TTS callers ───────────────────────────────────────────
 
+async def _tts_deepgram(text: str, language: str) -> bytes:
+    """Primary TTS via Deepgram Aura-2 (English-only). Raises RuntimeError on failure.
+
+    Task #552 §G-R: canonical English-TTS primary. Aura-2 does not yet ship
+    Indic voices, so the caller MUST route Indic prompts to Google Neural2
+    via _tts_google_neural2 BEFORE this pool is consulted (V4 §12 — no
+    silent downgrade for Indic).
+    """
+    from providers import deepgram as _dg
+    if not _dg.ENABLED:
+        raise RuntimeError("Deepgram TTS not available (DEEPGRAM_API_KEY not set)")
+    if language and language[:2].lower() not in ("en", ""):
+        # Defensive guard — Aura-2 is English-only. Caller routes Indic through
+        # Google Neural2 above; if we somehow get a non-English request here,
+        # fail loud so the chain advances cleanly to ElevenLabs (multilingual).
+        raise RuntimeError(
+            f"Deepgram Aura-2 is English-only (got language={language!r}); "
+            f"chain will advance to ElevenLabs eleven_multilingual_v2"
+        )
+    return await _dg.synthesize(text)
+
+
 async def _tts_elevenlabs(text: str, voice_id: Optional[str], language: str) -> bytes:
-    """TTS via ElevenLabs eleven_multilingual_v2. Raises RuntimeError on failure."""
+    """Named-fallback TTS via ElevenLabs eleven_multilingual_v2. Raises RuntimeError on failure."""
     from providers import elevenlabs
     if not elevenlabs.ENABLED:
         raise RuntimeError("ElevenLabs TTS not available (ELEVENLABS_API_KEY not set)")
@@ -215,12 +240,14 @@ async def _synthesize_with_fallback(
 ) -> bytes:
     """TTS: weighted fallback-without-replacement via select_provider("tts").
 
-    PROVIDER_PRIORITY["tts"] (post-Task-#552 §G): elevenlabs(primary) → workers_ai.
-    Deepgram Aura-2 TTS branch was retired by Task #552 §G — Deepgram is
-    now STT-only on the voice path. The unreachable `vertex` dispatch
-    branch below is retained as a defensive guard so a future
-    re-introduction without a wired Cloud TTS client raises immediately
-    rather than silently selecting a missing backend.
+    PROVIDER_PRIORITY["tts"] (post-Task-#552 §G-R, 2026-05-09 reversal):
+    deepgram(primary) → elevenlabs(named fallback) → workers_ai(last-resort tail).
+    Deepgram Aura-2 was un-retired as the canonical English-TTS primary;
+    ElevenLabs was demoted to named fallback because the free-plan API gate
+    would otherwise block all TTS without a $5/mo Starter upgrade. The
+    unreachable `vertex` dispatch branch below is retained as a defensive
+    guard so a future re-introduction without a wired Cloud TTS client
+    raises immediately rather than silently selecting a missing backend.
     """
     from llm import select_provider
 
@@ -230,7 +257,9 @@ async def _synthesize_with_fallback(
     for _ in range(max_attempts):
         provider = select_provider("tts", lang=language, exclude=exclude)
         try:
-            if provider == "elevenlabs":
+            if provider == "deepgram":
+                return await _tts_deepgram(text, language)
+            elif provider == "elevenlabs":
                 return await _tts_elevenlabs(text, voice_id, language)
             elif provider == "workers_ai":
                 return await _tts_workers_ai(text, language)
@@ -350,12 +379,15 @@ async def _transcribe_with_fallback(audio_bytes: bytes, language: str) -> str:
 @router.post(
     "/voice/tts",
     response_class=Response,
-    summary="Text-to-speech (Indic: Google Neural2; English: ElevenLabs → Workers AI)",
+    summary="Text-to-speech (Indic: Google Neural2 ONLY; English: Deepgram Aura-2 → ElevenLabs → Workers AI)",
     description=(
         "Convert text to speech. For Indic languages (hi, bn, as) uses "
-        "Google Cloud TTS Neural2 before falling back to the "
-        "PROVIDER_PRIORITY weighted round-robin with fallback-without-replacement. "
-        "Weighted pool (post-Task-#552 §G): ElevenLabs(primary) → Workers AI(last-resort). "
+        "Google Cloud TTS Neural2 — on Neural2 failure the request returns "
+        "503 (V4 §12, no silent fallback to non-Indic-capable providers). "
+        "For English/other, uses the PROVIDER_PRIORITY weighted round-robin "
+        "with fallback-without-replacement. "
+        "Weighted pool (post-Task-#552 §G-R): Deepgram Aura-2(primary) → "
+        "ElevenLabs(named fallback) → Workers AI(last-resort). "
         "Returns mp3 audio bytes."
     ),
 )
@@ -382,31 +414,56 @@ async def text_to_speech(
     # consumed for Indic TTS — ElevenLabs/Deepgram have limited Indic support anyway.
     if lang_key in _GOOGLE_TTS_LANGS:
         from providers import google_tts
-        if google_tts.is_configured():
-            try:
-                audio_bytes = await google_tts.synthesize(
-                    body.text,
-                    lang=lang_key,
-                    gender=body.gender,
-                )
-                if audio_bytes:
-                    return Response(
-                        content=audio_bytes,
-                        media_type="audio/mpeg",
-                        headers={
-                            "Content-Disposition": 'inline; filename="speech.mp3"',
-                            "Cache-Control": "public, max-age=3600",
-                            "X-TTS-Provider": "google_neural2",
-                            "X-TTS-Lang": lang_key,
-                            "X-TTS-Chars": str(len(body.text)),
-                            "X-TTS-Bytes": str(len(audio_bytes)),
-                        },
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "[voice-tts] Google Neural2 failed for %s: %s — falling back to round-robin",
-                    lang_key, exc,
-                )
+        # Task #552 §G-R: Google Neural2 is the SOLE Indic TTS specialist.
+        # If Neural2 is not configured or fails, we MUST NOT fall through
+        # to the English pool (Deepgram Aura-2 is English-only; ElevenLabs
+        # multilingual coverage of Assamese is poor and would produce
+        # phonetically-wrong audio). Fail loud per V4 §12.
+        if not google_tts.is_configured():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Indic TTS ({lang_key}) requires Google Neural2 which is "
+                    "not configured. Per V4 §12 (no silent fallback) we will "
+                    "not downgrade to a non-Indic-capable provider."
+                ),
+                headers={"X-TTS-Provider-Required": "google_neural2", "X-TTS-Lang": lang_key},
+            )
+        try:
+            audio_bytes = await google_tts.synthesize(
+                body.text,
+                lang=lang_key,
+                gender=body.gender,
+            )
+        except Exception as exc:
+            logger.error("[voice-tts] Google Neural2 failed for %s: %s", lang_key, exc)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Indic TTS ({lang_key}) via Google Neural2 failed: {exc}. "
+                    "Per V4 §12 (no silent fallback) we will not downgrade to a "
+                    "non-Indic-capable provider — please retry shortly."
+                ),
+                headers={"X-TTS-Provider-Required": "google_neural2", "X-TTS-Lang": lang_key},
+            )
+        if not audio_bytes:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Neural2 returned empty audio for {lang_key}.",
+                headers={"X-TTS-Provider": "google_neural2", "X-TTS-Lang": lang_key},
+            )
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": 'inline; filename="speech.mp3"',
+                "Cache-Control": "public, max-age=3600",
+                "X-TTS-Provider": "google_neural2",
+                "X-TTS-Lang": lang_key,
+                "X-TTS-Chars": str(len(body.text)),
+                "X-TTS-Bytes": str(len(audio_bytes)),
+            },
+        )
 
     try:
         audio_bytes = await _synthesize_with_fallback(
@@ -513,7 +570,7 @@ async def _transcribe_with_indic_first(audio_bytes: bytes, language: str) -> str
         "**LLM** — generate reply via call_llm_api_chat\n\n"
         "**Leg 2 — TTS** (Google Neural2 for Indic; weighted round-robin for others):\n"
         "  Indic: Google Neural2 → ElevenLabs → Workers AI(last-resort)\n"
-        "  English/other: ElevenLabs(primary) → Workers AI(last-resort)\n\n"
+        "  English/other (post-Task-#552 §G-R): Deepgram Aura-2(primary) → ElevenLabs(named fallback) → Workers AI(last-resort)\n\n"
         "Returns { transcript, reply_text, audio_b64, language }."
     ),
 )
@@ -541,7 +598,7 @@ async def voice_pipeline(
     #
     # Dispatch pools (post-Task-#552 §G):
     #   STT leg: google_chirp2(Indic) → deepgram(primary) → workers_ai(0)
-    #   TTS leg: google_neural2(Indic) → elevenlabs(primary) → workers_ai(0)
+    #   TTS leg (post-Task-#552 §G-R): google_neural2(Indic) → deepgram_aura2(primary) → elevenlabs(named fallback) → workers_ai(0)
     #   (Task #490: vertex removed from both STT and TTS legs — content_format only.)
 
     from llm import select_provider as _sp
@@ -611,7 +668,11 @@ async def voice_pipeline(
 @router.get(
     "/voice/health",
     summary="Voice provider health check",
-    description="Reports readiness of ElevenLabs, Deepgram (STT-only), Workers AI, and Google TTS/STT providers.",
+    description=(
+        "Reports readiness of Deepgram (STT primary + TTS primary post-§G-R), "
+        "ElevenLabs (English-TTS named fallback), Workers AI (last-resort tail), "
+        "and Google TTS/STT (Indic specialists)."
+    ),
 )
 async def voice_health():
     from providers import elevenlabs
@@ -623,7 +684,16 @@ async def voice_health():
 
     try:
         from providers import deepgram as _dg
-        deepgram_health = {"ok": _dg.ENABLED, "model": "nova-3", "role": "stt-only"}
+        # Task #552 §G-R: Deepgram is now BOTH the English STT primary
+        # (Nova-3 via /v1/listen) and the English TTS primary (Aura-2 via
+        # /v1/speak — direct, bypassing CF AI Gateway).
+        deepgram_health = {
+            "ok": _dg.ENABLED,
+            "stt_model": _dg._STT_MODEL,
+            "tts_model": _dg._TTS_MODEL,
+            "role": "stt+tts (post-§G-R)",
+            "tts_byok_supported": False,  # /v1/speak requires real DEEPGRAM_API_KEY
+        }
     except Exception:
         deepgram_health = {"ok": False, "reason": "deepgram module unavailable"}
 

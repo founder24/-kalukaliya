@@ -78,16 +78,15 @@ FRONTEND = ROOT / "artifacts" / "syrabit"
 BANNED_LITERAL = re.compile(
     r"\b(cerebras|cohere|voyage_ai|cartesia|groq|openrouter|quge5|"
     r"azure_openai|AzureOpenAI|gpt-4\.1-nano|"
-    # Task #552 §G — AssemblyAI fully retired (provider module deleted)
-    # AND Deepgram Aura-2 TTS branch retired (Deepgram is now STT-only).
-    r"assemblyai|AssemblyAI|ASSEMBLYAI_API_KEY|ASSEMBLYAI_STT_MODEL|"
-    r"_tts_deepgram|deepgram_aura2)\b|"
-    r"\bAZURE_OPENAI_[A-Z0-9_]+\b|"
-    # Task #552 §G — bare-token bans for the Deepgram Aura-2 surface
-    # (the @cf/deepgram/aura-2-* Workers-AI model IDs are allowlisted via
-    # providers/cloudflare_ai.py — they are CF-hosted Aura, NOT the
-    # Deepgram-vendor Aura branch we just retired).
-    r"deepgram\.synthesize\(|aura-2-en-us|aura-2-hi-in",
+    # Task #552 §G — AssemblyAI fully retired (provider module deleted).
+    # Task #552 §G-R (2026-05-09 reversal) — Deepgram Aura-2 TTS surface
+    # un-retired as the canonical English-TTS primary; the previously-
+    # banned tokens (`_tts_deepgram`, `deepgram_aura2`,
+    # `deepgram.synthesize(`, `aura-2-en-us`, `aura-2-hi-in`) are no
+    # longer banned. ElevenLabs was demoted to the named fallback per
+    # the canonical-delegation rule (one primary + one named fallback).
+    r"assemblyai|AssemblyAI|ASSEMBLYAI_API_KEY|ASSEMBLYAI_STT_MODEL)\b|"
+    r"\bAZURE_OPENAI_[A-Z0-9_]+\b",
     re.IGNORECASE,
 )
 BANNED_VENDOR_USES = re.compile(

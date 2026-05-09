@@ -1176,8 +1176,11 @@ PROVIDER_PRIORITY: dict = {
     # added. Vertex remains the only direct GCP surface in syrabit-backend.
     "content_format":    ["vertex", "workers_ai_llama33_70b"],
     # Text-to-speech (post-Task-#552 §G): ElevenLabs (sole primary) → Workers AI.
-    # Deepgram Aura-2 TTS branch retired; Vertex removed (Task #490).
-    "tts":               ["elevenlabs", "workers_ai"],
+    # Task #552 §G-R (2026-05-09 reversal): Deepgram Aura-2 un-retired as
+    # English-TTS primary; ElevenLabs demoted to named fallback (free-plan
+    # gate would have required a $5/mo upgrade). workers_ai stays as the
+    # locked free-tier tail (test_tts_stt_voice_have_workers_ai_tail).
+    "tts":               ["deepgram", "elevenlabs", "workers_ai"],
     # Speech-to-text (post-Task-#552 §G): Deepgram Nova-3 (sole primary) → Workers AI.
     # AssemblyAI fully retired (provider module deleted). Indic STT routes
     # through Google Chirp_2 directly in routes/voice.py before this pool
@@ -1364,9 +1367,11 @@ POOL_WEIGHTS: dict[str, dict[str, int]] = {
     "embed_en":    {"workers_ai_custom": 10000, "workers_ai": 0},
     "embed_indic": {"workers_ai_custom": 10000, "workers_ai": 0},
     "tts": {
-        # Task #552 §G — ElevenLabs is sole English TTS primary;
-        # Deepgram Aura-2 branch retired.
-        "elevenlabs": 1000,
+        # Task #552 §G-R (2026-05-09 reversal) — Deepgram Aura-2 is the
+        # English-TTS primary; ElevenLabs is the named fallback (free-plan
+        # gate would otherwise require a $5/mo upgrade).
+        "deepgram":   1000,
+        "elevenlabs":  100,
         "workers_ai":   0,   # last-resort
     },
     "stt": {
