@@ -73,3 +73,42 @@ Full, verbatim record of every architecture decision previously inlined under `#
 ## Cost & runway model (Task #550, 2026-05-07)
 
 **Cost & runway model (Task #550, 2026-05-07):** Phased credit-runway memo at [`artifacts/syrabit/docs/infra/credit-runway-cost-model.md`](artifacts/syrabit/docs/infra/credit-runway-cost-model.md). Headline **credit-on infra value** (cash + credit drawdown) per phase: **P1 (1k–5k DAU) = $120–$320 / mo**, **P2 (5k–10k DAU) = $300–$800 / mo** (cash side held at the $100 cap), **P3 (10k–50k DAU) = $1,200–$3,500 / mo** (requires `# COST-CAP-OVERRIDE` cap raise), **P4 (50k–100k DAU) = $4k–$12k / mo** (credits exhausted, revenue-positive at ~$97k gross). Coexists with Task #549 founder-locks: the $100 cap, the workers_ai chat head, the voice paywall, and the 60/80/95 % degradation ladder are **superior** to anything in the memo — if a memo number ever requires breaching one of those locks, the lock wins and the memo must be re-derived. Quarterly review cadence; next review **2026-08-07** OR sooner whenever any credit pool changes by ≥ 20 %.
+
+---
+
+# Extended Gotchas
+
+Long, multi-paragraph operational gotchas previously inlined in `replit.md`. Short pointers in `replit.md` link back here.
+
+## K.2 deterministic cache scope (chat-adjacent)
+
+**K.2 deterministic cache scope (chat-adjacent):** The deterministic-input AI cache (`ai_input_cache.py`) is wired into formatter / translate / OCR paths AND into `pipeline.stage3_polish`, plus (Task #571) the MCQ generator (`routes/admin_pipeline.py:_pipeline_generate_mcqs`, template `mcq_pipeline_v1`), the flashcard generator (`routes/admin_pipeline.py:_pipeline_generate_flashcards`, template `flashcard_pipeline_v1`), and the definition generator (`vertex_services.extract_key_concepts`, template `extract_key_concepts_v1`). All three are keyed by `(content_type, template_version, exact prompt text, model, max_tokens)`, never serve cached completions across users for streaming or temperature>0 calls, and emit per-content-type counters + miss-reasons through `ai_input_cache.snapshot()` (surfaced via admin-only `/api/health/cache`). This was accepted in the round-7 review as "chat-adjacent but safe"; do NOT extend `is_deterministic(...)` to live `routes/ai_chat.py` dispatch — the live chat hot path is excluded by policy and any change there requires a new task and a fresh threat-model pass.
+
+## Cache-effectiveness observability (Task #571)
+
+**Cache-effectiveness observability (Task #571, 2026-05-07):** Admin-only `GET /api/health/cache` returns the `ai_input_cache.snapshot()` per-content-type rows (hits / misses / sets / hit_ratio / unique_keys_24h / miss_reasons). Nightly `cache-effectiveness` Lambda (03:15 UTC, declared in `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf` `locals.batch_jobs`) ships the same numbers to the `Syrabit/Cache` CloudWatch namespace; two alarms ride the `(ContentType=Total)` dimension — `cache-ai-hitratio-low` (HitRatio < 0.30 for 1 day) + `cache-cardinality-spike` (UniqueKeys24h > 3× the trailing 7-day MA, computed via metric math). Prompt-canonicalization for opt-in callers lives in `prompt_normalizer.py` (NFKC + lowercase + punct/whitespace strip + curated synonym map; every map entry is pinned in `tests/test_prompt_normalizer.py`). Edge-cache advisory targets per route are now stored as `edge_cache.cache_hit_ratio_target` in `workers/edge-proxy/monitored-urls.json`. Audit report: `artifacts/syrabit/docs/infra/cache-effectiveness-audit.md`. Founder locks (the $100 cap, the 5s `/api/me/quota` TTL, the `TOKEN_BUDGETS` ceilings, the chat dispatch chain) are explicitly **not** touched by Task #571.
+
+## Cache calendar — Knob (Task #575)
+
+**Knob (Task #575, 2026-05-07):** `artifacts/syrabit-backend/config/exam_calendar.yaml` declares the AHSEC + SEBA exam / results windows. `cache_calendar.current_season()` classifies "today" as `exam` / `results` / `normal` and `cache_calendar.ai_cache_ttl_for(content_type)` stretches the `ai_input_cache` TTL from **30 days → 90 days** for the four exam-relevant deterministic content types (`mcq`, `flashcard`, `definition`, `pyq`) while in exam / results mode. Formatter / translate / OCR keep the 30-day default in every season — they're admin-edit driven and the longer TTL would mask a freshly polished body for too long. `ai_input_cache.set_response(..., ttl=None)` (the default) reads the calendar; an explicit `ttl=` always wins.
+
+## Cache calendar — Edge wiring
+
+**Edge wiring:** `GET /api/health/season` (public, `Cache-Control: public, max-age=60`, registered in `workers/edge-proxy/monitored-urls.json` + exported as `SEASON_HEALTH_PATH`) exposes the current season, multiplier, active window, and next transition. The Cloudflare worker uses a three-tier cache: a region-scoped `SeasonCacheDO` Durable Object (single instance via `idFromName("global")`) owns the authoritative snapshot and enforces the 60 s shared-refresh contract so the FastAPI origin sees one call per minute per region regardless of isolate count; per-isolate `cached` shadows the DO RPC; the DO's upstream fetch carries `cf: { cacheTtl: 60, cacheEverything: true }` as belt-and-braces against cross-POP cold-wake stampedes. Cold start (and DO unbound in local dev) serves FALLBACK ("normal") immediately and refreshes via `ctx.waitUntil` so the request path never blocks. Per-route stretched TTLs live in `monitored-urls.json` as `edge_cache.exam_ttl_seconds`; routes that don't declare it keep their normal `ttl_seconds` regardless of season. Currently opted in: `/api/pyq/` (1h → **24h**), `/api/content/library-bundle` (30m → **4h**), `/api/content/chapter-by-slug/` (1h → **6h**), `/api/content/topic/` (1h → **6h**).
+
+## Cache calendar — PYQ wiring scope
+
+**PYQ wiring scope (explicit):** The deterministic AI input cache (`ai_input_cache`) is wired into the MCQ, flashcard, and definition generators today (Task #571). The PYQ generation pipeline (`routes/pyq.py:admin_pyq_agentic_process`) calls Gemini Vision OCR DIRECTLY and does NOT go through `ai_input_cache`, so the 30d→90d TTL stretch is *ready* (the calendar's `EXAM_STRETCH_CONTENT_TYPES` includes `"pyq"`) but a no-op on the AI-cache side until the generator is refactored to write through `ai_input_cache.set_response(content_type="pyq", ...)`. The follow-up that does that wiring is tracked as task #582. The edge-cache side of the PYQ benefit (the `/api/pyq/` `exam_ttl_seconds` stretch declared in `monitored-urls.json`) is live today regardless.
+
+## Cache calendar — Adding a window
+
+**Adding a window:** edit `config/exam_calendar.yaml` and add an entry with `name`, `kind` (`exam`|`results`), `start` and `end` (YYYY-MM-DD inclusive). Concurrent AHSEC + SEBA passes MUST be merged into a single combined window — overlaps are rejected by the loader and by the CI guard (`scripts/ci/check_exam_calendar.py`, wired into the deploy workflow as the `exam_calendar_gate` job). The CI guard also enforces a **365-day forward horizon**: the latest window's `end` must be ≥ 1 year from today so the edge worker keeps applying stretched TTLs through the next pass without a manual refresh.
+
+## Cache calendar — Admin Observability banner
+
+**Admin Observability banner:** `CacheHitRatioPanel` polls `/api/health/season` alongside `/api/health/cache` and renders an amber banner during exam / results mode showing the current season, TTL multiplier, active window name, and next transition date.
+
+## Cache calendar — Founder locks unchanged by this knob
+
+**Founder locks unchanged by this knob:** `/api/me/quota` 5 s edge cache TTL, `/api/ai/chat` edge bypass (live chat hot-path NEVER cached — K.2 gotcha still applies), `$100/mo` monthly USD cap (`cost_caps._DEFAULT_MONTHLY_TOTAL_USD_CAP` + `MeterDConfig.cap_usd`), and `TOKEN_BUDGETS` ceilings. The exam-mode TTL stretch only applies to the deterministic input cache + the four opted-in public content routes; nothing in the chat dispatch chain or the cost-cap ladder is touched.
+
