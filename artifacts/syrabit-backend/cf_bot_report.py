@@ -698,6 +698,48 @@ def aggregate_daily_series(buckets: list[dict], top_n: int = 5) -> dict:
     return {"top_bots": top_names, "rows": series}
 
 
+async def collect_recent_bot_hits(window_h: int = 24) -> dict[str, int]:
+    """Task #9 — flat ``{ua_lower: hit_count}`` projection over the last
+    ``window_h`` hours, used by the admin bot-buckets tile to fold raw
+    per-UA traffic onto the canonical four buckets in
+    ``infra/bot-rules.yaml``.
+
+    Returns an empty dict (never raises) when CF analytics are not
+    configured or the GraphQL query fails — the caller renders an
+    empty-state tile rather than 5xx-ing the admin health page.
+
+    Implementation note: re-uses the existing ``_fetch_per_ua_buckets``
+    GraphQL query so we don't open a second analytics-API quota line
+    item. We aggregate on the *raw* user-agent (lowercased), NOT on
+    ``_classify_ua``'s canonical name — the bot-buckets tile needs to
+    reach UAs that ``_classify_ua`` rejects (the "unclassified"
+    bucket) so an operator can spot a new crawler before adding it to
+    the YAML.
+    """
+    if not is_configured():
+        return {}
+    try:
+        cfg = _cfg()
+        zone_id = cfg["zone_id"]
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=window_h)
+        since_iso = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        until_iso = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        buckets = await _fetch_per_ua_buckets(zone_id, since_iso, until_iso)
+        if not buckets:
+            return {}
+        out: dict[str, int] = {}
+        for b in buckets:
+            ua = ((b.get("dimensions") or {}).get("userAgent") or "").strip().lower()
+            if not ua:
+                continue
+            out[ua] = out.get(ua, 0) + int(b.get("count") or 0)
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("collect_recent_bot_hits failed: %s", exc)
+        return {}
+
+
 async def fetch_admin_summary(days: int = 7) -> Optional[dict]:
     """Admin-API shaped summary of Cloudflare's verified-bot data — the
     same dataset Cloudflare's *AI Crawl Control* dashboard reads, sourced

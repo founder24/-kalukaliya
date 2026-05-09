@@ -74,6 +74,55 @@ def test_drift_checker_passes():
     )
 
 
+def test_drift_checker_detects_reverse_drift_across_string_segments():
+    """Regression for the round-2 reviewer finding: the bidirectional
+    drift checker MUST detect a UA token that sits at the head of a
+    Python raw-string continuation segment (e.g. ``r"rogerbot|..."``).
+    We verify that ``rogerbot`` is extracted from utils.py's regex
+    body, then simulate it being absent from both the YAML and the
+    benign allowlist and assert the checker would flag it.
+    """
+    import importlib
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    drift = importlib.import_module("check_bot_rules_drift")
+
+    utils_src = (REPO_ROOT / "artifacts" / "syrabit-backend" / "utils.py").read_text(encoding="utf-8")
+    m = re.search(
+        r"_SEARCH_BOT_UA_RE\s*=\s*re\.compile\(\s*(.*?)\s*,\s*re\.IGNORECASE",
+        utils_src, re.DOTALL,
+    )
+    assert m, "could not locate _SEARCH_BOT_UA_RE in utils.py"
+    tokens = drift._extract_regex_tokens(m.group(1))
+    assert "rogerbot" in tokens, (
+        "tokenizer regression: rogerbot must be extracted from a raw-string "
+        "continuation segment. Without this the drift checker silently misses "
+        "tokens that sit at the head of `r\"...|\"` segments."
+    )
+
+    # Now simulate rogerbot NOT being on the benign allowlist and not in
+    # the YAML — the bidirectional check should report it as drift.
+    saved = set(drift._BENIGN_REGEX_TOKENS)
+    try:
+        drift._BENIGN_REGEX_TOKENS.discard("rogerbot")
+        rules = gen_bot_regex._load_yaml()
+        by_bucket = gen_bot_regex.all_tokens(rules)
+        errors = drift._check_one(
+            REPO_ROOT / "artifacts" / "syrabit-backend" / "utils.py",
+            ["verified_search", "citation_ai", "training_ai"],
+            re.compile(
+                r"_SEARCH_BOT_UA_RE\s*=\s*re\.compile\(\s*(.*?)\s*,\s*re\.IGNORECASE",
+                re.DOTALL,
+            ),
+            by_bucket,
+        )
+        assert any("rogerbot" in e for e in errors), (
+            f"reverse-drift detection failed; errors: {errors}"
+        )
+    finally:
+        drift._BENIGN_REGEX_TOKENS.clear()
+        drift._BENIGN_REGEX_TOKENS.update(saved)
+
+
 def test_verified_bot_fast_path_constant_present():
     """Worker must define the high-RPM bucket constant + UA regex."""
     src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
