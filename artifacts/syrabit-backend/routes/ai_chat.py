@@ -2085,7 +2085,14 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             for i in range(0, len(fallback_msg), _CHUNK):
                 yield f"data: {json.dumps({'content': fallback_msg[i:i+_CHUNK]})}\n\n"
                 await asyncio.sleep(0.01)
-            yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or '', 'guardrail_tag': guardrail_tag})}\n\n"
+            # Task #40 — fast-path emits must still carry route_trace so
+            # the dev QA badge surfaces a decision for every turn (the
+            # absence on guardrail-blocked / instant-casual / instant-as /
+            # early-cache emits was hiding the badge for greetings).
+            _gb_trace = _build_route_trace(
+                msg.message, msg.response_lang, _stream_intent, None,
+            )
+            yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or '', 'guardrail_tag': guardrail_tag, 'route_trace': _gb_trace})}\n\n"
             yield "data: [DONE]\n\n"
         if not is_anon and credits_info:
             asyncio.create_task(_refund_credit(user_id, credits_info["used"] + 1))
@@ -2163,10 +2170,15 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             except Exception:
                 pass
             _instant_as_text = _instant_as
+            # Task #40 — surface route_trace on the instant Assamese
+            # casual fast-path so the dev QA badge appears for greetings.
+            _ias_trace = _build_route_trace(
+                msg.message, msg.response_lang, _stream_intent, None,
+            )
             async def _instant_as_stream():
                 yield f"data: {json.dumps({'conversation_id': msg.conversation_id or '', 'rag_source': 'none', 'rag_quality': 'none', 'rag_chunks': 0})}\n\n"
                 yield f"data: {json.dumps({'content': _instant_as_text})}\n\n"
-                yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or ''})}\n\n"
+                yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or '', 'route_trace': _ias_trace})}\n\n"
                 yield "data: [DONE]\n\n"
             if not is_anon and credits_info:
                 asyncio.create_task(_refund_credit(user_id, credits_info["used"] + 1))
@@ -2220,11 +2232,16 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             )
         except Exception:
             pass
+        # Task #40 — surface route_trace on the instant English casual
+        # fast-path so the dev QA badge appears for greetings.
+        _is_trace = _build_route_trace(
+            msg.message, msg.response_lang, _stream_intent, None,
+        )
         async def _instant_stream():
             nonlocal _instant_s
             yield f"data: {json.dumps({'conversation_id': msg.conversation_id or '', 'rag_source': 'none', 'rag_quality': 'none', 'rag_chunks': 0})}\n\n"
             yield f"data: {json.dumps({'content': _instant_s})}\n\n"
-            yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or ''})}\n\n"
+            yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': msg.conversation_id or '', 'route_trace': _is_trace})}\n\n"
             yield "data: [DONE]\n\n"
         if not is_anon and credits_info:
             asyncio.create_task(_refund_credit(user_id, credits_info["used"] + 1))
@@ -2387,7 +2404,31 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
                 if _ci % (_CHUNK_SIZE * 5) == 0:
                     await asyncio.sleep(0)
             _answer_words = len(_early_emit.split())
-            yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': _conv_id_early or '', 'rag_source': 'cache', 'words': _answer_words, 'web_search_used': False})}\n\n"
+            # Task #40 — early-cache hit short-circuits BEFORE the
+            # authoritative router runs. The cached answer was produced
+            # without retrieval / web fetch on this turn, so synthesize
+            # a precomputed ``direct`` RouteDecision (lang profile from
+            # chat_router so head/feature stay accurate). Calling
+            # _build_route_trace with topic_score=None would re-run the
+            # router and mis-report ``general`` cache hits as the
+            # probe-pending ``rag`` sentinel.
+            from chat_router import RouteDecision as _RD, lang_profile as _lp
+            _ec_lp = _lp(msg.response_lang or "en")
+            _ec_decision = _RD(
+                decision="direct",
+                reason=f"intent={_stream_intent or ''} → early-cache hit (no retrieval ran)",
+                lang=_ec_lp["lang"],
+                intent=_stream_intent or "",
+                provider_chain=_ec_lp["provider_chain"],
+                pinecone_namespace="",
+                embed_provider="",
+                feature=_ec_lp["feature"],
+            )
+            _ec_trace = _build_route_trace(
+                msg.message, msg.response_lang, _stream_intent, None,
+                precomputed_decision=_ec_decision,
+            )
+            yield f"data: {json.dumps({'event': 'syrabit_done', 'conversation_id': _conv_id_early or '', 'rag_source': 'cache', 'words': _answer_words, 'web_search_used': False, 'route_trace': _ec_trace})}\n\n"
             yield "data: [DONE]\n\n"
             asyncio.create_task(_early_cache_persist())
             try:
