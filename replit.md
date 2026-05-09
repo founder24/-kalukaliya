@@ -113,11 +113,11 @@ L1 browser → L2 CF CDN → L3 KV AI cache → L4 Redis hot cache → L5 D1 met
 
 ### §9 Advanced cache optimization (#571 → #577)
 
-Cache intelligence (#571) live; semantic fingerprinting (#572) and prewarming engine (#574) MISSING (Tasks #10 / #13); deterministic rendering (#573) PARTIAL (Task #10); dynamic-TTL exam-window stretch (#575) live; regional cache `X-Cache-Region: ne-india` (#576) live; retrieval-result cache (#577) live.
+Cache intelligence (#571) live; semantic fingerprinting (#572) live (Task #10 — `cache_fingerprint.py` + dual-read window); deterministic rendering (#573) live (Task #10 — `templates/deterministic/*` + `content_formatter.format_content`); prewarming engine (#574) live (Task #13 — nightly `prewarm-seo-routes` Lambda); dynamic-TTL exam-window stretch (#575) live; regional cache `X-Cache-Region: ne-india` (#576) live; retrieval-result cache (#577) live.
 
 ### §10 SEO
 
-Programmatic `/board/class/subject/chapter/type` routes; generated content types PARTIAL (Task #11 lifts H1=chapter-topic + schema.org + hreflang `as-IN/en-IN` + `geo.region=IN-AS`); IndexNow PARTIAL (Task #11 extends to Yandex + verifies Google Indexing API); internal linker + entity SEO health live; AEO answer cards + FAQ JSON-LD PARTIAL (Task #12).
+Programmatic `/board/class/subject/chapter/type` routes live (Task #11 — `routes/seo_pages.py` + `templates/seo/chapter.html.j2` with H1=chapter-topic + schema.org `BreadcrumbList/LearningResource/Course/FAQPage/Quiz` + hreflang `as-IN/en-IN` + `geo.region=IN-AS`); IndexNow live (Task #11 — Bing + Yandex + Google Indexing API); internal linker + entity SEO health live; AEO answer cards + FAQ JSON-LD live (Task #12 — `aca_jobs/materialize_chapter_faqs.py` + `data-aeo-block` markers in the chapter template).
 
 ### §11 Voice flow
 
@@ -129,7 +129,7 @@ PDF/Image upload → OCR detection → Indic routing → text extraction → str
 
 ### §13 Security
 
-Auth: **Supabase sole IdP** (Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in `routes/auth.py` and the `JWT_SECRET` user-session path PARTIAL pending cutover; `JWT_SECRET` / `ADMIN_JWT_SECRET` remain only for short-lived service-to-service tokens, never for user sessions). Edge security: WAF + DDoS + rate-limit + bot detection (Task #9 splits verified-bot KV fast path). Secrets: Azure KV primary (AWS SM + CF Secrets read-only replicas). OriginGate `X-Origin-Auth` lock-step rotation.
+Auth: **Supabase sole IdP** (Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in `routes/auth.py` and the `JWT_SECRET` user-session path PARTIAL pending cutover; `JWT_SECRET` / `ADMIN_JWT_SECRET` remain only for short-lived service-to-service tokens, never for user sessions). Edge security: WAF + DDoS + rate-limit + bot detection live (Task #9 — verified-bot KV fast path so Google/Bing/Perplexity/GPTBot route through a 30 000-RPM lane). Secrets: Azure KV primary (AWS SM + CF Secrets read-only replicas). OriginGate `X-Origin-Auth` lock-step rotation.
 
 ### §14 Observability (#569, #570)
 
@@ -137,7 +137,7 @@ W3C tracing + provider spans + latency + cost telemetry + cache metrics + circui
 
 ### §15 Cost governance
 
-`MONTHLY_TOTAL_USD_CAP = $100` (founder-locked); progressive degradation 60 / 80 / 95 % ladder + paywall + cache-only at 100 %; heavy-free user flow PARTIAL (Task #13 closes prewarm leg).
+`MONTHLY_TOTAL_USD_CAP = $100` (founder-locked); progressive degradation 60 / 80 / 95 % ladder + paywall + cache-only at 100 %; heavy-free user flow live (Task #13 closed the prewarm leg via the nightly `prewarm-seo-routes` Lambda).
 
 ### §16 PWA
 
