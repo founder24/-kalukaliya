@@ -4,7 +4,7 @@ import { RefreshCw, Copy, Check, FileText, Globe, BookOpen, ThumbsUp, ThumbsDown
 import { ReadAloudButton } from '@/components/study/ReadAloudButton';
 import { QuizModal } from '@/components/study/QuizModal';
 import { useShare } from '@/hooks/useShare';
-import { postChatFeedback, eduRequestSite } from '@/utils/api';
+import { postChatFeedback, eduRequestSite, API_BASE } from '@/utils/api';
 import { log } from '@/utils/logger';
 import { toast } from 'sonner';
 import { ThinkingIndicator } from './ThinkingIndicator';
@@ -23,6 +23,13 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
   const [hiddenLinks, setHiddenLinks] = useState([]);
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const [requestState, setRequestState] = useState({}); // host -> 'pending'|'sent'|'failed'
+  // Task #42 — dev-only "router log" expander on the QA badge.
+  // ``routerLogState`` is one of 'idle' | 'loading' | 'ok' | 'error';
+  // ``routerLogs`` holds the matching backend log lines.
+  const [routerPanelOpen, setRouterPanelOpen] = useState(false);
+  const [routerLogState, setRouterLogState] = useState('idle');
+  const [routerLogs, setRouterLogs] = useState([]);
+  const [routerLogError, setRouterLogError] = useState(null);
   // Countdown for the auto-retry that fires 8 s after an AI unavailable error.
   const [retryCountdown, setRetryCountdown] = useState(null);
   const retryTimerRef = useRef(null);
@@ -367,9 +374,45 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 dev mode AND the backend emitted a route_trace, so it
                 never ships to production users. */}
             {!msg.streaming && msg.route_trace && import.meta.env.DEV && (
-              <div
-                className="mt-2 inline-flex flex-wrap items-center gap-1.5 rounded-md border border-dashed border-amber-400/60 bg-amber-50/70 px-2 py-1 text-[10px] font-mono text-amber-900 dark:border-amber-300/40 dark:bg-amber-900/20 dark:text-amber-200"
-                title="Task #37 router trace (dev only)"
+              <button
+                type="button"
+                onClick={async () => {
+                  const next = !routerPanelOpen;
+                  setRouterPanelOpen(next);
+                  // Lazy-fetch the matching backend log lines the first
+                  // time the panel opens (or on every open if the prior
+                  // attempt failed). conversation_id may be missing on
+                  // the very first turn before the backend assigns one
+                  // — fall back to no filter so the most-recent log
+                  // line still surfaces in dev.
+                  if (!next) return;
+                  if (routerLogState === 'loading') return;
+                  if (routerLogState === 'ok' && routerLogs.length > 0) return;
+                  setRouterLogState('loading');
+                  setRouterLogError(null);
+                  try {
+                    const params = new URLSearchParams();
+                    if (conversationId) params.set('conversation_id', conversationId);
+                    params.set('limit', '20');
+                    const res = await fetch(
+                      `${API_BASE}/dev/router-logs/recent?${params.toString()}`,
+                      { credentials: 'omit' },
+                    );
+                    if (!res.ok) {
+                      throw new Error(`HTTP ${res.status}`);
+                    }
+                    const data = await res.json();
+                    setRouterLogs(Array.isArray(data?.logs) ? data.logs : []);
+                    setRouterLogState('ok');
+                  } catch (e) {
+                    setRouterLogError(e?.message || 'fetch failed');
+                    setRouterLogState('error');
+                  }
+                }}
+                className="mt-2 inline-flex flex-wrap items-center gap-1.5 rounded-md border border-dashed border-amber-400/60 bg-amber-50/70 px-2 py-1 text-[10px] font-mono text-amber-900 dark:border-amber-300/40 dark:bg-amber-900/20 dark:text-amber-200 cursor-pointer text-left hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition-colors"
+                title="Click to expand router trace + matching backend log lines (dev only)"
+                aria-expanded={routerPanelOpen}
+                aria-controls={`router-log-panel-${msg.id || messageIndex}`}
                 data-testid="chat-router-qa-badge"
               >
                 <span className="font-semibold uppercase">QA</span>
@@ -407,6 +450,84 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                   <span className="opacity-70" title={msg.route_trace.reason}>
                     · {String(msg.route_trace.reason).slice(0, 48)}
                   </span>
+                )}
+                <span className="opacity-60 ml-1" aria-hidden="true">
+                  {routerPanelOpen ? '▾' : '▸'}
+                </span>
+              </button>
+            )}
+
+            {/* Task #42 — dev-only "router log" expander. Pretty-prints
+                the full route_trace JSON and renders the matching
+                backend [STREAM][ROUTER=...] log lines tailed from the
+                in-process ring buffer at /api/dev/router-logs/recent.
+                Gated on import.meta.env.DEV so it never ships to
+                production users. */}
+            {!msg.streaming && msg.route_trace && import.meta.env.DEV && routerPanelOpen && (
+              <div
+                id={`router-log-panel-${msg.id || messageIndex}`}
+                data-testid="chat-router-log-panel"
+                className="mt-1 rounded-md border border-amber-300/50 bg-amber-50/60 p-2 text-[11px] font-mono text-amber-900 dark:border-amber-300/30 dark:bg-amber-900/15 dark:text-amber-100"
+                style={{ maxWidth: 'min(100%, 42rem)' }}
+              >
+                <div className="text-[10px] uppercase font-semibold opacity-70 mb-1">
+                  route_trace
+                </div>
+                <pre
+                  className="whitespace-pre-wrap break-all bg-amber-100/40 dark:bg-amber-900/25 rounded p-1.5 m-0"
+                  style={{ maxHeight: '12rem', overflow: 'auto' }}
+                  data-testid="chat-router-log-trace-json"
+                >
+                  {JSON.stringify(msg.route_trace, null, 2)}
+                </pre>
+                <div className="text-[10px] uppercase font-semibold opacity-70 mt-2 mb-1">
+                  backend log lines
+                  {conversationId
+                    ? <span className="ml-1 normal-case opacity-70">(cid={String(conversationId).slice(0, 8)}…)</span>
+                    : <span className="ml-1 normal-case opacity-70">(no cid — showing recent)</span>}
+                </div>
+                {routerLogState === 'loading' && (
+                  <div className="flex items-center gap-1.5 opacity-80">
+                    <Loader2 size={11} className="animate-spin" />
+                    Fetching…
+                  </div>
+                )}
+                {routerLogState === 'error' && (
+                  <div
+                    className="opacity-80"
+                    data-testid="chat-router-log-error"
+                  >
+                    Could not load router logs: {routerLogError || 'unknown error'}.
+                    The dev tail endpoint is gated on a non-production
+                    backend env (ENV/ENVIRONMENT ≠ production).
+                  </div>
+                )}
+                {routerLogState === 'ok' && routerLogs.length === 0 && (
+                  <div className="opacity-80">
+                    No matching <code>[STREAM][ROUTER=…]</code> log lines
+                    in the last {500} entries of the in-process buffer.
+                  </div>
+                )}
+                {routerLogState === 'ok' && routerLogs.length > 0 && (
+                  <ul
+                    className="space-y-1 m-0 p-0 list-none"
+                    style={{ maxHeight: '14rem', overflow: 'auto' }}
+                    data-testid="chat-router-log-lines"
+                  >
+                    {routerLogs.map((line, idx) => (
+                      <li
+                        key={`${line.ts}-${idx}`}
+                        className="bg-amber-100/40 dark:bg-amber-900/25 rounded p-1.5"
+                      >
+                        <div className="opacity-60 text-[10px]">
+                          {line.ts} · {line.level}
+                        </div>
+                        <div className="whitespace-pre-wrap break-all">
+                          {line.message}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}

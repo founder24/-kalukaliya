@@ -1966,6 +1966,10 @@ from routes.admin_settings import router as admin_settings_router
 # + the public token-authed ingest endpoint that the edge worker posts
 # batched per-request log records to.
 from routes.admin_logs import router as admin_logs_router
+# Task #42 — dev-only ring buffer of router fail-loud log lines, fed to
+# the chat QA badge expander on failed turns. Refuses with 404 in
+# production so it never leaks internal log content.
+from routes.dev_router_logs import router as dev_router_logs_router
 from routes.admin_notifications import router as admin_notifications_router
 from routes.admin_monetization import router as admin_monetization_router
 from routes.cms_sarvam_health import router as cms_sarvam_health_router
@@ -2192,6 +2196,10 @@ api.include_router(admin_settings_router)
 # prefixes (so the ingest endpoint stays at ``/api/logs/ingest`` and is
 # easy for the worker to target without reasoning about router nesting).
 app.include_router(admin_logs_router)
+# Task #42 — dev-only chat router log tail. Mounted on the bare ``app``
+# (same as admin_logs) because the route already includes its
+# ``/api/...`` prefix.
+app.include_router(dev_router_logs_router)
 api.include_router(admin_notifications_router)
 api.include_router(admin_monetization_router)
 api.include_router(cms_sarvam_health_router)

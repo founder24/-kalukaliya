@@ -18,7 +18,11 @@ No login is required — anonymous chat is supported.
 | `chat-input` | chat textarea container |
 | `chat-send-button` | send button |
 | `lang-selector` | language selector trigger button |
-| `chat-router-qa-badge` | dev-only QA badge (one per finished assistant msg) |
+| `chat-router-qa-badge` | dev-only QA badge (one per finished assistant msg) — clickable in dev (Task #42) |
+| `chat-router-log-panel` | dev-only expander revealed by clicking the QA badge (Task #42) |
+| `chat-router-log-trace-json` | pretty-printed `route_trace` JSON inside the expander |
+| `chat-router-log-lines` | matching backend `[STREAM][ROUTER=…]` log lines fetched from `/api/dev/router-logs/recent` |
+| `chat-router-log-error` | rendered when the dev tail endpoint is unreachable / 404 (e.g. ENV=production) |
 | `chat-message-bubble` | each message bubble |
 | `assamese-unavailable-card` | Assamese chain 503 card |
 | `ai-unavailable-card` | generic chain-503 card |
@@ -130,6 +134,30 @@ ad-hoc dev verification, run these three smaller plans separately.
 4. Type "hello", click send
 5. Wait up to 60s for ≥1 chat-router-qa-badge
 6. Assert LAST badge contains: route=direct, lang=as, ns=∅, embed=∅
+```
+
+### B-4: Router-log expander on a fail-loud bubble (Task #42)
+
+Verifies the dev-only "router log" expander reveals the full
+`route_trace` + matching backend `[STREAM][ROUTER=…]` log lines
+without leaving the chat tab.
+
+```text
+1. Navigate to /chat (no subject — guarantees the V4 §12 fail-loud
+   path on the first study Q because no Pinecone vectors are seeded
+   for the empty subject)
+2. Type "What is photosynthesis and how does it work?", click send
+3. Wait up to 90s for ai-unavailable-card on the assistant bubble
+4. Wait for chat-router-qa-badge to appear (alongside the unavailable card)
+5. Click chat-router-qa-badge
+6. Assert chat-router-log-panel is visible
+7. Assert chat-router-log-trace-json contains "decision" and the same
+   route value (web|rag) shown on the badge
+8. Assert EITHER chat-router-log-lines exists (and contains a row whose
+   message includes "[STREAM][ROUTER=" or "[NON-STREAM][ROUTER=") OR
+   chat-router-log-error exists (when the backend is running with
+   ENV=production and the dev tail endpoint is 404)
+9. Click chat-router-qa-badge again → chat-router-log-panel hidden
 ```
 
 ### B-3: English study question (proves `route=web` OR `route=rag`)

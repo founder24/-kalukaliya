@@ -1151,8 +1151,8 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
     if _route_force_web and not web_results:
         logger.error(
             "[NON-STREAM][ROUTER=web] web search returned 0 results for "
-            "%r — failing loud (no silent ungrounded fallback)",
-            (msg.message or "")[:80],
+            "%r cid=%s — failing loud (no silent ungrounded fallback)",
+            (msg.message or "")[:80], msg.conversation_id or "",
         )
         raise HTTPException(
             status_code=503,
@@ -1172,9 +1172,9 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
             and not (document_text or "").strip()):
         logger.error(
             "[NON-STREAM][ROUTER=rag] strong-topic match but Pinecone "
-            "returned 0 chunks for %r — failing loud (no silent "
+            "returned 0 chunks for %r cid=%s — failing loud (no silent "
             "ungrounded fallback)",
-            (msg.message or "")[:80],
+            (msg.message or "")[:80], msg.conversation_id or "",
         )
         raise HTTPException(
             status_code=503,
@@ -2987,9 +2987,9 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
     # of streaming an ungrounded LLM answer.
     if _s_route_force_web and not web_results:
         logger.error(
-            "[STREAM][ROUTER=web] web search returned 0 results for %r — "
-            "failing loud (no silent ungrounded fallback)",
-            (msg.message or "")[:80],
+            "[STREAM][ROUTER=web] web search returned 0 results for %r "
+            "cid=%s — failing loud (no silent ungrounded fallback)",
+            (msg.message or "")[:80], msg.conversation_id or "",
         )
         # Task #41 — V4 §12 fail-loud preserved (no ungrounded LLM
         # answer), but ship the router decision inside the HTTP
@@ -3027,8 +3027,9 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
             and not (document_text or "").strip()):
         logger.error(
             "[STREAM][ROUTER=rag] strong-topic match but Pinecone returned "
-            "0 chunks for %r — failing loud (no silent ungrounded fallback)",
-            (msg.message or "")[:80],
+            "0 chunks for %r cid=%s — failing loud (no silent ungrounded "
+            "fallback)",
+            (msg.message or "")[:80], msg.conversation_id or "",
         )
         # Task #41 — see sibling web-empty branch above for why this
         # is a structured 503 detail rather than an SSE error chunk.
