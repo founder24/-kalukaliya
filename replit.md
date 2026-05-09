@@ -73,7 +73,7 @@ Pages (PWA), Workers (edge compute), CDN + tiered cache, KV (deterministic AI ca
 
 ### §4.2 Azure layer
 
-Container Apps (FastAPI runtime, eastus2 → westus3 DR), Key Vault (secrets source of truth — AWS SM + CF Secrets are read-only replicas), Blob (OCR scratch).
+Container Apps (FastAPI runtime, eastus2 → westus3 DR), Key Vault (secrets source of truth — AWS SM + CF Secrets are read-only replicas). Cloudflare R2 is the canonical OCR scratch / warm-media surface; current OCR endpoints run as in-memory Vertex Vision round-trips with no persisted scratch tier, and the Azure Blob row was retired by Task #46 (docs updated in #48).
 
 ### §4.3 AWS layer
 

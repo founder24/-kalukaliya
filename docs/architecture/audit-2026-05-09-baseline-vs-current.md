@@ -77,7 +77,7 @@ deliverable) is reading a stale picture.
 | §2 Core Principles | SEO-driven distribution | PARTIAL | #11 |
 | §4.1 Cloudflare | WAF + Bot Management | PARTIAL | #9 |
 | §4.1 Cloudflare | Cron Triggers — prewarming | PARTIAL | #13 |
-| §4.2 Azure | Azure Blob — temporary OCR/media | PARTIAL | (n/a — note still accurate) |
+| §4.2 Azure | Azure Blob — temporary OCR/media | RETIRED | #46 (row retired; R2 is canonical OCR scratch — docs updated in #48) |
 | §7 AI Pipeline | Stage 8 — Deterministic materialization | PARTIAL | #12 + #13 |
 | §9 Adv. cache | #572 Semantic query fingerprinting | **MISSING** | #10 |
 | §9 Adv. cache | #573 Deterministic educational rendering | PARTIAL | #10 |
@@ -91,8 +91,10 @@ deliverable) is reading a stale picture.
 | §17 Build phases | Phase 2 Scale (prewarm) | PARTIAL | #13 |
 | §… Strategic moats | Assamese educational corpus | PARTIAL | (correct — corpus growth ongoing) |
 
-**14 of 16 rows are stale.** Only "Azure Blob" and "Assamese
-corpus" remain genuinely PARTIAL on the merits.
+**15 of 16 rows are stale.** Only "Assamese corpus" remains
+genuinely PARTIAL on the merits — the "Azure Blob" row was
+retired by Task #46 (R2 is now the canonical OCR scratch; docs
+updated in #48).
 
 ## 4 · Drift: documented founder-locks
 
