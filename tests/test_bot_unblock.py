@@ -150,14 +150,53 @@ def test_spoofed_critical_bot_returns_403():
     assert "CRITICAL_BOT_UA" in src, "missing CRITICAL_BOT_UA regex (spoofed-bot 403 gate)"
     assert "X-Bot-Verify" in src and "spoofed" in src
     # The two must appear together in a 403 branch.
+    # Either form is acceptable:
+    #   if (CRITICAL_BOT_UA.test(ua)) { ... status: 403 ... }
+    #   if (CRITICAL_BOT_UA.test(ua) && !fcrDnsAlreadyConfirmed) { return ... 403 ... }
     m = re.search(
-        r"if\s*\(\s*CRITICAL_BOT_UA\.test\(ua\)\s*\)\s*\{[\s\S]{0,800}?status:\s*403",
+        r"if\s*\(\s*CRITICAL_BOT_UA\.test\(ua\)[^)]*\)\s*\{[\s\S]{0,800}?status:\s*403",
         src,
     )
     assert m, (
-        "expected `if (CRITICAL_BOT_UA.test(ua)) { ... status: 403 ... }` "
+        "expected `if (CRITICAL_BOT_UA.test(ua) ...) { ... status: 403 ... }` "
         "branch in worker — spoofed critical bots must be 403'd"
     )
+
+
+def test_fcrdns_promotes_to_verified_bot_fast_path():
+    """Task #9 core: a CRITICAL_BOT_UA from an IP that misses the static
+    CIDR list but PASSES forward-confirmed rDNS MUST be promoted to the
+    verified-bot fast path (60 000 RPM bucket, X-RateLimit-Scope:
+    `verified_bot`, bot prerender path). Without this promotion a real
+    Googlebot crawling from a rotated IP falls through to the unverified
+    branch (120 RPM, no prerender) and indexing degrades.
+
+    Contract checks (static, against the worker source):
+      1. `isSearchBot` is `let` (mutable) — required for promotion.
+      2. There is an FCrDNS-promotion block that flips `isSearchBot=true`
+         on `verifyBotIpWithKv` success.
+      3. The fast-path branch is reachable via `isSearchBot` (not just
+         `botResult.verified`).
+    """
+    src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
+    # 1. mutable isSearchBot
+    assert re.search(r"\blet\s+isSearchBot\b", src), (
+        "isSearchBot must be `let` so FCrDNS success can promote it to true"
+    )
+    # 2. promotion block — verifyBotIpWithKv result assigned then
+    #    isSearchBot set to true.
+    promo = re.search(
+        r"verifyBotIpWithKv\([^)]*\)[\s\S]{0,200}?isSearchBot\s*=\s*true",
+        src,
+    )
+    assert promo, (
+        "missing FCrDNS → isSearchBot promotion. A successful "
+        "verifyBotIpWithKv result must set isSearchBot = true so the "
+        "verified-bot fast path is reachable for rotated-IP Googlebot."
+    )
+    # 3. The verified_bot scope label is gated on the same isSearchBot.
+    assert 'X-RateLimit-Scope": botScope' in src or "\"X-RateLimit-Scope\": botScope" in src
+    assert '"verified_bot"' in src, "missing verified_bot rate-limit scope label"
 
 
 def test_forward_confirmed_rdns_implementation():

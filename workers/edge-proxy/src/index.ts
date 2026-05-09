@@ -3836,43 +3836,54 @@ async function _handleEdgeFetch(
     //      {verified: false, spoofed: false} — unverified but not an impersonation
     //   4. UA matches SEARCH_BOT_UA + IP NOT in ranges → {verified: false, spoofed: true}
     const botResult = verifySearchBot(ua, request, clientIp);
-    const isSearchBot = botResult.verified;
+    // Task #9 — `isSearchBot` is the EFFECTIVE trusted-bot flag that
+    // gates fast-path rate limiting (60 000 RPM) and bot prerender.
+    // It starts at `botResult.verified` (cf.verifiedBot OR static CIDR
+    // hit) and is promoted to `true` below when forward-confirmed
+    // rDNS validates a CRITICAL_BOT_UA from a non-CIDR IP. Without
+    // this promotion, a legitimate Googlebot crawling from a rotated
+    // IP would fall through to the unverified-bot branch (120 RPM,
+    // no prerender) — the exact regression this task closes.
+    let isSearchBot = botResult.verified;
+    let fcrDnsAlreadyConfirmed = false;
     let remaining = 999999;
+
+    // Run forward-confirmed rDNS once per request for any unverified
+    // CRITICAL_BOT_UA (spoofed OR no-CIDR-list case e.g. YouBot). The
+    // result drives BOTH the spoof-403 gate below AND the fast-path
+    // promotion that follows. Caching is in `verifyBotIpWithKv` (24 h
+    // KV, family-scoped key), so re-using the result across both
+    // branches doesn't double-charge DoH calls.
+    if (!isSearchBot && CRITICAL_BOT_UA.test(ua)) {
+      fcrDnsAlreadyConfirmed = await verifyBotIpWithKv(env, ctx, ua, clientIp);
+      if (fcrDnsAlreadyConfirmed) {
+        isSearchBot = true;
+      }
+    }
 
     if (botResult.spoofed) {
       const ipH = hashIp(clientIp);
       const colo = (request as unknown as { cf?: { colo?: string } }).cf?.colo || "unknown";
       ctx.waitUntil(logSpoofedBot(env.RATE_LIMIT, ipH, ua, clientIp, colo));
 
-      // Task #9 — hard-403 spoofed critical search/citation bots.
-      // `botResult.spoofed=true` means: UA matches one of our canonical
-      // search/citation tokens AND the request IP is NOT in the
-      // hard-coded CIDR list for that bot family. Before slamming the
-      // door we give the request one last chance via forward-confirmed
-      // rDNS (PTR + A round-trip, KV-cached 24 h, family-scoped key)
-      // so legitimate bots crawling from a freshly-rotated IP that
-      // hasn't been added to the CIDR list yet are still served.
-      // If FCrDNS also fails for a critical UA, the request is denied —
-      // serving anything to a spoofed Googlebot is an integrity bug
-      // because attackers use the cf.cache.reactsToBot hint to scrape
-      // pre-rendered HTML the SPA gates.
-      if (CRITICAL_BOT_UA.test(ua)) {
-        const fcrDnsConfirmed = await verifyBotIpWithKv(env, ctx, ua, clientIp);
-        if (!fcrDnsConfirmed) {
-          return new Response(
-            "Forbidden: User-Agent claims to be a verified search bot, but the " +
-            "request IP did not pass forward-confirmed reverse-DNS verification.\n",
-            {
-              status: 403,
-              headers: {
-                ...cors,
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "no-store",
-                "X-Bot-Verify": "spoofed",
-              },
+      // Task #9 — hard-403 spoofed critical search/citation bots when
+      // FCrDNS also fails. Serving anything to a spoofed Googlebot is
+      // an integrity bug because attackers use the cf.cache.reactsToBot
+      // hint to scrape pre-rendered HTML the SPA gates.
+      if (CRITICAL_BOT_UA.test(ua) && !fcrDnsAlreadyConfirmed) {
+        return new Response(
+          "Forbidden: User-Agent claims to be a verified search bot, but the " +
+          "request IP did not pass forward-confirmed reverse-DNS verification.\n",
+          {
+            status: 403,
+            headers: {
+              ...cors,
+              "Content-Type": "text/plain; charset=utf-8",
+              "Cache-Control": "no-store",
+              "X-Bot-Verify": "spoofed",
             },
-          );
-        }
+          },
+        );
       }
     }
 
@@ -4116,8 +4127,12 @@ async function _handleEdgeFetch(
         // also extends trust to bots whose rDNS PTR matches one of
         // the canonical suffixes in `infra/bot-rules.yaml` (24h KV
         // cache) when cf.verifiedBot was false.
+        // `fcrDnsAlreadyConfirmed` short-circuits the duplicate KV
+        // check — if we already promoted isSearchBot via FCrDNS above
+        // we don't re-query DoH/KV here.
         const isFastPath = VERIFIED_BOT_UA.test(ua) && (
           (request as unknown as { cf?: { verifiedBot?: boolean } }).cf?.verifiedBot === true ||
+          fcrDnsAlreadyConfirmed ||
           await verifyBotIpWithKv(env, ctx, ua, clientIp)
         );
         const botCap = isFastPath ? VERIFIED_BOT_RATE_LIMIT_RPM : BOT_RATE_LIMIT_RPM;
