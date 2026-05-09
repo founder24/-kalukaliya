@@ -712,6 +712,21 @@ async def lifespan(app):
         except Exception as _d1_warm_err:
             logger.warning(f"D1 cache warm-up failed (non-blocking): {type(_d1_warm_err).__name__}: {str(_d1_warm_err)[:200]}")
 
+        # Task #10 — pull bilingual topic synonyms from the syllabus
+        # graph so the semantic cache fingerprint can collapse
+        # paraphrased EN/AS variants onto a single KV key. Best-effort:
+        # built-in seed map keeps the canonical CI pairs working when
+        # D1 / Mongo are unavailable.
+        try:
+            from cache_fingerprint import sync_synonyms_from_d1 as _fp_sync
+            _n = await _fp_sync(db)
+            logger.info("cache_fingerprint synonym sync registered %d aliases", _n)
+        except Exception as _fp_err:
+            logger.warning(
+                "cache_fingerprint synonym sync failed (non-blocking): %s: %s",
+                type(_fp_err).__name__, str(_fp_err)[:200],
+            )
+
     try:
         if _is_leader:
             # Task #332 — cron heartbeat collection (TTL + lookup

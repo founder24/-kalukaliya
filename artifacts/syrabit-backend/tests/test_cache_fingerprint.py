@@ -182,6 +182,20 @@ def test_render_deterministic_template_unknown_query_type_returns_none():
     assert _render_deterministic_template("freeform", {"x": 1}) is None
 
 
+def test_format_content_eligible_query_type_without_template_data_raises():
+    """V4 §12 — `format_content` must fail loud when caller declares
+    a materialization-eligible `query_type` but omits `template_data`,
+    instead of silently degrading to LLM polish."""
+    import asyncio
+    import pytest
+    from content_formatter import format_content, DeterministicTemplateError
+    with pytest.raises(DeterministicTemplateError):
+        asyncio.run(format_content(
+            "ignored", style="markdown", lang="en", max_tokens=64,
+            query_type="definition",  # eligible, no template_data
+        ))
+
+
 def test_render_deterministic_template_missing_placeholder_raises():
     """V4 §12 — fail loud when an eligible deterministic render cannot
     be completed, instead of silently degrading to Vertex / Workers-AI."""

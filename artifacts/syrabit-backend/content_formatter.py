@@ -545,22 +545,35 @@ async def format_content(
     t0 = time.perf_counter()
 
     # Task #10 / blueprint #573 — deterministic-template short-circuit.
-    # When the caller passes a materialization-eligible ``query_type``
-    # AND a ``template_data`` dict that satisfies every placeholder,
-    # we render the template directly and skip the LLM dispatch entirely.
-    # ``formatted_by="deterministic_template"`` makes the audit field
-    # explicit so downstream stats can separate template-rendered output
-    # from Vertex / Workers-AI polish.
-    if query_type and query_type in _MATERIALIZATION_QUERY_TYPES and template_data:
+    # When the caller declares a materialization-eligible ``query_type``,
+    # we render the deterministic template and skip the LLM dispatch
+    # entirely. ``formatted_by="deterministic_template"`` makes the
+    # audit field explicit so downstream stats can separate
+    # template-rendered output from Vertex / Workers-AI polish.
+    #
+    # V4 §12 — if ``query_type`` is eligible but ``template_data`` is
+    # missing or the render fails, we fail loud
+    # (``DeterministicTemplateError``) instead of silently degrading
+    # into the LLM polish path. Producers MUST supply the structured
+    # template_data for every materialization-eligible call; the
+    # absence of it is a programming error worth surfacing.
+    if query_type and query_type in _MATERIALIZATION_QUERY_TYPES:
+        if not template_data:
+            raise DeterministicTemplateError(
+                f"format_content: query_type={query_type!r} requires template_data; "
+                "silent fallback to LLM polish is forbidden by V4 §12."
+            )
         rendered = _render_deterministic_template(query_type, template_data)
-        if rendered is not None:
-            duration_ms = int((time.perf_counter() - t0) * 1000)
-            return {
-                "text": rendered,
-                "formatted_by": "deterministic_template",
-                "duration_ms": duration_ms,
-                "trace_id": trace_id,
-            }
+        # ``rendered is None`` only for non-eligible query_types, which
+        # we already guarded above; an eligible-but-failed render
+        # raises rather than returns None.
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        return {
+            "text": rendered,
+            "formatted_by": "deterministic_template",
+            "duration_ms": duration_ms,
+            "trace_id": trace_id,
+        }
 
     if not text or not str(text).strip():
         return {
@@ -607,6 +620,20 @@ async def format_content(
     # `ai_input_cache` reuses the canonical-JSON hash logic.
     _cache_msgs = [{"role": "user", "content": f"{style}|{lang}|{text}"}]
     _cache_model = f"content_formatter:{style}:{lang}"
+    # Task #10 — compute the semantic fingerprint of the formatter
+    # input so paraphrased / bilingual variants of the same source
+    # text collapse onto a single cache entry. ``query_type``-aware
+    # fold ensures a "definition" formatter call cannot share a key
+    # with an "mcq" formatter call even when the topic is identical.
+    _fp: "str | None" = None
+    try:
+        from cache_fingerprint import fingerprint as _fp_compute
+        _fp = _fp_compute(
+            text, language=lang, query_type=query_type or "formatter",
+        )
+    except Exception as e:
+        logger.debug("[content-format] fingerprint compute skipped: %s", e)
+        _fp = None
     try:
         from ai_input_cache import (
             get_response as _aic_get,
@@ -623,6 +650,7 @@ async def format_content(
             content_type="formatter",
             template_version=f"content_formatter_v1:{style}:{lang}",
             normalize_text=True,
+            fingerprint=_fp,
         )
         if _cached:
             duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -677,6 +705,7 @@ async def format_content(
                 content_type="formatter",
                 template_version=f"content_formatter_v1:{style}:{lang}",
                 normalize_text=True,
+                fingerprint=_fp,
             )
         except Exception:
             pass

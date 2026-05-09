@@ -358,11 +358,94 @@ def dual_read_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+# ── D1-backed synonym sync (Task #10 §6 — syllabus graph lookup) ─────
+# Reads the ``syllabus_topic_synonyms`` table out of the D1 mirror
+# (Mongo fallback via the existing ``d1_mirror.read_with_fallback``
+# helper) and feeds every row into the runtime synonym layer. The
+# table contract is a single row per canonical topic with English /
+# Assamese aliases:
+#
+#     {
+#       "canonical_topic": "photosynthesis",
+#       "topic_en": "photosynthesis",
+#       "topic_as": "ফটোসিন্থেসিস",
+#       "aliases_en": ["photo synthesis", "photo-synthesis"],
+#       "aliases_as": ["সালোকসংশ্লেষণ"],
+#     }
+#
+# The function is best-effort — a D1 outage / Mongo outage / missing
+# table just yields zero rows so the canonical "fail loud" rule does
+# not apply (the built-in seed map keeps the canonical CI pairs
+# working). Callers that demand fresh data can inspect the returned
+# row count and decide.
+async def sync_synonyms_from_d1(db=None) -> int:
+    """Pull syllabus topic synonyms from D1 (Mongo fallback) and
+    register them into the runtime synonym layer.
+
+    Returns the number of (language, alias → canonical) pairs that
+    were registered. Idempotent.
+    """
+    try:
+        from d1_mirror import read_with_fallback as _d1_read
+    except Exception as e:
+        logger.debug("[cache_fingerprint] d1_mirror unavailable: %s", e)
+        return 0
+
+    async def _mongo_loader():
+        if db is None:
+            return []
+        try:
+            cursor = db.syllabus_topic_synonyms.find({}, {"_id": 0})
+            return await cursor.to_list(10000)
+        except Exception as e:
+            logger.warning("[cache_fingerprint] mongo fallback failed: %s", e)
+            return []
+
+    try:
+        rows = await _d1_read(
+            "syllabus_topic_synonyms", "all", "1", _mongo_loader,
+        )
+    except Exception as e:
+        logger.warning("[cache_fingerprint] d1 sync error: %s", e)
+        return 0
+    if not isinstance(rows, list):
+        return 0
+    registered = 0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        canonical = str(
+            r.get("canonical_topic") or r.get("topic_en") or ""
+        ).strip().lower()
+        if not canonical:
+            continue
+        en_aliases: list[str] = []
+        if r.get("topic_en"):
+            en_aliases.append(str(r["topic_en"]))
+        en_aliases.extend(str(a) for a in (r.get("aliases_en") or []) if a)
+        as_aliases: list[str] = []
+        if r.get("topic_as"):
+            as_aliases.append(str(r["topic_as"]))
+        as_aliases.extend(str(a) for a in (r.get("aliases_as") or []) if a)
+        for raw in en_aliases:
+            register_synonym("en", raw, canonical)
+            registered += 1
+        for raw in as_aliases:
+            register_synonym("as", raw, canonical)
+            registered += 1
+    if registered:
+        logger.info(
+            "[cache_fingerprint] D1 synonym sync registered %d aliases", registered,
+        )
+    return registered
+
+
 __all__ = [
     "fingerprint",
     "canonical_form",
     "resolve_topic_synonym",
     "register_synonym",
+    "sync_synonyms_from_d1",
     "dual_read_enabled",
     "QUERY_VERBS",
     "reset_runtime_synonyms_for_tests",
