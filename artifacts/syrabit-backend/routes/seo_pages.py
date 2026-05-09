@@ -30,7 +30,6 @@ The SPA continues to serve the rich interactive view at the existing
 """
 from __future__ import annotations
 
-import html as _html
 import json
 import logging
 import re
@@ -87,31 +86,10 @@ TYPE_LABEL: Dict[str, str] = {
 # Page-types that emit a `Quiz` JSON-LD block.
 QUIZ_TYPES = {"mcqs", "pyqs"}
 
-# Mapping a Task #11 page-type to its underlying ``seo_pages.page_type``
-# row in MongoDB. Only used when materialised content is available;
-# missing rows still render the H1/H2/Quick-Answer/JSON-LD scaffold so
-# the URL is indexable from day one.
-PAGE_TYPE_TO_DB: Dict[str, str] = {
-    "notes":       "notes",
-    "mcqs":        "mcqs",
-    "pyqs":        "important-questions",
-    "definitions": "definition",
-    "summary":     "notes",       # summary derived from notes content
-    "flashcards":  "flashcard",
-    "revision":    "notes",       # revision packs derived from notes
-}
-
-GEO_METAS = (
-    '<meta name="geo.region" content="IN-AS"/>'
-    '<meta name="geo.placename" content="Assam, India"/>'
-    '<meta name="geo.position" content="26.2006;92.9376"/>'
-    '<meta name="ICBM" content="26.2006, 92.9376"/>'
-)
-
-
-def _e(s: object) -> str:
-    """Shorthand HTML escape that tolerates None / non-string."""
-    return _html.escape("" if s is None else str(s), quote=True)
+# NOTE: legacy helpers ``PAGE_TYPE_TO_DB``, ``GEO_METAS`` and ``_e``
+# were removed after the Jinja2 migration — geo tags + HTML escaping
+# now live entirely in ``templates/seo/chapter.html.j2`` and
+# materialised-content lookups live in their own helpers below.
 
 
 def _truncate_meta(text: str, *, limit: int = 160) -> str:
