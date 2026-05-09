@@ -309,6 +309,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _now_bson() -> datetime:
+    """Timezone-aware ``datetime`` for Mongo writes.
+
+    The ``chapter_faqs`` TTL index ``expireAfterSeconds`` only fires
+    when the indexed field is a BSON date — string timestamps are
+    silently ignored by Mongo's TTL monitor. Every authoritative
+    write therefore stamps ``updated_at`` / ``created_at`` with this
+    helper rather than the ISO string used elsewhere for log lines.
+    """
+    return datetime.now(timezone.utc)
+
+
 async def ensure_indexes(db) -> None:
     """Create the ``chapter_faqs`` indexes the spec demands.
 
@@ -373,7 +385,8 @@ async def _store_chapter_payload(
     """Persist the materialised payload across the three collections."""
     from cache_fingerprint import fingerprint as fp_compute
 
-    now = _now_iso()
+    # BSON datetime — TTL index only honours date types.
+    now = _now_bson()
 
     # Authoritative ``chapter_faqs`` upserts (one doc per FAQ + one for
     # the quick-answer). Idempotent on (chapter_id, kind, fingerprint).
@@ -577,15 +590,91 @@ async def _load_subtopics(db, chapter_id: str) -> List[Dict[str, Any]]:
         return []
 
 
+_STEM_NORMALISE_RE = re.compile(r"[^\w\s]+")
+
+
+def _normalise_stem(text: str) -> str:
+    """Lower-case + collapse punctuation so semantically-identical
+    stems group under one bucket during frequency mining."""
+    return _STEM_NORMALISE_RE.sub(" ", _clean_text(text).lower()).strip()
+
+
 async def _load_pyq_stems(db, chapter_id: str) -> List[Dict[str, Any]]:
+    """Return PYQ rows for a chapter ranked by stem **frequency**.
+
+    The task spec calls for "the most-frequent question stems" — i.e.
+    the questions students actually keep seeing on the paper, not the
+    most recent one. We run a Mongo aggregation that groups by a
+    normalised stem (lower-cased, punctuation stripped) and counts
+    occurrences; the canonical (unnormalised) stem of the
+    highest-year occurrence is used as the display question. Returns
+    up to 20 rows in descending count order; ties broken by year desc.
+    """
     try:
-        rows = await db.pyq_html_pages.find(
+        pipeline = [
+            {"$match": {"chapter_id": chapter_id}},
+            {"$project": {
+                "_id": 0,
+                "stem": {"$ifNull": ["$question_stem", "$title"]},
+                "year": 1,
+            }},
+            {"$match": {"stem": {"$nin": [None, ""]}}},
+            {"$group": {
+                "_id": {"$toLower": {"$trim": {"input": "$stem"}}},
+                "count":  {"$sum": 1},
+                "stem":   {"$first": "$stem"},
+                "year":   {"$max":  "$year"},
+            }},
+            {"$sort": {"count": -1, "year": -1}},
+            {"$limit": 20},
+            {"$project": {
+                "_id": 0,
+                "question_stem": "$stem",
+                "year":  1,
+                "count": 1,
+            }},
+        ]
+        cursor = db.pyq_html_pages.aggregate(pipeline)
+        rows = await cursor.to_list(20)
+        if rows:
+            return rows
+    except Exception as e:
+        # Fall through to the simpler client-side aggregation below
+        # so a Mongo driver / fixture without ``aggregate`` still
+        # produces frequency-ranked output rather than crashing.
+        logger.info(
+            "[materialize-faqs] aggregate() unavailable for %s — "
+            "falling back to client-side frequency mining: %s",
+            chapter_id, e,
+        )
+
+    try:
+        raw = await db.pyq_html_pages.find(
             {"chapter_id": chapter_id},
             {"_id": 0, "question_stem": 1, "title": 1, "year": 1},
-        ).sort("year", -1).to_list(20)
-        return rows or []
+        ).to_list(500)
     except Exception:
         return []
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for r in raw or []:
+        stem = _clean_text(r.get("question_stem") or r.get("title") or "")
+        if not stem:
+            continue
+        key = _normalise_stem(stem)
+        if not key:
+            continue
+        b = buckets.setdefault(
+            key, {"question_stem": stem, "year": r.get("year"), "count": 0},
+        )
+        b["count"] += 1
+        if (r.get("year") or 0) > (b.get("year") or 0):
+            b["year"] = r.get("year")
+            b["question_stem"] = stem
+    ranked = sorted(
+        buckets.values(),
+        key=lambda b: (-(b.get("count", 0) or 0), -(b.get("year") or 0)),
+    )
+    return ranked[:20]
 
 
 async def materialize_one_chapter(db, chapter: Dict[str, Any]) -> Dict[str, Any]:

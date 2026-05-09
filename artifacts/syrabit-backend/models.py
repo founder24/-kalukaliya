@@ -2,6 +2,8 @@
 Syrabit.ai — Pydantic request/response models.
 Imported by server.py and any future router modules.
 """
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import List, Literal, Optional
 
@@ -297,3 +299,62 @@ class ErrorOut(BaseModel):
     status: int
     detail: str
     path: str
+
+
+# ── Task #12 — AEO Answer-Card + FAQ materializer (chapter_faqs collection) ──
+#
+# Schema for the authoritative ``db.chapter_faqs`` collection written
+# by ``aca_jobs/materialize_chapter_faqs.py``. Two ``kind`` discriminator
+# values are persisted per chapter:
+#
+#   * ``quick_answer`` — the 40–60 word AEO Answer-Card body. Exactly
+#     one row per chapter (the per-chapter fingerprint is stable).
+#   * ``faq`` — one row per Q→A pair. The job writes 5–10 of these per
+#     chapter, idempotent on ``(chapter_id, kind, fingerprint)``.
+#
+# Index contract (created at job start by
+# ``aca_jobs.materialize_chapter_faqs.ensure_indexes``):
+#   * Unique index on ``(chapter_id, kind, fingerprint)`` so the
+#     upsert key is collision-safe across re-runs.
+#   * TTL index on ``updated_at`` with ``expireAfterSeconds = 90 * 86400``.
+#     IMPORTANT: ``updated_at`` MUST be a BSON datetime (not an ISO
+#     string) — Mongo's TTL monitor silently ignores string values,
+#     and the 90-day auto-expiry would otherwise never fire.
+#
+# This Pydantic model is the single source of truth for the
+# document shape; the job and any future read-side code should
+# import it rather than restate the field set.
+
+ChapterFaqKind = Literal["faq", "quick_answer"]
+
+
+class ChapterFaqDoc(BaseModel):
+    """One document in ``db.chapter_faqs``.
+
+    Mongo TTL on ``updated_at`` requires the BSON-date type, so the
+    field is typed as ``datetime`` (not ``str``). The ``question`` and
+    ``position`` fields are only populated for ``kind="faq"`` rows;
+    quick-answer rows omit them.
+    """
+    chapter_id: str
+    kind: ChapterFaqKind
+    fingerprint: str  # 32-hex output of `cache_fingerprint.fingerprint(...)`
+    answer: str
+    rendered: Optional[str] = None
+    formatted_by: str = "deterministic_template"
+
+    # Quick-answer-only context (denormalised so admin tooling can
+    # render the row without re-walking the syllabus graph).
+    chapter_title: Optional[str] = None
+    subject_name: Optional[str] = None
+    board_name: Optional[str] = None
+    class_name: Optional[str] = None
+
+    # FAQ-only fields.
+    question: Optional[str] = None
+    source: Optional[str] = None  # one of: "syllabus" | "pyq" | "evergreen"
+    position: Optional[int] = None
+
+    # BSON dates — required for the TTL index to fire.
+    created_at: datetime
+    updated_at: datetime
