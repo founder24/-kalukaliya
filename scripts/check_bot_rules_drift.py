@@ -216,17 +216,9 @@ def _check_one(
     return errors
 
 
-# ---------------------------------------------------------------------------
-# rDNS suffix parity (round-14 reviewer follow-up).
-# ---------------------------------------------------------------------------
-# The worker's `BOT_RDNS_SUFFIXES` map duplicates the `rdns_suffixes`
-# metadata from `infra/bot-rules.yaml` for every verified-bot family.
-# Drift here is silent: a YAML edit adds a new family with rdns
-# suffixes but the worker keeps the old map, so FCrDNS promotion
-# never fires for the new family. This check enforces token-level
-# parity (every YAML token with a non-empty rdns_suffixes list MUST
-# appear in the worker's BOT_RDNS_SUFFIXES map, and every suffix in
-# the YAML MUST appear in the worker's suffix list for that family).
+# Enforce parity between YAML `rdns_suffixes` and the worker's
+# BOT_RDNS_SUFFIXES map: every YAML token with non-empty rdns_suffixes
+# must have a matching family in the worker covering all listed suffixes.
 
 _WORKER_PATH = ROOT / "workers" / "edge-proxy" / "src" / "index.ts"
 _RDNS_BLOCK = re.compile(

@@ -185,7 +185,7 @@ def render_manifest(tokens: dict[str, list[str]]) -> str:
     edit MUST produce a regenerated artifact AND regenerated runtime
     regex literals in the same commit, otherwise CI fails.
 
-    Codegen model — IN-PLACE SOURCE OVERWRITE (round-11 reviewer
+    Codegen model — IN-PLACE SOURCE OVERWRITE (per reviewer
     requirement). ``--apply`` walks ``APPLY_SPECS`` and rewrites the
     body of each runtime regex literal from YAML buckets +
     per-target benign extras (declared in ``APPLY_SPECS`` itself,
@@ -210,7 +210,7 @@ def render_manifest(tokens: dict[str, list[str]]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# In-place codegen (round-11 requirement).
+# In-place codegen.
 # ---------------------------------------------------------------------------
 # Each spec rewrites the body of one runtime regex literal. The body is
 # computed as the concatenation, in this order, of:

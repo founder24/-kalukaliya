@@ -46,12 +46,7 @@ router = APIRouter()
 # startup doesn't pay the parse cost.
 _RULES_PATH = Path(__file__).resolve().parents[3] / "infra" / "bot-rules.yaml"
 
-# Wire the registry-loader import path ONCE at module init (round-13
-# reviewer suggestion). Repeated `sys.path.insert` on every request was
-# both a perf wart (O(N) prefix scan on every import lookup) and a
-# subtle mutability hazard. The path is idempotent — re-importing the
-# module (e.g. under reload) re-runs this block but stays a single
-# entry because we check before insert.
+# Wire the registry-loader import path once at module init (idempotent).
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)

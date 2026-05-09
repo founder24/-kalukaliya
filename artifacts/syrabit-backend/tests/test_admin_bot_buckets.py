@@ -84,12 +84,9 @@ async def test_bot_buckets_aggregation_with_mocked_hits(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bot_buckets_rdns_counters_populate_when_redis_mirrors(monkeypatch):
-    """Round-14 reviewer follow-up: when the rDNS Redis mirror has
-    counters for `bot:rdns_ctr:<family>:{verified,miss}`, the admin
+    """When the rDNS Redis mirror has per-family counters, the admin
     health route's `rdns_verification.per_family` block must surface
-    non-zero values per family AND a global `total.miss_rate`. Catches
-    the regression where the mirror wiring is silently broken and the
-    admin tile shows a flat 0% miss-rate forever."""
+    non-zero values per family + a global `total.miss_rate`."""
     from routes import admin_observability_bot_buckets as mod
     import cf_bot_report
 

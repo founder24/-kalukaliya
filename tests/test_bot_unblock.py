@@ -291,6 +291,65 @@ def test_forward_confirmed_rdns_implementation():
     )
 
 
+def test_verified_bot_fast_path_classification_contract():
+    """Deterministic guard for the verified-bot fast path.
+
+    Asserts (against the worker source regex literals — no network)
+    that verified-search UAs match SEARCH_BOT_UA but NOT AI_BOT_UA,
+    citation-AI UAs match SEARCH_BOT_UA + CRITICAL_BOT_UA but NOT
+    AI_BOT_UA, and training-AI UAs match AI_BOT_UA (hard 403).
+    """
+    src = (REPO_ROOT / "workers" / "edge-proxy" / "src" / "index.ts").read_text(encoding="utf-8")
+
+    def _extract(name: str) -> re.Pattern[str]:
+        m = re.search(rf"const {name} = /([^/\n]+)/i;", src)
+        assert m, f"{name} regex literal not found in worker source"
+        return re.compile(m.group(1), re.IGNORECASE)
+
+    SEARCH = _extract("SEARCH_BOT_UA")
+    AI = _extract("AI_BOT_UA")
+    CRITICAL = _extract("CRITICAL_BOT_UA")
+
+    verified_search = [
+        "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+        "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)",
+        "Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Applebot/0.1",
+        "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+        "Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)",
+    ]
+    citation_ai = [
+        "Mozilla/5.0 AppleWebKit/537.36 (compatible; PerplexityBot/1.0)",
+        "Mozilla/5.0 (compatible; Perplexity-User/1.0)",
+        "Mozilla/5.0 AppleWebKit/537.36 (compatible; OAI-SearchBot/1.0)",
+        "Mozilla/5.0 (compatible; ChatGPT-User/1.0)",
+    ]
+    training_ai = [
+        "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.0)",
+        "Mozilla/5.0 AppleWebKit/537.36 (compatible; ClaudeBot/1.0)",
+        "anthropic-ai/0.1",
+        "CCBot/2.0 (https://commoncrawl.org/faq/)",
+        "Mozilla/5.0 (compatible; Bytespider; spider-feedback@bytedance.com)",
+        "Mozilla/5.0 (compatible; Amazonbot/0.1)",
+        "Mozilla/5.0 AppleWebKit/537.36 (compatible; Meta-ExternalAgent/1.1)",
+    ]
+
+    for ua in verified_search:
+        assert SEARCH.search(ua), f"verified-search UA must match SEARCH_BOT_UA: {ua!r}"
+        assert not AI.search(ua), f"verified-search UA leaked into AI_BOT_UA: {ua!r}"
+
+    for ua in citation_ai:
+        assert SEARCH.search(ua), f"citation-AI UA must match SEARCH_BOT_UA: {ua!r}"
+        assert CRITICAL.search(ua), f"citation-AI UA must be CRITICAL: {ua!r}"
+        assert not AI.search(ua), f"citation-AI UA leaked into AI_BOT_UA: {ua!r}"
+
+    for ua in training_ai:
+        assert AI.search(ua), f"training-AI UA must match AI_BOT_UA (hard 403): {ua!r}"
+
+    for ua in ("Googlebot/2.1", "PerplexityBot/1.0", "Bingbot/2.0", "ChatGPT-User/1.0"):
+        assert CRITICAL.search(ua), f"critical bot must be in CRITICAL_BOT_UA: {ua!r}"
+
+
 def test_drift_check_wired_to_ci():
     """The drift checker must run as a CI gate, not just an ad-hoc script."""
     wf = REPO_ROOT / ".github" / "workflows" / "bot-rules-drift.yml"
