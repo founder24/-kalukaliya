@@ -77,15 +77,21 @@ jobs:
       - name: Live golden bot-unblock probe (gated)
         # Runs the live-gated subset of `tests/test_bot_unblock.py`
         # against a deployed preview when `BOT_UNBLOCK_TEST_URL` is
-        # set in repo secrets. The 4 live tests assert: googlebot &
-        # perplexitybot get prerendered HTML (h1 + schema.org JSON-LD),
-        # gptbot is hard-403'd, and a Googlebot UA from a non-Google
-        # IP is hard-403'd with `X-Bot-Verify: spoofed`. When the
-        # secret is unset the tests skip cleanly so this step never
-        # blocks PRs from forks or the initial drift gate.
-        if: ${{ env.BOT_UNBLOCK_TEST_URL != '' }}
+        # set in repo secrets. The live tests assert: perplexitybot
+        # gets prerendered HTML (h1 + schema.org JSON-LD), gptbot is
+        # hard-403'd, and a Googlebot UA from a non-Google IP is
+        # hard-403'd with `X-Bot-Verify: spoofed` (RUNNER_MODE=spoof,
+        # the default — matches GitHub-hosted runners). The
+        # `verified` mode (Googlebot expected 200 + prerender) is
+        # mutually exclusive and requires a CF-trusted egress; route
+        # it through a separately-configured job if needed.
+        # NOTE: gating the step on `secrets.X` directly because
+        # `env.X` would only be set inside this same step (round-11
+        # review fix).
+        if: ${{ secrets.BOT_UNBLOCK_TEST_URL != '' }}
         env:
           BOT_UNBLOCK_TEST_URL: ${{ secrets.BOT_UNBLOCK_TEST_URL }}
+          BOT_UNBLOCK_RUNNER_MODE: spoof
         run: |
           set -euo pipefail
           python3 -m pip install --quiet pytest httpx

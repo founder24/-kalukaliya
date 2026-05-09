@@ -31,6 +31,25 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import gen_bot_regex  # noqa: E402
 
 LIVE_URL = os.environ.get("BOT_UNBLOCK_TEST_URL")
+# The Googlebot live probes split into two MUTUALLY EXCLUSIVE modes
+# because they make opposite assertions about the same UA from
+# different network vantage points (round-11 review comment):
+#
+#   * BOT_UNBLOCK_RUNNER_MODE=verified — runner egresses from a
+#     Cloudflare-trusted vantage (e.g. through a CF Tunnel that
+#     surfaces a Google-owned PTR, or in a synthetic-monitor location
+#     CF treats as a verified bot). Expect 200 + prerender for
+#     Googlebot UA.
+#
+#   * BOT_UNBLOCK_RUNNER_MODE=spoof — runner egresses from any other
+#     IP (the GitHub Actions default). Expect a hard-403 with
+#     `X-Bot-Verify: spoofed` for Googlebot UA — the worker's
+#     CRITICAL_BOT_UA branch firing.
+#
+# Either mode is valid for CI; running both in one pipeline requires
+# two jobs with different egress configurations. The default mode is
+# `spoof` because that matches the unmodified GitHub-hosted runner.
+RUNNER_MODE = os.environ.get("BOT_UNBLOCK_RUNNER_MODE", "spoof").lower()
 
 GOOGLEBOT_UA = (
     "Mozilla/5.0 (compatible; Googlebot/2.1; "
@@ -351,8 +370,12 @@ def _assert_prerendered(html: str, ua: str) -> None:
 
 
 @pytest.mark.skipif(
-    not LIVE_URL,
-    reason="set BOT_UNBLOCK_TEST_URL to enable live verified-bot probe",
+    not LIVE_URL or RUNNER_MODE != "verified",
+    reason=(
+        "set BOT_UNBLOCK_TEST_URL and BOT_UNBLOCK_RUNNER_MODE=verified "
+        "(runner must egress from a Cloudflare-trusted vantage) to "
+        "enable the verified-bot probe"
+    ),
 )
 def test_live_googlebot_not_blocked_and_prerendered():
     """A request from a Googlebot UA must NOT receive a 4xx that would
@@ -403,8 +426,12 @@ def test_live_gptbot_blocked():
 
 
 @pytest.mark.skipif(
-    not LIVE_URL,
-    reason="set BOT_UNBLOCK_TEST_URL to enable live spoofed-bot probe",
+    not LIVE_URL or RUNNER_MODE != "spoof",
+    reason=(
+        "set BOT_UNBLOCK_TEST_URL and BOT_UNBLOCK_RUNNER_MODE=spoof "
+        "(runner must egress from a non-Google IP) to enable the "
+        "spoofed-bot probe — mutually exclusive with the verified probe"
+    ),
 )
 def test_live_spoofed_googlebot_hard_403():
     """A Googlebot UA from a non-Google IP (the test runner) MUST get
