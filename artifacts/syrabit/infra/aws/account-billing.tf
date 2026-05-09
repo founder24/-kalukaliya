@@ -31,6 +31,14 @@ locals {
 # Activate balance is $1 000; budget is intentionally low so any drift trips
 # the alarm long before the credit pool is at risk.
 
+# Thresholds 60 / 80 / 95 mirror the founder-locked degradation ladder
+# (`cost_caps.DEGRADATION_PCT_PAUSE_BATCH` / `_VOICE_OFF` / `_FREE_503`)
+# so an AWS-side budget breach lands in the same operator inbox as the
+# in-app cost-cap trip — see Task #4 and the "Cloud budget mirror"
+# gotcha in the root `replit.md`. Email goes to `lz_ops_email`; SNS
+# topic notification feeds the existing `syrabit-ops-alerts` Slack
+# subscription so the on-call sees both channels light up at once.
+
 resource "aws_budgets_budget" "monthly_cost" {
   name              = "${local.lz_project}-${local.lz_env}-monthly"
   budget_type       = "COST"
@@ -39,20 +47,44 @@ resource "aws_budgets_budget" "monthly_cost" {
   time_unit         = "MONTHLY"
   time_period_start = "2026-05-01_00:00"
 
+  # 60 % — pause batch jobs (Meter §J first ladder rung).
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 50
+    threshold                  = 60
     threshold_type             = "PERCENTAGE"
     notification_type          = "ACTUAL"
     subscriber_email_addresses = [local.lz_ops_email]
+    subscriber_sns_topic_arns  = [aws_sns_topic.ops_alerts.arn]
   }
 
+  # 80 % — voice off.
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [local.lz_ops_email]
+    subscriber_sns_topic_arns  = [aws_sns_topic.ops_alerts.arn]
+  }
+
+  # 95 % — free tier 503.
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 95
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [local.lz_ops_email]
+    subscriber_sns_topic_arns  = [aws_sns_topic.ops_alerts.arn]
+  }
+
+  # Forecast 80 % — early warning before the actual ladder fires.
   notification {
     comparison_operator        = "GREATER_THAN"
     threshold                  = 80
     threshold_type             = "PERCENTAGE"
     notification_type          = "FORECASTED"
     subscriber_email_addresses = [local.lz_ops_email]
+    subscriber_sns_topic_arns  = [aws_sns_topic.ops_alerts.arn]
   }
 }
 

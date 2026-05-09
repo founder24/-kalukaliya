@@ -439,3 +439,27 @@ If this landing zone ever has to be torn down:
    account doesn't leave a high-reputation IP unmanaged.
 4. Revoke the GitHub OIDC role **before** deleting it (so any in-flight
    workflow run fails fast instead of silently using a stale role).
+
+## 11. Explore AWS credit claim — 2026-05-09 (Task #4)
+
+One-shot $100 credit claim via the AWS console **Explore AWS** promo
+(5 activities × $20). Two resources stay behind ("KEEP"); the other
+three are claimed and immediately destroyed so they cannot bill
+against the credit pool.
+
+| Activity | Disposition | Code / state |
+| --- | --- | --- |
+| 1. Monthly cost budget (60 / 80 / 95 %)        | **KEEP**          | [`infra/aws/account-billing.tf`](../../infra/aws/account-billing.tf) — budget `syrabit-prod-monthly`; thresholds mirror `cost_caps.DEGRADATION_PCT_*`; SNS recipient = `aws_sns_topic.ops_alerts`. |
+| 2. Lambda + Function URL (`syrabit-explore-credit-hello`) | **KEEP**          | [`infra/aws/lambda-explore-credit-hello.tf`](../../infra/aws/lambda-explore-credit-hello.tf) + [`lambda-src/explore_credit_hello/handler.py`](../../infra/aws/lambda-src/explore_credit_hello/handler.py). ARN: `<FILL_IN_AFTER_APPLY>`. URL: `<FILL_IN_AFTER_APPLY>`. **Not wired into any production code path** (canonical-delegation guard). |
+| 3. EC2 `t2.micro`                              | **CLAIM + DELETE** | Console-only. Tag `Name=syrabit-explore-throwaway`. Terminated + root EBS volume deleted. |
+| 4. Bedrock playground (Claude 3 Haiku, `us-east-1`) | **CLAIM ONLY (model access enabled, no production wiring)** | Forbidden in chat / Assamese / formatter / voice — `infra/architecture-locked-2026.md` §5.1 keeps Vertex / Sarvam / Workers AI as the only approved providers. |
+| 5. Aurora PostgreSQL (`db.t3.medium`, single AZ) | **CLAIM + DELETE** | Console-only. Cluster + instance + manual snapshot all deleted; `Skip final snapshot` confirmed. |
+
+Step-by-step claim + verification procedure (including post-flight
+checks for $0 spend and absence of throwaway resources):
+[`aws-explore-credit-runbook.md`](aws-explore-credit-runbook.md).
+
+The two KEEP resources cost ~$0 / month at idle (Lambda has no
+provisioned concurrency; Function URL has no fixed price; Budget is
+free). Any drift trips the same SNS topic the rest of the landing
+zone alarms on.
