@@ -1,0 +1,31 @@
+Trim replit.md, extract decisions
+What & Why
+replit.md has grown to ~10k tokens, so the system flags it on every turn and re-loads the entire Architecture-decisions block (~7k tokens of historical task summaries) into the agent's context. Extracting that block into a dedicated docs/architecture/decisions.md and leaving short one-line summaries in replit.md cuts roughly 7k tokens off every future turn while preserving every fact (the long block is moved verbatim, not deleted).
+
+The threat model permits this: the Architecture block contains references and config keys but no secrets, passwords, or staff/admin credentials.
+
+Done looks like
+replit.md is roughly 1/3 of its current size — slim, fast to load, still complete on day-to-day "Run & Operate", "Where things live", "User preferences", and "Gotchas" sections.
+The "Architecture decisions" section in replit.md is replaced by a one-paragraph summary plus a link to docs/architecture/decisions.md.
+The "Gotchas" section keeps the founder-locks (token budgets, $100 cap, edge cache TTL) but moves the long historical narratives (K.2 cache scope, cache-effectiveness observability, etc.) into the same decisions doc under a ## Gotchas — extended notes section.
+docs/architecture/decisions.md is a new file containing the full extracted text verbatim, organized exactly as the current replit.md ordering, so nothing is lost or reworded.
+Architecture summary lines in the slimmed replit.md keep the founder-lock invariants explicit (no silent fallbacks, $100 cap, voice paywall, Sarvam=Assamese head, 1024-dim embedding) so a fresh agent reading only replit.md still respects them.
+Existing inbound links to replit.md continue to work (we don't rename or move it).
+Nothing in the running system changes — this is a docs-only edit, no code changes, no env changes, no workflow restarts needed.
+Out of scope
+Editing threat_model.md (already concise).
+Editing or moving the existing ADRs in docs/architecture/adr/ (0001-pg-to-mongo.md, 0003-canonical-strict-specialist-delegation.md).
+Editing infra/v4-locked-architecture.md or infra/four-cloud-delegation.md (those are already the linked sources of truth).
+Any code, config, secret, or workflow changes.
+Reorganizing or renaming sections in the extracted material — copy verbatim, then summarize.
+Steps
+Create docs/architecture/decisions.md — copy the full current "Architecture decisions" block out of replit.md verbatim into a new file with a short header explaining its origin and that replit.md now points here. Append an ## Extended Gotchas section that holds the long Gotchas narratives (K.2 deterministic cache scope, cache-effectiveness observability, and any other ≥3-line Gotcha entries).
+Slim replit.md — replace the long "Architecture decisions" block with a 1-line summary per decision (provider chain shape + the single load-bearing fact), followed by a "Full history & rationale: see docs/architecture/decisions.md" link line. Replace each multi-paragraph Gotcha that was extracted with a 1-line pointer to the same doc. Keep "Run & Operate", "Stack", "Where things live", "Product", "User preferences", and the short founder-lock Gotchas (token budgets, $100 cap, /api/me/quota TTL, OriginGate rotation, Pinecone dim, ACA Bicep) inline in replit.md.
+Verify size + completeness — confirm slimmed replit.md is under ~3k tokens, every fact in the original Architecture-decisions block is present in docs/architecture/decisions.md, and the founder-lock invariants (no silent fallbacks, $100 cap, voice paywall, Sarvam=Assamese head, 1024-dim) are still explicitly named in the slimmed replit.md so any agent reading only it still respects them.
+Relevant files
+replit.md
+docs/architecture/adr/0001-pg-to-mongo.md
+docs/architecture/adr/0003-canonical-strict-specialist-delegation.md
+infra/v4-locked-architecture.md
+infra/four-cloud-delegation.md
+threat_model.md
