@@ -86,26 +86,31 @@ async def admin_baseline_publish(
             status_code=400,
             detail="missing required field: report_date",
         )
-    started_at = payload.get("started_at") or datetime.now(tz=timezone.utc)
-    finished_at = payload.get("finished_at") or started_at
-    doc = {
-        "report_date":         report_date,
-        "started_at":          started_at,
-        "finished_at":         finished_at,
-        "duration_s":          float(payload.get("duration_s") or 0.0),
-        "public_base_url":     payload.get("public_base_url"),
-        "sampled_pages":       int(payload.get("sampled_pages") or 0),
-        "summary":             payload.get("summary") or {},
-        "pages":               payload.get("pages") or [],
-        "wow_delta_seo_score": payload.get("wow_delta_seo_score"),
-        "prior_started_at":    payload.get("prior_started_at"),
-        "task":                28,
-        "published_via":       "post",
+    # Round-2 reviewer fix: defensive merge — only $set fields the
+    # caller actually supplied. This protects the canonical doc that
+    # ``aca_jobs.seo_baseline.run_baseline_publish`` already wrote
+    # against a thin POST that would otherwise blank out
+    # ``summary`` / ``pages`` on a same-``report_date`` upsert.
+    SET_FIELDS = (
+        "started_at", "finished_at", "duration_s", "public_base_url",
+        "sampled_pages", "summary", "pages", "wow_delta_seo_score",
+        "prior_started_at",
+    )
+    set_doc: Dict[str, Any] = {
+        "report_date":   report_date,
+        "task":          28,
+        "published_via": "post",
+        "published_at":  datetime.now(tz=timezone.utc),
     }
+    for field in SET_FIELDS:
+        if field in payload and payload[field] is not None:
+            # Empty containers (e.g. `pages: []` from a degenerate
+            # run) ARE meaningful — treat them as explicit signals.
+            set_doc[field] = payload[field]
     try:
         await db.seo_baseline_runs.update_one(
             {"report_date": report_date},
-            {"$set": doc},
+            {"$set": set_doc},
             upsert=True,
         )
     except Exception as exc:

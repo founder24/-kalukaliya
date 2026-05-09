@@ -198,6 +198,62 @@ def test_same_day_rerun_compares_against_prior_week_not_self(monkeypatch):
     assert len(same_day_rows) == 1
 
 
+def test_run_returns_full_doc_for_post_publish(monkeypatch):
+    """Reviewer fix (round-2): the Lambda POSTs the function's
+    return value to /api/admin/seo/baseline-publish, so the return
+    must include the FULL persisted shape (summary + pages +
+    timestamps + base_url) — not just the compact summary.
+    """
+    db = _FakeDb()
+    monkeypatch.setattr(job, "_publish_metrics", lambda *a, **kw: None)
+    out = asyncio.run(job.run_baseline_publish(
+        db,
+        base_url="https://syrabit.ai",
+        boards=("ahsec",),
+        chapters_per_board=2,
+        page_type="notes",
+        runner=_make_runner(median=88, failures=1),
+    ))
+    # Convenience projections (back-compat).
+    assert out["median_seo_score"] == 88
+    assert out["wow_delta_seo_score"] is None
+    # Full persisted doc fields (the POST contract).
+    assert out["public_base_url"] == "https://syrabit.ai"
+    assert isinstance(out["summary"], dict) and out["summary"]["median_seo_score"] == 88
+    assert isinstance(out["pages"], list) and len(out["pages"]) == 2
+    assert "started_at" in out and "finished_at" in out
+
+
+def test_publish_endpoint_does_not_blank_canonical_doc(monkeypatch):
+    """Reviewer fix (round-2): a same-report_date POST that omits
+    `summary` / `pages` must NOT overwrite the canonical doc that
+    ``run_baseline_publish`` already wrote. Hardened by the
+    field-by-field merge in the route.
+    """
+    from routes import admin_seo_baseline as route
+
+    today_iso = datetime.now(tz=timezone.utc).date().isoformat()
+    seeded = {
+        "report_date":   today_iso,
+        "started_at":    datetime.now(tz=timezone.utc),
+        "summary":       {"median_seo_score": 91, "pages_with_failures": 0},
+        "pages":         [{"url": "/x", "page_type": "notes"}],
+        "sampled_pages": 1,
+    }
+    fake_db = _FakeDb(seeded=[seeded])
+    monkeypatch.setattr(route, "db", fake_db)
+
+    # Thin POST: only report_date — must NOT clear summary/pages.
+    asyncio.run(route.admin_baseline_publish(
+        payload={"report_date": today_iso},
+        admin={"sub": "test", "is_admin": True},
+    ))
+    persisted = fake_db.seo_baseline_runs.docs[0]
+    assert persisted["summary"]["median_seo_score"] == 91  # preserved
+    assert persisted["pages"] == [{"url": "/x", "page_type": "notes"}]
+    assert persisted["published_via"] == "post"  # merge applied
+
+
 def test_publish_metrics_emits_three_datapoints():
     """Exercises the boto3 stub path: median + failures + delta."""
     seen: dict = {}

@@ -239,12 +239,28 @@ async def run_baseline_publish(
 
     _publish_metrics(summary, wow_delta)
 
-    # Return shape the Lambda handler logs / tests assert on.
+    # Return the FULL persisted doc shape so the Lambda's POST to
+    # /api/admin/seo/baseline-publish hits the route with the same
+    # payload that was just written to Mongo (round-2 reviewer fix:
+    # posting only the compact summary caused the route to overwrite
+    # `pages=[]` and `summary={}` on the canonical doc). Tests still
+    # assert on the flat top-level keys; we project them alongside
+    # the full doc so existing assertions keep working.
     return {
+        # Top-level convenience projections (back-compat with
+        # earlier callers + the existing tests).
         "report_date":         report_date,
         "sampled_pages":       doc["sampled_pages"],
         "median_seo_score":    summary.get("median_seo_score"),
         "pages_with_failures": int(summary.get("pages_with_failures") or 0),
         "wow_delta_seo_score": wow_delta,
         "duration_s":          doc["duration_s"],
+        # Full persisted doc (canonical Mongo shape) — the Lambda
+        # forwards this to the admin POST so no field is lost.
+        "started_at":          started_at,
+        "finished_at":         finished_at,
+        "public_base_url":     base_url,
+        "summary":             summary,
+        "pages":               doc["pages"],
+        "prior_started_at":    prior_started_at,
     }
