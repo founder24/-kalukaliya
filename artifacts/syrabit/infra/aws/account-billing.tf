@@ -60,27 +60,29 @@ resource "aws_budgets_budget" "monthly_cost" {
 # Catches the case where Activate credits are silently being consumed faster
 # than the steady-state worker tier should burn them.
 
-resource "aws_ce_anomaly_monitor" "account_wide" {
-  name              = "${local.lz_project}-account-wide"
-  monitor_type      = "DIMENSIONAL"
-  monitor_dimension = "SERVICE"
-}
-
-resource "aws_ce_anomaly_subscription" "account_wide" {
-  name             = "${local.lz_project}-account-wide-anomaly"
-  monitor_arn_list = [aws_ce_anomaly_monitor.account_wide.arn]
-  frequency        = "DAILY"
-
-  threshold_expression {
-    dimension {
-      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
-      values        = ["25"]
-      match_options = ["GREATER_THAN_OR_EQUAL"]
-    }
-  }
-
-  subscriber {
-    type    = "EMAIL"
-    address = local.lz_ops_email
-  }
-}
+# NOTE (deferred 2026-05-09): AWS account already has a default
+# DIMENSIONAL+SERVICE Anomaly Monitor ("Default-Services-Monitor") which
+# uses up the per-account dimensional-monitor slot. Re-enable after
+# subscribing to the existing Default monitor or migrating it to TF.
+# resource "aws_ce_anomaly_monitor" "account_wide" {
+#   name              = "${local.lz_project}-account-wide"
+#   monitor_type      = "DIMENSIONAL"
+#   monitor_dimension = "SERVICE"
+# }
+#
+# resource "aws_ce_anomaly_subscription" "account_wide" {
+#   name             = "${local.lz_project}-account-wide-anomaly"
+#   monitor_arn_list = [aws_ce_anomaly_monitor.account_wide.arn]
+#   frequency        = "DAILY"
+#   threshold_expression {
+#     dimension {
+#       key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
+#       values        = ["25"]
+#       match_options = ["GREATER_THAN_OR_EQUAL"]
+#     }
+#   }
+#   subscriber {
+#     type    = "EMAIL"
+#     address = local.lz_ops_email
+#   }
+# }

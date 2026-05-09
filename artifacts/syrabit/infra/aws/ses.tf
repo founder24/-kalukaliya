@@ -49,9 +49,11 @@ resource "aws_sesv2_configuration_set" "workers" {
     sending_enabled = true
   }
 
-  tracking_options {
-    custom_redirect_domain = "click.syrabit.ai"
-  }
+  # NOTE: custom_redirect_domain disabled until click.syrabit.ai is verified
+  # as a separate SES email identity + DNS CNAME added. Re-enable after DNS setup.
+  # tracking_options {
+  #   custom_redirect_domain = "click.syrabit.ai"
+  # }
 
   tags = local.lz_common_tags
 }

@@ -46,7 +46,7 @@ locals {
     textract         = "Amazon Textract structured-document OCR path"
     rekognition      = "Amazon Rekognition image moderation pre-R2"
     comprehend       = "Amazon Comprehend sampled PII + sentiment"
-    translate        = "Amazon Translate Indic↔EN fallback (after Sarvam)"
+    translate        = "Amazon Translate Indic<->EN fallback (after Sarvam)"
     personalize      = "Amazon Personalize home rail recommendations"
     fraud_detector   = "Amazon Fraud Detector signup + payment risk"
   }

@@ -284,27 +284,31 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
 
 # ─── Cost Anomaly Detection ───────────────────────────────────────────────────
 
-resource "aws_ce_anomaly_monitor" "bedrock" {
-  provider         = aws.us_east_1
-  name             = "${local.lz_project}-bedrock-spend"
-  monitor_type     = "DIMENSIONAL"
-  monitor_dimension = "SERVICE"
-}
-
-resource "aws_ce_anomaly_subscription" "bedrock_alert" {
-  provider       = aws.us_east_1
-  name           = "${local.lz_project}-bedrock-anomaly-alert"
-  monitor_arn_list = [aws_ce_anomaly_monitor.bedrock.arn]
-  frequency      = "DAILY"
-  threshold_expression {
-    dimension {
-      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
-      values        = ["50"]
-      match_options = ["GREATER_THAN_OR_EQUAL"]
-    }
-  }
-  subscriber {
-    type    = "EMAIL"
-    address = "ops@syrabit.ai"
-  }
-}
+# NOTE (deferred 2026-05-09): blocked by AWS account dimensional-monitor
+# slot already used by Default-Services-Monitor (see account-billing.tf).
+# Re-architect as a CUSTOM monitor scoped to Bedrock service-arn filter,
+# or subscribe to the existing Default monitor with a Bedrock filter.
+# resource "aws_ce_anomaly_monitor" "bedrock" {
+#   provider         = aws.us_east_1
+#   name             = "${local.lz_project}-bedrock-spend"
+#   monitor_type     = "DIMENSIONAL"
+#   monitor_dimension = "SERVICE"
+# }
+#
+# resource "aws_ce_anomaly_subscription" "bedrock_alert" {
+#   provider       = aws.us_east_1
+#   name           = "${local.lz_project}-bedrock-anomaly-alert"
+#   monitor_arn_list = [aws_ce_anomaly_monitor.bedrock.arn]
+#   frequency      = "DAILY"
+#   threshold_expression {
+#     dimension {
+#       key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
+#       values        = ["50"]
+#       match_options = ["GREATER_THAN_OR_EQUAL"]
+#     }
+#   }
+#   subscriber {
+#     type    = "EMAIL"
+#     address = "ops@syrabit.ai"
+#   }
+# }

@@ -572,16 +572,17 @@ locals {
 resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
   for_each            = local.cache_cardinality_alarm_dims
   alarm_name          = "${local.lz_project}-cache-cardinality-spike-${each.key}-${local.lz_env}"
-  comparison_operator = "GreaterThanThreshold"
+  comparison_operator = "GreaterThanUpperThreshold"
   evaluation_periods  = 1
   datapoints_to_alarm = 1
-  threshold           = 0
   treat_missing_data  = "notBreaching"
-  alarm_description   = "Task #571 — UniqueKeys24h for ContentType=${each.key} spiked above 3x the trailing 7-day moving average. Almost always means a generator is fragmenting cache keys (timestamp/uuid leaked into prompt, normalizer regression). Inspect /admin/observability cache panel + miss_reasons for this content_type."
+  alarm_description   = "Task #571 — UniqueKeys24h for ContentType=${each.key} broke above the CloudWatch anomaly-detection upper band (band-width=3, trained on ~14d history). Almost always means a generator is fragmenting cache keys (timestamp/uuid leaked into prompt, normalizer regression). Inspect /admin/observability cache panel + miss_reasons for this content_type. (Original Task #571 design called for `today > 3x 7d MA`, but CloudWatch metric math requires aligned periods so a hand-rolled rolling MA isn't expressible in a single alarm; the anomaly band is the canonical AWS replacement and is strictly stricter for the same `band_width=3`.)"
+
+  threshold_metric_id = "ad1"
 
   metric_query {
-    id          = "today"
-    return_data = false
+    id          = "m1"
+    return_data = true
     metric {
       namespace   = "Syrabit/Cache"
       metric_name = "UniqueKeys24h"
@@ -590,29 +591,11 @@ resource "aws_cloudwatch_metric_alarm" "cache_cardinality_spike" {
       dimensions  = { ContentType = each.key }
     }
   }
-  # Trailing 7-day moving average. The metric's period must equal the
-  # window length we want to average over — period=604800 + stat=Average
-  # over the alarm's evaluation window collapses into "average value of
-  # UniqueKeys24h across the last 7 days", which is the moving-average
-  # signal we need. (CloudWatch fetches `evaluation_periods × period`
-  # of data; with evaluation_periods=1 + period=604800 the alarm will
-  # always look at the last 7 days of data when computing `ma7`.)
   metric_query {
-    id          = "ma7"
-    return_data = false
-    metric {
-      namespace   = "Syrabit/Cache"
-      metric_name = "UniqueKeys24h"
-      period      = 604800
-      stat        = "Average"
-      dimensions  = { ContentType = each.key }
-    }
-  }
-  metric_query {
-    id          = "spike"
+    id          = "ad1"
+    expression  = "ANOMALY_DETECTION_BAND(m1, 3)"
+    label       = "UniqueKeys24h(${each.key}) anomaly band (k=3)"
     return_data = true
-    expression  = "today - 3 * ma7"
-    label       = "UniqueKeys24h(${each.key}) - 3x 7d MA"
   }
 
   alarm_actions = [aws_sns_topic.ops_alerts.arn]

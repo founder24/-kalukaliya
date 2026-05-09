@@ -188,32 +188,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "cw_logs_archive" {
 #    that should transition to Deep Archive once they age out of the
 #    R2 hot mirror. Bucket creation is owned by `s3-to-r2-sync.tf`
 #    (input variable, may be pre-existing); we only add the lifecycle.
-resource "aws_s3_bucket_lifecycle_configuration" "finals_to_deep_archive" {
-  bucket = var.s3_finals_bucket
-
-  rule {
-    id     = "finals-180d-to-deep-archive"
-    status = "Enabled"
-
-    filter { prefix = "finals/" }
-
-    transition {
-      days          = 180
-      storage_class = "DEEP_ARCHIVE"
-    }
-
-    # Same 7-year DPDP / income-tax retention ceiling as the
-    # purpose-built compliance buckets above.
-    expiration {
-      days = 2555
-    }
-
-    noncurrent_version_transition {
-      noncurrent_days = 30
-      storage_class   = "DEEP_ARCHIVE"
-    }
-  }
-}
+# NOTE (deferred 2026-05-09): bucket `var.s3_finals_bucket` (default
+# syrabit-prod-finals-staging) is not yet provisioned in the new account.
+# Re-enable after the s3-to-r2-sync migration creates / imports the
+# bucket. The 3 purpose-built Glacier compliance buckets above (Razorpay
+# receipts / content snapshots / CW logs) already cover Task #551 7-yr
+# WORM retention; this rule is only for the additive cold-archive
+# optimization on the legacy `finals/` prefix.
+# resource "aws_s3_bucket_lifecycle_configuration" "finals_to_deep_archive" {
+#   bucket = var.s3_finals_bucket
+#   rule {
+#     id     = "finals-180d-to-deep-archive"
+#     status = "Enabled"
+#     filter { prefix = "finals/" }
+#     transition {
+#       days          = 180
+#       storage_class = "DEEP_ARCHIVE"
+#     }
+#     expiration {
+#       days = 2555
+#     }
+#     noncurrent_version_transition {
+#       noncurrent_days = 30
+#       storage_class   = "DEEP_ARCHIVE"
+#     }
+#   }
+# }
 
 # ── Outputs consumed by the FastAPI restore endpoint (admin_archive.py) ──────
 output "glacier_archive_buckets" {

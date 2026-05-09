@@ -154,8 +154,11 @@ resource "aws_cloudwatch_metric_alarm" "otel_exporter_errors_us_east_1" {
   threshold           = 5
   treat_missing_data  = "notBreaching"
   alarm_description   = "AWS Lambda OTel exporter is failing repeatedly in us-east-1 (bedrock-proxy) — App Insights + Axiom may be missing AWS spans. Runbook: docs/infra/observability.md."
-  alarm_actions       = [aws_sns_topic.ops_alerts.arn]
-  ok_actions          = [aws_sns_topic.ops_alerts.arn]
+  # NOTE (2026-05-09): CloudWatch alarms can only fire SNS topics in their
+  # own region. ops_alerts lives in ap-south-1; cross-region notifications
+  # are deferred until a us-east-1 ops_alerts mirror is provisioned.
+  # alarm_actions       = [aws_sns_topic.ops_alerts.arn]
+  # ok_actions          = [aws_sns_topic.ops_alerts.arn]
 
   tags = local.lz_common_tags
 }
