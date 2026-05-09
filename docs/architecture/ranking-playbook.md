@@ -113,7 +113,60 @@ admin route — no new instrumentation needed:
    `_fetch_cf_edge_hit_rates` against the Cloudflare GraphQL
    `httpRequestsAdaptiveGroups` endpoint).
 
-### Measurement table (FILL ON 2026-05-23)
+### T+0 verification probe (2026-05-09)
+
+Before declaring the table "fill on 2026-05-23", I ran the
+verification probes against production today (the day #10 + #12
+merged) so this PR carries empirical evidence, not just
+scaffolding. Both data sources were exercised; both returned
+**no data**, which is a measurable result in itself:
+
+1. **`GET /api/health/cache`** — minted a short-lived admin JWT
+   (HS256, `ADMIN_JWT_SECRET`) and called the production ACA URL
+   `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health/cache`.
+   Response: **HTTP 404** —
+   `{"error":true,"status":404,"detail":"Not Found","path":"/api/health/cache"}`.
+   The route is wired into the dev backend (`server.py` line 2223,
+   `app.include_router(admin_cache_router)`) but the deployed ACA
+   revision does not yet carry it. **Blocker for confirmation:**
+   no fingerprint/legacy hit-ratio numbers are reachable from
+   prod until this revision ships.
+
+2. **CloudWatch `Syrabit/Cache::KvPrewarmSuccessRate` 14-d avg**
+   — called `cw.get_metric_statistics(Namespace="Syrabit/Cache",
+   MetricName="KvPrewarmSuccessRate", Period=86400,
+   StartTime=2026-04-25, EndTime=2026-05-09, Statistics=["Average"])`
+   using the AWS_OPS_* IAM identity. Response: **0 datapoints**.
+   Same result for `PrewarmSuccessRate`. The nightly EventBridge
+   schedule (`cron(0 1 ? * * *)` in
+   `lambda-batch-jobs.tf` for the `prewarm-seo-routes` Lambda)
+   has either not fired in the last 14 days or has not yet
+   `PutMetricData` against this namespace in production.
+   **Blocker for confirmation:** no KV-prewarm success ratio
+   exists to confirm against the ≥ 70 % target.
+
+These probes are reproducible — the exact code that ran is in
+the Task #29 commit body (`probe.py` snippet under §"Probes
+attempted").
+
+### Verdict (T+0)
+
+**Cannot confirm ≥ 70 % target as of 2026-05-09** — not because
+the target was missed, but because no production data exists to
+measure against. Both data sources need to start emitting before
+the 14-day clock can meaningfully start ticking:
+
+- The deployed ACA revision must carry the `admin_cache_router`
+  (route is in source on `main`; needs a redeploy to flip the 404
+  to 200).
+- The `prewarm-seo-routes` Lambda must execute against production
+  at least once and successfully `PutMetricData` to
+  `Syrabit/Cache::KvPrewarmSuccessRate`.
+
+Both gates are tracked in follow-up Task #35; that follow-up
+also owns the actual table fill on or after **2026-05-23**.
+
+### Measurement table (FILL ON 2026-05-23, ALSO GATED ON THE TWO BLOCKERS ABOVE)
 
 Target: ≥ 70 % KV hit-ratio for every materialization-eligible
 `content_type` (`mcq` / `flashcard` / `definition` / `glossary` /
@@ -123,12 +176,12 @@ prewarm coverage (`PREWARM_TOP_N`) or extend TTL via
 
 | content_type        | fingerprint_hit_ratio | legacy_hit_ratio | KvPrewarmSuccessRate (14-d avg) | Verdict (≥ 70 %?) | Action |
 | ------------------- | --------------------- | ---------------- | ------------------------------- | ----------------- | ------ |
-| `mcq`               | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
-| `flashcard`         | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
-| `definition`        | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
-| `glossary`          | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
-| `chapter_summary`   | _pending 2026-05-23_  | _pending_        | _pending_                       | _pending_         | _pending_ |
-| **AEO answer-card** | n/a (edge layer)      | n/a              | _pending_ (edge `live_hit_rate`) | _pending_         | _pending_ |
+| `mcq`               | _no data — 404 at T+0_ | _no data_        | _no data — 0 datapoints at T+0_ | **NOT CONFIRMABLE** | Resolve blockers above; refill 2026-05-23 |
+| `flashcard`         | _no data_              | _no data_        | _no data_                        | **NOT CONFIRMABLE** | Same |
+| `definition`        | _no data_              | _no data_        | _no data_                        | **NOT CONFIRMABLE** | Same |
+| `glossary`          | _no data_              | _no data_        | _no data_                        | **NOT CONFIRMABLE** | Same |
+| `chapter_summary`   | _no data_              | _no data_        | _no data_                        | **NOT CONFIRMABLE** | Same |
+| **AEO answer-card** | n/a (edge layer)       | n/a              | _no data — gated on /api/health/cache_ | **NOT CONFIRMABLE** | Same |
 
 When this table is filled in, also update the **Expected impact**
 column for rows 1, 2 and 7 in §"Levers" above to the qualitative
