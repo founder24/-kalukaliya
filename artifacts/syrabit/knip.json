@@ -35,5 +35,18 @@
   ],
   "ignore": [
     "vite-plugins/**"
-  ]
+  ],
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "exports": "warn",
+    "types": "warn",
+    "nsExports": "warn",
+    "nsTypes": "warn",
+    "duplicates": "warn",
+    "enumMembers": "warn",
+    "classMembers": "warn",
+    "binaries": "warn",
+    "unlisted": "warn",
+    "unresolved": "warn"
+  }
 }

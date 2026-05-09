@@ -80,3 +80,12 @@ jobs:
         run: pnpm --filter @workspace/syrabit run build:vite-only || pnpm --filter @workspace/syrabit run build
         # Either build script works; we try the lighter `vite-only` first
         # so we don't pay for the full prerender on every PR.
+
+      - name: Knip dead-code guard (Task #7)
+        run: pnpm --filter @workspace/syrabit run lint:knip
+        # Task #7 — fails the build if a new unused npm dep, unreachable
+        # source file, or unlisted binary is introduced. Allowlist for
+        # CLI-only scripts / SSR entry / Cloudflare Workers / Service
+        # Worker lives in `artifacts/syrabit/knip.json`; unused-export
+        # findings are downgraded to `warn` (intentional public utility
+        # exports + dual default-named re-exports, see purge log).
