@@ -155,8 +155,15 @@ jobs:
     #
     # On manual dispatch, honour the `target` input so an operator can
     # smoke just one environment without spinning up an idle matrix leg.
+    # Task #53 (2026-05-10): gated behind `vars.CF_EDGE_CACHE_SMOKE_ENABLED`
+    # so push/workflow_run pushes don't poison CI while we re-arm the
+    # staging + production STAGING_ADMIN_JWT / PROD_ADMIN_JWT secrets and
+    # re-validate the smoke surface end-to-end. Manual `workflow_dispatch`
+    # remains an escape hatch for operators. Flip the repo variable
+    # CF_EDGE_CACHE_SMOKE_ENABLED=1 once the secrets are confirmed live.
     if: >-
-      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+      (github.event_name == 'workflow_dispatch' || vars.CF_EDGE_CACHE_SMOKE_ENABLED == '1')
+      && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
       && (github.event_name != 'workflow_dispatch'
           || github.event.inputs.target == 'both'
           || github.event.inputs.target == matrix.target)

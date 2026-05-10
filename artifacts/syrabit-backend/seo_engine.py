@@ -2,6 +2,10 @@
 Syrabit.ai — Programmatic SEO Engine
 Generates thousands of search-indexed educational pages from MongoDB academic data.
 
+Last touched: 2026-05-10 (Task #53 — exercise seo-validator CI after pyjwt+httpx
+dependency fix landed in 47312c3e; this benign comment trips the workflow's
+push.paths filter so the fix is verified end-to-end).
+
 Collections:
   - topics:     granular concepts under chapters (auto-extracted or admin-created)
   - seo_pages:  AI-generated study content per topic × page_type
