@@ -1,11 +1,19 @@
 # Infra Dependency Audit — 2026-05-10
 
-> **Scope:** Terraform providers (23 `.tf` files in `artifacts/syrabit/infra/aws/`),
-> GitHub Actions across 31 workflow files in `.github/workflows/`,
-> and 3 Cloudflare Workers (`workers/edge-proxy`, `workers/email-worker`,
+> **Scope:** Terraform providers across 37 `.tf` files
+> (`artifacts/syrabit/infra/aws/` × 23, `artifacts/syrabit/infra/azure/` × 11,
+> `artifacts/syrabit/infra/gcp/` × 3), GitHub Actions across 31 workflow
+> files in `.github/workflows/`, and 3 Cloudflare Workers
+> (`workers/edge-proxy`, `workers/email-worker`,
 > `artifacts/syrabit/workers/embed-worker`).
 > Read-only audit per Task #56. **No `versions.tf`, `wrangler.toml`,
 > worker `package.json`, or workflow `uses:` line was modified.**
+>
+> **Errata vs initial draft:** the initial draft scoped TF to
+> `artifacts/syrabit/infra/aws/` + `infra/azure/` only (the latter is
+> bicep-only). The Azure and GCP TF surfaces under
+> `artifacts/syrabit/infra/azure/` and `artifacts/syrabit/infra/gcp/`
+> were missed. §2 below now covers all three TF surfaces.
 
 ---
 
@@ -18,33 +26,53 @@
 | 3 | **Workers — Wrangler** | `artifacts/syrabit/workers/embed-worker/package.json` pins `wrangler: ^3.78.0`. Wrangler 3.x reached end-of-feature in late 2025; the production edge + email workers in `workers/*` are already on `^4.0.0`. Embed worker is a major behind. | **MEDIUM** | Bump embed-worker to `wrangler ^4` in a focused PR with a `wrangler deploy --dry-run` + worker smoke (the embed worker is on the hot path for every Indic embed call so a regression hits Pinecone fan-out). |
 | 4 | **Workers — compatibility_date** | The 3 wrangler.toml files under `artifacts/syrabit/workers/` (the legacy mirror tree) all carry `compatibility_date = "2024-09-23"` — **~20 months stale**. The production trees under `workers/edge-proxy` and `workers/email-worker` are on `2026-05-01`. | **MEDIUM** (only impacts the legacy/mirror tree, but ambiguity is itself a risk) | Either delete the legacy `artifacts/syrabit/workers/edge-proxy/` and `artifacts/syrabit/workers/email-worker/` trees (they look like leftovers from the move to top-level `workers/`) or bump their compat date in lock-step. Embed worker is **only** under `artifacts/syrabit/workers/` — it must be bumped (not deleted). |
 | 5 | **Workers — `@cloudflare/workers-types`** | Three different floors across the three workers: `^4.20240909.0` (embed), `^4.20241205.0` (email), `^4.20260424.1` (edge-proxy). The first two are pre-2026; the latter is post-2026 D1 + DO RPC type updates. | **LOW** | Consolidate to one floor (the most-recent one) when the wrangler 4 bump for embed-worker lands. |
-| 6 | **Terraform** | Only one provider declared: `hashicorp/aws >= 5.0`. The lock file resolves to `6.44.0`. **No Cloudflare provider, no Azure provider** is declared — even though the codebase deploys to all three clouds. Cloudflare resources are managed via `wrangler` directly and Azure via `bicep` + the deploy workflow, so this is **intentional**, not a gap. | **N/A — informational** | No action. The 4-cloud delegation matrix says the same. Document this in the next infra README pass so it's clear TF only owns AWS. |
-| 7 | **Terraform — version constraint floor** | `_root.tf` says `version = ">= 5.0"` but the lock pins to `6.44.0`. `>= 5.0` lets a fresh `terraform init` accept anything from 5.0.0 (which is pre-IPv6-VPC and pre-modern S3 bucket-API split) up to whatever `terraform init -upgrade` resolves at the time. The lock file pins the actual install, but a green-field clone could land on a much-older AWS provider before the lock file is rebuilt. | **LOW** | Tighten to `version = "~> 6.44"` (i.e. `>= 6.44, < 7.0`) so the floor matches the actually-tested version. The lock file already enforces this in CI; the source-of-truth pin should match. |
+| 6 | **Terraform** | TF spans **3 separate roots** — AWS (`hashicorp/aws ≥ 5.0`, lock-resolved to `6.44.0`), Azure (`hashicorp/azurerm ≥ 3.90` + `hashicorp/azuread ≥ 2.47` + `hashicorp/null ≥ 3.2`, **no lock file checked in**), GCP (`hashicorp/google ~> 5.40`, **no lock file checked in**). Bicep + `wrangler` cover the rest. | **MEDIUM** — missing `.terraform.lock.hcl` for Azure + GCP roots means a fresh `terraform init` can resolve different provider versions than what was last `apply`-ed. | Run `terraform init` in `infra/azure/` and `infra/gcp/` and **commit both lock files** in a follow-up. The AWS root already has one. |
+| 7 | **Terraform — Azure provider redundancy** | `azurerm` `required_providers` blocks appear in **3 files**: `versions.tf` (canonical), `front-door.tf`, and `cosmos-db-cache.tf`. Comment in `versions.tf` says this is intentional ("Terraform merges identical version constraints across files cleanly"), but if the per-file pins ever drift the merge fails silently with a `mismatched provider` error. | **LOW** | Pick one of the 3 to be canonical (the comment already nominates `versions.tf`); delete the other two `required_providers` blocks but keep the resource definitions. Out of scope for this audit. |
+| 8 | **Terraform — version constraint floor** | `aws/_root.tf` says `version = ">= 5.0"` but the lock pins to `6.44.0`. `>= 5.0` lets a fresh `terraform init` accept anything from 5.0.0 (pre-IPv6-VPC, pre-modern S3 bucket-API split) up to whatever `terraform init -upgrade` resolves at the time. The lock file pins the actual install, but a green-field clone could land on a much-older AWS provider before the lock file is rebuilt. | **LOW** | Tighten to `version = "~> 6.44"` (i.e. `>= 6.44, < 7.0`) so the floor matches the actually-tested version. Same applies to Azure (`>= 3.90` is 2 majors stale — azurerm 4.x landed late 2024, 5.x mid-2025) and GCP (`~> 5.40` is one major stale — google 6.x landed late 2024). |
 
 ---
 
 ## 2. Terraform inventory
 
-### 2a. Provider versions
+### 2a. Provider versions across the 3 TF roots
 
-| Provider | Source | Source-pin | Lock-resolved | Latest (registry) | Verdict |
-|---|---|---|---|---|---|
-| AWS | `hashicorp/aws` | `>= 5.0` | `6.44.0` | `6.x` (latest series) | **CURRENT** — lock-file is on the active major, but source pin is one major too low (see headline #7) |
-| Cloudflare | (not declared) | n/a | n/a | n/a | **N/A** — managed via `wrangler` directly |
-| Azure | (not declared) | n/a | n/a | n/a | **N/A** — managed via `bicep` + GitHub Actions deploy |
+| Root | Provider | Source | Source-pin | Lock-resolved | Latest (registry) | Verdict |
+|---|---|---|---|---|---|---|
+| `infra/aws/` | aws | `hashicorp/aws` | `>= 5.0` | `6.44.0` | `6.x` series | **CURRENT** — lock on active major, source pin one major too low (headline #8) |
+| `infra/azure/` | azurerm | `hashicorp/azurerm` | `>= 3.90` | **(no lock)** | `5.x` series | **STALE source pin (2 majors)**, no lock file → reproducibility risk |
+| `infra/azure/` | azuread | `hashicorp/azuread` | `>= 2.47` | **(no lock)** | `3.x` series | **STALE source pin (1 major)**, no lock file |
+| `infra/azure/` | null | `hashicorp/null` | `>= 3.2` | **(no lock)** | `3.x` series | floor is current major |
+| `infra/gcp/` | google | `hashicorp/google` | `~> 5.40` | **(no lock)** | `6.x` series | **STALE source pin (1 major)**, no lock file |
 
-### 2b. TF source files inventoried
+### 2b. TF source files inventoried (37 total)
 
-23 `.tf` files under `artifacts/syrabit/infra/aws/`. `infra/azure/` contains
-no `.tf` (only `aca-syrabit-backend.bicep`). All `provider` and
-`required_providers` blocks live in `_root.tf` — no per-module overrides
-were found.
+- **AWS root** (`artifacts/syrabit/infra/aws/`, 23 files): all
+  `required_providers` / `provider` blocks live in `_root.tf`. No
+  per-module overrides.
+- **Azure root** (`artifacts/syrabit/infra/azure/`, 11 files):
+  canonical pin set in `versions.tf`. Two additional files
+  (`front-door.tf`, `cosmos-db-cache.tf`) duplicate the `azurerm`
+  `required_providers` block — intentional per the `versions.tf`
+  header comment, but a drift hazard (headline #7).
+- **GCP root** (`artifacts/syrabit/infra/gcp/`, 3 files): single
+  `required_providers` block in `main.tf`. `provider "google"` block
+  also in `main.tf`.
 
-### 2c. Lock file
+The other Azure path the task scope mentioned (`infra/azure/`, top-level)
+contains no `.tf` files — only `aca-syrabit-backend.bicep` for the ACA
+deploy. That ARM/Bicep surface is out of TF scope.
 
-`artifacts/syrabit/infra/aws/.terraform.lock.hcl` exists, contains the
-single-provider entry above with full hash set (16 hashes — current lock
-format). No drift between `required_providers` constraint and the lock.
+### 2c. Lock files
+
+| Root | `.terraform.lock.hcl` present? | Notes |
+|---|---|---|
+| `infra/aws/` | ✅ yes | Single provider entry (`hashicorp/aws 6.44.0`) with 16-hash format, no drift vs source pin. |
+| `infra/azure/` | ❌ **MISSING** | Reproducibility risk — see headline #6. |
+| `infra/gcp/` | ❌ **MISSING** | Same. |
+
+The missing Azure + GCP lock files are the **highest-priority TF
+finding**. Without them, two CI runs can resolve different `azurerm` /
+`google` provider versions and quietly produce different `apply` plans.
 
 ---
 
@@ -160,6 +188,9 @@ itself, not npm packages. This is the desired posture.
 | Workers | `wrangler ^3.78.0` (embed-worker) | major behind, 3.x in deprecation window | focused PR |
 | Workers | 3 wrangler.toml's at `compatibility_date=2024-09-23` | 20 months stale (mirror tree) | bump or delete |
 | TF | `hashicorp/aws >= 5.0` | source-pin one major below lock-file | tighten to `~> 6.44` |
+| TF | `infra/azure/` + `infra/gcp/` | no `.terraform.lock.hcl` checked in | **MEDIUM** — run `terraform init` and commit lock files |
+| TF | `azurerm` `required_providers` duplicated in 3 files | drift hazard | consolidate to `versions.tf` |
+| TF | `azurerm >= 3.90` (2 majors stale) / `azuread >= 2.47` (1 major) / `google ~> 5.40` (1 major) | source pins lag actively-maintained majors | tighten in a focused TF PR + lock-file commit |
 | Workers | `@cloudflare/workers-types` 3-way version skew | 9 months / 5 months / current | consolidate floor |
 
 ---
