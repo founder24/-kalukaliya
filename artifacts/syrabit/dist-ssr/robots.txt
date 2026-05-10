@@ -1,0 +1,160 @@
+# Syrabit.ai robots.txt — SEO Phase B (Plan 10) snapshot.
+# Edits to this file are guarded by tests/test_robots_txt_snapshot.py.
+
+# --- Default policy: allow well-behaved general crawlers. ---
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+
+# --- Long-tail search engines: explicitly invited. ---
+User-agent: Applebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: PetalBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: MojeekBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: SeznamBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Yeti
+Allow: /
+Crawl-delay: 0
+
+User-agent: DuckDuckBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: YandexBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Baiduspider
+Allow: /
+Crawl-delay: 0
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 0
+
+# --- AI ANSWER bots (cite sources, drive referral traffic): allowed. ---
+# Task #287 policy: invite citation-driving LLM crawlers so AHSEC HS1/HS2
+# notes appear in Perplexity / ChatGPT browse / OpenAI SearchGPT answers.
+# Training-only crawlers (GPTBot, ClaudeBot, Google-Extended, etc.) remain
+# disallowed below — we want citations, not silent corpus ingestion.
+# Task #9: Crawl-delay: 0 — verified-bot fast path (≥60K RPM bucket)
+# is the real ceiling; the polite default (~1 RPS) would needlessly
+# slow citation pickup.
+User-agent: ChatGPT-User
+Allow: /
+Crawl-delay: 0
+
+User-agent: OAI-SearchBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: PerplexityBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Perplexity-User
+Allow: /
+Crawl-delay: 0
+
+# --- AI training crawlers: explicitly disallowed. ---
+# Mirrors `_AI_BOT_NAMES` in artifacts/syrabit-backend/cf_bot_report.py
+# and the `AI_BOT_UA` regex in workers/edge-proxy/src/index.ts so the
+# polite advisory (this file), the hard edge-block (worker), and the
+# admin dashboard's "AI Crawler" classification all agree on which bots
+# are excluded. Only well-behaved bots respect robots.txt — the worker
+# enforces the same set with HTTP 403 for misbehaving ones.
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Anthropic-AI
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: YouBot
+Allow: /
+# YouBot is You.com's search/answer engine — cites sources, drives referral
+# traffic. No longer classified as an AI training crawler.
+
+User-agent: Cohere-AI
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+# --- Task #9: Crawl-delay: 0 for the major verified search bots ---
+# Verified search bots (cf.verifiedBot=true) are routed at the edge
+# through a separate ≥60 000 RPM bucket — see `VERIFIED_BOT_RATE_LIMIT_RPM`
+# in workers/edge-proxy/src/index.ts. Cloudflare Bot Fight Mode is
+# explicitly DISABLED on the syrabit.ai zone (see
+# docs/infra/cloudflare-bot-config.md) so this advisory is the only
+# pacing signal well-behaved bots see. `Crawl-delay: 0` tells them
+# we have no per-request throttle; the edge bucket is the real ceiling.
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 0
+
+# --- Task #9: explicit per-shard sitemap discovery ---
+# Some long-tail crawlers (Yandex, Baidu, smaller answer engines) only
+# parse top-level `Sitemap:` lines from robots.txt and never fetch
+# nested sitemap-index <loc> entries. Listing every shard here
+# guarantees they discover the full URL inventory even without an
+# index parser.
+Sitemap: https://syrabit.ai/sitemap-index.xml
+Sitemap: https://syrabit.ai/sitemap-pages.xml
+Sitemap: https://syrabit.ai/sitemap-subjects.xml
+Sitemap: https://syrabit.ai/sitemap-chapters.xml
+Sitemap: https://syrabit.ai/sitemap-notes.xml
+Sitemap: https://syrabit.ai/sitemap-mcqs.xml
+Sitemap: https://syrabit.ai/sitemap-pyqs.xml
+Sitemap: https://syrabit.ai/sitemap-examples.xml
+Sitemap: https://syrabit.ai/sitemap-definitions.xml
+Sitemap: https://syrabit.ai/sitemap-learn.xml
+# Task #11 — sitemap-chapters now fans out 7 page-types per chapter
+# (notes, mcqs, flashcards, pyqs, summary, definitions, revision) under
+# the canonical /board/.../chapter/.../{type} URL pattern.
