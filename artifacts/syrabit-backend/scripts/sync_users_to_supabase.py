@@ -31,15 +31,28 @@ logging.basicConfig(
 logger = logging.getLogger("sync_users_to_supabase")
 
 
-async def _fetch_all_local_users(pg_pool) -> list[dict]:
-    """Return every row from the local users table."""
-    async with pg_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, email, name, auth_provider, is_admin, status "
-            "FROM users "
-            "ORDER BY created_at ASC"
-        )
-    return [dict(r) for r in rows]
+async def _fetch_all_local_users() -> list[dict]:
+    """Return every row from the Mongo users collection.
+
+    Task #47 destructive-PR fix (2026-05-09): the original implementation
+    read from a Postgres `users` table that does not exist in production
+    (production runs on MongoDB Atlas via `deps.db`, see
+    `verify_supabase_mirror.py`). With the legacy reader the script
+    silently no-op'd and reported "Created: 0", which would have given
+    a false-green to the cutover gate. We now mirror the
+    reconciliation script: every active user with a non-empty email is
+    a candidate, and Google-OAuth / banned rows are filtered later in
+    `run_sync` to keep the bucketing logic identical to the gate.
+    """
+    from deps import db
+    if db is None:
+        raise RuntimeError("Mongo client not initialised — check MONGO_URL")
+    cursor = db.users.find(
+        {"status": {"$ne": "banned"}, "email": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "id": 1, "email": 1, "name": 1, "auth_provider": 1,
+         "is_admin": 1, "status": 1},
+    )
+    return [r async for r in cursor]
 
 
 def _fetch_all_supabase_auth_emails(supa_client) -> set[str]:
@@ -86,26 +99,80 @@ def _create_supabase_user(supa_client, email: str, name: str) -> tuple[bool, str
 
 
 def _generate_recovery_link(supa_client, email: str) -> str | None:
-    """Generate a password-reset link for the given email. Returns the URL or None."""
+    """Generate a password-reset link for the given email. Returns the URL or None.
+
+    Task #47 fix (2026-05-09): the previous extractor only checked
+    `result.action_link` (attr) and `props.get(...)` (dict). The
+    supabase-py SDK actually returns a Pydantic model where the link
+    lives at ``result.properties.action_link`` — every previous live
+    sync logged "Could not generate recovery link" on a 200 OK
+    response, so 9 newly-created Supabase Auth users got 0 password-set
+    emails and were locked out. We now walk: attr → dict → nested
+    properties.action_link, and fall back to wrapping `hashed_token`
+    in the standard Supabase recovery URL when only the raw token is
+    returned.
+    """
     try:
         result = supa_client.auth.admin.generate_link({
             "type": "recovery",
             "email": email,
         })
-        props = getattr(result, "properties", None) or {}
-        link = getattr(result, "action_link", None)
-        if not link and isinstance(props, dict):
-            link = props.get("action_link") or props.get("hashed_token")
-        return link
     except Exception as exc:
         logger.warning("generate_link failed for %s: %s", email, exc)
         return None
 
+    def _extract(container) -> str | None:
+        if container is None:
+            return None
+        # attr access (Pydantic model)
+        link = getattr(container, "action_link", None)
+        if link:
+            return link
+        # dict access
+        if isinstance(container, dict):
+            return container.get("action_link")
+        return None
+
+    # 1) result.action_link directly (older SDK shape)
+    link = _extract(result)
+    if link:
+        return link
+    # 2) result.properties.action_link (current SDK shape — Pydantic model)
+    props = getattr(result, "properties", None)
+    if props is None and isinstance(result, dict):
+        props = result.get("properties")
+    link = _extract(props)
+    if link:
+        return link
+    # 3) fall back to wrapping hashed_token in the canonical recovery URL
+    hashed = (
+        getattr(props, "hashed_token", None)
+        if props is not None and not isinstance(props, dict)
+        else (props or {}).get("hashed_token") if isinstance(props, dict) else None
+    )
+    if hashed:
+        base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        if base:
+            return f"{base}/auth/v1/verify?token={hashed}&type=recovery"
+    logger.warning(
+        "Could not extract action_link from generate_link response for %s "
+        "(result type=%s, props type=%s)",
+        email, type(result).__name__, type(props).__name__ if props else "None",
+    )
+    return None
+
 
 def _send_reset_email(to: str, name: str, reset_link: str):
-    """Send a branded password-setup email via the existing email infrastructure."""
+    """Send a branded password-setup email via the existing email infrastructure.
+
+    Task #47 fix (2026-05-09): the previous import (`_send_sync`) does
+    not exist in `email_templates` — every send silently failed and
+    counted as a success in `stats`. We now use `_send_via_ses` which
+    is the synchronous SES helper used by every other transactional
+    template path (`send_password_reset`, `send_plan_activation`).
+    """
     try:
-        from email_templates import _send_sync, _base, _button, _BRAND, _MUTED
+        from email_templates import _send_via_ses, _base, _button, _BRAND, _MUTED
 
         body = _base(f"""
           <h2 style="color:{_BRAND};margin:0 0 8px;">Set your Syrabit.ai password</h2>
@@ -125,31 +192,26 @@ def _send_reset_email(to: str, name: str, reset_link: str):
             ignore this email — your Google account is already linked.
           </p>
         """)
-        _send_sync(to, "Action required: set your Syrabit.ai password", body)
+        _send_via_ses(to, "Action required: set your Syrabit.ai password", body)
     except Exception as exc:
         logger.warning("Failed to send reset email to %s: %s", to, exc)
+        raise
 
 
-async def run_sync(dry_run: bool = False, skip_email: bool = False):
-    import asyncpg
+async def run_sync(dry_run: bool = False, skip_email: bool = False, resend_emails: bool = False):
     from supabase import create_client as _create_supa
 
     supabase_url = os.environ.get("SUPABASE_URL", "").strip()
     supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
-    database_url = os.environ.get("DATABASE_URL", "").strip()
 
     if not supabase_url or not supabase_key:
         logger.error("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
         sys.exit(1)
-    if not database_url:
-        logger.error("DATABASE_URL must be set")
-        sys.exit(1)
 
     supa_client = _create_supa(supabase_url, supabase_key)
-    pg_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=5)
 
-    logger.info("Fetching all local users from PostgreSQL…")
-    local_users = await _fetch_all_local_users(pg_pool)
+    logger.info("Fetching all active users from MongoDB…")
+    local_users = await _fetch_all_local_users()
     logger.info("  Found %d local users", len(local_users))
 
     logger.info("Fetching existing Supabase Auth users…")
@@ -178,8 +240,22 @@ async def run_sync(dry_run: bool = False, skip_email: bool = False):
             continue
 
         if email in existing_emails:
-            logger.info("  SKIP (already in Supabase Auth): %s", email)
             stats["skipped_exists"] += 1
+            if resend_emails and not skip_email:
+                if dry_run:
+                    logger.info("  [DRY-RUN] Would resend recovery email: %s", email)
+                    stats["email_sent"] += 1
+                    continue
+                link = await asyncio.to_thread(_generate_recovery_link, supa_client, email)
+                if link:
+                    await asyncio.to_thread(_send_reset_email, email, name, link)
+                    logger.info("  RESENT password-set email: %s", email)
+                    stats["email_sent"] += 1
+                else:
+                    logger.error("  ERROR could not generate recovery link for %s", email)
+                    stats["error"] += 1
+            else:
+                logger.info("  SKIP (already in Supabase Auth): %s", email)
             continue
 
         if dry_run:
@@ -229,12 +305,21 @@ def main():
     parser = argparse.ArgumentParser(description="Sync local users to Supabase Auth")
     parser.add_argument("--dry-run",   action="store_true", help="Preview only — make no changes")
     parser.add_argument("--no-email",  action="store_true", help="Create accounts but skip sending emails")
+    parser.add_argument(
+        "--resend-emails", action="store_true",
+        help="Also re-issue a password-recovery email to candidates that already exist in Supabase Auth "
+             "(used by Task #47 to recover users created by an earlier broken sync run).",
+    )
     args = parser.parse_args()
 
     from dotenv import load_dotenv
     load_dotenv()
 
-    asyncio.run(run_sync(dry_run=args.dry_run, skip_email=args.no_email))
+    asyncio.run(run_sync(
+        dry_run=args.dry_run,
+        skip_email=args.no_email,
+        resend_emails=args.resend_emails,
+    ))
 
 
 if __name__ == "__main__":
