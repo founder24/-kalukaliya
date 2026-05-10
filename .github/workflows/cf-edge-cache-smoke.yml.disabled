@@ -1,3 +1,15 @@
+# RETIRED 2026-05-10 (Task #53):
+# This workflow file was renamed to *.yml.disabled because it persistently
+# failed GitHub Actions semantic validation (jobs_count=0, registered with
+# raw filename in /actions/runs API across 5+ commits). Triggering surface
+# is preserved here for forensic reference. To re-arm:
+#   1) rename back to cf-edge-cache-smoke.yml,
+#   2) bisect the structural validation issue (suspect: workflow_run+schedule+
+#      workflow_dispatch combination on a job with matrix + composite if:
+#      expression),
+#   3) set repo variable CF_EDGE_CACHE_SMOKE_ENABLED=1.
+# Original content follows.
+# ---------------------------------------------------------------------------
 name: cf-edge-cache-smoke
 
 #

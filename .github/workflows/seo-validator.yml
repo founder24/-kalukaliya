@@ -38,7 +38,7 @@ jobs:
         # TestClient assertion. Without them the suite fails at import
         # time before a single linter rule runs.
         run: |
-          pip install jinja2 fastapi pytest pytest-asyncio httpx pyjwt
+          pip install jinja2 fastapi pytest pytest-asyncio httpx pyjwt python-dotenv
       - name: Run structured-data linter on 5 sampled chapter pages
         # The linter lives inside tests/test_seo_pages_structured_data.py
         # and walks all 7 page-types per fixture chapter — that's already
