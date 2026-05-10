@@ -198,17 +198,49 @@ def _send_reset_email(to: str, name: str, reset_link: str):
         raise
 
 
-async def run_sync(dry_run: bool = False, skip_email: bool = False, resend_emails: bool = False):
+def _send_recovery_via_supabase_smtp(supa_anon_client, email: str) -> tuple[bool, str]:
+    """Trigger Supabase's built-in password-reset email.
+
+    Task #47 (2026-05-09): when --use-supabase-email is set, we ask
+    Supabase itself to dispatch the recovery email via the project's
+    configured SMTP (Settings → Auth → SMTP). This bypasses our SES
+    setup entirely — required when running the migration from a
+    sandbox-SES environment that cannot send to unverified addresses.
+
+    Uses the *anon* Supabase client because `reset_password_for_email`
+    is a public-side method, not an admin one.
+    """
+    try:
+        # supabase-py exposes this as either reset_password_email or
+        # reset_password_for_email depending on version.
+        client = supa_anon_client.auth
+        fn = getattr(client, "reset_password_for_email", None) or getattr(
+            client, "reset_password_email", None
+        )
+        if fn is None:
+            return False, "supabase-py client missing reset_password_for_email"
+        fn(email)
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
+async def run_sync(dry_run: bool = False, skip_email: bool = False, resend_emails: bool = False, use_supabase_email: bool = False):
     from supabase import create_client as _create_supa
 
     supabase_url = os.environ.get("SUPABASE_URL", "").strip()
     supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    supabase_anon = os.environ.get("SUPABASE_ANON_KEY", "").strip()
 
     if not supabase_url or not supabase_key:
         logger.error("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
         sys.exit(1)
+    if use_supabase_email and not supabase_anon:
+        logger.error("--use-supabase-email requires SUPABASE_ANON_KEY")
+        sys.exit(1)
 
     supa_client = _create_supa(supabase_url, supabase_key)
+    supa_anon_client = _create_supa(supabase_url, supabase_anon) if use_supabase_email else None
 
     logger.info("Fetching all active users from MongoDB…")
     local_users = await _fetch_all_local_users()
@@ -245,6 +277,17 @@ async def run_sync(dry_run: bool = False, skip_email: bool = False, resend_email
                 if dry_run:
                     logger.info("  [DRY-RUN] Would resend recovery email: %s", email)
                     stats["email_sent"] += 1
+                    continue
+                if use_supabase_email:
+                    ok, err = await asyncio.to_thread(
+                        _send_recovery_via_supabase_smtp, supa_anon_client, email
+                    )
+                    if ok:
+                        logger.info("  RESENT (via Supabase SMTP): %s", email)
+                        stats["email_sent"] += 1
+                    else:
+                        logger.error("  ERROR Supabase SMTP send for %s: %s", email, err)
+                        stats["error"] += 1
                     continue
                 link = await asyncio.to_thread(_generate_recovery_link, supa_client, email)
                 if link:
@@ -310,6 +353,11 @@ def main():
         help="Also re-issue a password-recovery email to candidates that already exist in Supabase Auth "
              "(used by Task #47 to recover users created by an earlier broken sync run).",
     )
+    parser.add_argument(
+        "--use-supabase-email", action="store_true",
+        help="Dispatch the recovery email via Supabase project SMTP (Settings → Auth → SMTP) instead of "
+             "AWS SES. Required when running from an environment whose SES is in sandbox mode.",
+    )
     args = parser.parse_args()
 
     from dotenv import load_dotenv
@@ -319,6 +367,7 @@ def main():
         dry_run=args.dry_run,
         skip_email=args.no_email,
         resend_emails=args.resend_emails,
+        use_supabase_email=args.use_supabase_email,
     ))
 
 
