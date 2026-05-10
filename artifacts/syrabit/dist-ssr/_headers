@@ -1,0 +1,107 @@
+# NOTE: `Link: rel=preload` headers for the critical JS/CSS chunks are NOT
+# listed here because Vite uses content-hash filenames that change every build.
+# They are injected into dist/_headers at build time by the Vite plugin:
+#   vite-plugins/preload-headers-inject.js  (Task #79)
+# The plugin appends a `/*` block with the correct hashed paths after each
+# `vite build` run, enabling Cloudflare to emit 103 Early Hints responses.
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/precache-manifest.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+/icons/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/opengraph.jpg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/logo.webp
+  Cache-Control: public, max-age=31536000, immutable
+
+/logo-56.webp
+  Cache-Control: public, max-age=31536000, immutable
+
+/logo-144.webp
+  Cache-Control: public, max-age=31536000, immutable
+
+/manifest.json
+  Cache-Control: public, max-age=86400, stale-while-revalidate=3600
+
+/robots.txt
+  Cache-Control: public, max-age=86400
+
+/sitemap*.xml
+  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+
+/feed.xml
+  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Content-Type: application/rss+xml; charset=utf-8
+
+/feed/*.xml
+  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Content-Type: application/rss+xml; charset=utf-8
+
+/llms.txt
+  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Content-Type: text/plain; charset=utf-8
+
+/llms-full.txt
+  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Content-Type: text/plain; charset=utf-8
+
+/.well-known/*
+  Cache-Control: public, max-age=86400, s-maxage=86400, stale-while-revalidate=3600
+
+/api/content/*
+  Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600
+
+/api/seo/*
+  Cache-Control: public, max-age=60, s-maxage=600, stale-while-revalidate=1800
+
+/
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/library
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/library/index.html
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/browser
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/browser/index.html
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/pricing
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/login
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/signup
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/exam-routine
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/assamboard/*
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/learn/*
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+
+/subject/*
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
