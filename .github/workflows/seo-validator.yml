@@ -31,8 +31,14 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install minimal deps
+        # Task #53 — `fastapi.testclient` requires `httpx`; `auth_deps`
+        # imports `jwt` from `pyjwt`. Both are runtime imports that the
+        # structured-data linter pulls in transitively when it imports
+        # `routes.bot_discovery` (touches `auth_deps`) and any FastAPI
+        # TestClient assertion. Without them the suite fails at import
+        # time before a single linter rule runs.
         run: |
-          pip install jinja2 fastapi pytest pytest-asyncio
+          pip install jinja2 fastapi pytest pytest-asyncio httpx pyjwt
       - name: Run structured-data linter on 5 sampled chapter pages
         # The linter lives inside tests/test_seo_pages_structured_data.py
         # and walks all 7 page-types per fixture chapter — that's already

@@ -74,6 +74,31 @@ jobs:
           set -euo pipefail
           python3 scripts/check_bot_rules_drift.py
 
+      - name: Probe live secret presence
+        # Task #53 — Direct `secrets.*` references inside step `if:`
+        # expressions cause GitHub Actions startup-failures (jobs_count=0,
+        # no logs). The supported pattern is to materialise the secret
+        # into a job-level env at the start, then gate downstream steps
+        # on the env. We expose only a boolean ("set" / "unset") via
+        # GITHUB_OUTPUT so neither the secret value nor a masked
+        # placeholder appears in subsequent `if:` evaluation logs.
+        id: live_gates
+        env:
+          BOT_UNBLOCK_PREVIEW_URL: ${{ secrets.BOT_UNBLOCK_PREVIEW_URL }}
+          BOT_UNBLOCK_TEST_URL: ${{ secrets.BOT_UNBLOCK_TEST_URL }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BOT_UNBLOCK_PREVIEW_URL:-}" ]; then
+            echo "preview_set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "preview_set=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${BOT_UNBLOCK_TEST_URL:-}" ]; then
+            echo "test_set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "test_set=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Live golden bot-unblock probe — Playwright matrix (gated)
         # Canonical golden test for Task #9 lives at
         # `artifacts/syrabit/tests/bot-unblock.spec.ts` (Playwright,
@@ -81,7 +106,7 @@ jobs:
         # `BOT_UNBLOCK_PREVIEW_URL` when configured. The httpx
         # contract probes below are the secondary, header-only fast
         # check.
-        if: ${{ secrets.BOT_UNBLOCK_PREVIEW_URL != '' }}
+        if: steps.live_gates.outputs.preview_set == 'true'
         env:
           BOT_UNBLOCK_PREVIEW_URL: ${{ secrets.BOT_UNBLOCK_PREVIEW_URL }}
         working-directory: artifacts/syrabit
@@ -102,10 +127,7 @@ jobs:
         # `verified` mode (Googlebot expected 200 + prerender) is
         # mutually exclusive and requires a CF-trusted egress; route
         # it through a separately-configured job if needed.
-        # NOTE: gating the step on `secrets.X` directly because
-        # `env.X` would only be set inside this same step (round-11
-        # review fix).
-        if: ${{ secrets.BOT_UNBLOCK_TEST_URL != '' }}
+        if: steps.live_gates.outputs.test_set == 'true'
         env:
           BOT_UNBLOCK_TEST_URL: ${{ secrets.BOT_UNBLOCK_TEST_URL }}
           BOT_UNBLOCK_RUNNER_MODE: spoof
