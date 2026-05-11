@@ -355,13 +355,21 @@ def _check_no_tracked_dist_files() -> list[str]:
     silent. Falls back to silence (no failure) when git is
     unavailable so non-git contexts (pytest in a tarball, etc.)
     don't blow up.
+
+    Pathspec note: the wildcard MUST NOT have a trailing slash —
+    ``git ls-files artifacts/syrabit/dist*/`` returns 0 results
+    because git treats the trailing slash as anchoring to a
+    directory entry (and ls-files only emits files). The literal
+    directory names (``dist``, ``dist-ssr``) without a wildcard
+    work fine — see test in artifacts/syrabit-backend/tests/
+    test_no_tracked_dist_files.py for the verified pattern.
     """
     import subprocess
     failures: list[str] = []
     try:
         proc = subprocess.run(
-            ["git", "--no-optional-locks", "ls-files",
-             "artifacts/syrabit/dist*/"],
+            ["git", "--no-optional-locks", "ls-files", "--",
+             "artifacts/syrabit/dist", "artifacts/syrabit/dist-ssr"],
             capture_output=True, text=True, cwd=str(ROOT), timeout=15,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
