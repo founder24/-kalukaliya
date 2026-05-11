@@ -8,146 +8,37 @@ This README is a **navigation index**. The canonical implementation map of the 2
 
 ## Run & operate
 
-The canonical Replit workspace workflow set is **driven by the per-artifact
-`.replit-artifact/artifact.toml` files** (see `artifacts/syrabit/...`,
-`artifacts/syrabit-backend/...`, `artifacts/mockup-sandbox/...`). The earlier
-duplicate `Start application` / `Start backend` workflows were removed in
-Task #14 — the artifact-managed entries are the single source of truth.
+Workflows are driven by per-artifact `.replit-artifact/artifact.toml` files (see `artifacts/syrabit/`, `artifacts/syrabit-backend/`, `artifacts/mockup-sandbox/`). Workflow-contract / browser-console triage history: [`docs/dev/task-14-workflow-triage-2026-05-09.md`](docs/dev/task-14-workflow-triage-2026-05-09.md).
 
-- **Frontend dev** (`artifacts/syrabit: web`, port `25144`):
-  `pnpm --filter @workspace/syrabit run dev`
-- **Backend dev** (`artifacts/syrabit: api`, port `8080`):
-  `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
-  (the workflow exports `PORT=8080` so `gunicorn.conf.py`'s
-  `BACKEND_PORT||PORT||7766` chain binds the same port the vite dev proxy
-  defaults to via `BACKEND_TARGET`)
-- **Mockup sandbox** (`artifacts/mockup-sandbox: Component Preview Server`,
-  port `8081`): `pnpm --filter @workspace/mockup-sandbox run dev`
-- **Local health check:** `bash scripts/dev_health_check.sh` (also wired as
-  the `dev_health` validation step) — exercises backend `import server`,
-  `/api/health`, frontend `/`, mockup `/__mockup/`, and `pnpm build`.
-  Skip the build leg with `DEV_HEALTH_SKIP_BUILD=1` for fast iteration.
-- **Production health:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
+- **Frontend dev** (`artifacts/syrabit: web`, port `25144`): `pnpm --filter @workspace/syrabit run dev`
+- **Backend dev** (`artifacts/syrabit: api`, port `8080`): `cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py`
+- **Mockup sandbox** (port `8081`): `pnpm --filter @workspace/mockup-sandbox run dev`
+- **Local health check:** `bash scripts/dev_health_check.sh` (also the `dev_health` validation step). Skip the build leg with `DEV_HEALTH_SKIP_BUILD=1`.
 - **Backend import smoke test:** `cd artifacts/syrabit-backend && python -c "import server"` before pushing.
-- **Workflow contract / browser-console triage:**
-  [`docs/dev/task-14-workflow-triage-2026-05-09.md`](docs/dev/task-14-workflow-triage-2026-05-09.md)
-  — explains the pivot from the original 5-workflow contract to the
-  current 3-service artifact-managed model and documents every browser
-  console line observed on `/`, `/library`, and a sample chapter page.
-- **Full production env-var contract:** [`docs/infra/env-vars.md`](docs/infra/env-vars.md) — auto-generated from code refs + bicep / TF / wrangler wiring by `scripts/ci/check_env_vars_doc.py` (Task #89). Regenerate with `python scripts/ci/check_env_vars_doc.py --write`; the `dev_health` validation step fails on drift.
-- **Required env vars** (canonical subset enforced by `scripts/ci/check_canonical_delegation.py::_check_replit_required_env_vars` — NOT a complete production inventory; see `docs/infra/env-vars.md` for everything): `SARVAM_API_KEY` `WEB_PUSH_VAPID_PRIVATE_KEY` `WEB_PUSH_CONTACT` `SENTRY_DSN` `MONGO_URL` `PINECONE_API_KEY` `JWT_SECRET` `ADMIN_JWT_SECRET` `CLOUDFLARE_API_TOKEN` `R2_ACCESS_KEY_ID` `R2_SECRET_ACCESS_KEY` `R2_BUCKET_NAME` `R2_ENDPOINT_URL` `RAZORPAY_KEY_ID` `RAZORPAY_KEY_SECRET` `RAZORPAY_WEBHOOK_SECRET` `DEEPGRAM_API_KEY` `ELEVENLABS_API_KEY` `UPSTASH_REDIS_REST_URL` `UPSTASH_REDIS_REST_TOKEN` `GOOGLE_APPLICATION_CREDENTIALS_JSON` `VERTEX_PROJECT_ID` `VERTEX_LOCATION` `WORKERS_EMBED_SECRET` `WORKERS_EMBED_URL` `AWS_ACCESS_KEY_ID` `AWS_SECRET_ACCESS_KEY` `AWS_REGION` `SES_REGION` `PINECONE_INDEX` `POSTHOG_API_KEY` `POSTHOG_HOST` *(Task #556 done — `SENDGRID_API_KEY` / `RESEND_API_KEY` / `EMAIL_PROVIDER` / `EMAIL_FALLBACK` retired in favour of SES sole transactional path; Task #557 done — `FCM_SERVER_KEY` / `FIREBASE_SERVICE_ACCOUNT` retired in favour of self-hosted web-push; Task #559 done — `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT` / `ASSEMBLYAI_API_KEY` retired.)*
+- **Production health:** `https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io/api/health`
+- **Full env-var contract:** [`docs/infra/env-vars.md`](docs/infra/env-vars.md) — auto-generated; regenerate with `python scripts/ci/check_env_vars_doc.py --write` (Task #89, gated by `dev_health`).
+- **Required env vars** (canonical subset enforced by `scripts/ci/check_canonical_delegation.py::_check_replit_required_env_vars`; see env-vars.md for the full prod inventory): `SARVAM_API_KEY` `WEB_PUSH_VAPID_PRIVATE_KEY` `WEB_PUSH_CONTACT` `SENTRY_DSN` `MONGO_URL` `PINECONE_API_KEY` `JWT_SECRET` `ADMIN_JWT_SECRET` `CLOUDFLARE_API_TOKEN` `R2_ACCESS_KEY_ID` `R2_SECRET_ACCESS_KEY` `R2_BUCKET_NAME` `R2_ENDPOINT_URL` `RAZORPAY_KEY_ID` `RAZORPAY_KEY_SECRET` `RAZORPAY_WEBHOOK_SECRET` `DEEPGRAM_API_KEY` `ELEVENLABS_API_KEY` `UPSTASH_REDIS_REST_URL` `UPSTASH_REDIS_REST_TOKEN` `GOOGLE_APPLICATION_CREDENTIALS_JSON` `VERTEX_PROJECT_ID` `VERTEX_LOCATION` `WORKERS_EMBED_SECRET` `WORKERS_EMBED_URL` `AWS_ACCESS_KEY_ID` `AWS_SECRET_ACCESS_KEY` `AWS_REGION` `SES_REGION` `PINECONE_INDEX` `POSTHOG_API_KEY` `POSTHOG_HOST`. Retired: SendGrid/Resend (#556 → SES), FCM/Firebase (#557 → web-push), Azure-OpenAI/AssemblyAI (#559).
 
 ## Stack
 
-- **Frontend:** React 18, Vite, React Router, Tailwind CSS, Drizzle ORM
-- **Backend:** Python 3.11, FastAPI, Gunicorn (Uvicorn workers)
-- **Validation/Codegen:** Zod, Orval
-- **Build:** pnpm monorepo, esbuild, Docker
+React 18 + Vite + Tailwind frontend; Python 3.11 + FastAPI + Gunicorn backend; pnpm monorepo; Cloudflare Workers edge; Zod + Orval validation/codegen.
 
 ## Where things live
 
-- **Frontend:** `artifacts/syrabit/`
-- **Backend:** `artifacts/syrabit-backend/`
-- **Embed worker (Cloudflare):** `artifacts/syrabit/workers/embed-worker/`
-- **Edge proxy (Cloudflare):** `workers/edge-proxy/`
+- **Frontend:** `artifacts/syrabit/` — **Backend:** `artifacts/syrabit-backend/`
+- **Edge proxy:** `workers/edge-proxy/` — **Embed worker:** `artifacts/syrabit/workers/embed-worker/`
 - **Bicep + ACA deploy:** `infra/azure/aca-syrabit-backend.bicep`, `.github/workflows/azure-container-apps-deploy.yml`
 - **AWS Lambda batch jobs:** `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf` + `artifacts/syrabit/services/backend/lambda_batch/` + `infra/aws/lambda/manifest.json`
-- **AWS Glacier Deep Archive (7-yr DPDP):** `artifacts/syrabit/infra/aws/glacier-archive.tf` + `routes/admin_archive.py` + runbook `artifacts/syrabit/docs/infra/glacier-restore-runbook.md`
+- **AWS Glacier (7-yr DPDP):** `artifacts/syrabit/infra/aws/glacier-archive.tf` + `routes/admin_archive.py`
 - **Threat model:** `threat_model.md`
-- **2026 architecture lock:** `infra/architecture-locked-2026.md`, `infra/architecture-matrix.json`, `scripts/check_architecture_lock.py`
+- **2026 architecture lock:** `infra/architecture-locked-2026.md`, `infra/architecture-matrix.json`
 - **Four-cloud delegation matrix:** `infra/four-cloud-delegation.md`
 
-## Architecture summary (mirrors `infra/architecture-locked-2026.md` section-by-section)
+## Architecture summary
 
-Section headers below mirror the lock document 1:1. For per-row status (`IMPLEMENTED | PARTIAL | MISSING | RETIRED`) and source paths, read the lock.
+Read [`infra/architecture-locked-2026.md`](infra/architecture-locked-2026.md) — it has the full §2 → §19 breakdown (core principles, CF/Azure/AWS layers, chat/OCR/voice/payments providers, databases, AI pipeline, 5-layer cache, SEO, security, observability, cost governance, PWA, positioning) with per-row `IMPLEMENTED | PARTIAL | MISSING | RETIRED` status and source paths. The lock wins on any disagreement.
 
-### §2 Core principles
-
-Edge-first delivery, retrieval-heavy AI, deterministic caching, multi-provider orchestration, curriculum grounding, progressive degradation, materialized educational outputs, SEO-driven distribution.
-
-### §3 High-level architecture
-
-PWA → CF Edge (Pages + CDN + Workers + KV + D1) → Edge Gateway (auth / quota / trace / budget) → ACA FastAPI core (eastus2) → RAG pipeline (vector + BM25 + graph) → provider delegation → response formatter → SSE streaming.
-
-### §4.1 Cloudflare layer
-
-Pages (PWA), Workers (edge compute), CDN + tiered cache, KV (deterministic AI cache), D1 (syllabus graph), R2 (assets + OCR + final backups), WAF + Bot Management, Turnstile, Cron Triggers.
-
-### §4.2 Azure layer
-
-Container Apps (FastAPI runtime, eastus2 → westus3 DR), Key Vault (secrets source of truth — AWS SM + CF Secrets are read-only replicas). Cloudflare R2 is the canonical OCR scratch / warm-media surface; current OCR endpoints run as in-memory Vertex Vision round-trips with no persisted scratch tier, and the Azure Blob row was retired by Task #46 (docs updated in #48).
-
-### §4.3 AWS layer
-
-SQS (async queues), Lambda (scheduled jobs), Glacier Deep Archive (7-yr DPDP), SES (sole transactional email tier-1).
-
-### §5.1 Chat providers (canonical)
-
-English: strict 3-position chain `vertex → vertex_flash_lite → workers_ai_llama32_3b` (head flips on ≤90d runway). Assamese: strict 3-position chain `sarvam → vertex_assamese → retrieval_only`. Content formatter: Vertex 2.5 Flash → Llama-3.3-70b → passthrough; every doc carries `formatted_by` audit field.
-
-### §5.2 OCR
-
-Indic OCR via Google Vision; general OCR via Workers AI Vision.
-
-### §5.3 Voice
-
-STT English: Deepgram Nova-3. STT Assamese: Google Chirp_2 → Workers AI Whisper. TTS English: ElevenLabs primary, Deepgram Aura-2 fallback. TTS Assamese: Google Neural2. Voice paywall on `/voice/tts /voice/stt /voice/voice`.
-
-### §5.4 Payments
-
-Razorpay INR-only subscriptions; Glacier 7-yr receipt archive.
-
-### §5.5 Analytics & monitoring
-
-PostHog (LCP-gated SDK); Cloudflare Analytics; Sentry errors-only Developer tier (Performance retired); GCP Cloud Trace as sole tracing exporter.
-
-### §6 Databases
-
-MongoDB Atlas (users / chat / content / OCR / metadata); Cloudflare D1 (syllabus graph + edge metadata); Pinecone (1024-dim, `aws-ap-south-1`); Cloudflare KV (deterministic AI cache: MCQs / flashcards / definitions / translations / precomputed notes); Upstash Redis (rate limit + hot retrieval cache + quota).
-
-### §7 AI pipeline (8 stages)
-
-Request intake → intent resolution → 8-source retrieval dispatch → RRF fusion → prompt synthesis → model delegation → response formatting → deterministic materialization.
-
-### §8 Cache architecture (5 layers)
-
-L1 browser → L2 CF CDN → L3 KV AI cache → L4 Redis hot cache → L5 D1 metadata cache.
-
-### §9 Advanced cache optimization (#571 → #577)
-
-Cache intelligence (#571) live; semantic fingerprinting (#572) live (Task #10 — `cache_fingerprint.py` + dual-read window); deterministic rendering (#573) live (Task #10 — `templates/deterministic/*` + `content_formatter.format_content`); prewarming engine (#574) live (Task #13 — nightly `prewarm-seo-routes` Lambda); dynamic-TTL exam-window stretch (#575) live; regional cache `X-Cache-Region: ne-india` (#576) live; retrieval-result cache (#577) live.
-
-### §10 SEO
-
-Programmatic `/board/class/subject/chapter/type` routes live (Task #11 — `routes/seo_pages.py` + `templates/seo/chapter.html.j2` with H1=chapter-topic + schema.org `BreadcrumbList/LearningResource/Course/FAQPage/Quiz` + hreflang `as-IN/en-IN` + `geo.region=IN-AS`); IndexNow live (Task #11 — Bing + Yandex + Google Indexing API); internal linker + entity SEO health live; AEO answer cards + FAQ JSON-LD live (Task #12 — `aca_jobs/materialize_chapter_faqs.py` + `data-aeo-block` markers in the chapter template).
-
-### §11 Voice flow
-
-Student Voice → STT → Intent Resolution → Retrieval → Model Delegation → TTS → Streamed Audio (bilingual + Assamese explanations + exam revision + spoken summaries + accessibility).
-
-### §12 OCR flow
-
-PDF/Image upload → OCR detection → Indic routing → text extraction → structure parsing → retrieval indexing → PYQ materialization.
-
-### §13 Security
-
-Auth: **Supabase sole IdP** (Supabase JWKS verification + OIDC broker live; legacy email/password endpoints in `routes/auth.py` and the `JWT_SECRET` user-session path PARTIAL pending cutover; `JWT_SECRET` / `ADMIN_JWT_SECRET` remain only for short-lived service-to-service tokens, never for user sessions). Edge security: WAF + DDoS + rate-limit + bot detection live (Task #9 — verified-bot KV fast path so Google/Bing/Perplexity/GPTBot route through a 30 000-RPM lane). Secrets: Azure KV primary (AWS SM + CF Secrets read-only replicas). OriginGate `X-Origin-Auth` lock-step rotation.
-
-### §14 Observability (#569, #570)
-
-W3C tracing + provider spans + latency + cost telemetry + cache metrics + circuit-state + canaries; synthetic user journeys + SLA ledger + blast-radius + provider outage map + admin Ops Console.
-
-### §15 Cost governance
-
-`MONTHLY_TOTAL_USD_CAP = $100` (founder-locked); progressive degradation 60 / 80 / 95 % ladder + paywall + cache-only at 100 %; heavy-free user flow live (Task #13 closed the prewarm leg via the nightly `prewarm-seo-routes` Lambda).
-
-### §16 PWA
-
-Installable, offline shell, standalone, app shortcuts, low-data, bilingual UI, offline revision notes.
-
-### §19 Positioning
-
-*“Curriculum-constrained educational intelligence infrastructure”* — retrieval compounds, cache compounds, SEO compounds, educational artifacts compound, inference dependency decreases over time.
+One-line shape: PWA → CF Edge (Pages + CDN + Workers + KV + D1) → Edge Gateway (auth/quota/trace/budget) → ACA FastAPI core (eastus2) → RAG (vector + BM25 + graph) → provider delegation → response formatter → SSE streaming. English chat chain `vertex → vertex_flash_lite → workers_ai_llama32_3b`; Assamese chain `sarvam → vertex_assamese → retrieval_only`. Pinecone 1024-dim. 5-layer cache `browser → CF CDN → KV → Redis → D1`. Auth: Supabase sole IdP. Cost cap $100/mo with 60/80/95 % degradation ladder.
 
 ## Founder locks (always win)
 
@@ -164,41 +55,35 @@ Installable, offline shell, standalone, app shortcuts, low-data, bilingual UI, o
 - Prioritize modularity and maintainability.
 - Treat vectorless RAG and vector RAG as **complementary layers** — vector for semantic/paraphrased exam-Q search, vectorless (BM25 + tree-walk) for exact-term/formula/navigation queries.
 - **No silent fallbacks** — fail loud (V4 §12).
-- **Supabase is the sole auth provider** for student / staff / admin (sign-up, sign-in, OAuth, password reset, email verification, MFA). Backend verifies Supabase JWTs via JWKS; `GOOGLE_OAUTH_CLIENT_SECRET` is no longer required.
+- **Supabase is the sole auth provider** for student/staff/admin (sign-up, sign-in, OAuth, password reset, email verification, MFA). Backend verifies Supabase JWTs via JWKS; `GOOGLE_OAUTH_CLIENT_SECRET` is no longer required.
 
 ## Gotchas
 
+Headline operational traps. The full multi-paragraph rationale lives in [`docs/architecture/decisions.md`](docs/architecture/decisions.md) under the matching anchor.
+
 - **Backend import check:** `cd artifacts/syrabit-backend && python -c "import server"` before pushing.
 - **ACA deploy config:** Bicep ARM PATCH must include `properties.configuration.ingress.traffic = [{latestRevision: true, weight: 100}]` and `targetPort: 8000`. Bicep template (`infra/azure/aca-syrabit-backend.bicep`) must precisely mirror the runtime contract.
-- **Pinecone dimension incompatibility:** dimension is 1024. Future embed providers must match or be quarantined.
+- **Pinecone dimension = 1024.** Future embed providers must match or be quarantined.
 - **`OriginGate` lock-step rotation:** `ORIGIN_SHARED_SECRET` (ACA env) and `BACKEND_ORIGIN_SECRET` (syrabitworker binding) MUST be equal. Same for `D1_SYNC_SECRET`.
-- **Token budgets are LOCKED:** `cost_caps.TOKEN_BUDGETS` ceilings are founder-locked. Raising any value requires a `# COST-CAP-OVERRIDE: <reason>` comment on the changed line AND a Sentry-annotated changelog entry; `tests/test_cost_caps.py` walks the source file and fails CI when either signal is missing. Same applies to bumping the edge chat caps (`CHAT_CAP_MONTHLY=30`, `CHAT_CAP_DAILY=3`) in `workers/edge-proxy/src/index.ts`.
-- **Monthly USD ceiling LOCKED at $100:** `_DEFAULT_MONTHLY_TOTAL_USD_CAP` (`cost_caps.py`) and `MeterDConfig.cap_usd` (`credit_burn_meter.py`) defaults must remain ≤ $100 unless the changed line carries a `# COST-CAP-OVERRIDE: <reason>` marker. `scripts/check_budget_ceiling.py` enforces this in CI and validates that the three degradation thresholds (60 / 80 / 95 %) stay strictly increasing inside (0.0, 1.0).
-- **Cloud budget mirror (Task #4):** the AWS-side `aws_budgets_budget.monthly_cost` in `artifacts/syrabit/infra/aws/account-billing.tf` mirrors the same $100/mo ceiling and the same 60 / 80 / 95 % thresholds, fanning out to the `syrabit-ops-alerts` SNS topic so an AWS-side breach lands in the same Slack channel as the in-app `cost_caps` ladder. Raising the AWS budget to anything > $100 requires the same `# COST-CAP-OVERRIDE: <reason>` discipline as `cost_caps.py`. Ops contact for the budget alerts is `local.lz_ops_email` in the same file.
-- **`/api/me/quota` edge cache TTL = 5s (intentional, not 60s):** `Cache-Control: private, max-age=5, s-maxage=5` keeps the SPA's "remaining turns" banner from showing a stale value across more than one tick. Raising the TTL requires a UX review of banner staleness.
-- **K.2 deterministic cache scope:** `ai_input_cache` covers formatter / translate / OCR / MCQ / flashcard / definition; live `routes/ai_chat.py` is excluded by policy. Task #10 layered the **semantic fingerprint** on top: callers may pass `fingerprint=<32-hex>` (computed via `cache_fingerprint.fingerprint(...)`) so paraphrased / bilingual variants ("Explain photosynthesis" + "ফটোসিন্থেসিস কি") collapse onto a single `aic:fp:<region>:<model>:<fp>` key. The literal SHA256 keys are read-through for 30 days under `CACHE_FINGERPRINT_DUAL_READ` (default `true`); writes go ONLY to the fingerprint key. Per-content-type `fingerprint_hit_ratio` + `legacy_hit_ratio` are surfaced in `/api/health/cache`. Materialization-eligible content types (`definition` / `mcq` / `flashcard` / `glossary` / `chapter_summary`) can also short-circuit the LLM via `content_formatter.format_content(query_type=..., template_data=...)` which renders `templates/deterministic/<type>.md` and emits `formatted_by="deterministic_template"`. See [Extended decisions](docs/architecture/decisions.md#k2-deterministic-cache-scope-chat-adjacent).
-- **Cache calendar:** exam/results-mode TTL stretch (30d→90d for mcq/flashcard/definition/pyq) via `artifacts/syrabit-backend/cache_calendar.py` + `config/exam_calendar.yaml`; `/api/health/season` exposes the active mode. `cache_calendar.recommended_ttl_seconds(content_type, route, today)` is the single source of truth for both the prewarm Lambda and the Cloudflare worker per-route override pass — change a TTL here and it propagates to both call-sites in the next deploy. See [Extended decisions](docs/architecture/decisions.md#cache-calendar-knob-task-575).
-- **Prewarm engine (Task #13):** `aca_jobs/prewarm_seo_routes.py` runs nightly at 01:00 UTC via Lambda (Terraform: `prewarm-seo-routes` in `lambda-batch-jobs.tf`). Selects target chapters as `top_n` by 7-day `db.page_views` traffic UNION every chapter under a subject whose exam window starts within `PREWARM_EXAM_LOOKAHEAD_DAYS` (default 30), warms an extra per-chapter FAQ JSON-LD leg (`GET /content/chapters/{id}/faq-jsonld`, KV-cached at edge with 1h server-side cache) so the schema.org FAQPage block is hot for crawlers, walks all 7 SEO `PAGE_TYPES` per chapter, **GETs** each URL through Cloudflare with `X-Prewarm-Recommended-TTL` (advertises the cache_calendar TTL) + `X-Prewarm-Auth` (== `BACKEND_ORIGIN_SECRET`, gates the worker's `getPrewarmOverrideTtl`/`withOverriddenTtl` override path) so the worker fills its tiered cache AND the materialization-eligible page-types (`mcqs`, `flashcards`, `definitions`, `summary`, `pyqs`) produce a body that fills KV (`aic:fp:*`) + Mongo `ai_input_cache`. Persists the per-board summary to `db.seo_prewarm_runs` (consumed by admin tile `/api/admin/seo/prewarm-coverage`, which now surfaces split `kv_attempted/warmed/failed/success_rate` alongside the combined counts). Emits both `Syrabit/Cache::PrewarmSuccessRate` (combined) and `Syrabit/Cache::KvPrewarmSuccessRate` (KV-eligible only) per pass; CloudWatch alarms `cache-prewarm-success-rate-low` and `cache-kv-prewarm-success-rate-low` each fire at <0.90 so a degraded materialization path is not masked by healthy edge-only legs. Knobs: `PREWARM_TOP_N=5000`, `PREWARM_CONCURRENCY=32`, `PREWARM_HTTP_TIMEOUT_S=10`, `PREWARM_EXAM_LOOKAHEAD_DAYS=30`, `PUBLIC_BASE_URL=https://syrabit.ai`. The Lambda env carries `PREWARM_AUTH_TOKEN_SECRET_ARN` (mirrors `origin/shared-secret` SM entry == worker `BACKEND_ORIGIN_SECRET`); `lambda_batch/_db.bootstrap_env` hydrates it into `PREWARM_AUTH_TOKEN` at cold-start. Targets ≥95% KV hit-ratio during exam windows for materialization-eligible content types.
+- **Token + USD budgets are LOCKED.** `cost_caps.TOKEN_BUDGETS`, `_DEFAULT_MONTHLY_TOTAL_USD_CAP`, `MeterDConfig.cap_usd`, edge `CHAT_CAP_MONTHLY=30`/`CHAT_CAP_DAILY=3` (`workers/edge-proxy/src/index.ts`), and the AWS-side `aws_budgets_budget.monthly_cost` (Task #4 cloud mirror, `account-billing.tf`) all share the $100/mo ceiling and the 60/80/95 % thresholds. Any raise needs a `# COST-CAP-OVERRIDE: <reason>` marker on the changed line. Enforced by `scripts/check_budget_ceiling.py` + `tests/test_cost_caps.py`. See [Extended decisions — Cost caps & cloud budget mirror](docs/architecture/decisions.md#cost-caps--cloud-budget-mirror-tasks-4--549).
+- **`/api/me/quota` edge cache TTL = 5s (intentional, not 60s):** `Cache-Control: private, max-age=5, s-maxage=5` keeps the SPA's "remaining turns" banner from showing a stale value across more than one tick.
+- **K.2 deterministic cache scope + semantic fingerprint:** `ai_input_cache` covers formatter/translate/OCR/MCQ/flashcard/definition; live `routes/ai_chat.py` excluded by policy. Callers may pass `fingerprint=<32-hex>` (via `cache_fingerprint.fingerprint(...)`) so paraphrased / bilingual variants collapse onto one `aic:fp:<region>:<model>:<fp>` key. Materialization-eligible types short-circuit the LLM via `content_formatter.format_content(...)` rendering `templates/deterministic/<type>.md`. See [Extended decisions — K.2](docs/architecture/decisions.md#k2-deterministic-cache-scope-chat-adjacent).
+- **Cache calendar:** exam/results-mode TTL stretch via `artifacts/syrabit-backend/cache_calendar.py` + `config/exam_calendar.yaml`; `cache_calendar.recommended_ttl_seconds(...)` is the SSOT for prewarm Lambda + CF worker overrides. See [Extended decisions — Cache calendar knob](docs/architecture/decisions.md#cache-calendar-knob-task-575).
+- **Prewarm engine (Task #13):** `aca_jobs/prewarm_seo_routes.py` runs nightly 01:00 UTC via `prewarm-seo-routes` Lambda, walks all 7 SEO `PAGE_TYPES` per chapter, fills KV (`aic:fp:*`) + Mongo `ai_input_cache`. CloudWatch alarms `cache-prewarm-success-rate-low` + `cache-kv-prewarm-success-rate-low` fire at <0.90. Targets ≥95 % KV hit-ratio in exam windows. Full knob/auth/observability detail: [Extended decisions — Prewarm engine](docs/architecture/decisions.md#prewarm-engine-task-13).
 - **Cache-effectiveness observability (#571):** admin `/api/health/cache` + nightly Lambda → CloudWatch alarms (hit-ratio < 0.30, cardinality 3× spike).
-- **Backend tests — use `asyncio.run()` not `asyncio.get_event_loop().run_until_complete()` (Task #86):** Python 3.10+ deprecated `get_event_loop()` for callers without a running loop, and the deprecation warning interacts badly with the Task #85 leaked-coroutine gate (`pytest -W error::RuntimeWarning`). New tests that need to drive an async helper from a sync test body must use `asyncio.run(coro)` directly. The wider canonical pattern is `@pytest.mark.asyncio async def test_…(): await …` (asyncio mode is `auto` in `pyproject.toml`); use the bare-`asyncio.run` form only when the surrounding test must remain sync (e.g. fixtures or helpers that pre-date the asyncio plugin).
-- **Backend tests — chat-provider chains are canonical, NOT historical (Task #86):** `_PAID_PROVIDER_RPM_WINDOWS` only tracks `vertex` and `sarvam` (the only paid chat primaries). Tests that seed RPM windows or assert chain membership must reference the canonical chains from architecture lock §5.1 (`vertex → vertex_flash_lite → workers_ai_llama32_3b` for English, `sarvam → vertex_assamese → retrieval_only` for Assamese) — `azure_openai` / `workers_ai_indic` (chat) / `workers_ai_mistral_7b` (chat) are retired from the chat chains and seeding their windows raises `KeyError`. `workers_ai_indic` and `workers_ai_mistral_7b` DO remain legitimate members of the `assamese_content` / `content` pools respectively, so the `test_no_retired_providers_present` retired-set must NOT include them — the chat-chain shape tests already enforce their absence from chat. `scripts/ci/check_canonical_delegation.py` enforces these chains in CI.
-- **Backend pytest gate — leaked-coroutine warnings are CI errors (Task #85):** `artifacts/syrabit-backend/pyproject.toml` `[tool.pytest.ini_options].filterwarnings` promotes the `coroutine ... was never awaited` `RuntimeWarning` to a hard test failure. If your test starts failing with `RuntimeWarning: coroutine 'X' was never awaited`, the production code path or the test fixture forgot to `await` an async/AsyncMock call — fix the missing `await` (or stub the call as `AsyncMock(return_value=...)` and ensure the caller awaits it) rather than suppressing the warning. The filter is intentionally narrow to that one message so unrelated `RuntimeWarning`s (third-party resource warnings, etc.) keep their default informational behaviour. Sweep with `pytest -W error::RuntimeWarning` before promoting any new warning class.
-- **Indic embed via AWS Bedrock (Task #27, partial reversal of #491):** Assamese / Indic-tagged retrievals route through `cohere.embed-multilingual-v3` on AWS Bedrock (`BEDROCK_EMBED_REGION=us-east-1`, reuses existing AWS IAM via `boto3` — there is **no `COHERE_API_KEY` env-var and no `cohere` Python SDK**; `scripts/ci/check_canonical_delegation.py` enforces both bans). English / unknown-lang queries continue to use the Workers-AI custom embed worker. Both write 1024-dim vectors into the same Pinecone index; per-doc `embed_provider` metadata + provider-folded cache key (`embed_cache.py`) keep the two surfaces isolated. Spend is metered into MeterD's `INDIC_EMBED_MONTHLY_USD_SUBCAP=$5/mo` sub-bucket inside the global $100 cap (`cost_caps.BEDROCK_COHERE_EMBED_USD_PER_1K_TOKENS=0.0001`); `is_indic_embed_paused()` flips True for the rest of the calendar month when the sub-cap trips, after which the dispatcher routes Indic queries to Workers-AI for the rest of the month — `EMBED_INDIC_PROVIDER=workers_ai_custom` and `RAG_EMBEDDING_PROVIDER_FORCE=workers_ai_custom` are the manual kill-switches. Admin tile: 4-leg `/admin/health/embed-stack` (`bedrock_indic` excluded from top-level `ok` so a paused Indic route does not page on-call). Test: `tests/test_cohere_bedrock_embed.py`. Decision log: [Task #27 — Cohere via Bedrock](docs/architecture/decisions.md#task-27--cohere-embed-multilingual-v3-via-aws-bedrock-2026-05-09).
+- **Backend test gates (Tasks #85, #86):** pytest promotes the *"coroutine ... was never awaited"* `RuntimeWarning` to a hard failure — fix the missing `await`, do not suppress. Use `asyncio.run(coro)` not `asyncio.get_event_loop().run_until_complete(...)`. Chat-provider chains in tests are canonical (lock §5.1) — `azure_openai`/`workers_ai_indic`(chat)/`workers_ai_mistral_7b`(chat) are retired from chat chains and seeding their RPM windows raises `KeyError`; the same providers DO remain in `assamese_content`/`content` pools. Full gate semantics: [Extended decisions — Backend test gates](docs/architecture/decisions.md#backend-test-gates-tasks-85--86).
+- **Indic embed via AWS Bedrock (Task #27, partial reversal of #491):** Assamese / Indic-tagged retrievals route through `cohere.embed-multilingual-v3` on AWS Bedrock (no `COHERE_API_KEY`, no `cohere` SDK — both banned by `check_canonical_delegation.py`); English uses Workers-AI custom embed. Both 1024-dim into the same Pinecone index, isolated by `embed_provider` metadata. Sub-cap `INDIC_EMBED_MONTHLY_USD_SUBCAP=$5/mo` inside the global $100 cap. Kill-switches: `EMBED_INDIC_PROVIDER=workers_ai_custom`, `RAG_EMBEDDING_PROVIDER_FORCE=workers_ai_custom`. Admin tile: `/admin/health/embed-stack`. See [Extended decisions — Task #27](docs/architecture/decisions.md#task-27--cohere-embed-multilingual-v3-via-aws-bedrock-2026-05-09).
 
 ## Pointers
 
 - **2026 architecture lock:** `infra/architecture-locked-2026.md` (+ `infra/architecture-matrix.json`)
 - **Extended decision log:** `docs/architecture/decisions.md`
 - **Four-cloud delegation matrix:** `infra/four-cloud-delegation.md`
-- **GCP landing zone:** `artifacts/syrabit/docs/infra/gcp-landing-zone.md`
-- **Azure landing zone:** `artifacts/syrabit/docs/infra/azure-landing-zone.md`
-- **AWS landing zone:** `artifacts/syrabit/docs/infra/aws-landing-zone.md`
+- **Landing zones:** `artifacts/syrabit/docs/infra/{gcp,azure,aws}-landing-zone.md`
 - **ACA cutover runbook:** `artifacts/syrabit/docs/infra/aca-cutover.md`
 - **Cache-effectiveness audit (#571):** `artifacts/syrabit/docs/infra/cache-effectiveness-audit.md`
-- **Ranking playbook (#15):** `docs/architecture/ranking-playbook.md` (lever → impact matrix; weekly measurement loop)
-- **Task #15 deferral notes:** `docs/architecture/task-15-baseline-deferral.md` (what landed offline + what's gated on #5–#13 merging + 14 d of prod traffic)
-- **AWS Glacier restore runbook:** `artifacts/syrabit/docs/infra/glacier-restore-runbook.md`
-- **AWS Lambda batch-jobs manifest:** `infra/aws/lambda/manifest.json`
+- **Ranking playbook (#15):** `docs/architecture/ranking-playbook.md`
+- **Glacier restore runbook:** `artifacts/syrabit/docs/infra/glacier-restore-runbook.md`
+- **Lambda batch-jobs manifest:** `infra/aws/lambda/manifest.json`
 - **2026 cleanup purge log:** `docs/cleanup/2026-purge-log.md`
-- **Task #27 partial reversal of #491 (Indic embed via Bedrock):** `docs/architecture/decisions.md#task-27--cohere-embed-multilingual-v3-via-aws-bedrock-2026-05-09`
 - **Skills index:** `.local/skills/`

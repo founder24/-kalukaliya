@@ -301,3 +301,36 @@ language-correct embed pool selection (English → Workers-AI custom;
 Assamese → Cohere-Bedrock per Task #27), bypass the $100/mo cap, or
 escape the no-silent-fallbacks rule (a probe failure surfaces as web,
 not as a silent rag-empty 503).
+
+## Cost caps & cloud budget mirror (Tasks #4, #549)
+
+`MONTHLY_TOTAL_USD_CAP = $100` is enforced in three coordinated places that must move together:
+
+1. **In-app:** `cost_caps._DEFAULT_MONTHLY_TOTAL_USD_CAP` and `credit_burn_meter.MeterDConfig.cap_usd` defaults must remain ≤ $100 unless the changed line carries a `# COST-CAP-OVERRIDE: <reason>` marker. The 60 / 80 / 95 % degradation thresholds must stay strictly increasing inside (0.0, 1.0). `cost_caps.TOKEN_BUDGETS` per-provider ceilings carry the same override discipline; bumping any value also requires a Sentry-annotated changelog entry. `tests/test_cost_caps.py` walks the source file and fails CI when either signal is missing.
+2. **Edge:** `workers/edge-proxy/src/index.ts` `CHAT_CAP_MONTHLY = 30` and `CHAT_CAP_DAILY = 3` per-user caps. Same `# COST-CAP-OVERRIDE` rule.
+3. **Cloud mirror (Task #4):** `aws_budgets_budget.monthly_cost` in `artifacts/syrabit/infra/aws/account-billing.tf` mirrors the same $100/mo ceiling and the same 60 / 80 / 95 % thresholds, fanning out to the `syrabit-ops-alerts` SNS topic so an AWS-side breach lands in the same Slack channel as the in-app `cost_caps` ladder. Raising the AWS budget above $100 needs the same override marker. Ops contact for the budget alerts is `local.lz_ops_email` in the same file.
+
+CI guard: `scripts/check_budget_ceiling.py`. Any drift between the three surfaces is treated as a cap raise and must carry the override discipline.
+
+## Prewarm engine (Task #13)
+
+`aca_jobs/prewarm_seo_routes.py` runs nightly at 01:00 UTC via Lambda (Terraform: `prewarm-seo-routes` in `lambda-batch-jobs.tf`).
+
+- **Selection:** `top_n` chapters by 7-day `db.page_views` traffic UNION every chapter under a subject whose exam window starts within `PREWARM_EXAM_LOOKAHEAD_DAYS` (default 30).
+- **Per-chapter work:** warms an extra FAQ JSON-LD leg (`GET /content/chapters/{id}/faq-jsonld`, KV-cached at edge with 1h server-side cache) so the schema.org FAQPage block is hot for crawlers, then walks all 7 SEO `PAGE_TYPES`.
+- **Request shape:** GETs each URL through Cloudflare with `X-Prewarm-Recommended-TTL` (advertises the `cache_calendar` TTL) + `X-Prewarm-Auth` (== `BACKEND_ORIGIN_SECRET`, gates the worker's `getPrewarmOverrideTtl` / `withOverriddenTtl` override path) so the worker fills its tiered cache AND the materialization-eligible page-types (`mcqs`, `flashcards`, `definitions`, `summary`, `pyqs`) produce a body that fills KV (`aic:fp:*`) + Mongo `ai_input_cache`.
+- **Persistence:** per-board summary written to `db.seo_prewarm_runs`, consumed by admin tile `/api/admin/seo/prewarm-coverage` (surfaces split `kv_attempted/warmed/failed/success_rate` alongside the combined counts).
+- **Metrics + alarms:** emits both `Syrabit/Cache::PrewarmSuccessRate` (combined) and `Syrabit/Cache::KvPrewarmSuccessRate` (KV-eligible only) per pass; CloudWatch alarms `cache-prewarm-success-rate-low` and `cache-kv-prewarm-success-rate-low` each fire at <0.90 so a degraded materialization path is not masked by healthy edge-only legs.
+- **Knobs:** `PREWARM_TOP_N=5000`, `PREWARM_CONCURRENCY=32`, `PREWARM_HTTP_TIMEOUT_S=10`, `PREWARM_EXAM_LOOKAHEAD_DAYS=30`, `PUBLIC_BASE_URL=https://syrabit.ai`.
+- **Auth:** Lambda env carries `PREWARM_AUTH_TOKEN_SECRET_ARN` (mirrors `origin/shared-secret` SM entry == worker `BACKEND_ORIGIN_SECRET`); `lambda_batch/_db.bootstrap_env` hydrates it into `PREWARM_AUTH_TOKEN` at cold-start.
+- **Target:** ≥95 % KV hit-ratio during exam windows for materialization-eligible content types.
+
+## Backend test gates (Tasks #85, #86)
+
+Two pytest gates in `artifacts/syrabit-backend/pyproject.toml` enforce async hygiene + canonical chat-chain shape.
+
+**Task #85 — leaked-coroutine warnings are CI errors.** `[tool.pytest.ini_options].filterwarnings` promotes the `coroutine ... was never awaited` `RuntimeWarning` to a hard test failure. If your test starts failing with `RuntimeWarning: coroutine 'X' was never awaited`, the production code path or the test fixture forgot to `await` an async/`AsyncMock` call — fix the missing `await` (or stub the call as `AsyncMock(return_value=...)` and ensure the caller awaits it) rather than suppressing the warning. The filter is intentionally narrow to that one message so unrelated `RuntimeWarning`s (third-party resource warnings, etc.) keep their default informational behaviour. Sweep with `pytest -W error::RuntimeWarning` before promoting any new warning class.
+
+**Task #86 — use `asyncio.run()` not `asyncio.get_event_loop().run_until_complete()`.** Python 3.10+ deprecated `get_event_loop()` for callers without a running loop, and the deprecation warning interacts badly with the Task #85 gate. New tests that need to drive an async helper from a sync test body must use `asyncio.run(coro)` directly. The wider canonical pattern is `@pytest.mark.asyncio async def test_…(): await …` (asyncio mode is `auto` in `pyproject.toml`); use the bare `asyncio.run` form only when the surrounding test must remain sync (e.g. fixtures or helpers that pre-date the asyncio plugin).
+
+**Task #86 — chat-provider chains in tests are canonical, not historical.** `_PAID_PROVIDER_RPM_WINDOWS` only tracks `vertex` and `sarvam` (the only paid chat primaries). Tests that seed RPM windows or assert chain membership must reference the canonical chains from architecture lock §5.1 (`vertex → vertex_flash_lite → workers_ai_llama32_3b` for English, `sarvam → vertex_assamese → retrieval_only` for Assamese) — `azure_openai` / `workers_ai_indic` (chat) / `workers_ai_mistral_7b` (chat) are retired from the chat chains and seeding their windows raises `KeyError`. `workers_ai_indic` and `workers_ai_mistral_7b` DO remain legitimate members of the `assamese_content` / `content` pools respectively, so the `test_no_retired_providers_present` retired-set must NOT include them — the chat-chain shape tests already enforce their absence from chat. `scripts/ci/check_canonical_delegation.py` enforces these chains in CI.
