@@ -54,7 +54,11 @@ Thumbs.db
 **/.terraform/
 
 # Audits — keep summary docs, ignore raw dumps (Task #94)
+# Covers both directory dumps (`*-raw/`, `raw*/`) and the symlink/file aliases
+# that pointed at them in the original tree (`*-raw` no trailing slash).
 docs/audits/**/*-raw/
+docs/audits/**/*-raw
+docs/audits/**/raw*/
 
 # Archived attached assets (Task #8 — purged from tracked tree, kept locally for reference)
 docs/archive/attached/
