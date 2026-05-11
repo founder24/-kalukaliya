@@ -132,6 +132,14 @@ ALLOWLIST_PARTS = {
     "node_modules",
     "build",
     "dist",
+    # Task #87 — Vite SSR build output (`pnpm --filter @workspace/syrabit
+    # run build` emits to `artifacts/syrabit/dist-ssr/`). Regenerable
+    # build artefact; minified bundles legitimately contain provider
+    # vendor strings that the literal scanner would otherwise flag.
+    # `.gitignore` now blocks future commits — this skip is the
+    # belt-and-braces complement so a stale tracked tree doesn't
+    # break the deploy guard.
+    "dist-ssr",
 }
 # Files where banned tokens legitimately remain. Inherited verbatim from the
 # legacy guard so no previously-passing PR turns red on the umbrella swap.
@@ -143,6 +151,14 @@ ALLOWLIST_FILES = {
     # the retired `firebase_admin` literal in audit-trail prose. The
     # runtime path itself contains no FCM call.
     "artifacts/syrabit-backend/scripts/migrate_fcm_to_vapid.py",
+    # Task #87 — Supabase auth migration runner. The matching strings
+    # ("recovery email" in DRY-RUN logging, "--resend-emails" CLI flag
+    # help text) are operator audit prose, not transactional email
+    # send sites. The runtime path uses Supabase admin SDK
+    # (`generate_link` + project SMTP / SES helper) — not a competing
+    # transactional email vendor — so it does not violate the SES
+    # sole-path contract from Task #556.
+    "artifacts/syrabit-backend/scripts/sync_users_to_supabase.py",
     "artifacts/syrabit-backend/tests/test_dead_providers_guard.py",
     "artifacts/syrabit-backend/tests/test_provider_dispatch.py",
     "artifacts/syrabit-backend/tests/test_credit_drain_order.py",

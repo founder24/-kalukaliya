@@ -4,3 +4,10 @@
 # Platform and the encrypted GitHub environment secrets.
 do-backend-vars.env
 do-rust-vars.env
+
+# Task #87 — Vite SSR build output. `pnpm --filter @workspace/syrabit
+# run build` emits to `dist-ssr/` (sibling of `dist/`). Regenerable
+# build artefact; an earlier deploy run accidentally committed 250+
+# files here, breaking the canonical-delegation guard on minified
+# vendor strings inside the bundles. Keep this entry forever.
+dist-ssr/
