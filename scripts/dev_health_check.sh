@@ -7,6 +7,7 @@
 #   3. frontend GET /                  (artifacts/syrabit: web on :25144)
 #   4. mockup   GET /__mockup/         (artifacts/mockup-sandbox on :8081)
 #   5. frontend `pnpm build` (skipped when DEV_HEALTH_SKIP_BUILD=1)
+#   6. env-var contract: `docs/infra/env-vars.md` matches code (Task #89)
 #
 # Wired as the `dev_health` validation step (validation skill).
 # Aggregates failures (does not exit on the first one) and returns a
@@ -64,6 +65,18 @@ else
     err "pnpm --filter @workspace/syrabit run build (see /tmp/dev_health_build.log)"
     tail -n 40 /tmp/dev_health_build.log || true
   fi
+fi
+
+echo "[6/6] env-var contract doc"
+# Task #89 — docs/infra/env-vars.md is auto-generated from code refs +
+# bicep / wrangler / TF wiring. This step fails if anyone added a new
+# env var (or removed one) without running
+# `python scripts/ci/check_env_vars_doc.py --write`.
+if ( cd "$REPO_ROOT" && python3 scripts/ci/check_env_vars_doc.py >/tmp/dev_health_envdoc.log 2>&1 ); then
+  pass "docs/infra/env-vars.md matches code"
+else
+  err "docs/infra/env-vars.md drifted (run: python scripts/ci/check_env_vars_doc.py --write)"
+  tail -n 30 /tmp/dev_health_envdoc.log || true
 fi
 
 echo
