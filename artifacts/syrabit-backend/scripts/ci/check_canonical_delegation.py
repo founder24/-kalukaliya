@@ -61,6 +61,7 @@ behaviour-preserving promise above holds.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 import sys
@@ -132,15 +133,26 @@ ALLOWLIST_PARTS = {
     "node_modules",
     "build",
     "dist",
-    # Task #87 — Vite SSR build output (`pnpm --filter @workspace/syrabit
-    # run build` emits to `artifacts/syrabit/dist-ssr/`). Regenerable
-    # build artefact; minified bundles legitimately contain provider
-    # vendor strings that the literal scanner would otherwise flag.
-    # `.gitignore` now blocks future commits — this skip is the
-    # belt-and-braces complement so a stale tracked tree doesn't
-    # break the deploy guard.
-    "dist-ssr",
+    # NOTE: the bare `dist-ssr` part-match used to live here as a
+    # belt-and-braces skip while 160 tracked dist-ssr files were
+    # poisoning the scan. Task #90 (a) removed those tracked files
+    # from main and (b) added `_check_no_tracked_dist_files` below to
+    # actively reject any future `artifacts/syrabit/dist*/` commit.
+    # The narrow exact-subtree allowlist `ALLOWLIST_PATH_PREFIXES`
+    # keeps the same skip semantics for the local working tree (where
+    # a developer may have run `pnpm run build` and produced fresh
+    # SSR output) without granting blanket coverage to any random
+    # `dist-ssr/` directory anywhere in the repo.
 }
+# Path-prefix allowlist (relative to the repo root, POSIX). Unlike
+# ALLOWLIST_PARTS — which matches any ancestor directory anywhere —
+# entries here only skip files under the *exact* subtree. Used for
+# regenerable build outputs that may legitimately appear in a local
+# working tree but must never be tracked in git.
+ALLOWLIST_PATH_PREFIXES: tuple[str, ...] = (
+    "artifacts/syrabit/dist-ssr/",
+    "artifacts/syrabit/dist/",
+)
 # Files where banned tokens legitimately remain. Inherited verbatim from the
 # legacy guard so no previously-passing PR turns red on the umbrella swap.
 ALLOWLIST_FILES = {
@@ -277,6 +289,8 @@ def _is_allowlisted(p: Path) -> bool:
     if parts & ALLOWLIST_PARTS:
         return True
     rel = p.relative_to(ROOT).as_posix()
+    if any(rel.startswith(pref) for pref in ALLOWLIST_PATH_PREFIXES):
+        return True
     if rel in ALLOWLIST_FILES:
         return True
     if any(p.name.startswith(prefix) for prefix in ALLOWLIST_NAME_PREFIXES):
@@ -327,6 +341,47 @@ def _scan_file(p: Path) -> list[str]:
     return failures
 
 
+def _check_no_tracked_dist_files() -> list[str]:
+    """Task #90 — reject any tracked file under
+    ``artifacts/syrabit/dist*/``. Vite SSR / client build output is
+    regenerable and the 160 dist-ssr files that were accidentally
+    committed in 2026-04 forced ALLOWLIST_PARTS to skip the whole
+    subtree just to keep the scanner green. A `.gitignore` rule
+    blocks honest `git add` but does not catch `git add -f` or
+    historical bloat — this guard is the active complement.
+
+    Uses ``git ls-files`` (read-only) to enumerate tracked paths so
+    fresh local SSR output (un-tracked, ignored) is correctly
+    silent. Falls back to silence (no failure) when git is
+    unavailable so non-git contexts (pytest in a tarball, etc.)
+    don't blow up.
+    """
+    import subprocess
+    failures: list[str] = []
+    try:
+        proc = subprocess.run(
+            ["git", "--no-optional-locks", "ls-files",
+             "artifacts/syrabit/dist*/"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return failures
+    if proc.returncode != 0:
+        return failures
+    tracked = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    if tracked:
+        sample = ", ".join(tracked[:3])
+        more = f" (+{len(tracked) - 3} more)" if len(tracked) > 3 else ""
+        failures.append(
+            f"Task #90: {len(tracked)} tracked file(s) under "
+            f"artifacts/syrabit/dist*/ — these are regenerable build "
+            f"output and must never be committed. Sample: {sample}{more}. "
+            f"Run: git rm -r --cached artifacts/syrabit/dist-ssr "
+            f"artifacts/syrabit/dist (then commit)."
+        )
+    return failures
+
+
 def _check_aca_jobs_manifest() -> list[str]:
     """Task #551 §E — every aca_jobs/<name>.py must appear in the
     Lambda manifest (carried forward unchanged)."""
@@ -349,7 +404,68 @@ def _check_aca_jobs_manifest() -> list[str]:
         entry.get("aca_module", "").split(".", 1)[-1]
         for entry in manifest.get("migrated_jobs", [])
     }
-    exempt = set(manifest.get("exempt_modules", [])) | {"__init__"}
+
+    # Task #88 — `exempt_modules` entries are time-boxed objects:
+    #   {module, _expires_iso (YYYY-MM-DD), _blocking_task (#NN), _reason}
+    # The guard fails when today >= _expires_iso so deferred Lambda wiring
+    # cannot quietly drift forever. `__init__` is auto-exempted.
+    # Task #88 — anchor "today" in UTC so the expiry boundary is deterministic
+    # regardless of CI host timezone (the docstring + manifest doc both
+    # describe `_expires_iso` as a UTC date).
+    today = _dt.datetime.now(_dt.timezone.utc).date()
+    exempt: set[str] = {"__init__"}
+    raw_exempt = manifest.get("exempt_modules", [])
+    for idx, entry in enumerate(raw_exempt):
+        if isinstance(entry, str):
+            failures.append(
+                f"infra/aws/lambda/manifest.json: exempt_modules[{idx}]={entry!r} is a bare string — "
+                f"Task #88 requires an object with `module`, `_expires_iso`, `_blocking_task`, `_reason`."
+            )
+            continue
+        if not isinstance(entry, dict):
+            failures.append(
+                f"infra/aws/lambda/manifest.json: exempt_modules[{idx}] must be an object."
+            )
+            continue
+        module = entry.get("module")
+        expires = entry.get("_expires_iso")
+        blocking = entry.get("_blocking_task")
+        reason = entry.get("_reason")
+        missing = [k for k, v in (
+            ("module", module), ("_expires_iso", expires),
+            ("_blocking_task", blocking), ("_reason", reason),
+        ) if not v]
+        if missing:
+            failures.append(
+                f"infra/aws/lambda/manifest.json: exempt_modules[{idx}] "
+                f"({module or '<unnamed>'}) missing required field(s) {missing} — "
+                f"Task #88 requires `module`, `_expires_iso` (YYYY-MM-DD), "
+                f"`_blocking_task` (#NN), `_reason`."
+            )
+            continue
+        try:
+            expires_date = _dt.date.fromisoformat(expires)
+        except (TypeError, ValueError):
+            failures.append(
+                f"infra/aws/lambda/manifest.json: exempt_modules[{idx}] ({module}) "
+                f"_expires_iso={expires!r} is not a valid ISO date (YYYY-MM-DD)."
+            )
+            continue
+        if not (isinstance(blocking, str) and blocking.startswith("#") and blocking[1:].isdigit()):
+            failures.append(
+                f"infra/aws/lambda/manifest.json: exempt_modules[{idx}] ({module}) "
+                f"_blocking_task={blocking!r} must look like '#NN' (a project task reference)."
+            )
+            continue
+        if today >= expires_date:
+            failures.append(
+                f"infra/aws/lambda/manifest.json: exempt_modules[{idx}] ({module}) "
+                f"expired on {expires} (blocking task {blocking}). Task #88: either land the Lambda "
+                f"migration for `aca_jobs/{module}.py` or extend `_expires_iso` with a documented reason."
+            )
+            continue
+        exempt.add(module)
+
     for path in sorted(aca_dir.glob("*.py")):
         name = path.stem
         if name in exempt:
@@ -832,6 +948,7 @@ def main() -> int:
 
     failures: list[str] = _check_aca_jobs_manifest()
     failures.extend(_check_canonical_bank())
+    failures.extend(_check_no_tracked_dist_files())
 
     for p in targets:
         if _is_allowlisted(p):
