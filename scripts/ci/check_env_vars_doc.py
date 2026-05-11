@@ -38,6 +38,14 @@ PY_REF_RE = re.compile(
     r"""|os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']"""
 )
 TS_REF_RE = re.compile(r"""\benv\.([A-Z][A-Z0-9_]+)\b""")
+# Catches TypeScript Env interface property declarations like
+# `JWT_SECRET?: string;` inside `interface Env { ... }` blocks. Casted
+# access patterns (`(env as Env & { JWT_SECRET?: string }).JWT_SECRET`)
+# in workers/edge-proxy/src/index.ts hide the env var name behind a
+# property cast that the bare TS_REF_RE above misses.
+TS_TYPE_DECL_RE = re.compile(
+    r"""^\s*([A-Z][A-Z0-9_]+)\??:\s*(?:string|number|boolean)""", re.M
+)
 WRANGLER_VAR_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]+)\s*=", re.M)
 BICEP_NAME_RE = re.compile(r"name:\s*'([A-Z][A-Z0-9_]+)'")
 BICEP_SECRETREF_RE = re.compile(
@@ -54,10 +62,19 @@ TF_ENV_KV_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]+)\s*=\s*(.+?)$", re.M)
 # These show up in `env.X` references but are not configured via env;
 # they're declared as bindings in wrangler.toml.
 WORKER_BINDING_NAMES = {
-    "AI", "ANALYTICS", "ASSETS", "AI_RESPONSE_CACHE_KV_ID",
-    "AI_RESPONSE_CACHE_KV_ID_NE_INDIA", "BOT_HTML_CACHE", "CF_EDGE_CACHE",
-    "CHAT_SESSION", "CONTENT_DB", "PAGES_ORIGIN", "R2_MEDIA",
-    "RATE_LIMITER", "RATE_LIMITER_DO", "SEASON_CACHE_DO", "SYLLABUS_INDEX",
+    # Workers AI / Analytics Engine / static assets bindings.
+    "AI", "ANALYTICS", "ASSETS",
+    # KV namespaces (declared under [[kv_namespaces]] in wrangler.toml).
+    "AI_RESPONSE_CACHE_KV_ID", "AI_RESPONSE_CACHE_KV_ID_NE_INDIA",
+    "BOT_HTML_CACHE", "CF_EDGE_CACHE", "CONTENT_CACHE", "CONTENT_DB",
+    "RATE_LIMIT", "SYLLABUS_INDEX",
+    # Durable Objects (declared under [[durable_objects.bindings]]).
+    "CHAT_SESSION", "RATE_LIMITER", "RATE_LIMITER_DO", "SEASON_CACHE_DO",
+    # R2 buckets.
+    "R2_MEDIA",
+    # Special: mTLS cert binding. (NOTE: PAGES_ORIGIN was REMOVED — it is
+    # a real plaintext [vars] env var in workers/edge-proxy/wrangler.toml,
+    # not a binding.)
     "MTLS_CERT",
 }
 
@@ -154,9 +171,15 @@ SERVICES: list[Service] = [
 # secretRef wiring. Secrets must never be committed to the repo.
 # ---------------------------------------------------------------------------
 SECRET_NAME_HINTS = (
-    "_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_DSN",
+    # Direct credential suffixes.
+    "_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_DSN", "_JWT",
+    # Connection-string style names that carry credentials inline.
     "MONGO_URL", "DATABASE_URL", "API_KEY", "CREDENTIALS",
-    "PRIVATE_KEY", "_ARN",
+    "PRIVATE_KEY",
+    # NOTE: `_ARN` was removed — an AWS Secrets Manager ARN is itself a
+    # public reference, not the secret value. The Lambda runtime
+    # dereferences it at cold-start; the ARN can safely be checked into
+    # Terraform state.
 )
 
 NON_SECRET_OVERRIDES = {
@@ -230,6 +253,11 @@ def scan_ts_dir(root: Path) -> set[str]:
         except OSError:
             continue
         for m in TS_REF_RE.finditer(text):
+            name = m.group(1)
+            if name and name not in WORKER_BINDING_NAMES:
+                out.add(name)
+        # Catch type-declaration-only env refs (cast access patterns).
+        for m in TS_TYPE_DECL_RE.finditer(text):
             name = m.group(1)
             if name and name not in WORKER_BINDING_NAMES:
                 out.add(name)
@@ -331,9 +359,12 @@ def build_doc() -> str:
         rows: list[tuple[str, str, str, str]] = []
 
         if svc.key == "aca-backend":
-            # All bicep-wired vars + code-referenced vars that look secret-ish
-            # or are explicitly listed in the founder-locked replit.md set.
-            interesting = bicep_set | (code_refs & set(bicep_set))
+            # Union of "everything code references" and "everything bicep
+            # binds" — code-only refs surface as "❌ not wired" so the
+            # operator can decide between (a) wire it in bicep, (b) prune
+            # the dead code path, or (c) confirm it comes from a different
+            # infra file (account-billing.tf / Key Vault / etc.).
+            interesting = code_refs | bicep_set
             for name in interesting:
                 wired = "✅ secretRef `%s`" % bicep_secrets[name] if name in bicep_secrets \
                         else ("✅ literal value" if name in bicep_plains else "❌ code-only")
