@@ -1,4 +1,3 @@
-```gitignore
 # Environment files
 .env
 .env.local
@@ -28,6 +27,8 @@ venv/
 .venv-bak/
 .venv-py3/
 .venv-py3-bak/
+.venv-prod/
+.python-deps/
 .python-version
 .mypy_cache/
 .pytest_cache/
@@ -48,6 +49,12 @@ yarn-error.log*
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Infra (Terraform local state / providers — Task #94)
+**/.terraform/
+
+# Audits — keep summary docs, ignore raw dumps (Task #94)
+docs/audits/**/*-raw/
 
 # Archived attached assets (Task #8 — purged from tracked tree, kept locally for reference)
 docs/archive/attached/
@@ -75,7 +82,7 @@ docs/archive/attached/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
+
 # Playwright test artifacts
 test-results/
 playwright-report/

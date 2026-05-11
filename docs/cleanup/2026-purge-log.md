@@ -363,3 +363,73 @@ file is retained as a redirect.)
   `ENVIRONMENT_VARIABLES.md`, `SETUP_GUIDE.md`, `setup.sh`,
   `WIRING_EXECUTION_PROMPT.md`); they are equally stale but moving
   them was not in the brief's enumerated list and would extend scope.
+
+---
+
+# Repo-bloat cleanup — Task #94 (2026-05-11)
+
+Driven by the repo-bloat audit at `.local/audits/repo_bloat_audit_2026-05-11.md`.
+GitHub trees API on `origin/main@b89c5e8c` showed **8,145 blobs / 195.64 MB**, of which **~165 MB / 84 %** was avoidable bloat: vendored Python install trees, raw PageSpeed JSON dumps, oversized canvas PNGs, and a stray Terraform provider stub. Working-tree copies of the Python trees are preserved on disk so any local tooling that depends on them keeps working — this task only stops tracking them in git.
+
+## Removed from the git index
+
+| Path | Files | Bytes | Why |
+| --- | ---: | ---: | --- |
+| `.python-deps/` | 5,395 | 129.72 MB | Vendored Python install. 32 architecture-specific `.so` files (uvloop, cryptography, zstandard, asyncpg, pyroaring, pydantic_core, etc.) total 86.51 MB — they only work on `cpython-311-x86_64-linux-gnu` and would poison cross-platform clones. Working tree kept on disk. |
+| `.venv-prod/` | 1,046 | 10.99 MB | Second vendored Python venv. Root `.gitignore` already listed `.venv/`, `.venv-bak/`, `.venv-py3/`, `.venv-py3-bak/` but missed this variant — typo gap. Working tree kept on disk. |
+| `docs/audits/pagespeed-2026-04-18-raw/` | 24 | 13.64 MB | One-off raw PageSpeed Insights JSON dumps (700-860 KB per file). Archived to R2 — see manifest below. `pagespeed-2026-04-18.md` summary stays. |
+| `docs/audits/pagespeed-2026-04-18-rerun-raw/` | 24 | 13.49 MB | Same — second run. Archived to R2. `pagespeed-2026-04-18-rerun.md` summary stays. |
+| `docs/audits/pagespeed-2026-04-18-rerun-2-raw` | 1 | 30 B | Symlink → `pagespeed-2026-04-18-rerun-raw`. Removed; `pagespeed-2026-04-18-rerun-2.md` summary stays. |
+| `artifacts/syrabit/infra/aws/.terraform/` | 2 | 16.89 KB | Stray Terraform provider stub. `.terraform/` is now globally gitignored. |
+| **Total deletions** | **6,492** | **167.86 MB** | |
+
+## Compressed in place
+
+| Path | Before | After | Method |
+| --- | ---: | ---: | --- |
+| `.canvas/assets/yoga-cover-notext.png` | 2,073,445 B (2.0 MB) | 333,616 B (326 KB) | Pillow palette quantize 64 colors + Floyd-Steinberg dither + `optimize=True`. Visually identical for cover art. |
+| `.canvas/assets/syrabit-cover-bg.png` | 984,876 B (962 KB) | 99,017 B (97 KB) | Pillow palette quantize 256 colors + `optimize=True`. |
+| **PNG savings** | **2,983 KB** | **425 KB** | **−86 %** |
+
+`yoga-cover-original.png` (14 KB) was untouched.
+
+## R2 archive — PageSpeed raw dumps
+
+48 raw JSON files (27.13 MB) uploaded to bucket `syrabit-assets` under prefix `audits/pagespeed-2026-04-18/`. Manifest at `audits/pagespeed-2026-04-18/manifest.json` lists every key + byte-size. Layout:
+
+- `audits/pagespeed-2026-04-18/pagespeed-2026-04-18-raw/<route>.<form>.json`
+- `audits/pagespeed-2026-04-18/pagespeed-2026-04-18-rerun-raw/<route>.<form>.json`
+
+The rerun-2 symlink had no unique content (it pointed at `rerun-raw`), so no extra upload was needed.
+
+## `.gitignore` patches
+
+Added to root `.gitignore`:
+
+- `.venv-prod/` (Python section — closes the typo gap)
+- `.python-deps/` (Python section)
+- `**/.terraform/` (new "Infra" section)
+- `docs/audits/**/*-raw/` (new "Audits" section — matches `*-raw/` directory name pattern used by the existing dumps)
+
+## Before / after
+
+| Metric | Before (origin/main `b89c5e8c`) | After |
+| --- | ---: | ---: |
+| Tracked blobs | 8,145 | 1,653 |
+| Tracked bytes | 195.64 MB | ~30 MB |
+| Largest single tracked file | 12.51 MB (`.python-deps/cryptography/.../_rust.abi3.so`) | 1.05 MB (`artifacts/syrabit/tests/api-schema.json`) |
+| Compiled `.so` files tracked | 32 (86.5 MB) | 0 |
+
+## Verification
+
+- Working-tree copies of `.python-deps/` and `.venv-prod/` remain on disk and untouched, so backend dev runtime is unaffected.
+- `bash scripts/dev_health_check.sh` re-run after the change.
+- `bash artifacts/syrabit-backend/scripts/ci/check_canonical_delegation.py` re-run after the change (the Task #90 `_check_no_tracked_dist_files` guard remains green; this task did not extend it into a general bloat guard — that's a deliberate scope split per the plan).
+
+## Out of scope (per plan)
+
+- Replacing `.python-deps/` / `.venv-prod/` with a different dependency-management strategy.
+- Re-running PageSpeed audits or re-generating the summary docs.
+- Editing `replit.md`.
+- Extending `_check_no_tracked_dist_files` into a general `_check_no_tracked_bloat` CI guard.
+
