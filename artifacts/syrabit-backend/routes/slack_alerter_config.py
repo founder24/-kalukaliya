@@ -68,6 +68,13 @@ SMOKE_TEST_SLACK_WEBHOOK_ENV = "SMOKE_TEST_SLACK_WEBHOOK"
 # Slack channel its sibling silence-alerters already post to so on-call
 # doesn't have to keep an inbox tab open.
 D1_MIRROR_LAG_SLACK_WEBHOOK_ENV = "D1_MIRROR_LAG_SLACK_WEBHOOK"
+# Task #95 — patch-contract broken-flag notifier
+# (``scripts/ci/notify_patch_contract_broken.py``) posts to this webhook
+# when the PATCH-contract watcher sets the flag for >= 5 minutes, and
+# again when the flag is cleared (resolved).  Uses the generic
+# ``SLACK_WEBHOOK_URL`` so it shares the same ops channel as other
+# non-topic-specific alerts without requiring a dedicated binding.
+PATCH_CONTRACT_SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
 
 
 class SlackAlerterConfig(TypedDict):
