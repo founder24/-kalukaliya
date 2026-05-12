@@ -1,4 +1,4 @@
-"""Shared constants and contract guard for the edge SPA-title-miss settings.
+"""Shared constants and contract guard for edge-settings PATCH routes.
 
 Both the proxy filter in ``routes/admin_edge_analytics.py`` and the snapshot
 tests in ``tests/test_admin_edge_settings.py`` import from here so that adding
@@ -14,6 +14,89 @@ Python evaluates the decorated class body.  This makes the guard opt-out
 rather than opt-in so new PATCH route models cannot accidentally skip it.
 
 ``assert_patch_contract`` remains public for direct unit-test usage.
+
+----------------------------------------------------------------------------
+Adding a new edge-settings PATCH route
+----------------------------------------------------------------------------
+
+Follow these steps every time you introduce a PATCH route in a
+``routes/admin_edge_*.py`` module:
+
+1. **Define key sets here** (``schemas/edge_settings.py``).
+
+   Add two ``frozenset`` constants that describe the new route's field
+   contract, e.g.::
+
+       CANONICAL_PREWARM_KEYS: frozenset[str] = frozenset({
+           "enabled",
+           "schedule_utc",
+           "env_schedule_utc",
+           "kv_override_set",
+       })
+       PATCHABLE_PREWARM_KEYS: frozenset[str] = frozenset({
+           "enabled",
+           "schedule_utc",
+       })
+
+   Rules:
+   * ``PATCHABLE_*`` must be a **strict subset** of ``CANONICAL_*``.
+     A patchable key absent from the GET response would be write-only —
+     clients could set it but never read the effective value back.
+   * Keep both sets in this file so they can never drift independently.
+
+2. **Decorate the Pydantic model** in the route module.
+
+   Apply ``@patch_route_contract`` *directly above* the class definition::
+
+       from schemas.edge_settings import (
+           CANONICAL_PREWARM_KEYS,
+           PATCHABLE_PREWARM_KEYS,
+           patch_route_contract,
+       )
+
+       @patch_route_contract(PATCHABLE_PREWARM_KEYS, CANONICAL_PREWARM_KEYS)
+       class PrewarmSettingsPatch(BaseModel):
+           enabled: Optional[bool] = None
+           schedule_utc: Optional[str] = None
+
+   The decorator calls ``assert_patch_contract`` at **class definition
+   time** (i.e. on ``import``).  A mismatch between the model's fields
+   and ``PATCHABLE_*`` raises ``AssertionError`` immediately when the
+   backend starts — not buried in a test run hours later.
+
+   Naming convention: the class **must** end in ``Patch`` and inherit
+   from ``pydantic.BaseModel``.  The CI script
+   ``scripts/ci/check_patch_route_contract.py`` uses this convention to
+   find every PATCH model and verify the decorator is present.
+
+3. **Filter the outbound payload** in the PATCH handler.
+
+   Use ``PATCHABLE_*`` as an explicit allowlist when building the JSON
+   sent to the edge worker so a future model change cannot accidentally
+   forward an unreadable field::
+
+       payload = {
+           k: v
+           for k, v in data.model_dump(exclude_none=True).items()
+           if k in PATCHABLE_PREWARM_KEYS
+       }
+
+4. **Add snapshot tests** analogous to ``tests/test_admin_edge_settings.py``:
+
+   * ``test_get_*_returns_exactly_canonical_keys`` — pins the GET key set.
+   * ``test_patchable_keys_are_subset_of_canonical_keys`` — subset guard.
+   * ``test_patch_drops_non_patchable_fields`` — payload filter check.
+   * ``test_import_time_assert_fires_when_patch_model_diverges`` — reload
+     the route module after monkeypatching the key frozenset; verify an
+     ``AssertionError`` is raised immediately.
+
+5. **Verify the CI guard passes.**
+
+   Run ``python scripts/ci/check_patch_route_contract.py`` locally before
+   pushing.  It will fail if it finds a ``*Patch(BaseModel)`` class in any
+   ``routes/admin_edge_*.py`` file that does not have the
+   ``@patch_route_contract`` decorator on the immediately preceding line.
+----------------------------------------------------------------------------
 """
 from __future__ import annotations
 
