@@ -3472,12 +3472,18 @@ export function _injectSpaTitleForBot(
   response: Response,
   pathname: string,
   isBotGet: boolean,
+  onMiss?: (pathname: string) => void,
 ): Response {
   if (!isBotGet) return response;
   const ct = (response.headers.get("content-type") || "").toLowerCase();
   if (!ct.includes("text/html")) return response;
   const meta = _resolveSpaRouteMeta(pathname);
-  if (!meta) return response;
+  if (!meta) {
+    // Task #9 — no pattern matched; fire the miss callback so the caller
+    // can emit an Analytics Engine datapoint for gap analysis.
+    onMiss?.(pathname);
+    return response;
+  }
 
   const { title, description } = meta;
   return new HTMLRewriter()
@@ -4375,11 +4381,26 @@ async function _handleEdgeFetch(
       // (i.e. routes not covered by the backend prerender set).  Human users
       // receive the original upstream body; HEAD and non-HTML responses are
       // passed through untouched because HTMLRewriter is a no-op there.
-      return _injectSpaTitleForBot(
-        out,
-        pathname,
-        (isSearchBot || botResult.claimsBot) && request.method === "GET",
-      );
+      //
+      // Task #9 — when no pattern matches (meta === null), the onMiss callback
+      // fires an Analytics Engine datapoint so the admin can surface the top
+      // uncovered bot-crawled paths in the admin dashboard.  The datapoint
+      // shares the syrabit-edge-metrics schema (same blobs/doubles layout) and
+      // uses blob1="spa_title_miss" as the event-type discriminator so the
+      // existing cache-metric queries are unaffected.
+      const _isBotGet = (isSearchBot || botResult.claimsBot) && request.method === "GET";
+      const _onTitleMiss = (env.ANALYTICS && _isBotGet)
+        ? (p: string): void => {
+            ctx.waitUntil(Promise.resolve(
+              env.ANALYTICS!.writeDataPoint({
+                blobs:   ["spa_title_miss", "", "none", p.slice(0, 64), "ok"],
+                doubles: [0, 0, out.status],
+                indexes: ["spa_title_miss"],
+              }),
+            ));
+          }
+        : undefined;
+      return _injectSpaTitleForBot(out, pathname, _isBotGet, _onTitleMiss);
     }
 
     if ((request.method !== "GET" && request.method !== "HEAD") || isBypass(pathname)) {

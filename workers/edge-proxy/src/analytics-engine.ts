@@ -265,3 +265,80 @@ export async function queryEdgeMetrics(
     rateLimitEvents,
   };
 }
+
+// ── Task #9 — SPA title-injection gap query ───────────────────────────────────
+//
+// Surfaces the top bot-crawled paths that did NOT match any pattern in
+// _resolveSpaRouteMeta and therefore received the generic SPA <title>.
+// Each such miss is recorded as an Analytics Engine datapoint with
+//   blob1 = "spa_title_miss"
+//   blob4 = pathname (first 64 chars)
+// by the onMiss callback wired in _handleEdgeFetch (see index.ts Task #9).
+//
+// Callers: admin /api/admin/edge/spa-title-misses route (to be added in
+// the backend) or the admin dashboard tile querying the CF AE directly
+// via this helper.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SpaTitleMiss {
+  /** Request pathname that reached the bot injector with no matching pattern. */
+  pathname: string;
+  /** Number of bot hits on that path within the requested time window. */
+  count: number;
+}
+
+/**
+ * Returns the top 20 bot-crawled SPA paths that did not match any title-
+ * injection pattern, ordered by hit count descending. Use this to discover
+ * which route families should be added to _resolveSpaRouteMeta.
+ *
+ * @param token  Cloudflare API token with Analytics: Read scope
+ *               (CF_ANALYTICS_TOKEN secret).
+ * @param range  One of "1h" | "6h" | "24h" | "7d". Defaults to "7d".
+ */
+export async function querySpaTitleMisses(
+  token: string,
+  range: string = '7d',
+): Promise<SpaTitleMiss[]> {
+  const windowSecs  = RANGE_SECONDS[range] ?? RANGE_SECONDS['7d'];
+  const datetimeGeq = isoSecsAgo(windowSecs);
+  const datetimeLeq = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+
+  const query = `
+    query SpaTitleMisses($accountTag: String!, $datetimeGeq: String!, $datetimeLeq: String!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          ${GQL_TYPE}(
+            filter: {
+              datetime_geq: $datetimeGeq
+              datetime_leq: $datetimeLeq
+              blob1_eq: "spa_title_miss"
+            }
+            limit: 20
+            orderBy: [count_DESC]
+          ) {
+            count
+            dimensions { blob4 }
+          }
+        }
+      }
+    }
+  `;
+
+  type AccountsWrapper<T> = { viewer: { accounts: { [key: string]: T[] }[] } };
+  interface MissRow { count: number; dimensions: { blob4: string } }
+
+  const data = await runGql<AccountsWrapper<MissRow>>(
+    token,
+    query,
+    { accountTag: ACCOUNT_ID, datetimeGeq, datetimeLeq },
+  );
+
+  const rows = (data.viewer.accounts[0]?.[GQL_TYPE] ?? []) as MissRow[];
+  return rows
+    .filter((r) => (r.dimensions?.blob4 ?? '') !== '')
+    .map((r) => ({
+      pathname: r.dimensions?.blob4 ?? '',
+      count:    r.count ?? 0,
+    }));
+}

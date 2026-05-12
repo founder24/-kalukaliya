@@ -204,6 +204,58 @@ describe("_resolveSpaRouteMeta", () => {
       expect(body).toContain("Syrabit.ai");
     });
 
+    describe("onMiss callback (Task #9)", () => {
+      beforeEach(() => {
+        function MockHTMLRewriter(this: object) {}
+        MockHTMLRewriter.prototype.on = function() { return this; };
+        MockHTMLRewriter.prototype.transform = function(r: Response) { return r; };
+        vi.stubGlobal("HTMLRewriter", MockHTMLRewriter);
+      });
+      afterEach(() => { vi.unstubAllGlobals(); });
+
+      it("calls onMiss when isBotGet=true and HTML but no matching pattern", () => {
+        const onMiss = vi.fn();
+        const resp = new Response("<html><head><title>x</title></head></html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+        _injectSpaTitleForBot(resp, "/pricing", true, onMiss);
+        expect(onMiss).toHaveBeenCalledOnce();
+        expect(onMiss).toHaveBeenCalledWith("/pricing");
+      });
+
+      it("does NOT call onMiss when isBotGet=false", () => {
+        const onMiss = vi.fn();
+        const resp = new Response("<html><head><title>x</title></head></html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+        _injectSpaTitleForBot(resp, "/pricing", false, onMiss);
+        expect(onMiss).not.toHaveBeenCalled();
+      });
+
+      it("does NOT call onMiss when content-type is not HTML", () => {
+        const onMiss = vi.fn();
+        const resp = new Response('{}', { headers: { "Content-Type": "application/json" } });
+        _injectSpaTitleForBot(resp, "/pricing", true, onMiss);
+        expect(onMiss).not.toHaveBeenCalled();
+      });
+
+      it("does NOT call onMiss when a matching pattern exists (rewrite fires instead)", () => {
+        const onMiss = vi.fn();
+        const resp = new Response("<html><head><title>Old</title></head></html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true, onMiss);
+        expect(onMiss).not.toHaveBeenCalled();
+      });
+
+      it("passes the full pathname to onMiss so callers can slice as needed", () => {
+        const onMiss = vi.fn();
+        const resp = new Response("<html>", { headers: { "Content-Type": "text/html" } });
+        _injectSpaTitleForBot(resp, "/some/unknown/path/with/segments", true, onMiss);
+        expect(onMiss).toHaveBeenCalledWith("/some/unknown/path/with/segments");
+      });
+    });
+
     describe("positive rewrite path (HTMLRewriter mocked for Node.js env)", () => {
       type ElementHandler = {
         element: (el: { setInnerContent: (s: string) => void; setAttribute: (k: string, v: string) => void }) => void;
