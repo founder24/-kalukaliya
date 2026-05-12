@@ -360,6 +360,55 @@ console.log(
   `[verify-all] indexability gate: checked ${indexabilityChecked} prerendered route(s)`,
 );
 
+// ── og:image:alt postcondition (Task #37 / Task #51) ─────────────────
+// Task #37 injected <meta property="og:image:alt"> into all four prerender
+// scripts.  Each script has a local hard assertion when it writes the file,
+// but verify-all.mjs needs to independently confirm the tag survived the full
+// build pipeline (critical-CSS inlining, asset hashing, etc.) and landed in
+// every dist/ HTML that social crawlers will see.
+//
+// The same INDEXABILITY_SKIP_RE exclusion set applies: admin/*, history/*,
+// profile/*, reset/*, cms/*, and api/* are not indexed so they also don't
+// need og:image:alt.
+//
+// Matches both attribute orders robustly:
+//   <meta property="og:image:alt" content="…" />        ← prerender canonical form
+//   <meta content="…" property="og:image:alt" />        ← acceptable alternate form
+const OG_IMAGE_ALT_CONTENT_RE =
+  /<meta\b[^>]*\bproperty=["']og:image:alt["'][^>]*\bcontent=["']([^"']*)["'][^>]*>/i;
+const OG_IMAGE_ALT_CONTENT_RE2 =
+  /<meta\b[^>]*\bcontent=["']([^"']*)["'][^>]*\bproperty=["']og:image:alt["'][^>]*>/i;
+
+let ogAltChecked = 0;
+for (const page of pages) {
+  if (page.rel === "index.html") continue; // root: SPA shell, meta injected client-side
+  if (INDEXABILITY_SKIP_RE.test(page.rel)) continue;
+  const route = "/" + page.rel.replace(/\/index\.html$/, "");
+
+  const m =
+    page.body.match(OG_IMAGE_ALT_CONTENT_RE) ||
+    page.body.match(OG_IMAGE_ALT_CONTENT_RE2);
+  if (!m) {
+    fail(
+      `${route}: missing <meta property="og:image:alt"> — ` +
+        `Task #37 injects this tag; a prerender script or build step may have dropped it`,
+    );
+    continue;
+  }
+  const altText = m[1].trim();
+  if (!altText) {
+    fail(
+      `${route}: og:image:alt content is empty — ` +
+        `social crawlers require a non-empty alt description for the preview banner`,
+    );
+    continue;
+  }
+  ogAltChecked++;
+}
+console.log(
+  `[verify-all] og:image:alt gate: checked ${ogAltChecked} prerendered route(s)`,
+);
+
 // ── Critical-CSS postcondition (Task #856) ──────────────────────────
 // scripts/inline-critical-css.mjs runs in the build pipeline ahead of
 // this verifier and is expected to leave the SPA-fallback +
