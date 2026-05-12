@@ -631,13 +631,16 @@ describe("BOT_HTML_CACHE end-to-end via worker.fetch (verifiedBot=true)", () => 
     expect(afterWrites).toBe(beforeWrites);
   });
 
-  it("non-verified Googlebot UA falls through to Pages-origin proxy without writing BOT_HTML_CACHE", async () => {
+  it("spoofed Googlebot UA (IP fails CIDR + no cf.verifiedBot) is hard-403'd and does not write BOT_HTML_CACHE", async () => {
     const kv = makeExpiringKv();
     const env = makeEnv({ botCache: kv });
 
     // Construct a request WITHOUT cf.verifiedBot. clientIp ("9.9.9.9")
-    // is not in any verified-bot CIDR range, so verifySearchBot must
-    // mark this as spoofed and the worker must skip the bot-cache path.
+    // is not in any verified-bot CIDR range, so verifySearchBot marks
+    // this as spoofed. Because Googlebot matches CRITICAL_BOT_UA and
+    // forward-confirmed rDNS cannot succeed in the test environment,
+    // the worker must return 403 (Task #9 — hard-403 on spoofed critical
+    // bots) and must NOT populate BOT_HTML_CACHE.
     const req = new Request(`https://syrabit.ai/about`, {
       headers: {
         "user-agent": "Googlebot/2.1",
@@ -647,11 +650,8 @@ describe("BOT_HTML_CACHE end-to-end via worker.fetch (verifiedBot=true)", () => 
 
     const resp = await workerHandler.fetch(req, env, ctxNoop);
 
-    expect(resp.status).toBe(200);
-    expect(await resp.text()).toBe("<html><body>pages-spa-shell</body></html>");
-    // Worker's own marker must be present (proves it went through the
-    // proxy branch, not the bot-cache branch).
-    expect(resp.headers.get("X-Edge-Worker")).toBe("syrabit-edge");
+    expect(resp.status).toBe(403);
+    expect(resp.headers.get("X-Bot-Verify")).toBe("spoofed");
     // Critical: the spoofed bot must not have populated BOT_HTML_CACHE.
     expect(kv.putSpy).not.toHaveBeenCalled();
     expect(kv.store.size).toBe(0);
