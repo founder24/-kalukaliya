@@ -36,7 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from auth_deps import get_admin_user
-from schemas.edge_settings import CANONICAL_SETTINGS_KEYS
+from schemas.edge_settings import CANONICAL_SETTINGS_KEYS, PATCHABLE_SETTINGS_KEYS
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -195,6 +195,13 @@ async def admin_edge_get_spa_title_miss_settings(
 
 
 class SpaTitleMissSettingsPatch(BaseModel):
+    """PATCH body for SPA title-miss alert settings.
+
+    The field names must exactly match ``PATCHABLE_SETTINGS_KEYS`` in
+    ``schemas/edge_settings.py``.  The module-level assertion below enforces
+    this at import time so the two definitions can never drift apart.
+    """
+
     threshold: Optional[int] = Field(
         default=None,
         ge=1,
@@ -204,6 +211,14 @@ class SpaTitleMissSettingsPatch(BaseModel):
         default=None,
         description="Set true to pause the nightly SPA title-miss alert entirely.",
     )
+
+
+_patch_model_fields = frozenset(SpaTitleMissSettingsPatch.model_fields)
+assert _patch_model_fields == PATCHABLE_SETTINGS_KEYS, (
+    f"SpaTitleMissSettingsPatch fields {_patch_model_fields} do not match "
+    f"PATCHABLE_SETTINGS_KEYS {PATCHABLE_SETTINGS_KEYS} in schemas/edge_settings.py. "
+    "Update both together."
+)
 
 
 @router.patch("/admin/edge/spa-title-miss-settings")

@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from schemas.edge_settings import CANONICAL_SETTINGS_KEYS
+from schemas.edge_settings import CANONICAL_SETTINGS_KEYS, PATCHABLE_SETTINGS_KEYS
 
 _CANONICAL_KEYS = {"configured"} | CANONICAL_SETTINGS_KEYS
 
@@ -179,6 +179,22 @@ def test_get_settings_not_configured_when_env_missing(admin_client):
         assert key not in body, (
             f"Key {key!r} must not appear in the unconfigured response; got: {body}"
         )
+
+
+def test_patchable_keys_are_subset_of_canonical_keys():
+    """PATCHABLE_SETTINGS_KEYS must always be a subset of CANONICAL_SETTINGS_KEYS.
+
+    This guards against a field being added to the PATCH contract without a
+    corresponding entry in the GET allowlist, which would mean the frontend
+    could write a value it can never read back.
+    """
+    assert PATCHABLE_SETTINGS_KEYS <= CANONICAL_SETTINGS_KEYS, (
+        f"PATCHABLE_SETTINGS_KEYS contains keys absent from CANONICAL_SETTINGS_KEYS.\n"
+        f"  patchable:  {sorted(PATCHABLE_SETTINGS_KEYS)}\n"
+        f"  canonical:  {sorted(CANONICAL_SETTINGS_KEYS)}\n"
+        f"  extra keys: {sorted(PATCHABLE_SETTINGS_KEYS - CANONICAL_SETTINGS_KEYS)}\n"
+        "Add the missing key(s) to CANONICAL_SETTINGS_KEYS in schemas/edge_settings.py."
+    )
 
 
 def test_get_settings_503_from_edge_returns_defaults(admin_client, env_with_edge):
