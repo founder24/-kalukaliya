@@ -1,21 +1,8 @@
 /**
  * Task #62 — AlertSettings threshold inline-validation tests.
+ * Task #59 — AlertSettings confirm-before-disable guard tests.
  *
- * The AlertSettings sub-panel in EdgeMetricsPanel allows an admin to adjust
- * the SPA title-miss alert threshold at runtime.  Task #62 added client-side
- * validation that:
- *
- *   1. Shows an inline error next to the threshold input when the value is
- *      not a finite integer ≥ 1 (e.g. 0, -5, "abc", "1.5").
- *   2. Styles the input with a red border when the value is invalid.
- *   3. Disables the Save button while the input is invalid.
- *   4. Makes no network request (no axios.patch call) when the threshold is
- *      invalid and the Save button is clicked.
- *
- * The inline error disappears as soon as the admin types a valid value,
- * and the Save button re-enables so they can submit.
- *
- * Coverage:
+ * Task #62 coverage (threshold inline-validation):
  *   - threshold=0 → inline error, red border, Save disabled, no PATCH
  *   - threshold=-5 → inline error, Save disabled
  *   - threshold=1.5 → inline error (non-integer; parseInt would truncate silently)
@@ -25,6 +12,12 @@
  *   - typing invalid then correcting to valid → error disappears
  *   - empty field → no inline error (validated on save, not on empty)
  *   - valid threshold + clicking Save → axios.patch IS called
+ *
+ * Task #59 coverage (confirm-before-disable guard):
+ *   1. Save with disabled=true → no axios.patch; "Confirm pause?" prompt shown.
+ *   2. Confirm in the prompt  → axios.patch called with { disabled: true }.
+ *   3. Cancel in the prompt   → prompt dismissed; axios.patch NOT called.
+ *   4. Save with disabled=false → axios.patch called directly (no confirm step).
  */
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -55,33 +48,40 @@ vi.mock('@/utils/api', () => ({
 /* ── component import ────────────────────────────────────────────────────── */
 import { AlertSettings } from './EdgeMetricsPanel';
 
-/* ── canonical server response ───────────────────────────────────────────── */
-const SETTINGS_RESP = {
-  configured:    true,
-  threshold:     50,
-  disabled:      false,
-  kv_override_set: false,
-  env_threshold: 50,
-  env_disabled:  false,
-};
+/* ── shared helpers ──────────────────────────────────────────────────────── */
+const SETTINGS_URL = 'http://localhost:8000/admin/edge/spa-title-miss-settings';
 
+function settingsResponse({ threshold = 50, disabled = false } = {}) {
+  return {
+    data: {
+      configured:    true,
+      threshold,
+      disabled,
+      kv_override_set: false,
+      env_threshold: 50,
+      env_disabled:  false,
+    },
+  };
+}
+
+function patchSuccess({ threshold = 50, disabled = false } = {}) {
+  return Promise.resolve({ data: { ok: true, threshold, disabled } });
+}
+
+/* ── Task #62 helpers ────────────────────────────────────────────────────── */
 async function renderLoaded(token = null) {
-  axiosGet.mockResolvedValue({ data: SETTINGS_RESP });
-  axiosPatch.mockResolvedValue({
-    data: { ok: true, threshold: 50, disabled: false },
-  });
+  axiosGet.mockResolvedValue(settingsResponse());
+  axiosPatch.mockResolvedValue({ data: { ok: true, threshold: 50, disabled: false } });
 
   await act(async () => {
     render(<AlertSettings token={token} />);
   });
 
-  // Wait for the settings to load so the form is visible.
   await waitFor(() => {
     expect(screen.getByTestId('threshold-input')).toBeDefined();
   });
 }
 
-/* ── helpers ─────────────────────────────────────────────────────────────── */
 function setThreshold(value) {
   const input = screen.getByTestId('threshold-input');
   fireEvent.change(input, { target: { value } });
@@ -95,8 +95,19 @@ function getSaveButton() {
   return screen.getByTestId('save-button');
 }
 
-/* ── tests ───────────────────────────────────────────────────────────────── */
+/* ── Task #59 helpers ────────────────────────────────────────────────────── */
+async function renderAndLoad({ disabled = false } = {}) {
+  axiosGet.mockResolvedValueOnce(settingsResponse({ disabled }));
+  render(<AlertSettings token="test-token" />);
 
+  await waitFor(() =>
+    expect(screen.getByTestId('alert-settings-save-btn')).toBeInTheDocument(),
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* Task #62 — threshold inline-validation                                     */
+/* ══════════════════════════════════════════════════════════════════════════ */
 describe('AlertSettings — threshold inline validation (Task #62)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -122,9 +133,6 @@ describe('AlertSettings — threshold inline validation (Task #62)', () => {
   });
 
   it('shows inline error for threshold=1.5 (non-integer — Number.isInteger rejects it; parseInt would silently truncate)', async () => {
-    // This is the key regression-prevention test for the parseInt → Number.isInteger
-    // migration: parseInt("1.5") === 1 (valid), Number.isInteger(1.5) === false (invalid).
-    // The Pydantic int field on the backend would reject 1.5 with a 422.
     await renderLoaded();
     setThreshold('1.5');
     expect(getError()).not.toBeNull();
@@ -132,9 +140,6 @@ describe('AlertSettings — threshold inline validation (Task #62)', () => {
   });
 
   it('shows no inline error for non-numeric "abc" (type=number yields empty string — empty field is validated on save)', async () => {
-    // <input type="number"> rejects non-numeric characters at the browser level;
-    // jsdom sets e.target.value="" for "abc", which hits the "empty = no error" path.
-    // The save() guard still catches the invalid value before any network call.
     await renderLoaded();
     setThreshold('abc');
     expect(getError()).toBeNull();
@@ -202,7 +207,6 @@ describe('AlertSettings — threshold inline validation (Task #62)', () => {
     await renderLoaded();
     setThreshold('0');
 
-    // Button is disabled — click should have no effect.
     const btn = getSaveButton();
     expect(btn.disabled).toBe(true);
     fireEvent.click(btn);
@@ -225,5 +229,75 @@ describe('AlertSettings — threshold inline validation (Task #62)', () => {
       const [, payload] = axiosPatch.mock.calls[0];
       expect(payload.threshold).toBe(75);
     });
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* Task #59 — confirm-before-disable guard                                    */
+/* ══════════════════════════════════════════════════════════════════════════ */
+describe('AlertSettings — confirm-before-disable guard (Task #59)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('Save while disabled=true shows "Confirm pause?" and does NOT call axios.patch', async () => {
+    await renderAndLoad({ disabled: true });
+
+    fireEvent.click(screen.getByTestId('alert-settings-save-btn'));
+
+    expect(axiosPatch).not.toHaveBeenCalled();
+    expect(screen.getByTestId('alert-settings-confirm-dialog')).toBeInTheDocument();
+    expect(screen.getByText(/Confirm pause\?/i)).toBeInTheDocument();
+  });
+
+  it('Clicking Confirm calls axios.patch with { disabled: true }', async () => {
+    await renderAndLoad({ disabled: true });
+    axiosPatch.mockReturnValueOnce(patchSuccess({ disabled: true }));
+    axiosGet.mockResolvedValueOnce(settingsResponse({ disabled: true }));
+
+    fireEvent.click(screen.getByTestId('alert-settings-save-btn'));
+
+    expect(screen.getByTestId('alert-settings-confirm-dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('alert-settings-confirm-btn'));
+
+    await waitFor(() => expect(axiosPatch).toHaveBeenCalledTimes(1));
+    expect(axiosPatch).toHaveBeenCalledWith(
+      SETTINGS_URL,
+      expect.objectContaining({ disabled: true }),
+      expect.anything(),
+    );
+  });
+
+  it('Clicking Cancel dismisses the prompt without calling axios.patch', async () => {
+    await renderAndLoad({ disabled: true });
+
+    fireEvent.click(screen.getByTestId('alert-settings-save-btn'));
+
+    expect(screen.getByTestId('alert-settings-confirm-dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('alert-settings-cancel-btn'));
+
+    expect(axiosPatch).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('alert-settings-confirm-dialog')).toBeNull();
+    expect(screen.getByTestId('alert-settings-save-btn')).toBeInTheDocument();
+  });
+
+  it('Save while disabled=false calls axios.patch directly (no confirm step)', async () => {
+    await renderAndLoad({ disabled: false });
+    axiosPatch.mockReturnValueOnce(patchSuccess({ disabled: false }));
+    axiosGet.mockResolvedValueOnce(settingsResponse({ disabled: false }));
+
+    expect(screen.queryByTestId('alert-settings-confirm-dialog')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('alert-settings-save-btn'));
+
+    await waitFor(() => expect(axiosPatch).toHaveBeenCalledTimes(1));
+    expect(axiosPatch).toHaveBeenCalledWith(
+      SETTINGS_URL,
+      expect.objectContaining({ disabled: false }),
+      expect.anything(),
+    );
+    expect(screen.queryByTestId('alert-settings-confirm-dialog')).toBeNull();
   });
 });
