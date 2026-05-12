@@ -8,17 +8,22 @@ seconds of writing the offending code.
 
 Persistent-failure alerting (Task #92)
 ---------------------------------------
-If the check fails for *ALERT_AFTER_POLLS* consecutive polls without a
-passing run (default 300 = 5 minutes at a 1-second poll interval), the
-watcher:
+When the check fails the counter is incremented on **every poll** — not
+only on file saves — so that a developer who steps away still triggers the
+alert after ALERT_AFTER_POLLS consecutive failing polls (default 300 ≈ 5 min).
 
-  1. Writes a flag file at _BROKEN_FLAG_PATH so other tooling can detect
-     the persistent breakage without parsing console output.
+Specifically, on each 1-second tick:
+  - If a watched file changed → re-run check immediately (instant feedback).
+  - Else if currently in a failing state (consecutive_failures > 0) → also
+    re-run check so the counter keeps advancing.
+  - Else (all clear) → no-op.
+
+Once consecutive_failures >= ALERT_AFTER_POLLS the watcher:
+  1. Writes a flag file (PATCH_CONTRACT_BROKEN_FLAG) so external tooling can
+     detect the alert without parsing console output.
   2. Prints a prominent "PERSISTENT VIOLATION ALERT" block to stderr.
 
-A single passing run resets the consecutive-failure counter and removes
-the flag file (if present).  The flag path can be overridden at runtime
-by setting the PATCH_CONTRACT_BROKEN_FLAG env var.
+A single passing run resets the counter and removes the flag file.
 
 Usage (normally invoked by the patch_contract_guard workflow):
     python scripts/ci/watch_patch_route_contract.py
@@ -51,7 +56,11 @@ _ALERT_AFTER_POLLS: int = int(os.environ.get("PATCH_CONTRACT_ALERT_POLLS", "300"
 _BROKEN_FLAG_PATH: Path = Path(
     os.environ.get(
         "PATCH_CONTRACT_BROKEN_FLAG",
-        str(Path(__file__).resolve().parent.parent.parent / ".local" / "patch_contract_broken.flag"),
+        str(
+            Path(__file__).resolve().parent.parent.parent
+            / ".local"
+            / "patch_contract_broken.flag"
+        ),
     )
 )
 
@@ -116,7 +125,9 @@ def run_check() -> bool:
 def _handle_result(passed: bool, consecutive_failures: int) -> int:
     """Update failure counter, manage flag file and alerts.
 
-    Returns the updated consecutive_failures value.
+    Returns the updated consecutive_failures value.  Called after every
+    run_check() invocation regardless of whether the call was triggered by
+    a file-save or by a time-based re-poll while in failing state.
     """
     if passed:
         if consecutive_failures > 0:
@@ -141,6 +152,44 @@ def _handle_result(passed: bool, consecutive_failures: int) -> int:
     return consecutive_failures
 
 
+def _run_one_poll(
+    consecutive_failures: int,
+    prev_mtimes: "dict[Path, float]",
+    routes_dir: Path = _ROUTES_DIR,
+) -> "tuple[int, dict[Path, float]]":
+    """Execute one poll cycle.
+
+    Returns ``(new_consecutive_failures, new_prev_mtimes)``.
+
+    Two cases trigger a re-check:
+      1. A watched file changed (instant feedback on every save).
+      2. We are currently in a failing state even with no new saves, so
+         the counter advances on every tick until the alert threshold is
+         reached or the developer fixes the violation.
+    """
+    current_mtimes = _collect_mtimes(routes_dir)
+
+    if current_mtimes != prev_mtimes:
+        changed = [
+            p.name
+            for p in set(current_mtimes) | set(prev_mtimes)
+            if current_mtimes.get(p) != prev_mtimes.get(p)
+        ]
+        print(
+            f"\n[watch_patch_route_contract] change detected: {', '.join(sorted(changed))}",
+            flush=True,
+        )
+        passed = run_check()
+        consecutive_failures = _handle_result(passed, consecutive_failures)
+        return consecutive_failures, current_mtimes
+
+    if consecutive_failures > 0:
+        passed = run_check()
+        consecutive_failures = _handle_result(passed, consecutive_failures)
+
+    return consecutive_failures, prev_mtimes
+
+
 def main() -> None:
     if not _ROUTES_DIR.is_dir():
         print(
@@ -163,21 +212,9 @@ def main() -> None:
 
     while True:
         time.sleep(_POLL_INTERVAL)
-        current_mtimes = _collect_mtimes(_ROUTES_DIR)
-
-        if current_mtimes != prev_mtimes:
-            changed = [
-                p.name
-                for p in set(current_mtimes) | set(prev_mtimes)
-                if current_mtimes.get(p) != prev_mtimes.get(p)
-            ]
-            print(
-                f"\n[watch_patch_route_contract] change detected: {', '.join(sorted(changed))}",
-                flush=True,
-            )
-            passed = run_check()
-            consecutive_failures = _handle_result(passed, consecutive_failures)
-            prev_mtimes = current_mtimes
+        consecutive_failures, prev_mtimes = _run_one_poll(
+            consecutive_failures, prev_mtimes
+        )
 
 
 if __name__ == "__main__":
