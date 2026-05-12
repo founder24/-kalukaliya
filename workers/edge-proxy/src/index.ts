@@ -3465,6 +3465,62 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
       description: `Learn about ${topic} with AI-powered explanations, notes, MCQs, and previous year questions on Syrabit.ai.`,
     };
   }
+  // /ahsec (board hub)
+  if (parts.length === 1 && parts[0] === "ahsec") {
+    return {
+      title: "AHSEC Study Materials | Syrabit.ai",
+      description: "Browse AHSEC study materials, notes, MCQs, and previous year questions for HS 1st and 2nd Year on Syrabit.ai.",
+    };
+  }
+  // /seba (board hub)
+  if (parts.length === 1 && parts[0] === "seba") {
+    return {
+      title: "SEBA Study Materials | Syrabit.ai",
+      description: "Browse SEBA study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+    };
+  }
+  // /degree (board hub)
+  if (parts.length === 1 && parts[0] === "degree") {
+    return {
+      title: "Degree Study Materials | Syrabit.ai",
+      description: "Browse Degree study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+    };
+  }
+  // /ahsec/class-11 (board+class hub — exactly 2 segments)
+  if (parts.length === 2 && parts[0] === "ahsec" && parts[1] === "class-11") {
+    return {
+      title: "AHSEC Class 11 Study Materials | Syrabit.ai",
+      description: "Browse AHSEC Class 11 study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+    };
+  }
+  // /ahsec/class-12 (board+class hub — exactly 2 segments)
+  if (parts.length === 2 && parts[0] === "ahsec" && parts[1] === "class-12") {
+    return {
+      title: "AHSEC Class 12 Study Materials | Syrabit.ai",
+      description: "Browse AHSEC Class 12 study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+    };
+  }
+  // /notes (notes hub — exactly 1 segment)
+  if (parts.length === 1 && parts[0] === "notes") {
+    return {
+      title: "Study Notes | Syrabit.ai",
+      description: "Browse study notes for AHSEC Class 11, Class 12, and Degree courses on Syrabit.ai.",
+    };
+  }
+  // /notes/class-11 (notes class hub — exactly 2 segments, no subject yet)
+  if (parts.length === 2 && parts[0] === "notes" && parts[1] === "class-11") {
+    return {
+      title: "Class 11 Notes | Syrabit.ai",
+      description: "Browse Class 11 study notes for all AHSEC subjects on Syrabit.ai.",
+    };
+  }
+  // /notes/class-12 (notes class hub — exactly 2 segments, no subject yet)
+  if (parts.length === 2 && parts[0] === "notes" && parts[1] === "class-12") {
+    return {
+      title: "Class 12 Notes | Syrabit.ai",
+      description: "Browse Class 12 study notes for all AHSEC subjects on Syrabit.ai.",
+    };
+  }
   return null;
 }
 

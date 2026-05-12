@@ -154,25 +154,112 @@ describe("_resolveSpaRouteMeta", () => {
       expect(_resolveSpaRouteMeta("/api/notes")).toBeNull();
     });
 
-    it("returns null for /notes without subpath", () => {
-      expect(_resolveSpaRouteMeta("/notes")).toBeNull();
-    });
-
-    it("returns null for /notes/class-11 without subject", () => {
-      expect(_resolveSpaRouteMeta("/notes/class-11")).toBeNull();
-    });
-
     it("returns null for unknown route family", () => {
       expect(_resolveSpaRouteMeta("/pricing")).toBeNull();
       expect(_resolveSpaRouteMeta("/about")).toBeNull();
     });
 
-    it("returns null for /ahsec without year segment", () => {
+    it("returns null for /ahsec/hs-1st-year without subject", () => {
       expect(_resolveSpaRouteMeta("/ahsec/hs-1st-year")).toBeNull();
     });
 
     it("returns null for /notes/degree with only 3 segments (missing subject)", () => {
       expect(_resolveSpaRouteMeta("/notes/degree/1st-semester")).toBeNull();
+    });
+  });
+
+  describe("board hub pages", () => {
+    it("/ahsec returns board hub title", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("AHSEC Study Materials | Syrabit.ai");
+      expect(meta!.description).toContain("AHSEC");
+    });
+
+    it("/ahsec/ (trailing slash) returns board hub title", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("AHSEC Study Materials | Syrabit.ai");
+    });
+
+    it("/seba returns board hub title", () => {
+      const meta = _resolveSpaRouteMeta("/seba");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("SEBA Study Materials | Syrabit.ai");
+      expect(meta!.description).toContain("SEBA");
+    });
+
+    it("/degree returns board hub title", () => {
+      const meta = _resolveSpaRouteMeta("/degree");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Degree Study Materials | Syrabit.ai");
+      expect(meta!.description).toContain("Degree");
+    });
+
+    it("/ahsec/class-11 returns board+class hub title", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("AHSEC Class 11 Study Materials | Syrabit.ai");
+      expect(meta!.description).toContain("Class 11");
+    });
+
+    it("/ahsec/class-12 returns board+class hub title", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-12");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("AHSEC Class 12 Study Materials | Syrabit.ai");
+      expect(meta!.description).toContain("Class 12");
+    });
+
+    it("/ahsec/class-11/ (trailing slash) returns board+class hub title", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("AHSEC Class 11 Study Materials | Syrabit.ai");
+    });
+
+    it("does not match /ahsec/class-11/physics (subject present — falls through to subject handler)", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/physics");
+      expect(meta).toBeNull();
+    });
+  });
+
+  describe("notes hub pages", () => {
+    it("/notes returns notes hub title", () => {
+      const meta = _resolveSpaRouteMeta("/notes");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Study Notes | Syrabit.ai");
+      expect(meta!.description).toContain("AHSEC");
+    });
+
+    it("/notes/ (trailing slash) returns notes hub title", () => {
+      const meta = _resolveSpaRouteMeta("/notes/");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Study Notes | Syrabit.ai");
+    });
+
+    it("/notes/class-11 returns class-11 notes hub title", () => {
+      const meta = _resolveSpaRouteMeta("/notes/class-11");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Class 11 Notes | Syrabit.ai");
+      expect(meta!.description).toContain("Class 11");
+    });
+
+    it("/notes/class-12 returns class-12 notes hub title", () => {
+      const meta = _resolveSpaRouteMeta("/notes/class-12");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Class 12 Notes | Syrabit.ai");
+      expect(meta!.description).toContain("Class 12");
+    });
+
+    it("/notes/class-11/ (trailing slash) returns class-11 notes hub title", () => {
+      const meta = _resolveSpaRouteMeta("/notes/class-11/");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Class 11 Notes | Syrabit.ai");
+    });
+
+    it("does not match /notes/class-11/physics (subject present — falls through to subject handler)", () => {
+      const meta = _resolveSpaRouteMeta("/notes/class-11/physics");
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Physics — Class 11 Notes | Syrabit.ai");
     });
   });
 
