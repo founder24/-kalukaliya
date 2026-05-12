@@ -28,15 +28,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from schemas.edge_settings import CANONICAL_SETTINGS_KEYS
 
-_CANONICAL_KEYS = frozenset({
-    "configured",
-    "disabled",
-    "env_disabled",
-    "env_threshold",
-    "kv_override_set",
-    "threshold",
-})
+_CANONICAL_KEYS = {"configured"} | CANONICAL_SETTINGS_KEYS
 
 _EDGE_PAYLOAD = {
     "disabled": False,

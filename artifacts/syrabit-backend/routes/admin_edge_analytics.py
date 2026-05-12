@@ -36,6 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from auth_deps import get_admin_user
+from schemas.edge_settings import CANONICAL_SETTINGS_KEYS
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -184,8 +185,7 @@ async def admin_edge_get_spa_title_miss_settings(
                 "reason": f"edge returned {resp.status_code}",
             }
         edge_data = resp.json()
-        _ALLOWED_EDGE_KEYS = {"disabled", "env_disabled", "env_threshold", "kv_override_set", "threshold"}
-        return {"configured": True, **{k: v for k, v in edge_data.items() if k in _ALLOWED_EDGE_KEYS}}
+        return {"configured": True, **{k: v for k, v in edge_data.items() if k in CANONICAL_SETTINGS_KEYS}}
     except Exception as exc:
         logger.warning("[edge-spa-title-miss-settings GET] edge fetch failed: %s", exc)
         return {
