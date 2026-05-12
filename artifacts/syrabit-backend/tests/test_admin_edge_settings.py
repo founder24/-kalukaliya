@@ -197,6 +197,65 @@ def test_patchable_keys_are_subset_of_canonical_keys():
     )
 
 
+def test_patch_drops_non_patchable_fields(admin_client, env_with_edge):
+    """PATCH handler must strip any field absent from PATCHABLE_SETTINGS_KEYS.
+
+    Even though the ``SpaTitleMissSettingsPatch`` Pydantic model is asserted at
+    import time to have exactly the same fields as ``PATCHABLE_SETTINGS_KEYS``,
+    the outbound payload is built through an explicit allowlist filter so a
+    future model change cannot accidentally forward an unreadable field to the
+    edge worker.  This test simulates a rogue extra field on the model dump and
+    verifies it is silently dropped before the PUT reaches the edge.
+    """
+    from unittest.mock import patch as mock_patch
+
+    edge_response = {**_EDGE_PAYLOAD}
+
+    mock_resp = _make_mock_response(200, edge_response)
+    mock_async_client = MagicMock()
+    mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+    mock_async_client.__aexit__ = AsyncMock(return_value=False)
+    mock_async_client.put = AsyncMock(return_value=mock_resp)
+
+    captured_payloads: list[dict] = []
+
+    async def capturing_put(url, *, json, headers):
+        captured_payloads.append(json)
+        return mock_resp
+
+    mock_async_client.put = capturing_put
+
+    with mock_patch(
+        "routes.admin_edge_analytics.httpx.AsyncClient",
+        return_value=mock_async_client,
+    ):
+        with mock_patch(
+            "routes.admin_edge_analytics.SpaTitleMissSettingsPatch.model_dump",
+            return_value={
+                "threshold": 75,
+                "disabled": None,
+                "non_patchable_secret": "should_be_dropped",
+            },
+        ):
+            res = admin_client.patch(
+                "/admin/edge/spa-title-miss-settings",
+                json={"threshold": 75},
+            )
+
+    assert res.status_code == 200, f"Unexpected status: {res.status_code} — {res.text}"
+    assert len(captured_payloads) == 1
+    sent = captured_payloads[0]
+    assert "non_patchable_secret" not in sent, (
+        f"A non-patchable field leaked into the edge PUT payload: {sent!r}. "
+        "The PATCHABLE_SETTINGS_KEYS filter in admin_edge_patch_spa_title_miss_settings "
+        "must strip any key not in PATCHABLE_SETTINGS_KEYS before forwarding to the edge worker."
+    )
+    assert set(sent.keys()) <= PATCHABLE_SETTINGS_KEYS, (
+        f"Outbound payload contains unexpected keys: {set(sent.keys()) - PATCHABLE_SETTINGS_KEYS!r}"
+    )
+    assert sent.get("threshold") == 75
+
+
 def test_get_settings_503_from_edge_returns_defaults(admin_client, env_with_edge):
     """When the edge worker returns 503 (KV not bound), the proxy synthesises
     default values and must still expose exactly the canonical key set."""

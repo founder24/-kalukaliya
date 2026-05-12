@@ -242,7 +242,11 @@ async def admin_edge_patch_spa_title_miss_settings(
             detail="CF_EDGE_PROXY_URL or D1_SYNC_SECRET is not set — cannot reach edge worker",
         )
 
-    payload = data.model_dump(exclude_none=True)
+    payload = {
+        k: v
+        for k, v in data.model_dump(exclude_none=True).items()
+        if k in PATCHABLE_SETTINGS_KEYS
+    }
     if not payload:
         raise HTTPException(status_code=400, detail="At least one of 'threshold' or 'disabled' must be provided")
 
