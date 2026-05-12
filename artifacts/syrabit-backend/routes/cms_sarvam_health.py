@@ -159,6 +159,7 @@ from metrics import (
 )
 from rag import _embed_and_store_page
 from seo_engine import _md_to_html
+from slug_utils import clean_learn_slug as _clean_learn_slug  # Task #6: clean-slug fallback lookup
 import ga4_client
 import cloudflare_client
 import vertex_services
@@ -782,10 +783,19 @@ async def get_public_cms_library():
 async def get_public_cms_document(doc_id: str):
     """Get single CMS document for public view (PYQs and notes are freely scrapable).
     Personalized or private documents are never returned — use the authenticated
-    /cms/{user_id}/{slug} endpoint for those."""
+    /cms/{user_id}/{slug} endpoint for those.
+
+    Task #6 — two-phase lookup so clean sitemap slugs (e.g. /learn/bcom-2nd-sem)
+    resolve to documents whose ``seo_slug`` field still contains the raw noisy form
+    (e.g. ``bcom--2nd-sem---bcm--03-(2025)--(bcm0200304)``).  Phase 1 is the fast
+    exact-match path; Phase 2 narrows candidates by a MongoDB prefix regex and then
+    applies ``clean_learn_slug`` in Python to confirm an exact match.
+    """
     try:
         if not await is_mongo_available():
             raise HTTPException(status_code=503, detail="Content service unavailable")
+        # Phase 1: exact match on id or seo_slug (covers noisy slugs and already-
+        # migrated clean slugs without any overhead).
         doc = await db.cms_documents.find_one(
             {
                 "$or": [{"id": doc_id}, {"seo_slug": doc_id}],
@@ -794,6 +804,26 @@ async def get_public_cms_document(doc_id: str):
             },
             {"_id": 0}
         )
+        if not doc:
+            # Phase 2: the caller may have followed a clean sitemap URL whose slug
+            # was never written back to the DB.  Narrow candidates with a prefix
+            # regex on the first hyphen-word of doc_id (e.g. "bcom" from
+            # "bcom-2nd-sem"), then confirm with clean_learn_slug in Python.
+            first_word = doc_id.split("-")[0] if doc_id else ""
+            if first_word:
+                candidates = await db.cms_documents.find(
+                    {
+                        "seo_slug": {"$regex": f"^{re.escape(first_word)}", "$options": "i"},
+                        "status": "published",
+                        **_PUBLIC_CMS_FILTER,
+                    },
+                    {"_id": 0},
+                ).to_list(200)
+                for candidate in candidates:
+                    raw_slug = candidate.get("seo_slug") or candidate.get("id", "")
+                    if _clean_learn_slug(raw_slug) == doc_id:
+                        doc = candidate
+                        break
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         return doc
