@@ -3587,6 +3587,9 @@ export function _injectSpaTitleForBot(
   // Task #18 — rewrite og:image:width / og:image:height / og:image:alt
   //   so platforms (WhatsApp, Facebook, Telegram) skip an extra fetch to
   //   measure the image before rendering the preview card.
+  // Task #22 — also rewrite twitter:image and twitter:image:alt so X
+  //   preview cards use the route-specific subject banner rather than
+  //   the generic SPA fallback image.
   let rewriter = new HTMLRewriter()
     .on("title", {
       element(el) { el.setInnerContent(title); },
@@ -3617,11 +3620,24 @@ export function _injectSpaTitleForBot(
     })
     .on('meta[name="twitter:card"]', {
       element(el) { el.setAttribute("content", "summary_large_image"); },
+    })
+    .on('meta[name="twitter:image"]', {
+      element(el) { el.setAttribute("content", ogImage); },
+    })
+    .on('meta[name="twitter:image:width"]', {
+      element(el) { el.setAttribute("content", OG_IMAGE_WIDTH); },
+    })
+    .on('meta[name="twitter:image:height"]', {
+      element(el) { el.setAttribute("content", OG_IMAGE_HEIGHT); },
     });
   if (ogImageAlt !== undefined) {
-    rewriter = rewriter.on('meta[property="og:image:alt"]', {
-      element(el) { el.setAttribute("content", ogImageAlt); },
-    });
+    rewriter = rewriter
+      .on('meta[property="og:image:alt"]', {
+        element(el) { el.setAttribute("content", ogImageAlt); },
+      })
+      .on('meta[name="twitter:image:alt"]', {
+        element(el) { el.setAttribute("content", ogImageAlt); },
+      });
   }
   return rewriter.transform(response);
 }

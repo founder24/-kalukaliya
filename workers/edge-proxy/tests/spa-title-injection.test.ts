@@ -498,6 +498,159 @@ describe("_resolveSpaRouteMeta", () => {
         expect(metaEl.setAttribute).toHaveBeenCalledWith("content", "summary_large_image");
       });
 
+      it("rewrites twitter:image for subject route to the same CDN PNG URL as og:image (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:image" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:image"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          `${_OG_IMAGE_BASE}/chemistry.png`,
+        );
+      });
+
+      it("rewrites twitter:image for hub route to the same CDN PNG URL as og:image (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:image" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/ahsec", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:image"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          `${_OG_IMAGE_BASE}/ahsec.png`,
+        );
+      });
+
+      it("twitter:image matches og:image value for the same route (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image" content="old"><meta name="twitter:image" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics", true);
+
+        const ogEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const twEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image"]'].element(ogEl);
+        capturedHandlers['meta[name="twitter:image"]'].element(twEl);
+        const ogVal = ogEl.setAttribute.mock.calls[0][1] as string;
+        const twVal = twEl.setAttribute.mock.calls[0][1] as string;
+        expect(twVal).toBe(ogVal);
+      });
+
+      it("rewrites twitter:image:alt for subject route with subject name (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:image:alt" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:image:alt"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          expect.stringContaining("Physics"),
+        );
+      });
+
+      it("rewrites twitter:image:alt for hub route with board name (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:image:alt" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/ahsec", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:image:alt"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          expect.stringContaining("AHSEC"),
+        );
+      });
+
+      it("twitter:image:alt matches og:image:alt value for the same route (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:alt" content="old"><meta name="twitter:image:alt" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const ogAltEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const twAltEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:alt"]'].element(ogAltEl);
+        capturedHandlers['meta[name="twitter:image:alt"]'].element(twAltEl);
+        const ogAltVal = ogAltEl.setAttribute.mock.calls[0][1] as string;
+        const twAltVal = twAltEl.setAttribute.mock.calls[0][1] as string;
+        expect(twAltVal).toBe(ogAltVal);
+      });
+
+      it("does NOT register twitter:image:alt handler for unmatched route (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><title>x</title></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/pricing", true);
+        expect(capturedHandlers['meta[name="twitter:image:alt"]']).toBeUndefined();
+      });
+
+      it("rewrites twitter:image:width to OG_IMAGE_WIDTH for subject route (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:image:width" content="0"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:image:width"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", OG_IMAGE_WIDTH);
+      });
+
+      it("rewrites twitter:image:height to OG_IMAGE_HEIGHT for subject route (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:image:height" content="0"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:image:height"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", OG_IMAGE_HEIGHT);
+      });
+
+      it("twitter:image:width matches og:image:width value (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:width" content="0"><meta name="twitter:image:width" content="0"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/ahsec", true);
+
+        const ogEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const twEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:width"]'].element(ogEl);
+        capturedHandlers['meta[name="twitter:image:width"]'].element(twEl);
+        expect(twEl.setAttribute.mock.calls[0][1]).toBe(ogEl.setAttribute.mock.calls[0][1]);
+      });
+
+      it("twitter:image:height matches og:image:height value (Task #22)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:height" content="0"><meta name="twitter:image:height" content="0"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/ahsec", true);
+
+        const ogEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const twEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:height"]'].element(ogEl);
+        capturedHandlers['meta[name="twitter:image:height"]'].element(twEl);
+        expect(twEl.setAttribute.mock.calls[0][1]).toBe(ogEl.setAttribute.mock.calls[0][1]);
+      });
+
       it("rewrites og:image for subject route to CDN PNG URL (Task #17)", () => {
         const resp = new Response(
           '<html><head><meta property="og:image" content="old"></head></html>',
