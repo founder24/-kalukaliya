@@ -59,8 +59,8 @@ function MiniBar({ label, value, max }) {
   );
 }
 
-/** Task #33 — Alert settings sub-panel rendered inside TitleInjectionGaps. */
-function AlertSettings({ token, onSaved }) {
+/** Task #33 / Task #62 — Alert settings sub-panel rendered inside TitleInjectionGaps. */
+export function AlertSettings({ token, onSaved }) {
   const [settings, setSettings]     = useState(null);
   const [loading, setLoading]       = useState(false);
   const [saving, setSaving]         = useState(false);
@@ -72,6 +72,17 @@ function AlertSettings({ token, onSaved }) {
   // Draft values edited by the admin.
   const [draftThreshold, setDraftThreshold] = useState('');
   const [draftDisabled, setDraftDisabled]   = useState(false);
+
+  // Task #62 — inline validation derived from current draft value.
+  // Empty string is treated as "not yet provided" and validated only on save;
+  // any non-empty value that is not a finite integer ≥ 1 shows the error inline
+  // next to the input so the admin sees the constraint as they type.
+  const _thrNum = parseInt(draftThreshold, 10);
+  const thresholdInputError =
+    draftThreshold.trim() !== '' &&
+    (!Number.isFinite(_thrNum) || _thrNum < 1)
+      ? 'Must be an integer ≥ 1'
+      : null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,7 +145,9 @@ function AlertSettings({ token, onSaved }) {
     setSaveError(null);
     const thr = parseInt(draftThreshold, 10);
     if (!Number.isFinite(thr) || thr < 1) {
-      setSaveError('Threshold must be an integer ≥ 1');
+      // Task #62 — inline error next to the input already communicates the
+      // constraint; no network request is made and no duplicate saveError is
+      // set here so the bottom status area stays uncluttered.
       return;
     }
     if (draftDisabled) {
@@ -181,18 +194,36 @@ function AlertSettings({ token, onSaved }) {
         )}
       </p>
 
-      {/* Threshold field */}
+      {/* Threshold field — Task #62: inline error shown as the admin types */}
       <div className="flex items-center gap-2">
         <label className="text-[11px] text-gray-600 w-32 flex-shrink-0">
           Hit threshold
         </label>
-        <input
-          type="number"
-          min={1}
-          value={draftThreshold}
-          onChange={(e) => setDraftThreshold(e.target.value)}
-          className="w-20 rounded border border-gray-200 bg-white px-2 py-0.5 text-xs font-mono text-gray-800 focus:outline-none focus:ring-1 focus:ring-amber-400"
-        />
+        <div className="flex flex-col gap-0.5">
+          <input
+            type="number"
+            min={1}
+            value={draftThreshold}
+            onChange={(e) => setDraftThreshold(e.target.value)}
+            data-testid="threshold-input"
+            aria-describedby={thresholdInputError ? 'threshold-error' : undefined}
+            aria-invalid={!!thresholdInputError}
+            className={`w-20 rounded border px-2 py-0.5 text-xs font-mono text-gray-800 focus:outline-none focus:ring-1 ${
+              thresholdInputError
+                ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                : 'border-gray-200 bg-white focus:ring-amber-400'
+            }`}
+          />
+          {thresholdInputError && (
+            <span
+              id="threshold-error"
+              data-testid="threshold-error"
+              className="text-[10px] text-red-500 leading-tight"
+            >
+              {thresholdInputError}
+            </span>
+          )}
+        </div>
         <span className="text-[10px] text-gray-400">bot hits / 24 h to alert</span>
       </div>
 
@@ -247,7 +278,8 @@ function AlertSettings({ token, onSaved }) {
         ) : (
           <button
             onClick={save}
-            disabled={saving}
+            disabled={saving || !!thresholdInputError}
+            data-testid="save-button"
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors"
           >
             {saving ? <RefreshCw size={9} className="animate-spin" /> : <Check size={9} />}
