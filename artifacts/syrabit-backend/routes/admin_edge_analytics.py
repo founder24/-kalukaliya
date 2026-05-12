@@ -183,7 +183,9 @@ async def admin_edge_get_spa_title_miss_settings(
                 "configured": True,
                 "reason": f"edge returned {resp.status_code}",
             }
-        return {"configured": True, **resp.json()}
+        edge_data = resp.json()
+        _ALLOWED_EDGE_KEYS = {"disabled", "env_disabled", "env_threshold", "kv_override_set", "threshold"}
+        return {"configured": True, **{k: v for k, v in edge_data.items() if k in _ALLOWED_EDGE_KEYS}}
     except Exception as exc:
         logger.warning("[edge-spa-title-miss-settings GET] edge fetch failed: %s", exc)
         return {

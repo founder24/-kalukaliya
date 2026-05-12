@@ -126,12 +126,12 @@ def test_get_settings_canonical_values(admin_client, env_with_edge):
 
 
 def test_get_settings_extra_edge_field_is_caught():
-    """Document that the proxy currently spreads edge JSON verbatim.
+    """The proxy must drop any unexpected field returned by the edge worker.
 
-    If the edge worker returns an unexpected field, the backend passes it
-    through and the key-snapshot test above will fail.  This test makes
-    that behaviour explicit so a future refactor can add a schema filter
-    and this test can be updated to assert the extra field is *dropped*.
+    The proxy now filters the edge JSON through an explicit allowlist of the
+    five known keys (``disabled``, ``env_disabled``, ``env_threshold``,
+    ``kv_override_set``, ``threshold``).  Any additional field the edge starts
+    returning must be silently dropped so the frontend schema never drifts.
     """
     extra_payload = {**_EDGE_PAYLOAD, "surprise_field": "should_not_appear"}
 
@@ -159,10 +159,15 @@ def test_get_settings_extra_edge_field_is_caught():
             res = client.get("/admin/edge/spa-title-miss-settings")
 
     body = res.json()
-    assert "surprise_field" in body, (
-        "The proxy no longer spreads edge JSON verbatim.  "
-        "Update _CANONICAL_KEYS and remove this assertion if the proxy now "
-        "filters the response through an explicit schema."
+    assert "surprise_field" not in body, (
+        "The proxy passed an unexpected edge field through to the frontend. "
+        "The allowlist filter in routes/admin_edge_analytics.py must drop "
+        "any key not in {disabled, env_disabled, env_threshold, kv_override_set, threshold}."
+    )
+    assert set(body.keys()) == _CANONICAL_KEYS, (
+        f"Response keys do not match the canonical set after filtering.\n"
+        f"  got:      {sorted(body.keys())}\n"
+        f"  expected: {sorted(_CANONICAL_KEYS)}\n"
     )
 
 
