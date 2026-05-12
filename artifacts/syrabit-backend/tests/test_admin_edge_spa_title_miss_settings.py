@@ -1,4 +1,4 @@
-"""Task #33 / Task #47 — backend tests for GET and PATCH
+"""Task #33 / Task #47 / Task #58 — backend tests for GET and PATCH
 /admin/edge/spa-title-miss-settings.
 
 These routes proxy the edge worker's GET/PUT /api/edge/spa-title-miss-settings
@@ -15,6 +15,7 @@ Coverage:
     - edge returns 503 (RATE_LIMIT KV not bound) → 200 with fallback defaults
     - edge returns non-200/non-503 → 200 with reason
     - edge unreachable → 200 with reason
+    - full schema snapshot (Task #48)
 
   PATCH /admin/edge/spa-title-miss-settings
     - auth rejection
@@ -29,6 +30,7 @@ Coverage:
     - edge returns 400 → propagates 400
     - edge returns non-200/400/503 → 502
     - edge unreachable → 502
+    - full schema snapshot (Task #58)
 """
 from __future__ import annotations
 
@@ -408,7 +410,7 @@ def test_patch_edge_unreachable_returns_502(authed_client):
     assert res.status_code == 502
 
 
-# ─── Task #48: full schema snapshot — GET happy-path response contract ────────
+# ─── Task #48: full schema snapshot — GET happy-path response contract ─────────
 
 def test_get_happy_path_full_schema_snapshot(authed_client):
     """Schema guard (Task #48): every key in the GET settings response must be
@@ -456,3 +458,59 @@ def test_get_happy_path_full_schema_snapshot(authed_client):
     assert body["kv_override_set"] is True
     assert body["env_threshold"] == 50
     assert body["env_disabled"] is False
+
+
+# ─── Task #58: full schema snapshot — PATCH happy-path response contract ───────
+
+def test_patch_happy_path_full_schema_snapshot(authed_client):
+    """Schema guard (Task #58): every key in the PATCH settings response must be
+    present with the correct type.  The PATCH route returns resp.json() verbatim
+    from the edge worker, so this test pins the edge → backend → client contract.
+    A future refactor that renames a field (e.g. disabled → paused, ok → success)
+    will be caught here rather than silently breaking the admin settings panel.
+
+    Keys and types guaranteed by the Task #33 / Task #58 contract:
+        ok          bool    — True when the edge worker persisted the update
+        threshold   int     — the new effective threshold after the save
+        disabled    bool    — the new effective disabled flag after the save
+
+    The route passes through the edge response without transformation, so the
+    snapshot is defined by what the edge PUT /api/edge/spa-title-miss-settings
+    endpoint returns on success (confirmed by Tasks #33 and #47 fixtures).
+    """
+    edge_resp = {
+        "ok":        True,
+        "threshold": 100,
+        "disabled":  False,
+    }
+    fake = _FakeClient(put_resp=_FakeResp(200, edge_resp))
+
+    with patch.dict(os.environ, _ENV, clear=False), \
+            patch("routes.admin_edge_analytics.httpx.AsyncClient",
+                  return_value=fake):
+        res = authed_client.patch(
+            "/admin/edge/spa-title-miss-settings",
+            json={"threshold": 100, "disabled": False},
+        )
+
+    assert res.status_code == 200
+    body = res.json()
+
+    # ── top-level keys must all be present ────────────────────────────────────
+    assert "ok"        in body, "ok must be present in PATCH response"
+    assert "threshold" in body, "threshold must be present in PATCH response"
+    assert "disabled"  in body, "disabled must be present in PATCH response"
+
+    # ── correct types ─────────────────────────────────────────────────────────
+    assert isinstance(body["ok"],        bool), "ok must be bool"
+    assert isinstance(body["threshold"], int),  "threshold must be int"
+    assert isinstance(body["disabled"],  bool), "disabled must be bool"
+
+    # ── values match the fixture ──────────────────────────────────────────────
+    assert body["ok"]        is True
+    assert body["threshold"] == 100
+    assert body["disabled"]  is False
+
+    # ── no unexpected extra status-code fields that belong to error paths ─────
+    assert "error"  not in body, "error key must not appear in a successful PATCH response"
+    assert "reason" not in body, "reason key must not appear in a successful PATCH response"
