@@ -411,6 +411,91 @@ console.log(
   `[verify-all] og:image:alt gate: checked ${ogAltChecked} prerendered route(s)`,
 );
 
+// ── og:image URL format gate (Task #66) ──────────────────────────────────────
+// When an og:image meta tag is present the URL must be absolute HTTPS and
+// point to either the subject-specific CDN path or the site's own origin.
+// Catching a stale localhost URL, a relative path, or an unexpected domain
+// here prevents broken social-preview banners from reaching production.
+//
+// The check is WARN-only when og:image is absent: some static pages are
+// expected to fall back to the edge-injected generic image, so a missing
+// tag in the prerendered HTML is acceptable.  But if the tag IS present
+// the URL must satisfy the allowlist — that failure is hard.
+//
+// Scope: same INDEXABILITY_SKIP_RE exclusion as the other OG gates.
+//
+// Allowed URL prefixes — both must be absolute HTTPS on our own origins:
+//   https://cdn.syrabit.ai/og/   Task #50 subject-specific CDN images
+//   https://syrabit.ai/          generic site assets (e.g. opengraph.jpg)
+// If the CDN base URL changes, update OG_IMAGE_ALLOWED_PREFIXES here AND
+// in workers/edge-proxy/src/index.ts (_OG_IMAGE_BASE constant) together.
+const OG_IMAGE_SRC_RE =
+  /<meta\b[^>]*\bproperty=["']og:image["'][^>]*\bcontent=["']([^"']*)["'][^>]*>/i;
+const OG_IMAGE_SRC_RE2 =
+  /<meta\b[^>]*\bcontent=["']([^"']*)["'][^>]*\bproperty=["']og:image["'][^>]*>/i;
+
+const OG_IMAGE_ALLOWED_PREFIXES = [
+  "https://cdn.syrabit.ai/og/", // subject-specific CDN images (Task #50)
+  "https://syrabit.ai/",        // generic site assets — e.g. opengraph.jpg
+];
+
+let ogImageUrlChecked = 0;
+let ogImageUrlAbsent  = 0;
+for (const page of pages) {
+  if (page.rel === "index.html") continue; // root: SPA shell
+  if (INDEXABILITY_SKIP_RE.test(page.rel)) continue;
+  const route = "/" + page.rel.replace(/\/index\.html$/, "");
+
+  const m =
+    page.body.match(OG_IMAGE_SRC_RE) ||
+    page.body.match(OG_IMAGE_SRC_RE2);
+
+  if (!m) {
+    warn(
+      `${route}: no <meta property="og:image"> found — ` +
+        `social crawlers will fall back to the edge-injected generic preview`,
+    );
+    ogImageUrlAbsent++;
+    continue;
+  }
+
+  const imgUrl = m[1].trim();
+  if (!imgUrl) {
+    fail(`${route}: og:image content is empty`);
+    continue;
+  }
+
+  // Fail fast on obvious breakage patterns before checking the allowlist.
+  if (/localhost|127\.0\.0\.1|undefined/i.test(imgUrl)) {
+    fail(
+      `${route}: og:image URL looks like a dev/debug artifact: ${imgUrl} — ` +
+        `this value must never ship in a production build`,
+    );
+    continue;
+  }
+  if (!imgUrl.startsWith("https://")) {
+    fail(
+      `${route}: og:image URL is not absolute HTTPS: ${imgUrl} — ` +
+        `relative paths and plain HTTP URLs are rejected by most social crawlers`,
+    );
+    continue;
+  }
+  if (!OG_IMAGE_ALLOWED_PREFIXES.some((p) => imgUrl.startsWith(p))) {
+    fail(
+      `${route}: og:image URL (${imgUrl}) does not start with an allowed prefix. ` +
+        `Allowed: ${OG_IMAGE_ALLOWED_PREFIXES.map((p) => p).join(", ")}. ` +
+        `Update OG_IMAGE_ALLOWED_PREFIXES in verify-all.mjs if the CDN base has changed.`,
+    );
+    continue;
+  }
+
+  ogImageUrlChecked++;
+}
+console.log(
+  `[verify-all] og:image URL gate: checked ${ogImageUrlChecked} route(s), ` +
+    `${ogImageUrlAbsent} absent (warn-only)`,
+);
+
 // ── Critical-CSS postcondition (Task #856) ──────────────────────────
 // scripts/inline-critical-css.mjs runs in the build pipeline ahead of
 // this verifier and is expected to leave the SPA-fallback +
