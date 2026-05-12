@@ -75,13 +75,16 @@ export function AlertSettings({ token, onSaved }) {
 
   // Task #62 — inline validation derived from current draft value.
   // Empty string is treated as "not yet provided" and validated only on save;
-  // any non-empty value that is not a finite integer ≥ 1 shows the error inline
+  // any non-empty value that is not a whole integer ≥ 1 shows the error inline
   // next to the input so the admin sees the constraint as they type.
-  const _thrNum = parseInt(draftThreshold, 10);
+  // Note: Number() is used instead of parseInt() so that "1.5" is correctly
+  // identified as non-integer (parseInt("1.5") would silently truncate to 1
+  // and accept a value the backend Pydantic int field would reject with 422).
+  const _thrNum = Number(draftThreshold.trim());
   const thresholdInputError =
     draftThreshold.trim() !== '' &&
-    (!Number.isFinite(_thrNum) || _thrNum < 1)
-      ? 'Must be an integer ≥ 1'
+    (!Number.isInteger(_thrNum) || _thrNum < 1)
+      ? 'Must be a whole number ≥ 1'
       : null;
 
   const load = useCallback(async () => {
@@ -117,9 +120,11 @@ export function AlertSettings({ token, onSaved }) {
     setSaveError(null);
     setSavedOk(false);
     try {
-      const thr = parseInt(draftThreshold, 10);
-      if (!Number.isFinite(thr) || thr < 1) {
-        setSaveError('Threshold must be an integer ≥ 1');
+      // Use the same Number.isInteger check as thresholdInputError so "1.5"
+      // is rejected here too (parseInt would silently truncate it to 1).
+      const thr = Number(draftThreshold.trim());
+      if (!Number.isInteger(thr) || thr < 1) {
+        setSaveError('Threshold must be a whole number ≥ 1');
         return;
       }
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -143,8 +148,10 @@ export function AlertSettings({ token, onSaved }) {
 
   const save = () => {
     setSaveError(null);
-    const thr = parseInt(draftThreshold, 10);
-    if (!Number.isFinite(thr) || thr < 1) {
+    // Use the same Number.isInteger check as thresholdInputError so "1.5"
+    // is caught here too (parseInt would silently truncate to 1).
+    const thr = Number(draftThreshold.trim());
+    if (!Number.isInteger(thr) || thr < 1) {
       // Task #62 — inline error next to the input already communicates the
       // constraint; no network request is made and no duplicate saveError is
       // set here so the bottom status area stays uncluttered.

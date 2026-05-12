@@ -18,7 +18,8 @@
  * Coverage:
  *   - threshold=0 → inline error, red border, Save disabled, no PATCH
  *   - threshold=-5 → inline error, Save disabled
- *   - non-numeric "abc" → inline error, Save disabled
+ *   - threshold=1.5 → inline error (non-integer; parseInt would truncate silently)
+ *   - non-numeric "abc" via type=number → empty string → no inline error (save guard catches it)
  *   - threshold=1 → no error (boundary — exactly valid)
  *   - threshold=50 → no error (typical value)
  *   - typing invalid then correcting to valid → error disappears
@@ -118,6 +119,16 @@ describe('AlertSettings — threshold inline validation (Task #62)', () => {
     await renderLoaded();
     setThreshold('-5');
     expect(getError()).not.toBeNull();
+  });
+
+  it('shows inline error for threshold=1.5 (non-integer — Number.isInteger rejects it; parseInt would silently truncate)', async () => {
+    // This is the key regression-prevention test for the parseInt → Number.isInteger
+    // migration: parseInt("1.5") === 1 (valid), Number.isInteger(1.5) === false (invalid).
+    // The Pydantic int field on the backend would reject 1.5 with a 422.
+    await renderLoaded();
+    setThreshold('1.5');
+    expect(getError()).not.toBeNull();
+    expect(getSaveButton().disabled).toBe(true);
   });
 
   it('shows no inline error for non-numeric "abc" (type=number yields empty string — empty field is validated on save)', async () => {
