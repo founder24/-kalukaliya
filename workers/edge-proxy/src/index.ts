@@ -3524,6 +3524,28 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
       ogImageAlt: `${subject} AHSEC HS 2nd Year — Syrabit.ai`,
     };
   }
+  // Task #50 — /ahsec/class-11/:subject[/:chapter...]
+  // Previously unhandled; added so /ahsec/class-11/<slug> gets the same
+  // subject-specific banner as the /notes/class-11/<slug> equivalent.
+  if (parts.length >= 3 && parts[0] === "ahsec" && parts[1] === "class-11") {
+    const subject = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — AHSEC Class 11 | Syrabit.ai`,
+      description: `Study ${subject} for AHSEC Class 11 with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[2]}.png`,
+      ogImageAlt: `${subject} AHSEC Class 11 — Syrabit.ai`,
+    };
+  }
+  // Task #50 — /ahsec/class-12/:subject[/:chapter...]
+  if (parts.length >= 3 && parts[0] === "ahsec" && parts[1] === "class-12") {
+    const subject = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — AHSEC Class 12 | Syrabit.ai`,
+      description: `Study ${subject} for AHSEC Class 12 with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[2]}.png`,
+      ogImageAlt: `${subject} AHSEC Class 12 — Syrabit.ai`,
+    };
+  }
   // /learn/:slug[/:section...]
   if (parts.length >= 2 && parts[0] === "learn") {
     const topic = _slugToTitle(parts[1]);
@@ -3604,6 +3626,28 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
       description: "Browse Class 12 study notes for all AHSEC subjects on Syrabit.ai.",
       ogImage: `${_OG_IMAGE_BASE}/notes-class-12.png`,
       ogImageAlt: "Class 12 study notes — Syrabit.ai",
+    };
+  }
+  // Task #50 — /degree/:program (program hub — exactly 2 segments, e.g. /degree/ba, /degree/bcom)
+  // No per-program OG image exists; fall back gracefully to the board-level degree.png.
+  if (parts.length === 2 && parts[0] === "degree") {
+    const program = _slugToTitle(parts[1]);
+    return {
+      title: `${program} Degree Study Materials | Syrabit.ai`,
+      description: `Browse ${program} Degree study materials, notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/degree.png`,
+      ogImageAlt: `${program} Degree study materials — Syrabit.ai`,
+    };
+  }
+  // Task #50 — /seba/:class (class hub — exactly 2 segments, e.g. /seba/class-10, /seba/class-9)
+  // No per-class OG image exists; fall back gracefully to the board-level seba.png.
+  if (parts.length === 2 && parts[0] === "seba") {
+    const cls = _slugToTitle(parts[1]);
+    return {
+      title: `SEBA ${cls} Study Materials | Syrabit.ai`,
+      description: `Browse SEBA ${cls} study materials, notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/seba.png`,
+      ogImageAlt: `SEBA ${cls} study materials — Syrabit.ai`,
     };
   }
   return null;

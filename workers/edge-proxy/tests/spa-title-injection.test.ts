@@ -218,9 +218,11 @@ describe("_resolveSpaRouteMeta", () => {
       expect(meta!.title).toBe("AHSEC Class 11 Study Materials | Syrabit.ai");
     });
 
-    it("does not match /ahsec/class-11/physics (subject present — falls through to subject handler)", () => {
+    it("returns subject-specific og:image for /ahsec/class-11/physics (Task #50)", () => {
       const meta = _resolveSpaRouteMeta("/ahsec/class-11/physics");
-      expect(meta).toBeNull();
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe("Physics — AHSEC Class 11 | Syrabit.ai");
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/physics.png`);
     });
   });
 
@@ -955,5 +957,317 @@ describe("SPA shell index.html — OG image dimension + alt placeholder tags (Ta
     expect(ogWidthIdx).toBeGreaterThan(ogImageIdx);
     expect(ogHeightIdx).toBeGreaterThan(ogImageIdx);
     expect(ogAltIdx).toBeGreaterThan(ogImageIdx);
+  });
+});
+
+// Task #50 — OG image URL wiring audit
+// Verifies that every live subject/hub URL resolves to an existing CDN slug
+// and never falls through to a missing or wrong image.
+describe("OG image URL wiring audit (Task #50)", () => {
+  // Known subject slugs that have a generated og/<slug>.png on the CDN.
+  // This list mirrors the filenames in scripts/og-images/generated/.
+  const SUBJECT_SLUGS = [
+    "accountancy",
+    "accountancy-honours",
+    "assamese-honours",
+    "assamese-mil",
+    "bengali-mil",
+    "biology",
+    "botany",
+    "business-administration",
+    "business-studies",
+    "chemistry",
+    "chemistry-honours",
+    "computer-science",
+    "economics",
+    "economics-honours",
+    "education",
+    "education-honours",
+    "english-core",
+    "english-first",
+    "environmental-education",
+    "general-mathematics",
+    "general-science",
+    "geography",
+    "geography-honours",
+    "hindi-mil",
+    "history",
+    "history-honours",
+    "life-science",
+    "logic-philosophy",
+    "mass-communication",
+    "mathematics",
+    "mathematics-honours",
+    "modern-indian-language-assamese",
+    "philosophy",
+    "physical-science",
+    "physics",
+    "physics-honours",
+    "political-science",
+    "political-science-honours",
+    "social-science",
+    "sociology",
+    "sociology-honours",
+    "statistics-honours",
+    "zoology",
+  ] as const;
+
+  // Hub slugs that have dedicated generated images.
+  const HUB_SLUGS: Record<string, string> = {
+    "/ahsec":          "ahsec.png",
+    "/seba":           "seba.png",
+    "/degree":         "degree.png",
+    "/ahsec/class-11": "ahsec-class-11.png",
+    "/ahsec/class-12": "ahsec-class-12.png",
+    "/notes":          "notes.png",
+    "/notes/class-11": "notes-class-11.png",
+    "/notes/class-12": "notes-class-12.png",
+  };
+
+  describe("task spec sample URLs resolve correctly", () => {
+    it("/notes/class-12/chemistry → chemistry.png (task spec example)", () => {
+      const meta = _resolveSpaRouteMeta("/notes/class-12/chemistry");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/chemistry.png`);
+    });
+
+    it("/degree/ba → degree.png (graceful fallback, task spec example)", () => {
+      const meta = _resolveSpaRouteMeta("/degree/ba");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/degree.png`);
+    });
+
+    it("/seba → seba.png (task spec example)", () => {
+      const meta = _resolveSpaRouteMeta("/seba");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/seba.png`);
+    });
+  });
+
+  describe("/ahsec/class-11/:subject — new handler (Task #50)", () => {
+    it("resolves to subject-specific PNG, not generic", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/physics");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/physics.png`);
+    });
+
+    it("uses subject slug from URL as image filename", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/chemistry");
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/chemistry.png`);
+    });
+
+    it("deep chapter path inherits subject image", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/mathematics/chapter-3/integration");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/mathematics.png`);
+    });
+
+    it("title includes subject name and AHSEC Class 11", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/biology");
+      expect(meta!.title).toBe("Biology — AHSEC Class 11 | Syrabit.ai");
+    });
+
+    it("ogImageAlt is non-empty and contains subject name", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-11/physics");
+      expect(meta!.ogImageAlt).toBeDefined();
+      expect(meta!.ogImageAlt).toContain("Physics");
+    });
+  });
+
+  describe("/ahsec/class-12/:subject — new handler (Task #50)", () => {
+    it("resolves to subject-specific PNG, not generic", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-12/chemistry");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/chemistry.png`);
+    });
+
+    it("uses subject slug from URL as image filename", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-12/economics");
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/economics.png`);
+    });
+
+    it("deep chapter path inherits subject image", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-12/biology/chapter-1/cell-biology");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/biology.png`);
+    });
+
+    it("title includes subject name and AHSEC Class 12", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-12/mathematics");
+      expect(meta!.title).toBe("Mathematics — AHSEC Class 12 | Syrabit.ai");
+    });
+
+    it("ogImageAlt is non-empty and contains subject name", () => {
+      const meta = _resolveSpaRouteMeta("/ahsec/class-12/chemistry");
+      expect(meta!.ogImageAlt).toBeDefined();
+      expect(meta!.ogImageAlt).toContain("Chemistry");
+    });
+  });
+
+  describe("/degree/:program — new hub handler (Task #50)", () => {
+    it("/degree/ba → degree.png (graceful fallback)", () => {
+      const meta = _resolveSpaRouteMeta("/degree/ba");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/degree.png`);
+    });
+
+    it("/degree/bcom → degree.png (graceful fallback)", () => {
+      const meta = _resolveSpaRouteMeta("/degree/bcom");
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/degree.png`);
+    });
+
+    it("/degree/bsc → degree.png (graceful fallback)", () => {
+      const meta = _resolveSpaRouteMeta("/degree/bsc");
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/degree.png`);
+    });
+
+    it("title includes program name", () => {
+      const meta = _resolveSpaRouteMeta("/degree/ba");
+      expect(meta!.title).toContain("Ba");
+      expect(meta!.title).toContain("Degree");
+    });
+
+    it("ogImageAlt mentions program and Degree", () => {
+      const meta = _resolveSpaRouteMeta("/degree/bcom");
+      expect(meta!.ogImageAlt).toContain("Degree");
+    });
+
+    it("does NOT match /degree alone (that is the 1-segment hub)", () => {
+      const meta = _resolveSpaRouteMeta("/degree");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/degree.png`);
+      expect(meta!.title).toBe("Degree Study Materials | Syrabit.ai");
+    });
+  });
+
+  describe("/seba/:class — new hub handler (Task #50)", () => {
+    it("/seba/class-10 → seba.png (graceful fallback)", () => {
+      const meta = _resolveSpaRouteMeta("/seba/class-10");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/seba.png`);
+    });
+
+    it("/seba/class-9 → seba.png (graceful fallback)", () => {
+      const meta = _resolveSpaRouteMeta("/seba/class-9");
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/seba.png`);
+    });
+
+    it("title includes class name and SEBA", () => {
+      const meta = _resolveSpaRouteMeta("/seba/class-10");
+      expect(meta!.title).toContain("SEBA");
+      expect(meta!.title).toContain("Class 10");
+    });
+
+    it("ogImageAlt mentions SEBA", () => {
+      const meta = _resolveSpaRouteMeta("/seba/class-9");
+      expect(meta!.ogImageAlt).toContain("SEBA");
+    });
+
+    it("does NOT match /seba alone (that is the 1-segment hub)", () => {
+      const meta = _resolveSpaRouteMeta("/seba");
+      expect(meta).not.toBeNull();
+      expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/seba.png`);
+      expect(meta!.title).toBe("SEBA Study Materials | Syrabit.ai");
+    });
+  });
+
+  describe("hub pages — all resolve to their dedicated CDN image", () => {
+    for (const [pathname, expectedFile] of Object.entries(HUB_SLUGS)) {
+      it(`${pathname} → ${expectedFile}`, () => {
+        const meta = _resolveSpaRouteMeta(pathname);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(`${_OG_IMAGE_BASE}/${expectedFile}`);
+      });
+    }
+  });
+
+  describe("subject slug → CDN filename consistency across all route families", () => {
+    for (const slug of SUBJECT_SLUGS) {
+      const expectedUrl = `${_OG_IMAGE_BASE}/${slug}.png`;
+
+      it(`${slug}: /notes/class-11/${slug} → ${slug}.png`, () => {
+        const meta = _resolveSpaRouteMeta(`/notes/class-11/${slug}`);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(expectedUrl);
+      });
+
+      it(`${slug}: /notes/class-12/${slug} → ${slug}.png`, () => {
+        const meta = _resolveSpaRouteMeta(`/notes/class-12/${slug}`);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(expectedUrl);
+      });
+
+      it(`${slug}: /ahsec/class-11/${slug} → ${slug}.png`, () => {
+        const meta = _resolveSpaRouteMeta(`/ahsec/class-11/${slug}`);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(expectedUrl);
+      });
+
+      it(`${slug}: /ahsec/class-12/${slug} → ${slug}.png`, () => {
+        const meta = _resolveSpaRouteMeta(`/ahsec/class-12/${slug}`);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(expectedUrl);
+      });
+
+      it(`${slug}: /ahsec/hs-1st-year/${slug} → ${slug}.png`, () => {
+        const meta = _resolveSpaRouteMeta(`/ahsec/hs-1st-year/${slug}`);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(expectedUrl);
+      });
+
+      it(`${slug}: /ahsec/hs-2nd-year/${slug} → ${slug}.png`, () => {
+        const meta = _resolveSpaRouteMeta(`/ahsec/hs-2nd-year/${slug}`);
+        expect(meta).not.toBeNull();
+        expect(meta!.ogImage).toBe(expectedUrl);
+      });
+    }
+  });
+
+  describe("og:image URL shape invariants", () => {
+    it("every matched route produces a URL under _OG_IMAGE_BASE", () => {
+      const paths = [
+        "/notes/class-11/physics",
+        "/notes/class-12/chemistry",
+        "/ahsec/class-11/biology",
+        "/ahsec/class-12/mathematics",
+        "/ahsec/hs-1st-year/economics",
+        "/ahsec/hs-2nd-year/history",
+        "/notes/degree/1st-semester/philosophy",
+        "/ahsec",
+        "/seba",
+        "/degree",
+        "/ahsec/class-11",
+        "/ahsec/class-12",
+        "/notes",
+        "/notes/class-11",
+        "/notes/class-12",
+        "/degree/ba",
+        "/degree/bcom",
+        "/seba/class-10",
+      ];
+      for (const p of paths) {
+        const meta = _resolveSpaRouteMeta(p);
+        expect(meta, `expected non-null meta for ${p}`).not.toBeNull();
+        expect(meta!.ogImage, `ogImage for ${p}`).toMatch(
+          /^https:\/\/cdn\.syrabit\.ai\/og\/.+\.png$/,
+        );
+      }
+    });
+
+    it("no matched route produces a URL ending in /undefined.png", () => {
+      const paths = [
+        "/notes/class-11/physics",
+        "/ahsec/class-11/chemistry",
+        "/ahsec/class-12/biology",
+        "/degree/ba",
+        "/seba/class-10",
+      ];
+      for (const p of paths) {
+        const meta = _resolveSpaRouteMeta(p);
+        expect(meta!.ogImage, `ogImage for ${p} must not be undefined.png`).not.toContain(
+          "undefined.png",
+        );
+      }
+    });
   });
 });
