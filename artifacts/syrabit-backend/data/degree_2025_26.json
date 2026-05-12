@@ -1,0 +1,427 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "source": "FYUGP/NEP 2020 Degree curriculum for Assam Universities 2025-26 (curated from Gauhati University, Dibrugarh University, and Cotton University published syllabi)",
+    "generated_at": "2026-05-12T00:00:00Z",
+    "board_id": "b3",
+    "board_slug": "degree",
+    "license": "Curated from publicly published syllabi; Syrabit content under CC-BY-4.0",
+    "notes": "Covers FYUGP (Four-Year Undergraduate Programme) under NEP 2020 as adopted by Assam universities. Semesters 1-8 across Arts, Science, and Commerce disciplines. Honours/Major and Multidisciplinary courses included."
+  },
+  "classes": {
+    "c_sem1_2": {
+      "name": "Semester 1 & 2 (1st Year)",
+      "slug": "sem-1-2",
+      "streams": {
+        "s_arts": {
+          "name": "Arts / Humanities",
+          "slug": "arts",
+          "subjects": [
+            {
+              "slug": "assamese-honours",
+              "name": "Assamese (Honours)",
+              "icon": "📕",
+              "description": "Degree Assamese Honours — classical and modern Assamese literature, linguistics, and literary criticism under NEP FYUGP.",
+              "chapters": [
+                {"title": "প্ৰাচীন অসমীয়া সাহিত্য", "topics": ["চৰ্যাপদ", "মাধৱ কন্দলীৰ ৰামায়ণ", "শঙ্কৰদেৱৰ সাহিত্য", "মাধৱদেৱৰ সাহিত্য"]},
+                {"title": "মধ্যকালীন অসমীয়া সাহিত্য", "topics": ["বৈষ্ণৱ সাহিত্য", "বুৰঞ্জী সাহিত্য", "কামৰূপীয়া সাহিত্য", "অনুবাদ সাহিত্য"]},
+                {"title": "আধুনিক অসমীয়া কবিতা", "topics": ["হেমচন্দ্ৰ বৰুৱা", "লক্ষ্মীনাথ বেজবৰুৱা", "অম্বিকাগিৰি ৰায়চৌধুৰী", "নৱকান্ত বৰুৱা"]},
+                {"title": "অসমীয়া গদ্য সাহিত্য", "topics": ["উপন্যাস", "চুটিগল্প", "নাটক", "প্ৰবন্ধ"]},
+                {"title": "অসমীয়া ভাষাতত্ত্ব", "topics": ["ধ্বনিতত্ত্ব", "ৰূপতত্ত্ব", "বাক্যতত্ত্ব", "অৰ্থতত্ত্ব"]},
+                {"title": "সাহিত্য সমালোচনা", "topics": ["পাশ্চাত্য সমালোচনাৰ ধাৰা", "ভাৰতীয় সমালোচনা", "অসমীয়া সমালোচনা", "আধুনিক তত্ত্ব"]}
+              ]
+            },
+            {
+              "slug": "philosophy",
+              "name": "Philosophy",
+              "icon": "🤔",
+              "description": "Degree Philosophy (Honours) — Indian and Western philosophy, logic, ethics, and epistemology under NEP FYUGP.",
+              "chapters": [
+                {"title": "Indian Philosophy — Orthodox Schools", "topics": ["Nyaya", "Vaisheshika", "Samkhya", "Yoga", "Purva Mimamsa", "Vedanta"]},
+                {"title": "Indian Philosophy — Heterodox Schools", "topics": ["Charvaka materialism", "Jain philosophy", "Buddhist philosophy", "Theory of no-self"]},
+                {"title": "Western Philosophy — Ancient", "topics": ["Pre-Socratics", "Socratic method", "Plato's theory of Forms", "Aristotle's logic and metaphysics"]},
+                {"title": "Western Philosophy — Modern", "topics": ["Descartes and rationalism", "Locke and empiricism", "Kant's critical philosophy", "Hegel's dialectic"]},
+                {"title": "Ethics", "topics": ["Metaethics", "Normative ethics", "Consequentialism", "Deontology", "Virtue ethics"]},
+                {"title": "Logic", "topics": ["Classical logic", "Modern symbolic logic", "Predicate logic", "Informal fallacies", "Induction"]}
+              ]
+            },
+            {
+              "slug": "history-honours",
+              "name": "History (Honours)",
+              "icon": "📜",
+              "description": "Degree History Honours — ancient, medieval, modern Indian history and world history under NEP FYUGP.",
+              "chapters": [
+                {"title": "Prehistoric India", "topics": ["Palaeolithic and Mesolithic cultures", "Neolithic and Chalcolithic", "Indus Valley Civilisation", "Vedic age"]},
+                {"title": "Ancient Indian Polity and Culture", "topics": ["Mauryan Empire", "Gupta period", "Sangam age", "South Indian kingdoms"]},
+                {"title": "Medieval India", "topics": ["Delhi Sultanate", "Mughal Empire", "Bhakti and Sufi movements", "Regional kingdoms"]},
+                {"title": "History of Assam", "topics": ["Ahom kingdom", "Koch kingdom", "Vaishnava movement", "British annexation"]},
+                {"title": "Modern India", "topics": ["British colonialism", "Social reform movements", "Indian National Movement", "Partition and independence"]},
+                {"title": "World History", "topics": ["Industrial Revolution", "World Wars", "Cold War", "Decolonisation"]}
+              ]
+            },
+            {
+              "slug": "political-science-honours",
+              "name": "Political Science (Honours)",
+              "icon": "🏛️",
+              "description": "Degree Political Science Honours — political theory, Indian government, international relations, and public administration.",
+              "chapters": [
+                {"title": "Political Theory", "topics": ["State, sovereignty, law", "Justice and liberty", "Equality and rights", "Democracy and its forms"]},
+                {"title": "Indian Constitution", "topics": ["Framing and sources", "Fundamental Rights and DPSP", "Federal structure", "Emergency provisions"]},
+                {"title": "Indian Government and Politics", "topics": ["Parliament", "Executive", "Judiciary", "Party system and elections"]},
+                {"title": "Comparative Government", "topics": ["USA, UK, France", "Presidential vs parliamentary", "Federal vs unitary", "Coalition politics"]},
+                {"title": "International Relations", "topics": ["Theories of IR", "India's foreign policy", "United Nations", "Nuclear policy"]},
+                {"title": "Public Administration", "topics": ["Nature and scope", "Bureaucracy", "Administrative law", "E-governance"]}
+              ]
+            },
+            {
+              "slug": "economics-honours",
+              "name": "Economics (Honours)",
+              "icon": "📊",
+              "description": "Degree Economics Honours — micro and macro economics, Indian economy, statistics, and development economics under NEP FYUGP.",
+              "chapters": [
+                {"title": "Microeconomics — Consumer Theory", "topics": ["Utility and demand", "Indifference curves", "Consumer equilibrium", "Elasticity of demand"]},
+                {"title": "Microeconomics — Production and Costs", "topics": ["Production function", "Returns to scale", "Cost curves", "Economies of scale"]},
+                {"title": "Market Structures", "topics": ["Perfect competition", "Monopoly", "Monopolistic competition", "Oligopoly"]},
+                {"title": "Macroeconomics", "topics": ["National income accounting", "Keynesian framework", "IS-LM model", "Inflation and unemployment"]},
+                {"title": "Indian Economy", "topics": ["Planning and development", "Agriculture sector", "Industry and services", "Recent reforms"]},
+                {"title": "Development Economics", "topics": ["Theories of development", "Poverty and inequality", "Human Development Index", "North-East India context"]}
+              ]
+            },
+            {
+              "slug": "sociology-honours",
+              "name": "Sociology (Honours)",
+              "icon": "👥",
+              "description": "Degree Sociology Honours — social theory, Indian society, research methods, and contemporary social issues.",
+              "chapters": [
+                {"title": "Classical Sociological Theory", "topics": ["Marx and alienation", "Durkheim and social solidarity", "Weber and rationalization", "Spencer and evolution"]},
+                {"title": "Modern Sociological Theory", "topics": ["Structural functionalism", "Conflict theory", "Symbolic interactionism", "Postmodern perspectives"]},
+                {"title": "Indian Society", "topics": ["Caste system", "Tribal communities of NE India", "Family and kinship", "Religion and secularism"]},
+                {"title": "Social Stratification", "topics": ["Class, caste, gender", "Social mobility", "Intersectionality", "Reservation policy"]},
+                {"title": "Research Methods", "topics": ["Quantitative methods", "Qualitative methods", "Survey design", "Fieldwork in social science"]},
+                {"title": "Contemporary Social Issues", "topics": ["Urbanisation", "Gender and feminism", "Environment and society", "Digital society"]}
+              ]
+            },
+            {
+              "slug": "geography-honours",
+              "name": "Geography (Honours)",
+              "icon": "🌍",
+              "description": "Degree Geography Honours — physical geography, human geography, cartography, and regional geography of India and the world.",
+              "chapters": [
+                {"title": "Physical Geography — Geomorphology", "topics": ["Earth's interior", "Plate tectonics", "Weathering and mass movements", "Fluvial and glacial processes"]},
+                {"title": "Physical Geography — Climatology", "topics": ["Atmosphere and radiation", "Temperature and pressure", "Winds and precipitation", "Climate classification"]},
+                {"title": "Physical Geography — Oceanography", "topics": ["Ocean relief", "Ocean currents", "Salinity and temperature", "Tides and waves"]},
+                {"title": "Human Geography", "topics": ["Population distribution", "Migration", "Settlement patterns", "Cultural geography"]},
+                {"title": "Geography of India", "topics": ["Physiographic divisions", "Monsoon and climate", "Natural resources", "Regional development"]},
+                {"title": "Cartography and Remote Sensing", "topics": ["Map projections", "Topographic maps", "GIS basics", "Remote sensing applications"]}
+              ]
+            },
+            {
+              "slug": "education-honours",
+              "name": "Education (Honours)",
+              "icon": "🎓",
+              "description": "Degree Education Honours — philosophy, psychology, sociology of education, and curriculum development.",
+              "chapters": [
+                {"title": "Philosophical Foundations of Education", "topics": ["Idealism, realism, pragmatism", "Indian philosophical traditions", "Aims of education", "Educational thinkers"]},
+                {"title": "Psychological Foundations of Education", "topics": ["Learning theories", "Intelligence and creativity", "Motivation", "Individual differences"]},
+                {"title": "Sociological Foundations of Education", "topics": ["Education and social change", "Equality of educational opportunity", "Education and cultural transmission", "NEP 2020"]},
+                {"title": "Curriculum Studies", "topics": ["Curriculum design", "Types of curriculum", "Evaluation", "CCE and outcome-based education"]},
+                {"title": "Educational Technology", "topics": ["Programmed instruction", "Computer-aided learning", "E-learning", "ICT in classroom"]},
+                {"title": "Educational Management", "topics": ["School management", "Leadership styles", "Community participation", "Supervision"]}
+              ]
+            },
+            {
+              "slug": "mass-communication",
+              "name": "Mass Communication",
+              "icon": "📡",
+              "description": "Degree Mass Communication — media theory, journalism, broadcast media, and digital communication.",
+              "chapters": [
+                {"title": "Introduction to Communication", "topics": ["Models of communication", "Process and elements", "Barriers", "Types — verbal and non-verbal"]},
+                {"title": "Print Journalism", "topics": ["News writing", "Reporting", "Editing", "Layout and design"]},
+                {"title": "Broadcast Media", "topics": ["Radio journalism", "Television journalism", "News anchoring", "Documentary making"]},
+                {"title": "Digital Media", "topics": ["Social media platforms", "Online journalism", "Data journalism", "Ethics in digital media"]},
+                {"title": "Advertising and Public Relations", "topics": ["Advertising concepts", "Campaign planning", "PR strategies", "Media management"]},
+                {"title": "Media Laws and Ethics", "topics": ["Press freedom", "Defamation and privacy", "Broadcast regulations", "Responsible journalism"]}
+              ]
+            }
+          ]
+        },
+        "s_science": {
+          "name": "Science",
+          "slug": "science",
+          "subjects": [
+            {
+              "slug": "physics-honours",
+              "name": "Physics (Honours)",
+              "icon": "⚛️",
+              "description": "Degree Physics Honours — classical mechanics, electrodynamics, quantum mechanics, and modern physics under NEP FYUGP.",
+              "chapters": [
+                {"title": "Classical Mechanics", "topics": ["Lagrangian mechanics", "Hamiltonian mechanics", "Central force problems", "Rigid body dynamics", "Special relativity"]},
+                {"title": "Electromagnetism", "topics": ["Maxwell's equations", "Electromagnetic waves", "Waveguides", "Radiation", "Optics"]},
+                {"title": "Quantum Mechanics", "topics": ["Schrödinger equation", "Particle in a box", "Harmonic oscillator", "Hydrogen atom", "Perturbation theory"]},
+                {"title": "Thermodynamics and Statistical Mechanics", "topics": ["Laws of thermodynamics", "Entropy", "Statistical distributions", "Phase transitions", "Blackbody radiation"]},
+                {"title": "Solid State Physics", "topics": ["Crystal structure", "Band theory", "Semiconductors", "Superconductivity", "Magnetic properties"]},
+                {"title": "Nuclear and Particle Physics", "topics": ["Nuclear structure", "Radioactivity", "Nuclear reactions", "Elementary particles", "Detectors"]}
+              ]
+            },
+            {
+              "slug": "chemistry-honours",
+              "name": "Chemistry (Honours)",
+              "icon": "🧪",
+              "description": "Degree Chemistry Honours — physical, inorganic, and organic chemistry under NEP FYUGP.",
+              "chapters": [
+                {"title": "Physical Chemistry", "topics": ["Chemical thermodynamics", "Electrochemistry", "Chemical kinetics", "Phase equilibria", "Quantum chemistry"]},
+                {"title": "Inorganic Chemistry", "topics": ["Periodic properties", "Coordination chemistry", "Transition metals", "Main group chemistry", "Bioinorganic chemistry"]},
+                {"title": "Organic Chemistry", "topics": ["Stereochemistry", "Reaction mechanisms", "Carbonyl chemistry", "Heterocyclic compounds", "Spectroscopic methods"]},
+                {"title": "Analytical Chemistry", "topics": ["Gravimetric analysis", "Titrimetry", "Spectrophotometry", "Chromatography", "Instrumental methods"]},
+                {"title": "Biochemistry", "topics": ["Amino acids and proteins", "Enzymes", "Carbohydrate metabolism", "Lipid metabolism", "Molecular biology"]},
+                {"title": "Green and Industrial Chemistry", "topics": ["Green chemistry principles", "Industrial processes", "Polymers", "Dyes and pigments", "Pharmaceutical chemistry"]}
+              ]
+            },
+            {
+              "slug": "mathematics-honours",
+              "name": "Mathematics (Honours)",
+              "icon": "📐",
+              "description": "Degree Mathematics Honours — analysis, algebra, geometry, differential equations, and numerical methods under NEP FYUGP.",
+              "chapters": [
+                {"title": "Real Analysis", "topics": ["Sequences and series", "Continuity and differentiability", "Riemann integration", "Uniform convergence", "Metric spaces"]},
+                {"title": "Abstract Algebra", "topics": ["Groups and subgroups", "Rings and fields", "Homomorphisms", "Quotient structures", "Galois theory"]},
+                {"title": "Linear Algebra", "topics": ["Vector spaces", "Linear transformations", "Eigenvalues", "Inner product spaces", "Diagonalisation"]},
+                {"title": "Differential Equations", "topics": ["First order ODE", "Second order ODE", "Laplace transforms", "PDE", "Boundary value problems"]},
+                {"title": "Complex Analysis", "topics": ["Complex functions", "Analytic functions", "Cauchy's theorem", "Laurent series", "Residue theorem"]},
+                {"title": "Numerical Methods", "topics": ["Root finding", "Interpolation", "Numerical integration", "ODE solvers", "Error analysis"]}
+              ]
+            },
+            {
+              "slug": "botany",
+              "name": "Botany",
+              "icon": "🌿",
+              "description": "Degree Botany Honours — plant diversity, anatomy, physiology, ecology, and economic botany under NEP FYUGP.",
+              "chapters": [
+                {"title": "Plant Diversity — Algae and Fungi", "topics": ["Algal classification", "Fungal classification", "Lichen", "Economic importance", "Pathogenic fungi"]},
+                {"title": "Plant Diversity — Bryophytes and Pteridophytes", "topics": ["Liverworts and mosses", "Ferns and horsetails", "Life cycles", "Economic importance", "Evolution"]},
+                {"title": "Plant Anatomy", "topics": ["Meristematic tissue", "Vascular system", "Wood anatomy", "Secondary growth", "Adaptive anatomy"]},
+                {"title": "Plant Physiology", "topics": ["Water relations", "Mineral nutrition", "Photosynthesis", "Respiration", "Growth and development"]},
+                {"title": "Plant Ecology and Environment", "topics": ["Ecosystems", "Succession", "Phytogeography", "Conservation biology", "Wetland ecology of Assam"]},
+                {"title": "Economic Botany", "topics": ["Cereals and pulses", "Spices and condiments", "Medicinal plants of NE India", "Forest products", "Bioprospecting"]}
+              ]
+            },
+            {
+              "slug": "zoology",
+              "name": "Zoology",
+              "icon": "🦁",
+              "description": "Degree Zoology Honours — animal diversity, physiology, genetics, ecology, and wildlife biology under NEP FYUGP.",
+              "chapters": [
+                {"title": "Animal Diversity — Non-chordates", "topics": ["Protozoa", "Porifera", "Coelenterata", "Annelida", "Arthropoda and Mollusca"]},
+                {"title": "Animal Diversity — Chordates", "topics": ["Pisces", "Amphibia", "Reptilia", "Aves", "Mammalia"]},
+                {"title": "Animal Physiology", "topics": ["Digestion and absorption", "Respiration", "Circulation", "Excretion", "Nervous and endocrine systems"]},
+                {"title": "Genetics and Molecular Biology", "topics": ["Mendelian genetics", "Chromosomal theory", "DNA structure and replication", "Gene expression", "Mutation"]},
+                {"title": "Wildlife and Conservation", "topics": ["Biodiversity of NE India", "Threatened species", "Protected areas", "Wildlife laws", "Community conservation"]},
+                {"title": "Ecology", "topics": ["Population ecology", "Community ecology", "Ecosystem ecology", "Biogeochemical cycles", "Applied ecology"]}
+              ]
+            },
+            {
+              "slug": "statistics-honours",
+              "name": "Statistics (Honours)",
+              "icon": "📊",
+              "description": "Degree Statistics Honours — probability theory, statistical inference, regression, and data science under NEP FYUGP.",
+              "chapters": [
+                {"title": "Probability Theory", "topics": ["Random variables", "Probability distributions", "Expectation and moments", "Generating functions", "Limit theorems"]},
+                {"title": "Statistical Inference", "topics": ["Estimation theory", "Hypothesis testing", "Likelihood methods", "Bayesian inference", "Non-parametric tests"]},
+                {"title": "Regression and Multivariate Analysis", "topics": ["Simple and multiple regression", "Logistic regression", "Principal component analysis", "Factor analysis", "Cluster analysis"]},
+                {"title": "Design of Experiments", "topics": ["CRD and RBD", "Latin square", "Factorial experiments", "Confounding", "Response surface methodology"]},
+                {"title": "Time Series Analysis", "topics": ["Components of time series", "Smoothing methods", "ARIMA models", "Forecasting", "Index numbers"]},
+                {"title": "Data Science and Computing", "topics": ["Statistical software (R/Python)", "Data wrangling", "Visualisation", "Machine learning basics", "Big data analytics"]}
+              ]
+            },
+            {
+              "slug": "computer-science",
+              "name": "Computer Science",
+              "icon": "💻",
+              "description": "Degree Computer Science Honours — programming, data structures, algorithms, databases, and software engineering under NEP FYUGP.",
+              "chapters": [
+                {"title": "Programming Fundamentals", "topics": ["Algorithms and flowcharts", "C/Python programming", "Control structures", "Functions", "Object-oriented concepts"]},
+                {"title": "Data Structures", "topics": ["Arrays and linked lists", "Stacks and queues", "Trees and graphs", "Hashing", "Complexity analysis"]},
+                {"title": "Algorithms", "topics": ["Sorting algorithms", "Searching algorithms", "Divide and conquer", "Dynamic programming", "Greedy algorithms"]},
+                {"title": "Database Management", "topics": ["Relational model", "SQL", "Normalisation", "Transaction management", "NoSQL databases"]},
+                {"title": "Operating Systems and Networks", "topics": ["Process management", "Memory management", "File systems", "Network layers", "Protocols"]},
+                {"title": "Software Engineering and AI", "topics": ["SDLC models", "Testing", "Machine learning basics", "Neural networks", "Web development"]}
+              ]
+            }
+          ]
+        },
+        "s_commerce": {
+          "name": "Commerce",
+          "slug": "commerce",
+          "subjects": [
+            {
+              "slug": "accountancy-honours",
+              "name": "Accountancy (Honours)",
+              "icon": "🧾",
+              "description": "Degree Accountancy Honours — financial accounting, cost accounting, auditing, and corporate accounting under NEP FYUGP.",
+              "chapters": [
+                {"title": "Financial Accounting", "topics": ["Accounting concepts and standards", "Journal and ledger", "Trial balance", "Final accounts", "Bank reconciliation"]},
+                {"title": "Corporate Accounting", "topics": ["Issue of shares and debentures", "Forfeiture and reissue", "Profit and loss", "Balance sheet", "Amalgamation and absorption"]},
+                {"title": "Cost Accounting", "topics": ["Cost concepts", "Material costing", "Labour costing", "Overhead absorption", "Marginal costing"]},
+                {"title": "Management Accounting", "topics": ["Budgetary control", "Standard costing", "Ratio analysis", "Cash flow statement", "Financial decisions"]},
+                {"title": "Auditing", "topics": ["Principles of auditing", "Internal audit", "Audit planning", "Vouching and verification", "Company audit"]},
+                {"title": "Income Tax", "topics": ["Heads of income", "Computation of income", "Deductions", "TDS", "Return filing"]}
+              ]
+            },
+            {
+              "slug": "business-administration",
+              "name": "Business Administration",
+              "icon": "💼",
+              "description": "Degree Business Administration (BBA/BCA/BCom core) — management principles, marketing, finance, and HR under NEP FYUGP.",
+              "chapters": [
+                {"title": "Principles of Management", "topics": ["Management functions", "Planning and decision making", "Organisation structure", "Leadership", "Control"]},
+                {"title": "Marketing Management", "topics": ["Market segmentation", "Marketing mix", "Consumer behaviour", "Product and pricing", "Digital marketing"]},
+                {"title": "Financial Management", "topics": ["Capital budgeting", "Working capital", "Dividend policy", "Leverage", "Sources of finance"]},
+                {"title": "Human Resource Management", "topics": ["Recruitment and selection", "Training and development", "Performance appraisal", "Compensation", "Industrial relations"]},
+                {"title": "Entrepreneurship", "topics": ["Entrepreneurial process", "Business plan", "Start-up ecosystem", "Government schemes", "Social entrepreneurship"]},
+                {"title": "Business Law", "topics": ["Contract law", "Sale of goods", "Partnership", "Companies Act", "Consumer protection"]}
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "c_sem3_4": {
+      "name": "Semester 3 & 4 (2nd Year)",
+      "slug": "sem-3-4",
+      "streams": {
+        "s_all_streams": {
+          "name": "All Streams",
+          "slug": "all",
+          "subjects": [
+            {
+              "slug": "assamese-honours",
+              "name": "Assamese (Honours)",
+              "icon": "📕",
+              "description": "Degree Assamese Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/assamese-honours"
+            },
+            {
+              "slug": "philosophy",
+              "name": "Philosophy",
+              "icon": "🤔",
+              "description": "Degree Philosophy Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/philosophy"
+            },
+            {
+              "slug": "history-honours",
+              "name": "History (Honours)",
+              "icon": "📜",
+              "description": "Degree History Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/history-honours"
+            },
+            {
+              "slug": "political-science-honours",
+              "name": "Political Science (Honours)",
+              "icon": "🏛️",
+              "description": "Degree Political Science Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/political-science-honours"
+            },
+            {
+              "slug": "economics-honours",
+              "name": "Economics (Honours)",
+              "icon": "📊",
+              "description": "Degree Economics Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/economics-honours"
+            },
+            {
+              "slug": "sociology-honours",
+              "name": "Sociology (Honours)",
+              "icon": "👥",
+              "description": "Degree Sociology Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/sociology-honours"
+            },
+            {
+              "slug": "geography-honours",
+              "name": "Geography (Honours)",
+              "icon": "🌍",
+              "description": "Degree Geography Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/geography-honours"
+            },
+            {
+              "slug": "education-honours",
+              "name": "Education (Honours)",
+              "icon": "🎓",
+              "description": "Degree Education Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/education-honours"
+            },
+            {
+              "slug": "physics-honours",
+              "name": "Physics (Honours)",
+              "icon": "⚛️",
+              "description": "Degree Physics Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/physics-honours"
+            },
+            {
+              "slug": "chemistry-honours",
+              "name": "Chemistry (Honours)",
+              "icon": "🧪",
+              "description": "Degree Chemistry Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/chemistry-honours"
+            },
+            {
+              "slug": "mathematics-honours",
+              "name": "Mathematics (Honours)",
+              "icon": "📐",
+              "description": "Degree Mathematics Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/mathematics-honours"
+            },
+            {
+              "slug": "botany",
+              "name": "Botany",
+              "icon": "🌿",
+              "description": "Degree Botany Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/botany"
+            },
+            {
+              "slug": "zoology",
+              "name": "Zoology",
+              "icon": "🦁",
+              "description": "Degree Zoology Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/zoology"
+            },
+            {
+              "slug": "statistics-honours",
+              "name": "Statistics (Honours)",
+              "icon": "📊",
+              "description": "Degree Statistics Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/statistics-honours"
+            },
+            {
+              "slug": "computer-science",
+              "name": "Computer Science",
+              "icon": "💻",
+              "description": "Degree Computer Science Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/science/computer-science"
+            },
+            {
+              "slug": "accountancy-honours",
+              "name": "Accountancy (Honours)",
+              "icon": "🧾",
+              "description": "Degree Accountancy Honours — 2nd year continuation.",
+              "_inherits": "sem-1-2/commerce/accountancy-honours"
+            },
+            {
+              "slug": "business-administration",
+              "name": "Business Administration",
+              "icon": "💼",
+              "description": "Degree BBA/BCom — 2nd year continuation.",
+              "_inherits": "sem-1-2/commerce/business-administration"
+            },
+            {
+              "slug": "mass-communication",
+              "name": "Mass Communication",
+              "icon": "📡",
+              "description": "Degree Mass Communication — 2nd year continuation.",
+              "_inherits": "sem-1-2/arts/mass-communication"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
