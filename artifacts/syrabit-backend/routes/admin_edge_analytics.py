@@ -36,7 +36,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from auth_deps import get_admin_user
-from schemas.edge_settings import CANONICAL_SETTINGS_KEYS, PATCHABLE_SETTINGS_KEYS
+from schemas.edge_settings import (
+    CANONICAL_SETTINGS_KEYS,
+    PATCHABLE_SETTINGS_KEYS,
+    assert_patch_contract,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -213,18 +217,7 @@ class SpaTitleMissSettingsPatch(BaseModel):
     )
 
 
-_patch_model_fields = frozenset(SpaTitleMissSettingsPatch.model_fields)
-assert _patch_model_fields == PATCHABLE_SETTINGS_KEYS, (
-    f"SpaTitleMissSettingsPatch fields {_patch_model_fields} do not match "
-    f"PATCHABLE_SETTINGS_KEYS {PATCHABLE_SETTINGS_KEYS} in schemas/edge_settings.py. "
-    "Update both together."
-)
-assert PATCHABLE_SETTINGS_KEYS <= CANONICAL_SETTINGS_KEYS, (
-    f"PATCHABLE_SETTINGS_KEYS {PATCHABLE_SETTINGS_KEYS} is not a subset of "
-    f"CANONICAL_SETTINGS_KEYS {CANONICAL_SETTINGS_KEYS} in schemas/edge_settings.py. "
-    "Every patchable key must also appear in CANONICAL_SETTINGS_KEYS so it can be "
-    "read back via GET; add the missing key(s) to CANONICAL_SETTINGS_KEYS."
-)
+assert_patch_contract(SpaTitleMissSettingsPatch, PATCHABLE_SETTINGS_KEYS, CANONICAL_SETTINGS_KEYS)
 
 
 @router.patch("/admin/edge/spa-title-miss-settings")

@@ -30,7 +30,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from schemas.edge_settings import CANONICAL_SETTINGS_KEYS, PATCHABLE_SETTINGS_KEYS
+from schemas.edge_settings import (
+    CANONICAL_SETTINGS_KEYS,
+    PATCHABLE_SETTINGS_KEYS,
+    assert_patch_contract,
+)
 
 _CANONICAL_KEYS = {"configured"} | CANONICAL_SETTINGS_KEYS
 
@@ -309,6 +313,56 @@ def test_get_settings_surfaces_all_patchable_keys(admin_client, env_with_edge):
         "write-only field — add the missing key(s) to CANONICAL_SETTINGS_KEYS in "
         "schemas/edge_settings.py so the frontend can always read back what it wrote."
     )
+
+
+class _ValidPatchModel:
+    """Minimal stand-in used by assert_patch_contract unit tests."""
+    model_fields = {"disabled": None, "threshold": None}
+
+
+class _ExtraPatchModel:
+    """Model with an extra field not in patchable_keys."""
+    model_fields = {"disabled": None, "threshold": None, "extra_field": None}
+
+
+class _MissingPatchModel:
+    """Model missing a field that is in patchable_keys."""
+    model_fields = {"disabled": None}
+
+
+def test_assert_patch_contract_passes_with_valid_contract():
+    """assert_patch_contract must not raise when model fields, patchable keys,
+    and canonical keys are all mutually consistent."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold", "env_disabled", "kv_override_set"})
+    assert_patch_contract(_ValidPatchModel, patchable, canonical)
+
+
+def test_assert_patch_contract_raises_when_model_has_extra_field():
+    """If the Pydantic model declares a field absent from patchable_keys,
+    assert_patch_contract must raise AssertionError mentioning 'do not match'."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold"})
+    with pytest.raises(AssertionError, match="do not match"):
+        assert_patch_contract(_ExtraPatchModel, patchable, canonical)
+
+
+def test_assert_patch_contract_raises_when_model_is_missing_field():
+    """If the Pydantic model omits a field present in patchable_keys,
+    assert_patch_contract must raise AssertionError mentioning 'do not match'."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold"})
+    with pytest.raises(AssertionError, match="do not match"):
+        assert_patch_contract(_MissingPatchModel, patchable, canonical)
+
+
+def test_assert_patch_contract_raises_when_patchable_not_subset_of_canonical():
+    """If patchable_keys contains a key absent from canonical_keys, the field
+    would be write-only.  assert_patch_contract must raise AssertionError."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled"})
+    with pytest.raises(AssertionError, match="is not a subset"):
+        assert_patch_contract(_ValidPatchModel, patchable, canonical)
 
 
 def test_import_time_assert_fires_when_patch_model_diverges_from_patchable_keys(monkeypatch):
