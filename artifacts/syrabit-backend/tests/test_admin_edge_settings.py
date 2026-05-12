@@ -34,6 +34,7 @@ from schemas.edge_settings import (
     CANONICAL_SETTINGS_KEYS,
     PATCHABLE_SETTINGS_KEYS,
     assert_patch_contract,
+    patch_route_contract,
 )
 
 _CANONICAL_KEYS = {"configured"} | CANONICAL_SETTINGS_KEYS
@@ -363,6 +364,71 @@ def test_assert_patch_contract_raises_when_patchable_not_subset_of_canonical():
     canonical = frozenset({"disabled"})
     with pytest.raises(AssertionError, match="is not a subset"):
         assert_patch_contract(_ValidPatchModel, patchable, canonical)
+
+
+def test_patch_route_contract_passes_with_valid_model():
+    """@patch_route_contract must not raise when model fields exactly match
+    patchable_keys and patchable_keys is a subset of canonical_keys."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold", "env_disabled", "kv_override_set"})
+
+    @patch_route_contract(patchable, canonical)
+    class _GoodModel:
+        model_fields = {"disabled": None, "threshold": None}
+
+    assert _GoodModel is not None
+
+
+def test_patch_route_contract_raises_at_definition_time_for_extra_field():
+    """@patch_route_contract must raise AssertionError *at class definition
+    time* (inside the with-block, not at a later call site) when the model
+    declares a field absent from patchable_keys."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold"})
+
+    with pytest.raises(AssertionError, match="do not match"):
+        @patch_route_contract(patchable, canonical)
+        class _BadModel:
+            model_fields = {"disabled": None, "threshold": None, "extra_field": None}
+
+
+def test_patch_route_contract_raises_at_definition_time_for_missing_field():
+    """@patch_route_contract must raise AssertionError at class definition time
+    when the model omits a field that is in patchable_keys."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold"})
+
+    with pytest.raises(AssertionError, match="do not match"):
+        @patch_route_contract(patchable, canonical)
+        class _MissingFieldModel:
+            model_fields = {"disabled": None}
+
+
+def test_patch_route_contract_raises_at_definition_time_when_not_subset():
+    """@patch_route_contract must raise AssertionError at class definition time
+    when patchable_keys is not a subset of canonical_keys (write-only field)."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled"})
+
+    with pytest.raises(AssertionError, match="is not a subset"):
+        @patch_route_contract(patchable, canonical)
+        class _WriteOnlyModel:
+            model_fields = {"disabled": None, "threshold": None}
+
+
+def test_patch_route_contract_returns_class_unchanged():
+    """The decorator must return exactly the same class object it was given."""
+    patchable = frozenset({"disabled", "threshold"})
+    canonical = frozenset({"disabled", "threshold", "env_threshold"})
+
+    class _OriginalModel:
+        model_fields = {"disabled": None, "threshold": None}
+
+    decorated = patch_route_contract(patchable, canonical)(_OriginalModel)
+    assert decorated is _OriginalModel, (
+        "patch_route_contract must return the original class unchanged; "
+        f"got {decorated!r} instead of {_OriginalModel!r}"
+    )
 
 
 def test_import_time_assert_fires_when_patch_model_diverges_from_patchable_keys(monkeypatch):

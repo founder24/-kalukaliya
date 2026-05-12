@@ -40,6 +40,7 @@ from schemas.edge_settings import (
     CANONICAL_SETTINGS_KEYS,
     PATCHABLE_SETTINGS_KEYS,
     assert_patch_contract,
+    patch_route_contract,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,12 +199,14 @@ async def admin_edge_get_spa_title_miss_settings(
         }
 
 
+@patch_route_contract(PATCHABLE_SETTINGS_KEYS, CANONICAL_SETTINGS_KEYS)
 class SpaTitleMissSettingsPatch(BaseModel):
     """PATCH body for SPA title-miss alert settings.
 
     The field names must exactly match ``PATCHABLE_SETTINGS_KEYS`` in
-    ``schemas/edge_settings.py``.  The module-level assertion below enforces
-    this at import time so the two definitions can never drift apart.
+    ``schemas/edge_settings.py``.  The ``@patch_route_contract`` decorator
+    enforces this at class definition time so the two definitions can never
+    drift apart — the guard is co-located with the model and cannot be omitted.
     """
 
     threshold: Optional[int] = Field(
@@ -215,9 +218,6 @@ class SpaTitleMissSettingsPatch(BaseModel):
         default=None,
         description="Set true to pause the nightly SPA title-miss alert entirely.",
     )
-
-
-assert_patch_contract(SpaTitleMissSettingsPatch, PATCHABLE_SETTINGS_KEYS, CANONICAL_SETTINGS_KEYS)
 
 
 @router.patch("/admin/edge/spa-title-miss-settings")
