@@ -11,7 +11,7 @@
 // asset hashes from dist/index.html are preserved unchanged.
 //
 // Routes covered:
-//   /home         (LandingPage — public marketing landing)
+//   /home               (LandingPage — public marketing landing)
 //   /pricing
 //   /login
 //   /signup
@@ -19,8 +19,13 @@
 //   /privacy
 //   /about
 //   /technology
-//   /profile      (auth-gated shell — emit canonical + noindex)
-//   /admin/login  (auth-gated shell — emit canonical + noindex)
+//   /profile            (auth-gated shell — emit canonical + noindex)
+//   /admin/login        (auth-gated shell — emit canonical + noindex)
+//   /ahsec/hs-1st-year  (Task #2: AHSEC Class 11 index — high-value SEO target)
+//   /ahsec/hs-2nd-year  (Task #2: AHSEC Class 12 index — high-value SEO target)
+//   /notes/class-11     (Task #2: notes hub — long-tail "Class 11 notes" traffic)
+//   /notes/class-12     (Task #2: notes hub — long-tail "Class 12 notes" traffic)
+//   /notes/degree       (Task #2: notes hub — degree students)
 //
 // /chat and /library are prerendered with full SSR by their dedicated
 // scripts; subject + chapter pages by scripts/prerender-routes.mjs.
@@ -141,6 +146,44 @@ const ROUTES = [
     description:
       "Internal Syrabit.ai administrator sign-in. Not for student accounts — students log in at /login instead.",
     robots: "noindex, follow",
+  },
+  {
+    // Task #2 (SEO Quick Wins): AHSEC class-level index pages are high-value
+    // SEO targets (e.g. "AHSEC Class 11 notes" → /ahsec/hs-1st-year) and
+    // are shared heavily on WhatsApp / Telegram. These routes get byte-zero
+    // head metadata so Googlebot sees keyword-rich titles without waiting
+    // for React to hydrate.
+    path: "/ahsec/hs-1st-year",
+    title: "AHSEC HS 1st Year (Class 11) Notes, MCQs & PYQs — Syrabit.ai",
+    description:
+      "Free AHSEC Class 11 (HS 1st Year) notes, MCQs, definitions and solved previous-year questions for all subjects — Science, Commerce and Arts. AI study help in Assamese & English.",
+  },
+  {
+    path: "/ahsec/hs-2nd-year",
+    title: "AHSEC HS 2nd Year (Class 12) Notes, MCQs & PYQs — Syrabit.ai",
+    description:
+      "Free AHSEC Class 12 (HS 2nd Year) notes, MCQs, definitions and solved previous-year questions for all subjects — Science, Commerce and Arts. AI study help in Assamese & English.",
+  },
+  {
+    // Task #2 (SEO Quick Wins): /notes/* hub pages drive long-tail search
+    // traffic for "Class 11 notes", "Class 12 notes", "Degree notes" queries
+    // and appear in WhatsApp link previews shared between students.
+    path: "/notes/class-11",
+    title: "Class 11 Notes, MCQs & PYQs for Assam Board (AHSEC) — Syrabit.ai",
+    description:
+      "Browse free AHSEC Class 11 (HS 1st Year) chapter notes, MCQs and solved PYQs for every subject. AI-powered study help in Assamese & English.",
+  },
+  {
+    path: "/notes/class-12",
+    title: "Class 12 Notes, MCQs & PYQs for Assam Board (AHSEC) — Syrabit.ai",
+    description:
+      "Browse free AHSEC Class 12 (HS 2nd Year) chapter notes, MCQs and solved PYQs for every subject. AI-powered study help in Assamese & English.",
+  },
+  {
+    path: "/notes/degree",
+    title: "Degree Notes — B.A, B.Com, B.Sc (GU / DU) | Syrabit.ai",
+    description:
+      "Free Gauhati University and Dibrugarh University degree chapter notes, MCQs and exam-ready answers for B.A, B.Com, and B.Sc (FYUGP) students.",
   },
 ];
 

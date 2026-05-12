@@ -26,18 +26,19 @@
 // traffic data still ships a sensible set of pages.
 //
 // Limits are env-tunable so we can scale up gradually:
-//   PRERENDER_SUBJECTS_LIMIT          (default 20, was 50 before #544)
-//   PRERENDER_CHAPTERS_PER_SUBJECT    (default 3, was 5 before #544)
+//   PRERENDER_SUBJECTS_LIMIT          (default 50, raised from 20 by Task #2)
+//   PRERENDER_CHAPTERS_PER_SUBJECT    (default 6, raised from 3 by Task #2)
 //   PRERENDER_TRAFFIC_DAYS            (default 30)
 //   PRERENDER_BACKEND_URL / VITE_BACKEND_URL  (default https://syrabit.ai)
 //
-// Task #544: defaults lowered to keep the worklist under ~80 routes
-// (20 subjects + 20×3 chapters = 80) so the build finishes inside the
-// 12-min wall budget on Cloudflare Pages. The SPA shell + edge fallback
-// Worker (workers/edge-proxy) already serves real HTML for routes that
-// were NOT prerendered — we lose only the build-time HTML payload, not
-// SEO. Bump these back up only after confirming a faster backend or
-// raising BUILD_BUDGET_MS.
+// Task #544: defaults were lowered to 20 subjects / 3 chapters to keep
+// the worklist under ~80 routes within the 12-min wall budget.
+// Task #2 (SEO Quick Wins): raised back to 50 subjects / 6 chapters
+// (50 + 50×6 = 350 routes). The 12-min PRERENDER_BUDGET_MS wall-clock
+// cap still applies — the build soft-fails gracefully on budget overrun,
+// serving the SPA shell for un-prerendered routes. Override via env:
+//   PRERENDER_BUDGET_MS=<ms>  (max 30 min)
+// if 350 routes exceeds 12 min on a cold Cloudflare build.
 
 import fs from "fs";
 import path from "path";
@@ -57,11 +58,11 @@ const ssrEntry = path.join(distSsrDir, "entry-server.js");
 
 const BACKEND = SHARED_BACKEND;
 const SUBJECTS_LIMIT = parseInt(
-  process.env.PRERENDER_SUBJECTS_LIMIT || "20",
+  process.env.PRERENDER_SUBJECTS_LIMIT || "50",
   10,
 );
 const CHAPTERS_PER_SUBJECT = parseInt(
-  process.env.PRERENDER_CHAPTERS_PER_SUBJECT || "3",
+  process.env.PRERENDER_CHAPTERS_PER_SUBJECT || "6",
   10,
 );
 const TRAFFIC_DAYS = parseInt(
