@@ -5364,6 +5364,8 @@ STATIC_PAGES = [
     ("/notes/class-11", "weekly", "0.8"),
     ("/notes/class-12", "weekly", "0.8"),
     ("/notes/degree", "weekly", "0.8"),
+    ("/seba", "weekly", "0.9"),
+    ("/degree", "weekly", "0.9"),
 ]
 
 _SITEMAP_TYPES = ["notes", "mcqs", "important-questions", "examples", "definition"]
