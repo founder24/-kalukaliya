@@ -1007,22 +1007,20 @@ class MtlsClientCertMiddleware:
 # Only fires for paths that actually need cleaning — clean slugs pass
 # through to the SPA/CF Pages handler unchanged.
 
-_DIRTY_LEARN_PARENS_RE = re.compile(r"\([^)]*\)")
-_DIRTY_LEARN_DASH_RE   = re.compile(r"-{2,}")
+from slug_utils import clean_learn_slug as _normalize_learn_slug  # Task #3 SEO
 
-
-def _normalize_learn_slug(slug: str) -> str:
-    cleaned = _DIRTY_LEARN_PARENS_RE.sub("", slug)
-    cleaned = _DIRTY_LEARN_DASH_RE.sub("-", cleaned).strip("-")
-    return cleaned or slug
+# Fast-path guard: only enter slug-cleaning logic when the path contains
+# one of these markers.  Catches both parenthesised codes '(' and the
+# double-hyphen separator '--' used to append paper-code tokens.
+_DIRTY_SLUG_MARKERS = ("(", "--")
 
 
 class DirtyLearnSlugRedirectMiddleware:
     """301-redirect ``/learn/<noisy-slug>`` → ``/learn/<clean-slug>``.
 
-    Only activates when the path segment after ``/learn/`` contains a ``(``
-    character (presence of a parenthesised paper code or year).  All other
-    requests pass through without any processing cost.
+    Fires when the slug after ``/learn/`` contains ``(`` (parenthesised
+    paper code or year) OR ``--`` (double-hyphen paper-code separator).
+    Clean slugs contain neither and pass through at zero cost.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -1031,7 +1029,9 @@ class DirtyLearnSlugRedirectMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             path: str = scope.get("path", "")
-            if path.startswith("/learn/") and "(" in path:
+            if path.startswith("/learn/") and any(
+                m in path for m in _DIRTY_SLUG_MARKERS
+            ):
                 prefix = "/learn/"
                 raw_slug = path[len(prefix):]
                 clean_slug = _normalize_learn_slug(raw_slug)
