@@ -16,7 +16,7 @@
  *   [[analytics_engine_datasets]] ANALYTICS binding (wrangler.toml Phase 5).
  */
 import { useState, useEffect, useCallback } from 'react';
-import { Activity, Zap, BarChart2, RefreshCw, TrendingUp, Clock, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Activity, Zap, BarChart2, RefreshCw, TrendingUp, Clock, AlertTriangle, ExternalLink, Settings, Check, X } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE } from '@/utils/api';
 
@@ -59,12 +59,190 @@ function MiniBar({ label, value, max }) {
   );
 }
 
+/** Task #33 — Alert settings sub-panel rendered inside TitleInjectionGaps. */
+function AlertSettings({ token, onSaved }) {
+  const [settings, setSettings]     = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState(null);
+  const [saveError, setSaveError]   = useState(null);
+  const [savedOk, setSavedOk]       = useState(false);
+
+  // Draft values edited by the admin.
+  const [draftThreshold, setDraftThreshold] = useState('');
+  const [draftDisabled, setDraftDisabled]   = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_BASE}/admin/edge/spa-title-miss-settings`, {
+        headers,
+        withCredentials: true,
+      });
+      const body = res.data;
+      if (!body.configured) {
+        setError(body.reason || 'Edge not configured');
+        return;
+      }
+      setSettings(body);
+      setDraftThreshold(String(body.threshold ?? 50));
+      setDraftDisabled(!!body.disabled);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Request failed';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    setSavedOk(false);
+    try {
+      const thr = parseInt(draftThreshold, 10);
+      if (!Number.isFinite(thr) || thr < 1) {
+        setSaveError('Threshold must be an integer ≥ 1');
+        return;
+      }
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      await axios.patch(
+        `${API_BASE}/admin/edge/spa-title-miss-settings`,
+        { threshold: thr, disabled: draftDisabled },
+        { headers, withCredentials: true },
+      );
+      setSavedOk(true);
+      setTimeout(() => setSavedOk(false), 3000);
+      // Reload to reflect the new effective values from KV.
+      await load();
+      if (onSaved) onSaved();
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Save failed';
+      setSaveError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading && !settings) {
+    return (
+      <div className="flex items-center gap-1.5 py-1">
+        <RefreshCw size={10} className="animate-spin text-gray-300" />
+        <span className="text-[10px] text-gray-400">Loading settings…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 mt-1">
+        Settings unavailable: {error}
+      </p>
+    );
+  }
+
+  if (!settings) return null;
+
+  const isOverride = settings.kv_override_set;
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5 space-y-2">
+      <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">
+        Alert Settings
+        {isOverride && (
+          <span className="ml-1.5 normal-case bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold">
+            KV override active
+          </span>
+        )}
+        {!isOverride && (
+          <span className="ml-1.5 normal-case bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full text-[9px]">
+            env-var defaults
+          </span>
+        )}
+      </p>
+
+      {/* Threshold field */}
+      <div className="flex items-center gap-2">
+        <label className="text-[11px] text-gray-600 w-32 flex-shrink-0">
+          Hit threshold
+        </label>
+        <input
+          type="number"
+          min={1}
+          value={draftThreshold}
+          onChange={(e) => setDraftThreshold(e.target.value)}
+          className="w-20 rounded border border-gray-200 bg-white px-2 py-0.5 text-xs font-mono text-gray-800 focus:outline-none focus:ring-1 focus:ring-amber-400"
+        />
+        <span className="text-[10px] text-gray-400">bot hits / 24 h to alert</span>
+      </div>
+
+      {/* Disabled toggle */}
+      <div className="flex items-center gap-2">
+        <label className="text-[11px] text-gray-600 w-32 flex-shrink-0">
+          Alert disabled
+        </label>
+        <button
+          onClick={() => setDraftDisabled((v) => !v)}
+          className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+            draftDisabled ? 'bg-red-400' : 'bg-emerald-400'
+          }`}
+          role="switch"
+          aria-checked={draftDisabled}
+        >
+          <span
+            className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+              draftDisabled ? 'translate-x-4' : 'translate-x-0'
+            }`}
+          />
+        </button>
+        <span className={`text-[10px] font-semibold ${draftDisabled ? 'text-red-500' : 'text-emerald-600'}`}>
+          {draftDisabled ? 'Alert paused' : 'Alert active'}
+        </span>
+      </div>
+
+      {/* Save / status */}
+      <div className="flex items-center gap-2 pt-0.5">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors"
+        >
+          {saving ? <RefreshCw size={9} className="animate-spin" /> : <Check size={9} />}
+          Save
+        </button>
+        {savedOk && (
+          <span className="text-[11px] text-emerald-600 flex items-center gap-1">
+            <Check size={10} /> Saved to KV
+          </span>
+        )}
+        {saveError && (
+          <span className="text-[11px] text-red-500 flex items-center gap-1">
+            <X size={10} /> {saveError}
+          </span>
+        )}
+      </div>
+
+      {isOverride && settings.env_threshold !== undefined && (
+        <p className="text-[10px] text-gray-400 pt-0.5">
+          Env-var defaults: threshold={settings.env_threshold}, disabled={String(settings.env_disabled ?? false)}.
+          KV values override them at runtime.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Title Injection Gaps sub-section — Task #12. */
-function TitleInjectionGaps({ token, range }) {
-  const [misses, setMisses]       = useState(null);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState(null);
-  const [missRange, setMissRange] = useState('7d');
+function TitleInjectionGaps({ token }) {
+  const [misses, setMisses]           = useState(null);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState(null);
+  const [missRange, setMissRange]     = useState('7d');
+  const [showSettings, setShowSettings] = useState(false);
 
   const loadMisses = useCallback(async (r) => {
     setLoading(true);
@@ -144,8 +322,28 @@ function TitleInjectionGaps({ token, range }) {
           >
             <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
           </button>
+          {/* Task #33 — toggle alert settings panel */}
+          <button
+            onClick={() => setShowSettings((v) => !v)}
+            className={`ml-0.5 p-0.5 rounded transition-colors ${
+              showSettings
+                ? 'text-amber-600 bg-amber-50'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            }`}
+            title="Alert settings (threshold & on/off)"
+          >
+            <Settings size={10} />
+          </button>
         </div>
       </div>
+
+      {/* Task #33 — collapsible alert settings panel */}
+      {showSettings && (
+        <AlertSettings
+          token={token}
+          onSaved={() => loadMisses(missRange)}
+        />
+      )}
 
       {error && (
         <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2 py-1.5">

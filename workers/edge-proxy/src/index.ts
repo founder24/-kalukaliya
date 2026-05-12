@@ -715,6 +715,46 @@ const RATE_LIMIT_WINDOW_S = 60;
 const AI_RATE_LIMIT_RPM = 30;
 const AI_RATE_LIMIT_PREFIXES = ["/api/ai/chat", "/api/ai/generate", "/api/ai/grounded", "/api/ai/explain", "/api/ai/quiz", "/api/ai/summarize", "/api/chat"];
 
+// ─── Task #33 — SPA title-miss alert runtime settings (KV-tunable) ───────────
+// Admins can change the threshold and disabled flag from the dashboard without
+// deploying a new worker. Settings are stored in RATE_LIMIT KV and take
+// priority over the wrangler vars (SPA_TITLE_MISS_ALERT_THRESHOLD,
+// SPA_TITLE_MISS_ALERT_DISABLED), which remain as last-resort defaults.
+
+const _SPA_TITLE_MISS_SETTINGS_KEY = "spa_title_miss:settings";
+
+interface _SpaTitleMissKvSettings {
+  threshold: number;
+  disabled:  boolean;
+}
+
+async function _readSpaTitleMissKvSettings(
+  kv: KVNamespace | undefined,
+  env: Pick<Env, "SPA_TITLE_MISS_ALERT_THRESHOLD" | "SPA_TITLE_MISS_ALERT_DISABLED">,
+): Promise<_SpaTitleMissKvSettings> {
+  const envThreshold = (() => {
+    const raw = env.SPA_TITLE_MISS_ALERT_THRESHOLD;
+    if (!raw) return 50;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 50;
+  })();
+  const envDisabled = env.SPA_TITLE_MISS_ALERT_DISABLED?.toLowerCase() === "true";
+
+  if (!kv) return { threshold: envThreshold, disabled: envDisabled };
+  try {
+    const raw = await kv.get(_SPA_TITLE_MISS_SETTINGS_KEY);
+    if (!raw) return { threshold: envThreshold, disabled: envDisabled };
+    const parsed = JSON.parse(raw) as Partial<_SpaTitleMissKvSettings>;
+    return {
+      threshold: typeof parsed.threshold === "number" && parsed.threshold >= 1
+        ? Math.floor(parsed.threshold) : envThreshold,
+      disabled: typeof parsed.disabled === "boolean" ? parsed.disabled : envDisabled,
+    };
+  } catch {
+    return { threshold: envThreshold, disabled: envDisabled };
+  }
+}
+
 // ─── Task #513 §A — chat-cap (per-user monthly hard + daily soft) ─────────
 // Chat dispatch is the single most expensive call type per request
 // (Azure gpt-4.1-nano hot path). The cap is enforced AT THE EDGE so
@@ -3788,15 +3828,11 @@ async function _handleEdgeFetch(
         const range = url.searchParams.get("range") ?? "24h";
         const misses = await querySpaTitleMisses(env.CF_ANALYTICS_TOKEN, range);
 
-        // Replicate runSpaTitleMissAlert classification logic:
-        // 1. Filter to paths not covered by _resolveSpaRouteMeta ("gap" paths).
-        // 2. Apply threshold — same env var the cron alert uses.
-        const rawThreshold = env.SPA_TITLE_MISS_ALERT_THRESHOLD;
-        const thr = (() => {
-          if (!rawThreshold) return 50;
-          const n = Number(rawThreshold);
-          return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 50;
-        })();
+        // Task #33 — read effective settings from KV first (runtime override),
+        // falling back to env vars. This makes threshold / disabled tunable
+        // from the admin dashboard without a wrangler redeploy.
+        const kvSettings = await _readSpaTitleMissKvSettings(env.RATE_LIMIT, env);
+        const thr = kvSettings.threshold;
 
         const uncovered = misses.filter(
           (m) => _resolveSpaRouteMeta(m.pathname) === null,
@@ -3819,6 +3855,7 @@ async function _handleEdgeFetch(
           JSON.stringify({
             range,
             threshold:            thr,
+            alert_disabled:       kvSettings.disabled,
             gaps_found:           uncovered.length,
             gaps_above_threshold: gapsAbove.length,
             gaps:                 enriched,
@@ -3832,6 +3869,103 @@ async function _handleEdgeFetch(
           { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
         );
       }
+    }
+
+    // Task #33 — GET /api/edge/spa-title-miss-settings
+    // Returns the effective alert settings (KV override takes priority over env vars).
+    // Auth: X-Edge-Admin-Secret (D1_SYNC_SECRET).
+    if (pathname === "/api/edge/spa-title-miss-settings" && request.method === "GET") {
+      const edgeSecret = request.headers.get("X-Edge-Admin-Secret") ?? "";
+      if (!env.D1_SYNC_SECRET || edgeSecret !== env.D1_SYNC_SECRET) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      const settings = await _readSpaTitleMissKvSettings(env.RATE_LIMIT, env);
+      // Also return whether a KV override is currently stored so the UI can
+      // show a "using KV override" vs "using env var default" indicator.
+      const kvRaw = env.RATE_LIMIT ? await env.RATE_LIMIT.get(_SPA_TITLE_MISS_SETTINGS_KEY) : null;
+      return new Response(
+        JSON.stringify({
+          threshold:       settings.threshold,
+          disabled:        settings.disabled,
+          kv_override_set: kvRaw !== null,
+          env_threshold:   (() => {
+            const raw = env.SPA_TITLE_MISS_ALERT_THRESHOLD;
+            if (!raw) return 50;
+            const n = Number(raw);
+            return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 50;
+          })(),
+          env_disabled: env.SPA_TITLE_MISS_ALERT_DISABLED?.toLowerCase() === "true",
+        }),
+        { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
+      );
+    }
+
+    // Task #33 — PUT /api/edge/spa-title-miss-settings
+    // Persists threshold and/or disabled flag to RATE_LIMIT KV so the admin
+    // can tune alerting at runtime without a wrangler redeploy.
+    // Body: { "threshold": <int ≥ 1>, "disabled": <bool> }
+    // Either field may be omitted to leave it unchanged; send both to set both.
+    // Auth: X-Edge-Admin-Secret (D1_SYNC_SECRET).
+    if (pathname === "/api/edge/spa-title-miss-settings" && request.method === "PUT") {
+      const edgeSecret = request.headers.get("X-Edge-Admin-Secret") ?? "";
+      if (!env.D1_SYNC_SECRET || edgeSecret !== env.D1_SYNC_SECRET) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      if (!env.RATE_LIMIT) {
+        return new Response(
+          JSON.stringify({ error: "RATE_LIMIT KV not bound — cannot persist settings" }),
+          { status: 503, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      let body: Record<string, unknown>;
+      try {
+        body = await request.json() as Record<string, unknown>;
+      } catch {
+        return new Response(
+          JSON.stringify({ error: "Invalid JSON body" }),
+          { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      // Read current stored settings and merge the provided fields.
+      const current = await _readSpaTitleMissKvSettings(env.RATE_LIMIT, env);
+      let { threshold: newThreshold, disabled: newDisabled } = current;
+
+      if ("threshold" in body) {
+        const t = Number(body["threshold"]);
+        if (!Number.isFinite(t) || t < 1) {
+          return new Response(
+            JSON.stringify({ error: "threshold must be an integer ≥ 1" }),
+            { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+          );
+        }
+        newThreshold = Math.floor(t);
+      }
+      if ("disabled" in body) {
+        if (typeof body["disabled"] !== "boolean") {
+          return new Response(
+            JSON.stringify({ error: "disabled must be a boolean" }),
+            { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+          );
+        }
+        newDisabled = body["disabled"] as boolean;
+      }
+
+      const saved: _SpaTitleMissKvSettings = { threshold: newThreshold, disabled: newDisabled };
+      // Settings persist for 365 days (effectively permanent; the admin can
+      // always overwrite). TTL prevents orphaned keys after the feature is retired.
+      await env.RATE_LIMIT.put(_SPA_TITLE_MISS_SETTINGS_KEY, JSON.stringify(saved), {
+        expirationTtl: 365 * 24 * 3600,
+      });
+      return new Response(
+        JSON.stringify({ ok: true, threshold: newThreshold, disabled: newDisabled }),
+        { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
+      );
     }
 
     // ── Google Tag Gateway (gtag proxy) ─────────────────────────────────────
@@ -4992,10 +5126,24 @@ export default {
       // `wrapped` is scoped to the "* * * * *" branch above; use `env`
       // directly here (KV ops in the alert use RATE_LIMIT, not the
       // kv-monitor wrapper, which is fine for a once-daily job).
-      ctx.waitUntil(runSpaTitleMissAlert(env, {
-        resolveMeta: _resolveSpaRouteMeta,
-        slugToTitle: _slugToTitle,
-      }).catch((e) => {
+      //
+      // Task #33 — read KV-persisted settings before calling the alert so
+      // that threshold / disabled changes made from the admin dashboard take
+      // effect on the next cron run without a wrangler redeploy.
+      ctx.waitUntil((async () => {
+        const kvSettings = await _readSpaTitleMissKvSettings(env.RATE_LIMIT, env);
+        // Build an env overlay that splices in the KV-derived values so the
+        // alert module's threshold() / kill-switch checks see the runtime value.
+        const alertEnv = {
+          ...env,
+          SPA_TITLE_MISS_ALERT_THRESHOLD: String(kvSettings.threshold),
+          SPA_TITLE_MISS_ALERT_DISABLED:  String(kvSettings.disabled),
+        };
+        await runSpaTitleMissAlert(alertEnv, {
+          resolveMeta: _resolveSpaRouteMeta,
+          slugToTitle: _slugToTitle,
+        });
+      })().catch((e) => {
         const msg = e instanceof Error ? e.message : "unknown";
         console.error(`[spa-title-miss-alert] unhandled error: ${msg.slice(0, 300)}`);
       }));
