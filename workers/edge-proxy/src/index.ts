@@ -3415,24 +3415,25 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
   const clean = pathname.replace(/\/+$/, "") || "/";
   const parts = clean.split("/").filter(Boolean);
 
-  // /notes/class-11/:subject
-  if (parts.length === 3 && parts[0] === "notes" && parts[1] === "class-11") {
+  // /notes/class-11/:subject[/:chapter...]
+  // Minimum 3 segments — deeper chapter paths inherit the subject title.
+  if (parts.length >= 3 && parts[0] === "notes" && parts[1] === "class-11") {
     const subject = _slugToTitle(parts[2]);
     return {
       title: `${subject} — Class 11 Notes | Syrabit.ai`,
       description: `Study ${subject} for AHSEC Class 11 with AI-powered notes, MCQs, flashcards, and previous year questions on Syrabit.ai.`,
     };
   }
-  // /notes/class-12/:subject
-  if (parts.length === 3 && parts[0] === "notes" && parts[1] === "class-12") {
+  // /notes/class-12/:subject[/:chapter...]
+  if (parts.length >= 3 && parts[0] === "notes" && parts[1] === "class-12") {
     const subject = _slugToTitle(parts[2]);
     return {
       title: `${subject} — Class 12 Notes | Syrabit.ai`,
       description: `Study ${subject} for AHSEC Class 12 with AI-powered notes, MCQs, flashcards, and previous year questions on Syrabit.ai.`,
     };
   }
-  // /notes/degree/:sem/:subject
-  if (parts.length === 4 && parts[0] === "notes" && parts[1] === "degree") {
+  // /notes/degree/:sem/:subject[/:chapter...]
+  if (parts.length >= 4 && parts[0] === "notes" && parts[1] === "degree") {
     const subject = _slugToTitle(parts[3]);
     const sem = _slugToTitle(parts[2]);
     return {
@@ -3440,24 +3441,24 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
       description: `Study ${subject} for your Degree ${sem} with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
     };
   }
-  // /ahsec/hs-1st-year/:subject
-  if (parts.length === 3 && parts[0] === "ahsec" && parts[1] === "hs-1st-year") {
+  // /ahsec/hs-1st-year/:subject[/:chapter...]
+  if (parts.length >= 3 && parts[0] === "ahsec" && parts[1] === "hs-1st-year") {
     const subject = _slugToTitle(parts[2]);
     return {
       title: `${subject} — AHSEC HS 1st Year | Syrabit.ai`,
       description: `Study ${subject} for AHSEC HS 1st Year with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
     };
   }
-  // /ahsec/hs-2nd-year/:subject
-  if (parts.length === 3 && parts[0] === "ahsec" && parts[1] === "hs-2nd-year") {
+  // /ahsec/hs-2nd-year/:subject[/:chapter...]
+  if (parts.length >= 3 && parts[0] === "ahsec" && parts[1] === "hs-2nd-year") {
     const subject = _slugToTitle(parts[2]);
     return {
       title: `${subject} — AHSEC HS 2nd Year | Syrabit.ai`,
       description: `Study ${subject} for AHSEC HS 2nd Year with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
     };
   }
-  // /learn/:slug
-  if (parts.length === 2 && parts[0] === "learn") {
+  // /learn/:slug[/:section...]
+  if (parts.length >= 2 && parts[0] === "learn") {
     const topic = _slugToTitle(parts[1]);
     return {
       title: `${topic} — Learn | Syrabit.ai`,
@@ -3467,7 +3468,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
   return null;
 }
 
-function _injectSpaTitleForBot(
+export function _injectSpaTitleForBot(
   response: Response,
   pathname: string,
   isBotGet: boolean,
