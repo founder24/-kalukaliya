@@ -145,16 +145,41 @@ def test_invalid_range_returns_400(authed_client):
     assert res.status_code == 400
 
 
+# ─── shared enriched-object format (Task #32 / Task #39) ─────────────────────
+# After Task #32 the edge worker returns an enriched object (not a flat array):
+#   { range, threshold, alert_disabled, gaps_found,
+#     gaps_above_threshold, gaps: [...], tag_handlers: {...} }
+# After Task #39 tag_handlers is always present in the 200 response.
+
+_TAG_HANDLERS = {
+    "og_title": True, "og_description": True, "og_image": True,
+    "og_image_alt": True, "twitter_title": True, "twitter_description": True,
+    "twitter_card": True, "twitter_image": True, "twitter_image_alt": True,
+}
+
+def _enriched_edge_resp(gaps, *, alert_disabled=False):
+    """Build a realistic enriched edge response (post-Task-#32 shape)."""
+    return {
+        "range":               "24h",
+        "threshold":           50,
+        "alert_disabled":      alert_disabled,
+        "gaps_found":          len(gaps),
+        "gaps_above_threshold": len(gaps),
+        "gaps":                gaps,
+        "tag_handlers":        _TAG_HANDLERS,
+    }
+
+
 # ─── (a) successful proxy with misses ────────────────────────────────────────
 
 def test_happy_path_with_misses(authed_client):
-    """Edge returns 200 with a non-empty misses list — the route must pass
-    it through verbatim under ``misses`` with ``configured: true``."""
-    misses = [
-        {"pathname": "/learn/physics/chapter-1", "count": 42},
-        {"pathname": "/learn/maths/chapter-2",   "count": 17},
+    """Edge returns 200 with an enriched object (Task #32 shape) — the route
+    must extract the ``gaps`` array into ``misses`` and surface ``tag_handlers``."""
+    gaps = [
+        {"pathname": "/learn/physics/chapter-1", "count": 42, "suggested_title": "Chapter 1"},
+        {"pathname": "/learn/maths/chapter-2",   "count": 17, "suggested_title": "Chapter 2"},
     ]
-    fake = _FakeClient(_FakeResp(200, misses))
+    fake = _FakeClient(_FakeResp(200, _enriched_edge_resp(gaps)))
 
     with patch.dict(os.environ, _ENV, clear=False), \
             patch("routes.admin_edge_analytics.httpx.AsyncClient",
@@ -164,13 +189,57 @@ def test_happy_path_with_misses(authed_client):
     assert res.status_code == 200
     body = res.json()
     assert body["configured"] is True
-    assert body["misses"] == misses
+    assert body["misses"] == gaps
+    # Task #39 — tag_handlers must be surfaced so the admin tile can show
+    # which tags are being rewritten on matched routes.
+    assert body["tag_handlers"]["twitter_image"] is True
+    assert body["tag_handlers"]["twitter_image_alt"] is True
+    assert body["tag_handlers"]["og_image"] is True
+    assert body["tag_handlers"]["og_image_alt"] is True
+
+
+def test_tag_handlers_present_even_when_no_gaps(authed_client):
+    """tag_handlers must be returned even when gaps is empty so the admin
+    tile can always show tag coverage status."""
+    fake = _FakeClient(_FakeResp(200, _enriched_edge_resp([])))
+
+    with patch.dict(os.environ, _ENV, clear=False), \
+            patch("routes.admin_edge_analytics.httpx.AsyncClient",
+                  return_value=fake):
+        res = authed_client.get("/admin/edge/spa-title-misses")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["configured"] is True
+    assert body["misses"] == []
+    assert isinstance(body.get("tag_handlers"), dict)
+    assert body["tag_handlers"].get("twitter_image") is True
+
+
+def test_legacy_flat_array_still_works(authed_client):
+    """If an older worker returns a flat array (pre-Task-#32), the route must
+    treat the array as the gaps list and return an empty tag_handlers dict."""
+    legacy = [
+        {"pathname": "/learn/old-path", "count": 5},
+    ]
+    fake = _FakeClient(_FakeResp(200, legacy))
+
+    with patch.dict(os.environ, _ENV, clear=False), \
+            patch("routes.admin_edge_analytics.httpx.AsyncClient",
+                  return_value=fake):
+        res = authed_client.get("/admin/edge/spa-title-misses?range=7d")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["configured"] is True
+    assert body["misses"] == legacy
+    assert body.get("tag_handlers") == {}
 
 
 def test_happy_path_forwards_range_param_and_secret(authed_client):
     """The edge URL, range query-param, and X-Edge-Admin-Secret header must all
     be forwarded so the worker can authenticate and filter by the correct window."""
-    fake = _FakeClient(_FakeResp(200, []))
+    fake = _FakeClient(_FakeResp(200, _enriched_edge_resp([])))
 
     with patch.dict(os.environ, _ENV, clear=False), \
             patch("routes.admin_edge_analytics.httpx.AsyncClient",
@@ -187,9 +256,9 @@ def test_happy_path_forwards_range_param_and_secret(authed_client):
 # ─── (b) empty misses list ───────────────────────────────────────────────────
 
 def test_happy_path_with_empty_misses(authed_client):
-    """Edge returns 200 with an empty list — route must surface ``misses: []``
+    """Edge returns 200 with empty gaps — route must surface ``misses: []``
     (not None) so the dashboard can distinguish "no data yet" from "not set up"."""
-    fake = _FakeClient(_FakeResp(200, []))
+    fake = _FakeClient(_FakeResp(200, _enriched_edge_resp([])))
 
     with patch.dict(os.environ, _ENV, clear=False), \
             patch("routes.admin_edge_analytics.httpx.AsyncClient",

@@ -236,9 +236,54 @@ function AlertSettings({ token, onSaved }) {
   );
 }
 
+/** Task #39 — compact tag-rewrite status row rendered inside TitleInjectionGaps. */
+function TagRewriteStatus({ tagHandlers }) {
+  if (!tagHandlers || Object.keys(tagHandlers).length === 0) return null;
+
+  const tags = [
+    { key: 'og_image',          label: 'og:image' },
+    { key: 'og_image_alt',      label: 'og:image:alt' },
+    { key: 'twitter_image',     label: 'twitter:image' },
+    { key: 'twitter_image_alt', label: 'twitter:image:alt' },
+  ];
+
+  return (
+    <div className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold mb-1.5">
+        Tag Rewrite Coverage
+      </p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {tags.map(({ key, label }) => {
+          const active = tagHandlers[key] === true;
+          return (
+            <span
+              key={key}
+              className={`inline-flex items-center gap-1 text-[11px] font-mono ${
+                active ? 'text-emerald-700' : 'text-amber-600'
+              }`}
+            >
+              {active
+                ? <Check size={10} className="flex-shrink-0" />
+                : <X size={10} className="flex-shrink-0" />
+              }
+              {label}
+            </span>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-emerald-500 mt-1.5 leading-snug">
+        All tags above are rewritten on every bot-crawled route matched by{' '}
+        <code className="font-mono bg-emerald-100 px-0.5 rounded text-[9px]">_resolveSpaRouteMeta</code>.
+        Uncovered routes below still serve the generic fallback.
+      </p>
+    </div>
+  );
+}
+
 /** Title Injection Gaps sub-section — Task #12. */
 function TitleInjectionGaps({ token }) {
   const [misses, setMisses]           = useState(null);
+  const [tagHandlers, setTagHandlers] = useState(null);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState(null);
   const [missRange, setMissRange]     = useState('7d');
@@ -264,6 +309,8 @@ function TitleInjectionGaps({ token }) {
         return;
       }
       setMisses(body.misses);
+      // Task #39 — persist tag_handlers so the coverage section can render.
+      setTagHandlers(body.tag_handlers ?? null);
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Request failed';
       setError(msg);
@@ -344,6 +391,9 @@ function TitleInjectionGaps({ token }) {
           onSaved={() => loadMisses(missRange)}
         />
       )}
+
+      {/* Task #39 — tag rewrite coverage: shown once data loads, above errors */}
+      {tagHandlers && !error && <TagRewriteStatus tagHandlers={tagHandlers} />}
 
       {error && (
         <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2 py-1.5">

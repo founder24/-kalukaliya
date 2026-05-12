@@ -3851,6 +3851,21 @@ async function _handleEdgeFetch(
           };
         });
 
+        // Task #39 — static build-time record of which tag rewrites are active
+        // in the current worker. Admins can use this to confirm twitter:image
+        // and twitter:image:alt handlers are live without reading the source.
+        const tagHandlers = {
+          og_title:           true,
+          og_description:     true,
+          og_image:           true,
+          og_image_alt:       true,
+          twitter_title:      true,
+          twitter_description:true,
+          twitter_card:       true,
+          twitter_image:      true,
+          twitter_image_alt:  true,
+        };
+
         return new Response(
           JSON.stringify({
             range,
@@ -3859,6 +3874,7 @@ async function _handleEdgeFetch(
             gaps_found:           uncovered.length,
             gaps_above_threshold: gapsAbove.length,
             gaps:                 enriched,
+            tag_handlers:         tagHandlers,
           }),
           { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
         );

@@ -101,7 +101,30 @@ async def admin_edge_spa_title_misses(
                 "reason": f"edge returned {resp.status_code}",
                 "misses": None,
             }
-        return {"configured": True, "misses": resp.json()}
+        # Task #39 — the edge worker (post-Task #32) returns an enriched
+        # object {range, threshold, alert_disabled, gaps_found,
+        # gaps_above_threshold, gaps: [...], tag_handlers: {...}}.
+        # Extract the gaps array and tag_handlers so the frontend always
+        # receives misses as a plain list and tag_handlers as a dict.
+        data = resp.json()
+        if isinstance(data, dict):
+            gaps         = data.get("gaps", [])
+            tag_handlers = data.get("tag_handlers", {})
+            alert_disabled = data.get("alert_disabled", False)
+            gaps_found     = data.get("gaps_found", len(gaps))
+        else:
+            # Legacy flat-array format (pre-Task-#32 workers); keep working.
+            gaps         = data if isinstance(data, list) else []
+            tag_handlers = {}
+            alert_disabled = False
+            gaps_found     = len(gaps)
+        return {
+            "configured":    True,
+            "misses":        gaps,
+            "tag_handlers":  tag_handlers,
+            "alert_disabled": alert_disabled,
+            "gaps_found":    gaps_found,
+        }
     except Exception as exc:
         logger.warning("[edge-spa-title-misses] edge fetch failed: %s", exc)
         return {
