@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { _slugToTitle, _resolveSpaRouteMeta, _injectSpaTitleForBot, _OG_IMAGE_BASE, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT } from "../src/index";
 
 describe("_slugToTitle", () => {
@@ -634,5 +636,35 @@ describe("_resolveSpaRouteMeta", () => {
         expect(OG_IMAGE_HEIGHT).toBe("630");
       });
     });
+  });
+});
+
+describe("SPA shell index.html — Twitter card placeholder tags (Task #16)", () => {
+  let indexHtml: string;
+
+  beforeEach(() => {
+    const indexPath = resolve(__dirname, "../../../artifacts/syrabit/index.html");
+    indexHtml = readFileSync(indexPath, "utf-8");
+  });
+
+  it("contains meta[name='twitter:card'] so the HTMLRewriter has a node to rewrite", () => {
+    expect(indexHtml).toMatch(/meta[^>]+name=["']twitter:card["'][^>]+content=["']summary_large_image["']/);
+  });
+
+  it("contains meta[name='twitter:title'] so the HTMLRewriter has a node to rewrite", () => {
+    expect(indexHtml).toMatch(/meta[^>]+name=["']twitter:title["']/);
+  });
+
+  it("contains meta[name='twitter:description'] so the HTMLRewriter has a node to rewrite", () => {
+    expect(indexHtml).toMatch(/meta[^>]+name=["']twitter:description["']/);
+  });
+
+  it("all three Twitter card tags appear inside <head>", () => {
+    const headMatch = indexHtml.match(/<head[\s\S]*?<\/head>/i);
+    expect(headMatch).not.toBeNull();
+    const head = headMatch![0];
+    expect(head).toMatch(/twitter:card/);
+    expect(head).toMatch(/twitter:title/);
+    expect(head).toMatch(/twitter:description/);
   });
 });
