@@ -1,0 +1,89 @@
+name: og-images-sync
+
+#
+# Task #20 — Automatically regenerate and re-upload OG banner images when
+# curriculum JSON files change.
+#
+# Triggers on any push that touches a curriculum data file under
+# artifacts/syrabit-backend/data/*.json  so that adding or renaming a subject
+# slug in the canonical JSON automatically produces a fresh OG PNG and uploads
+# it to Cloudflare R2 on the next push.
+#
+# The generate step always runs (it is fast and has no external deps beyond
+# Pillow).  The upload step is gated on R2 credentials being present as
+# repository secrets; contributors who lack the secrets will see the generate
+# step pass but the upload step skipped, not failed.
+#
+# Supply-chain hardening: every `uses:` reference is pinned to a full 40-char
+# commit SHA.  See backend-tests.yml for the rationale.
+#
+
+on:
+  push:
+    branches: [Replit-agent, master, main]
+    paths:
+      - "artifacts/syrabit-backend/data/*.json"
+      - "scripts/og-images/generate_og_images.py"
+      - "scripts/og-images/upload_to_r2.py"
+      - ".github/workflows/og-images-sync.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  generate-and-upload:
+    name: Regenerate OG images → upload to R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e9aba2c848f5ebd159c070c61ea2c4e2b122355e # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          pip install --quiet Pillow boto3
+
+      - name: Generate OG banner PNGs
+        run: |
+          set -euo pipefail
+          python scripts/og-images/generate_og_images.py
+
+      - name: Check R2 credentials availability
+        id: r2_check
+        env:
+          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          if [ -n "${R2_ACCESS_KEY_ID:-}" ] && \
+             [ -n "${R2_SECRET_ACCESS_KEY:-}" ] && \
+             [ -n "${R2_ENDPOINT_URL:-}" ] && \
+             [ -n "${R2_BUCKET_NAME:-}" ]; then
+            echo "r2_ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "r2_ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::R2 credentials not fully set (need R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME) — skipping upload. Images were generated successfully."
+          fi
+
+      - name: Upload OG PNGs to Cloudflare R2
+        if: steps.r2_check.outputs.r2_ready == 'true'
+        env:
+          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          python scripts/og-images/upload_to_r2.py

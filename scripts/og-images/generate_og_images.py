@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Task #17 — Generate 1200×630 Open Graph banner PNGs for all Syrabit.ai
+Task #17 / #20 — Generate 1200×630 Open Graph banner PNGs for all Syrabit.ai
 SPA routes that have og:image injection via the edge worker (Task #14).
+
+The subject slug list is driven from the canonical curriculum JSON files in
+artifacts/syrabit-backend/data/ (ahsec_2025_26.json, and any future
+seba_*.json / degree_*.json equivalents) so that adding a new subject to the
+JSON automatically produces a new OG banner on the next generate+upload run.
+Static hub-page entries (board/class/notes hubs) are defined in
+_STATIC_IMAGES below and are always included regardless of the JSON.
 
 Outputs: scripts/og-images/generated/<slug>.png
 
@@ -14,6 +21,7 @@ After generation, upload with:
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -24,6 +32,9 @@ from PIL import Image, ImageDraw, ImageFont
 # ── output ────────────────────────────────────────────────────────────────────
 OUT_DIR = Path(__file__).parent / "generated"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── curriculum data directory ─────────────────────────────────────────────────
+_DATA_DIR = Path(__file__).parents[2] / "artifacts" / "syrabit-backend" / "data"
 
 W, H = 1200, 630
 
@@ -44,38 +55,113 @@ WHITE     = (255, 255, 255)
 GREY      = (180, 180, 200)
 DIM_GREY  = (120, 120, 150)
 
-# ── image map: slug → (headline, sub_label) ───────────────────────────────────
-# sub_label appears below the headline in a smaller accent colour.
-IMAGES: dict[str, tuple[str, str]] = {
-    # --- Subject routes -------------------------------------------------------
-    "accountancy":                    ("Accountancy",                   "AHSEC · Syrabit.ai"),
-    "biology":                        ("Biology",                       "AHSEC · Syrabit.ai"),
-    "business-studies":               ("Business Studies",              "AHSEC · Syrabit.ai"),
-    "chemistry":                      ("Chemistry",                     "AHSEC · Syrabit.ai"),
-    "economics":                      ("Economics",                     "AHSEC · Syrabit.ai"),
-    "education":                      ("Education",                     "AHSEC · Syrabit.ai"),
-    "english-core":                   ("English",                       "AHSEC · Syrabit.ai"),
-    "environmental-education":        ("Environmental Education",       "AHSEC · Syrabit.ai"),
-    "geography":                      ("Geography",                     "AHSEC · Syrabit.ai"),
-    "history":                        ("History",                       "AHSEC · Syrabit.ai"),
-    "logic-philosophy":               ("Logic & Philosophy",            "AHSEC · Syrabit.ai"),
-    "mathematics":                    ("Mathematics",                   "AHSEC · Syrabit.ai"),
-    "modern-indian-language-assamese":("Modern Indian Language",        "Assamese · AHSEC · Syrabit.ai"),
-    "physics":                        ("Physics",                       "AHSEC · Syrabit.ai"),
-    "political-science":              ("Political Science",             "AHSEC · Syrabit.ai"),
-    "sociology":                      ("Sociology",                     "AHSEC · Syrabit.ai"),
-    # --- Board hub pages ------------------------------------------------------
-    "ahsec":                          ("AHSEC Study Materials",         "HS 1st & 2nd Year · Syrabit.ai"),
-    "seba":                           ("SEBA Study Materials",          "Class 9 & 10 · Syrabit.ai"),
-    "degree":                         ("Degree Study Materials",        "FYUGP / NEP · Syrabit.ai"),
-    # --- Board+class hub pages ------------------------------------------------
-    "ahsec-class-11":                 ("AHSEC Class 11",                "Study Materials · Syrabit.ai"),
-    "ahsec-class-12":                 ("AHSEC Class 12",                "Study Materials · Syrabit.ai"),
-    # --- Notes hub pages ------------------------------------------------------
-    "notes":                          ("Study Notes",                   "AHSEC · Degree · Syrabit.ai"),
-    "notes-class-11":                 ("Class 11 Notes",                "All Subjects · Syrabit.ai"),
-    "notes-class-12":                 ("Class 12 Notes",                "All Subjects · Syrabit.ai"),
+# ── board slug → display label ────────────────────────────────────────────────
+_BOARD_LABELS: dict[str, str] = {
+    "ahsec":   "AHSEC · Syrabit.ai",
+    "seba":    "SEBA · Syrabit.ai",
+    "degree":  "Degree · Syrabit.ai",
 }
+
+# ── subject-level overrides ───────────────────────────────────────────────────
+# Add an entry here when the JSON subject name is too verbose or when the
+# sub_label needs extra context beyond the default board label.
+_SUBJECT_OVERRIDES: dict[str, tuple[str, str]] = {
+    "english-core":                    ("English",               "AHSEC · Syrabit.ai"),
+    "modern-indian-language-assamese": ("Modern Indian Language","Assamese · AHSEC · Syrabit.ai"),
+    "logic-philosophy":                ("Logic & Philosophy",    "AHSEC · Syrabit.ai"),
+}
+
+# ── static hub pages (not present in any curriculum JSON) ────────────────────
+# slug → (headline, sub_label)
+_STATIC_IMAGES: dict[str, tuple[str, str]] = {
+    "ahsec":          ("AHSEC Study Materials",  "HS 1st & 2nd Year · Syrabit.ai"),
+    "seba":           ("SEBA Study Materials",   "Class 9 & 10 · Syrabit.ai"),
+    "degree":         ("Degree Study Materials", "FYUGP / NEP · Syrabit.ai"),
+    "ahsec-class-11": ("AHSEC Class 11",         "Study Materials · Syrabit.ai"),
+    "ahsec-class-12": ("AHSEC Class 12",         "Study Materials · Syrabit.ai"),
+    "notes":          ("Study Notes",            "AHSEC · Degree · Syrabit.ai"),
+    "notes-class-11": ("Class 11 Notes",         "All Subjects · Syrabit.ai"),
+    "notes-class-12": ("Class 12 Notes",         "All Subjects · Syrabit.ai"),
+}
+
+
+def _load_curriculum_images() -> dict[str, tuple[str, str]]:
+    """Walk all curriculum JSON files in the data dir and return
+    slug → (headline, sub_label) for every unique subject found.
+
+    Subjects that use ``_inherits`` (stream-level aliases that share a slug
+    with a fully-defined sibling) are skipped to avoid overwriting the
+    canonical entry with an empty name.
+
+    The data dir is scanned for any ``*.json`` that carries a ``_meta.board_slug``
+    field — this means ahsec_2025_26.json, and any future seba_*.json or
+    degree_*.json files are picked up automatically without changes here.
+    """
+    images: dict[str, tuple[str, str]] = {}
+
+    if not _DATA_DIR.is_dir():
+        print(
+            f"  [warn] curriculum data dir not found: {_DATA_DIR}\n"
+            "         Only static hub images will be generated.",
+            file=sys.stderr,
+        )
+        return images
+
+    for json_path in sorted(_DATA_DIR.glob("*.json")):
+        try:
+            with open(json_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception as exc:
+            print(f"  [warn] could not parse {json_path.name}: {exc}", file=sys.stderr)
+            continue
+
+        meta = data.get("_meta", {})
+        board_slug = meta.get("board_slug", "").strip()
+        if not board_slug:
+            continue  # Not a curriculum file — skip
+
+        board_label = _BOARD_LABELS.get(
+            board_slug, f"{board_slug.upper()} · Syrabit.ai"
+        )
+
+        subject_count = 0
+        for cls_data in data.get("classes", {}).values():
+            for stream_data in cls_data.get("streams", {}).values():
+                for subject in stream_data.get("subjects", []):
+                    slug = subject.get("slug", "").strip()
+                    name = subject.get("name", "").strip()
+                    if not slug or not name:
+                        continue
+                    # _inherits subjects share a slug with a fully-defined sibling;
+                    # skip them so we don't overwrite with a potentially empty entry.
+                    if "_inherits" in subject:
+                        continue
+                    if slug not in images:
+                        images[slug] = (name, board_label)
+                        subject_count += 1
+
+        print(f"  [curriculum] {json_path.name}: {subject_count} new subject slug(s) loaded")
+
+    return images
+
+
+def _build_images() -> dict[str, tuple[str, str]]:
+    """Merge curriculum-derived entries with static hub pages and overrides.
+
+    Priority (highest wins):
+      1. _STATIC_IMAGES    — hub pages always keep their custom labels
+      2. _SUBJECT_OVERRIDES — custom headline/sub_label for specific subjects
+      3. curriculum JSON    — auto-derived from board data
+    """
+    images: dict[str, tuple[str, str]] = {}
+    images.update(_load_curriculum_images())
+    images.update(_SUBJECT_OVERRIDES)
+    images.update(_STATIC_IMAGES)
+    return images
+
+
+# ── image map built at import time ────────────────────────────────────────────
+IMAGES: dict[str, tuple[str, str]] = _build_images()
 
 
 def _gradient_bg(draw: ImageDraw.ImageDraw) -> None:
