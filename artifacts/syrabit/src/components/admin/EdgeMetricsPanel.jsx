@@ -101,6 +101,13 @@ function TitleInjectionGaps({ token, range }) {
     { label: '7 d',  value: '7d'  },
   ];
 
+  // Derive the preview origin from the current window so it works in
+  // staging and local dev without a hardcoded production URL.
+  const previewOrigin =
+    typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+      ? window.location.origin.replace(/^https?:\/\/[^.]+\./, 'https://syrabit.')
+      : 'https://syrabit.ai';
+
   return (
     <div className="border-t border-gray-100 pt-3 mt-1">
       <div className="flex items-center justify-between gap-2 mb-2">
@@ -119,7 +126,7 @@ function TitleInjectionGaps({ token, range }) {
           {MISS_RANGES.map((r) => (
             <button
               key={r.value}
-              onClick={() => { setMissRange(r.value); loadMisses(r.value); }}
+              onClick={() => setMissRange(r.value)}
               className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
                 missRange === r.value
                   ? 'bg-amber-100 text-amber-700'
@@ -171,7 +178,7 @@ function TitleInjectionGaps({ token, range }) {
               className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-amber-50 group transition-colors"
             >
               <a
-                href={`https://syrabit.ai${m.pathname}`}
+                href={`${previewOrigin}${m.pathname}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 text-[11px] font-mono text-gray-700 hover:text-amber-700 truncate min-w-0"
