@@ -367,9 +367,11 @@ console.log(
 // build pipeline (critical-CSS inlining, asset hashing, etc.) and landed in
 // every dist/ HTML that social crawlers will see.
 //
-// The same INDEXABILITY_SKIP_RE exclusion set applies: admin/*, history/*,
-// profile/*, reset/*, cms/*, and api/* are not indexed so they also don't
-// need og:image:alt.
+// Scope: the same INDEXABILITY_SKIP_RE exclusion set applies: admin/*,
+// history/*, profile/*, reset/*, cms/*, and api/* are explicitly disallowed
+// in robots.txt and never reached by social crawlers, so og:image:alt has no
+// effect on them. Checking only publicly-indexable routes is intentional —
+// demanding og:image:alt on private routes would create noise without value.
 //
 // Matches both attribute orders robustly:
 //   <meta property="og:image:alt" content="…" />        ← prerender canonical form
