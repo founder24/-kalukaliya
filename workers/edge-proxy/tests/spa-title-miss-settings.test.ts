@@ -252,7 +252,13 @@ describe("GET /api/edge/spa-title-miss-settings (Task #33 / Task #47)", () => {
     // ── key presence ─────────────────────────────────────────────────────────
     // Fail loudly if a field is added, removed, or renamed in the GET handler.
     const keys = Object.keys(body).sort();
-    expect(keys).toEqual(["disabled", "env_disabled", "env_threshold", "kv_override_set", "threshold"]);
+    expect(keys).toEqual([
+      "disabled",
+      "env_disabled",
+      "env_threshold",
+      "kv_override_set",
+      "threshold",
+    ]);
 
     // ── type assertions ───────────────────────────────────────────────────────
     expect(typeof body.threshold).toBe("number");
