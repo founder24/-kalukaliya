@@ -29,11 +29,16 @@
 
 
     <!-- ── SEO ── -->
-    <title>Syrabit.ai</title>
+    <title>Syrabit.ai — Educational Browser For Assam Board Students | AHSEC &amp; Degree</title>
     <meta http-equiv="content-language" content="en-IN" />
     <meta name="description" content="Syrabit.ai is the educational browser for Assam Board students. Browse AHSEC (Class 11-12) and Degree (B.Com, B.A, B.Sc) syllabus content, get instant answers, and study smarter. Trusted by students across Assam." />
     <meta name="keywords" content="AHSEC educational browser, Assam board study app, Class 11 12 exam prep, AHSEC syllabus browser, degree exam prep Assam, B.Com B.A B.Sc notes, SEBA AHSEC study tool, Assam Higher Secondary, SEBA HSLC, Gauhati University, Dibrugarh University, Cotton University, NEP FYUGP, study notes, MCQ, important questions, previous year questions, PYQ, solved examples, definitions, exam preparation, Assam board exam, HS 1st Year, HS 2nd Year, Class 9, Class 10, HSLC exam, syllabus-aligned notes" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <!-- Homepage canonical — static fallback so Googlebot gets the canonical
+         on first byte before React hydrates. Per-route canonicals injected by
+         PageMeta.jsx (SPA navigation) and prerender-*.mjs (build-time snapshots)
+         override this for every route other than the homepage shell. -->
+    <link rel="canonical" href="https://syrabit.ai/" />
     <!-- Task #494: per-route <link rel="canonical"> is owned by react-helmet-async
          (src/components/seo/PageMeta.jsx) so each page emits its own canonical
          instead of every SPA-fallback route inheriting the homepage URL.
@@ -371,7 +376,7 @@
       #__shell{position:fixed;inset:0;background:#0a0a1a;color:#e2e8f0;font-family:system-ui,-apple-system,'Space Grotesk',sans-serif;display:flex;flex-direction:column;z-index:0}
       #__shell header{height:56px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0}
       #__shell .__logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#a78bfa);display:inline-block;flex-shrink:0}
-      #__shell h1{font-size:0.95rem;font-weight:600;margin:0;color:#f1f5f9}
+      #__shell .__brand{font-size:0.95rem;font-weight:600;margin:0;color:#f1f5f9}
       #__shell main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
       #__shell .__hero{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:420px;text-align:center}
       #__shell .__icon{width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,rgba(124,58,237,0.20),rgba(139,92,246,0.15));border:1px solid rgba(139,92,246,0.25)}
@@ -384,7 +389,7 @@
     <div id="__shell" aria-hidden="true">
       <header>
         <span class="__logo"></span>
-        <h1>Syrabit.ai</h1>
+        <span class="__brand">Syrabit.ai</span>
       </header>
       <main>
         <div class="__hero">

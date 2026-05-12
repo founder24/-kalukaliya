@@ -5350,7 +5350,7 @@ def _as_alt_url(en_url: str, *, slug_as: str = "") -> str:
         return f"{en_url}{sep}lang=as"
 
 STATIC_PAGES = [
-    ("/home", "weekly", "1.0"),
+    ("/", "weekly", "1.0"),
     ("/about", "monthly", "0.9"),
     ("/pricing", "monthly", "0.8"),
     ("/library", "weekly", "0.9"),
