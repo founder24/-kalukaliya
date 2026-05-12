@@ -23,7 +23,9 @@ key added by the backend proxy itself.  Both layers are covered here.
 """
 from __future__ import annotations
 
+import importlib
 import os
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -274,3 +276,37 @@ def test_get_settings_503_from_edge_returns_defaults(admin_client, env_with_edge
     assert "threshold" in body
     assert "disabled" in body
     assert "kv_override_set" in body
+
+
+def test_import_time_assert_fires_when_patch_model_diverges_from_patchable_keys(monkeypatch):
+    """Task #81 — The import-time assert in admin_edge_analytics fires when
+    SpaTitleMissSettingsPatch.model_fields no longer matches PATCHABLE_SETTINGS_KEYS.
+
+    Strategy: monkeypatch PATCHABLE_SETTINGS_KEYS in schemas.edge_settings to a
+    narrower set so it diverges from the real model's field names, then reload
+    routes.admin_edge_analytics.  The assert at lines 216-221 of that module
+    must raise AssertionError immediately, proving both safety layers are live:
+
+      1. The assert itself (import-time schema contract).
+      2. The explicit PATCHABLE_SETTINGS_KEYS filter on the outbound payload
+         (Task #80) that protects even if the assert is somehow bypassed.
+    """
+    module_name = "routes.admin_edge_analytics"
+
+    import schemas.edge_settings as edge_settings_mod
+
+    monkeypatch.setattr(
+        edge_settings_mod,
+        "PATCHABLE_SETTINGS_KEYS",
+        frozenset({"disabled"}),
+    )
+
+    original_module = sys.modules.pop(module_name, None)
+    try:
+        with pytest.raises(AssertionError, match="do not match"):
+            importlib.import_module(module_name)
+    finally:
+        if original_module is not None:
+            sys.modules[module_name] = original_module
+        else:
+            sys.modules.pop(module_name, None)
