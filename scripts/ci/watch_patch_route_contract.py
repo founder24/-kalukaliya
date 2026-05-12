@@ -148,7 +148,8 @@ def _handle_result(passed: bool, consecutive_failures: int) -> int:
     )
     if consecutive_failures >= _ALERT_AFTER_POLLS:
         _write_flag(consecutive_failures)
-        _print_persistent_alert(consecutive_failures)
+        if consecutive_failures == _ALERT_AFTER_POLLS:
+            _print_persistent_alert(consecutive_failures)
     return consecutive_failures
 
 
