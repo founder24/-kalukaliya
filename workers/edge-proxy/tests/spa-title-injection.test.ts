@@ -639,6 +639,92 @@ describe("_resolveSpaRouteMeta", () => {
   });
 });
 
+describe("SPA shell index.html — OG image dimension & alt placeholder tags (Task #21)", () => {
+  let indexHtml: string;
+
+  beforeEach(() => {
+    const indexPath = resolve(__dirname, "../../../artifacts/syrabit/index.html");
+    indexHtml = readFileSync(indexPath, "utf-8");
+  });
+
+  it("contains meta[property='og:image:width'] so the HTMLRewriter has a node to rewrite", () => {
+    expect(indexHtml).toMatch(/meta[^>]+property=["']og:image:width["']/);
+  });
+
+  it("contains meta[property='og:image:height'] so the HTMLRewriter has a node to rewrite", () => {
+    expect(indexHtml).toMatch(/meta[^>]+property=["']og:image:height["']/);
+  });
+
+  it("contains meta[property='og:image:alt'] so the HTMLRewriter has a node to rewrite", () => {
+    expect(indexHtml).toMatch(/meta[^>]+property=["']og:image:alt["']/);
+  });
+
+  it("og:image:width has numeric content value (1200)", () => {
+    expect(indexHtml).toMatch(/property=["']og:image:width["'][^>]+content=["']1200["']/);
+  });
+
+  it("og:image:height has numeric content value (630)", () => {
+    expect(indexHtml).toMatch(/property=["']og:image:height["'][^>]+content=["']630["']/);
+  });
+
+  it("og:image:alt has non-empty content value", () => {
+    const match = indexHtml.match(/property=["']og:image:alt["'][^>]+content=["']([^"']+)["']/);
+    expect(match).not.toBeNull();
+    expect(match![1].length).toBeGreaterThan(0);
+  });
+
+  it("all three og:image dimension/alt tags appear inside <head>", () => {
+    const headMatch = indexHtml.match(/<head[\s\S]*?<\/head>/i);
+    expect(headMatch).not.toBeNull();
+    const head = headMatch![0];
+    expect(head).toMatch(/og:image:width/);
+    expect(head).toMatch(/og:image:height/);
+    expect(head).toMatch(/og:image:alt/);
+  });
+
+  describe("end-to-end rewrite using real index.html as bot response body (Task #21)", () => {
+    type ElementHandler = {
+      element: (el: { setInnerContent: (s: string) => void; setAttribute: (k: string, v: string) => void }) => void;
+    };
+
+    let capturedHandlers: Record<string, ElementHandler>;
+
+    beforeEach(() => {
+      capturedHandlers = {};
+      function MockHTMLRewriter(this: object) {}
+      MockHTMLRewriter.prototype.on = function(selector: string, handler: ElementHandler) {
+        capturedHandlers[selector] = handler;
+        return this;
+      };
+      MockHTMLRewriter.prototype.transform = function(r: Response) { return r; };
+      vi.stubGlobal("HTMLRewriter", MockHTMLRewriter);
+    });
+
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it("og:image:width, og:image:height, and og:image:alt all get rewrite handlers when real index.html is the bot response", () => {
+      const resp = new Response(indexHtml, { headers: { "Content-Type": "text/html" } });
+      _injectSpaTitleForBot(resp, "/notes/class-11/physics", true);
+
+      const widthEl  = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+      const heightEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+      const altEl    = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+
+      expect(capturedHandlers['meta[property="og:image:width"]']).toBeDefined();
+      expect(capturedHandlers['meta[property="og:image:height"]']).toBeDefined();
+      expect(capturedHandlers['meta[property="og:image:alt"]']).toBeDefined();
+
+      capturedHandlers['meta[property="og:image:width"]'].element(widthEl);
+      capturedHandlers['meta[property="og:image:height"]'].element(heightEl);
+      capturedHandlers['meta[property="og:image:alt"]'].element(altEl);
+
+      expect(widthEl.setAttribute).toHaveBeenCalledWith("content", OG_IMAGE_WIDTH);
+      expect(heightEl.setAttribute).toHaveBeenCalledWith("content", OG_IMAGE_HEIGHT);
+      expect(altEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Physics"));
+    });
+  });
+});
+
 describe("SPA shell index.html — Twitter card placeholder tags (Task #16)", () => {
   let indexHtml: string;
 
