@@ -388,4 +388,43 @@ describe("PUT /api/edge/spa-title-miss-settings (Task #33 / Task #47)", () => {
     const body = await resp.json() as { threshold: number };
     expect(body.threshold).toBe(99);
   });
+
+  // ── PUT 200 response schema snapshot (Task #69) ───────────────────────────
+  // The backend PATCH /admin/edge/spa-title-miss-settings route proxies the
+  // edge worker PUT and returns resp.json() verbatim.  The backend snapshot
+  // test (test_patch_happy_path_full_schema_snapshot) pins the backend side
+  // but never actually calls the edge — so a rename like ok→success or a
+  // dropped field would pass all backend tests while silently breaking the
+  // real integration.  This test closes that gap by pinning the exact shape
+  // returned by the edge worker's PUT handler.
+  //
+  // Contract: exactly three keys — ok (boolean true), threshold (number),
+  // disabled (boolean) — no more, no less.
+  it("PUT 200 response schema snapshot: exact keys and types", async () => {
+    const kv  = makeKv();
+    const env = makeEnv({ rateLimit: kv });
+
+    const resp = await workerHandler.fetch(
+      settingsPut({ threshold: 42, disabled: false }),
+      env,
+      ctxNoop,
+    );
+    expect(resp.status).toBe(200);
+    const body = await resp.json() as Record<string, unknown>;
+
+    // ── key presence ─────────────────────────────────────────────────────────
+    // Fail loudly if a field is added, removed, or renamed in the PUT handler.
+    const keys = Object.keys(body).sort();
+    expect(keys).toEqual(["disabled", "ok", "threshold"]);
+
+    // ── type + value assertions ───────────────────────────────────────────────
+    expect(typeof body.ok).toBe("boolean");
+    expect(body.ok).toBe(true);
+
+    expect(typeof body.threshold).toBe("number");
+    expect(body.threshold).toBe(42);
+
+    expect(typeof body.disabled).toBe("boolean");
+    expect(body.disabled).toBe(false);
+  });
 });
