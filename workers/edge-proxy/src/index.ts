@@ -2607,7 +2607,10 @@ async function handleEdgePurge(
   }
 }
 
-const _KNOWN_BOARDS = new Set(["ahsec", "seba", "degree", "cbse", "nep"]);
+// Task #10: "notes" is a first-class hub prefix (/notes, /notes/class-11,
+// /notes/class-12) and must be included alongside the board slugs so the
+// board and board-class cache-key patterns match it.
+const _KNOWN_BOARDS = new Set(["ahsec", "seba", "degree", "cbse", "nep", "notes"]);
 
 const BOT_CONTENT_PATTERNS: Array<{ regex: RegExp; type: string; test?: (p: string) => boolean }> = [
   { regex: /^\/([a-z0-9-]+)\/([a-z0-9-]+)\/([a-z0-9-]+)\/([a-z0-9-]+)\/(notes|mcqs|important-questions|examples|definition|faq)$/, type: "topic-typed" },

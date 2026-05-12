@@ -53,11 +53,28 @@ describe("getBotPageCacheKey", () => {
 
     it("matches board+class for known boards", () => {
       expect(getBotPageCacheKey("/ahsec/class-12")).toBe("bot:content:/ahsec/class-12");
+      expect(getBotPageCacheKey("/ahsec/class-11")).toBe("bot:content:/ahsec/class-11");
       expect(getBotPageCacheKey("/seba/class-10")).toBe("bot:content:/seba/class-10");
     });
 
     it("rejects unknown board for board+class", () => {
       expect(getBotPageCacheKey("/foo/bar")).toBeNull();
+    });
+
+    // Task #10 — /notes hub and its class-level sub-routes must get their
+    // own KV cache slots so bots don't hit the origin on every crawl.
+    it("matches /notes hub page", () => {
+      expect(getBotPageCacheKey("/notes")).toBe("bot:content:/notes");
+    });
+
+    it("matches /notes/class-11 and /notes/class-12 hub pages", () => {
+      expect(getBotPageCacheKey("/notes/class-11")).toBe("bot:content:/notes/class-11");
+      expect(getBotPageCacheKey("/notes/class-12")).toBe("bot:content:/notes/class-12");
+    });
+
+    it("strips trailing slash on /notes routes", () => {
+      expect(getBotPageCacheKey("/notes/")).toBe("bot:content:/notes");
+      expect(getBotPageCacheKey("/notes/class-11/")).toBe("bot:content:/notes/class-11");
     });
 
     it("matches subject (3 segments)", () => {
