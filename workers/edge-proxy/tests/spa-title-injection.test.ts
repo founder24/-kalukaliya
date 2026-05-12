@@ -668,3 +668,53 @@ describe("SPA shell index.html — Twitter card placeholder tags (Task #16)", ()
     expect(head).toMatch(/twitter:description/);
   });
 });
+
+describe("SPA shell index.html — OG image dimension + alt placeholder tags (Task #21)", () => {
+  let indexHtml: string;
+  let head: string;
+
+  beforeEach(() => {
+    const indexPath = resolve(__dirname, "../../../artifacts/syrabit/index.html");
+    indexHtml = readFileSync(indexPath, "utf-8");
+    const headMatch = indexHtml.match(/<head[\s\S]*?<\/head>/i);
+    expect(headMatch).not.toBeNull();
+    head = headMatch![0];
+  });
+
+  it("contains og:image:width so the HTMLRewriter has a node to rewrite", () => {
+    expect(head).toMatch(/meta[^>]+property=["']og:image:width["']/);
+  });
+
+  it("og:image:width is 1200", () => {
+    expect(head).toMatch(/property=["']og:image:width["'][^>]+content=["']1200["']/);
+  });
+
+  it("contains og:image:height so the HTMLRewriter has a node to rewrite", () => {
+    expect(head).toMatch(/meta[^>]+property=["']og:image:height["']/);
+  });
+
+  it("og:image:height is 630", () => {
+    expect(head).toMatch(/property=["']og:image:height["'][^>]+content=["']630["']/);
+  });
+
+  it("contains og:image:alt so the HTMLRewriter has a node to rewrite (Task #21)", () => {
+    expect(head).toMatch(/meta[^>]+property=["']og:image:alt["']/);
+  });
+
+  it("og:image:alt has non-empty default content", () => {
+    const match = head.match(/property=["']og:image:alt["'][^>]+content=["']([^"']+)["']/);
+    expect(match).not.toBeNull();
+    expect(match![1].trim().length).toBeGreaterThan(0);
+  });
+
+  it("og:image:alt, og:image:width, og:image:height all appear after og:image", () => {
+    const ogImageIdx    = head.indexOf('property="og:image"');
+    const ogWidthIdx    = head.indexOf('property="og:image:width"');
+    const ogHeightIdx   = head.indexOf('property="og:image:height"');
+    const ogAltIdx      = head.indexOf('property="og:image:alt"');
+    expect(ogImageIdx).toBeGreaterThan(-1);
+    expect(ogWidthIdx).toBeGreaterThan(ogImageIdx);
+    expect(ogHeightIdx).toBeGreaterThan(ogImageIdx);
+    expect(ogAltIdx).toBeGreaterThan(ogImageIdx);
+  });
+});
