@@ -119,6 +119,36 @@ PATCHABLE_SETTINGS_KEYS: frozenset[str] = frozenset({
     "threshold",
 })
 
+# ── Prewarm-settings contract (Task #87) ──────────────────────────────────────
+# GET /admin/edge/prewarm-settings will return these five fields once the edge
+# worker KV endpoint goes live.  PATCHABLE_PREWARM_KEYS is the writable subset
+# (on/off switch + schedule).  The remaining two are read-only env reflections.
+CANONICAL_PREWARM_KEYS: frozenset[str] = frozenset({
+    "enabled",
+    "env_schedule_utc",
+    "kv_override_set",
+    "schedule_utc",
+})
+
+PATCHABLE_PREWARM_KEYS: frozenset[str] = frozenset({
+    "enabled",
+    "schedule_utc",
+})
+
+# ── Cache-calendar-settings contract (Task #87) ───────────────────────────────
+# GET /admin/edge/cache-calendar-settings will return these three fields once
+# the edge worker KV endpoint goes live.  PATCHABLE_CACHE_CALENDAR_KEYS is the
+# writable subset — only force_season can be overridden at runtime.
+CANONICAL_CACHE_CALENDAR_KEYS: frozenset[str] = frozenset({
+    "env_force_season",
+    "force_season",
+    "kv_override_set",
+})
+
+PATCHABLE_CACHE_CALENDAR_KEYS: frozenset[str] = frozenset({
+    "force_season",
+})
+
 
 def assert_patch_contract(
     patch_model: "Type[BaseModel]",

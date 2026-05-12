@@ -1985,6 +1985,7 @@ from routes.admin_r2_storage_health import router as admin_r2_storage_health_rou
 from routes.admin_routing_config import router as admin_routing_config_router
 from routes.admin_syra import router as admin_syra_router
 from routes.admin_edge_analytics import router as admin_edge_analytics_router
+from routes.admin_edge_prewarm import router as admin_edge_prewarm_router
 from routes.admin_ci_status import router as admin_ci_status_router
 from routes.admin_trustpilot_alerts import router as admin_trustpilot_alerts_router
 from routes.admin_trustpilot_jsonld_status import router as admin_trustpilot_jsonld_status_router
@@ -2213,6 +2214,7 @@ api.include_router(admin_r2_storage_health_router)
 api.include_router(admin_routing_config_router)
 api.include_router(admin_syra_router)
 api.include_router(admin_edge_analytics_router)
+api.include_router(admin_edge_prewarm_router)
 api.include_router(admin_ci_status_router)
 api.include_router(admin_trustpilot_alerts_router)
 api.include_router(admin_trustpilot_jsonld_status_router)
