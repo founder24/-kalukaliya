@@ -56,7 +56,7 @@ import {
 import { recordEdgeLog, type EdgeLogShipperEnv } from "./log-shipper";
 // Task #109 Phase 5 — Durable Object rate limiter + Analytics Engine query utility.
 import { RateLimiter } from "./rate-limiter-do";
-import { queryEdgeMetrics } from "./analytics-engine";
+import { queryEdgeMetrics, querySpaTitleMisses } from "./analytics-engine";
 // Task #575 — SeasonCacheDO owns the /api/health/season snapshot for the region.
 import { SeasonCacheDO } from "./season-cache-do";
 export { RateLimiter, SeasonCacheDO };
@@ -3720,6 +3720,40 @@ async function _handleEdgeFetch(
         const range   = url.searchParams.get("range") ?? "24h";
         const metrics = await queryEdgeMetrics(env.CF_ANALYTICS_TOKEN, range);
         return new Response(JSON.stringify(metrics), {
+          headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "unknown";
+        return new Response(
+          JSON.stringify({ error: `Analytics Engine query failed: ${msg.slice(0, 300)}` }),
+          { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
+    // Task #12 — GET /api/edge/spa-title-misses?range=<1h|6h|24h|7d>
+    // Returns the top 20 bot-crawled SPA paths that fell through
+    // _resolveSpaRouteMeta and therefore received the generic <title>.
+    // Auth: same X-Edge-Admin-Secret handshake as /api/edge/analytics.
+    // Call via the Flask backend /admin/edge/spa-title-misses proxy.
+    if (pathname === "/api/edge/spa-title-misses" && request.method === "GET") {
+      const edgeSecret = request.headers.get("X-Edge-Admin-Secret") ?? "";
+      if (!env.D1_SYNC_SECRET || edgeSecret !== env.D1_SYNC_SECRET) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      if (!env.CF_ANALYTICS_TOKEN) {
+        return new Response(
+          JSON.stringify({ error: "CF_ANALYTICS_TOKEN secret not set. Run: wrangler secret put CF_ANALYTICS_TOKEN" }),
+          { status: 503, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      try {
+        const range  = url.searchParams.get("range") ?? "7d";
+        const misses = await querySpaTitleMisses(env.CF_ANALYTICS_TOKEN, range);
+        return new Response(JSON.stringify(misses), {
           headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
         });
       } catch (e) {

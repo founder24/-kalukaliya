@@ -16,7 +16,7 @@
  *   [[analytics_engine_datasets]] ANALYTICS binding (wrangler.toml Phase 5).
  */
 import { useState, useEffect, useCallback } from 'react';
-import { Activity, Zap, BarChart2, RefreshCw, TrendingUp, Clock } from 'lucide-react';
+import { Activity, Zap, BarChart2, RefreshCw, TrendingUp, Clock, AlertTriangle, ExternalLink } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE } from '@/utils/api';
 
@@ -55,6 +55,138 @@ function MiniBar({ label, value, max }) {
         <div className="h-2 rounded-full bg-violet-400" style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs font-mono text-gray-600 w-10 text-right flex-shrink-0">{value.toLocaleString()}</span>
+    </div>
+  );
+}
+
+/** Title Injection Gaps sub-section — Task #12. */
+function TitleInjectionGaps({ token, range }) {
+  const [misses, setMisses]       = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
+  const [missRange, setMissRange] = useState('7d');
+
+  const loadMisses = useCallback(async (r) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_BASE}/admin/edge/spa-title-misses`, {
+        params: { range: r },
+        headers,
+        withCredentials: true,
+      });
+      const body = res.data;
+      if (!body.configured) {
+        setError(body.reason || 'Edge analytics not configured');
+        return;
+      }
+      if (body.misses === null) {
+        setError(body.reason || 'Could not fetch title-miss data');
+        return;
+      }
+      setMisses(body.misses);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Request failed';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => { loadMisses(missRange); }, [loadMisses, missRange]);
+
+  const MISS_RANGES = [
+    { label: '24 h', value: '24h' },
+    { label: '7 d',  value: '7d'  },
+  ];
+
+  return (
+    <div className="border-t border-gray-100 pt-3 mt-1">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1.5">
+          <AlertTriangle size={12} className="text-amber-500" />
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+            Title Injection Gaps
+          </p>
+          {misses !== null && misses.length > 0 && (
+            <span className="text-[10px] bg-amber-100 text-amber-700 rounded-full px-1.5 py-0.5 font-bold">
+              {misses.length}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {MISS_RANGES.map((r) => (
+            <button
+              key={r.value}
+              onClick={() => { setMissRange(r.value); loadMisses(r.value); }}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                missRange === r.value
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'text-gray-400 hover:bg-gray-100'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+          <button
+            onClick={() => loadMisses(missRange)}
+            disabled={loading}
+            className="ml-0.5 p-0.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+            title="Refresh"
+          >
+            <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2 py-1.5">
+          {error}
+        </p>
+      )}
+
+      {!error && loading && misses === null && (
+        <div className="flex justify-center py-3">
+          <RefreshCw size={14} className="animate-spin text-gray-300" />
+        </div>
+      )}
+
+      {!error && misses !== null && misses.length === 0 && (
+        <p className="text-[11px] text-gray-400 text-center py-2">
+          No uncovered paths in this window.
+        </p>
+      )}
+
+      {!error && misses !== null && misses.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="text-[10px] text-gray-400 mb-1">
+            Bot-crawled paths without a custom title — add these to{' '}
+            <code className="font-mono bg-gray-100 px-0.5 rounded text-[9px]">_resolveSpaRouteMeta</code>
+            {' '}to fix SEO.
+          </p>
+          {misses.map((m) => (
+            <div
+              key={m.pathname}
+              className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-amber-50 group transition-colors"
+            >
+              <a
+                href={`https://syrabit.ai${m.pathname}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[11px] font-mono text-gray-700 hover:text-amber-700 truncate min-w-0"
+                title={m.pathname}
+              >
+                <span className="truncate">{m.pathname}</span>
+                <ExternalLink size={9} className="flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
+              </a>
+              <span className="text-[11px] font-mono text-amber-700 font-semibold flex-shrink-0">
+                {m.count.toLocaleString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -218,6 +350,9 @@ export default function EdgeMetricsPanel({ token }) {
           <RefreshCw size={18} className="animate-spin text-gray-300" />
         </div>
       )}
+
+      {/* Task #12 — Title Injection Gaps: always shown below other metrics */}
+      <TitleInjectionGaps token={token} />
 
       <p className="text-[10px] text-gray-300 text-right">
         Dataset: syrabit-edge-metrics · Phase 5 · Task #109
