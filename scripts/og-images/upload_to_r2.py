@@ -168,22 +168,53 @@ def prune(current_slugs: list[str], dry_run: bool = False) -> int:
     return deleted
 
 
+# Generic browser UA — reflects real social-crawler fetch behaviour (WhatsApp,
+# Telegram, and Discord linker bots all require objects to be publicly readable
+# by ordinary HTTP clients, not just bots with special WAF allow-list entries).
+_SMOKE_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _fetch_head(url: str) -> tuple[int, str]:
+    """
+    Issue a HEAD request; fall back to a range-GET (0–0 bytes) if HEAD is
+    blocked by an intermediary.  Returns (status_code, content_type).
+    """
+    for method, extra_headers in [
+        ("HEAD", {}),
+        ("GET",  {"Range": "bytes=0-0"}),
+    ]:
+        try:
+            req = urllib.request.Request(
+                url, method=method,
+                headers={"User-Agent": _SMOKE_UA, **extra_headers},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                # 200 (HEAD/GET) and 206 (partial-content) both mean reachable.
+                if resp.status in (200, 206):
+                    return resp.status, resp.getheader("Content-Type", "")
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (405, 501):   # method-not-allowed → try GET
+                return exc.code, exc.headers.get("Content-Type", "")
+        except Exception:
+            pass
+    return 0, ""
+
+
 def smoke_check(slugs: list[str]) -> None:
     print("\nSmoke-checking public URLs …")
     failures: list[str] = []
     for slug in slugs:
         url = f"{PUBLIC_CDN_BASE}/{slug}.png"
-        try:
-            req = urllib.request.Request(url, method="HEAD")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                ct = resp.getheader("Content-Type", "")
-                if resp.status == 200 and "image" in ct:
-                    print(f"  ✓  {url}  →  {resp.status} {ct}")
-                else:
-                    print(f"  ✗  {url}  →  {resp.status} {ct}")
-                    failures.append(url)
-        except Exception as exc:
-            print(f"  ✗  {url}  →  {exc}")
+        status, ct = _fetch_head(url)
+        if status in (200, 206) and "image" in ct:
+            print(f"  ✓  {url}  →  {status} {ct}")
+        else:
+            label = f"{status} {ct}".strip() if status else "unreachable"
+            print(f"  ✗  {url}  →  {label}")
             failures.append(url)
 
     if failures:
