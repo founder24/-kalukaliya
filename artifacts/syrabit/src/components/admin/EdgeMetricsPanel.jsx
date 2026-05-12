@@ -236,6 +236,13 @@ function AlertSettings({ token, onSaved }) {
   );
 }
 
+const MISS_RANGES = [
+  { label: '1 h',  value: '1h'  },
+  { label: '6 h',  value: '6h'  },
+  { label: '24 h', value: '24h' },
+  { label: '7 d',  value: '7d'  },
+];
+
 /** Task #39 — compact tag-rewrite status row rendered inside TitleInjectionGaps. */
 function TagRewriteStatus({ tagHandlers }) {
   if (!tagHandlers || Object.keys(tagHandlers).length === 0) return null;
@@ -280,13 +287,15 @@ function TagRewriteStatus({ tagHandlers }) {
   );
 }
 
-/** Title Injection Gaps sub-section — Task #12. */
+/** Title Injection Gaps sub-section — Task #12 / Task #44. */
 function TitleInjectionGaps({ token }) {
-  const [misses, setMisses]           = useState(null);
-  const [tagHandlers, setTagHandlers] = useState(null);
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState(null);
-  const [missRange, setMissRange]     = useState('7d');
+  // scanResult holds the full enriched response from the backend proxy:
+  // { range, threshold, alert_disabled, gaps_found, gaps_above_threshold, gaps[] }
+  const [scanResult, setScanResult]     = useState(null);
+  const [tagHandlers, setTagHandlers]   = useState(null);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState(null);
+  const [missRange, setMissRange]       = useState('24h');
   const [showSettings, setShowSettings] = useState(false);
 
   const loadMisses = useCallback(async (r) => {
@@ -304,11 +313,13 @@ function TitleInjectionGaps({ token }) {
         setError(body.reason || 'Edge analytics not configured');
         return;
       }
-      if (body.misses === null) {
+      // Task #44: backend now unpacks the enriched edge response.
+      // `body.gaps` is null when the edge is unreachable.
+      if (body.gaps === null || body.gaps === undefined) {
         setError(body.reason || 'Could not fetch title-miss data');
         return;
       }
-      setMisses(body.misses);
+      setScanResult(body);
       // Task #39 — persist tag_handlers so the coverage section can render.
       setTagHandlers(body.tag_handlers ?? null);
     } catch (e) {
@@ -321,11 +332,6 @@ function TitleInjectionGaps({ token }) {
 
   useEffect(() => { loadMisses(missRange); }, [loadMisses, missRange]);
 
-  const MISS_RANGES = [
-    { label: '24 h', value: '24h' },
-    { label: '7 d',  value: '7d'  },
-  ];
-
   // Derive the preview origin from the current window so it works in
   // staging and local dev without a hardcoded production URL.
   const previewOrigin =
@@ -333,17 +339,20 @@ function TitleInjectionGaps({ token }) {
       ? window.location.origin.replace(/^https?:\/\/[^.]+\./, 'https://syrabit.')
       : 'https://syrabit.ai';
 
+  const gaps = scanResult?.gaps ?? [];
+
   return (
     <div className="border-t border-gray-100 pt-3 mt-1">
+      {/* Header row */}
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5">
           <AlertTriangle size={12} className="text-amber-500" />
           <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
             Title Injection Gaps
           </p>
-          {misses !== null && misses.length > 0 && (
+          {scanResult !== null && scanResult.gaps_above_threshold > 0 && (
             <span className="text-[10px] bg-amber-100 text-amber-700 rounded-full px-1.5 py-0.5 font-bold">
-              {misses.length}
+              {scanResult.gaps_above_threshold}
             </span>
           )}
         </div>
@@ -361,13 +370,15 @@ function TitleInjectionGaps({ token }) {
               {r.label}
             </button>
           ))}
+          {/* Scan Now / Refresh button */}
           <button
             onClick={() => loadMisses(missRange)}
             disabled={loading}
-            className="ml-0.5 p-0.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-40"
-            title="Refresh"
+            className="ml-1 flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold hover:bg-amber-100 disabled:opacity-40 transition-colors"
+            title="Scan Now — re-fetch title gaps from the edge worker"
           >
-            <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={9} className={loading ? 'animate-spin' : ''} />
+            {loading ? 'Scanning…' : 'Scan Now'}
           </button>
           {/* Task #33 — toggle alert settings panel */}
           <button
@@ -383,6 +394,35 @@ function TitleInjectionGaps({ token }) {
           </button>
         </div>
       </div>
+
+      {/* Task #44 — counters + threshold summary row */}
+      {scanResult !== null && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
+          <span className="text-[10px] text-gray-500">
+            <span className="font-semibold text-gray-700">{scanResult.gaps_found}</span> paths uncovered
+          </span>
+          <span className="text-[10px] text-gray-400">·</span>
+          <span className="text-[10px] text-gray-500">
+            <span className="font-semibold text-amber-700">{scanResult.gaps_above_threshold}</span> above threshold
+          </span>
+          {scanResult.threshold != null && (
+            <>
+              <span className="text-[10px] text-gray-400">·</span>
+              <span className="text-[10px] text-gray-500">
+                threshold: <span className="font-mono font-semibold text-gray-700">{scanResult.threshold}</span> bot hits
+              </span>
+            </>
+          )}
+          {scanResult.alert_disabled && (
+            <>
+              <span className="text-[10px] text-gray-400">·</span>
+              <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-semibold">
+                alert paused
+              </span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Task #33 — collapsible alert settings panel */}
       {showSettings && (
@@ -401,29 +441,29 @@ function TitleInjectionGaps({ token }) {
         </p>
       )}
 
-      {!error && loading && misses === null && (
+      {!error && loading && scanResult === null && (
         <div className="flex justify-center py-3">
           <RefreshCw size={14} className="animate-spin text-gray-300" />
         </div>
       )}
 
-      {!error && misses !== null && misses.length === 0 && (
+      {!error && scanResult !== null && gaps.length === 0 && (
         <p className="text-[11px] text-gray-400 text-center py-2">
-          No uncovered paths in this window.
+          No paths above threshold in this window.
         </p>
       )}
 
-      {!error && misses !== null && misses.length > 0 && (
+      {!error && scanResult !== null && gaps.length > 0 && (
         <div className="space-y-0.5">
-          <p className="text-[10px] text-gray-400 mb-1">
-            Bot-crawled paths without a custom title — add these to{' '}
-            <code className="font-mono bg-gray-100 px-0.5 rounded text-[9px]">_resolveSpaRouteMeta</code>
-            {' '}to fix SEO.
-          </p>
-          {misses.map((m) => (
+          <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 px-2 mb-1">
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider">Path</span>
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider text-right">Bot hits</span>
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider text-right">Suggested title</span>
+          </div>
+          {gaps.map((m) => (
             <div
               key={m.pathname}
-              className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-amber-50 group transition-colors"
+              className="grid grid-cols-[1fr_auto_auto] gap-x-2 items-center rounded px-2 py-1 hover:bg-amber-50 group transition-colors"
             >
               <a
                 href={`${previewOrigin}${m.pathname}`}
@@ -435,11 +475,26 @@ function TitleInjectionGaps({ token }) {
                 <span className="truncate">{m.pathname}</span>
                 <ExternalLink size={9} className="flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
               </a>
-              <span className="text-[11px] font-mono text-amber-700 font-semibold flex-shrink-0">
+              <span className="text-[11px] font-mono text-amber-700 font-semibold text-right flex-shrink-0">
                 {m.count.toLocaleString()}
               </span>
+              {m.suggested_title ? (
+                <span
+                  className="text-[10px] text-gray-500 italic text-right flex-shrink-0 max-w-[140px] truncate"
+                  title={m.suggested_title}
+                >
+                  {m.suggested_title}
+                </span>
+              ) : (
+                <span />
+              )}
             </div>
           ))}
+          <p className="text-[10px] text-gray-400 mt-1.5 px-2">
+            Add these paths to{' '}
+            <code className="font-mono bg-gray-100 px-0.5 rounded text-[9px]">_resolveSpaRouteMeta</code>
+            {' '}to fix SEO gaps.
+          </p>
         </div>
       )}
     </div>

@@ -101,35 +101,45 @@ async def admin_edge_spa_title_misses(
                 "reason": f"edge returned {resp.status_code}",
                 "misses": None,
             }
-        # Task #39 — the edge worker (post-Task #32) returns an enriched
-        # object {range, threshold, alert_disabled, gaps_found,
-        # gaps_above_threshold, gaps: [...], tag_handlers: {...}}.
-        # Extract the gaps array and tag_handlers so the frontend always
-        # receives misses as a plain list and tag_handlers as a dict.
         data = resp.json()
+        # Task #39 & #44 — The edge worker returns an enriched object.
+        # Unpack the fields so the dashboard tile can display gaps_found,
+        # gaps_above_threshold, tag_handlers, and per-gap suggested_title.
         if isinstance(data, dict):
-            gaps         = data.get("gaps", [])
-            tag_handlers = data.get("tag_handlers", {})
-            alert_disabled = data.get("alert_disabled", False)
-            gaps_found     = data.get("gaps_found", len(gaps))
+            gaps = data.get("gaps", [])
+            return {
+                "configured":           True,
+                "range":                data.get("range", range),
+                "threshold":            data.get("threshold"),
+                "alert_disabled":       data.get("alert_disabled", False),
+                "gaps_found":           data.get("gaps_found", len(gaps)),
+                "gaps_above_threshold": data.get("gaps_above_threshold", 0),
+                "gaps":                 gaps,
+                "tag_handlers":         data.get("tag_handlers", {}),
+                # Legacy key kept for backwards compat — callers that still read
+                # body.misses get the gaps list.
+                "misses":               gaps,
+            }
         else:
             # Legacy flat-array format (pre-Task-#32 workers); keep working.
-            gaps         = data if isinstance(data, list) else []
-            tag_handlers = {}
-            alert_disabled = False
-            gaps_found     = len(gaps)
-        return {
-            "configured":    True,
-            "misses":        gaps,
-            "tag_handlers":  tag_handlers,
-            "alert_disabled": alert_disabled,
-            "gaps_found":    gaps_found,
-        }
+            gaps = data if isinstance(data, list) else []
+            return {
+                "configured":           True,
+                "range":                range,
+                "threshold":            None,
+                "alert_disabled":       False,
+                "gaps_found":           len(gaps),
+                "gaps_above_threshold": 0,
+                "gaps":                 gaps,
+                "tag_handlers":         {},
+                "misses":               gaps,
+            }
     except Exception as exc:
         logger.warning("[edge-spa-title-misses] edge fetch failed: %s", exc)
         return {
             "configured": True,
             "reason": f"edge unreachable: {type(exc).__name__}",
+            "gaps": None,
             "misses": None,
         }
 
