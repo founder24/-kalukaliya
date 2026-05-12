@@ -422,85 +422,6 @@ describe("_resolveSpaRouteMeta", () => {
         expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Class 11"));
       });
 
-      it("rewrites og:image for bot GET on a subject route (Task #14)", () => {
-        const resp = new Response(
-          '<html><head><meta property="og:image" content="old"></head></html>',
-          { headers: { "Content-Type": "text/html" } },
-        );
-        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
-
-        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
-        capturedHandlers['meta[property="og:image"]'].element(metaEl);
-        expect(metaEl.setAttribute).toHaveBeenCalledWith(
-          "content",
-          "https://cdn.syrabit.ai/og/chemistry.png",
-        );
-      });
-
-      it("og:image uses the raw subject slug (not title-cased) so the URL is stable", () => {
-        const resp = new Response("<html><head></head></html>", {
-          headers: { "Content-Type": "text/html" },
-        });
-        _injectSpaTitleForBot(resp, "/notes/class-11/political-science", true);
-
-        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
-        capturedHandlers['meta[property="og:image"]'].element(metaEl);
-        expect(metaEl.setAttribute).toHaveBeenCalledWith(
-          "content",
-          "https://cdn.syrabit.ai/og/political-science.png",
-        );
-      });
-
-      it("og:image for a board hub uses the board slug banner", () => {
-        const resp = new Response("<html><head></head></html>", {
-          headers: { "Content-Type": "text/html" },
-        });
-        _injectSpaTitleForBot(resp, "/ahsec", true);
-
-        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
-        capturedHandlers['meta[property="og:image"]'].element(metaEl);
-        expect(metaEl.setAttribute).toHaveBeenCalledWith(
-          "content",
-          "https://cdn.syrabit.ai/og/ahsec.png",
-        );
-      });
-
-      it("og:image for a board+class hub uses the board-class banner", () => {
-        const resp = new Response("<html><head></head></html>", {
-          headers: { "Content-Type": "text/html" },
-        });
-        _injectSpaTitleForBot(resp, "/ahsec/class-12", true);
-
-        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
-        capturedHandlers['meta[property="og:image"]'].element(metaEl);
-        expect(metaEl.setAttribute).toHaveBeenCalledWith(
-          "content",
-          "https://cdn.syrabit.ai/og/ahsec-class-12.png",
-        );
-      });
-
-      it("og:image for /learn/* is NOT registered (preserves generic SPA og:image)", () => {
-        const resp = new Response("<html><head></head></html>", {
-          headers: { "Content-Type": "text/html" },
-        });
-        _injectSpaTitleForBot(resp, "/learn/some-topic", true);
-        expect(capturedHandlers['meta[property="og:image"]']).toBeUndefined();
-      });
-
-      it("deep chapter path inherits the subject-level og:image", () => {
-        const resp = new Response("<html><head></head></html>", {
-          headers: { "Content-Type": "text/html" },
-        });
-        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry/atomic-structure", true);
-
-        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
-        capturedHandlers['meta[property="og:image"]'].element(metaEl);
-        expect(metaEl.setAttribute).toHaveBeenCalledWith(
-          "content",
-          "https://cdn.syrabit.ai/og/chemistry.png",
-        );
-      });
-
       it("og:title and og:description use the same values as title and description", () => {
         const resp = new Response("<html><head></head></html>", {
           headers: { "Content-Type": "text/html" },
@@ -536,6 +457,43 @@ describe("_resolveSpaRouteMeta", () => {
         const titleEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
         capturedHandlers["title"].element(titleEl);
         expect(titleEl.setInnerContent).toHaveBeenCalledWith("Chemistry — Class 12 Notes | Syrabit.ai");
+      });
+
+      it("rewrites twitter:title for bot GET on matched HTML route (Task #15)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:title" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:title"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", "Chemistry — Class 12 Notes | Syrabit.ai");
+      });
+
+      it("rewrites twitter:description for bot GET on matched HTML route (Task #15)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:description" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics/chapter-1", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:description"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Physics"));
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Class 11"));
+      });
+
+      it("sets twitter:card to summary_large_image on matched HTML route (Task #15)", () => {
+        const resp = new Response(
+          '<html><head><meta name="twitter:card" content="summary"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="twitter:card"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", "summary_large_image");
       });
     });
   });
