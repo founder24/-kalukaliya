@@ -246,6 +246,48 @@ describe("runSpaTitleMissAlert", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("bypasses the cooldown immediately when a brand-new path appears", async () => {
+    // First run: one known gap.
+    mockQuery.mockResolvedValue([
+      { pathname: "/seba/class-10/history", count: 100 },
+    ]);
+    const env = baseEnv();
+    const r1 = await runSpaTitleMissAlert(env, noopDeps(), NOW);
+    expect(r1.alert_fired).toBe(true);
+
+    // Second run 1 hour later (within cooldown) but a NEW path has appeared.
+    mockQuery.mockResolvedValue([
+      { pathname: "/seba/class-10/history",  count: 120 }, // already known
+      { pathname: "/degree/bcom/accounting", count: 80 },  // brand new
+    ]);
+    const oneHourLater = new Date(NOW.getTime() + 60 * 60 * 1000);
+    const r2 = await runSpaTitleMissAlert(env, noopDeps(), oneHourLater);
+    // Must NOT be skipped — new path bypasses cooldown.
+    expect(r2.skipped).toBe(false);
+    expect(r2.alert_fired).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // The webhook payload should include both paths.
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(body.gaps).toHaveLength(2);
+  });
+
+  it("respects the cooldown when the same paths re-appear (no new routes)", async () => {
+    // First run: known gap.
+    mockQuery.mockResolvedValue([
+      { pathname: "/seba/class-10/history", count: 100 },
+    ]);
+    const env = baseEnv();
+    await runSpaTitleMissAlert(env, noopDeps(), NOW);
+
+    // Second run 1 hour later with the same path still above threshold.
+    const oneHourLater = new Date(NOW.getTime() + 60 * 60 * 1000);
+    const r2 = await runSpaTitleMissAlert(env, noopDeps(), oneHourLater);
+    expect(r2.skipped).toBe(true);
+    expect(r2.reason).toMatch(/cooldown.*no new paths/);
+    expect(fetchMock).toHaveBeenCalledOnce(); // only the first call
+  });
+
   // ── webhook failures ─────────────────────────────────────────────────────
 
   it("returns alert_fired=false and does not update state when webhook fails", async () => {

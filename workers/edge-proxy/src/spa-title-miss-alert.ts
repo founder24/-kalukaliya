@@ -256,19 +256,10 @@ export async function runSpaTitleMissAlert(
   const state = await readState(kv);
   const thr   = threshold(env);
 
-  // ── cooldown check ─────────────────────────────────────────────────────────
-  if (state.last_fired_at) {
-    const lastMs = new Date(state.last_fired_at).getTime();
-    if (now.getTime() - lastMs < COOLDOWN_MS) {
-      return {
-        ok: true, skipped: true,
-        reason: `cooldown active since ${state.last_fired_at}`,
-        gaps_found: 0, gaps_above_threshold: 0, alert_fired: false,
-      };
-    }
-  }
-
-  // ── query Analytics Engine ─────────────────────────────────────────────────
+  // ── query Analytics Engine first so cooldown can be bypassed for new paths ─
+  // We always pay the AE query cost (one lightweight GQL call/day) because
+  // the cooldown is path-aware: if a brand-new uncovered route appears, it
+  // should alert immediately even if we are within the 23-hour window.
   let misses: SpaTitleMiss[];
   try {
     misses = await querySpaTitleMisses(env.CF_ANALYTICS_TOKEN, "24h");
@@ -293,6 +284,26 @@ export async function runSpaTitleMissAlert(
       gaps_found: uncovered.length, gaps_above_threshold: 0,
       alert_fired: false,
     };
+  }
+
+  // ── cooldown check — bypassed when a new path appears ─────────────────────
+  // last_paths tracks which paths were included in the previous alert. If
+  // every qualifying path was already reported, the cooldown gate applies
+  // (suppress re-alerting the same set every day). If any path is new, we
+  // fire immediately even if last_fired_at is recent.
+  const previousPaths = new Set(state.last_paths);
+  const hasNewPath = gapsAbove.some((m) => !previousPaths.has(m.pathname));
+
+  if (!hasNewPath && state.last_fired_at) {
+    const lastMs = new Date(state.last_fired_at).getTime();
+    if (now.getTime() - lastMs < COOLDOWN_MS) {
+      return {
+        ok: true, skipped: true,
+        reason: `cooldown active since ${state.last_fired_at} (no new paths)`,
+        gaps_found: uncovered.length, gaps_above_threshold: gapsAbove.length,
+        alert_fired: false,
+      };
+    }
   }
 
   // ── build enriched payload ─────────────────────────────────────────────────
