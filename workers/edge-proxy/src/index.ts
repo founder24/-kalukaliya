@@ -20,6 +20,7 @@ import { runSyntheticProbe } from "./synthetic-probe";
 import { runCfBlockProbe } from "./cf-block-probe";
 import { runBotCacheAlert } from "./bot-cache-alert";
 import { runAiGatewayCacheAlert } from "./ai-gateway-cache-alert";
+import { runSpaTitleMissAlert } from "./spa-title-miss-alert";
 import {
   runR2StorageClassAlert,
   resetR2StorageWatchdogBlindCounter,
@@ -4879,6 +4880,19 @@ export default {
           console.error(`[r2-storage-class-alert] unhandled error: ${msg.slice(0, 300)}`);
         }));
       }
+      return;
+    }
+    if (cron === "0 1 * * *") {
+      // Task #13 — daily SPA title-miss gap alert. Queries the Analytics
+      // Engine for the rolling 24h window and pages when any uncovered
+      // path exceeds SPA_TITLE_MISS_ALERT_THRESHOLD (default 50) hits.
+      ctx.waitUntil(runSpaTitleMissAlert(wrapped, {
+        resolveMeta: _resolveSpaRouteMeta,
+        slugToTitle: _slugToTitle,
+      }).catch((e) => {
+        const msg = e instanceof Error ? e.message : "unknown";
+        console.error(`[spa-title-miss-alert] unhandled error: ${msg.slice(0, 300)}`);
+      }));
       return;
     }
     if (cron === "0 */6 * * *") {

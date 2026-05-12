@@ -491,7 +491,13 @@ new_classes = ["SeasonCacheDO"]
 #                   R2_STORAGE_ALERT_DISABLED=true to pause.
 #
 #   "0 */6 * * *" → 6-hourly D1 content sync from the Railway backend.
-crons = ["* * * * *", "0 */6 * * *"]
+#   "0 1 * * *"   → Task #13 daily SPA title-miss gap alert. Queries the
+#                   Analytics Engine for paths that exceeded the bot-hit
+#                   threshold (SPA_TITLE_MISS_ALERT_THRESHOLD, default 50)
+#                   without a matching _resolveSpaRouteMeta pattern and
+#                   fires a single webhook alert via
+#                   SYNTHETIC_PROBE_WATCHDOG_WEBHOOK_URL.
+crons = ["* * * * *", "0 */6 * * *", "0 1 * * *"]
 
 # ---------------------------------------------------------------------------
 # Phase 6 (Task #110) — mTLS client certificate for Railway origin hardening.
