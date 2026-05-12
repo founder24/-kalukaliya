@@ -171,6 +171,12 @@ function maybeFlush(binding: string, kv: KVNamespace | undefined, ctx?: Executio
 export function _resetMonitorStateForTests(): void {
   _state.clear();
   _currentDay = utcDayKey();
+  // _opsSinceFlush is a separate module-level Map that tracks the rolling
+  // operation count between shared-counter flushes (every FLUSH_EVERY_OPS
+  // ops). It must be cleared alongside _state so accumulated ops from one
+  // test cannot cause an unexpected flushSharedCounter write → kv.put() in
+  // a later test, making put-call-count assertions flaky.
+  _opsSinceFlush.clear();
 }
 
 /* ───────────────────── snapshot / status ───────────────────── */

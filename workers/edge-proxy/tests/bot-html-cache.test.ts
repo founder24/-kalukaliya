@@ -705,6 +705,111 @@ describe("BOT_HTML_CACHE end-to-end via worker.fetch (verifiedBot=true)", () => 
     expect(kv.putSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("/notes topic path (4 segments): cold request misses, backend is fetched at the topic SEO URL, KV is written; warm request hits cache without re-fetching (Task #42)", async () => {
+    // /notes/class-12/biology/cell-division — 4 parts →
+    // resolveBotApiUrl → /api/seo/html/notes/class-12/biology/cell-division
+    const TOPIC_PATH = "/notes/class-12/biology/cell-division";
+    const kv = makeExpiringKv();
+    const env = makeEnv({ botCache: kv });
+
+    const r1 = await workerHandler.fetch(
+      botRequest(TOPIC_PATH),
+      env,
+      ctxNoop,
+    );
+    expect(r1.status).toBe(200);
+    expect(r1.headers.get("X-Cache")).toBe("BOT-KV-MISS");
+    expect(r1.headers.get("X-Source")).toMatch(/^bot-prerender(?:-fallback)?$/);
+    expect(r1.headers.get("Last-Modified")).toBe(BACKEND_LM);
+    expect(r1.headers.get("ETag")).toMatch(/^"[0-9a-f]{12}"$/);
+    expect(await r1.text()).toBe(RENDERED_HTML);
+
+    // KV key must match the full pathname.
+    expect(kv.putSpy).toHaveBeenCalledTimes(1);
+    const [storedKey, storedValue, storedOpts] = kv.putSpy.mock.calls[0];
+    expect(storedKey).toBe(`bot:content:${TOPIC_PATH}`);
+    expect(storedOpts?.expirationTtl).toBe(3600);
+    const wrapper = JSON.parse(storedValue);
+    expect(wrapper.body).toBe(RENDERED_HTML);
+    expect(wrapper.lastmod).toBe(BACKEND_LM);
+
+    // The backend must have been called with the 4-segment topic SEO URL
+    // (not the 3-segment subject URL — the routing branch is different).
+    const backendCalls = fetchSpy.mock.calls.filter(([url, init]) => {
+      const method = ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase();
+      return method === "GET" && String(url).includes("/api/seo/html/notes/class-12/biology/cell-division");
+    });
+    expect(backendCalls.length).toBe(1);
+
+    // Warm request: KV hit, backend is not re-fetched.
+    const callsBefore = fetchSpy.mock.calls.length;
+    const r2 = await workerHandler.fetch(
+      botRequest(TOPIC_PATH),
+      env,
+      ctxNoop,
+    );
+    expect(r2.status).toBe(200);
+    expect(r2.headers.get("X-Cache")).toBe("BOT-KV-HIT");
+    expect(r2.headers.get("X-Source")).toBe("bot-cache");
+    expect(await r2.text()).toBe(RENDERED_HTML);
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore);
+    expect(kv.putSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("/notes typed-topic path (5 segments): cold request misses, backend is fetched at the typed-topic SEO URL, KV is written; warm request hits cache without re-fetching (Task #42)", async () => {
+    // /notes/class-12/biology/cell-division/mcqs — 5 parts →
+    // resolveBotApiUrl → /api/seo/html/notes/class-12/biology/cell-division/mcqs
+    const TYPED_TOPIC_PATH = "/notes/class-12/biology/cell-division/mcqs";
+    const kv = makeExpiringKv();
+    const env = makeEnv({ botCache: kv });
+
+    const r1 = await workerHandler.fetch(
+      botRequest(TYPED_TOPIC_PATH),
+      env,
+      ctxNoop,
+    );
+    expect(r1.status).toBe(200);
+    expect(r1.headers.get("X-Cache")).toBe("BOT-KV-MISS");
+    expect(r1.headers.get("X-Source")).toMatch(/^bot-prerender(?:-fallback)?$/);
+    expect(r1.headers.get("Last-Modified")).toBe(BACKEND_LM);
+    expect(r1.headers.get("ETag")).toMatch(/^"[0-9a-f]{12}"$/);
+    expect(await r1.text()).toBe(RENDERED_HTML);
+
+    // KV key must carry all 5 path segments.
+    expect(kv.putSpy).toHaveBeenCalledTimes(1);
+    const [storedKey, storedValue, storedOpts] = kv.putSpy.mock.calls[0];
+    expect(storedKey).toBe(`bot:content:${TYPED_TOPIC_PATH}`);
+    expect(storedOpts?.expirationTtl).toBe(3600);
+    const wrapper = JSON.parse(storedValue);
+    expect(wrapper.body).toBe(RENDERED_HTML);
+    expect(wrapper.lastmod).toBe(BACKEND_LM);
+
+    // The backend must have been called at the 5-segment typed-topic SEO URL
+    // (page_type suffix "mcqs" must be part of the path, not a query-param).
+    const backendCalls = fetchSpy.mock.calls.filter(([url, init]) => {
+      const method = ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase();
+      return (
+        method === "GET" &&
+        String(url).includes("/api/seo/html/notes/class-12/biology/cell-division/mcqs")
+      );
+    });
+    expect(backendCalls.length).toBe(1);
+
+    // Warm request: KV hit, backend is not re-fetched.
+    const callsBefore = fetchSpy.mock.calls.length;
+    const r2 = await workerHandler.fetch(
+      botRequest(TYPED_TOPIC_PATH),
+      env,
+      ctxNoop,
+    );
+    expect(r2.status).toBe(200);
+    expect(r2.headers.get("X-Cache")).toBe("BOT-KV-HIT");
+    expect(r2.headers.get("X-Source")).toBe("bot-cache");
+    expect(await r2.text()).toBe(RENDERED_HTML);
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore);
+    expect(kv.putSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("KV entry expires after expirationTtl seconds: a later request misses and re-renders", async () => {
     const kv = makeExpiringKv();
     const env = makeEnv({ botCache: kv });
