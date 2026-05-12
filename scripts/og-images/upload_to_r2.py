@@ -48,7 +48,12 @@ def _build_client():
     """Build a boto3 S3 client pointed at R2. Raises if env vars are missing."""
     key    = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
     secret = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
-    acct   = os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
+    # Prefer explicit R2_ENDPOINT_URL; otherwise derive from CLOUDFLARE_ACCOUNT_ID
+    # (CF_AI_GATEWAY_ACCOUNT_ID accepted as a legacy alias for the same value).
+    acct = (
+        os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+        or os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "")
+    ).strip()
     endpoint = os.environ.get("R2_ENDPOINT_URL", "").strip() or (
         f"https://{acct}.r2.cloudflarestorage.com" if acct else ""
     )
@@ -56,7 +61,9 @@ def _build_client():
         raise RuntimeError(
             "\nMissing R2 credentials.  Set these environment variables:\n"
             "  R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,\n"
-            "  CF_AI_GATEWAY_ACCOUNT_ID  (or R2_ENDPOINT_URL)\n"
+            "  R2_ENDPOINT_URL            — e.g. https://<acct>.r2.cloudflarestorage.com\n"
+            "               OR\n"
+            "  CLOUDFLARE_ACCOUNT_ID      — account ID; endpoint is derived automatically\n"
         )
     import boto3
     from botocore.config import Config
