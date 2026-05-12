@@ -3542,11 +3542,20 @@ export function _injectSpaTitleForBot(
   }
 
   const { title, description } = meta;
+  // Task #8 — also rewrite Open Graph tags so social-sharing previews
+  // (WhatsApp, Telegram, Twitter/X) show the route-specific title and
+  // description rather than the generic SPA fallback.
   return new HTMLRewriter()
     .on("title", {
       element(el) { el.setInnerContent(title); },
     })
     .on('meta[name="description"]', {
+      element(el) { el.setAttribute("content", description); },
+    })
+    .on('meta[property="og:title"]', {
+      element(el) { el.setAttribute("content", title); },
+    })
+    .on('meta[property="og:description"]', {
       element(el) { el.setAttribute("content", description); },
     })
     .transform(response);

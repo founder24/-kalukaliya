@@ -397,6 +397,56 @@ describe("_resolveSpaRouteMeta", () => {
         expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Class 11"));
       });
 
+      it("rewrites og:title for bot GET on matched HTML route (Task #8)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:title" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:title"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", "Chemistry — Class 12 Notes | Syrabit.ai");
+      });
+
+      it("rewrites og:description for bot GET on matched HTML route (Task #8)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:description" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics/chapter-1", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:description"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Physics"));
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Class 11"));
+      });
+
+      it("og:title and og:description use the same values as title and description", () => {
+        const resp = new Response("<html><head></head></html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+        _injectSpaTitleForBot(resp, "/ahsec/class-12", true);
+
+        const titleEl    = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const ogTitleEl  = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const descEl     = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        const ogDescEl   = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+
+        capturedHandlers["title"].element(titleEl);
+        capturedHandlers['meta[property="og:title"]'].element(ogTitleEl);
+        capturedHandlers['meta[name="description"]'].element(descEl);
+        capturedHandlers['meta[property="og:description"]'].element(ogDescEl);
+
+        const titleValue  = titleEl.setInnerContent.mock.calls[0][0] as string;
+        const ogTitleVal  = ogTitleEl.setAttribute.mock.calls[0][1] as string;
+        const descValue   = descEl.setAttribute.mock.calls[0][1] as string;
+        const ogDescValue = ogDescEl.setAttribute.mock.calls[0][1] as string;
+
+        expect(ogTitleVal).toBe(titleValue);
+        expect(ogDescValue).toBe(descValue);
+      });
+
       it("applies rewrite for deep chapter path (nested route) — acceptance example", () => {
         const resp = new Response("<html><head><title>Old</title></head></html>", {
           headers: { "Content-Type": "text/html" },
