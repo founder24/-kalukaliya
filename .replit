@@ -18,49 +18,35 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "tf-apply"
+args = "Backend"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "dev_health"
+args = "Start application"
 
 [[workflows.workflow]]
-name = "tf-apply"
+name = "Backend"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = """
-bash -c '
-  export AWS_ACCESS_KEY_ID=\"$AWS_TF_ACCESS_KEY_ID\"
-  export AWS_SECRET_ACCESS_KEY=\"$AWS_TF_SECRET_ACCESS_KEY\"
-  export AWS_DEFAULT_REGION=ap-south-1
-  export TF_VAR_r2_endpoint_url=\"$R2_ENDPOINT_URL\"
-  export TF_VAR_azure_tenant_id=00000000-0000-0000-0000-000000000000
-  export TF_VAR_azure_cron_runtime_object_id=00000000-0000-0000-0000-000000000000
-  export TF_VAR_azure_aca_backend_ip=104.18.18.233
-  export PATH=/home/runner/.local/bin:$PATH
-  cd /home/runner/workspace/artifacts/syrabit/infra/aws
-  echo \"=== START $(date -u +%H:%M:%S) ===\"
-  terraform apply -input=false -auto-approve -parallelism=30
-  echo \"=== EXIT=$? at $(date -u +%H:%M:%S) ===\"
-  # Keep workflow alive so logs persist
-  sleep 300
-  '"""
+args = "cd artifacts/syrabit-backend && python3 -m uvicorn server:app --host 0.0.0.0 --port 8080 --reload"
+waitForPort = 8080
 
 [workflows.workflow.metadata]
 outputType = "console"
 
 [[workflows.workflow]]
-name = "dev_health"
+name = "Start application"
 author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash scripts/dev_health_check.sh"
-
-[workflows.workflow.metadata]
-isValidation = true
+args = "cd artifacts/syrabit && PORT=5000 pnpm dev"
+waitForPort = 5000
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -78,7 +64,7 @@ packages = ["cargo", "libiconv", "libxcrypt", "rustc"]
 [userenv]
 
 [userenv.shared]
-DB_NAME = "test_database"
+DB_NAME = "syrabit_dev"
 ADMIN_EMAILS = "admin@syrabit.ai"
 ADMIN_NAMES = "Administrator"
 LLM_PROVIDER = "groq"
@@ -90,13 +76,14 @@ VITE_SITE_URL = "https://syrabit.ai"
 TRUSTPILOT_BUSINESS_UNIT_ID = "6831bda2e0dd12f40d94de6c"
 EDGE_WORKER_URL = "https://api.syrabit.ai"
 CF_AI_GATEWAY_ACCOUNT_ID = "d66e40eac539fff1db270fddf384a5ec"
-CORS_ORIGINS = "http://localhost:5000,http://localhost:3000,http://0.0.0.0:5000,https://f5641b56-9215-49ab-9946-ebb50a2f75a2-00-2rp6le2tp8cuz.kirk.replit.dev,https://*.replit.dev,https://*.replit.app"
+CORS_ORIGINS = "http://localhost:5000,http://localhost:3000,https://*.replit.dev,https://*.replit.app,https://*.pike.replit.dev,https://*.kirk.replit.dev"
 EMAIL_WORKER_URL = "https://syrabit-email.axomxplain.workers.dev"
 EMAIL_WORKER_AUTH_KEY = "Tt12N2yvx26opixnNz37nJW_dFo35bFC0r3kr9Iydeg"
 VITE_SUPABASE_URL = "https://czeznmqogtwecidhpysa.supabase.co"
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6ZXpubXFvZ3R3ZWNpZGhweXNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxMjI1NDUsImV4cCI6MjA4NzY5ODU0NX0.7J2dlwfibjTArT6J4N3AnJ90OfgW4nYsym4T8kJ81u4"
 PINECONE_WRITE = "true"
 CLOUDFLARE_ACCOUNT_ID = "d66e40eac539fff1db270fddf384a5ec"
+PINECONE_INDEX = "syrabit-ahsec"
 
 [userenv.development]
 
@@ -111,19 +98,7 @@ VITE_BACKEND_URL = "https://api.syrabit.ai"
 
 [[ports]]
 localPort = 5000
-externalPort = 5000
-
-[[ports]]
-localPort = 5001
-externalPort = 3002
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 8081
+externalPort = 80
 
 [[ports]]
 localPort = 8082
