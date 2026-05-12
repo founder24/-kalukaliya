@@ -159,7 +159,7 @@ function clean(obj) {
   return obj;
 }
 
-function rewriteHead(html, { title, description, canonical }) {
+function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
   html = html.replace(
     /<title>[^<]*<\/title>/,
     `<title>${escapeHtml(title)}</title>`,
@@ -196,6 +196,12 @@ function rewriteHead(html, { title, description, canonical }) {
     /<meta property="og:description" content="[^"]*"\s*\/?>/,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
   );
+  if (ogImageAlt) {
+    html = html.replace(
+      /<meta property="og:image:alt" content="[^"]*"\s*\/?>/,
+      `<meta property="og:image:alt" content="${escapeHtml(ogImageAlt)}" />`,
+    );
+  }
   html = html.replace(
     /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:title" content="${escapeHtml(title)}" />`,
@@ -785,6 +791,7 @@ async function main() {
             `Complete ${subjectName} study material for ${boardName} ${className}. ` +
               `AI-powered notes, MCQs, important questions, and exam preparation.`,
           canonical,
+          ogImageAlt: `${subjectName} — ${boardName} ${className} | Syrabit.ai`,
         },
       });
       const out = writeRoute(url, html);
@@ -905,6 +912,7 @@ async function main() {
               chapterPayload.meta_description ||
               `${chapterTitle} notes for ${subjName}. Complete study material for ${bName} ${cName} students.`,
             canonical: chapterCanonical,
+            ogImageAlt: `${chapterTitle} — ${subjName} | Syrabit.ai`,
           },
         });
         // P0 #1 — bake FAQPage JSON-LD into byte-zero HTML so AI

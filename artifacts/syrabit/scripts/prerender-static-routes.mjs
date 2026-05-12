@@ -55,12 +55,14 @@ const ROUTES = [
       "Syrabit.ai — Educational Browser For Assam Board Students",
     description:
       "AI-powered educational browser for AHSEC, SEBA and Degree students in Assam. Browse syllabus content, get instant answers, and study smarter.",
+    ogImageAlt: "Syrabit.ai — Educational Browser For Assam Board Students",
   },
   {
     path: "/pricing",
     title: "Pricing & Plans — Free, Starter & Pro | Syrabit.ai",
     description:
       "Compare Syrabit.ai plans for AHSEC and Degree students. Start free or upgrade to Starter (₹99) or Pro (₹999) for unlimited AI study help.",
+    ogImageAlt: "Syrabit.ai Pricing & Plans — Free, Starter & Pro",
   },
   {
     path: "/login",
@@ -68,30 +70,35 @@ const ROUTES = [
     description:
       "Sign in to Syrabit.ai to continue your AHSEC, SEBA or Degree exam preparation. Resume your study notes, MCQs, and AI chat history.",
     robots: "noindex, follow",
+    ogImageAlt: "Log In to Syrabit.ai",
   },
   {
     path: "/signup",
     title: "Create Your Free Syrabit.ai Account",
     description:
       "Sign up free for Syrabit.ai — the AI-powered study platform built for Assam Board (AHSEC, SEBA) and Degree (B.Com, B.A, B.Sc) students.",
+    ogImageAlt: "Create Your Free Syrabit.ai Account",
   },
   {
     path: "/terms",
     title: "Terms of Service | Syrabit.ai",
     description:
       "Terms and conditions for using Syrabit.ai — the AI-powered study platform for Assam Board and Degree students.",
+    ogImageAlt: "Syrabit.ai Terms of Service",
   },
   {
     path: "/privacy",
     title: "Privacy Policy | Syrabit.ai",
     description:
       "How Syrabit.ai collects, uses and protects student data on our AI-powered exam preparation platform for AHSEC, SEBA and Degree students.",
+    ogImageAlt: "Syrabit.ai Privacy Policy",
   },
   {
     path: "/about",
     title: "About Syrabit.ai — The Educational Browser For Assam",
     description:
       "Learn about Syrabit.ai, the AI-powered study platform built in Guwahati for AHSEC (Class 11-12), SEBA, and Degree students across Assam.",
+    ogImageAlt: "About Syrabit.ai — The Educational Browser For Assam",
   },
   {
     // Stream landing pages — Task: stop serving the homepage HTML shell
@@ -105,6 +112,7 @@ const ROUTES = [
       "AHSEC Class 11-12 Notes, MCQs & Solved PYQs — Syrabit.ai",
     description:
       "Free AHSEC Class 11 and Class 12 syllabus notes, MCQs, definitions and solved previous-year questions for Science, Commerce and Arts. AI study help in Assamese & English.",
+    ogImageAlt: "AHSEC study materials — Syrabit.ai",
   },
   {
     path: "/seba",
@@ -112,6 +120,7 @@ const ROUTES = [
       "SEBA Class 9-10 (HSLC) Notes, MCQs & Solved PYQs — Syrabit.ai",
     description:
       "Free SEBA Class 9 and Class 10 (HSLC) syllabus notes, chapter summaries, MCQs and solved previous-year questions. AI tutor in Assamese & English for every subject.",
+    ogImageAlt: "SEBA study materials — Syrabit.ai",
   },
   {
     path: "/degree",
@@ -119,12 +128,14 @@ const ROUTES = [
       "Gauhati University Degree Notes — B.A, B.Com, B.Sc | Syrabit.ai",
     description:
       "Free Gauhati University and Dibrugarh University degree syllabus notes, MCQs and exam-ready answers for B.A, B.Com and B.Sc (FYUGP) students across Assam.",
+    ogImageAlt: "Degree study materials — Syrabit.ai",
   },
   {
     path: "/technology",
     title: "Technology Behind Syrabit.ai — RAG, AI Tutors & Speed",
     description:
       "How Syrabit.ai combines retrieval-augmented generation, AI tutors and Cloudflare's edge to deliver fast, syllabus-grounded answers for Assam students.",
+    ogImageAlt: "Technology Behind Syrabit.ai — RAG, AI Tutors & Speed",
   },
   {
     // Task #499: auth-gated user shell — must ship its own canonical
@@ -136,6 +147,7 @@ const ROUTES = [
     description:
       "Manage your Syrabit.ai account, study history, and AHSEC, SEBA or Degree exam preparation preferences.",
     robots: "noindex, follow",
+    ogImageAlt: "Your Profile — Syrabit.ai",
   },
   {
     // Task #499: admin login is also noindex but still needs a
@@ -146,6 +158,7 @@ const ROUTES = [
     description:
       "Internal Syrabit.ai administrator sign-in. Not for student accounts — students log in at /login instead.",
     robots: "noindex, follow",
+    ogImageAlt: "Admin Login — Syrabit.ai",
   },
   {
     // Task #2 (SEO Quick Wins): AHSEC class-level index pages are high-value
@@ -157,12 +170,14 @@ const ROUTES = [
     title: "AHSEC HS 1st Year (Class 11) Notes, MCQs & PYQs — Syrabit.ai",
     description:
       "Free AHSEC Class 11 (HS 1st Year) notes, MCQs, definitions and solved previous-year questions for all subjects — Science, Commerce and Arts. AI study help in Assamese & English.",
+    ogImageAlt: "AHSEC HS 1st Year (Class 11) study materials — Syrabit.ai",
   },
   {
     path: "/ahsec/hs-2nd-year",
     title: "AHSEC HS 2nd Year (Class 12) Notes, MCQs & PYQs — Syrabit.ai",
     description:
       "Free AHSEC Class 12 (HS 2nd Year) notes, MCQs, definitions and solved previous-year questions for all subjects — Science, Commerce and Arts. AI study help in Assamese & English.",
+    ogImageAlt: "AHSEC HS 2nd Year (Class 12) study materials — Syrabit.ai",
   },
   {
     // Task #2 (SEO Quick Wins): /notes/* hub pages drive long-tail search
@@ -172,18 +187,21 @@ const ROUTES = [
     title: "Class 11 Notes, MCQs & PYQs for Assam Board (AHSEC) — Syrabit.ai",
     description:
       "Browse free AHSEC Class 11 (HS 1st Year) chapter notes, MCQs and solved PYQs for every subject. AI-powered study help in Assamese & English.",
+    ogImageAlt: "Class 11 study notes — Syrabit.ai",
   },
   {
     path: "/notes/class-12",
     title: "Class 12 Notes, MCQs & PYQs for Assam Board (AHSEC) — Syrabit.ai",
     description:
       "Browse free AHSEC Class 12 (HS 2nd Year) chapter notes, MCQs and solved PYQs for every subject. AI-powered study help in Assamese & English.",
+    ogImageAlt: "Class 12 study notes — Syrabit.ai",
   },
   {
     path: "/notes/degree",
     title: "Degree Notes — B.A, B.Com, B.Sc (GU / DU) | Syrabit.ai",
     description:
       "Free Gauhati University and Dibrugarh University degree chapter notes, MCQs and exam-ready answers for B.A, B.Com, and B.Sc (FYUGP) students.",
+    ogImageAlt: "Degree study notes — Syrabit.ai",
   },
 ];
 
@@ -196,7 +214,7 @@ function escapeHtml(s = "") {
     .replace(/'/g, "&#39;");
 }
 
-function rewriteHead(html, { title, description, canonical, robots }) {
+function rewriteHead(html, { title, description, canonical, robots, ogImageAlt }) {
   html = html.replace(
     /<title>[^<]*<\/title>/,
     `<title>${escapeHtml(title)}</title>`,
@@ -222,7 +240,7 @@ function rewriteHead(html, { title, description, canonical, robots }) {
     );
   }
 
-  // og:url + matching titles/descriptions
+  // og:url + matching titles/descriptions + og:image:alt
   html = html.replace(
     /<meta property="og:url" content="[^"]*"\s*\/?>/,
     `<meta property="og:url" content="${canonical}" />`,
@@ -235,6 +253,12 @@ function rewriteHead(html, { title, description, canonical, robots }) {
     /<meta property="og:description" content="[^"]*"\s*\/?>/,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
   );
+  if (ogImageAlt) {
+    html = html.replace(
+      /<meta property="og:image:alt" content="[^"]*"\s*\/?>/,
+      `<meta property="og:image:alt" content="${escapeHtml(ogImageAlt)}" />`,
+    );
+  }
   html = html.replace(
     /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:title" content="${escapeHtml(title)}" />`,
@@ -296,6 +320,7 @@ function main() {
       description: route.description,
       canonical,
       robots: route.robots,
+      ogImageAlt: route.ogImageAlt,
     });
 
     // Hard assertion: exactly one <link rel="canonical"> with the
@@ -311,6 +336,13 @@ function main() {
     if (!canonicalTags[0].includes(`href="${canonical}"`)) {
       throw new Error(
         `[prerender-static-routes] ${route.path}: canonical points to wrong URL — ${canonicalTags[0]}`,
+      );
+    }
+    // Hard assertion: og:image:alt must be present and non-empty so social
+    // crawlers always get a descriptive alt string on first byte.
+    if (!/<meta property="og:image:alt" content="[^"]+"/.test(html)) {
+      throw new Error(
+        `[prerender-static-routes] ${route.path}: og:image:alt missing or empty in prerendered HTML`,
       );
     }
 

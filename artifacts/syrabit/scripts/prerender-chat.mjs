@@ -76,6 +76,10 @@ function rewriteHead(html) {
     `<meta property="og:description" content="${escapeHtml(DESCRIPTION)}" />`,
   );
   html = html.replace(
+    /<meta property="og:image:alt" content="[^"]*"\s*\/?>/,
+    `<meta property="og:image:alt" content="${escapeHtml(TITLE)}" />`,
+  );
+  html = html.replace(
     /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:title" content="${escapeHtml(TITLE)}" />`,
   );
@@ -211,6 +215,13 @@ async function main() {
   if (!/<meta name="robots" content="noindex, follow"\s*\/?>/.test(written)) {
     throw new Error(
       "[prerender-chat] noindex assertion failed: robots meta not set to noindex,follow",
+    );
+  }
+  // Hard assertion: og:image:alt must be present and non-empty so social
+  // crawlers see a descriptive alt string on the prerendered /chat page.
+  if (!/<meta property="og:image:alt" content="[^"]+"/.test(written)) {
+    throw new Error(
+      "[prerender-chat] og:image:alt assertion failed: tag missing or empty in prerendered HTML",
     );
   }
 

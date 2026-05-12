@@ -72,6 +72,9 @@ async function fetchBundle() {
   return data;
 }
 
+const OG_IMAGE_ALT =
+  "Assamboard Subject Library — Notes, MCQs, Definitions & Exam Prep";
+
 function rewriteHead(html) {
   html = html.replace(
     /<title>[^<]*<\/title>/,
@@ -106,6 +109,10 @@ function rewriteHead(html) {
   html = html.replace(
     /<meta property="og:description" content="[^"]*"\s*\/?>/,
     `<meta property="og:description" content="${escapeHtml(DESCRIPTION)}" />`,
+  );
+  html = html.replace(
+    /<meta property="og:image:alt" content="[^"]*"\s*\/?>/,
+    `<meta property="og:image:alt" content="${escapeHtml(OG_IMAGE_ALT)}" />`,
   );
   html = html.replace(
     /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
@@ -354,6 +361,13 @@ async function main() {
     ) {
       throw new Error(
         `[prerender-library] hydration assertion failed for ${route}: #root is empty or missing data-hydrate marker`,
+      );
+    }
+    // Hard assertion: og:image:alt must be present and non-empty so social
+    // crawlers see a descriptive alt string on the prerendered /library page.
+    if (!/<meta property="og:image:alt" content="[^"]+"/.test(written)) {
+      throw new Error(
+        `[prerender-library] og:image:alt assertion failed for ${route}: tag missing or empty`,
       );
     }
 
