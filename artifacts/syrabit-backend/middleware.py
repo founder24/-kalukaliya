@@ -996,3 +996,56 @@ class MtlsClientCertMiddleware:
         )
         await resp(scope, receive, send)
 
+
+# ── /learn/ slug normalisation redirect (Task #3 — SEO) ─────────────────────
+#
+# Any request to ``/learn/<dirty-slug>`` where the slug contains paper-code
+# noise (parenthesised codes like ``(2025)`` or ``(bcm0200304)``) is 301-
+# redirected to the clean form so that any URLs Google may have already
+# crawled are normalised before a user or bot follows them.
+#
+# Only fires for paths that actually need cleaning — clean slugs pass
+# through to the SPA/CF Pages handler unchanged.
+
+_DIRTY_LEARN_PARENS_RE = re.compile(r"\([^)]*\)")
+_DIRTY_LEARN_DASH_RE   = re.compile(r"-{2,}")
+
+
+def _normalize_learn_slug(slug: str) -> str:
+    cleaned = _DIRTY_LEARN_PARENS_RE.sub("", slug)
+    cleaned = _DIRTY_LEARN_DASH_RE.sub("-", cleaned).strip("-")
+    return cleaned or slug
+
+
+class DirtyLearnSlugRedirectMiddleware:
+    """301-redirect ``/learn/<noisy-slug>`` → ``/learn/<clean-slug>``.
+
+    Only activates when the path segment after ``/learn/`` contains a ``(``
+    character (presence of a parenthesised paper code or year).  All other
+    requests pass through without any processing cost.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            path: str = scope.get("path", "")
+            if path.startswith("/learn/") and "(" in path:
+                prefix = "/learn/"
+                raw_slug = path[len(prefix):]
+                clean_slug = _normalize_learn_slug(raw_slug)
+                if clean_slug != raw_slug and clean_slug:
+                    qs = scope.get("query_string", b"")
+                    location = f"{prefix}{clean_slug}"
+                    if qs:
+                        location = f"{location}?{qs.decode('latin-1')}"
+                    from starlette.responses import Response as _R
+                    resp = _R(
+                        status_code=301,
+                        headers={"Location": location,
+                                 "Cache-Control": "public, max-age=31536000"},
+                    )
+                    await resp(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)

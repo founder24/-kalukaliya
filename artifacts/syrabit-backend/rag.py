@@ -8,6 +8,19 @@ from utils import _extract_keywords
 
 logger = logging.getLogger(__name__)
 
+# Task #3 (SEO): strip paper-code noise from /learn/ slugs in source URLs.
+# Defined inline here so rag.py has no import dependency on seo_engine.
+# Must be kept in sync with seo_engine._clean_learn_slug.
+_LEARN_SLUG_PARENS_RE = re.compile(r"\([^)]*\)")
+_LEARN_SLUG_DASH_RE   = re.compile(r"-{2,}")
+
+def _clean_learn_slug(slug: str) -> str:
+    if not slug:
+        return slug
+    cleaned = _LEARN_SLUG_PARENS_RE.sub("", slug)
+    cleaned = _LEARN_SLUG_DASH_RE.sub("-", cleaned).strip("-")
+    return cleaned or slug
+
 __all__ = [
     "_HISTORY_MAX_TURNS", "_HISTORY_TOKEN_BUDGET",
     "_LATENCY_MAX", "_RAG_TELEM_MAX",
@@ -1051,7 +1064,11 @@ def _sources_from_rag_ctx(
     _cc_meta = rag_ctx.get("content_card_meta")
     if _cc_meta and (_cc_meta.get("card_name") or _cc_meta.get("lesson_name")):
         _cc_slug = _cc_meta.get("card_slug", "")
-        _cc_url = f"/learn/{_cc_slug}" if _cc_slug and not _cc_slug.startswith("chapter/") else ""
+        _cc_url = (
+            f"/learn/{_clean_learn_slug(_cc_slug)}"
+            if _cc_slug and not _cc_slug.startswith("chapter/")
+            else ""
+        )
         sources.append({
             "type":         "content_card",
             "card_name":    _cc_meta.get("card_name", ""),

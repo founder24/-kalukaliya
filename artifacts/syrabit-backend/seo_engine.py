@@ -5445,6 +5445,33 @@ async def _build_valid_slug_chains() -> set[tuple[str, str, str]]:
         return set()
 
 
+_LEARN_SLUG_PARENS_RE = re.compile(r"\([^)]*\)")
+_LEARN_SLUG_DASH_RE   = re.compile(r"-{2,}")
+
+
+def _clean_learn_slug(slug: str) -> str:
+    """Strip paper-code noise from a /learn/ slug for sitemap output.
+
+    Removes parenthesised codes such as ``(2025)`` or ``(bcm0200304)``,
+    then collapses consecutive hyphens to one and strips edge hyphens.
+    Applied only when emitting sitemap or citation URLs — the ``seo_slug``
+    field in MongoDB is never modified by this function.
+
+    Examples::
+
+        "bcom--2nd-sem---bcm--03-(2025)--(bcm0200304)"
+          → "bcom-2nd-sem-bcm-03"
+        "financial-accounting-(fyugp)-2024---fa0200101"
+          → "financial-accounting-2024-fa0200101"
+        "physical-world"   → "physical-world"   (already clean — unchanged)
+    """
+    if not slug:
+        return slug
+    cleaned = _LEARN_SLUG_PARENS_RE.sub("", slug)
+    cleaned = _LEARN_SLUG_DASH_RE.sub("-", cleaned).strip("-")
+    return cleaned or slug
+
+
 def _changefreq_from_lastmod(lastmod: str, today: str) -> tuple[str, str]:
     """Task #246 — derive changefreq + priority from the age of lastmod.
 
@@ -5700,7 +5727,7 @@ async def _fetch_learn_entries(today: str) -> list[dict]:
             lastmod = raw[:10] if raw else today
             freq, pri = _changefreq_from_lastmod(lastmod, today)
             entries.append({
-                "loc": f"{BASE_URL}/learn/{slug}",
+                "loc": f"{BASE_URL}/learn/{_clean_learn_slug(slug)}",
                 "lastmod": lastmod,
                 "pri": pri,
                 "freq": freq,

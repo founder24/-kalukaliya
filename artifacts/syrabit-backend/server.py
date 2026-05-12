@@ -2844,10 +2844,12 @@ from middleware import (
     ServerSideTrackingMiddleware,
     OriginSharedSecretMiddleware,
     MtlsClientCertMiddleware,
+    DirtyLearnSlugRedirectMiddleware,
 )
 from routes.cms_sarvam_health import CmsNoIndexMiddleware, BotRenderMiddleware
 app.add_middleware(CmsNoIndexMiddleware)
 app.add_middleware(BotRenderMiddleware)
+app.add_middleware(DirtyLearnSlugRedirectMiddleware)
 app.add_middleware(ServerSideTrackingMiddleware)
 app.add_middleware(GlobalRateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)

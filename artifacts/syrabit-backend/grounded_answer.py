@@ -52,6 +52,20 @@ from cache import (
 
 logger = logging.getLogger(__name__)
 
+# Task #3 (SEO): strip paper-code noise from /learn/ slugs in citation URLs.
+# Defined inline here so grounded_answer.py has no import dependency on
+# seo_engine. Must be kept in sync with seo_engine._clean_learn_slug.
+_LEARN_SLUG_PARENS_RE = re.compile(r"\([^)]*\)")
+_LEARN_SLUG_DASH_RE   = re.compile(r"-{2,}")
+
+def _clean_learn_slug(slug: str) -> str:
+    if not slug:
+        return slug
+    cleaned = _LEARN_SLUG_PARENS_RE.sub("", slug)
+    cleaned = _LEARN_SLUG_DASH_RE.sub("-", cleaned).strip("-")
+    return cleaned or slug
+
+
 GROUNDED_CACHE_PREFIX = "grounded_answer:"
 
 # Per-process metrics
@@ -251,7 +265,10 @@ def _build_citations(
             "index": next_idx,
             "type": "chapter",
             "title": ch.get("title", "Untitled chapter"),
-            "url": f"/learn/{ch.get('slug', '')}" if ch.get("slug") else "",
+            "url": (
+                f"/learn/{_clean_learn_slug(ch['slug'])}"
+                if ch.get("slug") else ""
+            ),
             "domain": "syrabit.ai",
             "snippet": snippet,
             "spans": overlap,
