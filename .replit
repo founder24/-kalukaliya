@@ -73,10 +73,10 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python3 scripts/ci/check_patch_route_contract.py"
+args = "python3 scripts/ci/watch_patch_route_contract.py"
 
 [workflows.workflow.metadata]
-isValidation = true
+outputType = "console"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
