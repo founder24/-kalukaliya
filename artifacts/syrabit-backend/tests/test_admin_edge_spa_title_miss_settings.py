@@ -406,3 +406,53 @@ def test_patch_edge_unreachable_returns_502(authed_client):
                                   json={"threshold": 100})
 
     assert res.status_code == 502
+
+
+# ─── Task #48: full schema snapshot — GET happy-path response contract ────────
+
+def test_get_happy_path_full_schema_snapshot(authed_client):
+    """Schema guard (Task #48): every key in the GET settings response must be
+    present with the correct type.  If a future refactor drops, renames, or
+    changes the type of any key, this test fails loudly rather than letting the
+    admin settings panel break silently.
+
+    Keys and types guaranteed by the Task #33 / Task #48 contract:
+        configured          bool    — always present; True on happy path
+        threshold           int     — effective threshold (KV override or env default)
+        disabled            bool    — whether the nightly alert is paused
+        kv_override_set     bool    — True when KV holds an explicit override value
+        env_threshold       int     — the env-var fallback threshold
+        env_disabled        bool    — the env-var fallback disabled flag
+    """
+    # Edge response includes optional env_* fields that the route passes through.
+    edge_resp = {
+        "threshold":       75,
+        "disabled":        False,
+        "kv_override_set": True,
+        "env_threshold":   50,
+        "env_disabled":    False,
+    }
+    fake = _FakeClient(get_resp=_FakeResp(200, edge_resp))
+
+    with patch.dict(os.environ, _ENV, clear=False), \
+            patch("routes.admin_edge_analytics.httpx.AsyncClient",
+                  return_value=fake):
+        res = authed_client.get("/admin/edge/spa-title-miss-settings")
+
+    assert res.status_code == 200
+    body = res.json()
+
+    # ── top-level keys and types ──────────────────────────────────────────────
+    assert body["configured"] is True,                    "configured must be True on happy path"
+    assert isinstance(body["threshold"], int),            "threshold must be int"
+    assert isinstance(body["disabled"], bool),            "disabled must be bool"
+    assert isinstance(body["kv_override_set"], bool),     "kv_override_set must be bool"
+    assert isinstance(body["env_threshold"], int),        "env_threshold must be int"
+    assert isinstance(body["env_disabled"], bool),        "env_disabled must be bool"
+
+    # ── values match the fixture ──────────────────────────────────────────────
+    assert body["threshold"] == 75
+    assert body["disabled"] is False
+    assert body["kv_override_set"] is True
+    assert body["env_threshold"] == 50
+    assert body["env_disabled"] is False
