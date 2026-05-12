@@ -22,6 +22,18 @@ _LEARN_SLUG_CODE_RE = re.compile(r"--+[a-z]{0,6}\d{2,}")
 # Step 3: collapse any remaining consecutive hyphens.
 _LEARN_SLUG_DASH_RE = re.compile(r"-{2,}")
 
+# Step 4: strip trailing segments that are code abbreviations orphaned by
+# steps 1–3.  Two shapes are caught:
+#   • Exactly 2 letters — paper-prefix abbreviations like "fa", "ba", "ma"
+#     (also covers pure-consonant 2-char pairs like "bc", "bm").
+#   • 3–5 pure-consonant letters (no a/e/i/o/u) — e.g. "bcm", "srm".
+# Real English subject words almost always contain a vowel *and* are 4+
+# chars ("sem", "core", "math"), so they are not matched.
+# Character class [b-df-hj-np-tv-z] = all lowercase letters except a,e,i,o,u.
+_LEARN_SLUG_TRAILING_CODE_RE = re.compile(
+    r"(?:-(?:[a-z]{2}|[b-df-hj-np-tv-z]{3,5}))+$"
+)
+
 
 def clean_learn_slug(slug: str) -> str:
     """Return a clean, human-readable /learn/ slug.
@@ -34,6 +46,8 @@ def clean_learn_slug(slug: str) -> str:
     2. Remove double-hyphen-prefixed code tokens: ``--03``, ``--2025``,
        ``---fa0200101``, ``---bcm0200304``
     3. Collapse consecutive hyphens to one and strip edge hyphens
+    4. Drop trailing pure-consonant abbreviation segments (e.g. ``-bcm``,
+       ``-fa``) that are orphaned after steps 1–3
 
     Falls back to the original ``slug`` if cleaning produces an empty string
     (defensive — should not happen with well-formed slugs).
@@ -41,16 +55,21 @@ def clean_learn_slug(slug: str) -> str:
     Examples::
 
         "bcom--2nd-sem---bcm--03-(2025)--(bcm0200304)"
-          → "bcom-2nd-sem-bcm"
+          → "bcom-2nd-sem"
         "financial-accounting-(fyugp)-2024---fa0200101"
           → "financial-accounting"
+        "economics--fa--05-(2025)--(fa0200501)"
+          → "economics"
         "physical-world"   → "physical-world"   (unchanged)
+        "bcom-2nd-sem"     → "bcom-2nd-sem"     (unchanged — "sem" is 3 chars
+                                                  with vowel, not 2-char code)
     """
     if not slug:
         return slug
     cleaned = _LEARN_SLUG_PARENS_RE.sub("", slug)
     cleaned = _LEARN_SLUG_CODE_RE.sub("", cleaned)
     cleaned = _LEARN_SLUG_DASH_RE.sub("-", cleaned).strip("-")
+    cleaned = _LEARN_SLUG_TRAILING_CODE_RE.sub("", cleaned)
     return cleaned or slug
 
 
