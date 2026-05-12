@@ -2679,7 +2679,7 @@ function _botResponseCacheTtl(pathname: string): number {
   return BOT_CACHE_TTL_CONTENT;
 }
 
-function resolveBotApiUrl(env: Env, pathname: string): string | null {
+export function resolveBotApiUrl(env: Env, pathname: string): string | null {
   const clean = pathname.replace(/\/+$/, "") || "/";
   const seoBase = `${env.BACKEND_URL}/api/seo`;
 

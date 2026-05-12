@@ -657,6 +657,54 @@ describe("BOT_HTML_CACHE end-to-end via worker.fetch (verifiedBot=true)", () => 
     expect(kv.store.size).toBe(0);
   });
 
+  it("/notes subject path: cold request misses, backend is fetched and KV is written; warm request hits cache without re-fetching (Task #28)", async () => {
+    const NOTES_PATH = "/notes/class-12/biology";
+    const kv = makeExpiringKv();
+    const env = makeEnv({ botCache: kv });
+
+    const r1 = await workerHandler.fetch(
+      botRequest(NOTES_PATH),
+      env,
+      ctxNoop,
+    );
+    expect(r1.status).toBe(200);
+    expect(r1.headers.get("X-Cache")).toBe("BOT-KV-MISS");
+    expect(r1.headers.get("X-Source")).toMatch(/^bot-prerender(?:-fallback)?$/);
+    expect(r1.headers.get("Last-Modified")).toBe(BACKEND_LM);
+    expect(r1.headers.get("ETag")).toMatch(/^"[0-9a-f]{12}"$/);
+    expect(await r1.text()).toBe(RENDERED_HTML);
+
+    // KV must have been written with the correct key.
+    expect(kv.putSpy).toHaveBeenCalledTimes(1);
+    const [storedKey, storedValue, storedOpts] = kv.putSpy.mock.calls[0];
+    expect(storedKey).toBe(`bot:content:${NOTES_PATH}`);
+    expect(storedOpts?.expirationTtl).toBe(3600);
+    const wrapper = JSON.parse(storedValue);
+    expect(wrapper.body).toBe(RENDERED_HTML);
+    expect(wrapper.lastmod).toBe(BACKEND_LM);
+
+    // Verify the backend was called with the correct SEO subject URL.
+    const backendCalls = fetchSpy.mock.calls.filter(([url, init]) => {
+      const method = ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase();
+      return method === "GET" && String(url).includes("/api/seo/html/subject/notes/class-12/biology");
+    });
+    expect(backendCalls.length).toBe(1);
+
+    // Warm request: KV hit, no backend re-fetch.
+    const callsBefore = fetchSpy.mock.calls.length;
+    const r2 = await workerHandler.fetch(
+      botRequest(NOTES_PATH),
+      env,
+      ctxNoop,
+    );
+    expect(r2.status).toBe(200);
+    expect(r2.headers.get("X-Cache")).toBe("BOT-KV-HIT");
+    expect(r2.headers.get("X-Source")).toBe("bot-cache");
+    expect(await r2.text()).toBe(RENDERED_HTML);
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore);
+    expect(kv.putSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("KV entry expires after expirationTtl seconds: a later request misses and re-renders", async () => {
     const kv = makeExpiringKv();
     const env = makeEnv({ botCache: kv });

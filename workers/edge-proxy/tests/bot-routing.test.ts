@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { getBotPageCacheKey, getBotCacheTtl } from "../src/index";
+import { getBotPageCacheKey, getBotCacheTtl, resolveBotApiUrl } from "../src/index";
+
+function makeMinimalEnv(backendUrl = "https://backend.test") {
+  return { BACKEND_URL: backendUrl } as Parameters<typeof resolveBotApiUrl>[0];
+}
 
 describe("getBotPageCacheKey", () => {
   describe("static pages", () => {
@@ -169,6 +173,63 @@ describe("getBotPageCacheKey", () => {
         getBotPageCacheKey("/a/b/c/d/e/f"),
       ).toBeNull();
     });
+  });
+});
+
+describe("resolveBotApiUrl", () => {
+  const env = makeMinimalEnv();
+  const seoBase = "https://backend.test/api/seo";
+  const backendBase = "https://backend.test";
+
+  it("routes /notes/class-12/biology (3 segments) to the SEO subject endpoint", () => {
+    expect(resolveBotApiUrl(env, "/notes/class-12/biology")).toBe(
+      `${seoBase}/html/subject/notes/class-12/biology`,
+    );
+  });
+
+  it("routes /notes/class-11/chemistry (3 segments) to the SEO subject endpoint", () => {
+    expect(resolveBotApiUrl(env, "/notes/class-11/chemistry")).toBe(
+      `${seoBase}/html/subject/notes/class-11/chemistry`,
+    );
+  });
+
+  it("strips trailing slash on /notes subject paths", () => {
+    expect(resolveBotApiUrl(env, "/notes/class-12/biology/")).toBe(
+      `${seoBase}/html/subject/notes/class-12/biology`,
+    );
+  });
+
+  it("routes /notes/class-12/biology/cell-division (4 segments) to the SEO topic endpoint", () => {
+    expect(resolveBotApiUrl(env, "/notes/class-12/biology/cell-division")).toBe(
+      `${seoBase}/html/notes/class-12/biology/cell-division`,
+    );
+  });
+
+  it("routes /notes/class-12/biology/cell-division/mcqs (5 segments) to the SEO typed-topic endpoint", () => {
+    expect(
+      resolveBotApiUrl(env, "/notes/class-12/biology/cell-division/mcqs"),
+    ).toBe(`${seoBase}/html/notes/class-12/biology/cell-division/mcqs`);
+  });
+
+  it("routes /notes hub (1 segment) to the backend origin", () => {
+    expect(resolveBotApiUrl(env, "/notes")).toBe(`${backendBase}/notes`);
+  });
+
+  it("routes /notes/class-12 (2 segments) to the backend origin", () => {
+    expect(resolveBotApiUrl(env, "/notes/class-12")).toBe(
+      `${backendBase}/notes/class-12`,
+    );
+  });
+
+  it("routes /ahsec/class-12/physics (3 segments) to the SEO subject endpoint", () => {
+    expect(resolveBotApiUrl(env, "/ahsec/class-12/physics")).toBe(
+      `${seoBase}/html/subject/ahsec/class-12/physics`,
+    );
+  });
+
+  it("returns null for paths it cannot handle", () => {
+    expect(resolveBotApiUrl(env, "/a/b/c/d/e/f")).toBeNull();
+    expect(resolveBotApiUrl(env, "/unknown-board")).toBeNull();
   });
 });
 
