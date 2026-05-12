@@ -8,7 +8,11 @@
  * The dataset is written to by the edge worker on every request (see index.ts
  * ANALYTICS.writeDataPoint calls). Fields written per request:
  *
- *   blob1  — cacheStatus:      "hit" | "miss" | "bypass" | "dynamic" | "pass"
+ *   blob1  — cacheStatus / event-type:
+ *              "hit" | "miss" | "bypass" | "dynamic" | "pass" — standard cache events
+ *              "spa_title_miss" — reserved Task #9 discriminator; NOT a cache event.
+ *              queryEdgeMetrics() filters these out via blob1_neq so they never
+ *              pollute totalRequests, cacheHitRate, or avgResponseMs.
  *   blob2  — chapterId:        slug of the chapter being viewed, or "" if not a chapter
  *   blob3  — aiProvider:       "workers-ai" | "backend" | "none"
  *   blob4  — pathname:         request pathname (first 64 chars)
@@ -113,12 +117,21 @@ export async function queryEdgeMetrics(
   const datetimeLeq = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
   // ── 1. Cache status breakdown + avg response time ─────────────────────
+  // blob1_neq: "spa_title_miss" isolates canonical cache events ("hit" /
+  // "miss" / "pass" / "bypass" / "dynamic") from the Task #9 miss-logging
+  // events that share the same dataset.  Without this filter, miss events
+  // inflate totalRequests, distort cacheHitRate, and pull avgResponseMs
+  // toward 0 (miss events write double1=0).
   const cacheQuery = `
     query CacheBreakdown($accountTag: String!, $datetimeGeq: String!, $datetimeLeq: String!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           ${GQL_TYPE}(
-            filter: { datetime_geq: $datetimeGeq, datetime_leq: $datetimeLeq }
+            filter: {
+              datetime_geq: $datetimeGeq
+              datetime_leq: $datetimeLeq
+              blob1_neq: "spa_title_miss"
+            }
             limit: 20
             orderBy: [count_DESC]
           ) {
