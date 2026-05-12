@@ -219,6 +219,12 @@ assert _patch_model_fields == PATCHABLE_SETTINGS_KEYS, (
     f"PATCHABLE_SETTINGS_KEYS {PATCHABLE_SETTINGS_KEYS} in schemas/edge_settings.py. "
     "Update both together."
 )
+assert PATCHABLE_SETTINGS_KEYS <= CANONICAL_SETTINGS_KEYS, (
+    f"PATCHABLE_SETTINGS_KEYS {PATCHABLE_SETTINGS_KEYS} is not a subset of "
+    f"CANONICAL_SETTINGS_KEYS {CANONICAL_SETTINGS_KEYS} in schemas/edge_settings.py. "
+    "Every patchable key must also appear in CANONICAL_SETTINGS_KEYS so it can be "
+    "read back via GET; add the missing key(s) to CANONICAL_SETTINGS_KEYS."
+)
 
 
 @router.patch("/admin/edge/spa-title-miss-settings")

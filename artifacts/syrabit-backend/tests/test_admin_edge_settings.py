@@ -278,6 +278,39 @@ def test_get_settings_503_from_edge_returns_defaults(admin_client, env_with_edge
     assert "kv_override_set" in body
 
 
+def test_get_settings_surfaces_all_patchable_keys(admin_client, env_with_edge):
+    """Every key in PATCHABLE_SETTINGS_KEYS must appear in the GET response.
+
+    This catches the scenario where a developer adds a field to both
+    ``SpaTitleMissSettingsPatch`` and ``PATCHABLE_SETTINGS_KEYS`` but forgets
+    to also add it to ``CANONICAL_SETTINGS_KEYS`` (the GET allowlist).  Without
+    this check the field would be write-only: clients can PATCH it but can never
+    read the effective value back.
+
+    The import-time assert in routes/admin_edge_analytics.py enforces the same
+    invariant at module load time; this test provides the same guarantee inside
+    the pytest suite so the CI gate is explicit and independently verifiable.
+    """
+    mock_resp = _make_mock_response(200, _EDGE_PAYLOAD)
+    mock_async_client = MagicMock()
+    mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+    mock_async_client.__aexit__ = AsyncMock(return_value=False)
+    mock_async_client.get = AsyncMock(return_value=mock_resp)
+
+    with patch("routes.admin_edge_analytics.httpx.AsyncClient", return_value=mock_async_client):
+        res = admin_client.get("/admin/edge/spa-title-miss-settings")
+
+    assert res.status_code == 200
+    body = res.json()
+    missing = PATCHABLE_SETTINGS_KEYS - set(body.keys())
+    assert not missing, (
+        f"The GET response is missing patchable key(s): {sorted(missing)}.\n"
+        "A field that can be written via PATCH but cannot be read via GET is a "
+        "write-only field — add the missing key(s) to CANONICAL_SETTINGS_KEYS in "
+        "schemas/edge_settings.py so the frontend can always read back what it wrote."
+    )
+
+
 def test_import_time_assert_fires_when_patch_model_diverges_from_patchable_keys(monkeypatch):
     """Task #81 — The import-time assert in admin_edge_analytics fires when
     SpaTitleMissSettingsPatch.model_fields no longer matches PATCHABLE_SETTINGS_KEYS.
