@@ -1,0 +1,60 @@
+name: patch-contract-guard
+
+#
+# Supply-chain hardening: every `uses:` reference in this file is pinned to a
+# full 40-char commit SHA (with a trailing `# vX.Y.Z` tag comment for
+# readability). Float tags like `actions/checkout@v4` are forbidden because a
+# compromise of the upstream tag could let an attacker silently exfiltrate
+# this repo's secrets. See
+# https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+#
+# Task #88 — Run the PATCH-contract check automatically in GitHub Actions on
+# every pull request.
+#
+# Runs `python3 scripts/ci/check_patch_route_contract.py` whenever
+# `routes/admin_edge_*.py` files or the guard script itself change.  Fails the
+# PR if any *Patch(BaseModel) class in those files is missing the
+# @patch_route_contract decorator.
+#
+# The script is pure-stdlib — no pip install is needed; ubuntu-latest ships
+# Python 3 out of the box.  We use actions/setup-python only to pin the
+# interpreter version explicitly and keep it consistent with the backend.
+#
+# Path filter keeps CI fast: the job is skipped entirely on PRs that touch
+# none of the guarded files.
+#
+
+on:
+  push:
+    branches: [Replit-agent]
+    paths:
+      - "artifacts/syrabit-backend/routes/admin_edge_*.py"
+      - "scripts/ci/check_patch_route_contract.py"
+  pull_request:
+    branches: [Replit-agent]
+    paths:
+      - "artifacts/syrabit-backend/routes/admin_edge_*.py"
+      - "scripts/ci/check_patch_route_contract.py"
+
+permissions:
+  contents: read
+
+jobs:
+  patch-contract:
+    name: PATCH-contract guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Run PATCH-contract check
+        run: python3 scripts/ci/check_patch_route_contract.py
