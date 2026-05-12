@@ -1,4 +1,4 @@
-"""Task #34 / Task #44 — backend tests for GET /admin/edge/spa-title-misses.
+"""Task #34 / Task #44 / Task #45 — backend tests for GET /admin/edge/spa-title-misses.
 
 Stubs the httpx call so tests run offline.  Covers:
 (a) successful proxy with gaps — enriched edge response (Task #44 contract)
@@ -12,6 +12,9 @@ Plus guards for:
 - unauthenticated caller → 401/403
 - Task #44: enriched fields (gaps_found, gaps_above_threshold, threshold, gaps[],
   suggested_title) are forwarded; legacy `misses` key mirrors gaps list
+- Task #45: edge worker returns 403 (wrong X-Edge-Admin-Secret) → route surfaces
+  configured:true + reason containing "403" rather than leaking a 500;
+  full schema snapshot so every required key change fails loudly
 """
 from __future__ import annotations
 
@@ -451,3 +454,104 @@ def test_alert_disabled_flag_forwarded(authed_client):
     body = res.json()
     assert body["alert_disabled"] is True
     assert body["threshold"] == 100
+
+
+# ─── Task #45: auth rejection when the edge secret is wrong ──────────────────
+
+def test_edge_403_wrong_secret_surfaces_reason(authed_client):
+    """When the edge worker returns 403 (X-Edge-Admin-Secret mismatch or absent),
+    the proxy must NOT propagate it as a 500 or a 403.  It must return 200 with
+    ``configured: true`` and a ``reason`` string that includes '403' so operators
+    can diagnose a secret rotation issue from the admin tile without digging into
+    server logs.
+
+    This is the 'auth rejection when the edge secret is wrong' case listed in the
+    Task #45 spec.  It is distinct from:
+    - the unauthenticated-admin case (D1_SYNC_SECRET / token missing → configured: false)
+    - the unauthenticated-admin user case (no admin JWT → HTTP 401 from FastAPI)
+    """
+    fake = _FakeClient(_FakeResp(403, {"error": "Forbidden"}))
+
+    with patch.dict(os.environ, _ENV, clear=False), \
+            patch("routes.admin_edge_analytics.httpx.AsyncClient",
+                  return_value=fake):
+        res = authed_client.get("/admin/edge/spa-title-misses")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["configured"] is True
+    assert body["misses"] is None
+    assert "403" in (body.get("reason") or ""), (
+        "reason must mention the 403 status so operators can identify a secret mismatch"
+    )
+
+
+# ─── Task #45: full schema snapshot of the enriched happy-path response ───────
+
+def test_happy_path_full_schema_snapshot(authed_client):
+    """Schema guard: every key in the enriched response contract must be present
+    with the correct type.  If a future refactor drops or renames a key, this
+    test fails immediately rather than leaving the dashboard tile silently broken.
+
+    Keys checked (Task #32 / #39 / #44 contract):
+        configured          bool
+        range               str
+        threshold           int | None
+        alert_disabled      bool
+        gaps_found          int
+        gaps_above_threshold int
+        gaps                list  — each entry: pathname str, count int,
+                                    suggested_title str
+        tag_handlers        dict
+        misses              list  (legacy mirror of gaps)
+    """
+    fake = _FakeClient(_FakeResp(200, _ENRICHED_EDGE_RESP))
+
+    with patch.dict(os.environ, _ENV, clear=False), \
+            patch("routes.admin_edge_analytics.httpx.AsyncClient",
+                  return_value=fake):
+        res = authed_client.get("/admin/edge/spa-title-misses?range=24h")
+
+    assert res.status_code == 200
+    body = res.json()
+
+    # ── top-level keys and types ──────────────────────────────────────────────
+    assert body["configured"] is True,            "configured must be True on happy path"
+    assert isinstance(body["range"], str),         "range must be a string"
+    assert body["threshold"] is None or isinstance(body["threshold"], int), \
+        "threshold must be int or None"
+    assert isinstance(body["alert_disabled"], bool), "alert_disabled must be bool"
+    assert isinstance(body["gaps_found"], int),    "gaps_found must be int"
+    assert isinstance(body["gaps_above_threshold"], int), \
+        "gaps_above_threshold must be int"
+    assert isinstance(body["gaps"], list),         "gaps must be a list"
+    assert isinstance(body["tag_handlers"], dict), "tag_handlers must be a dict"
+    assert isinstance(body["misses"], list),       "misses (legacy key) must be a list"
+
+    # ── per-gap entry schema ──────────────────────────────────────────────────
+    assert len(body["gaps"]) == 2, "fixture has 2 gaps"
+    for gap in body["gaps"]:
+        assert isinstance(gap["pathname"], str),       "gap.pathname must be str"
+        assert isinstance(gap["count"], int),          "gap.count must be int"
+        assert isinstance(gap.get("suggested_title"), str), \
+            "gap.suggested_title must be str (Task #44)"
+
+    # ── values match the fixture ──────────────────────────────────────────────
+    assert body["range"] == "24h"
+    assert body["threshold"] == 50
+    assert body["gaps_found"] == 2
+    assert body["gaps_above_threshold"] == 2
+    assert body["alert_disabled"] is False
+
+    # ── tag_handlers coverage (Task #39) ─────────────────────────────────────
+    expected_tags = {
+        "og_title", "og_description", "og_image", "og_image_alt",
+        "twitter_title", "twitter_description", "twitter_card",
+        "twitter_image", "twitter_image_alt",
+    }
+    assert expected_tags <= body["tag_handlers"].keys(), (
+        "tag_handlers must include all 9 expected tag keys"
+    )
+    assert all(body["tag_handlers"][t] is True for t in expected_tags), (
+        "all tag_handlers values must be True for a fully configured worker"
+    )
