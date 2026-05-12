@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { _slugToTitle, _resolveSpaRouteMeta, _injectSpaTitleForBot } from "../src/index";
+import { _slugToTitle, _resolveSpaRouteMeta, _injectSpaTitleForBot, _OG_IMAGE_BASE } from "../src/index";
 
 describe("_slugToTitle", () => {
   it("title-cases single word", () => {
@@ -494,6 +494,50 @@ describe("_resolveSpaRouteMeta", () => {
         const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
         capturedHandlers['meta[name="twitter:card"]'].element(metaEl);
         expect(metaEl.setAttribute).toHaveBeenCalledWith("content", "summary_large_image");
+      });
+
+      it("rewrites og:image for subject route to CDN PNG URL (Task #17)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          `${_OG_IMAGE_BASE}/chemistry.png`,
+        );
+      });
+
+      it("rewrites og:image for board hub route to CDN PNG URL (Task #17)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/ahsec", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          `${_OG_IMAGE_BASE}/ahsec.png`,
+        );
+      });
+
+      it("og:image URL uses _OG_IMAGE_BASE constant prefix (Task #17)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image"]'].element(metaEl);
+        const ogImageUrl = metaEl.setAttribute.mock.calls[0][1] as string;
+        expect(ogImageUrl).toMatch(/^https:\/\/cdn\.syrabit\.ai\/og\//);
+        expect(ogImageUrl).toMatch(/\.png$/);
       });
     });
   });

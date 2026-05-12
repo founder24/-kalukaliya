@@ -3409,7 +3409,9 @@ export function _slugToTitle(slug: string): string {
     .join(" ");
 }
 
-interface _SpaMeta { title: string; description: string }
+export const _OG_IMAGE_BASE = "https://cdn.syrabit.ai/og";
+
+interface _SpaMeta { title: string; description: string; ogImage: string }
 
 export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
   const clean = pathname.replace(/\/+$/, "") || "/";
@@ -3422,6 +3424,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: `${subject} — Class 11 Notes | Syrabit.ai`,
       description: `Study ${subject} for AHSEC Class 11 with AI-powered notes, MCQs, flashcards, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[2]}.png`,
     };
   }
   // /notes/class-12/:subject[/:chapter...]
@@ -3430,6 +3433,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: `${subject} — Class 12 Notes | Syrabit.ai`,
       description: `Study ${subject} for AHSEC Class 12 with AI-powered notes, MCQs, flashcards, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[2]}.png`,
     };
   }
   // /notes/degree/:sem/:subject[/:chapter...]
@@ -3439,6 +3443,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: `${subject} — ${sem} Degree Notes | Syrabit.ai`,
       description: `Study ${subject} for your Degree ${sem} with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[3]}.png`,
     };
   }
   // /ahsec/hs-1st-year/:subject[/:chapter...]
@@ -3447,6 +3452,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: `${subject} — AHSEC HS 1st Year | Syrabit.ai`,
       description: `Study ${subject} for AHSEC HS 1st Year with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[2]}.png`,
     };
   }
   // /ahsec/hs-2nd-year/:subject[/:chapter...]
@@ -3455,6 +3461,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: `${subject} — AHSEC HS 2nd Year | Syrabit.ai`,
       description: `Study ${subject} for AHSEC HS 2nd Year with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/${parts[2]}.png`,
     };
   }
   // /learn/:slug[/:section...]
@@ -3463,6 +3470,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: `${topic} — Learn | Syrabit.ai`,
       description: `Learn about ${topic} with AI-powered explanations, notes, MCQs, and previous year questions on Syrabit.ai.`,
+      ogImage: `${_OG_IMAGE_BASE}/notes.png`,
     };
   }
   // /ahsec (board hub)
@@ -3470,6 +3478,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "AHSEC Study Materials | Syrabit.ai",
       description: "Browse AHSEC study materials, notes, MCQs, and previous year questions for HS 1st and 2nd Year on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/ahsec.png`,
     };
   }
   // /seba (board hub)
@@ -3477,6 +3486,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "SEBA Study Materials | Syrabit.ai",
       description: "Browse SEBA study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/seba.png`,
     };
   }
   // /degree (board hub)
@@ -3484,6 +3494,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "Degree Study Materials | Syrabit.ai",
       description: "Browse Degree study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/degree.png`,
     };
   }
   // /ahsec/class-11 (board+class hub — exactly 2 segments)
@@ -3491,6 +3502,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "AHSEC Class 11 Study Materials | Syrabit.ai",
       description: "Browse AHSEC Class 11 study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/ahsec-class-11.png`,
     };
   }
   // /ahsec/class-12 (board+class hub — exactly 2 segments)
@@ -3498,6 +3510,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "AHSEC Class 12 Study Materials | Syrabit.ai",
       description: "Browse AHSEC Class 12 study materials, notes, MCQs, and previous year questions on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/ahsec-class-12.png`,
     };
   }
   // /notes (notes hub — exactly 1 segment)
@@ -3505,6 +3518,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "Study Notes | Syrabit.ai",
       description: "Browse study notes for AHSEC Class 11, Class 12, and Degree courses on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/notes.png`,
     };
   }
   // /notes/class-11 (notes class hub — exactly 2 segments, no subject yet)
@@ -3512,6 +3526,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "Class 11 Notes | Syrabit.ai",
       description: "Browse Class 11 study notes for all AHSEC subjects on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/notes-class-11.png`,
     };
   }
   // /notes/class-12 (notes class hub — exactly 2 segments, no subject yet)
@@ -3519,6 +3534,7 @@ export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
     return {
       title: "Class 12 Notes | Syrabit.ai",
       description: "Browse Class 12 study notes for all AHSEC subjects on Syrabit.ai.",
+      ogImage: `${_OG_IMAGE_BASE}/notes-class-12.png`,
     };
   }
   return null;
@@ -3541,12 +3557,13 @@ export function _injectSpaTitleForBot(
     return response;
   }
 
-  const { title, description } = meta;
+  const { title, description, ogImage } = meta;
   // Task #8 — also rewrite Open Graph tags so social-sharing previews
   // (WhatsApp, Telegram, Twitter/X) show the route-specific title and
   // description rather than the generic SPA fallback.
   // Task #15 — also rewrite Twitter card meta tags so links shared on
   // X show rich preview cards rather than falling back to plain text.
+  // Task #17 — rewrite og:image with the CDN-hosted subject banner URL.
   return new HTMLRewriter()
     .on("title", {
       element(el) { el.setInnerContent(title); },
@@ -3559,6 +3576,9 @@ export function _injectSpaTitleForBot(
     })
     .on('meta[property="og:description"]', {
       element(el) { el.setAttribute("content", description); },
+    })
+    .on('meta[property="og:image"]', {
+      element(el) { el.setAttribute("content", ogImage); },
     })
     .on('meta[name="twitter:title"]', {
       element(el) { el.setAttribute("content", title); },
