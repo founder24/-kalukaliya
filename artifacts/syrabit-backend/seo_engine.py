@@ -5359,6 +5359,11 @@ STATIC_PAGES = [
     ("/terms", "yearly", "0.3"),
     ("/privacy", "yearly", "0.3"),
     ("/technology", "monthly", "0.7"),
+    ("/ahsec/hs-1st-year", "weekly", "0.9"),
+    ("/ahsec/hs-2nd-year", "weekly", "0.9"),
+    ("/notes/class-11", "weekly", "0.8"),
+    ("/notes/class-12", "weekly", "0.8"),
+    ("/notes/degree", "weekly", "0.8"),
 ]
 
 _SITEMAP_TYPES = ["notes", "mcqs", "important-questions", "examples", "definition"]
