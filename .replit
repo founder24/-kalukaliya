@@ -28,6 +28,10 @@ args = "Start application"
 task = "workflow.run"
 args = "og_image_smoke"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "patch_contract_guard"
+
 [[workflows.workflow]]
 name = "Backend"
 author = "agent"
@@ -59,6 +63,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "OG_SMOKE_SKIP=0 python3 scripts/og-images/smoke_check_og.py --sample 5"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "patch_contract_guard"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 scripts/ci/check_patch_route_contract.py"
 
 [workflows.workflow.metadata]
 isValidation = true

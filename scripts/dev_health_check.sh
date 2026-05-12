@@ -8,6 +8,8 @@
 #   4. mockup   GET /__mockup/         (artifacts/mockup-sandbox on :8081)
 #   5. frontend `pnpm build` (skipped when DEV_HEALTH_SKIP_BUILD=1)
 #   6. env-var contract: `docs/infra/env-vars.md` matches code (Task #89)
+#   7. PATCH-route contract: @patch_route_contract on all *Patch(BaseModel) (Task #86)
+#   8. OG image CDN smoke check (skipped by default; set OG_SMOKE_SKIP=0)
 #
 # Wired as the `dev_health` validation step (validation skill).
 # Aggregates failures (does not exit on the first one) and returns a
@@ -37,21 +39,21 @@ http_check() {
   fi
 }
 
-echo "[1/5] backend import smoke test"
+echo "[1/8] backend import smoke test"
 ( cd "$REPO_ROOT/artifacts/syrabit-backend" && python3 -c "import server" >/dev/null 2>&1 ) \
   && pass "python -c 'import server'" \
   || err  "python -c 'import server' (cd artifacts/syrabit-backend && python -c 'import server')"
 
-echo "[2/5] backend /api/health"
+echo "[2/8] backend /api/health"
 http_check "artifacts/syrabit: api" "http://localhost:${API_PORT}/api/health" 200
 
-echo "[3/5] frontend /"
+echo "[3/8] frontend /"
 http_check "artifacts/syrabit: web" "http://localhost:${WEB_PORT}/" 200
 
-echo "[4/5] mockup sandbox /__mockup/"
+echo "[4/8] mockup sandbox /__mockup/"
 http_check "artifacts/mockup-sandbox" "http://localhost:${MOCKUP_PORT}/__mockup/" 200
 
-echo "[5/5] frontend build"
+echo "[5/8] frontend build"
 if [[ "${DEV_HEALTH_SKIP_BUILD:-0}" == "1" ]]; then
   warn "frontend build skipped (DEV_HEALTH_SKIP_BUILD=1)"
 else
@@ -67,7 +69,7 @@ else
   fi
 fi
 
-echo "[6/6] env-var contract doc"
+echo "[6/8] env-var contract doc"
 # Task #89 — docs/infra/env-vars.md is auto-generated from code refs +
 # bicep / wrangler / TF wiring. This step fails if anyone added a new
 # env var (or removed one) without running
@@ -79,7 +81,18 @@ else
   tail -n 30 /tmp/dev_health_envdoc.log || true
 fi
 
-echo "[7/7] OG image CDN smoke check"
+echo "[7/8] PATCH-route contract guard"
+# Task #86 — every *Patch(BaseModel) class in routes/admin_edge_*.py must
+# carry @patch_route_contract (registered as the `patch_contract_guard`
+# validation step).  Pure-stdlib; fast enough to run unconditionally.
+if ( cd "$REPO_ROOT" && python3 scripts/ci/check_patch_route_contract.py >/tmp/dev_health_patch_contract.log 2>&1 ); then
+  pass "PATCH-route contract check"
+else
+  err "PATCH-route contract check failed (run: python3 scripts/ci/check_patch_route_contract.py)"
+  cat /tmp/dev_health_patch_contract.log || true
+fi
+
+echo "[8/8] OG image CDN smoke check"
 # Task #49 — verify a sample of OG banner images are reachable on the
 # public CDN (https://cdn.syrabit.ai/og).  Skipped by default in dev
 # because the check makes live network requests that can fail when offline
