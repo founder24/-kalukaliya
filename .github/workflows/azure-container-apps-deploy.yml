@@ -116,8 +116,28 @@ jobs:
         working-directory: artifacts/syrabit-backend
         run: python scripts/ci/check_exam_calendar.py
 
+  og_image_smoke:
+    # Task #49 — pre-deploy gate. Verifies that a sample of OG banner images
+    # are publicly reachable on the CDN before shipping a new backend revision.
+    # If R2 public access has been accidentally revoked, or the CDN config has
+    # drifted, this job fails the deploy before it reaches production.
+    # No R2 credentials are required — the script issues public HEAD requests
+    # against https://cdn.syrabit.ai/og only.
+    # Skip by setting the OG_SMOKE_SKIP repository variable to "1".
+    name: OG image CDN smoke check (#49)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Smoke-check a sample of OG image CDN URLs
+        env:
+          OG_SMOKE_SKIP: ${{ vars.OG_SMOKE_SKIP || '0' }}
+        run: python scripts/og-images/smoke_check_og.py --sample 5
+
   deploy:
-    needs: [canonical_delegation_gate, budget_ceiling_gate, exam_calendar_gate]
+    needs: [canonical_delegation_gate, budget_ceiling_gate, exam_calendar_gate, og_image_smoke]
     if: github.ref == 'refs/heads/Replit-agent' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 35

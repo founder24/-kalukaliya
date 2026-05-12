@@ -90,3 +90,16 @@ jobs:
           # in the curriculum JSON (e.g. after a subject rename).  Without this,
           # old banners accumulate in R2 and continue to be served at stale URLs.
           python scripts/og-images/upload_to_r2.py --prune
+
+      - name: OG image CDN smoke check (Task #49)
+        # Task #49 — verify a sample of the just-uploaded images are reachable
+        # via the public CDN.  Runs only after a successful R2 upload so we
+        # don't false-alarm on forks that lack credentials.
+        # No R2 credentials needed — this script makes public HEAD requests only.
+        # A brief wait allows CF edge PoPs to pick up the freshly-uploaded PNGs.
+        if: steps.r2_check.outputs.r2_ready == 'true'
+        run: |
+          set -euo pipefail
+          echo "Waiting 10 s for CDN propagation …"
+          sleep 10
+          python scripts/og-images/smoke_check_og.py --sample 5

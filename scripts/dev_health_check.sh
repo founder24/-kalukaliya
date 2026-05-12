@@ -79,6 +79,22 @@ else
   tail -n 30 /tmp/dev_health_envdoc.log || true
 fi
 
+echo "[7/7] OG image CDN smoke check"
+# Task #49 — verify a sample of OG banner images are reachable on the
+# public CDN (https://cdn.syrabit.ai/og).  Skipped by default in dev
+# because the check makes live network requests that can fail when offline
+# or in sandboxed CI environments.  Set OG_SMOKE_SKIP=0 to enable it.
+if [[ "${OG_SMOKE_SKIP:-1}" == "1" ]]; then
+  warn "OG smoke check skipped (set OG_SMOKE_SKIP=0 to enable)"
+else
+  if ( cd "$REPO_ROOT" && python3 scripts/og-images/smoke_check_og.py --sample 3 >/tmp/dev_health_og_smoke.log 2>&1 ); then
+    pass "OG image CDN smoke check (3 sample URLs)"
+  else
+    err "OG image CDN smoke check failed (see /tmp/dev_health_og_smoke.log)"
+    cat /tmp/dev_health_og_smoke.log || true
+  fi
+fi
+
 echo
 if (( fail == 0 )); then
   echo "dev_health_check: OK"
