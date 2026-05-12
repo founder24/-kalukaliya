@@ -67,6 +67,7 @@ function AlertSettings({ token, onSaved }) {
   const [error, setError]           = useState(null);
   const [saveError, setSaveError]   = useState(null);
   const [savedOk, setSavedOk]       = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState(false);
 
   // Draft values edited by the admin.
   const [draftThreshold, setDraftThreshold] = useState('');
@@ -99,7 +100,8 @@ function AlertSettings({ token, onSaved }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const save = async () => {
+  const commitSave = async () => {
+    setPendingConfirm(false);
     setSaving(true);
     setSaveError(null);
     setSavedOk(false);
@@ -126,6 +128,20 @@ function AlertSettings({ token, onSaved }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const save = () => {
+    setSaveError(null);
+    const thr = parseInt(draftThreshold, 10);
+    if (!Number.isFinite(thr) || thr < 1) {
+      setSaveError('Threshold must be an integer ≥ 1');
+      return;
+    }
+    if (draftDisabled) {
+      setPendingConfirm(true);
+      return;
+    }
+    commitSave();
   };
 
   if (loading && !settings) {
@@ -186,7 +202,10 @@ function AlertSettings({ token, onSaved }) {
           Alert disabled
         </label>
         <button
-          onClick={() => setDraftDisabled((v) => !v)}
+          onClick={() => {
+            setDraftDisabled((v) => !v);
+            setPendingConfirm(false);
+          }}
           className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
             draftDisabled ? 'bg-red-400' : 'bg-emerald-400'
           }`}
@@ -205,15 +224,36 @@ function AlertSettings({ token, onSaved }) {
       </div>
 
       {/* Save / status */}
-      <div className="flex items-center gap-2 pt-0.5">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors"
-        >
-          {saving ? <RefreshCw size={9} className="animate-spin" /> : <Check size={9} />}
-          Save
-        </button>
+      <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+        {pendingConfirm ? (
+          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5">
+            <AlertTriangle size={10} className="text-red-500 flex-shrink-0" />
+            <span className="text-[11px] text-red-700 font-semibold">Confirm pause?</span>
+            <button
+              onClick={commitSave}
+              disabled={saving}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-500 text-white text-[11px] font-semibold hover:bg-red-600 disabled:opacity-50 transition-colors"
+            >
+              {saving ? <RefreshCw size={9} className="animate-spin" /> : <Check size={9} />}
+              Confirm
+            </button>
+            <button
+              onClick={() => setPendingConfirm(false)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-gray-200 text-gray-700 text-[11px] font-semibold hover:bg-gray-300 transition-colors"
+            >
+              <X size={9} /> Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={save}
+            disabled={saving}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors"
+          >
+            {saving ? <RefreshCw size={9} className="animate-spin" /> : <Check size={9} />}
+            Save
+          </button>
+        )}
         {savedOk && (
           <span className="text-[11px] text-emerald-600 flex items-center gap-1">
             <Check size={10} /> Saved to KV
