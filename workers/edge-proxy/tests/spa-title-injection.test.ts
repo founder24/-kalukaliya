@@ -605,6 +605,30 @@ describe("_resolveSpaRouteMeta", () => {
         expect(capturedHandlers['meta[property="og:image:alt"]']).toBeUndefined();
       });
 
+      it("does NOT register og:image:width or og:image:height handlers for unmatched route (Task #18)", () => {
+        const resp = new Response(
+          '<html><head><title>x</title></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/pricing", true);
+        expect(capturedHandlers['meta[property="og:image:width"]']).toBeUndefined();
+        expect(capturedHandlers['meta[property="og:image:height"]']).toBeUndefined();
+      });
+
+      it("ogImageAlt is present and non-empty for subject route metadata contract (Task #18)", () => {
+        const meta = _resolveSpaRouteMeta("/notes/class-11/physics");
+        expect(meta).not.toBeNull();
+        expect(typeof meta!.ogImageAlt).toBe("string");
+        expect(meta!.ogImageAlt!.length).toBeGreaterThan(0);
+      });
+
+      it("ogImageAlt is present and non-empty for board hub metadata contract (Task #18)", () => {
+        const meta = _resolveSpaRouteMeta("/ahsec");
+        expect(meta).not.toBeNull();
+        expect(typeof meta!.ogImageAlt).toBe("string");
+        expect(meta!.ogImageAlt!.length).toBeGreaterThan(0);
+      });
+
       it("og:image:width and og:image:height constants are 1200 and 630 (Task #18)", () => {
         expect(OG_IMAGE_WIDTH).toBe("1200");
         expect(OG_IMAGE_HEIGHT).toBe("630");
