@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { _slugToTitle, _resolveSpaRouteMeta, _injectSpaTitleForBot } from "../src/index";
 
 describe("_slugToTitle", () => {
@@ -202,6 +202,73 @@ describe("_resolveSpaRouteMeta", () => {
       const out = _injectSpaTitleForBot(resp, "/pricing", true);
       const body = await out.text();
       expect(body).toContain("Syrabit.ai");
+    });
+
+    describe("positive rewrite path (HTMLRewriter mocked for Node.js env)", () => {
+      type ElementHandler = {
+        element: (el: { setInnerContent: (s: string) => void; setAttribute: (k: string, v: string) => void }) => void;
+      };
+
+      let capturedHandlers: Record<string, ElementHandler>;
+      let capturedTransformArg: Response;
+      const transformedResponse = new Response("rewritten", { headers: { "Content-Type": "text/html" } });
+
+      beforeEach(() => {
+        capturedHandlers = {};
+        capturedTransformArg = new Response("");
+        function MockHTMLRewriter(this: { on: typeof MockHTMLRewriter.prototype.on; transform: typeof MockHTMLRewriter.prototype.transform }) {
+          // constructor body intentionally empty
+        }
+        MockHTMLRewriter.prototype.on = function(selector: string, handler: ElementHandler) {
+          capturedHandlers[selector] = handler;
+          return this;
+        };
+        MockHTMLRewriter.prototype.transform = function(resp: Response) {
+          capturedTransformArg = resp;
+          return transformedResponse;
+        };
+        vi.stubGlobal("HTMLRewriter", MockHTMLRewriter);
+      });
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      it("rewrites title for bot GET on matched HTML route", () => {
+        const resp = new Response("<html><head><title>Old</title></head></html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+        const out = _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+        expect(out).toBe(transformedResponse);
+
+        const titleEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers["title"].element(titleEl);
+        expect(titleEl.setInnerContent).toHaveBeenCalledWith("Chemistry — Class 12 Notes | Syrabit.ai");
+      });
+
+      it("rewrites description meta for bot GET on matched HTML route", () => {
+        const resp = new Response('<html><head><meta name="description" content="old"></head></html>', {
+          headers: { "Content-Type": "text/html" },
+        });
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics/chapter-1", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[name="description"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Physics"));
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", expect.stringContaining("Class 11"));
+      });
+
+      it("applies rewrite for deep chapter path (nested route) — acceptance example", () => {
+        const resp = new Response("<html><head><title>Old</title></head></html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+        const out = _injectSpaTitleForBot(resp, "/notes/class-12/chemistry/some-chapter", true);
+        expect(out).toBe(transformedResponse);
+
+        const titleEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers["title"].element(titleEl);
+        expect(titleEl.setInnerContent).toHaveBeenCalledWith("Chemistry — Class 12 Notes | Syrabit.ai");
+      });
     });
   });
 });
