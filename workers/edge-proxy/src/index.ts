@@ -299,6 +299,15 @@ interface Env {
    * Leave unset (or "false") in local dev and before the cert is active.
    */
   MTLS_REQUIRED?: string;
+  /**
+   * Task #13 / Task #32 — integer string; SPA title-miss paths whose bot-hit
+   * count equals or exceeds this value are included in the gap alert and the
+   * on-demand /api/edge/spa-title-misses response. Default: 50.
+   * Set via: wrangler secret put SPA_TITLE_MISS_ALERT_THRESHOLD
+   */
+  SPA_TITLE_MISS_ALERT_THRESHOLD?: string;
+  /** Task #13 — set to "true" to disable the nightly SPA title-miss alert. */
+  SPA_TITLE_MISS_ALERT_DISABLED?: string;
 }
 
 const KV_BINDINGS = ["RATE_LIMIT", "BOT_HTML_CACHE", "CF_EDGE_CACHE"] as const;
@@ -3750,9 +3759,13 @@ async function _handleEdgeFetch(
       }
     }
 
-    // Task #12 — GET /api/edge/spa-title-misses?range=<1h|6h|24h|7d>
+    // Task #12 / Task #32 — GET /api/edge/spa-title-misses?range=<1h|6h|24h|7d>
     // Returns the top 20 bot-crawled SPA paths that fell through
     // _resolveSpaRouteMeta and therefore received the generic <title>.
+    // Defaults to "24h" (matching the nightly cron window) so admins can
+    // trigger the same scan on demand without waiting for the 01:00 UTC cron.
+    // Response is enriched with per-path suggested titles and threshold
+    // metadata, reusing the same logic as runSpaTitleMissAlert (Task #13).
     // Auth: same X-Edge-Admin-Secret handshake as /api/edge/analytics.
     // Call via the Flask backend /admin/edge/spa-title-misses proxy.
     if (pathname === "/api/edge/spa-title-misses" && request.method === "GET") {
@@ -3770,11 +3783,48 @@ async function _handleEdgeFetch(
         );
       }
       try {
-        const range  = url.searchParams.get("range") ?? "7d";
+        // Default range mirrors the cron window so admins get the same view
+        // as the nightly alert without waiting for it to fire.
+        const range = url.searchParams.get("range") ?? "24h";
         const misses = await querySpaTitleMisses(env.CF_ANALYTICS_TOKEN, range);
-        return new Response(JSON.stringify(misses), {
-          headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
+
+        // Replicate runSpaTitleMissAlert classification logic:
+        // 1. Filter to paths not covered by _resolveSpaRouteMeta ("gap" paths).
+        // 2. Apply threshold — same env var the cron alert uses.
+        const rawThreshold = env.SPA_TITLE_MISS_ALERT_THRESHOLD;
+        const thr = (() => {
+          if (!rawThreshold) return 50;
+          const n = Number(rawThreshold);
+          return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 50;
+        })();
+
+        const uncovered = misses.filter(
+          (m) => _resolveSpaRouteMeta(m.pathname) === null,
+        );
+        const gapsAbove = uncovered.filter((m) => m.count >= thr);
+
+        // Enrich each gap with a human-readable suggested title derived from
+        // the last meaningful path segment (same heuristic as the cron alert).
+        const enriched = gapsAbove.map((m) => {
+          const parts = m.pathname.replace(/\/$/, "").split("/").filter(Boolean);
+          const lastPart = parts[parts.length - 1] ?? m.pathname;
+          return {
+            pathname:        m.pathname,
+            count:           m.count,
+            suggested_title: _slugToTitle(lastPart),
+          };
         });
+
+        return new Response(
+          JSON.stringify({
+            range,
+            threshold:            thr,
+            gaps_found:           uncovered.length,
+            gaps_above_threshold: gapsAbove.length,
+            gaps:                 enriched,
+          }),
+          { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } },
+        );
       } catch (e) {
         const msg = e instanceof Error ? e.message : "unknown";
         return new Response(
@@ -4939,7 +4989,10 @@ export default {
       // Task #13 — daily SPA title-miss gap alert. Queries the Analytics
       // Engine for the rolling 24h window and pages when any uncovered
       // path exceeds SPA_TITLE_MISS_ALERT_THRESHOLD (default 50) hits.
-      ctx.waitUntil(runSpaTitleMissAlert(wrapped, {
+      // `wrapped` is scoped to the "* * * * *" branch above; use `env`
+      // directly here (KV ops in the alert use RATE_LIMIT, not the
+      // kv-monitor wrapper, which is fine for a once-daily job).
+      ctx.waitUntil(runSpaTitleMissAlert(env, {
         resolveMeta: _resolveSpaRouteMeta,
         slugToTitle: _slugToTitle,
       }).catch((e) => {
