@@ -120,9 +120,9 @@ PATCHABLE_SETTINGS_KEYS: frozenset[str] = frozenset({
 })
 
 # ── Prewarm-settings contract (Task #87) ──────────────────────────────────────
-# GET /admin/edge/prewarm-settings will return these five fields once the edge
+# GET /admin/edge/prewarm-settings will return these four fields once the edge
 # worker KV endpoint goes live.  PATCHABLE_PREWARM_KEYS is the writable subset
-# (on/off switch + schedule).  The remaining two are read-only env reflections.
+# (on/off switch + schedule).  The remaining two are read-only reflections.
 CANONICAL_PREWARM_KEYS: frozenset[str] = frozenset({
     "enabled",
     "env_schedule_utc",
