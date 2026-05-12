@@ -3386,6 +3386,110 @@ async function handleGtagGateway(
   });
 }
 // ─────────────────────────────────────────────────────────────────────────────
+// Task #4 — Edge-level title / description injection for SPA routes.
+//
+// When a verified or claimed search bot reaches the PAGES_ORIGIN path (i.e.
+// the route is NOT in the prerender set and falls through to the static SPA
+// shell), we apply an HTMLRewriter pass that overwrites the generic
+// <title> and <meta name="description"> elements with route-specific values
+// derived from the URL slug.  Human users and non-HTML responses are
+// always served the original upstream body unchanged.
+//
+// Scope: /notes/class-11/:subject, /notes/class-12/:subject,
+//        /notes/degree/:sem/:subject, /ahsec/hs-1st-year/:subject,
+//        /ahsec/hs-2nd-year/:subject, /learn/:slug.
+//
+// Out of scope: OG tags, structured data, full SSR, backend changes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function _slugToTitle(slug: string): string {
+  return slug
+    .split("-")
+    .map((w) => (w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+interface _SpaMeta { title: string; description: string }
+
+export function _resolveSpaRouteMeta(pathname: string): _SpaMeta | null {
+  const clean = pathname.replace(/\/+$/, "") || "/";
+  const parts = clean.split("/").filter(Boolean);
+
+  // /notes/class-11/:subject
+  if (parts.length === 3 && parts[0] === "notes" && parts[1] === "class-11") {
+    const subject = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — Class 11 Notes | Syrabit.ai`,
+      description: `Study ${subject} for AHSEC Class 11 with AI-powered notes, MCQs, flashcards, and previous year questions on Syrabit.ai.`,
+    };
+  }
+  // /notes/class-12/:subject
+  if (parts.length === 3 && parts[0] === "notes" && parts[1] === "class-12") {
+    const subject = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — Class 12 Notes | Syrabit.ai`,
+      description: `Study ${subject} for AHSEC Class 12 with AI-powered notes, MCQs, flashcards, and previous year questions on Syrabit.ai.`,
+    };
+  }
+  // /notes/degree/:sem/:subject
+  if (parts.length === 4 && parts[0] === "notes" && parts[1] === "degree") {
+    const subject = _slugToTitle(parts[3]);
+    const sem = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — ${sem} Degree Notes | Syrabit.ai`,
+      description: `Study ${subject} for your Degree ${sem} with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+    };
+  }
+  // /ahsec/hs-1st-year/:subject
+  if (parts.length === 3 && parts[0] === "ahsec" && parts[1] === "hs-1st-year") {
+    const subject = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — AHSEC HS 1st Year | Syrabit.ai`,
+      description: `Study ${subject} for AHSEC HS 1st Year with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+    };
+  }
+  // /ahsec/hs-2nd-year/:subject
+  if (parts.length === 3 && parts[0] === "ahsec" && parts[1] === "hs-2nd-year") {
+    const subject = _slugToTitle(parts[2]);
+    return {
+      title: `${subject} — AHSEC HS 2nd Year | Syrabit.ai`,
+      description: `Study ${subject} for AHSEC HS 2nd Year with AI-powered notes, MCQs, and previous year questions on Syrabit.ai.`,
+    };
+  }
+  // /learn/:slug
+  if (parts.length === 2 && parts[0] === "learn") {
+    const topic = _slugToTitle(parts[1]);
+    return {
+      title: `${topic} — Learn | Syrabit.ai`,
+      description: `Learn about ${topic} with AI-powered explanations, notes, MCQs, and previous year questions on Syrabit.ai.`,
+    };
+  }
+  return null;
+}
+
+function _injectSpaTitleForBot(
+  response: Response,
+  pathname: string,
+  isBotGet: boolean,
+): Response {
+  if (!isBotGet) return response;
+  const ct = (response.headers.get("content-type") || "").toLowerCase();
+  if (!ct.includes("text/html")) return response;
+  const meta = _resolveSpaRouteMeta(pathname);
+  if (!meta) return response;
+
+  const { title, description } = meta;
+  return new HTMLRewriter()
+    .on("title", {
+      element(el) { el.setInnerContent(title); },
+    })
+    .on('meta[name="description"]', {
+      element(el) { el.setAttribute("content", description); },
+    })
+    .transform(response);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Task #944 — extracted so the public ``fetch`` export can wrap a single
 // recordEdgeLog call around every return path of the original handler.
@@ -4265,7 +4369,16 @@ async function _handleEdgeFetch(
       if (botResult.claimsBot && out.status >= 400) {
         logBotErrorResponse(env, ctx, out.status, botResult, ua, pathname);
       }
-      return out;
+      // Task #4 — inject route-specific <title> + <meta name="description">
+      // for verified/claimed search bots that fell through to the SPA shell
+      // (i.e. routes not covered by the backend prerender set).  Human users
+      // receive the original upstream body; HEAD and non-HTML responses are
+      // passed through untouched because HTMLRewriter is a no-op there.
+      return _injectSpaTitleForBot(
+        out,
+        pathname,
+        (isSearchBot || botResult.claimsBot) && request.method === "GET",
+      );
     }
 
     if ((request.method !== "GET" && request.method !== "HEAD") || isBypass(pathname)) {
