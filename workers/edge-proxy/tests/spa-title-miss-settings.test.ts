@@ -228,6 +228,48 @@ describe("GET /api/edge/spa-title-miss-settings (Task #33 / Task #47)", () => {
     expect(body.threshold).toBe(50);
     expect(body.kv_override_set).toBe(false);
   });
+
+  // ── GET 200 response schema snapshot (Task #75) ───────────────────────────
+  // Pins the exact shape returned by the GET handler so field additions,
+  // removals, or renames are caught at the edge-worker layer — not silently
+  // swallowed by the backend mock that never calls the real edge endpoint.
+  //
+  // Contract: exactly five keys —
+  //   disabled        (boolean)
+  //   env_disabled    (boolean)
+  //   env_threshold   (number)
+  //   kv_override_set (boolean)
+  //   threshold       (number)
+  it("GET 200 response schema snapshot: exact keys and types", async () => {
+    const kv = makeKv();
+    await kv.put(SETTINGS_KEY, JSON.stringify({ threshold: 30, disabled: true }));
+    const env = makeEnv({ rateLimit: kv, threshold: "40", disabled: "false" });
+
+    const resp = await workerHandler.fetch(settingsGet(), env, ctxNoop);
+    expect(resp.status).toBe(200);
+    const body = await resp.json() as Record<string, unknown>;
+
+    // ── key presence ─────────────────────────────────────────────────────────
+    // Fail loudly if a field is added, removed, or renamed in the GET handler.
+    const keys = Object.keys(body).sort();
+    expect(keys).toEqual(["disabled", "env_disabled", "env_threshold", "kv_override_set", "threshold"]);
+
+    // ── type assertions ───────────────────────────────────────────────────────
+    expect(typeof body.threshold).toBe("number");
+    expect(body.threshold).toBe(30); // KV override wins
+
+    expect(typeof body.disabled).toBe("boolean");
+    expect(body.disabled).toBe(true); // KV override wins
+
+    expect(typeof body.kv_override_set).toBe("boolean");
+    expect(body.kv_override_set).toBe(true);
+
+    expect(typeof body.env_threshold).toBe("number");
+    expect(body.env_threshold).toBe(40); // reflects wrangler var
+
+    expect(typeof body.env_disabled).toBe("boolean");
+    expect(body.env_disabled).toBe(false); // reflects wrangler var
+  });
 });
 
 describe("PUT /api/edge/spa-title-miss-settings (Task #33 / Task #47)", () => {
