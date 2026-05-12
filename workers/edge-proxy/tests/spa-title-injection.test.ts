@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { _slugToTitle, _resolveSpaRouteMeta, _injectSpaTitleForBot, _OG_IMAGE_BASE } from "../src/index";
+import { _slugToTitle, _resolveSpaRouteMeta, _injectSpaTitleForBot, _OG_IMAGE_BASE, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT } from "../src/index";
 
 describe("_slugToTitle", () => {
   it("title-cases single word", () => {
@@ -538,6 +538,76 @@ describe("_resolveSpaRouteMeta", () => {
         const ogImageUrl = metaEl.setAttribute.mock.calls[0][1] as string;
         expect(ogImageUrl).toMatch(/^https:\/\/cdn\.syrabit\.ai\/og\//);
         expect(ogImageUrl).toMatch(/\.png$/);
+      });
+
+      it("rewrites og:image:width to OG_IMAGE_WIDTH constant when ogImage present (Task #18)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:width" content="0"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:width"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", OG_IMAGE_WIDTH);
+        expect(OG_IMAGE_WIDTH).toBe("1200");
+      });
+
+      it("rewrites og:image:height to OG_IMAGE_HEIGHT constant when ogImage present (Task #18)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:height" content="0"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-12/chemistry", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:height"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith("content", OG_IMAGE_HEIGHT);
+        expect(OG_IMAGE_HEIGHT).toBe("630");
+      });
+
+      it("rewrites og:image:alt with subject name for subject route (Task #18)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:alt" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/notes/class-11/physics", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:alt"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          expect.stringContaining("Physics"),
+        );
+      });
+
+      it("rewrites og:image:alt with board name for hub route (Task #18)", () => {
+        const resp = new Response(
+          '<html><head><meta property="og:image:alt" content="old"></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/ahsec", true);
+
+        const metaEl = { setInnerContent: vi.fn(), setAttribute: vi.fn() };
+        capturedHandlers['meta[property="og:image:alt"]'].element(metaEl);
+        expect(metaEl.setAttribute).toHaveBeenCalledWith(
+          "content",
+          expect.stringContaining("AHSEC"),
+        );
+      });
+
+      it("does NOT register og:image:alt handler for unmatched route (Task #18)", () => {
+        const resp = new Response(
+          '<html><head><title>x</title></head></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+        _injectSpaTitleForBot(resp, "/pricing", true);
+        expect(capturedHandlers['meta[property="og:image:alt"]']).toBeUndefined();
+      });
+
+      it("og:image:width and og:image:height constants are 1200 and 630 (Task #18)", () => {
+        expect(OG_IMAGE_WIDTH).toBe("1200");
+        expect(OG_IMAGE_HEIGHT).toBe("630");
       });
     });
   });
