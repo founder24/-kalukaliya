@@ -405,6 +405,36 @@ for (const page of pages) {
     );
     continue;
   }
+  // Task #65: quality heuristic — a tag that survives the non-empty
+  // check but only contains the bare site name (e.g. "Syrabit.ai")
+  // or a very short string gives social crawlers no useful context
+  // about the specific subject/chapter being shared.
+  //
+  // Two failure modes (bare-site-name checked first so it gets its
+  // own diagnostic message rather than being swallowed by the length
+  // gate — "Syrabit.ai" is only 10 chars and would otherwise surface
+  // as a length failure with no mention of the root cause):
+  //   (a) altText is the bare site name "Syrabit.ai" (case-insensitive,
+  //       whitespace-trimmed) — the historical fallback that Task #37's
+  //       OG_IMAGE_ALT constant guard was meant to prevent from leaking
+  //       through. Checked before the length gate deliberately.
+  //   (b) altText shorter than 20 chars — too terse to describe any
+  //       real content page (the shortest legitimate static-route alt
+  //       we ship is "Log In to Syrabit.ai" at 20 chars).
+  if (altText.toLowerCase() === "syrabit.ai") {
+    fail(
+      `${route}: og:image:alt is the bare site name "Syrabit.ai" with no subject component — ` +
+        `prerender scripts must interpolate the subject/chapter title into the alt text`,
+    );
+    continue;
+  }
+  if (altText.length < 20) {
+    fail(
+      `${route}: og:image:alt is suspiciously short (${altText.length} chars: ${JSON.stringify(altText)}) — ` +
+        `use a subject/chapter-specific description (≥ 20 chars)`,
+    );
+    continue;
+  }
   ogAltChecked++;
 }
 console.log(
