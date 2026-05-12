@@ -874,3 +874,124 @@ describe("BOT_HTML_CACHE end-to-end via worker.fetch (verifiedBot=true)", () => 
     expect(kv.putSpy).toHaveBeenCalledTimes(2);
   });
 });
+
+// ─── Task #43 — FCrDNS/DoH guard ─────────────────────────────────────────────
+// The spoofed-Googlebot integration test (above) relies on the implicit fact
+// that DoH cannot succeed in the Vitest environment: the existing fetch mock
+// returns RENDERED_HTML for the cloudflare-dns.com URL, which is not valid
+// JSON, so _dohQuery's json() call throws and the catch block returns []. That
+// side effect is invisible to any reader and fragile: if a future test helper
+// stubs `cloudflare-dns.com` to return a well-formed DNS answer, the 403 branch
+// gets skipped and the test silently starts expecting the wrong status code.
+//
+// This describe block makes the assumption AUDITABLE by:
+//   1. Using a fetch mock that EXPLICITLY returns HTTP 404 for every DoH query,
+//      so any reader can immediately see that DoH is expected to fail here.
+//   2. Asserting that the DoH URL was actually called — proving verifyBotIpWithKv
+//      ran a live PTR lookup rather than short-circuiting on a KV hit. If a
+//      future change pre-seeds the RATE_LIMIT KV with a positive cache entry
+//      and accidentally bypasses the lookup, this assertion fails loudly.
+describe("FCrDNS/DoH guard — verifyBotIpWithKv DoH stub is explicit and auditable (Task #43)", () => {
+  /**
+   * Drop-in replacement for installRenderedFetch that adds an EXPLICIT
+   * HTTP 404 response for every Cloudflare DNS-over-HTTPS request.
+   *
+   * `_dohQuery` in index.ts fetches:
+   *   https://cloudflare-dns.com/dns-query?name=<arpa>&type=PTR
+   *   https://cloudflare-dns.com/dns-query?name=<fwd>&type=A
+   * A 404 response causes the `if (!dnsResp.ok) return []` branch, so
+   * _resolveRdns returns null and verifyBotIpWithKv returns false.
+   */
+  function installFcrDnsGuardedFetch() {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+
+        // Explicit DoH stub: hard-404 so _dohQuery returns [] for every
+        // PTR and A query — no PTR target means verifyBotIpWithKv returns false.
+        if (url.includes("cloudflare-dns.com/dns-query")) {
+          return new Response(null, { status: 404 });
+        }
+
+        if (url.startsWith("https://pages.test")) {
+          return new Response("<html><body>pages-spa-shell</body></html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+
+        if (method === "HEAD") {
+          return new Response(null, {
+            status: 200,
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Last-Modified": BACKEND_LM,
+            },
+          });
+        }
+
+        return new Response(RENDERED_HTML, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Last-Modified": BACKEND_LM,
+          },
+        });
+      },
+    );
+  }
+
+  let fetchSpy: ReturnType<typeof installFcrDnsGuardedFetch>;
+
+  beforeEach(() => {
+    _resetMonitorStateForTests();
+    fetchSpy = installFcrDnsGuardedFetch();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it(
+    "spoofed Googlebot (9.9.9.9, no cf.verifiedBot) is 403'd; " +
+      "DoH PTR fetch is explicitly stubbed to 404 and confirmed to have been called (Task #43)",
+    async () => {
+      const kv = makeExpiringKv();
+      // RATE_LIMIT must be populated so verifyBotIpWithKv does not
+      // short-circuit on the `if (!env.RATE_LIMIT) return false` guard
+      // and actually reaches the _dohQuery call we want to audit.
+      const env = makeEnv({ botCache: kv });
+
+      const req = new Request("https://syrabit.ai/about", {
+        headers: {
+          "user-agent": "Googlebot/2.1",
+          "CF-Connecting-IP": "9.9.9.9",
+        },
+        // Deliberately NO cf.verifiedBot — this is a spoofed request.
+      });
+
+      const resp = await workerHandler.fetch(req, env, ctxNoop);
+
+      // Hard-403: spoofed critical bot, FCrDNS returned null (DoH → 404).
+      expect(resp.status).toBe(403);
+      expect(resp.headers.get("X-Bot-Verify")).toBe("spoofed");
+
+      // Audit anchor (the core of Task #43): the DoH PTR endpoint MUST
+      // have been called, confirming verifyBotIpWithKv performed the live
+      // lookup rather than returning false via an earlier short-circuit.
+      // If a future change prevents _dohQuery from running (e.g. a KV
+      // pre-seed with a positive entry, or a cf.verifiedBot stub), this
+      // assertion fails and makes the bypass immediately visible.
+      const dohCalls = fetchSpy.mock.calls.filter(([input]) =>
+        String(input).includes("cloudflare-dns.com/dns-query"),
+      );
+      expect(dohCalls.length).toBeGreaterThanOrEqual(1);
+
+      // Spoofed bot must not populate BOT_HTML_CACHE.
+      expect(kv.putSpy).not.toHaveBeenCalled();
+      expect(kv.store.size).toBe(0);
+    },
+  );
+});
