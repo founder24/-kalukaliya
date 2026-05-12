@@ -86,4 +86,7 @@ jobs:
           R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
         run: |
           set -euo pipefail
-          python scripts/og-images/upload_to_r2.py
+          # Task #25 — --prune removes orphaned PNGs whose slugs no longer exist
+          # in the curriculum JSON (e.g. after a subject rename).  Without this,
+          # old banners accumulate in R2 and continue to be served at stale URLs.
+          python scripts/og-images/upload_to_r2.py --prune

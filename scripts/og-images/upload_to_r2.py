@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Task #17 — Upload generated OG banner PNGs to Cloudflare R2.
+Task #25 — Prune orphaned PNGs when a subject slug is renamed.
 
 Prerequisites:
   1. R2 credentials set (via Replit Secrets or exported env vars):
@@ -19,10 +20,13 @@ Prerequisites:
        pip install boto3
 
 Run:
-    python scripts/og-images/upload_to_r2.py [--dry-run] [--smoke-check]
+    python scripts/og-images/upload_to_r2.py [--dry-run] [--prune] [--smoke-check]
 
 Flags:
-    --dry-run      Print what would be uploaded, but don't upload.
+    --dry-run      Print what would be uploaded/deleted, but don't actually do it.
+    --prune        After uploading, list all objects under the og/ R2 prefix and
+                   delete any that are NOT in the current generated set.  Use this
+                   when a subject slug has been renamed so the old PNG is removed.
     --smoke-check  After uploading, curl-check each public URL and
                    report any that don't return HTTP 200.
 
@@ -107,6 +111,63 @@ def upload(dry_run: bool = False) -> list[str]:
     return uploaded
 
 
+def prune(current_slugs: list[str], dry_run: bool = False) -> int:
+    """
+    Task #25 — Delete R2 objects under the og/ prefix that are NOT in
+    current_slugs.  Returns the number of objects deleted (or that would
+    have been deleted in dry-run mode).
+
+    This prevents stale banners from accumulating when a subject slug is
+    renamed: the old PNG would never be overwritten by the upload step
+    (which only puts new/updated objects), so without pruning it would
+    linger in the bucket forever and continue to be served at the old URL.
+    """
+    bucket = os.environ.get("R2_BUCKET_NAME", "syrabit-media").strip()
+    client = _build_client()
+
+    # List all keys under the og/ prefix (paginated).
+    wanted_keys: set[str] = {f"{R2_PREFIX}/{slug}.png" for slug in current_slugs}
+    orphan_keys: list[str] = []
+
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=f"{R2_PREFIX}/"):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key not in wanted_keys:
+                orphan_keys.append(key)
+
+    if not orphan_keys:
+        print("  No orphaned OG images found in R2.")
+        return 0
+
+    print(f"\n{'[dry-run] ' if dry_run else ''}Pruning {len(orphan_keys)} orphaned object(s):")
+    for key in orphan_keys:
+        print(f"  {'[dry-run] would delete' if dry_run else 'deleting'}  {key}")
+
+    if dry_run:
+        return len(orphan_keys)
+
+    # R2 supports batch delete (up to 1000 keys per request, same as S3).
+    BATCH = 1000
+    deleted = 0
+    for i in range(0, len(orphan_keys), BATCH):
+        batch = orphan_keys[i : i + BATCH]
+        resp = client.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+        )
+        errors = resp.get("Errors", [])
+        if errors:
+            for err in errors:
+                print(f"  ✗  delete failed: {err['Key']}  ({err['Code']}: {err['Message']})",
+                      file=sys.stderr)
+            raise RuntimeError(f"{len(errors)} object(s) failed to delete during prune.")
+        deleted += len(batch)
+
+    print(f"  Pruned {deleted} orphaned object(s)  ✓")
+    return deleted
+
+
 def smoke_check(slugs: list[str]) -> None:
     print("\nSmoke-checking public URLs …")
     failures: list[str] = []
@@ -135,13 +196,18 @@ def smoke_check(slugs: list[str]) -> None:
 
 
 def main() -> None:
-    dry_run     = "--dry-run"     in sys.argv
-    do_smoke    = "--smoke-check" in sys.argv
+    dry_run  = "--dry-run"     in sys.argv
+    do_prune = "--prune"       in sys.argv
+    do_smoke = "--smoke-check" in sys.argv
 
     mode = "[DRY RUN] " if dry_run else ""
     print(f"{mode}Uploading OG banner PNGs to R2 …")
     slugs = upload(dry_run=dry_run)
     print(f"\n{mode}{len(slugs)} file(s) processed.")
+
+    if do_prune:
+        print(f"\n{mode}Pruning orphaned OG images from R2 …")
+        prune(current_slugs=slugs, dry_run=dry_run)
 
     if do_smoke and not dry_run:
         # Brief wait for CDN propagation
