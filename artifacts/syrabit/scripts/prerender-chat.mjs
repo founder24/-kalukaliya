@@ -87,6 +87,31 @@ function rewriteHead(html) {
     /<meta name="twitter:description" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:description" content="${escapeHtml(DESCRIPTION)}" />`,
   );
+  // Task #38: inject twitter:image and twitter:image:alt so the edge-proxy
+  // HTMLRewriter has a tag to rewrite and X/Twitter link previews use the
+  // route-specific banner rather than falling back to nothing.
+  if (/<meta name="twitter:image" content="[^"]*"\s*\/?>/.test(html)) {
+    html = html.replace(
+      /<meta name="twitter:image" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />`,
+    );
+  } else {
+    html = html.replace(
+      /<\/head>/,
+      `    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />\n  </head>`,
+    );
+  }
+  if (/<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/.test(html)) {
+    html = html.replace(
+      /<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:image:alt" content="${escapeHtml(TITLE)}" />`,
+    );
+  } else {
+    html = html.replace(
+      /<\/head>/,
+      `    <meta name="twitter:image:alt" content="${escapeHtml(TITLE)}" />\n  </head>`,
+    );
+  }
   // /chat is auth-gated and personalized — override the default
   // `index, follow, …` robots meta from the shared shell with
   // noindex,follow. Also matches the same guard in robots.txt.
@@ -222,6 +247,19 @@ async function main() {
   if (!/<meta property="og:image:alt" content="[^"]+"/.test(written)) {
     throw new Error(
       "[prerender-chat] og:image:alt assertion failed: tag missing or empty in prerendered HTML",
+    );
+  }
+  // Task #38: twitter:image and twitter:image:alt must be present so the
+  // edge-proxy HTMLRewriter can rewrite them and X/Twitter link previews
+  // show the route-specific banner rather than falling back to nothing.
+  if (!/<meta name="twitter:image" content="[^"]+"/.test(written)) {
+    throw new Error(
+      "[prerender-chat] twitter:image assertion failed: tag missing or empty in prerendered HTML",
+    );
+  }
+  if (!/<meta name="twitter:image:alt" content="[^"]+"/.test(written)) {
+    throw new Error(
+      "[prerender-chat] twitter:image:alt assertion failed: tag missing or empty in prerendered HTML",
     );
   }
 

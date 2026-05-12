@@ -267,6 +267,33 @@ function rewriteHead(html, { title, description, canonical, robots, ogImageAlt }
     /<meta name="twitter:description" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:description" content="${escapeHtml(description)}" />`,
   );
+  // Task #38: inject twitter:image and twitter:image:alt so the edge-proxy
+  // HTMLRewriter has a tag to rewrite and X/Twitter link previews use the
+  // route-specific banner rather than falling back to nothing.
+  if (/<meta name="twitter:image" content="[^"]*"\s*\/?>/.test(html)) {
+    html = html.replace(
+      /<meta name="twitter:image" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />`,
+    );
+  } else {
+    html = html.replace(
+      /<\/head>/,
+      `    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />\n  </head>`,
+    );
+  }
+  if (ogImageAlt) {
+    if (/<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/.test(html)) {
+      html = html.replace(
+        /<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/,
+        `<meta name="twitter:image:alt" content="${escapeHtml(ogImageAlt)}" />`,
+      );
+    } else {
+      html = html.replace(
+        /<\/head>/,
+        `    <meta name="twitter:image:alt" content="${escapeHtml(ogImageAlt)}" />\n  </head>`,
+      );
+    }
+  }
 
   // Optional per-route robots override (e.g. /login is noindex,follow).
   if (robots) {
@@ -343,6 +370,19 @@ function main() {
     if (!/<meta property="og:image:alt" content="[^"]+"/.test(html)) {
       throw new Error(
         `[prerender-static-routes] ${route.path}: og:image:alt missing or empty in prerendered HTML`,
+      );
+    }
+    // Task #38: twitter:image and twitter:image:alt must be present so the
+    // edge-proxy HTMLRewriter can rewrite them and X/Twitter link previews
+    // show the route-specific banner rather than falling back to nothing.
+    if (!/<meta name="twitter:image" content="[^"]+"/.test(html)) {
+      throw new Error(
+        `[prerender-static-routes] ${route.path}: twitter:image missing or empty in prerendered HTML`,
+      );
+    }
+    if (!/<meta name="twitter:image:alt" content="[^"]+"/.test(html)) {
+      throw new Error(
+        `[prerender-static-routes] ${route.path}: twitter:image:alt missing or empty in prerendered HTML`,
       );
     }
 

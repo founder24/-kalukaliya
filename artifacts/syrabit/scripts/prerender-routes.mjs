@@ -210,6 +210,33 @@ function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
     /<meta name="twitter:description" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:description" content="${escapeHtml(description)}" />`,
   );
+  // Task #38: inject twitter:image and twitter:image:alt so the edge-proxy
+  // HTMLRewriter has a tag to rewrite and X/Twitter link previews use the
+  // route-specific banner rather than falling back to nothing.
+  if (/<meta name="twitter:image" content="[^"]*"\s*\/?>/.test(html)) {
+    html = html.replace(
+      /<meta name="twitter:image" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />`,
+    );
+  } else {
+    html = html.replace(
+      /<\/head>/,
+      `    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />\n  </head>`,
+    );
+  }
+  if (ogImageAlt) {
+    if (/<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/.test(html)) {
+      html = html.replace(
+        /<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/,
+        `<meta name="twitter:image:alt" content="${escapeHtml(ogImageAlt)}" />`,
+      );
+    } else {
+      html = html.replace(
+        /<\/head>/,
+        `    <meta name="twitter:image:alt" content="${escapeHtml(ogImageAlt)}" />\n  </head>`,
+      );
+    }
+  }
   return html;
 }
 
@@ -379,6 +406,20 @@ function writeRoute(routePath, html) {
   fs.mkdirSync(outDir, { recursive: true });
   const outHtml = path.join(outDir, "index.html");
   fs.writeFileSync(outHtml, html);
+  // Task #38: hard assertions — twitter:image and twitter:image:alt must be
+  // present in every prerendered snapshot so the edge-proxy HTMLRewriter can
+  // find and replace them with the route-specific subject banner.
+  const written = fs.readFileSync(outHtml, "utf-8");
+  if (!/<meta name="twitter:image" content="[^"]+"/.test(written)) {
+    throw new Error(
+      `[prerender-routes] twitter:image assertion failed for ${routePath}: tag missing or empty`,
+    );
+  }
+  if (!/<meta name="twitter:image:alt" content="[^"]+"/.test(written)) {
+    throw new Error(
+      `[prerender-routes] twitter:image:alt assertion failed for ${routePath}: tag missing or empty`,
+    );
+  }
   return outHtml;
 }
 

@@ -122,6 +122,31 @@ function rewriteHead(html) {
     /<meta name="twitter:description" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:description" content="${escapeHtml(DESCRIPTION)}" />`,
   );
+  // Task #38: inject twitter:image and twitter:image:alt so the edge-proxy
+  // HTMLRewriter has a tag to rewrite and X/Twitter link previews use the
+  // route-specific banner rather than falling back to nothing.
+  if (/<meta name="twitter:image" content="[^"]*"\s*\/?>/.test(html)) {
+    html = html.replace(
+      /<meta name="twitter:image" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />`,
+    );
+  } else {
+    html = html.replace(
+      /<\/head>/,
+      `    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />\n  </head>`,
+    );
+  }
+  if (/<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/.test(html)) {
+    html = html.replace(
+      /<meta name="twitter:image:alt" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:image:alt" content="${escapeHtml(OG_IMAGE_ALT)}" />`,
+    );
+  } else {
+    html = html.replace(
+      /<\/head>/,
+      `    <meta name="twitter:image:alt" content="${escapeHtml(OG_IMAGE_ALT)}" />\n  </head>`,
+    );
+  }
   return html;
 }
 
@@ -368,6 +393,19 @@ async function main() {
     if (!/<meta property="og:image:alt" content="[^"]+"/.test(written)) {
       throw new Error(
         `[prerender-library] og:image:alt assertion failed for ${route}: tag missing or empty`,
+      );
+    }
+    // Task #38: twitter:image and twitter:image:alt must be present so the
+    // edge-proxy HTMLRewriter can rewrite them and X/Twitter link previews
+    // show the route-specific banner rather than falling back to nothing.
+    if (!/<meta name="twitter:image" content="[^"]+"/.test(written)) {
+      throw new Error(
+        `[prerender-library] twitter:image assertion failed for ${route}: tag missing or empty`,
+      );
+    }
+    if (!/<meta name="twitter:image:alt" content="[^"]+"/.test(written)) {
+      throw new Error(
+        `[prerender-library] twitter:image:alt assertion failed for ${route}: tag missing or empty`,
       );
     }
 
