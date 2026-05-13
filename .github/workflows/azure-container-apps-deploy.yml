@@ -517,10 +517,13 @@ jobs:
           #   Processing → Degraded/Failed     — fail fast
           #   (stays Processing for > 10 min)  — timeout error
 
-          LATEST_REV=$(az containerapp revision list \
+          # `latestRevisionName` is updated by ACA immediately after the PATCH
+          # succeeds — more reliable than sorting the revision list with
+          # negative JMESPath indices (not supported in all az CLI versions).
+          LATEST_REV=$(az containerapp show \
             --name "$APP" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query "sort_by([], &properties.createdTime)[-1].name" -o tsv)
+            --query "properties.latestRevisionName" -o tsv)
           echo "::notice::Watching revision $LATEST_REV"
 
           for i in $(seq 1 32); do
