@@ -393,6 +393,10 @@ jobs:
             # `--arg image …` and `--arg kv …` are passed in so the JQ
             # program itself never embeds the values literally.
             REV_SUFFIX="ci-$(date -u +%Y%m%d-%H%M%S)"
+            # Export so the health probe step knows the exact revision name to
+            # wait for (ACA PATCH is async — latestRevisionName lags).
+            echo "DEPLOY_REV_SUFFIX=$REV_SUFFIX" >> "$GITHUB_ENV"
+            echo "DEPLOY_APP_NAME=$app_name" >> "$GITHUB_ENV"
             # Two secrets may be injected directly from GitHub Actions secrets
             # instead of Key Vault refs. When the GH secret is non-empty the
             # jq arg is set and the conditional produces a direct {"value":…}
@@ -517,15 +521,36 @@ jobs:
           #   Processing → Degraded/Failed     — fail fast
           #   (stays Processing for > 10 min)  — timeout error
 
-          # `latestRevisionName` is updated by ACA immediately after the PATCH
-          # succeeds — more reliable than sorting the revision list with
-          # negative JMESPath indices (not supported in all az CLI versions).
-          LATEST_REV=$(az containerapp show \
-            --name "$APP" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query "properties.latestRevisionName" -o tsv)
-          echo "::notice::Watching revision $LATEST_REV"
+          # The ACA ARM PATCH is async (returns 202 Accepted). `latestRevisionName`
+          # lags by 10-30 s after the PATCH. We know the exact expected revision
+          # name because we set `revisionSuffix` in the PATCH body and exported
+          # it via $GITHUB_ENV in the previous step.
+          #
+          # ACA revision name convention: <app-name>--<suffix>
+          # e.g. syrabit-backend--ci-20260513-174946
+          EXPECTED_REV="${DEPLOY_APP_NAME}--${DEPLOY_REV_SUFFIX}"
+          echo "::notice::Expecting revision $EXPECTED_REV (may take 10-30 s to appear)"
 
+          # Phase 1: wait for the revision to appear in the API (up to 3 min)
+          LATEST_REV=""
+          for i in $(seq 1 18); do
+            LATEST_REV=$(az containerapp show \
+              --name "$APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.latestRevisionName" -o tsv 2>/dev/null || echo "")
+            echo "  [$i] latestRevisionName=$LATEST_REV"
+            if [ "$LATEST_REV" = "$EXPECTED_REV" ]; then
+              echo "  Revision appeared."
+              break
+            fi
+            sleep 10
+          done
+          if [ "$LATEST_REV" != "$EXPECTED_REV" ]; then
+            echo "::error::Timed out waiting for $EXPECTED_REV to become latestRevisionName (got: $LATEST_REV)"
+            exit 1
+          fi
+
+          # Phase 2: poll running state until Running/Failed/Stopped
           for i in $(seq 1 32); do
             STATE=$(az containerapp revision show \
               --name "$APP" \
