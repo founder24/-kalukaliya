@@ -175,6 +175,53 @@ jobs:
           set -euo pipefail
           az acr login --name "$AZURE_ACR_NAME"
 
+      # Pre-deploy guard: verify every required Key Vault secret exists
+      # before spending time on a 1-2 min image build that will fail anyway
+      # at provision time. Two of the 12 secrets (sarvam-api-key,
+      # workers-embed-secret) may instead be supplied via GitHub Actions
+      # secrets (SARVAM_API_KEY / WORKERS_EMBED_SECRET) — when the GH
+      # secret is non-empty the KV check for that slot is skipped because
+      # the deploy step will inject the value directly and not need the KV ref.
+      - name: Pre-deploy — validate Key Vault secrets
+        if: ${{ inputs.app == 'syrabit-backend' || inputs.app == 'both' }}
+        env:
+          GH_SARVAM_API_KEY:       ${{ secrets.SARVAM_API_KEY }}
+          GH_WORKERS_EMBED_SECRET: ${{ secrets.WORKERS_EMBED_SECRET }}
+        run: |
+          set -euo pipefail
+          KV="syrabit-prod-kv"
+          declare -A SKIP_IF_GH_SECRET=(
+            [SARVAM-API-KEY]="GH_SARVAM_API_KEY"
+            [WORKERS-EMBED-SECRET]="GH_WORKERS_EMBED_SECRET"
+          )
+          REQUIRED=(
+            AWS-ACCESS-KEY-ID AWS-SECRET-ACCESS-KEY MONGO-URI
+            JWT-SECRET ADMIN-JWT-SECRET RAZORPAY-KEY-SECRET
+            WORKERS-EMBED-SECRET ORIGIN-SHARED-SECRET D1-SYNC-SECRET
+            SENTRY-DSN SARVAM-API-KEY WEB-PUSH-VAPID-PRIVATE-KEY
+          )
+          MISSING=()
+          for s in "${REQUIRED[@]}"; do
+            gh_var="${SKIP_IF_GH_SECRET[$s]:-}"
+            if [ -n "$gh_var" ] && [ -n "${!gh_var:-}" ]; then
+              echo "  ✓ $s — supplied via GitHub Actions secret (KV check skipped)"
+              continue
+            fi
+            if az keyvault secret show --vault-name "$KV" --name "$s" \
+                --query id -o tsv 2>/dev/null | grep -q .; then
+              echo "  ✓ $s — present in $KV"
+            else
+              echo "  ✗ $s — MISSING in $KV and no GitHub secret override"
+              MISSING+=("$s")
+            fi
+          done
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::Key Vault missing ${#MISSING[@]} secret(s): ${MISSING[*]}"
+            echo "::error::Add them to syrabit-prod-kv, OR set the matching GitHub Actions secret (SARVAM_API_KEY / WORKERS_EMBED_SECRET) to bypass KV for those two slots."
+            exit 1
+          fi
+          echo "::notice::All required Key Vault secrets verified."
+
       # Per-app build/deploy plumbing.
       #
       # Each Container App owns ONE image repository in ACR and the deploy step
@@ -247,6 +294,9 @@ jobs:
           fi
 
       - name: Update Container App revision
+        env:
+          GH_SARVAM_API_KEY:       ${{ secrets.SARVAM_API_KEY }}
+          GH_WORKERS_EMBED_SECRET: ${{ secrets.WORKERS_EMBED_SECRET }}
         run: |
           set -euo pipefail
           APP="${{ inputs.app }}"
@@ -343,12 +393,23 @@ jobs:
             # `--arg image …` and `--arg kv …` are passed in so the JQ
             # program itself never embeds the values literally.
             REV_SUFFIX="ci-$(date -u +%Y%m%d-%H%M%S)"
+            # Two secrets may be injected directly from GitHub Actions secrets
+            # instead of Key Vault refs. When the GH secret is non-empty the
+            # jq arg is set and the conditional produces a direct {"value":…}
+            # entry; otherwise it falls back to the {"keyVaultUrl":…} KV ref.
+            # This lets the deploy succeed even when these two secrets have not
+            # yet been added to syrabit-prod-kv (e.g. first deploy after
+            # rotating the Sarvam key or resetting the embed shared secret).
+            _SARVAM_KEY="${GH_SARVAM_API_KEY:-}"
+            _EMBED_SECRET="${GH_WORKERS_EMBED_SECRET:-}"
             echo "::group::Build target spec"
             jq \
-              --arg image  "$image" \
-              --arg kv     "$KV_BASE" \
-              --arg suffix "$REV_SUFFIX" \
-              --arg acr    "$AZURE_ACR_NAME.azurecr.io" \
+              --arg image        "$image" \
+              --arg kv           "$KV_BASE" \
+              --arg suffix       "$REV_SUFFIX" \
+              --arg acr          "$AZURE_ACR_NAME.azurecr.io" \
+              --arg sarvam_key   "$_SARVAM_KEY" \
+              --arg embed_secret "$_EMBED_SECRET" \
               '
               .properties.configuration.registries = [{
                 "server":   $acr,
@@ -361,11 +422,11 @@ jobs:
                   {"name":"jwt-secret",                 "keyVaultUrl": ($kv + "/JWT-SECRET"),                 "identity":"system"},
                   {"name":"admin-jwt-secret",           "keyVaultUrl": ($kv + "/ADMIN-JWT-SECRET"),           "identity":"system"},
                   {"name":"razorpay-key-secret",        "keyVaultUrl": ($kv + "/RAZORPAY-KEY-SECRET"),        "identity":"system"},
-                  {"name":"workers-embed-secret",       "keyVaultUrl": ($kv + "/WORKERS-EMBED-SECRET"),       "identity":"system"},
+                  (if $embed_secret != "" then {"name":"workers-embed-secret","value":$embed_secret} else {"name":"workers-embed-secret","keyVaultUrl":($kv+"/WORKERS-EMBED-SECRET"),"identity":"system"} end),
                   {"name":"origin-shared-secret",       "keyVaultUrl": ($kv + "/ORIGIN-SHARED-SECRET"),       "identity":"system"},
                   {"name":"d1-sync-secret",             "keyVaultUrl": ($kv + "/D1-SYNC-SECRET"),             "identity":"system"},
                   {"name":"sentry-dsn",                 "keyVaultUrl": ($kv + "/SENTRY-DSN"),                 "identity":"system"},
-                  {"name":"sarvam-api-key",             "keyVaultUrl": ($kv + "/SARVAM-API-KEY"),             "identity":"system"},
+                  (if $sarvam_key != "" then {"name":"sarvam-api-key","value":$sarvam_key} else {"name":"sarvam-api-key","keyVaultUrl":($kv+"/SARVAM-API-KEY"),"identity":"system"} end),
                   {"name":"web-push-vapid-private-key", "keyVaultUrl": ($kv + "/WEB-PUSH-VAPID-PRIVATE-KEY"), "identity":"system"}
                 ]
               | .properties.configuration.ingress.traffic = [{"latestRevision": true, "weight": 100}]
