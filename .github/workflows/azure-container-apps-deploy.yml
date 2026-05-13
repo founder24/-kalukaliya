@@ -504,9 +504,24 @@ jobs:
         run: |
           set -euo pipefail
           URL="${{ inputs.health_url }}"
+          APP="${{ inputs.app }}"
+          [ "$APP" = "both" ] && APP="syrabit-backend"
+
           if [ -z "$URL" ]; then
-            URL="https://api.syrabit.ai/api/health"
+            # Probe the ACA FQDN directly instead of api.syrabit.ai.
+            # api.syrabit.ai routes through Cloudflare's OriginGate worker
+            # which returns 403 to any caller that doesn't present the
+            # ORIGIN_SHARED_SECRET header — including GitHub Actions runners.
+            # The ACA ingress FQDN is reachable directly from runners and
+            # bypasses CF entirely; /api/health is an unauthenticated endpoint.
+            ACA_FQDN=$(az containerapp show \
+              --name "$APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.configuration.ingress.fqdn" \
+              -o tsv)
+            URL="https://${ACA_FQDN}/api/health"
           fi
+
           echo "Probing $URL (up to 8 min — covers ACA cold start + KV resolve + FastAPI imports)"
           for i in $(seq 1 32); do
             code=$(curl -sS -o /tmp/h -w "%{http_code}" --max-time 8 "$URL" || echo 000)
