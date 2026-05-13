@@ -114,6 +114,7 @@ VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhY
 PINECONE_WRITE = "true"
 CLOUDFLARE_ACCOUNT_ID = "d66e40eac539fff1db270fddf384a5ec"
 PINECONE_INDEX = "syrabit-ahsec"
+WORKERS_EMBED_URL = "https://embed.syrabit.ai"
 
 [userenv.development]
 
