@@ -44,11 +44,33 @@ router = APIRouter()
 # Canonical registry path — single source of truth for which UA tokens
 # belong to which bucket. Loaded lazily on first request so server
 # startup doesn't pay the parse cost.
-_RULES_PATH = Path(__file__).resolve().parents[3] / "infra" / "bot-rules.yaml"
+# parents resolution from this file in the monorepo:
+#   parents[0] = artifacts/syrabit-backend/routes
+#   parents[1] = artifacts/syrabit-backend
+#   parents[2] = artifacts
+#   parents[3] = repo root                   <- what we actually want
+# In Docker the app is copied to /app so parents only goes to depth 2
+# (/app/routes -> /app -> /). parents[3] raises IndexError there.
+def _resolve_rules_path() -> Path:
+    try:
+        return Path(__file__).resolve().parents[3] / "infra" / "bot-rules.yaml"
+    except IndexError:
+        # Docker: /app/routes/... has only 3 parents. Return a sentinel;
+        # _load_registry() handles missing files gracefully.
+        return Path("/nonexistent-bot-rules.yaml")
+
+_RULES_PATH = _resolve_rules_path()
+
 
 # Wire the registry-loader import path once at module init (idempotent).
-_SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "scripts")
-if _SCRIPTS_DIR not in sys.path:
+def _resolve_scripts_dir() -> str:
+    try:
+        return str(Path(__file__).resolve().parents[3] / "scripts")
+    except IndexError:
+        return ""
+
+_SCRIPTS_DIR = _resolve_scripts_dir()
+if _SCRIPTS_DIR and _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 
