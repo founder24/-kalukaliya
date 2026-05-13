@@ -382,6 +382,7 @@ async def main() -> int:
                 ),
             })
 
+        # embed-model: legacy-corpus-rebuild-script-not-in-prod-chain
         result = await retriever.upsert(payload, namespace=NAMESPACE)
         counts["upserted"] += int(result.get("upserted", 0))
         logger.info("[T291][as] batch %d–%d → upserted=%d skipped=%d",

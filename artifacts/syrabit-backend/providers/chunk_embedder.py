@@ -444,6 +444,7 @@ async def embed_chunks_bulk(
                 from retrievers.pinecone_vector import PineconeVectorRetriever
                 _pc = PineconeVectorRetriever()
                 if _pc.is_configured():
+                    # embed-model: @cf/google/embeddinggemma-300m
                     pc_result = await _pc.upsert(pinecone_vectors)
                     logger.info(
                         "[chunk_embedder] Pinecone upsert: %d vectors → %s",

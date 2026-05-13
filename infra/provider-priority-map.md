@@ -101,7 +101,7 @@ implementation.
 
 | tier | provider_slug | model_id | region | notes |
 |---|---|---|---|---|
-| primary | workers_ai | @cf/baai/bge-m3 | cf-edge | Pinned for hot path; ~20–40 ms |
+| primary | workers_ai | @cf/google/embeddinggemma-300m | cf-edge | Pinned for hot path via workers_embed.py; 1024-dim; ~20–40 ms |
 
 --- removed ---
 - vertex_embed / text-embedding-004 (rollback-only, removed from chain)

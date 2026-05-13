@@ -515,6 +515,7 @@ async def run_backfill(
             if pinecone_vectors:
                 pinecone_ok = False
                 try:
+                    # embed-model: @cf/google/embeddinggemma-300m
                     res = await pinecone_retriever.upsert(pinecone_vectors)
                     errs = res.get("errors") or []
                     upserted_count = int(res.get("upserted", 0))

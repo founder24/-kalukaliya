@@ -45,9 +45,10 @@ EXCLUDES=(
   '--glob=!docs/**'
   # Vendored third-party SDK; not part of our active code paths.
   '--glob=!**/emergentintegrations/**'
-  # Existing legacy-provider auditor — its job is to mention these
+  # Existing legacy-provider auditors — their job is to mention these
   # names. New active dispatch code is what we're guarding here.
   '--glob=!**/scripts/check_dead_providers.py'
+  '--glob=!**/scripts/ci/check_canonical_delegation.py'
 )
 
 # Round-3 review tightening: NO comment-word bypass. The only way a

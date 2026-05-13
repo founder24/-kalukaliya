@@ -166,6 +166,7 @@ class ShadowRetriever(Retriever):
         return out
 
     async def upsert(self, vectors: list[dict[str, Any]]) -> dict[str, Any]:
+        # embed-model: legacy-model-set-by-caller (pass-through; no embedding decision here)
         out = await self._primary.upsert(vectors)
         if self._shadow_active():
             asyncio.create_task(self._shadow_upsert(vectors))
@@ -209,6 +210,7 @@ class ShadowRetriever(Retriever):
 
     async def _shadow_upsert(self, vectors: list[dict[str, Any]]) -> None:
         try:
+            # embed-model: legacy-model-set-by-caller (shadow mirror; no embedding decision here)
             await self._shadow.upsert(vectors)
             _bump("writes_mirrored", len(vectors))
         except Exception as exc:

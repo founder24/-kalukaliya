@@ -280,6 +280,7 @@ class SyllabusEmbedder:
         )
         vectors_to_upsert.extend(topic_vecs)
 
+        # embed-model: @cf/google/embeddinggemma-300m
         result = await retriever.upsert(vectors_to_upsert)
         inserted = result.get("upserted", len(vectors_to_upsert))
         logger.info(f"Embedded chapter '{title[:40]}' + {len(topic_vecs)} topics to Vectorize")
@@ -706,6 +707,7 @@ class SyllabusEmbedder:
                 )
                 vectors_batch.extend(topic_vecs)
 
+            # embed-model: @cf/google/embeddinggemma-300m
             if len(vectors_batch) >= 20:
                 result = await retriever.upsert(vectors_batch)
                 inserted += result.get("upserted", len(vectors_batch))
@@ -849,6 +851,7 @@ class SyllabusEmbedder:
                         vectors_batch.extend(topic_vecs)
                         stats["topics_processed"] += len(topic_vecs)
 
+                    # embed-model: @cf/google/embeddinggemma-300m
                     if len(vectors_batch) >= 20:
                         await retriever.upsert(vectors_batch)
                         vectors_batch = []

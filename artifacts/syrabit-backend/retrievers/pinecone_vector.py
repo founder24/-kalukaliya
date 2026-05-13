@@ -233,6 +233,7 @@ class PineconeVectorRetriever(Retriever):
                 payload["namespace"] = namespace
             try:
                 async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                    # embed-model: legacy-model-set-by-caller (raw HTTP client; no embedding decision here)
                     resp = await client.post(
                         f"{host}/vectors/upsert",
                         json=payload,

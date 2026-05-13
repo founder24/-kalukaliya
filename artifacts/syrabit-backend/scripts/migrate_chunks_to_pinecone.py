@@ -194,6 +194,7 @@ async def migrate(
             return len(vectors), local_failed
 
         try:
+            # embed-model: legacy-migration-script-not-in-prod-chain
             result = await retriever.upsert(vectors)
             n = result.get("upserted", 0)
             errs = result.get("errors", [])
