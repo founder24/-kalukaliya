@@ -44,20 +44,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Repo-relative path to the edge worker's monitored-urls policy.
-# parents resolution from this file:
+# parents resolution from this file in the monorepo:
 #   parents[0] = artifacts/syrabit-backend/routes
 #   parents[1] = artifacts/syrabit-backend
-#   parents[2] = artifacts                   ← previous (buggy) target
+#   parents[2] = artifacts
 #   parents[3] = repo root                   ← what we actually want
+# In Docker the app is copied to /app, so parents only goes to depth 2
+# (/app/routes → /app → /). parents[3] raises IndexError there.
 # Override via `MONITORED_URLS_PATH` for non-standard layouts (the
 # Lambda image flattens the repo into a single deploy bundle and
 # resolves this from $LAMBDA_TASK_ROOT).
-_MONITORED_URLS_PATH = Path(
-    os.environ.get(
-        "MONITORED_URLS_PATH",
-        str(Path(__file__).resolve().parents[3] / "workers" / "edge-proxy" / "monitored-urls.json"),
-    )
-)
+def _resolve_monitored_urls_path() -> Path:
+    env_override = os.environ.get("MONITORED_URLS_PATH")
+    if env_override:
+        return Path(env_override)
+    try:
+        return Path(__file__).resolve().parents[3] / "workers" / "edge-proxy" / "monitored-urls.json"
+    except IndexError:
+        # Docker container: /app/routes/admin_cache.py has only 3 parents.
+        # Return a sentinel that _load_edge_targets() will treat as absent.
+        return Path("/nonexistent-monitored-urls.json")
+
+
+_MONITORED_URLS_PATH = _resolve_monitored_urls_path()
 
 
 def _load_edge_targets() -> list[dict[str, Any]]:
