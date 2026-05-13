@@ -88,8 +88,12 @@
     }
   ],
   "exempt_modules": [
-    "__init__",
-    "supabase_auth_canary"
+    {
+      "module": "supabase_auth_canary",
+      "_expires_iso": "2026-07-31",
+      "_blocking_task": "#87",
+      "_reason": "Prep PR for Supabase auth cutover — Lambda + EventBridge wiring deferred to the destructive cutover PR (Task #87 / Task #47) so the JWKS infra can be reviewed without Terraform churn. Remove this exemption when the cutover ships its matching lambda_batch/supabase_auth_canary.py handler + Terraform block."
+    }
   ],
   "_task_87_doc": "Task #87 / Task #47 — `aca_jobs/supabase_auth_canary.py` is the *prep* PR for the Supabase auth cutover. Its docstring explicitly defers Lambda + EventBridge wiring to the destructive cutover PR (so the JWKS infra can be reviewed without TF churn). Listed here so the canonical-delegation guard does not require a manifest entry until the destructive PR lands the matching `lambda_batch/supabase_auth_canary.py` handler + Terraform block in `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf`. Remove this exemption when the cutover ships.",
   "_task_571_doc": "Task #571 — `cache-effectiveness` is a *new* batch shipper, not an ACA-Jobs migration; it has no `aca_module` counterpart. Listed in `auxiliary_jobs` below so the dead-providers CI guard (which only walks `aca_jobs/*.py`) does not require an entry, while the lambda-batch-jobs.tf locals.batch_jobs table still mirrors it 1:1.",
