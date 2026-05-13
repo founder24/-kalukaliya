@@ -462,7 +462,9 @@ jobs:
                     {"name":"ENV",                       "value":"production"},
                     {"name":"PORT",                      "value":"8000"},
                     {"name":"WORKERS_EMBED_URL",         "value":"https://embed.syrabit.ai"},
-                    {"name":"EMBED_PROVIDER_PRIMARY",    "value":"workers_ai_custom"}
+                    {"name":"EMBED_PROVIDER_PRIMARY",    "value":"workers_ai_custom"},
+                    {"name":"GUNICORN_WORKERS",          "value":"1"},
+                    {"name":"GUNICORN_THREADS",          "value":"2"}
                   ],
                   "resources": (.properties.template.containers[0].resources // {"cpu":1,"memory":"2Gi"}),
                   "probes": [
