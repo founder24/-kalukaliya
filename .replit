@@ -89,7 +89,7 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
-packages = ["cargo", "libiconv", "libxcrypt", "rustc"]
+packages = ["cacert", "cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libuv", "libwebp", "libxcrypt", "openjpeg", "openssl", "pkg-config", "postgresql", "rustc", "tcl", "tk", "xcodebuild", "zlib"]
 
 [userenv]
 
@@ -133,6 +133,10 @@ externalPort = 80
 [[ports]]
 localPort = 5001
 externalPort = 3002
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
 
 [[ports]]
 localPort = 8081

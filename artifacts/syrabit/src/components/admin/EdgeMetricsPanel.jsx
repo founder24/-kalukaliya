@@ -756,4 +756,3 @@ export default function EdgeMetricsPanel({ token }) {
   );
 }
 
-export { AlertSettings };
