@@ -565,8 +565,8 @@ jobs:
               --revision "$LATEST_REV" \
               --query "properties.healthState" -o tsv 2>/dev/null || echo "Unknown")
             echo "Attempt $i: runningState=$STATE healthState=$HEALTH"
-            if [ "$STATE" = "Running" ]; then
-              echo "::notice::Revision $LATEST_REV is Running (healthState=$HEALTH)"
+            if [ "$STATE" = "Running" ] || [ "$STATE" = "RunningAtMaxScale" ]; then
+              echo "::notice::Revision $LATEST_REV is healthy (runningState=$STATE healthState=$HEALTH)"
               exit 0
             fi
             if [ "$STATE" = "Failed" ] || [ "$STATE" = "Stopped" ]; then
@@ -575,7 +575,7 @@ jobs:
             fi
             sleep 15
           done
-          echo "::error::Revision $LATEST_REV never reached Running state after 8 min (last state: $STATE)"
+          echo "::error::Revision $LATEST_REV never reached Running/RunningAtMaxScale after 8 min (last state: $STATE)"
           exit 1
 
       - name: On-failure diagnostics (revision state + console logs + KV)
