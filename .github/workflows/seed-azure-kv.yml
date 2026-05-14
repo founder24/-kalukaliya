@@ -65,7 +65,8 @@ jobs:
                    KV_SEED_SUPABASE_ANON_KEY KV_SEED_SUPABASE_SERVICE_ROLE_KEY \
                    KV_SEED_RAZORPAY_KEY_ID \
                    KV_SEED_DEEPGRAM_API_KEY KV_SEED_ELEVENLABS_API_KEY \
-                   KV_SEED_POSTHOG_API_KEY; do
+                   KV_SEED_POSTHOG_API_KEY \
+                   KV_SEED_GOOGLE_APPLICATION_CREDENTIALS_JSON; do
             if [ -z "${!v:-}" ]; then missing+=("$v"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -88,6 +89,7 @@ jobs:
           KV_SEED_DEEPGRAM_API_KEY:           ${{ secrets.KV_SEED_DEEPGRAM_API_KEY }}
           KV_SEED_ELEVENLABS_API_KEY:         ${{ secrets.KV_SEED_ELEVENLABS_API_KEY }}
           KV_SEED_POSTHOG_API_KEY:            ${{ secrets.KV_SEED_POSTHOG_API_KEY }}
+          KV_SEED_GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.KV_SEED_GOOGLE_APPLICATION_CREDENTIALS_JSON }}
 
       - name: Azure login (OIDC, no client secret)
         uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
@@ -117,6 +119,7 @@ jobs:
           DEEPGRAM_API_KEY:             ${{ secrets.KV_SEED_DEEPGRAM_API_KEY }}
           ELEVENLABS_API_KEY:           ${{ secrets.KV_SEED_ELEVENLABS_API_KEY }}
           POSTHOG_API_KEY:              ${{ secrets.KV_SEED_POSTHOG_API_KEY }}
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.KV_SEED_GOOGLE_APPLICATION_CREDENTIALS_JSON }}
         run: |
           set -euo pipefail
           # Use --file with a process substitution / heredoc so the value
@@ -154,6 +157,7 @@ jobs:
           set_kv "DEEPGRAM-API-KEY"            "$DEEPGRAM_API_KEY"
           set_kv "ELEVENLABS-API-KEY"          "$ELEVENLABS_API_KEY"
           set_kv "POSTHOG-API-KEY"             "$POSTHOG_API_KEY"
+          set_kv "GOOGLE-APPLICATION-CREDENTIALS-JSON" "$GOOGLE_APPLICATION_CREDENTIALS_JSON"
           echo "::endgroup::"
 
           echo "::group::Verify all secrets are now present in $VAULT"
@@ -163,7 +167,8 @@ jobs:
                    UPSTASH-REDIS-REST-URL UPSTASH-REDIS-REST-TOKEN \
                    SUPABASE-ANON-KEY SUPABASE-SERVICE-ROLE-KEY \
                    RAZORPAY-KEY-ID \
-                   DEEPGRAM-API-KEY ELEVENLABS-API-KEY POSTHOG-API-KEY; do
+                   DEEPGRAM-API-KEY ELEVENLABS-API-KEY POSTHOG-API-KEY \
+                   GOOGLE-APPLICATION-CREDENTIALS-JSON; do
             if az keyvault secret show --vault-name "$VAULT" --name "$s" --query id -o tsv >/dev/null 2>&1; then
               echo "  ✓ $s present"
             else
