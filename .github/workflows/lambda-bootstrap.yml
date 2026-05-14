@@ -248,6 +248,19 @@ jobs:
               {"Sid":"Ec2Read","Effect":"Allow",
                "Action":["ec2:DescribeVpcAttribute","ec2:DescribeVpcs",
                          "ec2:DescribeSubnets","ec2:DescribeSecurityGroups"],
+               "Resource":"*"},
+              {"Sid":"CloudFrontRead","Effect":"Allow",
+               "Action":["cloudfront:ListOriginRequestPolicies",
+                         "cloudfront:GetOriginRequestPolicy",
+                         "cloudfront:ListCachePolicies",
+                         "cloudfront:GetCachePolicy",
+                         "cloudfront:ListDistributions",
+                         "cloudfront:GetDistribution"],
+               "Resource":"*"},
+              {"Sid":"Route53Read","Effect":"Allow",
+               "Action":["route53:ListHostedZones",
+                         "route53:GetHostedZone",
+                         "route53:ListTagsForResource"],
                "Resource":"*"}
             ]
           }'
@@ -347,15 +360,34 @@ jobs:
         run: terraform init -input=false
 
 
-      - name: Import existing CloudWatch log groups into state (idempotent)
+      - name: Import existing resources into state (idempotent)
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: |
-          # These log groups were auto-created by Lambda on first invocation.
-          # Terraform would fail with ResourceAlreadyExistsException without import.
+          # Resources created in prior partial runs whose tfstate was never committed.
+          # Import is idempotent — already-managed resources are skipped automatically.
+          TF="terraform import -input=false"
+
+          # CloudWatch log groups (auto-created by Lambda on first cold-start)
           for LG in "materialize-chapter-faqs" "seo-baseline" "prewarm-seo-routes"; do
-            terraform import -input=false               "aws_cloudwatch_log_group.batch_job[\"${LG}\"]"               "/aws/lambda/syrabit-${LG}" 2>&1               | grep -v "already managed\|No changes" || true
+            $TF "aws_cloudwatch_log_group.batch_job[\"${LG}\"]"               "/aws/lambda/syrabit-${LG}" 2>&1 | grep -v "already managed" || true
           done
+
+          # Lambda functions created in prior partial runs
+          $TF aws_lambda_function.bedrock_proxy    syrabit-bedrock-proxy  2>&1 | grep -v "already managed" || true
+          $TF aws_lambda_function.email_worker     syrabit-email-worker   2>&1 | grep -v "already managed" || true
+          $TF aws_lambda_function.s3_to_r2_sync    syrabit-s3-to-r2-prod  2>&1 | grep -v "already managed" || true
+          $TF aws_lambda_function.reembed_consumer syrabit-reembed-prod   2>&1 | grep -v "already managed" || true
+
+          for C in seo-indexnow seo-internal-linker discovery-engine-ingest                    bing-keyword-refresh bing-submit cf-bot-crosscheck unified-logs-cf-pull; do
+            $TF "aws_lambda_function.sqs_consumer[\"${C}\"]" "syrabit-${C}-consumer"               2>&1 | grep -v "already managed" || true
+          done
+
+          # SecretsManager secret (created in prior run)
+          SECRET_ARN=$(aws secretsmanager describe-secret             --secret-id syrabit/prod/origin/shared-secret             --region ap-south-1 --query ARN --output text 2>/dev/null || echo "")
+          [ -n "$SECRET_ARN" ] && [ "$SECRET_ARN" != "None" ] &&             $TF 'aws_secretsmanager_secret.workers["origin/shared-secret"]' "$SECRET_ARN"               2>&1 | grep -v "already managed" || true
+
+          echo "=== Import phase complete ==="
 
       - name: Terraform plan (Lambda + EventBridge + event-source mappings)
         working-directory: ${{ env.TF_DIR }}
