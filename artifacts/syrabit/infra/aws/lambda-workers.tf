@@ -145,7 +145,7 @@ resource "aws_lambda_function" "sqs_consumer" {
   memory_size   = each.value.memory_mb
   timeout       = each.value.timeout
 
-  reserved_concurrent_executions = each.value.concurrency
+  reserved_concurrent_executions = -1  # account concurrency limit; use unreserved pool (reserved caps documented in sqs_worker_lambdas map above)
 
   image_config {
     # Single image, per-Lambda command override — picks the right
