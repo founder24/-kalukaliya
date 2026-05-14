@@ -101,7 +101,7 @@ jobs:
           // ── Shared helpers (defined before report load so error path can use them) ──
 
           const STATUS_ICON = {
-            PASS: '✅', FAIL: '❌', WARN: '⚠️', SKIP: '⬜', PLAN_REQUIRED: '💳',
+            PASS: '✅', FAIL: '❌', WARN: '⚠️', SKIP: '⬜', PLAN_REQUIRED: '💳', RATE_LIMITED: '🔁',
           };
 
           function escMd(str) {
@@ -236,9 +236,11 @@ jobs:
           const { summary, items = [], generated_at } = report;
           const { pass = 0, fail = 0, warn = 0, skip = 0, total = 0 } = summary || {};
           const planRequired = items.filter(i => i.status === 'PLAN_REQUIRED').length;
+          const rateLimited  = items.filter(i => i.status === 'RATE_LIMITED').length;
 
-          const failItems = items.filter(i => i.status === 'FAIL');
-          const warnItems = items.filter(i => i.status === 'WARN');
+          const failItems    = items.filter(i => i.status === 'FAIL');
+          const warnItems    = items.filter(i => i.status === 'WARN');
+          const rateLtdItems = items.filter(i => i.status === 'RATE_LIMITED');
 
           const overallIcon = fail > 0 ? '🔴' : warn > 0 ? '🟡' : '🟢';
           const overallText = fail > 0 ? 'FAIL' : warn > 0 ? 'WARN' : 'PASS';
@@ -257,9 +259,9 @@ jobs:
           // Count table
           mdLines.push('### Summary');
           mdLines.push('');
-          mdLines.push('| ✅ PASS | ❌ FAIL | ⚠️ WARN | 💳 PLAN_REQUIRED | ⬜ SKIP | Total |');
-          mdLines.push('|:------:|:------:|:-------:|:----------------:|:------:|:-----:|');
-          mdLines.push(`| ${pass} | ${fail} | ${warn} | ${planRequired} | ${skip} | ${total} |`);
+          mdLines.push('| ✅ PASS | ❌ FAIL | ⚠️ WARN | 🔁 RATE_LIMITED | 💳 PLAN_REQUIRED | ⬜ SKIP | Total |');
+          mdLines.push('|:------:|:------:|:-------:|:---------------:|:----------------:|:------:|:-----:|');
+          mdLines.push(`| ${pass} | ${fail} | ${warn} | ${rateLimited} | ${planRequired} | ${skip} | ${total} |`);
           mdLines.push('');
 
           // All 19 items table (warn in output if count differs from expected)
@@ -299,11 +301,23 @@ jobs:
             }
           }
 
+          // RATE_LIMITED section — CF API quota exhaustion is not a configuration failure
+          if (rateLtdItems.length > 0) {
+            mdLines.push('');
+            mdLines.push('### 🔁 Rate-limited items — CF API quota exhausted (not a configuration failure)');
+            mdLines.push('');
+            mdLines.push('_Re-run the audit after a few minutes, or check the API token rate-limit budget._');
+            for (const item of rateLtdItems) {
+              mdLines.push(`- **#${item.id} ${item.label}**: ${item.detail || ''}`);
+            }
+          }
+
           mdLines.push('');
           mdLines.push('---');
           mdLines.push('_19-item Cloudflare audit — Phases 1–6 (Tasks #105–#110). '
             + 'WARN = token scope gap; PLAN_REQUIRED = paid add-on needed; '
-            + 'neither counts as a failure._');
+            + 'RATE_LIMITED = CF API quota exhausted during audit run; '
+            + 'none of these count as failures._');
 
           const mdDigest = mdLines.join('\n');
 
@@ -322,7 +336,7 @@ jobs:
             slackLines.push(`*Date:* ${dateStr}`);
             slackLines.push(
               `*Counts:* ✅ ${pass} PASS  ❌ ${fail} FAIL  ⚠️ ${warn} WARN` +
-              `  💳 ${planRequired} PLAN_REQUIRED  ⬜ ${skip} SKIP  (${total} total)`,
+              `  🔁 ${rateLimited} RATE_LIMITED  💳 ${planRequired} PLAN_REQUIRED  ⬜ ${skip} SKIP  (${total} total)`,
             );
 
             // All items — compact one-liner each (with count mismatch note if not 19)
@@ -355,6 +369,15 @@ jobs:
               slackLines.push('');
               slackLines.push('*⚠️ Warn items — token scope gaps (no action required unless intentional):*');
               for (const item of warnItems) {
+                slackLines.push(`  • *#${item.id} ${item.label}*: ${item.detail || ''}`);
+              }
+            }
+
+            // RATE_LIMITED section — CF API quota exhaustion is not a configuration failure
+            if (rateLtdItems.length > 0) {
+              slackLines.push('');
+              slackLines.push('*🔁 Rate-limited items — CF API quota exhausted (not failures — re-run later):*');
+              for (const item of rateLtdItems) {
                 slackLines.push(`  • *#${item.id} ${item.label}*: ${item.detail || ''}`);
               }
             }
