@@ -66,28 +66,36 @@ const headers = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'applicati
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Fetch a CF API path; retries on rate-limit (10429) with exponential backoff
-// (2 s → 4 s → 8 s) before propagating the error.
+// (2 s → 4 s → 8 s).  After all retries, pushes to warnings[] and throws a
+// tagged error so cfGetOrSkip callers degrade gracefully (remaining checks run).
 async function cfGet(path, { _attempt = 0 } = {}) {
   const res = await fetch(`${API}${path}`, { headers });
-  if (res.status === 429 || (!res.ok && res.status !== 200)) {
-    // Re-parse to check for CF 10429 inside a 200-body as well
-  }
   const j = await res.json();
-  if (!j.success && j.errors?.[0]?.code === 10429 && _attempt < 3) {
-    const wait = 2000 * (2 ** _attempt);
-    console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
-    await sleep(wait);
-    return cfGet(path, { _attempt: _attempt + 1 });
+  if (!j.success && j.errors?.[0]?.code === 10429) {
+    if (_attempt < 3) {
+      const wait = 2000 * (2 ** _attempt);
+      console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
+      await sleep(wait);
+      return cfGet(path, { _attempt: _attempt + 1 });
+    }
+    // All retries exhausted — push warning so the summary includes it, then throw
+    // a tagged error so cfGetOrSkip can degrade gracefully instead of aborting the run.
+    warnings.push(`CF API rate-limited on ${path} after 3 retries — re-run smoke checks later`);
+    const rlErr = new Error(`CF rate-limited on ${path} after 3 retries`);
+    rlErr._rate_limited = true;
+    throw rlErr;
   }
   if (!j.success) throw new Error(`CF error on ${path}: ${JSON.stringify(j.errors)}`);
   return j;
 }
 
-// Returns null on auth error (10000), throws for other errors
+// Returns null on auth error (10000) or rate-limit exhaustion (warning already pushed);
+// throws for all other errors.
 async function cfGetOrSkip(path) {
   try {
     return await cfGet(path);
   } catch (e) {
+    if (e._rate_limited) return null;   // degrade gracefully — caller sees null like a scope gap
     const msg = e.message || '';
     if (msg.includes('"code":10000') || msg.includes('"code": 10000')) return null;
     throw e;
