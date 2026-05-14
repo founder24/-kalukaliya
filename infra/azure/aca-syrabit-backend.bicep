@@ -146,6 +146,10 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         { name: 'supabase-service-role-key',  keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SUPABASE-SERVICE-ROLE-KEY',  identity: 'system' }
         // Task #chat-infra — Pinecone vector store.
         { name: 'pinecone-api-key',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/PINECONE-API-KEY',           identity: 'system' }
+        // CF_AI_GATEWAY_TOKEN — cf-aig-authorization header value for Workers AI + Sarvam
+        // gateway routing. Same value as CLOUDFLARE-API-TOKEN; kept as a separate
+        // KV secret so each binding rotates independently.
+        { name: 'cf-ai-gateway-token',        keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/CF-AI-GATEWAY-TOKEN',        identity: 'system' }
       ]
     }
     template: {
@@ -244,7 +248,16 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // Both must match; set to the production Cloudflare account.
             { name: 'CLOUDFLARE_ACCOUNT_ID',          value: 'd66e40eac539fff1db270fddf384a5ec' }
             { name: 'CF_AI_GATEWAY_ACCOUNT_ID',        value: 'd66e40eac539fff1db270fddf384a5ec' }
+            { name: 'CF_AI_GATEWAY_ID',                value: 'syrabit' }
             { name: 'CLOUDFLARE_API_TOKEN',            secretRef: 'cloudflare-api-token' }
+            // CF_AI_GATEWAY_TOKEN — same value as CLOUDFLARE_API_TOKEN; sent as
+            // `cf-aig-authorization: Bearer <token>` on every Workers AI /
+            // Sarvam request routed through the CF AI Gateway. Without it the
+            // gateway returns 401 even though the API token is present.
+            // Source of truth: Azure Key Vault `CF-AI-GATEWAY-TOKEN`
+            // (identical value to `CLOUDFLARE-API-TOKEN`; stored separately so
+            // each binding has a single rotatable secret).
+            { name: 'CF_AI_GATEWAY_TOKEN',             secretRef: 'cf-ai-gateway-token' }
             // Task #chat-infra — Vertex Gemini 2.5 Flash.
             // VERTEX_LOCATION defaults to us-central1 in config.py but the ACA
             // must set it explicitly so the SA JSON project is used correctly.
