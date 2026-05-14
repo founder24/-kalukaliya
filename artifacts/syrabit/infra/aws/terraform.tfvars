@@ -21,3 +21,9 @@ gcp_total_credits_usd = 300
 gcp_billing_project      = "blissful-acumen-495019-t6"
 gcp_billing_dataset      = "billing_export"
 gcp_billing_table_prefix = "gcp_billing_export_v1"
+
+# GitHub OIDC trust policy — must match the actual repository owner and name
+# so the aws_iam_role.github_deploy trust policy allows GitHub Actions OIDC.
+# The defaults in iam-github-oidc.tf were "syrabit"/"syrabit" (wrong repo).
+github_owner = "founder24"
+github_repo  = "-kalukaliya"
