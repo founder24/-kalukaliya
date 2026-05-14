@@ -12,6 +12,7 @@ from config import (
     ADMIN_JWT_SECRET, PLAN_LIMITS,
     COOKIE_DOMAIN, COOKIE_SAMESITE, SECURE_COOKIES,
     IP_COARSE_DAILY_CAP, DEVICE_COOKIE_MINTS_PER_MIN,
+    RATE_LIMIT_BYPASS_IPS,
 )
 from deps import security, redis_client
 from cache import _redis_get_session, _redis_cache_session
@@ -676,7 +677,9 @@ async def rate_limit_chat_optional(
     # Skip on truly unknown IPs so we don't lock out the loopback /
     # offline test paths; in production cf-connecting-ip / xff are
     # always populated upstream of this dependency.
-    if ip and ip != "unknown":
+    # IPs in RATE_LIMIT_BYPASS_IPS (env var) are exempt — use for
+    # known dev/CI egress IPs (e.g. Replit shared outbound IP).
+    if ip and ip != "unknown" and ip not in RATE_LIMIT_BYPASS_IPS:
         from db_ops import atomic_deduct_ip_credit
         if not atomic_deduct_ip_credit(ip, daily_limit=IP_COARSE_DAILY_CAP):
             raise HTTPException(
