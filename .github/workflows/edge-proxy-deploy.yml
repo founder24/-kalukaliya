@@ -24,7 +24,7 @@ name: edge-proxy-deploy
 #
 # 1. deploy-preview
 #      `wrangler deploy --env preview` against
-#      syrabit-edge-preview.<account>.workers.dev. Authenticated via the
+#      syrabitworker-preview.<account>.workers.dev. Authenticated via the
 #      CLOUDFLARE_API_TOKEN repo secret (needs edit:workers + edit:kv +
 #      edit:d1 scope) and CLOUDFLARE_ACCOUNT_ID.
 #
@@ -41,7 +41,7 @@ name: edge-proxy-deploy
 #      Runs only after smoke-preview is green. Pinned to the `production`
 #      GitHub environment so GitHub waits for a manual reviewer to approve
 #      the promotion before `wrangler deploy` (no --env, lands on the live
-#      syrabit.ai routes) executes. Auto-skips on PRs / non-default-branch
+#      syrabit.ai routes via syrabitworker) executes. Auto-skips on PRs / non-default-branch
 #      pushes (the environment gate refuses non-protected refs).
 #
 # 4. smoke-prod  (Task #881)
@@ -57,7 +57,7 @@ name: edge-proxy-deploy
 #      smoke-prod job). Executes
 #        pnpm --filter syrabit-edge exec wrangler rollback \
 #            --message "auto: smoke-prod failed in CI"
-#      which re-points the syrabit.ai/* route at the previous version-id
+#      which re-points the syrabit.ai/* route (syrabitworker) at the previous version-id
 #      (Cloudflare keeps every prior version of a Worker deploy, so the
 #      flip is seconds, no rebuild). A `::error::` notice tags the run
 #      with the failed check so the on-call has a single line to triage
@@ -104,7 +104,7 @@ name: edge-proxy-deploy
 # Required repo variable (Settings → Secrets and variables → Actions →
 # Variables):
 #   CF_WORKERS_SUBDOMAIN   — the account's workers.dev subdomain, used to
-#                            build https://syrabit-edge-preview.<sub>.workers.dev
+#                            build https://syrabitworker-preview.<sub>.workers.dev
 #                            for the smoke step. Falls back to
 #                            `wrangler deployments list --env preview`
 #                            parsing if unset.
@@ -244,7 +244,7 @@ jobs:
           # for what is a static value per account) and fall back to the
           # deployments-list parse path that smoke-preview.sh already has.
           if [ -n "${CF_WORKERS_SUBDOMAIN}" ]; then
-            url="https://syrabit-edge-preview.${CF_WORKERS_SUBDOMAIN}.workers.dev"
+            url="https://syrabitworker-preview.${CF_WORKERS_SUBDOMAIN}.workers.dev"
           else
             echo "CF_WORKERS_SUBDOMAIN repo variable is unset — discovering via wrangler."
             url=$(
@@ -415,12 +415,12 @@ jobs:
           # Use the workers.dev URL instead of api.syrabit.ai so the smoke
           # probes are not challenged by the Zone-wide Bot Management / WAF
           # rules that block non-browser UAs from GitHub Actions runner IPs.
-          # The prod worker (syrabit-edge, no suffix) has workers.dev enabled
+          # The prod worker (syrabitworker, no suffix) has workers.dev enabled
           # and its subdomain URL bypasses the zone-level Cloudflare policies
           # that guard api.syrabit.ai. The custom-domain route is proven at
           # deploy time by wrangler; this override only covers HTTP probes.
           if [ -n "${CF_WORKERS_SUBDOMAIN}" ]; then
-            smoke_url="https://syrabit-edge.${CF_WORKERS_SUBDOMAIN}.workers.dev"
+            smoke_url="https://syrabitworker.${CF_WORKERS_SUBDOMAIN}.workers.dev"
           else
             smoke_url="https://api.syrabit.ai"
             echo "::warning::CF_WORKERS_SUBDOMAIN not set — falling back to api.syrabit.ai (may be blocked by Bot Management)"
@@ -451,7 +451,7 @@ jobs:
   # Task #881 — auto-rollback safety net. Triggered ONLY when smoke-prod
   # fails (`if: failure()` plus an explicit needs on smoke-prod). Uses the
   # same Cloudflare creds as deploy-prod and runs `wrangler rollback` from
-  # the syrabit-edge package, which re-points the syrabit.ai/* route at
+  # the syrabit-edge package, which re-points the syrabitworker (syrabit.ai/* route) at
   # the prior version-id without a rebuild (Cloudflare keeps every prior
   # version of a Worker deploy). The `--message` annotates the rollback
   # in `wrangler deployments list` so the on-call can tell automated

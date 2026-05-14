@@ -1,4 +1,4 @@
-name = "syrabit-edge"
+name = "syrabitworker"
 main = "src/index.ts"
 account_id = "d66e40eac539fff1db270fddf384a5ec"
 compatibility_date = "2026-05-01"
@@ -91,7 +91,7 @@ BACKEND_URL = "https://api.syrabit.ai"
 # DO NOT uncomment the line below. Set WORKERS_AI_GATEWAY_ID as a
 # Wrangler **secret** instead:
 #
-#   echo "syrabit-ai-gw" | wrangler secret put WORKERS_AI_GATEWAY_ID --name syrabit-edge
+#   echo "syrabit-ai-gw" | wrangler secret put WORKERS_AI_GATEWAY_ID --name syrabitworker
 #
 # Reason: a plaintext var with the same name overwrites the secret on
 # every deploy, so anyone who deploys from a checkout without the value
@@ -117,7 +117,7 @@ D1_WARM_ON_STARTUP = "true"
 # MUST be the *.pages.dev hostname, not syrabit.ai/www.syrabit.ai —
 # routing through the custom domain would re-enter this same worker
 # (it is bound to syrabit.ai/* and www.syrabit.ai/*) and recurse.
-PAGES_ORIGIN = "https://syrabit-zip-convert.pages.dev"
+PAGES_ORIGIN = "https://syrabitfrontend.pages.dev"
 # D1_SYNC_SECRET must be set via Wrangler secret (not committed to source control):
 #   wrangler secret put D1_SYNC_SECRET
 #
@@ -430,7 +430,7 @@ new_classes = ["SeasonCacheDO"]
 #                       (Workers Analytics scope) so each can be
 #                       rotated independently. Set via
 #                       `wrangler secret put AI_GATEWAY_ANALYTICS_TOKEN
-#                       --name syrabit-edge`. Absent ⇒ watchdog skips
+#                       --name syrabitworker`. Absent ⇒ watchdog skips
 #                       with a console warning.
 #                   Optional knobs: AI_GATEWAY_CACHE_HIT_RATE_FLOOR_PCT
 #                   (default 50), AI_GATEWAY_CACHE_ALERT_MIN_SAMPLE
@@ -475,7 +475,7 @@ new_classes = ["SeasonCacheDO"]
 #                       and AI_GATEWAY_ANALYTICS_TOKEN so each scope
 #                       can be rotated independently. Set via
 #                       `wrangler secret put R2_STORAGE_ANALYTICS_TOKEN
-#                       --name syrabit-edge`. Absent ⇒ watchdog skips
+#                       --name syrabitworker`. Absent ⇒ watchdog skips
 #                       with a console warning.
 #                     R2_LIFECYCLE_RULES_APPLIED_AT — ISO date of when
 #                       the lifecycle rules were last applied (set as
@@ -527,7 +527,7 @@ crons = ["* * * * *", "0 */6 * * *", "0 1 * * *"]
 #          node artifacts/syrabit/scripts/cloudflare-phase6-apply.js
 #      Prints the certificate_id UUID and the certificate PEM.
 #   2. Store the private key as a wrangler secret:
-#        echo "<pem>" | wrangler secret put MTLS_PRIVATE_KEY --name syrabit-edge
+#        echo "<pem>" | wrangler secret put MTLS_PRIVATE_KEY --name syrabitworker
 #   3. Add CF_MTLS_CERT_ID to GitHub repo secrets (Settings → Secrets → Actions):
 #        CF_MTLS_CERT_ID = <uuid-from-step-1>
 #      The next push to master/main triggers edge-proxy-deploy.yml which injects
@@ -545,7 +545,7 @@ crons = ["* * * * *", "0 */6 * * *", "0 1 * * *"]
 #      BEFORE HTTP is reached — the gold-standard protection that makes the
 #      nightly-smoke.js 6a-iv bypass probe pass with a network/TLS error.
 #   6. Flip the fail-closed gate AFTER Railway requires the cert:
-#        wrangler secret put MTLS_REQUIRED --name syrabit-edge  (value: true)
+#        wrangler secret put MTLS_REQUIRED --name syrabitworker  (value: true)
 #      MTLS_REQUIRED=true makes proxyToBackend() return 503 if MTLS_CERT is
 #      absent, preventing any insecure plain-fetch bypass.
 # ---------------------------------------------------------------------------

@@ -17,6 +17,11 @@ name: Azure Container Apps deploy (manual)
 #
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/syrabit-backend/**"
+      - ".github/workflows/azure-container-apps-deploy.yml"
   workflow_dispatch:
     inputs:
       app:
@@ -43,7 +48,7 @@ on:
         type: string
 
 concurrency:
-  group: aca-deploy-${{ github.event.inputs.app }}
+  group: aca-deploy-${{ inputs.app || 'syrabit-backend' }}
   cancel-in-progress: false
 
 permissions:
@@ -183,7 +188,7 @@ jobs:
       # secret is non-empty the KV check for that slot is skipped because
       # the deploy step will inject the value directly and not need the KV ref.
       - name: Pre-deploy — validate Key Vault secrets
-        if: ${{ inputs.app == 'syrabit-backend' || inputs.app == 'both' }}
+        if: ${{ github.event_name == 'push' || inputs.app == 'syrabit-backend' || inputs.app == 'both' }}
         env:
           GH_SARVAM_API_KEY:       ${{ secrets.SARVAM_API_KEY }}
           GH_WORKERS_EMBED_SECRET: ${{ secrets.WORKERS_EMBED_SECRET }}
@@ -235,10 +240,10 @@ jobs:
       # both Container Apps.
 
       - name: Build and push image(s)
-        if: ${{ inputs.mode == 'deploy' }}
+        if: ${{ (inputs.mode || 'deploy') == 'deploy' }}
         run: |
           set -euo pipefail
-          APP="${{ inputs.app }}"
+          APP="${{ inputs.app || 'syrabit-backend' }}"
           TAG="$(git rev-parse --short HEAD)-$(date -u +%Y%m%dT%H%M%SZ)"
 
           build_one() {
@@ -269,7 +274,7 @@ jobs:
         if: ${{ inputs.mode == 'redeploy' }}
         run: |
           set -euo pipefail
-          APP="${{ inputs.app }}"
+          APP="${{ inputs.app || 'syrabit-backend' }}"
 
           resolve_one() {
             local app_name="$1"
@@ -299,7 +304,7 @@ jobs:
           GH_WORKERS_EMBED_SECRET: ${{ secrets.WORKERS_EMBED_SECRET }}
         run: |
           set -euo pipefail
-          APP="${{ inputs.app }}"
+          APP="${{ inputs.app || 'syrabit-backend' }}"
 
           deploy_one() {
             local app_name="$1"
@@ -509,7 +514,7 @@ jobs:
         if: success()
         run: |
           set -euo pipefail
-          APP="${{ inputs.app }}"
+          APP="${{ inputs.app || 'syrabit-backend' }}"
           [ "$APP" = "both" ] && APP="syrabit-backend"
 
           # Poll the revision running-state via Azure API rather than HTTP.
@@ -582,7 +587,7 @@ jobs:
         if: failure()
         run: |
           set +e
-          APP="${{ inputs.app }}"
+          APP="${{ inputs.app || 'syrabit-backend' }}"
           [ "$APP" = "both" ] && APP="syrabit-backend"
           echo "::group::All revisions"
           az containerapp revision list --name "$APP" --resource-group "$AZURE_RESOURCE_GROUP" \
