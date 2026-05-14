@@ -47,22 +47,17 @@ function rewriteHead(html) {
     /<meta name="description" content="[^"]*"\s*\/?>(\n)?/,
     `<meta name="description" content="${escapeHtml(DESCRIPTION)}" />\n    `,
   );
-  // Task #494: static template no longer carries a placeholder canonical;
-  // swap if present (legacy builds) else inject before </head>. /chat is
-  // noindex,follow, but we still emit a canonical so that AI crawlers
-  // don't merge ranking signals onto the homepage.
-  if (/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/.test(html)) {
-    html = html.replace(
-      /<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/,
-      `<link rel="canonical" href="${CANONICAL}" />\n    `,
-    );
-  } else {
-    html = html.replace(
-      /<\/head>/,
-      `    <link rel="canonical" href="${CANONICAL}" />\n` +
-      `    <link rel="alternate" hreflang="en-IN" href="${CANONICAL}" />\n  </head>`,
-    );
-  }
+  // Task #494 / Task #538: strip ALL existing canonical tags (there may be
+  // more than one if the SSR render and the template both inject one), then
+  // insert the single authoritative canonical + hreflang before </head>.
+  // Using a global replace avoids the "found 2" verify-all violation that
+  // occurred when a non-global replace left a second canonical behind.
+  html = html.replace(/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/g, "");
+  html = html.replace(
+    /<\/head>/,
+    `    <link rel="canonical" href="${CANONICAL}" />\n` +
+    `    <link rel="alternate" hreflang="en-IN" href="${CANONICAL}" />\n  </head>`,
+  );
   html = html.replace(
     /<meta property="og:url" content="[^"]*"\s*\/?>/,
     `<meta property="og:url" content="${CANONICAL}" />`,

@@ -168,22 +168,14 @@ function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
     /<meta name="description" content="[^"]*"\s*\/?>(\n)?/,
     `<meta name="description" content="${escapeHtml(description)}" />\n    `,
   );
-  // Task #494: the static template no longer ships a placeholder
-  // <link rel="canonical">. Swap if one happens to exist (legacy
-  // builds), otherwise inject before </head> so every prerendered
-  // route ships its own canonical instead of inheriting the homepage.
-  if (/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/.test(html)) {
-    html = html.replace(
-      /<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/,
-      `<link rel="canonical" href="${canonical}" />\n    `,
-    );
-  } else {
-    html = html.replace(
-      /<\/head>/,
-      `    <link rel="canonical" href="${canonical}" />\n` +
-      `    <link rel="alternate" hreflang="en-IN" href="${canonical}" />\n  </head>`,
-    );
-  }
+  // Task #494 / Task #538: strip ALL existing canonical tags globally, then
+  // inject the single authoritative canonical + hreflang before </head>.
+  html = html.replace(/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/g, "");
+  html = html.replace(
+    /<\/head>/,
+    `    <link rel="canonical" href="${canonical}" />\n` +
+    `    <link rel="alternate" hreflang="en-IN" href="${canonical}" />\n  </head>`,
+  );
   html = html.replace(
     /<meta property="og:url" content="[^"]*"\s*\/?>/,
     `<meta property="og:url" content="${canonical}" />`,
