@@ -121,6 +121,21 @@ jobs:
       # fetches the correct manylinux_2_17_aarch64 wheels natively; they
       # are injected into the Docker build context at .build/arm64-wheels/
       # so the Dockerfile can install them with --find-links (no compilation).
+      # Ensure the bedrock-proxy ECR repo exists in us-east-1 (secondary
+      # region where Bedrock inference runs). The primary-region repos are
+      # managed by Terraform; this repo is secondary-only and is idempotent
+      # (create-repository is a no-op if the repo already exists).
+      - name: Ensure ECR repos exist in us-east-1
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        run: |
+          aws ecr create-repository \
+            --region "$SECONDARY_REGION" \
+            --repository-name "syrabit/bedrock-proxy" \
+            --image-tag-mutability MUTABLE \
+            --image-scanning-configuration scanOnPush=true \
+            2>&1 | grep -v "RepositoryAlreadyExistsException" || true
+          echo "ECR syrabit/bedrock-proxy ready in $SECONDARY_REGION"
+
       - name: Pre-download arm64 Python wheels (native, no QEMU)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         run: |
