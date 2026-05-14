@@ -178,20 +178,18 @@ jobs:
           aws-region: ${{ env.PRIMARY_REGION }}
           role-duration-seconds: 3600
 
-      - name: "Phase B: import existing bedrock-proxy ECR repo (idempotent)"
+      - name: "Phase B: ensure bedrock-proxy ECR repo exists in us-east-1 (CLI, idempotent)"
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
-        working-directory: ${{ env.TF_DIR }}
-        continue-on-error: true
         run: |
-          # Import the repo if it already exists in AWS but not in tfstate.
-          # Safe to fail — if it is already in state the apply below is a no-op.
-          terraform import -input=false             aws_ecr_repository.bedrock_proxy_use1             syrabit/bedrock-proxy 2>&1 | tail -5 || true
+          # Use CLI directly — avoids Terraform data-source resolution errors
+          # (e.g. aws_secretsmanager_secret) that fire during plan/import and
+          # have nothing to do with ECR.  The repo was created manually on
+          # 2026-05-14; this step is purely idempotent from here on.
+          aws ecr describe-repositories             --region "$SECONDARY_REGION"             --repository-names syrabit/bedrock-proxy             --query 'repositories[0].repositoryArn'             --output text 2>/dev/null           && echo "Repo already exists — skipping create"           || aws ecr create-repository                --region "$SECONDARY_REGION"                --repository-name syrabit/bedrock-proxy                --image-tag-mutability MUTABLE                --image-scanning-configuration scanOnPush=true                --encryption-configuration encryptionType=AES256
 
-      - name: "Phase B: create bedrock-proxy ECR repo in us-east-1 (syrabit-github-deploy)"
-        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          terraform apply -auto-approve -input=false             -target=aws_ecr_repository.bedrock_proxy_use1             -target=aws_ecr_lifecycle_policy.bedrock_proxy_use1
+          # Lifecycle policy: keep last 5 images per repo.
+          aws ecr put-lifecycle-policy             --region "$SECONDARY_REGION"             --repository-name syrabit/bedrock-proxy             --lifecycle-policy-text               '{"rules":[{"rulePriority":1,"description":"keep-last-5","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'           || echo "Lifecycle policy skipped (ecr:PutLifecyclePolicy not yet granted — non-fatal)"
+
           echo "ECR syrabit/bedrock-proxy ready in $SECONDARY_REGION"
 
       # Login to us-east-1 ECR while we're running as syrabit-github-deploy
