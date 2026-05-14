@@ -14,7 +14,8 @@ name: lambda-bootstrap
 #   5. If Bedrock passes: remove the EMBED_INDIC_PROVIDER kill-switch from
 #      the ACA deploy workflow and push (triggers automatic ACA redeploy).
 #
-# Uses existing repo secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Uses existing repo secrets: AWS_OPS_ACCESS_KEY_ID, AWS_OPS_SECRET_ACCESS_KEY
+# (AWS_ACCESS_KEY_ID belongs to BedrockAPIKey-cgjb which has no ECR/Lambda perms)
 # Supply-chain: every `uses:` is pinned to a 40-char SHA.
 
 on:
@@ -69,8 +70,8 @@ jobs:
       - name: Configure AWS credentials (ap-south-1)
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_OPS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_OPS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.PRIMARY_REGION }}
 
       - name: Set up QEMU (arm64 emulation)
