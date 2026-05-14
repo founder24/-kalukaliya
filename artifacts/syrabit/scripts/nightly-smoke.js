@@ -63,21 +63,35 @@ if (!TOKEN) {
 
 const headers = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 
-async function cfGet(path) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Fetch a CF API path; retries on rate-limit (10429) with exponential backoff
+// (2 s → 4 s → 8 s) before propagating the error.
+async function cfGet(path, { _attempt = 0 } = {}) {
   const res = await fetch(`${API}${path}`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+  if (res.status === 429 || (!res.ok && res.status !== 200)) {
+    // Re-parse to check for CF 10429 inside a 200-body as well
+  }
   const j = await res.json();
+  if (!j.success && j.errors?.[0]?.code === 10429 && _attempt < 3) {
+    const wait = 2000 * (2 ** _attempt);
+    console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
+    await sleep(wait);
+    return cfGet(path, { _attempt: _attempt + 1 });
+  }
   if (!j.success) throw new Error(`CF error on ${path}: ${JSON.stringify(j.errors)}`);
   return j;
 }
 
 // Returns null on auth error (10000), throws for other errors
 async function cfGetOrSkip(path) {
-  const res = await fetch(`${API}${path}`, { headers });
-  const j = await res.json();
-  if (j.success) return j;
-  if (j.errors?.[0]?.code === 10000) return null;          // auth — caller handles
-  throw new Error(`CF error on ${path}: ${JSON.stringify(j.errors)}`);
+  try {
+    return await cfGet(path);
+  } catch (e) {
+    const msg = e.message || '';
+    if (msg.includes('"code":10000') || msg.includes('"code": 10000')) return null;
+    throw e;
+  }
 }
 
 const failures  = [];
