@@ -1,27 +1,21 @@
 name: lambda-bootstrap
 
-#
 # One-shot workflow that creates all Lambda functions, EventBridge schedules,
 # and SQS event-source mappings that have never been deployed (tfstate shows
 # 0 aws_lambda_function resources despite 158 other resources being live).
 #
-# What it does (in order):
+# Steps:
 #   1. Build + push four ECR images (arm64) from the single sqs_consumers
-#      Dockerfile.  Terraform uses image_config.command to set the handler per
-#      function, so one image serves every Lambda family.
-#   2. Run `terraform apply` targeting every Lambda resource group.  The local
-#      tfstate (checked into git) is the backend — no S3 state bucket needed.
-#   3. Commit the updated tfstate back to master so the state stays in sync.
-#   4. Test Bedrock cohere.embed-multilingual-v3 in us-east-1.
-#   5. If Bedrock passes: remove the EMBED_INDIC_PROVIDER kill-switch from the
-#      ACA deploy workflow and push, triggering an automatic ACA redeploy.
+#      Dockerfile — Terraform uses image_config.command to set the handler.
+#   2. terraform apply targeting every Lambda resource group.
+#      Local tfstate (checked into git) is the backend — no S3 needed.
+#   3. Commit updated tfstate back to main.
+#   4. Test Bedrock cohere.embed-multilingual-v3 (us-east-1).
+#   5. If Bedrock passes: remove the EMBED_INDIC_PROVIDER kill-switch from
+#      the ACA deploy workflow and push (triggers automatic ACA redeploy).
 #
-# Uses existing repo secrets:
-#   AWS_ACCESS_KEY_ID      (already set)
-#   AWS_SECRET_ACCESS_KEY  (already set)
-#
-# Supply-chain hardening: every `uses:` is pinned to a 40-char SHA.
-#
+# Uses existing repo secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Supply-chain: every `uses:` is pinned to a 40-char SHA.
 
 on:
   workflow_dispatch:
@@ -31,29 +25,33 @@ on:
         required: false
         default: "false"
         type: choice
-        options: ["false", "true"]
+        options:
+          - "false"
+          - "true"
       dry_run:
         description: "Plan only — do not apply, commit, or push"
         required: false
         default: "false"
         type: choice
-        options: ["false", "true"]
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: lambda-bootstrap
   cancel-in-progress: false
 
 permissions:
-  contents: write   # commit updated tfstate + kill-switch revert
+  contents: write
 
 env:
-  PRIMARY_REGION:   ap-south-1
+  PRIMARY_REGION: ap-south-1
   SECONDARY_REGION: us-east-1
-  ACCOUNT_ID:       "271740379017"
-  ECR_PRI:          "271740379017.dkr.ecr.ap-south-1.amazonaws.com"
-  ECR_SEC:          "271740379017.dkr.ecr.us-east-1.amazonaws.com"
-  TF_DIR:           artifacts/syrabit/infra/aws
-  TF_VERSION:       "1.8.5"
+  ACCOUNT_ID: "271740379017"
+  ECR_PRI: "271740379017.dkr.ecr.ap-south-1.amazonaws.com"
+  ECR_SEC: "271740379017.dkr.ecr.us-east-1.amazonaws.com"
+  TF_DIR: artifacts/syrabit/infra/aws
+  TF_VERSION: "1.8.5"
 
 jobs:
   bootstrap:
@@ -62,22 +60,19 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # ── Checkout ───────────────────────────────────────────────────────────
       - name: Checkout (includes local tfstate)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
 
-      # ── AWS credentials ────────────────────────────────────────────────────
-      - name: Configure AWS credentials (primary — ap-south-1)
+      - name: Configure AWS credentials (ap-south-1)
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.PRIMARY_REGION }}
+          aws-region: ${{ env.PRIMARY_REGION }}
 
-      # ── ECR image build ────────────────────────────────────────────────────
       - name: Set up QEMU (arm64 emulation)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
@@ -88,19 +83,19 @@ jobs:
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      - name: Login to ECR — ap-south-1
+      - name: Login to ECR (ap-south-1)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
         with:
           registries: ${{ env.ACCOUNT_ID }}
 
-      - name: Login to ECR — us-east-1 (bedrock-proxy repo)
+      - name: Login to ECR (us-east-1)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         run: |
           aws ecr get-login-password --region "$SECONDARY_REGION" | \
             docker login --username AWS --password-stdin "$ECR_SEC"
 
-      - name: Build + push all ECR images (arm64)
+      - name: Build + push ECR images (arm64, all four targets)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
@@ -109,17 +104,14 @@ jobs:
           platforms: linux/arm64
           push: true
           provenance: false
-          # Single image, four ECR targets.
-          # Terraform sets the per-function entry point via image_config.command.
           tags: |
             ${{ env.ECR_PRI }}/syrabit/queue-fanout:sqs-consumers-latest
             ${{ env.ECR_PRI }}/syrabit/email-worker:latest
             ${{ env.ECR_PRI }}/syrabit/health-prober:latest
             ${{ env.ECR_SEC }}/syrabit/bedrock-proxy:latest
           cache-from: type=gha,scope=sqs-consumers
-          cache-to:   type=gha,scope=sqs-consumers,mode=max
+          cache-to: type=gha,scope=sqs-consumers,mode=max
 
-      # ── Terraform ──────────────────────────────────────────────────────────
       - name: Install Terraform ${{ env.TF_VERSION }}
         run: |
           TF_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -156,8 +148,7 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -input=false -auto-approve /tmp/lambda-plan.out
 
-      # ── Commit updated tfstate ─────────────────────────────────────────────
-      - name: Commit updated tfstate to master
+      - name: Commit updated tfstate to main
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           git config user.name  "github-actions[bot]"
@@ -168,15 +159,12 @@ jobs:
           if git diff --cached --quiet; then
             echo "tfstate unchanged — nothing to commit"
           else
-            git commit -m "chore(infra): tfstate after Lambda bootstrap apply [skip ci]
-
-All Lambda functions + EventBridge schedules + event-source mappings
-created. Run: ${{ github.run_id }}"
+            MSG="chore(infra): tfstate after Lambda bootstrap apply [skip ci] run=${{ github.run_id }}"
+            git commit -m "$MSG"
             git push
           fi
 
-      # ── Verify ─────────────────────────────────────────────────────────────
-      - name: Verify Lambda functions
+      - name: Verify Lambda functions created
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           echo "=== ap-south-1 ==="
@@ -193,9 +181,8 @@ created. Run: ${{ github.run_id }}"
           aws scheduler list-schedules --region ap-south-1 \
             --name-prefix syrabit \
             --query 'Schedules[*].[Name,State]' \
-            --output table 2>/dev/null || echo "(no schedules found)"
+            --output table 2>/dev/null || echo "(no schedules or not yet active)"
 
-      # ── Bedrock test ───────────────────────────────────────────────────────
       - name: Test Bedrock cohere.embed-multilingual-v3 (us-east-1)
         if: ${{ github.event.inputs.dry_run != 'true' }}
         id: bedrock
@@ -205,7 +192,6 @@ created. Run: ${{ github.run_id }}"
           p = {'texts': ['তোমার নাম কি?'], 'input_type': 'search_document', 'truncate': 'NONE'}
           print(base64.b64encode(json.dumps(p).encode()).decode())
           ")
-
           if aws bedrock-runtime invoke-model \
                --region us-east-1 \
                --model-id cohere.embed-multilingual-v3 \
@@ -213,7 +199,6 @@ created. Run: ${{ github.run_id }}"
                --accept application/json \
                --body "$BODY" \
                /tmp/bedrock-out.json 2>/tmp/bedrock-err.txt; then
-
             DIMS=$(python3 -c "
           import json
           d = json.load(open('/tmp/bedrock-out.json'))
@@ -224,11 +209,10 @@ created. Run: ${{ github.run_id }}"
           else
             ERR=$(cat /tmp/bedrock-err.txt 2>/dev/null | head -2)
             echo "bedrock_ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Bedrock not accessible: $ERR"
+            echo "::warning::Bedrock not accessible: ${ERR}"
             echo "::warning::Visit https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/model-access → Manage model access → enable Cohere Embed Multilingual → Submit, then re-run"
           fi
 
-      # ── Revert kill-switch ─────────────────────────────────────────────────
       - name: Revert EMBED_INDIC_PROVIDER kill-switch (Bedrock confirmed)
         if: >-
           ${{ steps.bedrock.outputs.bedrock_ok == 'true' &&
@@ -241,11 +225,8 @@ created. Run: ${{ github.run_id }}"
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add "$WF"
-            git commit -m "fix(embed): revert EMBED_INDIC_PROVIDER kill-switch — Bedrock confirmed
-
-cohere.embed-multilingual-v3 verified live in us-east-1. Removing the
-temporary workers_ai_custom fallback so Assamese/Indic embeddings route
-through Bedrock Cohere (1024-dim). Run: ${{ github.run_id }}."
+            MSG="fix(embed): revert EMBED_INDIC_PROVIDER kill-switch — Bedrock confirmed run=${{ github.run_id }}"
+            git commit -m "$MSG"
             git push
             echo "::notice::Kill-switch removed — ACA redeploy triggered automatically"
           else
