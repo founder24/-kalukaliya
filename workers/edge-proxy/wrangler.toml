@@ -176,10 +176,13 @@ preview_id = "c7d531ef4b9a4cd980134251f5739556"
 # the real IDs below before deploying. Until then the worker treats
 # `env.AI_RESPONSE_CACHE` as undefined and the §K.2 cache silently
 # degrades to the backend Redis tier (correct fail-open behaviour).
-# [[kv_namespaces]]
-# binding = "AI_RESPONSE_CACHE"
-# id = "REPLACE_WITH_AI_RESPONSE_CACHE_KV_ID"
-# preview_id = "REPLACE_WITH_AI_RESPONSE_CACHE_KV_PREVIEW_ID"
+[[kv_namespaces]]
+binding = "AI_RESPONSE_CACHE"
+# Shares the CF_EDGE_CACHE namespace — AI response cache writes use the
+# "aic:fp:*" key prefix so no collision with other cache entries.
+# Namespace provisioned under account d66e40eac539fff1db270fddf384a5ec.
+id = "a672a5c8f6604db3ae07526bb30da72a"
+preview_id = "c8cdd4710c23460caf4d6fa526d76d2e"
 
 [[kv_namespaces]]
 binding = "BOT_HTML_CACHE"

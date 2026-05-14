@@ -72,7 +72,7 @@ from config import (
 # `content_format` only. The remaining Vertex surface is
 # `vertex_format.format_with_vertex` (NotebookLM-style polish), which
 # `polish_notes_with_vertex` below delegates to directly.
-from deps import sarvam_llm_client
+from deps import sarvam_llm_client, sarvam_llm_client_direct
 from cache import _cache_key
 
 logger = logging.getLogger(__name__)
@@ -1320,19 +1320,17 @@ def _safe_model_for_provider(model: str, provider: str, provider_list=None) -> s
     return model
 
 def _pick_sarvam_client():
-    # Task #492 (V4 §15) collapsed the Sarvam chat surface to a single
-    # client. The CF-Gateway-bypass twin (`sarvam_llm_client_direct`) was
-    # removed per the task's acceptance gate; CF Gateway outages now
-    # surface as a loud failure so the assamese_rag_chat dispatcher
-    # advances to the Workers-AI IndicTrans2 leg instead of silently
-    # bypassing the gateway.
+    # Primary: CF AI Gateway client (when configured).
+    # Fallback: direct to api.sarvam.ai (sarvam_llm_client_direct) so a
+    # gateway outage doesn't fall all the way through to Workers-AI IndicTrans2
+    # when SARVAM_API_KEY is available.
     return sarvam_llm_client
 
 async def _call_sarvam_llm(messages: list, api_key: str, model: str, max_tokens: int) -> str:
     """Non-streaming call to Sarvam LLM — reuses persistent sarvam_llm_client (zero TCP overhead).
     Adds SARVAM_THINK_BUFFER so the <think> block never consumes the user's answer budget.
-    Per Task #492 there is no direct-client fallback; gateway/auth errors propagate
-    so dispatch can advance to the next provider."""
+    If the CF AI Gateway client fails with a connection error, retries with the
+    direct api.sarvam.ai client before propagating to the next provider."""
     api_max = max_tokens + SARVAM_THINK_BUFFER
     payload = {
         "model": model,
@@ -1344,16 +1342,27 @@ async def _call_sarvam_llm(messages: list, api_key: str, model: str, max_tokens:
     client = _pick_sarvam_client()
     if client is None:
         raise HTTPException(status_code=503, detail="Sarvam LLM client not initialised")
-    resp = await client.post("/v1/chat/completions", json=payload)
-    resp.raise_for_status()
-    data = resp.json()
-    choice = data["choices"][0]["message"]
-    content = choice.get("content") or ""
-    reasoning = choice.get("reasoning_content") or ""
-    result = content if content else reasoning
-    result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
-    result = re.sub(r'<think>.*$', '', result, flags=re.DOTALL).strip()
-    return result
+
+    async def _do_call(c):
+        resp = await c.post("/v1/chat/completions", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        choice = data["choices"][0]["message"]
+        content = choice.get("content") or ""
+        reasoning = choice.get("reasoning_content") or ""
+        result = content if content else reasoning
+        result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
+        result = re.sub(r'<think>.*$', '', result, flags=re.DOTALL).strip()
+        return result
+
+    try:
+        return await _do_call(client)
+    except Exception as exc:
+        if _is_cf_connection_error(exc) and sarvam_llm_client_direct is not None and client is not sarvam_llm_client_direct:
+            mark_cf_gateway_down()
+            logger.warning(f"Sarvam gateway error ({exc!r}), retrying direct to api.sarvam.ai")
+            return await _do_call(sarvam_llm_client_direct)
+        raise
 
 def _cf_cache_headers(api_key: Optional[str] = None, *, clear_upstream_auth: Optional[bool] = None) -> dict:
     # Delegates to config.byok_headers() which returns:
@@ -3191,10 +3200,19 @@ async def _stream_sarvam(messages: list, api_key: str, model: str, max_tokens: i
                 except Exception:
                     continue
 
-    # Task #492: no direct-client bypass; failures propagate so dispatch
-    # advances to the Workers-AI IndicTrans2 leg.
-    async for token in _do_stream(client):
-        yield token
+    # Try CF AI Gateway first; on connection error fall back to the direct
+    # api.sarvam.ai client before propagating to the Workers-AI IndicTrans2 leg.
+    try:
+        async for token in _do_stream(client):
+            yield token
+    except Exception as exc:
+        if _is_cf_connection_error(exc) and sarvam_llm_client_direct is not None and client is not sarvam_llm_client_direct:
+            mark_cf_gateway_down()
+            logger.warning(f"Sarvam gateway stream error ({exc!r}), retrying direct to api.sarvam.ai")
+            async for token in _do_stream(sarvam_llm_client_direct):
+                yield token
+        else:
+            raise
 
 # Task #490 — the Vertex Gemini streaming helper and the `_stream_gemini`
 # direct path were both removed when Vertex was scoped to `content_format` only.

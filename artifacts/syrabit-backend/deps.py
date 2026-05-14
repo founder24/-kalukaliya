@@ -323,7 +323,15 @@ _sarvam_headers = {
 if _sarvam_gw_base and CF_AI_GATEWAY_TOKEN:
     _sarvam_headers['cf-aig-authorization'] = f'Bearer {CF_AI_GATEWAY_TOKEN}'
     _sarvam_headers['cf-aig-cache-ttl'] = str(CF_CACHE_TTL)
+
+# _sarvam_direct_headers always go straight to api.sarvam.ai — no CF AIG fields.
+_sarvam_direct_headers = {
+    'api-subscription-key': SARVAM_API_KEY,
+    'Content-Type': 'application/json',
+}
+
 sarvam_llm_client: Optional[httpx.AsyncClient] = None
+sarvam_llm_client_direct: Optional[httpx.AsyncClient] = None  # always https://api.sarvam.ai
 _sarvam_llm_ready = bool(SARVAM_API_KEY) or bool(_sarvam_gw_base)
 if _sarvam_llm_ready:
     sarvam_llm_client = httpx.AsyncClient(
@@ -336,6 +344,18 @@ if _sarvam_llm_ready:
     )
     _via = "Cloudflare AI Gateway" if _sarvam_gw_base else "direct"
     logging.getLogger(__name__).info(f"Sarvam-m LLM client ready (HTTP/2 pooled, {_via}: {_sarvam_effective_base})")
+    # Always keep a direct client so gateway failures can fall back to
+    # api.sarvam.ai instead of propagating to Workers-AI IndicTrans2.
+    if _sarvam_gw_base and SARVAM_API_KEY:
+        sarvam_llm_client_direct = httpx.AsyncClient(
+            base_url=SARVAM_BASE_URL,
+            headers={**_sarvam_direct_headers, 'Accept': 'text/event-stream'},
+            limits=_sarvam_pool_limits,
+            timeout=_sarvam_llm_timeout,
+            http2=True,
+            verify=True,
+        )
+        logging.getLogger(__name__).info(f"Sarvam-m direct fallback client ready ({SARVAM_BASE_URL})")
 else:
     logging.getLogger(__name__).warning("SARVAM_API_KEY not set — assamese_rag_chat will fall back to Workers-AI IndicTrans2 only")
 
