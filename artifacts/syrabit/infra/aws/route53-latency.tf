@@ -21,6 +21,9 @@
 variable "azure_aca_backend_ip" {
   description = "Static IP of the Azure Container Apps backend (eastus2)"
   type        = string
+  # default = "" so CI runs without the gitignored terraform.tfvars pass.
+  # Real value supplied via tfvars in local / prod applies.
+  default = ""
 }
 
 locals {
