@@ -964,7 +964,11 @@ SUPABASE_URL         = (
     os.environ.get('SUPABASE_URL', '').strip()
     or _derive_supabase_url_from_dsn(os.environ.get('SUPABASE_DB_URL', '').strip())
 )
-SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '') or os.environ.get('SUPABASE_KEY', '')
+SUPABASE_SERVICE_KEY = (
+    os.environ.get('SUPABASE_SERVICE_KEY', '')
+    or os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+    or os.environ.get('SUPABASE_KEY', '')
+)
 SUPABASE_ANON_KEY    = os.environ.get('SUPABASE_ANON_KEY', '') or os.environ.get('SUPABASE_KEY', '')
 
 # ── Cookie security (set SECURE_COOKIES=false in dev to allow HTTP) ───────────
@@ -1092,6 +1096,15 @@ PLAN_LIMITS = {
 # never trips it. Override via ``IP_COARSE_DAILY_CAP`` env var if a
 # specific deployment sees legitimate traffic above the default.
 IP_COARSE_DAILY_CAP = int(os.environ.get("IP_COARSE_DAILY_CAP", "1500"))
+
+# Comma-separated list of IPs (exact match) that are exempt from the
+# IP_COARSE_DAILY_CAP check. Intended for known dev/CI egress IPs
+# (e.g. Replit shared IP) that hit the cap during automated testing.
+# Example: RATE_LIMIT_BYPASS_IPS=8.231.86.2,10.0.0.1
+_bypass_raw = os.environ.get("RATE_LIMIT_BYPASS_IPS", "").strip()
+RATE_LIMIT_BYPASS_IPS: frozenset = frozenset(
+    ip.strip() for ip in _bypass_raw.split(",") if ip.strip()
+)
 
 # Task #797 — cap how often a single IP can mint a fresh device cookie
 # in a short window. The first-visit branch in
