@@ -207,12 +207,13 @@ preview_id = "c8cdd4710c23460caf4d6fa526d76d2e"
 [[kv_namespaces]]
 binding = "CONTENT_CACHE"
 id = "981e939bcca445c481d4be818ebefee7"
-# ⚠ MISCONFIGURATION: preview_id is identical to production id. This means
-# `wrangler dev --remote` reads/writes the live production KV namespace,
-# which can silently corrupt cached content. Fix:
+# preview_id must be a separate KV namespace from the production id above.
+# Create one with:
 #   wrangler kv namespace create CONTENT_CACHE --preview
-# Then replace this preview_id with the output ID.
-preview_id = "981e939bcca445c481d4be818ebefee7"
+# Then replace REPLACE_WITH_PREVIEW_NAMESPACE_ID below with the output id.
+# Until then, running `wrangler dev --remote` is BLOCKED — the deploy pipeline
+# enforces this via scripts/ci/check_architecture_lock.py.
+preview_id = "REPLACE_WITH_PREVIEW_NAMESPACE_ID"
 
 [[d1_databases]]
 binding = "CONTENT_DB"
