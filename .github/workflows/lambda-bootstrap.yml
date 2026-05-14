@@ -178,13 +178,20 @@ jobs:
           aws-region: ${{ env.PRIMARY_REGION }}
           role-duration-seconds: 3600
 
+      - name: "Phase B: import existing bedrock-proxy ECR repo (idempotent)"
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: true
+        run: |
+          # Import the repo if it already exists in AWS but not in tfstate.
+          # Safe to fail — if it is already in state the apply below is a no-op.
+          terraform import -input=false             aws_ecr_repository.bedrock_proxy_use1             syrabit/bedrock-proxy 2>&1 | tail -5 || true
+
       - name: "Phase B: create bedrock-proxy ECR repo in us-east-1 (syrabit-github-deploy)"
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: |
-          terraform apply -auto-approve -input=false \
-            -target=aws_ecr_repository.bedrock_proxy_use1 \
-            -target=aws_ecr_lifecycle_policy.bedrock_proxy_use1
+          terraform apply -auto-approve -input=false             -target=aws_ecr_repository.bedrock_proxy_use1             -target=aws_ecr_lifecycle_policy.bedrock_proxy_use1
           echo "ECR syrabit/bedrock-proxy ready in $SECONDARY_REGION"
 
       # Login to us-east-1 ECR while we're running as syrabit-github-deploy
