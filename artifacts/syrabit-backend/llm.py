@@ -947,8 +947,8 @@ _SLM_SLOT_CANDIDATES = [
     ("workers-ai",  "@cf/openai/gpt-oss-20b",                          64, 1),
     # Tier 2: Workers AI Qwen 2.5-72B — high-quality 72B on separate quota.
     ("workers-ai",  "@cf/qwen/qwen2.5-72b-instruct",                   64, 2),
-    # Tier 3: Workers AI llama-3.2-3b — ultrafast 3B for burst traffic.
-    ("workers-ai",  "@cf/meta/llama-3.2-3b-instruct",                 128, 3),
+    # Tier 3: Workers AI llama-3.2-1b — ultrafast 1B for burst traffic (3b account-banned).
+    ("workers-ai",  "@cf/meta/llama-3.2-1b-instruct",                 128, 3),
     # Tier 4: Workers AI llama-3.1-8b — fast 8B fallback.
     ("workers-ai",  "@cf/meta/llama-3.1-8b-instruct-fp8",              64, 4),
     # Task #490: Tier 5 (`("gemini", "gemini-2.5-flash", 4, 5)`) removed —
@@ -1818,7 +1818,7 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     # excluded. Each is a thin alias that routes through the canonical
     # ``workers-ai`` dispatch with a model override.
     "workers_ai_mistral_7b": "@cf/mistral/mistral-7b-instruct-v0.3",   # balanced English fallback
-    "workers_ai_llama32_3b": "@cf/meta/llama-3.2-3b-instruct",         # ultrafast 3B for burst / fast-mode
+    "workers_ai_llama32_3b": "@cf/meta/llama-3.2-1b-instruct",         # ultrafast 1B for burst / fast-mode (3b account-banned)
     "workers_ai_llama31_8b": "@cf/meta/llama-3.1-8b-instruct-fp8",     # Indic chat fallback tail
     # Task #2 — 2026 blueprint canonical chat-chain extensions.
     "vertex_flash_lite":   "gemini-2.5-flash-lite",                    # cheaper Vertex SKU; 2nd leg of English chat
@@ -2414,7 +2414,7 @@ async def _dispatch_llm_for_feature(
     # provider pool so deprecated providers cannot sneak back in.
     _TIER_ALIAS_TO_MODEL = {
         "workers_ai_mistral_7b": "@cf/mistral/mistral-7b-instruct-v0.3",
-        "workers_ai_llama32_3b": "@cf/meta/llama-3.2-3b-instruct",
+        "workers_ai_llama32_3b": "@cf/meta/llama-3.2-1b-instruct",
         "workers_ai_llama31_8b": "@cf/meta/llama-3.1-8b-instruct-fp8",
     }
     if provider in _TIER_ALIAS_TO_MODEL:

@@ -272,7 +272,7 @@ async def _vertex_startup_probe() -> None:
             if _acct and _tok:
                 _direct_url = (
                     f"https://api.cloudflare.com/client/v4/accounts/{_acct}"
-                    f"/ai/run/@cf/meta/llama-3.2-3b-instruct"
+                    f"/ai/run/@cf/meta/llama-3.2-1b-instruct"
                 )
                 async with _httpx.AsyncClient(timeout=8) as _c:
                     _dr = await _c.post(

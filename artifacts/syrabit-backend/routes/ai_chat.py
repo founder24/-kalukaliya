@@ -2172,9 +2172,11 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
         credits_info = await get_user_credits(user)
         if credits_info["remaining"] <= 0:
             raise HTTPException(status_code=402, detail=f"Daily credit limit reached ({credits_info['limit']} credits/day). Resets at midnight UTC. Upgrade your plan for more.")
-        deducted = await atomic_deduct_credit(user_id, credits_info["used"], credits_info["limit"])
-        if not deducted:
-            raise HTTPException(status_code=402, detail="Credit limit reached. Upgrade your plan for more.")
+        _is_privileged_user = (user or {}).get("is_admin") or (user or {}).get("role") in {"admin", "staff", "educator"}
+        if not _is_privileged_user:
+            deducted = await atomic_deduct_credit(user_id, credits_info["used"], credits_info["limit"])
+            if not deducted:
+                raise HTTPException(status_code=402, detail="Credit limit reached. Upgrade your plan for more.")
 
     if fallback_msg:
         logger.info(f"[guardrails] Prompt blocked ({guardrail_tag}) for user {user_id or 'anon'}: {msg.message[:80]!r}")
@@ -3093,36 +3095,53 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
     # but the speculative web fetch came back empty, raise 503 instead
     # of streaming an ungrounded LLM answer.
     if _s_route_force_web and not web_results:
-        logger.error(
-            "[STREAM][ROUTER=web] web search returned 0 results for %r "
-            "cid=%s — failing loud (no silent ungrounded fallback)",
-            (msg.message or "")[:80], msg.conversation_id or "",
-        )
-        # Task #41 — V4 §12 fail-loud preserved (no ungrounded LLM
-        # answer), but ship the router decision inside the HTTP
-        # 503 detail body so the dev-only QA badge can render on
-        # the failed message bubble. ``_chat_stream_impl`` is a
-        # coroutine (it later RETURNS a StreamingResponse for the
-        # success path), so we cannot yield the error here without
-        # turning it into an async generator — hence the structured
-        # detail body. The frontend's !response.ok branch
-        # (ChatPage.jsx) reads ``detail.route_trace`` and stores
-        # it on the failed message.
-        _web_empty_trace = _build_route_trace(
-            msg.message or "",
-            msg.response_lang,
-            _stream_intent,
-            _stream_topic_metadata,
-            precomputed_decision=_s_route_decision_obj,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": "Web search returned no results for this query. Please try again or rephrase.",
-                "error_kind": "web_empty",
-                "route_trace": _web_empty_trace,
-            },
-        )
+        # Assamese (response_lang="as") exception — web search never returns
+        # Assamese-script results. The documented Assamese chain
+        # (sarvam → vertex_assamese → retrieval_only) is the authoritative
+        # answer path for these queries; falling through to it is NOT a silent
+        # ungrounded fallback — it is the intended route documented in §2
+        # of the architecture lock. We log a WARNING so observability is
+        # preserved and downgrade `_s_route_force_web` so the LLM path
+        # continues below.
+        if _want_translate:
+            logger.warning(
+                "[STREAM][ROUTER=web] web_empty for Assamese query %r — "
+                "routing to Assamese LLM chain (sarvam/vertex_assamese) "
+                "per architecture lock §2. cid=%s",
+                (msg.message or "")[:60], msg.conversation_id or "",
+            )
+            _s_route_force_web = False
+        else:
+            logger.error(
+                "[STREAM][ROUTER=web] web search returned 0 results for %r "
+                "cid=%s — failing loud (no silent ungrounded fallback)",
+                (msg.message or "")[:80], msg.conversation_id or "",
+            )
+            # Task #41 — V4 §12 fail-loud preserved (no ungrounded LLM
+            # answer), but ship the router decision inside the HTTP
+            # 503 detail body so the dev-only QA badge can render on
+            # the failed message bubble. ``_chat_stream_impl`` is a
+            # coroutine (it later RETURNS a StreamingResponse for the
+            # success path), so we cannot yield the error here without
+            # turning it into an async generator — hence the structured
+            # detail body. The frontend's !response.ok branch
+            # (ChatPage.jsx) reads ``detail.route_trace`` and stores
+            # it on the failed message.
+            _web_empty_trace = _build_route_trace(
+                msg.message or "",
+                msg.response_lang,
+                _stream_intent,
+                _stream_topic_metadata,
+                precomputed_decision=_s_route_decision_obj,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": "Web search returned no results for this query. Please try again or rephrase.",
+                    "error_kind": "web_empty",
+                    "route_trace": _web_empty_trace,
+                },
+            )
 
     # Task #37 — V4 §12 fail-loud guard for the stream RAG branch.
     # Mirrors the non-stream guard: rag-decision + zero internal hits

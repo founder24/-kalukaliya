@@ -70,7 +70,7 @@ MODELS = {
     "chat_qwen":     "@cf/qwen/qwen2.5-72b-instruct",
     "chat_code":     "@cf/qwen/qwen2.5-coder-32b-instruct",
     "chat_fast":     "@cf/meta/llama-3.1-8b-instruct-fp8",
-    "chat_ultrafast": "@cf/meta/llama-3.2-3b-instruct",
+    "chat_ultrafast": "@cf/meta/llama-3.2-1b-instruct",
     "chat_indic":    "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
     "embed":       "@cf/baai/bge-large-en-v1.5",
     "embed_multi": "@cf/baai/bge-m3",

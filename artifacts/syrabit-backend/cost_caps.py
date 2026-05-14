@@ -615,15 +615,15 @@ def _select_chat_model(
     primary_provider = _chain[0]
     primary_model = (
         "gemini-2.5-flash" if primary_provider == "vertex"
-        else "@cf/meta/llama-3.2-3b-instruct"
+        else "@cf/meta/llama-3.2-1b-instruct"
     )
     # Task #581 §L1 — free users are HARD-ROUTED off Vertex. Even when
     # the credit-runway-aware chain head is `vertex`, free callers
-    # always get Workers-AI Llama-3.2-3B (or Mistral-7B in the cheap
+    # always get Workers-AI Llama-3.2-1B (or Mistral-7B in the cheap
     # bucket). Vertex spend is reserved for paid traffic + admin
     # generation.  Paid users keep the runway-aware primary.
     free_primary_provider = "workers_ai_llama32_3b"
-    free_primary_model = "@cf/meta/llama-3.2-3b-instruct"
+    free_primary_model = "@cf/meta/llama-3.2-1b-instruct"
 
     # Rule D LOCKED — global monthly USD cap reached. Force the
     # cheap-tier (Workers-AI Mistral-7B) for English chat regardless of
