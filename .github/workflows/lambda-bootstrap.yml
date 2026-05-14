@@ -281,6 +281,17 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform init -input=false
 
+
+      - name: Import existing CloudWatch log groups into state (idempotent)
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          # These log groups were auto-created by Lambda on first invocation.
+          # Terraform would fail with ResourceAlreadyExistsException without import.
+          for LG in "materialize-chapter-faqs" "seo-baseline" "prewarm-seo-routes"; do
+            terraform import -input=false               "aws_cloudwatch_log_group.batch_job[\"${LG}\"]"               "/aws/lambda/syrabit-${LG}" 2>&1               | grep -v "already managed\|No changes" || true
+          done
+
       - name: Terraform plan (Lambda + EventBridge + event-source mappings)
         working-directory: ${{ env.TF_DIR }}
         run: |
@@ -303,6 +314,8 @@ jobs:
             -target=aws_lambda_event_source_mapping.sqs_consumer \
             -target=aws_lambda_event_source_mapping.ses_retry_queue \
             -target=aws_lambda_event_source_mapping.reembed \
+            -target=aws_cloudwatch_log_group.batch_job \
+            -target=aws_iam_role.explore_credit_hello \
             -out=/tmp/lambda-plan.out
 
       - name: Terraform apply
