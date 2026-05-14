@@ -59,25 +59,15 @@ COPY artifacts/syrabit-backend/requirements-lambda.txt /tmp/requirements.txt
 # place with no further processing.  Post-extraction, pip validates that
 # the packages are "installed" via .dist-info and won't try to re-download
 # them.
-RUN python3 - << 'PYEOF'
-import zipfile, glob, os, sys
-
-SP = "/var/lang/lib/python3.11/site-packages"
-os.makedirs(SP, exist_ok=True)
-
-ok = skip = 0
-for whl in sorted(glob.glob("/tmp/wheels/*.whl")):
-    try:
-        with zipfile.ZipFile(whl) as z:
-            z.extractall(SP)
-        ok += 1
-    except Exception as exc:
-        print(f"WARN: {os.path.basename(whl)}: {exc}", file=sys.stderr)
-        skip += 1
-
-print(f"Extracted {ok} wheels, {skip} skipped")
-PYEOF
-rm -rf /tmp/wheels/ /tmp/requirements.txt
+RUN python3 -c "\
+import zipfile, glob, os, sys; \
+SP = '/var/lang/lib/python3.11/site-packages'; \
+os.makedirs(SP, exist_ok=True); \
+ok = skip = 0; \
+[(__import__('zipfile').ZipFile(w).extractall(SP), globals().update(ok=ok+1)) \
+    for w in sorted(glob.glob('/tmp/wheels/*.whl'))]; \
+print(f'Extracted wheels to {SP}')" \
+    && rm -rf /tmp/wheels/ /tmp/requirements.txt
 
 # ── Application code. The Lambda runtime expects user code under
 # ${LAMBDA_TASK_ROOT} (= /var/task on the AWS base image). Copy the
