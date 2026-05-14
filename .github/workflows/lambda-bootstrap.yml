@@ -127,17 +127,24 @@ jobs:
           mkdir -p .build/arm64-wheels
           REQS="artifacts/syrabit-backend/requirements.txt"
 
-          echo "=== Downloading arm64 binary wheels ==="
+          # --prefer-binary (NOT --only-binary=:all:) so pure-Python packages
+          # that only publish source dists (e.g. http-ece, pywebpush) are
+          # downloaded as sdists rather than causing the whole download to fail.
+          # --platform forces C-extension wheels to be the arm64 manylinux
+          # variant; pure-Python none-any wheels are unaffected by --platform.
+          echo "=== Downloading arm64 wheels + sdists ==="
           pip3 download \
             --platform manylinux_2_17_aarch64 \
             --platform manylinux_2_28_aarch64 \
             --python-version 311 \
             --implementation cp \
-            --only-binary=:all: \
+            --prefer-binary \
             -r "$REQS" \
-            --dest .build/arm64-wheels/ 2>&1 | grep -E "^(Saved|  Saved|File was already|error|ERROR)" || true
+            --dest .build/arm64-wheels/
 
-          echo "=== Wheels downloaded: $(ls .build/arm64-wheels/*.whl 2>/dev/null | wc -l) ==="
+          echo "=== Cache: $(ls .build/arm64-wheels/ | wc -l) files, $(du -sh .build/arm64-wheels/ | cut -f1) ==="
+          echo "Binary wheels: $(ls .build/arm64-wheels/*.whl 2>/dev/null | wc -l)"
+          echo "Source dists:  $(ls .build/arm64-wheels/*.tar.gz .build/arm64-wheels/*.zip 2>/dev/null | wc -l)"
 
       - name: Build + push ECR images (arm64, all four targets)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
