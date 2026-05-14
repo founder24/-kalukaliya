@@ -387,6 +387,15 @@ jobs:
           SECRET_ARN=$(aws secretsmanager describe-secret             --secret-id syrabit/prod/origin/shared-secret             --region ap-south-1 --query ARN --output text 2>/dev/null || echo "")
           [ -n "$SECRET_ARN" ] && [ "$SECRET_ARN" != "None" ] &&             $TF 'aws_secretsmanager_secret.workers["origin/shared-secret"]' "$SECRET_ARN"               2>&1 | grep -v "already managed" || true
 
+          # IAM role created in prior partial run (tagged, so wasn't blocked)
+          $TF aws_iam_role.explore_credit_hello syrabit-explore-credit-hello-role \
+            2>&1 | grep -v "already managed" || true
+
+          # SES retry queue ESM created in prior run (UUID from prior apply)
+          $TF aws_lambda_event_source_mapping.ses_retry_queue \
+            2d3f860d-9828-4100-9b56-81877be3c2e5 \
+            2>&1 | grep -v "already managed" || true
+
           echo "=== Import phase complete ==="
 
       - name: Terraform plan (Lambda + EventBridge + event-source mappings)
