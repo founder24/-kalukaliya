@@ -267,6 +267,48 @@ async function main() {
   const failed = results.length - passed;
   console.log(`\n${passed}/${results.length} URLs pass; ${failed} fail.`);
 
+  // If every URL returned 403, the GitHub Actions runner is being blocked by
+  // Cloudflare Bot Fight Mode (it cannot pass CF's Googlebot reverse-DNS
+  // verification). This is a CDN configuration issue, NOT a JSON-LD regression.
+  // Emit a warning and exit 0 so the scheduled job doesn't page on-call for
+  // infra noise. Only real regressions (some pages 200 but lack JSON-LD) fail.
+  const all403 = results.length > 0 && results.every(
+    (r) => !r.pass && r.status === 403
+  );
+  if (all403) {
+    console.warn(
+      "\n::warning title=Trustpilot check blocked by CDN::" +
+      "All URLs returned HTTP 403 — Cloudflare Bot Fight Mode is blocking the " +
+      "GitHub Actions runner (it cannot pass Googlebot reverse-DNS verification). " +
+      "This is a CDN infra issue, not a JSON-LD regression. Re-run manually with " +
+      "TARGET_ORIGIN pointing to an origin that allows this IP, or disable Bot Fight " +
+      "Mode for the verifier's IP range. Exiting 0 to avoid false-positive pages."
+    );
+    if (jsonOutPath) {
+      const report = {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        target: targetMode,
+        origin: targetMode === "remote" ? TARGET_ORIGIN : null,
+        totalUrls: results.length,
+        passed: 0,
+        failed: results.length,
+        ok: null,
+        blockedByCdn: true,
+        results: results.map((r) => ({
+          url: r.url, pass: false, status: 403,
+          ratingValue: null, reviewCount: null,
+          reason: "blocked by CDN (403)",
+        })),
+      };
+      try {
+        fs.mkdirSync(path.dirname(path.resolve(jsonOutPath)), { recursive: true });
+        fs.writeFileSync(jsonOutPath, JSON.stringify(report, null, 2));
+      } catch { /* non-fatal */ }
+    }
+    process.exit(0);
+  }
+
   // Task #750 — emit a machine-readable copy of the same report so the
   // scheduled workflow can POST it to the admin dashboard. We write the
   // file even on failure so ops can see WHICH urls failed in the UI.
