@@ -46,6 +46,16 @@ if [[ $# -lt 1 ]]; then
   exit 64
 fi
 
+# pnpm passes the `--` argument separator through to the script when called as
+# `pnpm run smoke -- <url>` (e.g. from CI). Skip it so $1 is always the URL.
+if [[ "${1}" == "--" ]]; then
+  shift
+  if [[ $# -lt 1 ]]; then
+    echo "usage: $0 <base-url>" >&2
+    exit 64
+  fi
+fi
+
 BASE_URL="${1%/}" # strip trailing slash
 PASSED=0
 FAILED=0
