@@ -3,6 +3,8 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
+run = ["sh", "-c", "cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py"]
+build = ["sh", "-c", "pip install -r artifacts/syrabit-backend/requirements.txt"]
 
 [deployment.postBuild]
 args = ["sh", "-c", "npm i -g pnpm@10.26.1 && pnpm store prune"]
