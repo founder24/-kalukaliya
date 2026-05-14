@@ -307,7 +307,15 @@ echo "[4/7] GET /api/readyz (backend reverse-proxy identity)"
 http_get "$BASE_URL/api/readyz"
 ready_src=$(header_value "X-Source")
 ready_byte_len=$(wc -c < "$BODY_PATH" | tr -d ' ')
-if [[ "$HTTP_STATUS" != "200" && "$HTTP_STATUS" != "503" ]]; then
+if [[ "$HTTP_STATUS" == "403" && "$ready_src" == "backend" ]]; then
+  # 403 + X-Source=backend means the proxy routing is correct (request reached
+  # the backend) but BACKEND_ORIGIN_SECRET is unset on this Worker env so the
+  # backend's OriginGate rejected the call. This is intentional on preview
+  # workers (we don't copy prod secrets there). Count it as a skipped check
+  # rather than a hard failure so the preview smoke can gate the prod promote.
+  TOTAL=$((TOTAL - 1))
+  echo "  ⚠ [backend-proxy] WARN: proxy reached backend (403) — BACKEND_ORIGIN_SECRET not set on this env (preview expected)"
+elif [[ "$HTTP_STATUS" != "200" && "$HTTP_STATUS" != "503" ]]; then
   # 503 is acceptable: it means the backend answered "not ready" — proves
   # the proxy worked even though a downstream dep is unhealthy.
   fail "backend-proxy" "expected 200/503, got $HTTP_STATUS — BACKEND_URL likely misconfigured (X-Source=${ready_src:-(missing)})"
