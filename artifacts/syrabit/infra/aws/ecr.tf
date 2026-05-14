@@ -71,7 +71,73 @@ resource "aws_ecr_lifecycle_policy" "workers" {
   })
 }
 
+# ─── bedrock-proxy repo in us-east-1 (secondary region) ─────────────────────
+#
+# The bedrock-proxy Lambda runs in us-east-1 because that is where
+# cohere.embed-multilingual-v3 (Bedrock) is enabled.  Lambda can only
+# pull images from ECR in the same region, so this repo must live in
+# us-east-1 independently of the primary-region for_each above.
+#
+# The aws_iam_role_policy.github_deploy resource (iam-github-oidc.tf)
+# grants ecr:CreateRepository on us-east-1 syrabit/* so the bootstrap
+# workflow can create this repo before the first Docker push.
+
+resource "aws_ecr_repository" "bedrock_proxy_use1" {
+  provider             = aws.us_east_1
+  name                 = "${local.lz_project}/bedrock-proxy"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = false
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = merge(local.lz_common_tags, {
+    Name   = "${local.lz_project}/bedrock-proxy"
+    worker = "bedrock-proxy"
+  })
+}
+
+resource "aws_ecr_lifecycle_policy" "bedrock_proxy_use1" {
+  provider   = aws.us_east_1
+  repository = aws_ecr_repository.bedrock_proxy_use1.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep the last 20 tagged images"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = 20
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Expire untagged images after 7 days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = { type = "expire" }
+      },
+    ]
+  })
+}
+
 output "ecr_repository_urls" {
-  value       = { for k, v in aws_ecr_repository.workers : k => v.repository_url }
+  value = merge(
+    { for k, v in aws_ecr_repository.workers : k => v.repository_url },
+    { "bedrock-proxy-use1" = aws_ecr_repository.bedrock_proxy_use1.repository_url },
+  )
   description = "Push URLs for each worker image; consumed by aws-deploy-workers.yml."
 }
