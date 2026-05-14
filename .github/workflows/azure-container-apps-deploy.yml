@@ -305,8 +305,12 @@ jobs:
 
       - name: Update Container App revision
         env:
-          GH_SARVAM_API_KEY:       ${{ secrets.SARVAM_API_KEY }}
-          GH_WORKERS_EMBED_SECRET: ${{ secrets.WORKERS_EMBED_SECRET }}
+          GH_SARVAM_API_KEY:              ${{ secrets.SARVAM_API_KEY }}
+          GH_WORKERS_EMBED_SECRET:        ${{ secrets.WORKERS_EMBED_SECRET }}
+          GH_UPSTASH_REDIS_REST_URL:      ${{ secrets.KV_SEED_UPSTASH_REDIS_REST_URL }}
+          GH_UPSTASH_REDIS_REST_TOKEN:    ${{ secrets.KV_SEED_UPSTASH_REDIS_REST_TOKEN }}
+          GH_SUPABASE_ANON_KEY:           ${{ secrets.KV_SEED_SUPABASE_ANON_KEY }}
+          GH_SUPABASE_SERVICE_ROLE_KEY:   ${{ secrets.KV_SEED_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
           APP="${{ inputs.app || 'syrabit-backend' }}"
@@ -416,14 +420,26 @@ jobs:
             # rotating the Sarvam key or resetting the embed shared secret).
             _SARVAM_KEY="${GH_SARVAM_API_KEY:-}"
             _EMBED_SECRET="${GH_WORKERS_EMBED_SECRET:-}"
+            # Upstash and Supabase are injected directly from GH secrets so
+            # they bypass any transient KV secret-resolution issues on the
+            # Container App managed-identity path.  KV still holds the values
+            # as the canonical source; this is belt-and-suspenders.
+            _UPSTASH_URL="${GH_UPSTASH_REDIS_REST_URL:-}"
+            _UPSTASH_TOKEN="${GH_UPSTASH_REDIS_REST_TOKEN:-}"
+            _SUPABASE_ANON="${GH_SUPABASE_ANON_KEY:-}"
+            _SUPABASE_SVC="${GH_SUPABASE_SERVICE_ROLE_KEY:-}"
             echo "::group::Build target spec"
             jq \
-              --arg image        "$image" \
-              --arg kv           "$KV_BASE" \
-              --arg suffix       "$REV_SUFFIX" \
-              --arg acr          "$AZURE_ACR_NAME.azurecr.io" \
-              --arg sarvam_key   "$_SARVAM_KEY" \
-              --arg embed_secret "$_EMBED_SECRET" \
+              --arg image          "$image" \
+              --arg kv             "$KV_BASE" \
+              --arg suffix         "$REV_SUFFIX" \
+              --arg acr            "$AZURE_ACR_NAME.azurecr.io" \
+              --arg sarvam_key     "$_SARVAM_KEY" \
+              --arg embed_secret   "$_EMBED_SECRET" \
+              --arg upstash_url    "$_UPSTASH_URL" \
+              --arg upstash_token  "$_UPSTASH_TOKEN" \
+              --arg supabase_anon  "$_SUPABASE_ANON" \
+              --arg supabase_svc   "$_SUPABASE_SVC" \
               '
               .properties.configuration.registries = [{
                 "server":   $acr,
@@ -443,10 +459,10 @@ jobs:
                   {"name":"sentry-dsn",                           "keyVaultUrl": ($kv + "/SENTRY-DSN"),                           "identity":"system"},
                   (if $sarvam_key != "" then {"name":"sarvam-api-key","value":$sarvam_key} else {"name":"sarvam-api-key","keyVaultUrl":($kv+"/SARVAM-API-KEY"),"identity":"system"} end),
                   {"name":"web-push-vapid-private-key",           "keyVaultUrl": ($kv + "/WEB-PUSH-VAPID-PRIVATE-KEY"),           "identity":"system"},
-                  {"name":"upstash-redis-rest-url",               "keyVaultUrl": ($kv + "/UPSTASH-REDIS-REST-URL"),               "identity":"system"},
-                  {"name":"upstash-redis-rest-token",             "keyVaultUrl": ($kv + "/UPSTASH-REDIS-REST-TOKEN"),             "identity":"system"},
-                  {"name":"supabase-anon-key",                    "keyVaultUrl": ($kv + "/SUPABASE-ANON-KEY"),                    "identity":"system"},
-                  {"name":"supabase-service-key",                 "keyVaultUrl": ($kv + "/SUPABASE-SERVICE-ROLE-KEY"),            "identity":"system"},
+                  (if $upstash_url   != "" then {"name":"upstash-redis-rest-url",  "value":$upstash_url}   else {"name":"upstash-redis-rest-url",  "keyVaultUrl":($kv+"/UPSTASH-REDIS-REST-URL"),  "identity":"system"} end),
+                  (if $upstash_token != "" then {"name":"upstash-redis-rest-token","value":$upstash_token} else {"name":"upstash-redis-rest-token","keyVaultUrl":($kv+"/UPSTASH-REDIS-REST-TOKEN"),"identity":"system"} end),
+                  (if $supabase_anon != "" then {"name":"supabase-anon-key",       "value":$supabase_anon} else {"name":"supabase-anon-key",       "keyVaultUrl":($kv+"/SUPABASE-ANON-KEY"),       "identity":"system"} end),
+                  (if $supabase_svc  != "" then {"name":"supabase-service-key",    "value":$supabase_svc}  else {"name":"supabase-service-key",    "keyVaultUrl":($kv+"/SUPABASE-SERVICE-ROLE-KEY"),"identity":"system"} end),
                   {"name":"pinecone-api-key",                     "keyVaultUrl": ($kv + "/PINECONE-API-KEY"),                     "identity":"system"},
                   {"name":"deepgram-api-key",                     "keyVaultUrl": ($kv + "/DEEPGRAM-API-KEY"),                     "identity":"system"},
                   {"name":"elevenlabs-api-key",                   "keyVaultUrl": ($kv + "/ELEVENLABS-API-KEY"),                   "identity":"system"},
