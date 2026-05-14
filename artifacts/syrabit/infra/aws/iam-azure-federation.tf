@@ -26,11 +26,16 @@
 variable "azure_tenant_id" {
   description = "Azure tenant ID hosting the cron-jobs managed identity. Set in tfvars."
   type        = string
+  # default = "" so CI runs (which don't have access to the gitignored
+  # terraform.tfvars) pass variable validation. The real value is always
+  # supplied via tfvars in local / prod applies.
+  default = ""
 }
 
 variable "azure_cron_runtime_object_id" {
   description = "objectId of the user-assigned managed identity `syrabit-cron-jobs-runtime`. Output of `azurerm_user_assigned_identity.cron_jobs_runtime.principal_id`."
   type        = string
+  default     = ""
 }
 
 resource "aws_iam_openid_connect_provider" "azure_cron" {
