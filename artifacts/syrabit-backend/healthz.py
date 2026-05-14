@@ -129,14 +129,44 @@ async def _probe_pinecone() -> None:
 
 
 async def _probe_cf_ai_gateway() -> None:
-    """HEAD the Cloudflare AI Gateway base URL (LLM passthrough)."""
-    base = (os.environ.get("CF_AI_GATEWAY_URL") or "").strip()
-    if not base:
-        raise RuntimeError("CF_AI_GATEWAY_URL not set")
+    """Probe the Cloudflare AI Gateway by running a cheap Workers AI inference call.
+
+    The bare HEAD on the gateway base URL returns 401 even with a valid token
+    because it is not a recognised inference endpoint.  Instead we POST a
+    minimal inference request to a fast model; a 200 confirms both network
+    reachability and auth are working.  When the gateway is disabled
+    (CF_AI_GATEWAY_ID not set) we fall back to a direct Workers AI call so
+    the probe remains meaningful in dev environments.
+    """
+    from config import (  # local import avoids circular-import at module load
+        CF_GATEWAY_ENABLED, CF_GATEWAY_BASE, CF_AI_GATEWAY_TOKEN,
+        _CF_ACCOUNT_ID,
+    )
     import httpx
+
+    _cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+
+    headers = {"Content-Type": "application/json"}
+    payload  = '{"messages":[{"role":"user","content":"ping"}],"max_tokens":1}'
+
+    if CF_GATEWAY_ENABLED and CF_GATEWAY_BASE:
+        url = f"{CF_GATEWAY_BASE}/workers-ai/@cf/meta/llama-3.2-3b-instruct"
+        token = CF_AI_GATEWAY_TOKEN or _cf_api_token
+        if token:
+            headers["cf-aig-authorization"] = f"Bearer {token}"
+            headers["Authorization"] = f"Bearer {token}"
+    elif _CF_ACCOUNT_ID and _cf_api_token:
+        url = (
+            f"https://api.cloudflare.com/client/v4/accounts/{_CF_ACCOUNT_ID}"
+            "/ai/run/@cf/meta/llama-3.2-3b-instruct"
+        )
+        headers["Authorization"] = f"Bearer {_cf_api_token}"
+    else:
+        raise RuntimeError("CF AI Gateway not configured (CF_AI_GATEWAY_ID or CLOUDFLARE_API_TOKEN missing)")
+
     async with httpx.AsyncClient(timeout=DEP_PROBE_TIMEOUT_S) as c:
-        r = await c.head(base)
-        if r.status_code >= 500:
+        r = await c.post(url, content=payload, headers=headers)
+        if r.status_code >= 400:
             raise RuntimeError(f"HTTP {r.status_code}")
 
 
