@@ -113,6 +113,32 @@ jobs:
           aws ecr get-login-password --region "$SECONDARY_REGION" | \
             docker login --username AWS --password-stdin "$ECR_SEC"
 
+      # Pre-download arm64 wheels on the NATIVE x86_64 runner (no QEMU).
+      # When pip runs inside QEMU-emulated arm64, it fails to identify the
+      # container as manylinux-compatible and falls back to source tarballs,
+      # which then fail to compile because the minimal Lambda base image has
+      # no gcc.  Running pip download here with explicit --platform flags
+      # fetches the correct manylinux_2_17_aarch64 wheels natively; they
+      # are injected into the Docker build context at .build/arm64-wheels/
+      # so the Dockerfile can install them with --find-links (no compilation).
+      - name: Pre-download arm64 Python wheels (native, no QEMU)
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        run: |
+          mkdir -p .build/arm64-wheels
+          REQS="artifacts/syrabit-backend/requirements.txt"
+
+          echo "=== Downloading arm64 binary wheels ==="
+          pip3 download \
+            --platform manylinux_2_17_aarch64 \
+            --platform manylinux_2_28_aarch64 \
+            --python-version 311 \
+            --implementation cp \
+            --only-binary=:all: \
+            -r "$REQS" \
+            --dest .build/arm64-wheels/ 2>&1 | grep -E "^(Saved|  Saved|File was already|error|ERROR)" || true
+
+          echo "=== Wheels downloaded: $(ls .build/arm64-wheels/*.whl 2>/dev/null | wc -l) ==="
+
       - name: Build + push ECR images (arm64, all four targets)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
