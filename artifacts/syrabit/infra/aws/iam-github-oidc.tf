@@ -58,12 +58,20 @@ data "aws_iam_policy_document" "github_deploy_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Restrict to the syrabit repo's master + release branches only.
+    # Restrict to the correct repo on master/release branches, named
+    # environments, and workflow_dispatch (any ref).  The wildcard entry
+    # covers `workflow_dispatch` runs whose sub is
+    # `repo:OWNER/REPO:ref:refs/heads/BRANCH` — same pattern as push
+    # triggers, so no extra entry is needed beyond the ref patterns.
+    # Previously this block used hardcoded "syrabit"/"syrabit" defaults;
+    # terraform.tfvars now sets github_owner="founder24",
+    # github_repo="-kalukaliya" (the actual repo).
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/master",
+        "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main",
         "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/release/*",
         "repo:${var.github_owner}/${var.github_repo}:environment:prod",
         "repo:${var.github_owner}/${var.github_repo}:environment:staging",
