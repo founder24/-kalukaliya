@@ -274,6 +274,21 @@ _LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
 # routed through ensure_question_in_assamese.
 _AS_SCRIPT_RATIO_THRESHOLD = 0.60
 
+# Sentinel returned when web_search_with_fallback is unavailable or times out.
+# A non-empty (truthy) list prevents the fail-loud 503 guard from firing while
+# contributing zero URL/snippet/_layer content — build_rag_system_prompt skips
+# it silently and the LLM answers from general knowledge.  Shape must stay in
+# sync with rag.py and tests/test_ai_chat_sentinel_routing.py.
+_WEB_TRAINING_SENTINEL: list = [
+    {
+        "_source": "training_knowledge",
+        "_fallback": True,
+        "web_fallback_reason": "ddg_zero_results",
+        "title": "No web results",
+        "snippet": "",
+    }
+]
+
 
 def _detect_is_assamese_script(text: str) -> bool:
     """Return True when *text* is predominantly in the Bengali/Assamese
@@ -436,24 +451,107 @@ async def _assamese_translate_gemini_main_sarvam_polish(
     return _tr_cache_store(translate_out)
 
 
+async def _sarvam_translate_question_for_embed(question: str) -> str:
+    """Translate an English study question to Assamese using Sarvam.
+
+    Called exclusively from ``ensure_question_in_assamese`` on the RAG-embed
+    path where semantic accuracy matters and stylistic polish is irrelevant
+    (vector search needs meaning, not fluency).  Sarvam is the sole Assamese
+    head (architecture lock) and is typically <1s — far faster than the
+    IndicTrans2 + Vertex-polish chain that ``_assamese_translate_gemini_main_sarvam_polish``
+    runs on the *response* path.
+
+    Failure modes: no SARVAM_API_KEY, timeout (>2s), or upstream error →
+    returns "" so ``ensure_question_in_assamese`` falls through to IndicTrans2.
+    """
+    try:
+        from providers.sarvam import chat as _sarvam_chat
+        resp = await asyncio.wait_for(
+            _sarvam_chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Translate the English text to Assamese. "
+                            "Return ONLY the Assamese translation — no explanation, "
+                            "no preamble, no quote marks."
+                        ),
+                    },
+                    {"role": "user", "content": question[:500]},
+                ],
+                language="as",
+                user_id=None,   # no per-user cap for internal embed-query translations
+                max_tokens=300,
+                temperature=0.0,
+            ),
+            timeout=2.0,
+        )
+        result = (resp.text or "").strip()
+        if result and _ASSAMESE_SCRIPT_RE.search(result):
+            logger.info(
+                "[T291][SARVAM-Q] Sarvam translated EN→AS for RAG embed (%.0fms): %r → %r",
+                resp.latency_ms, question[:40], result[:40],
+            )
+            return result
+    except asyncio.TimeoutError:
+        logger.warning("[T291][SARVAM-Q] Sarvam translate timed out (>2s) — trying IndicTrans2")
+    except Exception as _e:
+        logger.debug(
+            "[T291][SARVAM-Q] Sarvam translate unavailable (%s) — trying IndicTrans2",
+            type(_e).__name__,
+        )
+    return ""
+
+
 async def ensure_question_in_assamese(question: str) -> str:
     """Task #291 — when an Assamese-mode chat receives a question that
     isn't already in Assamese script, translate it to Assamese before
     embedding so the namespace="as" Pinecone retrieval lands in the
-    correct embedding space. No-op for already-Assamese questions and
-    for empty input."""
+    correct embedding space.  No-op for already-Assamese questions and
+    for empty input.
+
+    Translation chain (first success wins):
+      1. Sarvam sarvam-m (sole Assamese head, ~300-800ms, 2s cap).
+      2. IndicTrans2 via Workers AI WITHOUT Vertex polish
+         (embed-quality is sufficient — fluency irrelevant for vector
+         search, 3s cap; removes the 1.8s Vertex round-trip from the
+         critical TTFT path).
+      3. Raw English question (cross-lingual embeddings give partial
+         recall — better than a 5-6s blank screen on total failure).
+    """
     q = (question or "").strip()
     if not q or _detect_is_assamese_script(q):
         return q
+
+    # Step 1 — Sarvam (sole Assamese head per architecture lock)
+    _sarvam_out = await _sarvam_translate_question_for_embed(q)
+    if _sarvam_out:
+        return _sarvam_out
+
+    # Step 2 — IndicTrans2 fallback, no Vertex polish (embed path only)
     try:
-        translated = await _assamese_translate_gemini_main_sarvam_polish(q, target_lang_code="as-IN")
-        if translated:
-            logger.info("[T291][CROSS-LANG-Q] translated EN question → AS for RAG embed: %r → %r",
-                        q[:40], translated[:40])
-            return translated
+        from providers.workers_indic import call_indic_trans as _indic_trans
+        _it_out = await asyncio.wait_for(
+            _indic_trans(q[:2000], direction="en-indic"),
+            timeout=3.0,
+        )
+        _it_out = (_it_out or "").strip()
+        if _it_out:
+            logger.info(
+                "[T291][CROSS-LANG-Q] IndicTrans2 fallback (no polish): %r → %r",
+                q[:40], _it_out[:40],
+            )
+            return _it_out
+    except asyncio.TimeoutError:
+        logger.warning("[T291][CROSS-LANG-Q] IndicTrans2 timed out (>3s) — embedding raw EN question")
     except Exception as exc:
-        logger.warning("[T291][CROSS-LANG-Q] translate failed (%s) — embedding raw question",
-                       type(exc).__name__)
+        logger.warning(
+            "[T291][CROSS-LANG-Q] IndicTrans2 failed (%s) — embedding raw EN question",
+            type(exc).__name__,
+        )
+
+    # Step 3 — raw English (cross-lingual partial recall, beats 5-6s blank screen)
+    logger.info("[T291][CROSS-LANG-Q] all translators failed — embedding raw EN: %r", q[:60])
     return q
 
 
@@ -1110,17 +1208,18 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
                 timeout=1.2,
             )
         except asyncio.TimeoutError:
-            logger.error(
+            logger.warning(
                 "[NON-STREAM][ROUTER=web] web search timed out (>1.2s) — "
-                "failing loud (no silent ungrounded fallback)",
+                "returning training-knowledge sentinel (general-knowledge fallback)",
             )
-            return []
+            return _WEB_TRAINING_SENTINEL
         except Exception as _ws_err:
-            logger.error(
-                "[NON-STREAM][ROUTER=web] web_search_with_fallback raised: %s",
+            logger.warning(
+                "[NON-STREAM][ROUTER=web] web_search_with_fallback raised: %s — "
+                "returning training-knowledge sentinel",
                 _ws_err,
             )
-            return []
+            return _WEB_TRAINING_SENTINEL
 
     _ns_phase2 = await asyncio.gather(
         _ns_fetch_history(),
@@ -2570,10 +2669,14 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
                 timeout=1.5,
             )
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            return []
+            logger.warning("[STREAM] Speculative web search timed out — returning training-knowledge sentinel")
+            return _WEB_TRAINING_SENTINEL
         except Exception as _ws_err:
-            logger.warning(f"[STREAM] Speculative web search failed (non-fatal): {_ws_err}")
-            return []
+            logger.warning(
+                "[STREAM] Speculative web search failed (%s) — returning training-knowledge sentinel",
+                _ws_err,
+            )
+            return _WEB_TRAINING_SENTINEL
 
     _skip_semester = _is_casual or is_anon
 
