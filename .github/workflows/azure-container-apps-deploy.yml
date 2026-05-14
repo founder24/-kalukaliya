@@ -524,6 +524,7 @@ jobs:
                     {"name":"PORT",                                      "value":"8000"},
                     {"name":"WORKERS_EMBED_URL",                        "value":"https://embed.syrabit.ai"},
                     {"name":"EMBED_PROVIDER_PRIMARY",                   "value":"workers_ai_custom"},
+                    {"name":"EMBED_INDIC_PROVIDER",                     "value":"workers_ai_custom"},
                     {"name":"ACA_JOB_BATCHES_DISABLED",                 "value":"1"},
                     {"name":"GUNICORN_WORKERS",                         "value":"1"},
                     {"name":"GUNICORN_THREADS",                         "value":"2"}
