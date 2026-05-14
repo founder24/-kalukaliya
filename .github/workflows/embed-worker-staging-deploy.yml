@@ -125,6 +125,13 @@ jobs:
       # match the value pushed to the worker via
       # `wrangler secret put EMBED_SHARED_SECRET --env staging`.
       EMBED_STAGING_SHARED_SECRET: ${{ secrets.EMBED_STAGING_SHARED_SECRET }}
+      # Use the workers.dev hostname instead of embed-staging.syrabit.ai so
+      # the smoke curl requests are not challenged by the Zone-wide Bot
+      # Management / Cloudflare WAF rules that block non-browser UA from CI
+      # runners. The custom-domain route itself is proven at deploy time by
+      # wrangler (it validates route ownership); this override only covers
+      # the smoke-test HTTP probes.
+      EMBED_HOST_OVERRIDE: https://syrabit-embed-worker-staging.axomxplain.workers.dev
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
