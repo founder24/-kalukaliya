@@ -14,8 +14,24 @@ name: lambda-bootstrap
 #   5. If Bedrock passes: remove the EMBED_INDIC_PROVIDER kill-switch from
 #      the ACA deploy workflow and push (triggers automatic ACA redeploy).
 #
-# Uses existing repo secrets: AWS_OPS_ACCESS_KEY_ID, AWS_OPS_SECRET_ACCESS_KEY
-# (AWS_ACCESS_KEY_ID belongs to BedrockAPIKey-cgjb which has no ECR/Lambda perms)
+# Prerequisites — two one-time AWS console steps BEFORE triggering this:
+#
+#   STEP 1 — Fix the OIDC trust policy on the syrabit-github-deploy role:
+#     Console: IAM → Roles → syrabit-github-deploy → Trust relationships
+#     → Edit trust policy → replace the StringLike sub condition with:
+#       "repo:founder24/-kalukaliya:ref:refs/heads/master",
+#       "repo:founder24/-kalukaliya:ref:refs/heads/main",
+#       "repo:founder24/-kalukaliya:ref:refs/heads/release/*",
+#       "repo:founder24/-kalukaliya:environment:prod",
+#       "repo:founder24/-kalukaliya:environment:staging"
+#
+#   STEP 2 — Add create permissions to the deploy-perms inline policy:
+#     Console: IAM → Roles → syrabit-github-deploy → Permissions
+#     → deploy-perms → Edit → add the JSON block from
+#     infra/aws/iam-github-oidc.tf (LambdaDeploy, LambdaESM, SchedulerDeploy,
+#     LogGroupCreate statements).  Full JSON in docs/infra/iam-bootstrap.md.
+#
+# Uses existing GitHub secret: AWS_GITHUB_DEPLOY_ROLE_ARN
 # Supply-chain: every `uses:` is pinned to a 40-char SHA.
 
 on:
@@ -43,7 +59,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  id-token: write   # required for OIDC
+  contents: write   # required to commit updated tfstate
 
 env:
   PRIMARY_REGION: ap-south-1
@@ -67,12 +84,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
 
-      - name: Configure AWS credentials (ap-south-1)
+      - name: Configure AWS credentials via OIDC (ap-south-1)
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          aws-access-key-id: ${{ secrets.AWS_OPS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_OPS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.PRIMARY_REGION }}
+          role-duration-seconds: 3600
 
       - name: Set up QEMU (arm64 emulation)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
@@ -160,8 +177,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "tfstate unchanged — nothing to commit"
           else
-            MSG="chore(infra): tfstate after Lambda bootstrap apply [skip ci] run=${{ github.run_id }}"
-            git commit -m "$MSG"
+            git commit -m "chore(infra): tfstate after Lambda bootstrap [skip ci] run=${{ github.run_id }}"
             git push
           fi
 
@@ -182,7 +198,7 @@ jobs:
           aws scheduler list-schedules --region ap-south-1 \
             --name-prefix syrabit \
             --query 'Schedules[*].[Name,State]' \
-            --output table 2>/dev/null || echo "(no schedules or not yet active)"
+            --output table 2>/dev/null || echo "(none found)"
 
       - name: Test Bedrock cohere.embed-multilingual-v3 (us-east-1)
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -211,7 +227,7 @@ jobs:
             ERR=$(cat /tmp/bedrock-err.txt 2>/dev/null | head -2)
             echo "bedrock_ok=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Bedrock not accessible: ${ERR}"
-            echo "::warning::Visit https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/model-access → Manage model access → enable Cohere Embed Multilingual → Submit, then re-run"
+            echo "::warning::Visit https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/model-access and enable Cohere Embed Multilingual, then re-run"
           fi
 
       - name: Revert EMBED_INDIC_PROVIDER kill-switch (Bedrock confirmed)
@@ -226,8 +242,7 @@ jobs:
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add "$WF"
-            MSG="fix(embed): revert EMBED_INDIC_PROVIDER kill-switch — Bedrock confirmed run=${{ github.run_id }}"
-            git commit -m "$MSG"
+            git commit -m "fix(embed): revert EMBED_INDIC_PROVIDER kill-switch — Bedrock confirmed run=${{ github.run_id }}"
             git push
             echo "::notice::Kill-switch removed — ACA redeploy triggered automatically"
           else
