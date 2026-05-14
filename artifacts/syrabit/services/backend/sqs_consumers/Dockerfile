@@ -36,9 +36,9 @@ FROM public.ecr.aws/lambda/python:3.11-arm64
 # lxml, asyncpg, numpy, Pillow). The base image has gcc but not the
 # headers; install once, build, then drop the toolchain to keep the
 # final image lean.
-RUN microdnf install -y gcc gcc-c++ make libffi-devel openssl-devel \
+RUN dnf install -y gcc gcc-c++ make libffi-devel openssl-devel \
         libxml2-devel libxslt-devel postgresql-devel \
-    && microdnf clean all
+    && dnf clean all
 
 # ── Python deps. Mirrors the production backend image so a job that
 # imports from `routes.ai_chat` or `providers.workers_embed` resolves
