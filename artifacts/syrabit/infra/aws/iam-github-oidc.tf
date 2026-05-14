@@ -120,21 +120,89 @@ data "aws_iam_policy_document" "github_deploy_perms" {
     ]
   }
 
-  # Lambda update for the worker functions.
+  # Lambda — update existing functions (code-deploy path) AND create/delete
+  # new functions (bootstrap path, i.e. lambda-bootstrap workflow).
   statement {
     sid    = "LambdaDeploy"
     effect = "Allow"
     actions = [
       "lambda:GetFunction",
+      "lambda:ListFunctions",
+      "lambda:CreateFunction",
+      "lambda:DeleteFunction",
       "lambda:UpdateFunctionCode",
       "lambda:UpdateFunctionConfiguration",
       "lambda:PublishVersion",
       "lambda:UpdateAlias",
       "lambda:GetAlias",
+      "lambda:CreateAlias",
+      "lambda:DeleteAlias",
       "lambda:ListVersionsByFunction",
+      "lambda:AddPermission",
+      "lambda:RemovePermission",
+      "lambda:GetPolicy",
+      "lambda:TagResource",
+      "lambda:UntagResource",
+      "lambda:ListTags",
     ]
     resources = [
       "arn:aws:lambda:${local.lz_primary_region}:${data.aws_caller_identity.lz.account_id}:function:${local.lz_project}-*",
+      "arn:aws:lambda:${local.lz_secondary_region}:${data.aws_caller_identity.lz.account_id}:function:${local.lz_project}-*",
+    ]
+  }
+
+  # Lambda event source mappings (SQS triggers).
+  statement {
+    sid    = "LambdaESM"
+    effect = "Allow"
+    actions = [
+      "lambda:CreateEventSourceMapping",
+      "lambda:DeleteEventSourceMapping",
+      "lambda:UpdateEventSourceMapping",
+      "lambda:GetEventSourceMapping",
+      "lambda:ListEventSourceMappings",
+    ]
+    resources = ["*"]
+  }
+
+  # EventBridge Scheduler — create/manage batch-job schedules.
+  statement {
+    sid    = "SchedulerDeploy"
+    effect = "Allow"
+    actions = [
+      "scheduler:CreateSchedule",
+      "scheduler:UpdateSchedule",
+      "scheduler:DeleteSchedule",
+      "scheduler:GetSchedule",
+      "scheduler:ListSchedules",
+      "scheduler:TagResource",
+      "scheduler:UntagResource",
+    ]
+    resources = [
+      "arn:aws:scheduler:${local.lz_primary_region}:${data.aws_caller_identity.lz.account_id}:schedule/default/${local.lz_project}-*",
+    ]
+  }
+
+  # CloudWatch log-group creation for Lambda functions.
+  statement {
+    sid    = "LogGroupCreate"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:PutRetentionPolicy",
+      "logs:DeleteLogGroup",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+      "logs:GetLogEvents",
+      "logs:FilterLogEvents",
+    ]
+    resources = [
+      "arn:aws:logs:${local.lz_primary_region}:${data.aws_caller_identity.lz.account_id}:log-group:/aws/lambda/${local.lz_project}-*",
+      "arn:aws:logs:${local.lz_primary_region}:${data.aws_caller_identity.lz.account_id}:log-group:/aws/lambda/${local.lz_project}-*:*",
+      "arn:aws:logs:${local.lz_secondary_region}:${data.aws_caller_identity.lz.account_id}:log-group:/aws/lambda/${local.lz_project}-*",
+      "arn:aws:logs:${local.lz_secondary_region}:${data.aws_caller_identity.lz.account_id}:log-group:/aws/lambda/${local.lz_project}-*:*",
+      aws_cloudwatch_log_group.workers.arn,
+      "${aws_cloudwatch_log_group.workers.arn}:*",
     ]
   }
 
@@ -147,25 +215,8 @@ data "aws_iam_policy_document" "github_deploy_perms" {
     condition {
       test     = "StringEquals"
       variable = "iam:PassedToService"
-      values   = ["lambda.amazonaws.com"]
+      values   = ["lambda.amazonaws.com", "scheduler.amazonaws.com"]
     }
-  }
-
-  # CloudWatch logs visibility for deploy verification.
-  statement {
-    sid    = "LogsRead"
-    effect = "Allow"
-    actions = [
-      "logs:DescribeLogGroups",
-      "logs:DescribeLogStreams",
-      "logs:GetLogEvents",
-      "logs:FilterLogEvents",
-    ]
-    resources = [
-      "arn:aws:logs:${local.lz_primary_region}:${data.aws_caller_identity.lz.account_id}:log-group:/aws/lambda/${local.lz_project}-*:*",
-      aws_cloudwatch_log_group.workers.arn,
-      "${aws_cloudwatch_log_group.workers.arn}:*",
-    ]
   }
 }
 
