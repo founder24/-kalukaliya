@@ -57,27 +57,21 @@ jobs:
           set -euo pipefail
           missing=()
           # KV_SEED_AZURE_OPENAI_API_KEY removed — Azure OpenAI retired (Task #554).
-          # Core secrets — must be present as GitHub secrets.
           for v in KV_SEED_AWS_ACCESS_KEY_ID KV_SEED_AWS_SECRET_ACCESS_KEY \
                    KV_SEED_MONGO_URI \
                    KV_SEED_JWT_SECRET KV_SEED_ADMIN_JWT_SECRET \
                    KV_SEED_RAZORPAY_KEY_SECRET KV_SEED_WORKERS_EMBED_SECRET \
                    KV_SEED_UPSTASH_REDIS_REST_URL KV_SEED_UPSTASH_REDIS_REST_TOKEN \
-                   KV_SEED_SUPABASE_ANON_KEY; do
+                   KV_SEED_SUPABASE_ANON_KEY KV_SEED_SUPABASE_SERVICE_ROLE_KEY \
+                   KV_SEED_RAZORPAY_KEY_ID \
+                   KV_SEED_DEEPGRAM_API_KEY KV_SEED_ELEVENLABS_API_KEY \
+                   KV_SEED_POSTHOG_API_KEY; do
             if [ -z "${!v:-}" ]; then missing+=("$v"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing KV seed secrets in repo: ${missing[*]}"
             exit 1
           fi
-          # Optional secrets — warn only if absent; assumed already seeded via
-          # Azure Portal or a previous manual az keyvault secret set command.
-          for v in KV_SEED_RAZORPAY_KEY_ID KV_SEED_DEEPGRAM_API_KEY \
-                   KV_SEED_ELEVENLABS_API_KEY KV_SEED_POSTHOG_API_KEY; do
-            if [ -z "${!v:-}" ]; then
-              echo "::warning::$v not set as GitHub secret — assuming already present in Key Vault from manual seeding."
-            fi
-          done
         env:
           KV_SEED_AWS_ACCESS_KEY_ID:          ${{ secrets.KV_SEED_AWS_ACCESS_KEY_ID }}
           KV_SEED_AWS_SECRET_ACCESS_KEY:      ${{ secrets.KV_SEED_AWS_SECRET_ACCESS_KEY }}
@@ -88,7 +82,8 @@ jobs:
           KV_SEED_WORKERS_EMBED_SECRET:       ${{ secrets.KV_SEED_WORKERS_EMBED_SECRET }}
           KV_SEED_UPSTASH_REDIS_REST_URL:     ${{ secrets.KV_SEED_UPSTASH_REDIS_REST_URL }}
           KV_SEED_UPSTASH_REDIS_REST_TOKEN:   ${{ secrets.KV_SEED_UPSTASH_REDIS_REST_TOKEN }}
-          KV_SEED_SUPABASE_ANON_KEY:          ${{ secrets.KV_SEED_SUPABASE_ANON_KEY }}
+          KV_SEED_SUPABASE_ANON_KEY:            ${{ secrets.KV_SEED_SUPABASE_ANON_KEY }}
+          KV_SEED_SUPABASE_SERVICE_ROLE_KEY:  ${{ secrets.KV_SEED_SUPABASE_SERVICE_ROLE_KEY }}
           KV_SEED_RAZORPAY_KEY_ID:            ${{ secrets.KV_SEED_RAZORPAY_KEY_ID }}
           KV_SEED_DEEPGRAM_API_KEY:           ${{ secrets.KV_SEED_DEEPGRAM_API_KEY }}
           KV_SEED_ELEVENLABS_API_KEY:         ${{ secrets.KV_SEED_ELEVENLABS_API_KEY }}
@@ -116,11 +111,12 @@ jobs:
           WORKERS_EMBED_SECRET:       ${{ secrets.KV_SEED_WORKERS_EMBED_SECRET }}
           UPSTASH_REDIS_REST_URL:     ${{ secrets.KV_SEED_UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN:   ${{ secrets.KV_SEED_UPSTASH_REDIS_REST_TOKEN }}
-          SUPABASE_ANON_KEY:          ${{ secrets.KV_SEED_SUPABASE_ANON_KEY }}
-          RAZORPAY_KEY_ID:            ${{ secrets.KV_SEED_RAZORPAY_KEY_ID }}
-          DEEPGRAM_API_KEY:           ${{ secrets.KV_SEED_DEEPGRAM_API_KEY }}
-          ELEVENLABS_API_KEY:         ${{ secrets.KV_SEED_ELEVENLABS_API_KEY }}
-          POSTHOG_API_KEY:            ${{ secrets.KV_SEED_POSTHOG_API_KEY }}
+          SUPABASE_ANON_KEY:            ${{ secrets.KV_SEED_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY:    ${{ secrets.KV_SEED_SUPABASE_SERVICE_ROLE_KEY }}
+          RAZORPAY_KEY_ID:              ${{ secrets.KV_SEED_RAZORPAY_KEY_ID }}
+          DEEPGRAM_API_KEY:             ${{ secrets.KV_SEED_DEEPGRAM_API_KEY }}
+          ELEVENLABS_API_KEY:           ${{ secrets.KV_SEED_ELEVENLABS_API_KEY }}
+          POSTHOG_API_KEY:              ${{ secrets.KV_SEED_POSTHOG_API_KEY }}
         run: |
           set -euo pipefail
           # Use --file with a process substitution / heredoc so the value
@@ -150,52 +146,29 @@ jobs:
           set_kv "ADMIN-JWT-SECRET"          "$ADMIN_JWT_SECRET"
           set_kv "RAZORPAY-KEY-SECRET"       "$RAZORPAY_KEY_SECRET"
           set_kv "WORKERS-EMBED-SECRET"      "$WORKERS_EMBED_SECRET"
-          set_kv "UPSTASH-REDIS-REST-URL"    "$UPSTASH_REDIS_REST_URL"
-          set_kv "UPSTASH-REDIS-REST-TOKEN"  "$UPSTASH_REDIS_REST_TOKEN"
-          set_kv "SUPABASE-ANON-KEY"         "$SUPABASE_ANON_KEY"
-          # Optional — only seed if the GitHub secret was supplied; otherwise
-          # the value was already seeded manually via Azure Portal.
-          [ -n "${RAZORPAY_KEY_ID:-}"   ] && set_kv "RAZORPAY-KEY-ID"    "$RAZORPAY_KEY_ID"   || echo "  ⚠ RAZORPAY-KEY-ID skipped (not in GitHub secrets — assumed already in KV)"
-          [ -n "${DEEPGRAM_API_KEY:-}"  ] && set_kv "DEEPGRAM-API-KEY"   "$DEEPGRAM_API_KEY"  || echo "  ⚠ DEEPGRAM-API-KEY skipped (not in GitHub secrets — assumed already in KV)"
-          [ -n "${ELEVENLABS_API_KEY:-}"] && set_kv "ELEVENLABS-API-KEY" "$ELEVENLABS_API_KEY"|| echo "  ⚠ ELEVENLABS-API-KEY skipped (not in GitHub secrets — assumed already in KV)"
-          [ -n "${POSTHOG_API_KEY:-}"   ] && set_kv "POSTHOG-API-KEY"    "$POSTHOG_API_KEY"   || echo "  ⚠ POSTHOG-API-KEY skipped (not in GitHub secrets — assumed already in KV)"
+          set_kv "UPSTASH-REDIS-REST-URL"      "$UPSTASH_REDIS_REST_URL"
+          set_kv "UPSTASH-REDIS-REST-TOKEN"    "$UPSTASH_REDIS_REST_TOKEN"
+          set_kv "SUPABASE-ANON-KEY"           "$SUPABASE_ANON_KEY"
+          set_kv "SUPABASE-SERVICE-ROLE-KEY"   "$SUPABASE_SERVICE_ROLE_KEY"
+          set_kv "RAZORPAY-KEY-ID"             "$RAZORPAY_KEY_ID"
+          set_kv "DEEPGRAM-API-KEY"            "$DEEPGRAM_API_KEY"
+          set_kv "ELEVENLABS-API-KEY"          "$ELEVENLABS_API_KEY"
+          set_kv "POSTHOG-API-KEY"             "$POSTHOG_API_KEY"
           echo "::endgroup::"
 
-          # Verify core secrets (always seeded).
-          echo "::group::Verify core secrets are now present in $VAULT"
+          echo "::group::Verify all secrets are now present in $VAULT"
           for s in AWS-ACCESS-KEY-ID AWS-SECRET-ACCESS-KEY \
                    MONGO-URI JWT-SECRET ADMIN-JWT-SECRET \
                    RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET \
                    UPSTASH-REDIS-REST-URL UPSTASH-REDIS-REST-TOKEN \
-                   SUPABASE-ANON-KEY; do
+                   SUPABASE-ANON-KEY SUPABASE-SERVICE-ROLE-KEY \
+                   RAZORPAY-KEY-ID \
+                   DEEPGRAM-API-KEY ELEVENLABS-API-KEY POSTHOG-API-KEY; do
             if az keyvault secret show --vault-name "$VAULT" --name "$s" --query id -o tsv >/dev/null 2>&1; then
               echo "  ✓ $s present"
             else
               echo "::error::$s is missing in $VAULT after seed"
               exit 1
-            fi
-          done
-          echo "::endgroup::"
-
-          # Verify optional secrets only when they were actually seeded
-          # (i.e. the corresponding GitHub secret was supplied).
-          echo "::group::Verify optional secrets (if seeded)"
-          declare -A OPT_MAP=(
-            [RAZORPAY-KEY-ID]="${RAZORPAY_KEY_ID:-}"
-            [DEEPGRAM-API-KEY]="${DEEPGRAM_API_KEY:-}"
-            [ELEVENLABS-API-KEY]="${ELEVENLABS_API_KEY:-}"
-            [POSTHOG-API-KEY]="${POSTHOG_API_KEY:-}"
-          )
-          for kv_name in "${!OPT_MAP[@]}"; do
-            if [ -n "${OPT_MAP[$kv_name]}" ]; then
-              if az keyvault secret show --vault-name "$VAULT" --name "$kv_name" --query id -o tsv >/dev/null 2>&1; then
-                echo "  ✓ $kv_name present"
-              else
-                echo "::error::$kv_name is missing in $VAULT after seed"
-                exit 1
-              fi
-            else
-              echo "  ⚠ $kv_name — skipped (no GitHub secret); not verified"
             fi
           done
           echo "::endgroup::"
