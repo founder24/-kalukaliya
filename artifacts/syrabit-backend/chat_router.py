@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re as _re
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
@@ -374,12 +375,80 @@ async def _probe_assamese_via_bedrock_cohere(
         return None
 
 
+_CURRICULUM_KEYWORDS: frozenset = frozenset({
+    "explain", "define", "describe", "calculate", "derive", "prove",
+    "state", "write", "list", "mention", "discuss", "compare", "differentiate",
+    "distinguish", "evaluate", "analyse", "analyze", "illustrate", "show",
+    "solve", "find", "determine", "give", "name", "outline", "summarise",
+    "summarize", "notes", "short", "long", "answer", "question", "questions",
+    "physics", "chemistry", "biology", "mathematics", "maths", "math",
+    "history", "geography", "economics", "commerce", "english", "assamese",
+    "hindi", "political", "science", "sociology", "education", "philosophy",
+    "statistics", "accountancy", "business",
+    "law", "theory", "formula", "equation", "principle", "concept",
+    "reaction", "experiment", "hypothesis", "cell", "membrane", "osmosis",
+    "photosynthesis", "mitosis", "meiosis", "atom", "molecule", "compound",
+    "element", "force", "energy", "work", "power", "wave", "light",
+    "electricity", "magnetism", "motion", "velocity", "acceleration",
+    "thermodynamics", "entropy", "enthalpy", "catalyst", "acid", "base",
+    "organic", "inorganic", "carbon", "nitrogen", "oxygen", "hydrogen",
+    "revolution", "civilization", "empire", "culture", "trade", "economy",
+    "democracy", "government", "constitution", "parliament", "election",
+    "chapter", "unit", "lesson", "topic", "syllabus", "class", "exam",
+    "ahsec", "seba", "degree", "cbse", "board", "pyq", "mcq", "flashcard",
+    "कि", "সূত্ৰ", "বিষয়", "অধ্যায়", "পাঠ",
+})
+
+_CURRICULUM_KEYWORDS_AS: frozenset = frozenset({
+    "পদার্থবিজ্ঞান", "ৰসায়ন", "ৰসায়নবিজ্ঞান", "জীৱবিজ্ঞান", "গণিত",
+    "ইতিহাস", "ভূগোল", "অৰ্থনীতি", "ৰাজনীতি", "সমাজতত্ত্ব",
+    "ইংৰাজী", "অসমীয়া", "হিন্দী", "বিজ্ঞান", "বাণিজ্য",
+    "সূত্ৰ", "নিয়ম", "তত্ত্ব", "সংজ্ঞা", "ব্যাখ্যা", "বিৱৰণ",
+    "প্ৰমাণ", "গণনা", "উদাহৰণ", "পৰীক্ষা", "প্ৰশ্ন", "উত্তৰ",
+    "অধ্যায়", "পাঠ", "বিষয়", "টোকা", "কি", "কেনেকৈ", "কিয়",
+    "AHSEC", "SEBA", "MCQ",
+})
+
+
+def estimate_topic_score_from_keywords(
+    query: str,
+    subject_name: str = "",
+    chapter_name: str = "",
+) -> float:
+    """BM25-style keyword overlap estimate for routing when no subject_id is
+    available.  Returns a normalised hit-ratio in [0, 1].  Tokenises both
+    Latin and Assamese/Bengali script (U+0980–U+09FF) so mixed-script queries
+    score against the appropriate keyword pool.
+    """
+    latin_tokens: frozenset = frozenset(_re.findall(r"[a-z]+", query.lower()))
+    assamese_tokens: frozenset = frozenset(_re.findall(r"[\u0980-\u09FF]+", query))
+    all_tokens = latin_tokens | assamese_tokens
+    if not all_tokens:
+        return 0.0
+
+    context_tokens: set = set()
+    for name in (subject_name, chapter_name):
+        if name:
+            context_tokens.update(_re.findall(r"[a-z]+", name.lower()))
+            context_tokens.update(_re.findall(r"[\u0980-\u09FF]+", name))
+
+    if assamese_tokens:
+        keyword_pool = _CURRICULUM_KEYWORDS | _CURRICULUM_KEYWORDS_AS | context_tokens
+    else:
+        keyword_pool = _CURRICULUM_KEYWORDS | context_tokens
+
+    hits = all_tokens & keyword_pool
+    return min(1.0, len(hits) / max(len(all_tokens), 1))
+
+
 async def probe_topic_score(
     query: str,
     *,
     subject_id: Optional[str] = None,
     lang: Optional[str] = "en",
     timeout_s: float = 0.5,
+    subject_name: str = "",
+    chapter_name: str = "",
 ) -> Optional[float]:
     """Run the **language-correct** topic probe and return the centroid
     similarity in [0, 1], or ``None`` when the probe is unavailable.
@@ -406,8 +475,17 @@ async def probe_topic_score(
       surfaces as ``None``, never a silent "weak match → web".
     """
     import asyncio
-    if not (query or "").strip() or not subject_id:
+    if not (query or "").strip():
         return None
+    if not subject_id:
+        score = estimate_topic_score_from_keywords(
+            query, subject_name=subject_name, chapter_name=chapter_name,
+        )
+        logger.debug(
+            "chat_router.probe_topic_score: no subject_id — "
+            "keyword_estimate score=%.3f for %r", score, query[:40],
+        )
+        return score
     lang_norm = _normalize_lang(lang)
     if lang_norm == "as":
         return await _probe_assamese_via_bedrock_cohere(
@@ -451,4 +529,8 @@ __all__ = [
     "route",
     "probe_topic_score",
     "score_from_classify_result",
+    "estimate_topic_score_from_keywords",
+    "_DEFAULT_TOPIC_THRESHOLD",
+    "_CURRICULUM_KEYWORDS",
+    "_CURRICULUM_KEYWORDS_AS",
 ]

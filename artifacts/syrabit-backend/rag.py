@@ -332,8 +332,17 @@ async def web_search_with_fallback(
             logger.debug("[WEB_SEARCH] exa search_rag concurrent task non-fatal: %s", _ex_err)
 
     if not all_results:
-        logger.warning(f"[WEB_SEARCH] No results for: {query[:60]}")
-        return []
+        logger.warning(
+            f"[WEB_SEARCH] No results for: {query[:60]} — "
+            "returning training-knowledge sentinel (web_fallback_reason=ddg_zero_results)"
+        )
+        return [{
+            "_source": "training_knowledge",
+            "title": "No web results",
+            "snippet": "",
+            "_fallback": True,
+            "web_fallback_reason": "ddg_zero_results",
+        }]
 
     dur_ms = (time.perf_counter() - t0) * 1000
     logger.info(

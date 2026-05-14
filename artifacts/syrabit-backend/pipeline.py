@@ -162,9 +162,39 @@ _INSTANT_CASUAL_RESPONSES = {
     "nice": "Thank you! Is there anything you'd like to study?",
 }
 
+import re as _re
+
+_CASUAL_REGEX_RESPONSES: list[tuple] = [
+    (_re.compile(r"how are (you|u|ya)(\s+doing)?", _re.IGNORECASE),
+     "I'm doing great, thanks for asking! 😊 Ready to help with your studies. What would you like to learn?"),
+    (_re.compile(r"what can (you|u) do", _re.IGNORECASE),
+     "I can help with notes, MCQs, flashcards, previous year questions, and concept explanations for your AHSEC/SEBA/Degree syllabus! 📚 Just ask anything."),
+    (_re.compile(r"what.?s your name|what is your name", _re.IGNORECASE),
+     "I'm Syra, your AI study assistant for Assam board students! 🎓 How can I help you today?"),
+    (_re.compile(r"who are (you|u)", _re.IGNORECASE),
+     "I'm Syra, an AI study mentor built for AHSEC/SEBA/Degree students in Assam! 📚 Ask me anything from your syllabus."),
+    (_re.compile(r"are (you|u) (there|available|ready|online)", _re.IGNORECASE),
+     "Yes, I'm here and ready to help! 👋 What subject or topic would you like to explore?"),
+    (_re.compile(r"(can|could) (you|u) help (me|us)", _re.IGNORECASE),
+     "Absolutely! I'm here to help. 😊 Just tell me your subject, chapter, or question!"),
+    (_re.compile(r"what.?s up", _re.IGNORECASE),
+     "Hey! Ready to help you study. 📖 What would you like to work on?"),
+    (_re.compile(r"good (morning|afternoon|evening|night)", _re.IGNORECASE),
+     "Good day! 🙏 Ready to help you study. What would you like to learn today?"),
+    (_re.compile(r"(tell me|tell us) (about yourself|about you|who you are)", _re.IGNORECASE),
+     "I'm Syra, an AI study assistant for AHSEC/SEBA/Degree students in Assam! I help with notes, MCQs, flashcards, PYQs, and concept explanations. 📚 What would you like to study?"),
+]
+
+
 def get_instant_response(query: str) -> str | None:
     normalized = query.strip().lower().rstrip("!. ")
-    return _INSTANT_CASUAL_RESPONSES.get(normalized)
+    exact = _INSTANT_CASUAL_RESPONSES.get(normalized)
+    if exact is not None:
+        return exact
+    for pattern, response in _CASUAL_REGEX_RESPONSES:
+        if pattern.search(normalized):
+            return response
+    return None
 
 
 # Pre-translated Assamese instant responses — returned directly without any
@@ -184,11 +214,45 @@ _INSTANT_ASSAMESE_RESPONSES: dict[str, str] = {
 }
 
 
+_CASUAL_ASSAMESE_REGEX_RESPONSES: list[tuple] = [
+    (_re.compile(r"how are (you|u|ya)(\s+doing)?", _re.IGNORECASE),
+     "মই ভাল আছো, ধন্যবাদ! 😊 আপোনাৰ পঢ়া-শুনাত সহায় কৰিবলৈ সাজু। আজি কি জানিব বিচাৰে?"),
+    (_re.compile(r"what can (you|u) do", _re.IGNORECASE),
+     "মই নোটছ, MCQ, ফ্লেশকাৰ্ড, আগৰ বছৰৰ প্ৰশ্ন আৰু ধাৰণা ব্যাখ্যাত সহায় কৰিব পাৰো! 📚 যিকোনো কথা সুধিব।"),
+    (_re.compile(r"what.?s your name|what is your name", _re.IGNORECASE),
+     "মোৰ নাম ছয়ৰা — অসমৰ AHSEC/SEBA/Degree শিক্ষাৰ্থীসকলৰ বাবে AI অধ্যয়ন সহায়কাৰী! 🎓"),
+    (_re.compile(r"who are (you|u)", _re.IGNORECASE),
+     "মই ছয়ৰা, অসম বৰ্ডৰ শিক্ষাৰ্থীসকলৰ বাবে এজন AI অধ্যয়ন পৰামৰ্শদাতা! 📚 পাঠ্যক্ৰমৰ যিকোনো বিষয়ে সুধিব পাৰে।"),
+    (_re.compile(r"are (you|u) (there|available|ready|online)", _re.IGNORECASE),
+     "হয়, মই ইয়াত আছো আৰু সহায় কৰিবলৈ সাজু! 👋 কোনো বিষয় বা অধ্যায় জানিব বিচাৰে নেকি?"),
+    (_re.compile(r"(can|could) (you|u) help (me|us)", _re.IGNORECASE),
+     "অৱশ্যেই! মই সহায় কৰিবলৈ আছো। 😊 আপোনাৰ বিষয়, অধ্যায় বা প্ৰশ্নটো ক'ব পাৰে!"),
+    (_re.compile(r"what.?s up", _re.IGNORECASE),
+     "হেল্লো! পঢ়া-শুনাত সহায় কৰিবলৈ সাজু। 📖 আজি কিহৰ ওপৰত কাম কৰিব বিচাৰে?"),
+    (_re.compile(r"good (morning|afternoon|evening|night)", _re.IGNORECASE),
+     "নমস্কাৰ! 🙏 পঢ়া-শুনাত সহায় কৰিবলৈ সাজু। আজি কি শিকিব বিচাৰে?"),
+    (_re.compile(r"(tell me|tell us) (about yourself|about you|who you are)", _re.IGNORECASE),
+     "মই ছয়ৰা, অসমৰ AHSEC/SEBA/Degree শিক্ষাৰ্থীসকলৰ বাবে এজন AI অধ্যয়ন সহায়কাৰী! নোটছ, MCQ, ফ্লেশকাৰ্ড, PYQ আৰু ধাৰণা ব্যাখ্যাত সহায় কৰো। 📚 কি পঢ়িব বিচাৰে?"),
+]
+
+
 def get_instant_assamese_response(query: str) -> str | None:
     """Return a pre-translated Assamese response for common greetings/phrases.
-    Skips the entire LLM + translation pipeline — TTFB ~0 ms."""
+    Skips the entire LLM + translation pipeline — TTFB ~0 ms.
+
+    Two-pass: exact Assamese dict first (0 ms), then regex scan for casual
+    variants (~0.5 ms). Both passes always return Assamese-script strings so
+    the Assamese endpoint is language-consistent on every match.
+    """
     normalized = query.strip().rstrip("!। ")
-    return _INSTANT_ASSAMESE_RESPONSES.get(normalized)
+    exact = _INSTANT_ASSAMESE_RESPONSES.get(normalized)
+    if exact is not None:
+        return exact
+    normalized_lower = normalized.lower()
+    for pattern, response in _CASUAL_ASSAMESE_REGEX_RESPONSES:
+        if pattern.search(normalized_lower):
+            return response
+    return None
 
 _STAGE1_SKIP_INTENTS = {"casual", "general", "syllabus", "chapter_meta"}
 
