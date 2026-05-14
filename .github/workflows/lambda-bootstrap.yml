@@ -16,10 +16,9 @@ name: lambda-bootstrap
 #   5. If Bedrock passes: remove the EMBED_INDIC_PROVIDER kill-switch from the
 #      ACA deploy workflow and push, triggering an automatic ACA redeploy.
 #
-# Prerequisites — add these two GitHub secrets once:
-#   AWS_BOOTSTRAP_ACCESS_KEY_ID      root or admin IAM access key ID
-#   AWS_BOOTSTRAP_ACCESS_KEY_SECRET  matching secret
-# (AWS Console → Security credentials → Access keys → Create access key)
+# Uses existing repo secrets:
+#   AWS_ACCESS_KEY_ID      (already set)
+#   AWS_SECRET_ACCESS_KEY  (already set)
 #
 # Supply-chain hardening: every `uses:` is pinned to a 40-char SHA.
 #
@@ -74,8 +73,8 @@ jobs:
       - name: Configure AWS credentials (primary — ap-south-1)
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          aws-access-key-id:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_SECRET }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.PRIMARY_REGION }}
 
       # ── ECR image build ────────────────────────────────────────────────────
