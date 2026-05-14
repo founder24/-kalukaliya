@@ -244,9 +244,6 @@ data "aws_iam_policy_document" "github_deploy_perms" {
       values   = ["lambda.amazonaws.com", "scheduler.amazonaws.com"]
     }
   }
-}
-
-
   # Self-bootstrapping: syrabit-github-deploy can overwrite github-deploy's
   # bootstrap-extra-perms inline policy so the workflow never needs manual
   # CloudShell intervention to add missing actions (e.g. iam:TagRole,
@@ -276,6 +273,7 @@ data "aws_iam_policy_document" "github_deploy_perms" {
       values   = ["scheduler.amazonaws.com", "lambda.amazonaws.com"]
     }
   }
+}
 
 resource "aws_iam_role_policy" "github_deploy" {
   name   = "deploy-perms"
