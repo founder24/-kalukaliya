@@ -152,12 +152,19 @@ jobs:
       # github-deploy may lack iam:PutRolePolicy; if this fails we still
       # attempt Phase B (it will fail there if permissions never got updated,
       # but the error will be clearly identified).
+      #
+      # -refresh=false skips the Terraform state-refresh phase which would
+      # call iam:GetOpenIDConnectProvider on the OIDC provider in state.
+      # github-deploy has ECRPowerUser + LambdaFullAccess but NOT
+      # iam:GetOpenIDConnectProvider, so without -refresh=false the plan
+      # step fails before we can even attempt the IAM apply.
+      # The OIDC provider hasn't changed so stale state is safe here.
       - name: "Phase A: update syrabit-github-deploy IAM policy (github-deploy)"
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         working-directory: ${{ env.TF_DIR }}
         continue-on-error: true
         run: |
-          terraform apply -auto-approve -input=false \
+          terraform apply -auto-approve -input=false -refresh=false \
             -target=aws_iam_role_policy.github_deploy
           echo "IAM policy update applied"
 
