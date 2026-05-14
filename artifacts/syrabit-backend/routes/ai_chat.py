@@ -2256,7 +2256,11 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
 
     # S2: Assamese greeting fast-path — returns pre-translated text directly,
     # skipping the entire LLM + translation pipeline (~3-7 s saved per greeting).
-    if _want_translate and _stream_intent == "casual":
+    # Note: intentionally NOT gated on _stream_intent == "casual" — the intent
+    # classifier returns "general" for Assamese-script input (it is optimised for
+    # Latin-script classification). The dict lookup in get_instant_assamese_response
+    # already returns None for non-matches so this is always safe.
+    if _want_translate:
         _instant_as = get_instant_assamese_response(msg.message)
         if _instant_as:
             logger.info(f"[STREAM] INSTANT Assamese fast-path: '{msg.message[:30]}' → {len(_instant_as)} chars (0 LLM calls)")
