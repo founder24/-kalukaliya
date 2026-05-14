@@ -90,6 +90,13 @@ resource "aws_iam_role" "github_deploy" {
   description        = "Assumed by aws-deploy-workers.yml GitHub Actions workflow."
 
   tags = local.lz_common_tags
+
+  lifecycle {
+    # Trust policy is set at role creation time via tfvars.
+    # CI (github-deploy) lacks iam:UpdateAssumeRolePolicy, so prevent
+    # Terraform from planning trust-policy updates during bootstrap runs.
+    ignore_changes = [assume_role_policy]
+  }
 }
 
 data "aws_caller_identity" "lz" {}
@@ -122,6 +129,7 @@ data "aws_iam_policy_document" "github_deploy_perms" {
       # the bedrock-proxy ECR repo in us-east-1 (secondary region) which is
       # not managed by the primary-region for_each in ecr.tf.
       "ecr:CreateRepository",
+      "ecr:TagResource",
       "ecr:DeleteRepository",
       "ecr:PutLifecyclePolicy",
       "ecr:GetLifecyclePolicy",
