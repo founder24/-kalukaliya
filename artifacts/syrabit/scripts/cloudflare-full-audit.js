@@ -65,11 +65,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function cfGet(path, { _attempt = 0 } = {}) {
   const res = await fetch(`${API}${path}`, { headers });
   const j   = await res.json();
-  if (!j.success && j.errors?.[0]?.code === 10429 && _attempt < 3) {
-    const wait = 2000 * (2 ** _attempt);
-    console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
-    await sleep(wait);
-    return cfGet(path, { _attempt: _attempt + 1 });
+  if (!j.success && j.errors?.[0]?.code === 10429) {
+    if (_attempt < 3) {
+      const wait = 2000 * (2 ** _attempt);
+      console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
+      await sleep(wait);
+      return cfGet(path, { _attempt: _attempt + 1 });
+    }
+    // All 3 retries exhausted — return a sentinel so callers emit RATE_LIMITED, not FAIL.
+    // CI exits 0 when only RATE_LIMITED (+ WARN/SKIP) items exist (same leniency as WARN).
+    console.warn(`[rate-limit] 10429 on ${path} — all retries exhausted; returning RATE_LIMITED sentinel`);
+    return { ...j, _rate_limited: true };
   }
   return j;
 }
@@ -119,6 +125,26 @@ function planRequired(id, phase, label, detail = '', upgradeUrl = '', cost = '')
     'Purchase the required add-on or upgrade the plan, then re-run this audit — no code changes needed');
 }
 
+// Persistent rate-limit after all retries: surfaces as RATE_LIMITED, not FAIL.
+// CI exits 0 when only RATE_LIMITED (+ WARN/SKIP) items exist.
+function rateLimited(id, phase, label, path = '') {
+  const detail = path
+    ? `CF API rate-limited after 3 retries on ${path}; re-run later or check API token quota`
+    : 'CF API rate-limited after 3 retries; re-run later or check API token quota';
+  addItem(id, phase, label, 'RATE_LIMITED', detail,
+    'Transient CF API rate limit — not a configuration failure; re-run audit after a few minutes');
+}
+
+// Returns true and emits RATE_LIMITED when j carries the _rate_limited sentinel.
+// Callers should `return` immediately when this returns true.
+function checkRateLimit(j, id, phase, label, path) {
+  if (j?._rate_limited) {
+    rateLimited(id, phase, label, path);
+    return true;
+  }
+  return false;
+}
+
 // ─── Phase 1 ─────────────────────────────────────────────────────────────────
 
 async function auditItem1ZoneSettings() {
@@ -137,10 +163,16 @@ async function auditItem1ZoneSettings() {
   };
 
   const subResults = [];
-  let anyFail = false;
+  let anyFail      = false;
+  let anyRateLimit = false;
 
   for (const [setting, target] of Object.entries(checks)) {
     const j = await cfGet(`/zones/${ZONE_ID}/settings/${setting}`);
+    if (j._rate_limited) {
+      subResults.push(`${setting}: [rate-limited]`);
+      anyRateLimit = true;
+      continue;
+    }
     if (!j.success) {
       if (j.errors?.[0]?.code === 10000) {
         subResults.push(`${setting}: [scope gap]`);
@@ -162,6 +194,9 @@ async function auditItem1ZoneSettings() {
     fail(1, 1, 'Zone settings (HTTP3, TLS 1.3, HSTS, Brotli, etc.)',
       subResults.join(' | '),
       'run cloudflare-phase1-apply.js or set via dashboard');
+  } else if (anyRateLimit) {
+    rateLimited(1, 1, 'Zone settings (HTTP3, TLS 1.3, HSTS, Brotli, etc.)',
+      `/zones/${ZONE_ID}/settings/{setting}`);
   } else {
     pass(1, 1, 'Zone settings (HTTP3, TLS 1.3, HSTS, Brotli, etc.)',
       'all target values confirmed');
@@ -170,6 +205,7 @@ async function auditItem1ZoneSettings() {
 
 async function auditItem2BotManagement() {
   const bm = await cfGet(`/zones/${ZONE_ID}/bot_management`);
+  if (checkRateLimit(bm, 2, 1, 'Bot Management (SBFM, AI bots, JS challenge)', `/zones/${ZONE_ID}/bot_management`)) return;
   if (!bm.success) {
     if (bm.errors?.[0]?.code === 10000) {
       warn(2, 1, 'Bot Management', 'token lacks Bot Management: Read scope');
@@ -207,6 +243,7 @@ async function auditItem2BotManagement() {
 
 async function auditItem3Dmarc() {
   const dns = await cfGet(`/zones/${ZONE_ID}/dns_records?name=_dmarc.syrabit.ai&type=TXT`);
+  if (checkRateLimit(dns, 3, 1, 'DMARC TXT record', `/zones/${ZONE_ID}/dns_records`)) return;
   if (!dns.success) {
     warn(3, 1, 'DMARC TXT record', 'DNS Read scope issue: ' + JSON.stringify(dns.errors));
     return;
@@ -228,6 +265,7 @@ async function auditItem3Dmarc() {
 
 async function auditItem4R2LogsBucket() {
   const r2 = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/r2/buckets`);
+  if (checkRateLimit(r2, 4, 2, 'R2 bucket syrabit-logs', `/accounts/${ACCOUNT_ID}/r2/buckets`)) return;
   if (!r2) {
     warn(4, 2, 'R2 bucket syrabit-logs', 'token lacks R2: Read scope');
     return;
@@ -246,6 +284,10 @@ async function auditItem4R2LogsBucket() {
 
 async function auditItems5And6Logpush() {
   const lp = await cfGetOrSkip(`/zones/${ZONE_ID}/logpush/jobs`);
+  if (checkRateLimit(lp, 5, 2, 'Logpush job syrabit-http-requests', `/zones/${ZONE_ID}/logpush/jobs`)) {
+    rateLimited(6, 2, 'Logpush job syrabit-firewall-events', `/zones/${ZONE_ID}/logpush/jobs`);
+    return;
+  }
   if (!lp) {
     warn(5, 2, 'Logpush job syrabit-http-requests', 'token lacks Logs: Read scope');
     warn(6, 2, 'Logpush job syrabit-firewall-events', 'token lacks Logs: Read scope');
@@ -288,6 +330,7 @@ async function auditItems5And6Logpush() {
 
 async function auditItem7HealthCheck() {
   const hc = await cfGetOrSkip(`/zones/${ZONE_ID}/healthchecks`);
+  if (checkRateLimit(hc, 7, 2, 'Origin healthcheck api-syrabit-ai-origin', `/zones/${ZONE_ID}/healthchecks`)) return;
   if (!hc) {
     warn(7, 2, 'Origin healthcheck api-syrabit-ai-origin', 'token lacks Health Checks: Read scope');
     return;
@@ -317,6 +360,7 @@ async function auditItem7HealthCheck() {
 
 async function auditItem8ZeroTrust() {
   const zt = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps`);
+  if (checkRateLimit(zt, 8, 3, 'Zero Trust Access app (Syrabit Admin)', `/accounts/${ACCOUNT_ID}/access/apps`)) return;
   if (!zt) {
     warn(8, 3, 'Zero Trust Access app (Syrabit Admin)', 'token lacks Zero Trust: Read scope');
     return;
@@ -344,6 +388,7 @@ async function auditItem8ZeroTrust() {
 
 async function auditItem9WaitingRoom() {
   const wr = await cfGetOrSkip(`/zones/${ZONE_ID}/waiting_rooms`);
+  if (checkRateLimit(wr, 9, 3, 'Waiting Room syrabit-exam-season-queue', `/zones/${ZONE_ID}/waiting_rooms`)) return;
   if (!wr) {
     warn(9, 3, 'Waiting Room syrabit-exam-season-queue', 'token lacks Waiting Room: Read scope');
     return;
@@ -373,7 +418,10 @@ async function auditItem9WaitingRoom() {
 
 async function auditItems10to13R2AndCacheReserve() {
   const r2 = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/r2/buckets`);
-  if (!r2) {
+  if (checkRateLimit(r2, 10, 4, 'R2 bucket syrabit-assets', `/accounts/${ACCOUNT_ID}/r2/buckets`)) {
+    rateLimited(11, 4, 'R2 bucket syrabit-cache-reserve', `/accounts/${ACCOUNT_ID}/r2/buckets`);
+    rateLimited(13, 4, 'assets.syrabit.ai custom domain', `/accounts/${ACCOUNT_ID}/r2/buckets`);
+  } else if (!r2) {
     warn(10, 4, 'R2 bucket syrabit-assets', 'token lacks R2: Read scope');
     warn(11, 4, 'R2 bucket syrabit-cache-reserve', 'token lacks R2: Read scope');
     warn(13, 4, 'assets.syrabit.ai custom domain', 'token lacks R2: Read scope');
@@ -389,7 +437,9 @@ async function auditItems10to13R2AndCacheReserve() {
 
       // Check custom domain
       const domRes = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/r2/buckets/syrabit-assets/domains/custom`);
-      if (!domRes) {
+      if (checkRateLimit(domRes, 13, 4, 'assets.syrabit.ai custom domain', `/accounts/${ACCOUNT_ID}/r2/buckets/syrabit-assets/domains/custom`)) {
+        // rate-limited: sentinel already emitted
+      } else if (!domRes) {
         warn(13, 4, 'assets.syrabit.ai custom domain', 'token lacks R2 domain read scope');
       } else if (!domRes.success) {
         fail(13, 4, 'assets.syrabit.ai custom domain', JSON.stringify(domRes.errors), 'run cloudflare-phase4-apply.js → Step 2');
@@ -417,13 +467,14 @@ async function auditItems10to13R2AndCacheReserve() {
   // Cache Reserve is a paid Cloudflare add-on (~$5/month, pay-as-you-go).
   // Code 1135 = plan restriction; value !="on" = feature inactive.
   // Both cases use planRequired() so CI doesn't block until the add-on is purchased.
-  const crRaw  = await fetch(`${API}/zones/${ZONE_ID}/cache/cache_reserve`, { headers });
-  const crJson = await crRaw.json();
-  if (!crJson.success) {
+  const crJson = await cfGetOrSkip(`/zones/${ZONE_ID}/cache/cache_reserve`);
+  if (checkRateLimit(crJson, 12, 4, 'Cache Reserve zone setting', `/zones/${ZONE_ID}/cache/cache_reserve`)) {
+    // rate-limited: sentinel already emitted
+  } else if (!crJson) {
+    warn(12, 4, 'Cache Reserve zone setting', 'token lacks Cache: Read scope');
+  } else if (!crJson.success) {
     const code = crJson.errors?.[0]?.code;
-    if (code === 10000) {
-      warn(12, 4, 'Cache Reserve zone setting', 'token lacks Cache: Read scope');
-    } else if (code === 1135) {
+    if (code === 1135) {
       planRequired(12, 4, 'Cache Reserve zone setting',
         'not available on current plan (API code 1135)',
         `https://dash.cloudflare.com/${ACCOUNT_ID}/${ZONE_ID}/caching/cache-reserve`,
@@ -452,7 +503,9 @@ async function auditItems14And15WorkerBindings() {
   const DATASET = 'syrabit-edge-metrics';
 
   const bindings = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER}/bindings`);
-  if (!bindings) {
+  if (checkRateLimit(bindings, 14, 5, 'Analytics Engine binding (ANALYTICS)', `/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER}/bindings`)) {
+    // rate-limited: sentinel already emitted
+  } else if (!bindings) {
     warn(14, 5, 'Analytics Engine binding (ANALYTICS)', 'token lacks Workers: Read scope');
   } else if (!bindings.success) {
     fail(14, 5, 'Analytics Engine binding (ANALYTICS)', JSON.stringify(bindings.errors),
@@ -470,7 +523,9 @@ async function auditItems14And15WorkerBindings() {
   }
 
   const doNs = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/workers/durable_objects/namespaces`);
-  if (!doNs) {
+  if (checkRateLimit(doNs, 15, 5, 'RateLimiter Durable Object namespace', `/accounts/${ACCOUNT_ID}/workers/durable_objects/namespaces`)) {
+    // rate-limited: sentinel already emitted
+  } else if (!doNs) {
     warn(15, 5, 'RateLimiter Durable Object namespace', 'token lacks Durable Objects: Read scope');
   } else if (!doNs.success) {
     fail(15, 5, 'RateLimiter Durable Object namespace', JSON.stringify(doNs.errors),
@@ -529,13 +584,34 @@ async function auditItem16AeWriteRecency() {
 // ─── Phase 6 ─────────────────────────────────────────────────────────────────
 
 async function auditItem17MtlsCert() {
-  // Item 17 (Railway-origin mTLS certificate) was retired in Task #335
-  // when Railway was decommissioned. Emit a WARN (not a hard PASS) until
-  // the dashboard cert deletion is operator-confirmed in
-  // docs/infra/decommission.md → §8 — flipping this to pass() would hide
-  // any lingering cert drift on the account.
-  warn(17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
-    'check retired — Railway origin decommissioned in Task #335; delete the cert in the Cloudflare dashboard if it still exists');
+  // Railway origin was decommissioned in Task #335. The mTLS client cert
+  // "syrabit-railway-mtls" should have been deleted from the CF dashboard.
+  // Check via API: absent → PASS; still present → WARN (manual delete needed);
+  // scope gap (10000) → WARN; rate-limited → RATE_LIMITED.
+  // Manual deletion runbook: docs/dev/cf-audit-remediation.md § Delete syrabit-railway-mtls
+  const certs = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/mtls_certificates`);
+  if (checkRateLimit(certs, 17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
+    `/accounts/${ACCOUNT_ID}/mtls_certificates`)) return;
+  if (!certs) {
+    warn(17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
+      'token lacks SSL and Certificates: Read scope — verify cert deletion manually at ' +
+      'dash.cloudflare.com → SSL/TLS → Client Certificates');
+    return;
+  }
+  if (!certs.success) {
+    warn(17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
+      `API error: ${JSON.stringify(certs.errors)} — verify cert deletion manually`);
+    return;
+  }
+  const legacyCert = (certs.result || []).find(c => c.name === 'syrabit-railway-mtls');
+  if (legacyCert) {
+    warn(17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
+      `cert still present (id=${legacyCert.id}) — Railway decommissioned in Task #335; ` +
+      'delete at dash.cloudflare.com → SSL/TLS → Client Certificates (see cf-audit-remediation.md)');
+  } else {
+    pass(17, 6, 'mTLS client certificate (legacy syrabit-railway-mtls)',
+      'cert not found in account — confirmed deleted (Railway decommissioned in Task #335)');
+  }
 }
 
 async function auditItem18ImageResizing() {
@@ -544,6 +620,7 @@ async function auditItem18ImageResizing() {
   // Both cases use planRequired() so CI doesn't block until the add-on is purchased.
   // Once purchased, cloudflare-phase6-apply.js enables it automatically — no code changes.
   const j = await cfGetOrSkip(`/zones/${ZONE_ID}/settings/image_resizing`);
+  if (checkRateLimit(j, 18, 6, 'Image Resizing zone setting', `/zones/${ZONE_ID}/settings/image_resizing`)) return;
   if (!j) {
     warn(18, 6, 'Image Resizing zone setting', 'token lacks Zone Settings: Read scope');
     return;
@@ -580,11 +657,19 @@ async function auditItem19ZarazAndObservatory() {
   // Check Zaraz GA4
   const zaraz = await cfGetOrSkip(`/zones/${ZONE_ID}/zaraz/config`);
   let zarazOk = false;
+  // Guard: rate-limited → RATE_LIMITED (do not cascade into worker/Observatory checks).
+  if (checkRateLimit(zaraz, 19, 6, 'Zaraz GA4 + Observatory', `/zones/${ZONE_ID}/zaraz/config`)) return;
+  // Guard: scope gap → single WARN then return (prevents cascade into subsequent checks).
   if (!zaraz) {
     warn(19, 6, 'Zaraz GA4 + Observatory', 'token lacks Zaraz: Read scope — Zaraz check skipped');
+    return;
   } else if (!zaraz.success) {
+    // Guard: Zaraz API error → single FAIL then return (fixes the "23 rows / 5× item #19"
+    // duplicate-reporting bug: without this return the worker/secrets/Railway checks also
+    // emit under item #19 even when Zaraz itself is unconfigured).
     fail(19, 6, 'Zaraz GA4 + Observatory', `Zaraz: ${JSON.stringify(zaraz.errors)}`,
       'run cloudflare-phase6-apply.js → Step 3');
+    return;
   } else {
     const tools   = zaraz.result?.tools || {};
     const ga4Tool = Object.values(tools).find(
@@ -822,12 +907,15 @@ function renderReport() {
   const warn        = items.filter(i => i.status === 'WARN');
   const skip        = items.filter(i => i.status === 'SKIP');
   const planGated   = items.filter(i => i.status === 'PLAN_REQUIRED');
+  const rateLtd     = items.filter(i => i.status === 'RATE_LIMITED');
 
   // PLAN_REQUIRED items are NOT counted as failures — they represent features
   // that need a paid add-on or plan upgrade, not misconfiguration.  Once the
   // plan upgrade is purchased, the audit automatically starts reporting PASS
   // with no code changes required.
-  const MARK = { PASS: '✓', FAIL: '✗', WARN: '⚠', SKIP: '─', PLAN_REQUIRED: '💳' };
+  // RATE_LIMITED items are also NOT counted as failures — they represent CF API
+  // quota exhaustion during the audit run, not a configuration regression.
+  const MARK = { PASS: '✓', FAIL: '✗', WARN: '⚠', SKIP: '─', PLAN_REQUIRED: '💳', RATE_LIMITED: '🔁' };
 
   console.log('\n════════════════════════════════════════════════════════════════');
   console.log(' Cloudflare Full Audit Report — syrabit.ai (Phases 1–6)');
@@ -856,12 +944,18 @@ function renderReport() {
   console.log('\n────────────────────────────────────────────────────────────────');
   console.log(
     `  PASS: ${pass.length}   FAIL: ${fail.length}   WARN: ${warn.length}   ` +
-    `PLAN_REQUIRED: ${planGated.length}   SKIP: ${skip.length}   TOTAL: ${items.length}`,
+    `RATE_LIMITED: ${rateLtd.length}   PLAN_REQUIRED: ${planGated.length}   SKIP: ${skip.length}   TOTAL: ${items.length}`,
   );
   if (planGated.length > 0) {
     console.log(`  💳 ${planGated.length} item(s) need a paid plan upgrade (not counted as failures):`);
     for (const p of planGated) {
       console.log(`     #${p.id} ${p.label}`);
+    }
+  }
+  if (rateLtd.length > 0) {
+    console.log(`  🔁 ${rateLtd.length} item(s) CF API rate-limited after 3 retries (not counted as failures — re-run later):`);
+    for (const r of rateLtd) {
+      console.log(`     #${r.id} ${r.label}`);
     }
   }
   console.log('════════════════════════════════════════════════════════════════\n');
@@ -875,7 +969,10 @@ function renderReport() {
     const planNote = planGated.length > 0
       ? ` (${planGated.length} item(s) pending plan upgrade — not failures)`
       : '';
-    console.log(`All audit items passed or degraded gracefully to WARN/SKIP${planNote}.`);
+    const rlNote = rateLtd.length > 0
+      ? ` (${rateLtd.length} item(s) rate-limited — re-run later)`
+      : '';
+    console.log(`All audit items passed or degraded gracefully to WARN/SKIP${planNote}${rlNote}.`);
   }
 
   // Write JSON report
@@ -883,7 +980,7 @@ function renderReport() {
     generated_at: new Date().toISOString(),
     zone_id:      ZONE_ID,
     account_id:   ACCOUNT_ID,
-    summary:      { pass: pass.length, fail: fail.length, warn: warn.length, skip: skip.length, plan_required: planGated.length, total: items.length },
+    summary:      { pass: pass.length, fail: fail.length, warn: warn.length, skip: skip.length, plan_required: planGated.length, rate_limited: rateLtd.length, total: items.length },
     items,
   };
 
@@ -932,6 +1029,36 @@ async function main() {
   await auditItem19ZarazAndObservatory();
 
   process.exit(renderReport());
+}
+
+// ─── Self-test (CF_AUDIT_SELF_TEST=1) ────────────────────────────────────────
+// Run without real API credentials to verify RATE_LIMITED sentinel routing.
+// Usage:  CF_AUDIT_SELF_TEST=1 node artifacts/syrabit/scripts/cloudflare-full-audit.js
+if (process.env.CF_AUDIT_SELF_TEST === '1') {
+  const selfAssert = (msg, cond) => {
+    if (!cond) { console.error(`\nSELF-TEST FAILED: ${msg}\n`); process.exit(1); }
+    console.log(`  ✓ ${msg}`);
+  };
+  console.log('\nRunning CF_AUDIT_SELF_TEST verification …\n');
+  // 1. checkRateLimit must emit RATE_LIMITED and return true on _rate_limited sentinel
+  const fakeRl = { success: false, errors: [{ code: 10429, message: 'rate limited' }], _rate_limited: true };
+  const before = items.length;
+  const hit = checkRateLimit(fakeRl, 99, 0, 'self-test item', '/test/path');
+  selfAssert('checkRateLimit returns true on _rate_limited sentinel', hit === true);
+  selfAssert('emitted item status is RATE_LIMITED', items[items.length - 1]?.status === 'RATE_LIMITED');
+  // 2. checkRateLimit must return false for a healthy (success=true) response
+  const healthy = { success: true, result: {} };
+  selfAssert('checkRateLimit returns false for healthy response', checkRateLimit(healthy, 99, 0, 'x', '/x') === false);
+  selfAssert('healthy check does not emit an item', items.length === before + 1);
+  // 3. renderReport exit code: 0 when only RATE_LIMITED, 1 when any FAIL
+  items.length = 0;
+  items.push({ id: 1, phase: 1, label: 'rl-only', status: 'RATE_LIMITED', detail: 'test', remediation: '' });
+  selfAssert('exit 0 when only RATE_LIMITED items', renderReport() === 0);
+  items.length = 0;
+  items.push({ id: 1, phase: 1, label: 'fail-item', status: 'FAIL', detail: 'test', remediation: '' });
+  selfAssert('exit 1 when FAIL item present', renderReport() === 1);
+  console.log('\nAll self-test checks passed.\n');
+  process.exit(0);
 }
 
 main().catch((err) => {
