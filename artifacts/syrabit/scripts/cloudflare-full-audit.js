@@ -57,16 +57,26 @@ if (!TOKEN) {
 
 const headers = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 
-async function cfGet(path) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Fetch a CF API path with automatic retry on rate-limit (10429).
+// Backs off at 2 s → 4 s → 8 s before giving up and returning the raw
+// error response so callers can still categorise it as FAIL/WARN.
+async function cfGet(path, { _attempt = 0 } = {}) {
   const res = await fetch(`${API}${path}`, { headers });
   const j   = await res.json();
+  if (!j.success && j.errors?.[0]?.code === 10429 && _attempt < 3) {
+    const wait = 2000 * (2 ** _attempt);
+    console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
+    await sleep(wait);
+    return cfGet(path, { _attempt: _attempt + 1 });
+  }
   return j;
 }
 
 // Like cfGet but returns null instead of throwing on auth error (code 10000).
 async function cfGetOrSkip(path) {
-  const res = await fetch(`${API}${path}`, { headers });
-  const j   = await res.json();
+  const j = await cfGet(path);
   if (j.success) return j;
   if (j.errors?.[0]?.code === 10000) return null;
   return j;   // caller handles non-auth errors
@@ -891,31 +901,34 @@ function renderReport() {
 
 async function main() {
   console.log('Running Cloudflare full audit — 19 items across Phases 1–6 …\n');
+  // 500 ms between items prevents sustained bursts that trigger Cloudflare
+  // API rate limiting (10429). cfGet() also retries on 10429 independently.
+  const ITEM_PAUSE_MS = 500;
 
   // Phase 1
-  await auditItem1ZoneSettings();
-  await auditItem2BotManagement();
-  await auditItem3Dmarc();
+  await auditItem1ZoneSettings();      await sleep(ITEM_PAUSE_MS);
+  await auditItem2BotManagement();     await sleep(ITEM_PAUSE_MS);
+  await auditItem3Dmarc();             await sleep(ITEM_PAUSE_MS);
 
   // Phase 2
-  await auditItem4R2LogsBucket();
-  await auditItems5And6Logpush();
-  await auditItem7HealthCheck();
+  await auditItem4R2LogsBucket();      await sleep(ITEM_PAUSE_MS);
+  await auditItems5And6Logpush();      await sleep(ITEM_PAUSE_MS);
+  await auditItem7HealthCheck();       await sleep(ITEM_PAUSE_MS);
 
   // Phase 3
-  await auditItem8ZeroTrust();
-  await auditItem9WaitingRoom();
+  await auditItem8ZeroTrust();         await sleep(ITEM_PAUSE_MS);
+  await auditItem9WaitingRoom();       await sleep(ITEM_PAUSE_MS);
 
   // Phase 4
-  await auditItems10to13R2AndCacheReserve();
+  await auditItems10to13R2AndCacheReserve(); await sleep(ITEM_PAUSE_MS);
 
   // Phase 5
-  await auditItems14And15WorkerBindings();
-  await auditItem16AeWriteRecency();
+  await auditItems14And15WorkerBindings(); await sleep(ITEM_PAUSE_MS);
+  await auditItem16AeWriteRecency();   await sleep(ITEM_PAUSE_MS);
 
   // Phase 6
-  await auditItem17MtlsCert();
-  await auditItem18ImageResizing();
+  await auditItem17MtlsCert();         await sleep(ITEM_PAUSE_MS);
+  await auditItem18ImageResizing();    await sleep(ITEM_PAUSE_MS);
   await auditItem19ZarazAndObservatory();
 
   process.exit(renderReport());
