@@ -396,6 +396,72 @@ jobs:
             2d3f860d-9828-4100-9b56-81877be3c2e5 \
             2>&1 | grep -v "already managed" || true
 
+          
+          # ── Batch-job Lambda functions (created in prior partial -target runs) ──
+          for KEY in \
+            chat-credit-runway-freshness \
+            prewarm-seo-routes \
+            as-translation-backfill \
+            seo-baseline \
+            chat-credit-runway \
+            comprehend-sampler \
+            embed-backfill \
+            materialize-chapter-faqs \
+            cache-effectiveness; do
+            terraform -chdir=artifacts/syrabit/infra/aws import \
+              "aws_lambda_function.batch_job[\"${KEY}\"]" \
+              "syrabit-${KEY}" \
+              2>&1 | grep -v "already managed" || true
+          done
+
+          # explore-credit-hello Lambda function (separate resource)
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            aws_lambda_function.explore_credit_hello \
+            syrabit-explore-credit-hello \
+            2>&1 | grep -v "already managed" || true
+
+          # ── SQS consumer Event Source Mappings (ESMs created in prior runs) ──
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["discovery-engine-ingest"]' \
+            42ad456e-f696-428f-b14d-8d706767c941 \
+            2>&1 | grep -v "already managed" || true
+
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["seo-internal-linker"]' \
+            0649f3fb-4773-4ad1-a5e2-0e3912e9941f \
+            2>&1 | grep -v "already managed" || true
+
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["bing-submit"]' \
+            47992c42-2e9d-422a-a2a5-ae1411e57969 \
+            2>&1 | grep -v "already managed" || true
+
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["unified-logs-cf-pull"]' \
+            a0122a83-2d02-49c2-bcee-ef3138977ee1 \
+            2>&1 | grep -v "already managed" || true
+
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["cf-bot-crosscheck"]' \
+            429fd44e-6b4d-4530-913f-69110b2f9eba \
+            2>&1 | grep -v "already managed" || true
+
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["bing-keyword-refresh"]' \
+            f03aebeb-f42f-4615-b3ba-0417acaa246d \
+            2>&1 | grep -v "already managed" || true
+
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            'aws_lambda_event_source_mapping.sqs_consumer["seo-indexnow"]' \
+            70067199-b314-4e18-8842-f4e009d0e831 \
+            2>&1 | grep -v "already managed" || true
+
+          # ── EventBridge schedule (created in prior run) ──
+          terraform -chdir=artifacts/syrabit/infra/aws import \
+            aws_scheduler_schedule.s3_to_r2_nightly \
+            syrabit-s3-to-r2-nightly-prod \
+            2>&1 | grep -v "already managed" || true
+
           echo "=== Import phase complete ==="
 
       - name: Terraform plan (Lambda + EventBridge + event-source mappings)
