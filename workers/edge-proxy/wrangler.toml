@@ -78,7 +78,7 @@ routes = [
 # Rollback during cutover soak: temporarily set this back to the prior
 # revision URL — see docs/DEPLOYMENT.md §Rollback.
 # ---------------------------------------------------------------------------
-BACKEND_URL = "https://api.syrabit.ai"
+BACKEND_URL = "https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io"
 
 # Task #306 / #307 — WORKERS_AI_GATEWAY_ID: route every env.AI.run(...)
 # through the named AI Gateway so (a) Workers AI invoice line items are
