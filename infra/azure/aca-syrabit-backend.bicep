@@ -150,6 +150,27 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // gateway routing. Same value as CLOUDFLARE-API-TOKEN; kept as a separate
         // KV secret so each binding rotates independently.
         { name: 'cf-ai-gateway-token',        keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/CF-AI-GATEWAY-TOKEN',        identity: 'system' }
+        // Task #audit — Upstash Redis (L2 cache, credit deduction, rate limiting).
+        // Without these the backend rejects every chat request with 402 (credit
+        // deduction fails closed per V4 §12). Both are required; neither has a
+        // fallback. Seed into KV via seed-azure-kv.yml before deploying.
+        { name: 'upstash-redis-rest-url',     keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/UPSTASH-REDIS-REST-URL',     identity: 'system' }
+        { name: 'upstash-redis-rest-token',   keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/UPSTASH-REDIS-REST-TOKEN',   identity: 'system' }
+        // Task #audit — Supabase anon key (public client-side key used by the
+        // browser SDK; also needed server-side for unauthenticated Supabase REST
+        // calls in auth helpers). Without it student sign-up/sign-in is broken.
+        { name: 'supabase-anon-key',          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SUPABASE-ANON-KEY',          identity: 'system' }
+        // Task #audit — Razorpay key ID (public half of the API key pair; the
+        // secret half is already wired as razorpay-key-secret above). Without
+        // RAZORPAY_KEY_ID the payment initiation endpoint returns 500.
+        { name: 'razorpay-key-id',            keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/RAZORPAY-KEY-ID',            identity: 'system' }
+        // Task #audit — Voice pipeline keys.
+        // DEEPGRAM_API_KEY — STT. ELEVENLABS_API_KEY — TTS.
+        // Absence disables voice features loudly (V4 §12).
+        { name: 'deepgram-api-key',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/DEEPGRAM-API-KEY',           identity: 'system' }
+        { name: 'elevenlabs-api-key',         keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/ELEVENLABS-API-KEY',         identity: 'system' }
+        // Task #audit — PostHog product analytics API key.
+        { name: 'posthog-api-key',            keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/POSTHOG-API-KEY',            identity: 'system' }
       ]
     }
     template: {
@@ -220,7 +241,7 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // fails the backend leaves tracing disabled instead of
             // silently routing through a second sink.
             { name: 'OTEL_TRACES_EXPORTER',           value: 'googlecloud' }
-            { name: 'OTEL_EXPORTER_GCP_PROJECT_ID',   value: 'syrabit-prod' }
+            { name: 'OTEL_EXPORTER_GCP_PROJECT_ID',   value: 'blissful-acumen-495019-t6' }
             { name: 'OTEL_SERVICE_NAME',              value: 'syrabit-backend' }
             // Task #558 — Sentry Developer free tier (errors-only).
             { name: 'SENTRY_DSN',                     secretRef: 'sentry-dsn' }
@@ -270,6 +291,45 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'SUPABASE_SERVICE_ROLE_KEY',       secretRef: 'supabase-service-role-key' }
             // Task #chat-infra — Pinecone vector store for RAG retrieval.
             { name: 'PINECONE_API_KEY',                secretRef: 'pinecone-api-key' }
+            // Task #audit — Pinecone index name. Without this the backend queries
+            // the wrong index or fails on startup. Must match the 1024-dim index.
+            { name: 'PINECONE_INDEX',                  value: 'syrabit-ahsec' }
+            // Task #audit — Vertex AI project for readyz probe + OTEL routing.
+            { name: 'VERTEX_PROJECT_ID',               value: 'blissful-acumen-495019-t6' }
+            // Task #audit — Explicit PORT binding for Gunicorn. gunicorn.conf.py
+            // defaults to 7766 when PORT is unset; ACA targetPort is 8000.
+            // Setting PORT explicitly prevents a silent health-check mismatch.
+            { name: 'PORT',                            value: '8000' }
+            // Task #audit — MongoDB database name. config.py defaults to
+            // 'test_database' when DB_NAME is absent, which silently reads/writes
+            // the wrong collection in production.
+            { name: 'DB_NAME',                         value: 'syrabit' }
+            // Task #audit — Upstash Redis. Required for credit deduction, rate
+            // limiting, and L2 AI cache. Absence causes every chat request to
+            // return 402 (credit check fails closed per V4 §12).
+            { name: 'UPSTASH_REDIS_REST_URL',          secretRef: 'upstash-redis-rest-url' }
+            { name: 'UPSTASH_REDIS_REST_TOKEN',        secretRef: 'upstash-redis-rest-token' }
+            // Task #audit — Supabase anon key for browser-side + server-side
+            // unauthenticated Supabase REST calls. Student sign-up/sign-in broken
+            // without this.
+            { name: 'SUPABASE_ANON_KEY',               secretRef: 'supabase-anon-key' }
+            // Task #audit — Razorpay key ID (public half). The secret half
+            // (RAZORPAY_KEY_SECRET) is already wired above. Payment initiation
+            // returns 500 when RAZORPAY_KEY_ID is absent.
+            { name: 'RAZORPAY_KEY_ID',                 secretRef: 'razorpay-key-id' }
+            // Task #audit — Voice pipeline. DEEPGRAM_API_KEY for STT;
+            // ELEVENLABS_API_KEY for TTS. Both are paywall-gated; absence
+            // disables the voice routes loudly (V4 §12 — no silent fallbacks).
+            { name: 'DEEPGRAM_API_KEY',                secretRef: 'deepgram-api-key' }
+            { name: 'ELEVENLABS_API_KEY',              secretRef: 'elevenlabs-api-key' }
+            // Task #audit — PostHog product analytics.
+            { name: 'POSTHOG_API_KEY',                 secretRef: 'posthog-api-key' }
+            { name: 'POSTHOG_HOST',                    value: 'https://us.i.posthog.com' }
+            // Task #551 §B — Lambda batch job cutover. Shadow period ended
+            // 2026-05-14; set ACA_JOB_BATCHES_DISABLED=1 so the in-process
+            // ACA loops stop and Lambda becomes the sole driver. Rollback:
+            // remove this env var and redeploy.
+            { name: 'ACA_JOB_BATCHES_DISABLED',        value: '1' }
           ]
           probes: [
             {
