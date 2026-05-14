@@ -21,13 +21,17 @@
 variable "github_owner" {
   description = "GitHub org/user that owns the syrabit repo."
   type        = string
-  default     = "syrabit"
+  # Default updated from "syrabit" to "founder24" (the real owner).
+  # terraform.tfvars previously overrode this; now defaults match prod
+  # so CI runs without the gitignored tfvars also produce a correct plan.
+  default = "founder24"
 }
 
 variable "github_repo" {
   description = "GitHub repository name (without org)."
   type        = string
-  default     = "syrabit"
+  # Default updated from "syrabit" to "-kalukaliya" (the real repo name).
+  default = "-kalukaliya"
 }
 
 # ─── 1. GitHub OIDC provider ─────────────────────────────────────────────────
