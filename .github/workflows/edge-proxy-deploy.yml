@@ -204,14 +204,14 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      # Both secrets are read by scripts/smoke-test.sh: D1_SYNC_SECRET
-      # unlocks /api/edge/kv-usage (KV bindings enumeration) and
       # AI_FALLBACK_SECRET (legacy alias for EDGE_AI_FALLBACK_SECRET)
       # upgrades the AI-fallback check from gate-only (401) to full
-      # Workers-AI round-trip (200). Both must be the *preview*-env
-      # values, i.e. matching the secrets set on the preview Worker via
-      # `wrangler secret put … --env preview`.
-      D1_SYNC_SECRET: ${{ secrets.D1_SYNC_SECRET }}
+      # Workers-AI round-trip (200). Must be the *preview*-env value,
+      # i.e. matching the secret set on the preview Worker via
+      # `wrangler secret put EDGE_AI_FALLBACK_SECRET --env preview`.
+      # NOTE: D1_SYNC_SECRET is intentionally omitted here — the smoke
+      # script skips /api/edge/kv-usage when the var is absent (correct
+      # for preview; KV-binding health is verified in smoke-prod).
       AI_FALLBACK_SECRET: ${{ secrets.AI_FALLBACK_SECRET }}
       CF_WORKERS_SUBDOMAIN: ${{ vars.CF_WORKERS_SUBDOMAIN }}
     steps:
