@@ -113,6 +113,92 @@ jobs:
           aws ecr get-login-password --region "$SECONDARY_REGION" | \
             docker login --username AWS --password-stdin "$ECR_SEC"
 
+      # ── PRE-BUILD: create bedrock-proxy ECR repo in us-east-1 ─────────────
+      #
+      # The bedrock-proxy Lambda runs in us-east-1 (where cohere.embed-
+      # multilingual-v3 is available). Lambda can only pull from same-region
+      # ECR, so the repo must exist before we push the image.
+      #
+      # Strategy (two-role bootstrap):
+      #
+      #   Phase A — update syrabit-github-deploy's IAM policy via Terraform
+      #             running as github-deploy (which may have iam:PutRolePolicy).
+      #             This adds ecr:CreateRepository to syrabit-github-deploy.
+      #
+      #   Phase B — assume syrabit-github-deploy (trusted for this repo via
+      #             OIDC tfvars github_owner=founder24, github_repo=-kalukaliya)
+      #             and create the ECR repo via terraform apply -target.
+      #
+      #   Phase C — restore github-deploy credentials for the Docker push
+      #             (github-deploy has ECRPowerUser → can push to existing repos).
+
+      - name: Install Terraform ${{ env.TF_VERSION }} (pre-build ECR bootstrap)
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        run: |
+          TF_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+          curl -sLo /tmp/tf.zip \
+            "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_${TF_ARCH}.zip"
+          unzip -oq /tmp/tf.zip -d /tmp/tf-bin/
+          sudo mv /tmp/tf-bin/terraform /usr/local/bin/terraform
+          terraform version
+
+      - name: Terraform init (pre-build)
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
+
+      # Phase A: try to update syrabit-github-deploy's inline policy so it
+      # gains ecr:CreateRepository.  We use continue-on-error here because
+      # github-deploy may lack iam:PutRolePolicy; if this fails we still
+      # attempt Phase B (it will fail there if permissions never got updated,
+      # but the error will be clearly identified).
+      - name: "Phase A: update syrabit-github-deploy IAM policy (github-deploy)"
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: true
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=aws_iam_role_policy.github_deploy
+          echo "IAM policy update applied"
+
+      # Phase B: switch to syrabit-github-deploy (trusted for founder24/-kalukaliya
+      # via OIDC tfvars) and create the bedrock-proxy ECR repo in us-east-1.
+      - name: "Phase B: assume syrabit-github-deploy via OIDC"
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/syrabit-github-deploy
+          aws-region: ${{ env.PRIMARY_REGION }}
+          role-duration-seconds: 3600
+
+      - name: "Phase B: create bedrock-proxy ECR repo in us-east-1 (syrabit-github-deploy)"
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=aws_ecr_repository.bedrock_proxy_use1 \
+            -target=aws_ecr_lifecycle_policy.bedrock_proxy_use1
+          echo "ECR syrabit/bedrock-proxy ready in $SECONDARY_REGION"
+
+      # Login to us-east-1 ECR while we're running as syrabit-github-deploy
+      # (ECR token is stored in Docker config for 12 h; the github-deploy
+      # restore below does not invalidate it).
+      - name: "Phase B: Login to ECR us-east-1 (syrabit-github-deploy)"
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        run: |
+          aws ecr get-login-password --region "$SECONDARY_REGION" | \
+            docker login --username AWS --password-stdin "$ECR_SEC"
+
+      # Phase C: restore github-deploy for the Docker push (ECRPowerUser lets
+      # it push to already-existing repos in both regions).
+      - name: "Phase C: restore github-deploy credentials"
+        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.PRIMARY_REGION }}
+          role-duration-seconds: 3600
+
       # Pre-download arm64 wheels on the NATIVE x86_64 runner (no QEMU).
       # When pip runs inside QEMU-emulated arm64, it fails to identify the
       # container as manylinux-compatible and falls back to source tarballs,
@@ -121,21 +207,6 @@ jobs:
       # fetches the correct manylinux_2_17_aarch64 wheels natively; they
       # are injected into the Docker build context at .build/arm64-wheels/
       # so the Dockerfile can install them with --find-links (no compilation).
-      # Ensure the bedrock-proxy ECR repo exists in us-east-1 (secondary
-      # region where Bedrock inference runs). The primary-region repos are
-      # managed by Terraform; this repo is secondary-only and is idempotent
-      # (create-repository is a no-op if the repo already exists).
-      - name: Ensure ECR repos exist in us-east-1
-        if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
-        run: |
-          aws ecr create-repository \
-            --region "$SECONDARY_REGION" \
-            --repository-name "syrabit/bedrock-proxy" \
-            --image-tag-mutability MUTABLE \
-            --image-scanning-configuration scanOnPush=true \
-            2>&1 | grep -v "RepositoryAlreadyExistsException" || true
-          echo "ECR syrabit/bedrock-proxy ready in $SECONDARY_REGION"
-
       - name: Pre-download arm64 Python wheels (native, no QEMU)
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
         run: |
@@ -181,16 +252,20 @@ jobs:
           cache-from: type=gha,scope=sqs-consumers
           cache-to: type=gha,scope=sqs-consumers,mode=max
 
-      - name: Install Terraform ${{ env.TF_VERSION }}
+      - name: Install Terraform ${{ env.TF_VERSION }} (skip if pre-build already installed)
         run: |
-          TF_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-          curl -sLo /tmp/tf.zip \
-            "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_${TF_ARCH}.zip"
-          unzip -oq /tmp/tf.zip -d /tmp/tf-bin/
-          sudo mv /tmp/tf-bin/terraform /usr/local/bin/terraform
+          if command -v terraform &>/dev/null && terraform version | grep -q "${TF_VERSION}"; then
+            echo "Terraform ${TF_VERSION} already installed — skipping"
+          else
+            TF_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+            curl -sLo /tmp/tf.zip \
+              "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_${TF_ARCH}.zip"
+            unzip -oq /tmp/tf.zip -d /tmp/tf-bin/
+            sudo mv /tmp/tf-bin/terraform /usr/local/bin/terraform
+          fi
           terraform version
 
-      - name: Terraform init
+      - name: Terraform init (idempotent — skips if pre-build already ran)
         working-directory: ${{ env.TF_DIR }}
         run: terraform init -input=false
 
