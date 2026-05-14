@@ -32,19 +32,14 @@
 
 FROM public.ecr.aws/lambda/python:3.11-arm64
 
-# ── System deps required to build the heavier wheels (cryptography,
-# lxml, asyncpg, numpy, Pillow). The base image has gcc but not the
-# headers; install once, build, then drop the toolchain to keep the
-# final image lean.
-RUN dnf install -y gcc gcc-c++ make libffi-devel openssl-devel \
-        libxml2-devel libxslt-devel postgresql-devel \
-    && dnf clean all
-
-# ── Python deps. Mirrors the production backend image so a job that
-# imports from `routes.ai_chat` or `providers.workers_embed` resolves
-# the same pinned versions Gunicorn runs in ACA.
+# ── Python deps.
+# All heavy wheels (cryptography, lxml, asyncpg, numpy, Pillow, …) ship
+# pre-built manylinux ARM64 binaries on PyPI — no compiler toolchain
+# needed on the base image.  --prefer-binary forces pip to always take
+# a wheel over a source distribution so the build never tries to invoke
+# gcc inside the minimal Lambda base image.
 COPY artifacts/syrabit-backend/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+RUN pip install --no-cache-dir --prefer-binary -r /tmp/requirements.txt \
     && rm -f /tmp/requirements.txt
 
 # ── Application code. The Lambda runtime expects user code under
