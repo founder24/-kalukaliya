@@ -114,9 +114,23 @@ data "aws_iam_policy_document" "github_deploy_perms" {
       "ecr:DescribeRepositories",
       "ecr:DescribeImages",
       "ecr:ListImages",
+      # Repo lifecycle management — needed for bootstrap workflow to create
+      # the bedrock-proxy ECR repo in us-east-1 (secondary region) which is
+      # not managed by the primary-region for_each in ecr.tf.
+      "ecr:CreateRepository",
+      "ecr:DeleteRepository",
+      "ecr:PutLifecyclePolicy",
+      "ecr:GetLifecyclePolicy",
+      "ecr:DeleteLifecyclePolicy",
+      "ecr:SetRepositoryPolicy",
+      "ecr:GetRepositoryPolicy",
+      "ecr:DeleteRepositoryPolicy",
     ]
     resources = [
       "arn:aws:ecr:${local.lz_primary_region}:${data.aws_caller_identity.lz.account_id}:repository/${local.lz_project}/*",
+      # Secondary region (us-east-1) — bedrock-proxy Lambda must pull from
+      # same-region ECR; this repo is created by Terraform on first bootstrap.
+      "arn:aws:ecr:${local.lz_secondary_region}:${data.aws_caller_identity.lz.account_id}:repository/${local.lz_project}/*",
     ]
   }
 
