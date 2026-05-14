@@ -1,6 +1,13 @@
 name: Digital Ocean deploy (manual)
 
 #
+# DEPRECATED (ACA cutover) — Task #336 originally moved syrabit-backend from
+# Railway to Digital Ocean. A subsequent cutover migrated it again onto Azure
+# Container Apps (ACA). The active CI deploy is now:
+#   .github/workflows/azure-container-apps-deploy.yml
+# This workflow is kept for emergency DO fallback only. It is workflow_dispatch
+# only and will fail if DO_APP_ID_* secrets are not set.
+#
 # Task #336 — replaces .github/workflows/railway-deploy.yml.
 # Drives `bash scripts/digitalocean.sh deploy <app>` from CI using
 # the DIGITALOCEAN_ACCESS_TOKEN repo secret. Trigger is

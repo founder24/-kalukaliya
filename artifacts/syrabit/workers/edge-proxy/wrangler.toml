@@ -1,4 +1,4 @@
-name = "syrabit-edge-proxy"
+name = "syrabitworker"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
@@ -37,7 +37,7 @@ NODE_ENV = "production"
 ORIGIN_TARGET = "azure"
 
 [env.production]
-name = "syrabit-edge-proxy"
+name = "syrabitworker"
 routes = [
   { pattern = "dispatch.syrabit.ai/*", zone_name = "syrabit.ai" },
 ]

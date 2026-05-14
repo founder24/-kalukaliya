@@ -124,7 +124,7 @@ jobs:
   #             assets.syrabit.ai), R2 bucket syrabit-cache-reserve, and
   #             Cache Reserve enabled on the syrabit.ai zone.
   # Task #109 — Phase 5: Analytics Engine dataset binding (syrabit-edge-metrics)
-  #             present in the deployed syrabit-edge worker, and RateLimiter
+  #             present in the deployed syrabitworker worker, and RateLimiter
   #             Durable Object namespace provisioned via [[migrations]] v1.
   # Task #110 — Phase 6: mTLS client certificate (syrabit-railway-mtls), CF
   #             Image Resizing (image_resizing=on), Zaraz GA4 tool enabled,
