@@ -284,7 +284,13 @@ jobs:
       - name: Terraform plan (Lambda + EventBridge + event-source mappings)
         working-directory: ${{ env.TF_DIR }}
         run: |
-          terraform plan -input=false \
+          # -refresh=false: github-deploy lacks the read permissions needed
+          # to refresh every data source in state (secretsmanager:DescribeSecret,
+          # sqs:GetQueueAttributes, bedrock:GetGuardrail, ses:DescribeConfigurationSet,
+          # ec2:DescribeVpcAttribute).  These data sources belong to resources NOT
+          # being targeted here; skipping refresh is safe for a targeted create-only
+          # bootstrap run.
+          terraform plan -input=false -refresh=false \
             -target=aws_lambda_function.batch_job \
             -target=aws_lambda_function.sqs_consumer \
             -target=aws_lambda_function.s3_to_r2_sync \
