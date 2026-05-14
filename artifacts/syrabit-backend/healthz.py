@@ -40,11 +40,16 @@ logger = logging.getLogger(__name__)
 DEP_PROBE_TIMEOUT_S = 1.5
 
 
-async def _probe(name: str, fn: Callable[[], Awaitable[Any]]) -> dict[str, Any]:
-    """Run a single dependency probe, bounded by ``DEP_PROBE_TIMEOUT_S``."""
+async def _probe(
+    name: str,
+    fn: Callable[[], Awaitable[Any]],
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """Run a single dependency probe, bounded by ``timeout`` (default: ``DEP_PROBE_TIMEOUT_S``)."""
+    t = timeout if timeout is not None else DEP_PROBE_TIMEOUT_S
     started = time.monotonic()
     try:
-        await asyncio.wait_for(fn(), timeout=DEP_PROBE_TIMEOUT_S)
+        await asyncio.wait_for(fn(), timeout=t)
         return {
             "name":       name,
             "ok":         True,
@@ -54,8 +59,8 @@ async def _probe(name: str, fn: Callable[[], Awaitable[Any]]) -> dict[str, Any]:
         return {
             "name":       name,
             "ok":         False,
-            "latency_ms": int(DEP_PROBE_TIMEOUT_S * 1000),
-            "error":      f"timeout after {DEP_PROBE_TIMEOUT_S}s",
+            "latency_ms": int(t * 1000),
+            "error":      f"timeout after {t}s",
         }
     except Exception as e:  # noqa: BLE001
         return {
@@ -98,6 +103,13 @@ async def _probe_supabase() -> None:
     import deps as _deps  # type: ignore
     pool = getattr(_deps, "pg_pool", None)
     if pool is None:
+        # pg_pool is intentionally None when DATABASE_URL / SUPABASE_DB_URL
+        # is not configured (asyncpg disabled). Skip the probe cleanly so
+        # readyz does not flag a hard failure for an intentionally absent DSN.
+        # Only raise when _PG_DSN IS set (startup was expected but failed).
+        from config import _PG_DSN  # type: ignore
+        if not _PG_DSN:
+            return  # not configured — probe passes silently
         raise RuntimeError("deps.pg_pool is None (lifespan startup not complete?)")
     async with pool.acquire() as conn:
         await conn.fetchval("SELECT 1")
@@ -176,10 +188,11 @@ async def _probe_vertex_ai() -> None:
     Vertex remains an inference dependency surfaced in /api/readyz
     even after GCP hosting is retired — the production chat flow
     still calls Vertex via the Cloudflare AI Gateway. The probe
-    fetches an OAuth token from the metadata server (or the env-JSON
-    SA) and HEADs the regional Vertex endpoint, exercising both the
-    credential path AND network reachability under the per-probe
-    timeout budget. No tokens spent.
+    mints an OAuth token via the project's gcp_auth module (which
+    reads GOOGLE_APPLICATION_CREDENTIALS_JSON, not just the file-path
+    GOOGLE_APPLICATION_CREDENTIALS env var) and GETs the regional
+    custom-models listing — cheapest authenticated read that returns
+    200 even with zero custom models. No tokens spent on generation.
     """
     project = (
         os.environ.get("VERTEX_PROJECT_ID")
@@ -190,28 +203,18 @@ async def _probe_vertex_ai() -> None:
         raise RuntimeError("VERTEX_PROJECT_ID not set")
     region = (os.environ.get("VERTEX_REGION") or "us-central1").strip()
 
-    # Mint an access token via Application Default Credentials.
-    # `google-auth` is already a transitive dep of the Vertex SDK;
-    # ImportError here is a real configuration failure.
-    import google.auth  # type: ignore
-    from google.auth.transport.requests import Request  # type: ignore
-
-    def _token() -> str:
-        creds, _ = google.auth.default(
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-        creds.refresh(Request())
-        return creds.token
-
-    token = await asyncio.to_thread(_token)
+    # Use gcp_auth (reads GOOGLE_APPLICATION_CREDENTIALS_JSON directly)
+    # rather than google.auth.default() which falls through to the GCP
+    # metadata server — a ~5s hang in non-GCP environments — when only
+    # the raw JSON env var is set and no file-path credential is present.
+    import gcp_auth  # type: ignore
+    token = await asyncio.to_thread(gcp_auth.get_access_token)
     if not token:
-        raise RuntimeError("ADC produced empty access token")
+        raise RuntimeError("gcp_auth.get_access_token returned None — check GOOGLE_APPLICATION_CREDENTIALS_JSON")
 
-    # GET the publishers listing — cheapest authenticated read on
-    # the regional Vertex endpoint that returns a 200 on success.
     import httpx
-    url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/publishers/google/models"
-    async with httpx.AsyncClient(timeout=DEP_PROBE_TIMEOUT_S) as c:
+    url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/models"
+    async with httpx.AsyncClient(timeout=4.5) as c:
         r = await c.get(url, headers={"Authorization": f"Bearer {token}"}, params={"pageSize": 1})
         if r.status_code >= 400:
             raise RuntimeError(f"vertex HTTP {r.status_code}")
@@ -231,7 +234,7 @@ async def collect_dependency_health() -> dict[str, Any]:
         _probe("mongo",         _probe_mongo),
         _probe("pinecone",      _probe_pinecone),
         _probe("cf_ai_gateway", _probe_cf_ai_gateway),
-        _probe("vertex_ai",     _probe_vertex_ai),
+        _probe("vertex_ai",     _probe_vertex_ai, timeout=5.0),
     )
     failed = [p for p in probes if not p["ok"]]
     return {
