@@ -228,7 +228,15 @@ async def chat(
     result = await _post(model_key, payload, stream=stream)
     if stream:
         return result
-    text = (result or {}).get("response", "")
+    # Workers AI native: {"response": "..."}
+    # OpenAI-compat (gpt-oss-120b etc.): {"choices":[{"message":{"content":"..."}}]}
+    r = result or {}
+    text = r.get("response") or ""
+    if not text:
+        choices = r.get("choices") or []
+        if choices:
+            msg = choices[0].get("message") or {}
+            text = msg.get("content") or msg.get("reasoning_content") or ""
     logger.debug(
         "[cf-ai] chat model=%s tokens≈%d dur=%.0fms",
         MODELS.get(model_key, model_key),
@@ -277,7 +285,17 @@ async def chat_stream(
                 break
             try:
                 chunk = json.loads(raw)
-                delta = chunk.get("response", "")
+                # Workers AI native format: {"response": "..."}
+                delta = chunk.get("response") or ""
+                # OpenAI-compat format (e.g. gpt-oss-120b reasoning models):
+                # {"choices":[{"delta":{"content":"..."}}]}
+                # Also handle reasoning-only chunks where content is null but
+                # reasoning_content holds the token.
+                if not delta:
+                    choices = chunk.get("choices") or []
+                    if choices:
+                        d = choices[0].get("delta") or {}
+                        delta = d.get("content") or d.get("reasoning_content") or ""
                 if delta:
                     yield delta
             except json.JSONDecodeError:
