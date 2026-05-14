@@ -129,6 +129,23 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         // rotate during a planned `pushManager.subscribe` re-prompt
         // window.
         { name: 'web-push-vapid-private-key', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/WEB-PUSH-VAPID-PRIVATE-KEY', identity: 'system' }
+        // Task #chat-infra — Cloudflare Workers AI (SLM pool for LLM inference).
+        // `CLOUDFLARE_API_TOKEN` is the read-only AI+Workers token; must have
+        // `ai:read` and `workers:read` scopes. Without it `_CF_AI_ENABLED=False`
+        // and the entire SLM pool (Tier 0-4 Workers AI models) is disabled,
+        // causing "All AI providers temporarily unavailable" on every non-cached
+        // chat request. Source of truth: Azure Key Vault `CLOUDFLARE-API-TOKEN`.
+        { name: 'cloudflare-api-token',       keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/CLOUDFLARE-API-TOKEN',       identity: 'system' }
+        // Task #chat-infra — Vertex Gemini 2.5 Flash credentials.
+        // GOOGLE_APPLICATION_CREDENTIALS_JSON is the service-account JSON (base64
+        // or raw) used by `providers/vertex_chat.py`. Without it vertex and
+        // vertex_flash_lite fail immediately and the SLM pool has no Vertex head.
+        { name: 'google-application-credentials-json', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/GOOGLE-APPLICATION-CREDENTIALS-JSON', identity: 'system' }
+        // Task #chat-infra — Supabase auth.
+        // Required for `/api/auth/supabase-session` JWT exchange (student login).
+        { name: 'supabase-service-role-key',  keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SUPABASE-SERVICE-ROLE-KEY',  identity: 'system' }
+        // Task #chat-infra — Pinecone vector store.
+        { name: 'pinecone-api-key',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/PINECONE-API-KEY',           identity: 'system' }
       ]
     }
     template: {
@@ -219,6 +236,27 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // monitored mailbox.
             { name: 'WEB_PUSH_VAPID_PRIVATE_KEY',     secretRef: 'web-push-vapid-private-key' }
             { name: 'WEB_PUSH_CONTACT',               value: 'mailto:admin@syrabit.ai' }
+            // Task #chat-infra — Cloudflare Workers AI LLM inference.
+            // CLOUDFLARE_ACCOUNT_ID enables the SLM pool (Tier 0-4 Workers AI
+            // models: llama-3.3-70b, gpt-oss-20b, qwen-72b, llama-3.2-3b, llama-3.1-8b).
+            // CF_AI_GATEWAY_ACCOUNT_ID is the canonical name read by llm.py;
+            // CLOUDFLARE_ACCOUNT_ID is the alias read by cloudflare_ai.py config block.
+            // Both must match; set to the production Cloudflare account.
+            { name: 'CLOUDFLARE_ACCOUNT_ID',          value: 'd66e40eac539fff1db270fddf384a5ec' }
+            { name: 'CF_AI_GATEWAY_ACCOUNT_ID',        value: 'd66e40eac539fff1db270fddf384a5ec' }
+            { name: 'CLOUDFLARE_API_TOKEN',            secretRef: 'cloudflare-api-token' }
+            // Task #chat-infra — Vertex Gemini 2.5 Flash.
+            // VERTEX_LOCATION defaults to us-central1 in config.py but the ACA
+            // must set it explicitly so the SA JSON project is used correctly.
+            { name: 'GOOGLE_APPLICATION_CREDENTIALS_JSON', secretRef: 'google-application-credentials-json' }
+            { name: 'VERTEX_LOCATION',                 value: 'us-central1' }
+            // Task #chat-infra — Supabase auth (JWT exchange + user lookups).
+            // SUPABASE_URL is the REST API base; SUPABASE_SERVICE_ROLE_KEY is the
+            // service-role key for admin-level Supabase REST calls in auth_deps.py.
+            { name: 'SUPABASE_URL',                    value: 'https://czeznmqogtwecidhpysa.supabase.co' }
+            { name: 'SUPABASE_SERVICE_ROLE_KEY',       secretRef: 'supabase-service-role-key' }
+            // Task #chat-infra — Pinecone vector store for RAG retrieval.
+            { name: 'PINECONE_API_KEY',                secretRef: 'pinecone-api-key' }
           ]
           probes: [
             {
