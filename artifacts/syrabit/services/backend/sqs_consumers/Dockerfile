@@ -32,15 +32,21 @@
 
 FROM public.ecr.aws/lambda/python:3.11-arm64
 
-# ── Python deps.
-# All heavy wheels (cryptography, lxml, asyncpg, numpy, Pillow, …) ship
-# pre-built manylinux ARM64 binaries on PyPI — no compiler toolchain
-# needed on the base image.  --prefer-binary forces pip to always take
-# a wheel over a source distribution so the build never tries to invoke
-# gcc inside the minimal Lambda base image.
+# ── Python deps via pre-downloaded arm64 wheels.
+# Wheels are downloaded natively (no QEMU) in the CI runner before this
+# build step using:
+#   pip3 download --platform manylinux_2_17_aarch64 --only-binary=:all:
+# They land at .build/arm64-wheels/ and are injected into the build
+# context so pip never has to compile from source inside the emulated
+# arm64 environment.  --find-links makes pip check the local cache first;
+# --prefer-binary ensures pip takes a wheel over a source dist for any
+# package not found in the cache.
+COPY .build/arm64-wheels/ /tmp/wheels/
 COPY artifacts/syrabit-backend/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --prefer-binary -r /tmp/requirements.txt \
-    && rm -f /tmp/requirements.txt
+RUN pip install --no-cache-dir --prefer-binary \
+        --find-links /tmp/wheels/ \
+        -r /tmp/requirements.txt \
+    && rm -rf /tmp/wheels/ /tmp/requirements.txt
 
 # ── Application code. The Lambda runtime expects user code under
 # ${LAMBDA_TASK_ROOT} (= /var/task on the AWS base image). Copy the
