@@ -65,6 +65,7 @@ EMBED_WORKER_VERSION = "1.1.0"
 
 [env.staging]
 name = "syrabit-embed-worker-staging"
+workers_dev = true
 routes = [
   { pattern = "embed-staging.syrabit.ai/*", zone_name = "syrabit.ai" },
 ]
