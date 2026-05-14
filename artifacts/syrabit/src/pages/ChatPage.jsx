@@ -428,11 +428,30 @@ export default function ChatPage() {
           return;
         }
         if (response.status === 429) {
+          // Pull structured error from JSON body (may be {} if CF WAF returned HTML)
           const detail = String(errData.detail || '');
           const capError = errData.error || '';
-          const isDailyCap = capError === 'chat_daily_soft_cap' || /daily chat allowance|daily.*limit.*reached/i.test(detail);
-          const isMonthlyCap = capError === 'chat_budget_exhausted' || /monthly.*budget|monthly.*chat/i.test(detail);
-          const isAiRateLimit = /ai rate limit|rate limit exceeded|slow down/i.test(detail);
+          // Also check response headers — CF Worker sets X-Chat-Cap-Error and X-Cap
+          const capHeader = response.headers?.get?.('X-Chat-Cap-Error') || response.headers?.get?.('X-Cap') || '';
+
+          const isDailyCap =
+            capError === 'chat_daily_soft_cap' ||
+            capHeader === 'chat_daily_soft_cap' ||
+            /daily.*(chat|free|quota).*allowance|daily.*limit.*reached|daily.*quota.*exhausted|free quota exhausted/i.test(detail);
+          const isMonthlyCap =
+            capError === 'chat_budget_exhausted' ||
+            capHeader === 'chat_budget_exhausted' ||
+            /monthly.*budget|monthly.*chat/i.test(detail);
+          const isAiRateLimit =
+            /ai rate limit|rate limit exceeded|slow down|sending too fast/i.test(detail) ||
+            capHeader === 'anon_rate_limited';
+          const isNetworkBlock =
+            capHeader === 'ip_daily_cap' ||
+            /request ceiling.*network|network.*daily.*ceiling/i.test(detail);
+          const isSessionLimit =
+            capHeader === 'session_mint_limit' ||
+            /too many new sessions|cookies.*enabled/i.test(detail);
+
           if (isDailyCap && !user) {
             toast.error('Daily free limit reached — resets at midnight UTC. Sign in for more messages.', {
               action: { label: 'Sign in', onClick: () => navigate('/login') },
@@ -444,8 +463,19 @@ export default function ChatPage() {
             toast.error('Monthly chat budget reached. Resets at the start of next month.', { duration: 8000 });
           } else if (isAiRateLimit) {
             toast.error('Sending too fast — please wait a few seconds and try again.', { duration: 5000 });
+          } else if (isNetworkBlock) {
+            toast.error('Your network has reached its daily request limit. Sign in for a personal quota that isn\'t shared.', {
+              action: { label: 'Sign in', onClick: () => navigate('/login') },
+              duration: 8000,
+            });
+          } else if (isSessionLimit) {
+            toast.error('Too many new connections from your network — wait a minute and try again.', { duration: 6000 });
           } else {
-            toast.error(detail || 'Too many requests — please wait a moment and try again.', { duration: 6000 });
+            // Fallback: detail may be non-empty (pass through) or empty (CF WAF HTML block)
+            toast.error(
+              detail || 'Too many requests — please wait a moment and try again.',
+              { duration: 6000 }
+            );
           }
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;

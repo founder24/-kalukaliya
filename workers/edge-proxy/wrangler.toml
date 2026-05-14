@@ -554,4 +554,4 @@ crons = ["* * * * *", "0 */6 * * *", "0 1 * * *"]
 #   docs/ops/mtls-activation.md
 [[mtls_certificates]]
 binding        = "MTLS_CERT"
-certificate_id = "PENDING_CERT_PROVISIONING"
+certificate_id = "d303f792-9fa4-49a8-8034-47475f11ffcb"

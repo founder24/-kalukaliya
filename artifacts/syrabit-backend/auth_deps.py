@@ -635,6 +635,7 @@ async def rate_limit_chat_optional(
                 headers={
                     "Retry-After": "60",
                     "X-RateLimit-Limit": str(DEVICE_COOKIE_MINTS_PER_MIN),
+                    "X-Cap": "session_mint_limit",
                 },
             )
         new_cookie = mint_device_token()
@@ -667,6 +668,7 @@ async def rate_limit_chat_optional(
                 "Retry-After": "60",
                 "X-RateLimit-Limit": str(per_min_cap),
                 "X-RateLimit-Source": "do_chat",
+                "X-Cap": "anon_rate_limited",
             },
         )
 
@@ -684,7 +686,11 @@ async def rate_limit_chat_optional(
                     f"(>{IP_COARSE_DAILY_CAP} requests/day). Sign in or try again "
                     "tomorrow — resets at midnight UTC."
                 ),
-                headers={"Retry-After": "3600", "X-RateLimit-Limit": str(IP_COARSE_DAILY_CAP)},
+                headers={
+                    "Retry-After": "3600",
+                    "X-RateLimit-Limit": str(IP_COARSE_DAILY_CAP),
+                    "X-Cap": "ip_daily_cap",
+                },
             )
 
     # ── 4. Per-device daily quota (30/day) ───────────────────────────
@@ -747,7 +753,12 @@ async def rate_limit_chat_optional(
                     f"Daily free quota exhausted ({daily_cap} requests/day). "
                     "Sign in for higher limits — resets at midnight UTC."
                 ),
-                headers={"Retry-After": "3600", "X-RateLimit-Limit": str(daily_cap)},
+                headers={
+                    "Retry-After": "3600",
+                    "X-RateLimit-Limit": str(daily_cap),
+                    "X-Cap": "chat_daily_soft_cap",
+                    "X-Chat-Cap-Error": "chat_daily_soft_cap",
+                },
             )
 
     return None
@@ -864,6 +875,7 @@ async def rate_limit_ocr_optional(
                 headers={
                     "Retry-After": "60",
                     "X-RateLimit-Limit": str(DEVICE_COOKIE_MINTS_PER_MIN),
+                    "X-Cap": "session_mint_limit",
                 },
             )
         new_cookie = mint_device_token()
