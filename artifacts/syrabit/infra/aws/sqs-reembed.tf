@@ -106,7 +106,7 @@ resource "aws_lambda_function" "reembed_consumer" {
   memory_size = 512
   timeout     = 120
 
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = -1  # account concurrency limit; use unreserved pool
 
   environment {
     # Task #489 — OTEL_* matches the canonical map in `lambda-otel.tf`
