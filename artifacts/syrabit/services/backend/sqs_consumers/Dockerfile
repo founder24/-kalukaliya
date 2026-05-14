@@ -42,14 +42,15 @@ FROM public.ecr.aws/lambda/python:3.11-arm64
 # --prefer-binary ensures pip takes a wheel over a source dist for any
 # package not found in the cache.
 COPY .build/arm64-wheels/ /tmp/wheels/
-COPY artifacts/syrabit-backend/requirements.txt /tmp/requirements.txt
+# requirements-lambda.txt = requirements.txt minus pywebpush / py-vapid.
+# Those packages have no Python-3.11-compatible binary wheel (http-ece
+# transitive dep requires Python < 3.11) and Lambda functions never send
+# web-push notifications, so they are safe to exclude here.
+COPY artifacts/syrabit-backend/requirements-lambda.txt /tmp/requirements.txt
 # --no-index forces pip to use ONLY the local wheel cache (never PyPI).
-# Without --no-index, pip falls back to PyPI for any cache miss and
-# downloads source tarballs that need gcc — which the Lambda base image
-# doesn't have.  The pre-download step guarantees every package is in
-# /tmp/wheels/ (C-extension packages as arm64 manylinux .whl, pure-Python
-# packages as none-any .whl or .tar.gz).  Source dists of pure-Python
-# packages install fine without a compiler.
+# --only-binary=:all: was used in the CI pre-download step so every entry
+# in the cache is a binary wheel; --prefer-binary here is a belt-and-
+# suspenders guard for any pure-Python sdist that slips through.
 RUN pip install --no-cache-dir --prefer-binary \
         --no-index \
         --find-links /tmp/wheels/ \
