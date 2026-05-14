@@ -29,19 +29,3 @@ kind = "web"
   [services.env]
   PORT = "25144"
   BASE_PATH = "/"
-
-  [[services]]
-  name = "api"
-  paths = [ "/api" ]
-  localPort = 8080
-
-  [services.development]
-  run = "cd /home/runner/workspace/artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py"
-
-  [services.production]
-  build = [ "sh", "-c", "uv pip install --system --no-cache -r /home/runner/workspace/artifacts/syrabit-backend/requirements.txt || pip install --no-cache-dir -r /home/runner/workspace/artifacts/syrabit-backend/requirements.txt" ]
-  run = [ "sh", "-c", "cd /home/runner/workspace/artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py" ]
-
-  [services.env]
-  PORT = "8080"
-  
