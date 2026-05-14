@@ -246,6 +246,37 @@ data "aws_iam_policy_document" "github_deploy_perms" {
   }
 }
 
+
+  # Self-bootstrapping: syrabit-github-deploy can overwrite github-deploy's
+  # bootstrap-extra-perms inline policy so the workflow never needs manual
+  # CloudShell intervention to add missing actions (e.g. iam:TagRole,
+  # scheduler:CreateSchedule).
+  statement {
+    sid    = "BootstrapSelfUpdate"
+    effect = "Allow"
+    actions = [
+      "iam:PutRolePolicy",
+      "iam:GetRolePolicy",
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.lz.account_id}:role/github-deploy",
+    ]
+  }
+
+  # PassRole for the scheduler invocation role so bootstrap can create
+  # EventBridge schedules that target syrabit-* Lambda functions.
+  statement {
+    sid    = "PassSchedulerTargetRole"
+    effect = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:aws:iam::${data.aws_caller_identity.lz.account_id}:role/syrabit-*"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["scheduler.amazonaws.com", "lambda.amazonaws.com"]
+    }
+  }
+
 resource "aws_iam_role_policy" "github_deploy" {
   name   = "deploy-perms"
   role   = aws_iam_role.github_deploy.id
