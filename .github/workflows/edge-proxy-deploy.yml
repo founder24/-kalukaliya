@@ -398,13 +398,26 @@ jobs:
 
       - name: smoke-test prod
         id: smoke
+        env:
+          CF_WORKERS_SUBDOMAIN: ${{ vars.CF_WORKERS_SUBDOMAIN }}
         run: |
           set -o pipefail
-          # Same capture pattern as smoke-preview: stream live output to
-          # the build log via tee while saving it for the ::notice::
-          # / ::error:: summary line.
+          # Use the workers.dev URL instead of api.syrabit.ai so the smoke
+          # probes are not challenged by the Zone-wide Bot Management / WAF
+          # rules that block non-browser UAs from GitHub Actions runner IPs.
+          # The prod worker (syrabit-edge, no suffix) has workers.dev enabled
+          # and its subdomain URL bypasses the zone-level Cloudflare policies
+          # that guard api.syrabit.ai. The custom-domain route is proven at
+          # deploy time by wrangler; this override only covers HTTP probes.
+          if [ -n "${CF_WORKERS_SUBDOMAIN}" ]; then
+            smoke_url="https://syrabit-edge.${CF_WORKERS_SUBDOMAIN}.workers.dev"
+          else
+            smoke_url="https://api.syrabit.ai"
+            echo "::warning::CF_WORKERS_SUBDOMAIN not set — falling back to api.syrabit.ai (may be blocked by Bot Management)"
+          fi
+          echo "Smoke target: ${smoke_url}"
           summary_file="$RUNNER_TEMP/smoke-prod-summary.txt"
-          pnpm --filter syrabit-edge run smoke -- "https://api.syrabit.ai" \
+          pnpm --filter syrabit-edge run smoke -- "${smoke_url}" \
             | tee "$summary_file"
           status=${PIPESTATUS[0]}
           last_line=$(grep -E '^[✓✗]' "$summary_file" | tail -n1 || true)
