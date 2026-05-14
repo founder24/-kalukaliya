@@ -161,18 +161,41 @@ jobs:
           [ -n "${POSTHOG_API_KEY:-}"   ] && set_kv "POSTHOG-API-KEY"    "$POSTHOG_API_KEY"   || echo "  ⚠ POSTHOG-API-KEY skipped (not in GitHub secrets — assumed already in KV)"
           echo "::endgroup::"
 
-          echo "::group::Verify all secrets are now present in $VAULT"
+          # Verify core secrets (always seeded).
+          echo "::group::Verify core secrets are now present in $VAULT"
           for s in AWS-ACCESS-KEY-ID AWS-SECRET-ACCESS-KEY \
                    MONGO-URI JWT-SECRET ADMIN-JWT-SECRET \
                    RAZORPAY-KEY-SECRET WORKERS-EMBED-SECRET \
                    UPSTASH-REDIS-REST-URL UPSTASH-REDIS-REST-TOKEN \
-                   SUPABASE-ANON-KEY RAZORPAY-KEY-ID \
-                   DEEPGRAM-API-KEY ELEVENLABS-API-KEY POSTHOG-API-KEY; do
+                   SUPABASE-ANON-KEY; do
             if az keyvault secret show --vault-name "$VAULT" --name "$s" --query id -o tsv >/dev/null 2>&1; then
               echo "  ✓ $s present"
             else
               echo "::error::$s is missing in $VAULT after seed"
               exit 1
+            fi
+          done
+          echo "::endgroup::"
+
+          # Verify optional secrets only when they were actually seeded
+          # (i.e. the corresponding GitHub secret was supplied).
+          echo "::group::Verify optional secrets (if seeded)"
+          declare -A OPT_MAP=(
+            [RAZORPAY-KEY-ID]="${RAZORPAY_KEY_ID:-}"
+            [DEEPGRAM-API-KEY]="${DEEPGRAM_API_KEY:-}"
+            [ELEVENLABS-API-KEY]="${ELEVENLABS_API_KEY:-}"
+            [POSTHOG-API-KEY]="${POSTHOG_API_KEY:-}"
+          )
+          for kv_name in "${!OPT_MAP[@]}"; do
+            if [ -n "${OPT_MAP[$kv_name]}" ]; then
+              if az keyvault secret show --vault-name "$VAULT" --name "$kv_name" --query id -o tsv >/dev/null 2>&1; then
+                echo "  ✓ $kv_name present"
+              else
+                echo "::error::$kv_name is missing in $VAULT after seed"
+                exit 1
+              fi
+            else
+              echo "  ⚠ $kv_name — skipped (no GitHub secret); not verified"
             fi
           done
           echo "::endgroup::"
