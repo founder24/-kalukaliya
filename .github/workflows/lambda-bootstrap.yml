@@ -202,95 +202,69 @@ jobs:
             docker login --username AWS --password-stdin "$ECR_SEC"
 
 
-      # Phase B2: while we ARE syrabit-github-deploy, update github-deploy's
-      # bootstrap-extra-perms inline policy so the main Terraform apply step
-      # (which runs as github-deploy) has every action it needs.
-      # This eliminates the need for manual CloudShell intervention.
-      - name: "Phase B2: self-update github-deploy bootstrap-extra-perms"
+      # Phase B2: while we ARE syrabit-github-deploy, self-update github-deploy's
+      # bootstrap-extra-perms so it gains iam:TagRole + scheduler:CreateSchedule.
+      # Phase A just applied BootstrapSelfUpdate to syrabit-github-deploy's policy;
+      # IAM needs ~10-15s to propagate — retry loop handles that.
+      # continue-on-error so Phase C always restores credentials for Docker push.
+      - name: "Phase B2: self-update github-deploy bootstrap-extra-perms (with retries)"
         if: ${{ github.event.inputs.skip_ecr_build != 'true' }}
+        continue-on-error: true
+        id: phase_b2
         run: |
-          aws iam put-role-policy \
-            --role-name github-deploy \
-            --policy-name bootstrap-extra-perms \
-            --policy-document '{
-              "Version":"2012-10-17",
-              "Statement":[
-                {
-                  "Sid":"PutDeployRolePolicy",
-                  "Effect":"Allow",
-                  "Action":["iam:PutRolePolicy","iam:GetRolePolicy"],
-                  "Resource":"arn:aws:iam::271740379017:role/syrabit-github-deploy"
-                },
-                {
-                  "Sid":"IamDeployRoles",
-                  "Effect":"Allow",
-                  "Action":[
-                    "iam:CreateRole","iam:DeleteRole",
-                    "iam:AttachRolePolicy","iam:DetachRolePolicy",
-                    "iam:GetRole","iam:ListRolePolicies",
-                    "iam:ListAttachedRolePolicies","iam:PassRole",
-                    "iam:TagRole","iam:UntagRole"
-                  ],
-                  "Resource":"arn:aws:iam::271740379017:role/syrabit-*"
-                },
-                {
-                  "Sid":"SecretManagerReadWrite",
-                  "Effect":"Allow",
-                  "Action":[
-                    "secretsmanager:DescribeSecret",
-                    "secretsmanager:GetSecretValue",
-                    "secretsmanager:ListSecretVersionIds",
-                    "secretsmanager:GetResourcePolicy",
-                    "secretsmanager:CreateSecret",
-                    "secretsmanager:PutSecretValue",
-                    "secretsmanager:UpdateSecret",
-                    "secretsmanager:TagResource",
-                    "secretsmanager:DeleteSecret"
-                  ],
-                  "Resource":"arn:aws:secretsmanager:ap-south-1:271740379017:secret:syrabit/*"
-                },
-                {
-                  "Sid":"SchedulerFullOnSyrabit",
-                  "Effect":"Allow",
-                  "Action":[
-                    "scheduler:CreateSchedule",
-                    "scheduler:GetSchedule",
-                    "scheduler:UpdateSchedule",
-                    "scheduler:DeleteSchedule",
-                    "scheduler:ListSchedules",
-                    "scheduler:TagResource"
-                  ],
-                  "Resource":"arn:aws:scheduler:ap-south-1:271740379017:schedule/*/*"
-                },
-                {
-                  "Sid":"SqsRead",
-                  "Effect":"Allow",
-                  "Action":["sqs:GetQueueAttributes","sqs:GetQueueUrl"],
-                  "Resource":"arn:aws:sqs:ap-south-1:271740379017:syrabit-*"
-                },
-                {
-                  "Sid":"BedrockRead",
-                  "Effect":"Allow",
-                  "Action":["bedrock:GetGuardrail","bedrock:ListGuardrails"],
-                  "Resource":"*"
-                },
-                {
-                  "Sid":"SesRead",
-                  "Effect":"Allow",
-                  "Action":["ses:DescribeConfigurationSet","ses:GetIdentityVerificationAttributes"],
-                  "Resource":"*"
-                },
-                {
-                  "Sid":"Ec2Read",
-                  "Effect":"Allow",
-                  "Action":[
-                    "ec2:DescribeVpcAttribute","ec2:DescribeVpcs",
-                    "ec2:DescribeSubnets","ec2:DescribeSecurityGroups"
-                  ],
-                  "Resource":"*"
-                }
-              ]
-            }' && echo "✓ github-deploy bootstrap-extra-perms updated by syrabit-github-deploy"
+          POLICY='{
+            "Version":"2012-10-17",
+            "Statement":[
+              {"Sid":"PutDeployRolePolicy","Effect":"Allow",
+               "Action":["iam:PutRolePolicy","iam:GetRolePolicy"],
+               "Resource":"arn:aws:iam::271740379017:role/syrabit-github-deploy"},
+              {"Sid":"IamDeployRoles","Effect":"Allow",
+               "Action":["iam:CreateRole","iam:DeleteRole","iam:AttachRolePolicy",
+                         "iam:DetachRolePolicy","iam:GetRole","iam:ListRolePolicies",
+                         "iam:ListAttachedRolePolicies","iam:PassRole",
+                         "iam:TagRole","iam:UntagRole"],
+               "Resource":"arn:aws:iam::271740379017:role/syrabit-*"},
+              {"Sid":"SecretManagerReadWrite","Effect":"Allow",
+               "Action":["secretsmanager:DescribeSecret","secretsmanager:GetSecretValue",
+                         "secretsmanager:ListSecretVersionIds","secretsmanager:GetResourcePolicy",
+                         "secretsmanager:CreateSecret","secretsmanager:PutSecretValue",
+                         "secretsmanager:UpdateSecret","secretsmanager:TagResource",
+                         "secretsmanager:DeleteSecret"],
+               "Resource":"arn:aws:secretsmanager:ap-south-1:271740379017:secret:syrabit/*"},
+              {"Sid":"SchedulerFullOnSyrabit","Effect":"Allow",
+               "Action":["scheduler:CreateSchedule","scheduler:GetSchedule",
+                         "scheduler:UpdateSchedule","scheduler:DeleteSchedule",
+                         "scheduler:ListSchedules","scheduler:TagResource"],
+               "Resource":"arn:aws:scheduler:ap-south-1:271740379017:schedule/*/*"},
+              {"Sid":"SqsRead","Effect":"Allow",
+               "Action":["sqs:GetQueueAttributes","sqs:GetQueueUrl"],
+               "Resource":"arn:aws:sqs:ap-south-1:271740379017:syrabit-*"},
+              {"Sid":"BedrockRead","Effect":"Allow",
+               "Action":["bedrock:GetGuardrail","bedrock:ListGuardrails"],
+               "Resource":"*"},
+              {"Sid":"SesRead","Effect":"Allow",
+               "Action":["ses:DescribeConfigurationSet","ses:GetIdentityVerificationAttributes"],
+               "Resource":"*"},
+              {"Sid":"Ec2Read","Effect":"Allow",
+               "Action":["ec2:DescribeVpcAttribute","ec2:DescribeVpcs",
+                         "ec2:DescribeSubnets","ec2:DescribeSecurityGroups"],
+               "Resource":"*"}
+            ]
+          }'
+          for attempt in 1 2 3 4 5 6; do
+            echo "=== Attempt $attempt ==="
+            if aws iam put-role-policy \
+                --role-name github-deploy \
+                --policy-name bootstrap-extra-perms \
+                --policy-document "$POLICY"; then
+              echo "✓ github-deploy bootstrap-extra-perms updated on attempt $attempt"
+              exit 0
+            fi
+            echo "Attempt $attempt failed — IAM propagation delay; sleeping 15s..."
+            sleep 15
+          done
+          echo "✗ All attempts exhausted — manual CloudShell update may be needed"
+          exit 1
 
       # Phase C: restore github-deploy for the Docker push (ECRPowerUser lets
       # it push to already-existing repos in both regions).
