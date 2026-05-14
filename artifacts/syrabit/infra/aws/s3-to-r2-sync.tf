@@ -176,6 +176,10 @@ variable "s3_finals_bucket" {
 variable "r2_endpoint_url" {
   description = "Cloudflare R2 S3-compatible endpoint URL (per-account)."
   type        = string
+  # default = "" so CI runs without the gitignored terraform.tfvars pass.
+  # Real value supplied via tfvars in local / prod applies; the Lambda
+  # environment variable is populated from SSM at runtime anyway.
+  default = ""
 }
 
 variable "r2_finals_bucket" {
