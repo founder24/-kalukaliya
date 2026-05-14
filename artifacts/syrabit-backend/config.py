@@ -1076,7 +1076,7 @@ PLAN_LIMITS = {
     # starter/pro keep their previous 1536/2048 ceilings — paid plans
     # already had headroom and bumping them would change cost/latency
     # behaviour for paying users without it being asked for.
-    "free":    {"credits_per_day": 30,   "max_tokens": 10000,  "document_access": "zero",    "req_per_min": 15, "req_per_min_ip": 60},
+    "free":    {"credits_per_day": 20,   "max_tokens": 10000,  "document_access": "zero",    "req_per_min": 15, "req_per_min_ip": 60},
     "starter": {"credits_per_day": 500,  "max_tokens": 1536,   "document_access": "limited", "req_per_min": 10, "req_per_min_ip": 90},
     "pro":     {"credits_per_day": 4000, "max_tokens": 2048,   "document_access": "full",    "req_per_min": 15, "req_per_min_ip": 120},
 }
@@ -1110,7 +1110,7 @@ IP_COARSE_DAILY_CAP = int(os.environ.get("IP_COARSE_DAILY_CAP", "1500"))
 # legitimately co-occur.
 DEVICE_COOKIE_MINTS_PER_MIN = int(os.environ.get("DEVICE_COOKIE_MINTS_PER_MIN", "5"))
 PLAN_PRICES = {
-    "free":    {"price": 0,   "label": "Free",    "description": "30 credits/day · zero document access"},
+    "free":    {"price": 0,   "label": "Free",    "description": "20 credits/day · zero document access"},
     "starter": {"price": 99,  "label": "Starter", "description": "500 credits/day · limited document access"},
     "pro":     {"price": 999, "label": "Pro",      "description": "4,000 credits/day · full document access"},
 }

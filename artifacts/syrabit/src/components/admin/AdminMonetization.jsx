@@ -471,7 +471,7 @@ export default function AdminMonetization({ adminToken, onNavigate }) {
               <h3 className="text-gray-900 font-semibold text-sm mb-3">Pricing Tiers</h3>
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { key: 'free',    label: 'Free',    color: '#64748b', defaultPrice: 0,   defaultCredits: 30   },
+                  { key: 'free',    label: 'Free',    color: '#64748b', defaultPrice: 0,   defaultCredits: 20   },
                   { key: 'starter', label: 'Starter', color: '#8b5cf6', defaultPrice: 99,  defaultCredits: 300  },
                   { key: 'pro',     label: 'Pro',     color: '#f59e0b', defaultPrice: 999, defaultCredits: 4000 },
                 ].map(({ key, label, color, defaultPrice, defaultCredits }) => {

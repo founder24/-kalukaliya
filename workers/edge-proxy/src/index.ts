@@ -712,7 +712,7 @@ const BYPASS_PREFIXES = getBypassPrefixes();
 const RATE_LIMIT_RPM = 120;
 const BOT_RATE_LIMIT_RPM = 3000;
 const RATE_LIMIT_WINDOW_S = 60;
-const AI_RATE_LIMIT_RPM = 30;
+const AI_RATE_LIMIT_RPM = 60;
 const AI_RATE_LIMIT_PREFIXES = ["/api/ai/chat", "/api/ai/generate", "/api/ai/grounded", "/api/ai/explain", "/api/ai/quiz", "/api/ai/summarize", "/api/chat"];
 
 // ─── Task #33 — SPA title-miss alert runtime settings (KV-tunable) ───────────
@@ -768,7 +768,7 @@ async function _readSpaTitleMissKvSettings(
 //   - Monthly hard cap (`CHAT_CAP_MONTHLY=30`) applies to EVERYONE
 //     (free + paid) and rolls over at the 1st of the next UTC month.
 //     Key: `chat-budget:<id>:<YYYY-MM>` (TTL ≈ 32 days).
-//   - Daily soft cap (`CHAT_CAP_DAILY=3`) applies to FREE users only.
+//   - Daily soft cap (`CHAT_CAP_DAILY=20`) applies to FREE users only.
 //     Paid plans bypass the daily cap (their monthly hard cap is the
 //     only edge limit). Key: `chat-daily:<id>:<YYYY-MM-DD>` (TTL ≈
 //     25 h).
@@ -776,7 +776,7 @@ async function _readSpaTitleMissKvSettings(
 // Increments fire AFTER the origin returns a success status (<400)
 // so a 4xx/5xx that the client retries does not consume a turn.
 const CHAT_CAP_MONTHLY = 30;
-const CHAT_CAP_DAILY = 3;
+const CHAT_CAP_DAILY = 20;
 // Coverage (Task #513 §A round-7 narrowed): the chat budget gates
 // CHAT verbs only — `/api/ai/chat`, `/api/chat`, and the
 // `/api/edu/study/*` chat-equivalents (chat / qa / explain). The

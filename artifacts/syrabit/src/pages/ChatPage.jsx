@@ -429,12 +429,21 @@ export default function ChatPage() {
         }
         if (response.status === 429) {
           const detail = String(errData.detail || '');
-          const isAnonWall = !user && /daily request ceiling|sign in|anon/i.test(detail);
-          if (isAnonWall) {
-            toast.error('Free daily limit reached. Sign in to keep chatting — resets at midnight UTC.', {
+          const capError = errData.error || '';
+          const isDailyCap = capError === 'chat_daily_soft_cap' || /daily chat allowance|daily.*limit.*reached/i.test(detail);
+          const isMonthlyCap = capError === 'chat_budget_exhausted' || /monthly.*budget|monthly.*chat/i.test(detail);
+          const isAiRateLimit = /ai rate limit|rate limit exceeded|slow down/i.test(detail);
+          if (isDailyCap && !user) {
+            toast.error('Daily free limit reached — resets at midnight UTC. Sign in for more messages.', {
               action: { label: 'Sign in', onClick: () => navigate('/login') },
               duration: 8000,
             });
+          } else if (isDailyCap && user) {
+            toast.error('Daily chat allowance reached. Resets at midnight UTC.', { duration: 6000 });
+          } else if (isMonthlyCap) {
+            toast.error('Monthly chat budget reached. Resets at the start of next month.', { duration: 8000 });
+          } else if (isAiRateLimit) {
+            toast.error('Sending too fast — please wait a few seconds and try again.', { duration: 5000 });
           } else {
             toast.error(detail || 'Too many requests — please wait a moment and try again.', { duration: 6000 });
           }
@@ -732,7 +741,7 @@ export default function ChatPage() {
               <AlertTriangle size={14} aria-hidden="true" />
               <span>
                 {!user
-                  ? `Free daily messages used (${effectiveLimit ?? 30}/day) — sign in for more`
+                  ? `Free daily messages used (${effectiveLimit ?? 20}/day) — sign in for more`
                   : credits.limit === 0
                   ? 'Free plan has no credits — upgrade to start chatting'
                   : 'Credits exhausted — upgrade to continue'}
