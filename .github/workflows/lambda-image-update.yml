@@ -75,9 +75,7 @@ jobs:
           platforms: linux/arm64
           push: true
           provenance: false
-          no-cache: false
-          cache-from: type=gha,scope=sqs-consumers-diag
-          cache-to: type=gha,scope=sqs-consumers-diag,mode=max
+          no-cache: true
           tags: ${{ steps.tag.outputs.image }}
 
       - name: Update Lambda function code for each target
