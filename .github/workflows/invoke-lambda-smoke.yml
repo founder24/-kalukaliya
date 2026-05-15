@@ -125,6 +125,7 @@ jobs:
             --output table 2>/dev/null || echo "  (no classic EventBridge rules for syrabit)"
 
       - name: Self-bootstrap ec2 SG permission via BootstrapSelfUpdate (Task #10)
+        continue-on-error: true
         run: |
           set -euo pipefail
           echo "Granting ec2:AuthorizeSecurityGroupEgress to github-deploy via BootstrapSelfUpdate..."
