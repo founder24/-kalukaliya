@@ -27,6 +27,38 @@ jobs:
           role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
           aws-region: ap-south-1
 
+      - name: Seed MONGO_URL into AWS SM if placeholder
+        env:
+          MONGO_URI: ${{ secrets.KV_SEED_MONGO_URI }}
+        run: |
+          set -euo pipefail
+          SECRET_PATH="syrabit/prod/mongo/url"
+          CURRENT=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_PATH" --region ap-south-1 \
+            --query 'SecretString' --output text 2>/dev/null || echo "NOT_FOUND")
+          echo "Current secret (first 60): ${CURRENT:0:60}"
+          if echo "$CURRENT" | grep -qE '^mongodb(\+srv)?://'; then
+            echo "Secret already has a real URI — skipping seed."
+          else
+            echo "Placeholder or missing — seeding from KV_SEED_MONGO_URI..."
+            if [ -z "${MONGO_URI:-}" ]; then
+              echo "ERROR: KV_SEED_MONGO_URI is empty"; exit 1
+            fi
+            if ! echo "$MONGO_URI" | grep -qE '^mongodb(\+srv)?://'; then
+              echo "ERROR: KV_SEED_MONGO_URI is not a MongoDB URI (first 30: ${MONGO_URI:0:30})"; exit 1
+            fi
+            aws secretsmanager put-secret-value \
+              --secret-id "$SECRET_PATH" \
+              --secret-string "$MONGO_URI" \
+              --region ap-south-1
+            MASKED=$(echo "$MONGO_URI" | python3 -c "
+import sys, re
+uri = sys.stdin.read().strip()
+print(re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', uri)[:120])
+")
+            echo "Seeded OK — URI: $MASKED"
+          fi
+
       - name: Describe function configs
         run: |
           for FN in syrabit-prewarm-seo-routes syrabit-seo-baseline syrabit-materialize-chapter-faqs; do
