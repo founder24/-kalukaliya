@@ -14,11 +14,42 @@ _client = None
 _db = None
 
 
+def _sanitize_mongo_uri(uri: str) -> str:
+    """Percent-encode credentials in a MongoDB URI if they contain special chars.
+
+    PyMongo raises ``ValueError: Port contains non-digit characters`` when the
+    password includes RFC-3986-reserved characters (``@``, ``:``, ``/``, etc.)
+    that are not percent-encoded.  This helper fixes the URI at the last ``@``
+    boundary (i.e. the credential/host delimiter) so double-encoding is safe.
+    """
+    import re
+    from urllib.parse import quote_plus
+
+    m = re.match(r"^(mongodb(?:\+srv)?://)(.+)$", uri, re.DOTALL)
+    if not m:
+        return uri
+    prefix, rest = m.group(1), m.group(2)
+    at_idx = rest.rfind("@")
+    if at_idx == -1:
+        return uri  # no credentials — nothing to encode
+    creds, host_part = rest[:at_idx], rest[at_idx + 1 :]
+    colon_idx = creds.find(":")
+    if colon_idx == -1:
+        return uri  # username only (no password)
+    user, password = creds[:colon_idx], creds[colon_idx + 1 :]
+    # Only encode if not already percent-encoded (idempotent guard).
+    if "%" not in password:
+        password = quote_plus(password)
+    if "%" not in user:
+        user = quote_plus(user)
+    return f"{prefix}{user}:{password}@{host_part}"
+
+
 def _resolve_mongo_uri() -> str:
     # Direct env var wins (used in shadow mode + local tests).
     direct = os.environ.get("MONGO_URL", "").strip()
     if direct:
-        return direct
+        return _sanitize_mongo_uri(direct)
     arn = os.environ.get("MONGO_URL_SECRET_ARN", "").strip()
     if not arn:
         raise RuntimeError("Neither MONGO_URL nor MONGO_URL_SECRET_ARN is set")
@@ -29,8 +60,8 @@ def _resolve_mongo_uri() -> str:
     # The secret may be a bare URI or a JSON blob with a `uri` key.
     raw = raw.strip()
     if raw.startswith("{"):
-        return json.loads(raw).get("uri", raw)
-    return raw
+        raw = json.loads(raw).get("uri", raw)
+    return _sanitize_mongo_uri(raw)
 
 
 def get_db() -> Any:
