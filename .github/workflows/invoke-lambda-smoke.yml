@@ -151,15 +151,19 @@ jobs:
             STREAM_NAME=$(echo "${STREAMS}" | head -1 | awk '{print $1}')
             echo "  ✓ ${FN}: CW stream ${STREAM_NAME}"
 
-            # Fetch last few lines
-            EVENTS=$(aws logs get-log-events \
+            # Fetch ALL events for this invocation window (up to 100)
+            # so we see diagnostic lines (URI_DIAG, host_tail) that appear
+            # at the START of the stream before any error traceback.
+            ALL_EVENTS=$(aws logs get-log-events \
               --log-group-name "${LOG_GROUP}" \
               --log-stream-name "${STREAM_NAME}" \
               --start-time "${SINCE_EPOCH}" \
               --region ap-south-1 \
-              --query 'events[-10:].message' \
-              --output text 2>/dev/null | head -10 || echo "")
-            echo "$EVENTS"
+              --query 'events[*].message' \
+              --output text 2>/dev/null || echo "")
+            echo "--- CW log (all events) ---"
+            echo "$ALL_EVENTS"
+            echo "--- end CW log ---"
           }
 
           echo "=== CloudWatch evidence ==="
