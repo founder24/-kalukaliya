@@ -114,11 +114,28 @@ def _build_url(base: str, board: str, chapter_slug: str, page_type: str) -> str:
 
 
 def _require_tool(name: str, install_hint: str) -> None:
-    if shutil.which(name) is None:
-        sys.exit(
-            f"seo_baseline.py: required tool '{name}' not on PATH. "
-            f"Install with: {install_hint}"
+    """Exit (local) or warn (Lambda) when a CLI tool is missing.
+
+    When running inside an AWS Lambda container
+    (``AWS_LAMBDA_FUNCTION_NAME`` is set) a missing tool is not fatal:
+    the per-page exception handlers already record each failure under
+    ``rep.failures`` so the baseline run continues with whatever legs
+    are available (structured-data, rich-results) and the Lambda does
+    not crash with ``Runtime.ExitError``.
+    """
+    if shutil.which(name) is not None:
+        return
+    msg = (
+        f"seo_baseline.py: required tool '{name}' not on PATH. "
+        f"Install with: {install_hint}"
+    )
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        import logging as _logging
+        _logging.getLogger("seo_baseline").warning(
+            "Lambda context: %s — skipping %s leg per page", msg, name
         )
+        return
+    sys.exit(msg)
 
 
 def _run_lighthouse(url: str) -> dict[str, Any]:
