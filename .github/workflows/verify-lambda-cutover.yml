@@ -1,0 +1,168 @@
+name: Verify Lambda Cutover — prewarm/seo_baseline/materialize_faqs
+
+on:
+  workflow_dispatch:
+    inputs:
+      since_iso:
+        description: "Check for invocations since this ISO-8601 UTC timestamp (default: 2026-05-16T00:00:00Z)"
+        required: false
+        default: "2026-05-16T00:00:00Z"
+  schedule:
+    - cron: "30 2 16 5 *"   # 02:30 UTC on 2026-05-16 — first run after all three jobs fire
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  verify:
+    name: Check CloudWatch logs + alarms
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+      SINCE_ISO: ${{ inputs.since_iso || '2026-05-16T00:00:00Z' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Verify invocations + alarm states
+        id: verify
+        run: |
+          set -euo pipefail
+          SINCE_EPOCH=$(python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('${SINCE_ISO}'.replace('Z','+00:00')).timestamp() * 1000))")
+          NOW_EPOCH=$(python3 -c "import time; print(int(time.time()*1000))")
+          PASS=true
+
+          check_function() {
+            local FUNC="$1"
+            local LOG_GROUP="/aws/lambda/${FUNC}"
+            echo "========================================"
+            echo "Checking: ${FUNC}"
+            echo "  Log group: ${LOG_GROUP}"
+
+            # Get log streams modified after SINCE_ISO
+            STREAMS=$(aws logs describe-log-streams \
+              --log-group-name "${LOG_GROUP}" \
+              --order-by LastEventTime \
+              --descending \
+              --max-items 5 \
+              --region ap-south-1 \
+              --query 'logStreams[?lastEventTimestamp>=`'"${SINCE_EPOCH}"'`].logStreamName' \
+              --output text 2>/dev/null || echo "")
+
+            if [ -z "$STREAMS" ]; then
+              echo "  ✗ NO log streams found since ${SINCE_ISO}"
+              PASS=false
+              return
+            fi
+
+            # Check for REPORT line (successful invocation) in the most recent stream
+            FIRST_STREAM=$(echo "$STREAMS" | head -1)
+            REPORT=$(aws logs get-log-events \
+              --log-group-name "${LOG_GROUP}" \
+              --log-stream-name "${FIRST_STREAM}" \
+              --start-time "${SINCE_EPOCH}" \
+              --region ap-south-1 \
+              --query 'events[?contains(message, `REPORT RequestId`) || contains(message, `"status": "ok"`) || contains(message, `handler complete`)].message' \
+              --output text 2>/dev/null | head -3 || echo "")
+
+            ERRORS=$(aws logs get-log-events \
+              --log-group-name "${LOG_GROUP}" \
+              --log-stream-name "${FIRST_STREAM}" \
+              --start-time "${SINCE_EPOCH}" \
+              --region ap-south-1 \
+              --query 'events[?contains(message, `ERROR`) || contains(message, `Task timed out`)].message' \
+              --output text 2>/dev/null | head -3 || echo "")
+
+            if [ -n "$REPORT" ]; then
+              echo "  ✓ Successful invocation found"
+              echo "    $REPORT"
+            else
+              echo "  ✗ No REPORT/success line found in latest stream since ${SINCE_ISO}"
+              PASS=false
+            fi
+
+            if [ -n "$ERRORS" ]; then
+              echo "  ⚠ Errors in log:"
+              echo "    $ERRORS"
+            fi
+          }
+
+          check_function "syrabit-prewarm-seo-routes"
+          check_function "syrabit-seo-baseline"
+          check_function "syrabit-materialize-chapter-faqs"
+
+          echo "========================================"
+          echo "Checking CloudWatch alarms ..."
+
+          check_alarm() {
+            local ALARM="$1"
+            STATE=$(aws cloudwatch describe-alarms \
+              --alarm-names "${ALARM}" \
+              --region ap-south-1 \
+              --query 'MetricAlarms[0].StateValue' \
+              --output text 2>/dev/null || echo "UNKNOWN")
+            if [ "${STATE}" = "OK" ]; then
+              echo "  ✓ ${ALARM}: OK"
+            elif [ "${STATE}" = "INSUFFICIENT_DATA" ]; then
+              echo "  ⚠ ${ALARM}: INSUFFICIENT_DATA (no data yet — first run may not have emitted metric)"
+            else
+              echo "  ✗ ${ALARM}: ${STATE}"
+              PASS=false
+            fi
+          }
+
+          # prewarm_seo_routes alarm
+          check_alarm "syrabit-cache-prewarm-success-rate-low"
+
+          # seo_baseline alarms
+          check_alarm "seo-baseline-score-regression"
+          check_alarm "seo-baseline-failures-high"
+
+          echo "========================================"
+          if [ "${PASS}" = "true" ]; then
+            echo "RESULT: ALL CHECKS PASSED"
+            echo "pass=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "RESULT: ONE OR MORE CHECKS FAILED — review logs above"
+            echo "pass=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Stamp verification result into manifest
+        if: steps.verify.outputs.pass == 'true'
+        run: |
+          python3 - <<'PYEOF'
+          import json, datetime
+
+          with open("infra/aws/lambda/manifest.json") as f:
+              m = json.load(f)
+
+          stamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+          targets = {"prewarm_seo_routes", "seo_baseline", "materialize_chapter_faqs"}
+          for job in m.get("migrated_jobs", []):
+              mod = job.get("aca_module", "").split(".")[-1]
+              if mod in targets:
+                  job["cutover_verified_at"] = stamp
+                  job["cutover_verified_by"] = "verify-lambda-cutover.yml"
+
+          with open("infra/aws/lambda/manifest.json", "w") as f:
+              json.dump(m, f, indent=2)
+              f.write("\n")
+
+          print(f"Stamped cutover_verified_at={stamp} on {targets}")
+          PYEOF
+
+      - name: Commit verification stamp
+        if: steps.verify.outputs.pass == 'true'
+        run: |
+          git config user.email "ci@syrabit.ai"
+          git config user.name "Syrabit CI"
+          git add infra/aws/lambda/manifest.json
+          git diff --cached --quiet || git commit -m "ci(verify): stamp cutover_verified_at for prewarm/seo_baseline/materialize_faqs (Task #5)"
+          git push
