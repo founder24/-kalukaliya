@@ -85,7 +85,7 @@ resource "aws_ecr_lifecycle_policy" "workers" {
 resource "aws_ecr_repository" "bedrock_proxy_use1" {
   provider             = aws.us_east_1
   name                 = "${local.lz_project}/bedrock-proxy"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = false
 
   image_scanning_configuration {
