@@ -273,6 +273,19 @@ data "aws_iam_policy_document" "github_deploy_perms" {
       values   = ["scheduler.amazonaws.com", "lambda.amazonaws.com"]
     }
   }
+
+  # EC2 VPC security-group management — needed by smoke-invoke to open
+  # port 27017 (MongoDB Atlas) egress on the workers_egress SG (Task #10).
+  statement {
+    sid    = "SgEgressManage"
+    effect = "Allow"
+    actions = [
+      "ec2:AuthorizeSecurityGroupEgress",
+      "ec2:RevokeSecurityGroupEgress",
+      "ec2:DescribeSecurityGroups",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
