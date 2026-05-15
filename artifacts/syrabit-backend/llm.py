@@ -3536,8 +3536,7 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         "sarvam": 12000,
         # groq removed in Task #347 / V4 §0
         "gemini": 500000,
-        # the retired aggregator entry was removed in Task #6 (2026-05-09)
-        "openai": 80000,
+        # openai/azure_openai removed in Task #554 (Azure OpenAI tenant decommissioned)
         # bedrock removed in Task #347
     }
 

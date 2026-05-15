@@ -65,7 +65,6 @@ async def admin_patch_plan_tier(plan: str, data: dict, admin: dict = Depends(get
 # API CONFIG
 # ─────────────────────────────────────────────
 DEFAULT_API_CONFIG = {
-    "groq":        {"key": ""},
     "payment":     {"razorpay_key_id": "", "razorpay_key_secret": "", "razorpay_webhook_secret": ""},
     # Task #556 — Amazon SES is the sole transactional email transport
     # (legacy providers retired). Credentials live in env vars

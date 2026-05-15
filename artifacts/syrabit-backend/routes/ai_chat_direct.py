@@ -5,10 +5,9 @@ Architecture (two-layer):
   L1  — per-process TTLCache (instant reads, 2-hr TTL)
   L2  — MongoDB `direct_chat_history` (durable, 30-day auto-expiry TTL index)
 
-LLM calls go through providers.cloudflare_ai which:
-  - Routes via CF AI Gateway when CF_AI_GATEWAY_ID is set (adds caching + logging)
-  - Sends both Authorization + cf-aig-authorization headers (handles authenticated gateways)
-  - Parses both Workers AI native and OpenAI-compat (gpt-oss-*) response formats
+Hardcoded provider routing (V4 §12 — no silent fallbacks):
+  English chat  : Workers-AI chat_stream (llama-3.3-70b → gpt-oss-20b → gpt-oss-120b) → Vertex
+  Assamese chat : Sarvam (sarvam-m) → Workers-AI chat → Vertex
 
 Pipeline per request:
   1. Resolve / mint conversation_id
@@ -17,14 +16,11 @@ Pipeline per request:
      (last 10 pairs) + new user turn
   4. Stream tokens; accumulate full reply
   5. Persist turn: L1 update + Mongo upsert (best-effort — never fails the request)
-
-Model mapping: frontend slugs → cloudflare_ai model_key strings.
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from collections import defaultdict
@@ -41,25 +37,32 @@ from auth_deps import get_current_user_optional
 logger = logging.getLogger("routes.ai_chat_direct")
 router = APIRouter()
 
-# ── Model mapping ──────────────────────────────────────────────────────────────
-# Maps frontend slug → cloudflare_ai.py model_key.
-# cloudflare_ai.MODELS maps model_key → actual CF model ID.
+# ── Hardcoded provider chains (V4 §12 — no silent fallbacks) ──────────────────
+# English chat : Workers-AI chat_stream with model rotation → Vertex fallback
+# Assamese chat: Sarvam (sarvam-m) → Workers-AI chat → Vertex fallback
+# English content (notes/MCQ/flashcard): Vertex → Workers-AI  [in content_format POOL_WEIGHTS]
+# Assamese content: Workers-AI IndicTrans2                    [in assamese_content POOL_WEIGHTS]
+_ENGLISH_STREAM_MODELS = [
+    "chat",       # @cf/meta/llama-3.3-70b-instruct-fp8-fast  — primary
+    "chat_gpt_oss",  # @cf/openai/gpt-oss-20b                 — secondary
+    "chat_long",  # @cf/openai/gpt-oss-120b                   — tertiary
+]
+
+# ── Model mapping (legacy slug → model_key for English path) ──────────────────
 _MODEL_KEY_MAP: dict[str, str] = {
-    "openai/gpt-oss-20b":  "chat_gpt_oss",   # @cf/openai/gpt-oss-20b
-    "openai/gpt-oss-120b": "chat_long",       # @cf/openai/gpt-oss-120b
-    "fast":                "chat",            # @cf/meta/llama-3.3-70b-instruct-fp8-fast
+    "openai/gpt-oss-20b":  "chat_gpt_oss",
+    "openai/gpt-oss-120b": "chat_long",
+    "fast":                "chat",
     "default":             "chat",
-    # pass-through for callers that already use model_key strings
     "chat":                "chat",
     "chat_long":           "chat_long",
     "chat_gpt_oss":        "chat_gpt_oss",
 }
-_DEFAULT_MODEL_KEY = "chat"
 
 def _resolve_model_key(slug: Optional[str]) -> str:
     if not slug:
-        return _DEFAULT_MODEL_KEY
-    return _MODEL_KEY_MAP.get(slug.strip(), _DEFAULT_MODEL_KEY)
+        return "chat"
+    return _MODEL_KEY_MAP.get(slug.strip(), "chat")
 
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -96,7 +99,6 @@ class _ConvStore:
 
     def __init__(self):
         self._lock  = Lock()
-        # {conv_id: {"turns": [(user, asst), ...], "ts": float}}
         self._data: dict[str, dict] = {}
 
     def _evict(self):
@@ -238,7 +240,6 @@ class DirectChatMessage(BaseModel):
     message:         str
     conversation_id: Optional[str] = None
     session_id:      Optional[str] = None
-    # Subject / board context
     subject_id:      Optional[str] = None
     subject_name:    Optional[str] = None
     chapter_id:      Optional[str] = None
@@ -248,10 +249,8 @@ class DirectChatMessage(BaseModel):
     class_id:        Optional[str] = None
     class_name:      Optional[str] = None
     stream_name:     Optional[str] = None
-    # Rich card / document context
     card_context:    Optional[Any]  = None
     document_id:     Optional[str] = None
-    # Model & language
     model:           Optional[str] = None
     response_lang:   Optional[str] = "en"
     lang:            Optional[str] = "en"
@@ -274,7 +273,6 @@ def _build_messages(msg: DirectChatMessage,
     """Assemble the full messages list: system + context + history + user turn."""
     system_parts = [_SYSTEM_PROMPT]
 
-    # Subject / board context block
     ctx: list[str] = []
     if msg.board_name:   ctx.append(f"Board: {msg.board_name}")
     if msg.class_name:   ctx.append(f"Class: {msg.class_name}")
@@ -284,7 +282,6 @@ def _build_messages(msg: DirectChatMessage,
     if ctx:
         system_parts.append("STUDENT CONTEXT:\n" + "\n".join(ctx))
 
-    # Card / document reference material
     if msg.card_context:
         try:
             if isinstance(msg.card_context, dict):
@@ -302,7 +299,6 @@ def _build_messages(msg: DirectChatMessage,
         except Exception:
             pass
 
-    # Language preference
     lang = (msg.response_lang or msg.lang or "en").lower()
     if lang in ("as", "assamese"):
         system_parts.append(
@@ -333,42 +329,86 @@ async def chat_direct(
 
     await _ensure_index()
 
-    conv_id   = msg.conversation_id or _l1.new_id()
-    history   = await _load_history(conv_id)
-    messages  = _build_messages(msg, history)
-    model_key = _resolve_model_key(msg.model)
+    conv_id  = msg.conversation_id or _l1.new_id()
+    history  = await _load_history(conv_id)
+    messages = _build_messages(msg, history)
 
+    lang         = (msg.response_lang or msg.lang or "en").lower()
+    is_assamese  = lang in ("as", "assamese")
     actual_provider = "workers-ai"
-    try:
-        from providers.cloudflare_ai import chat as cf_chat
-        answer = await cf_chat(messages, model_key=model_key, max_tokens=1024)
-    except Exception as exc:
-        logger.warning(
-            "[chat_direct] workers-ai failed (%s): %s — falling back to vertex",
-            type(exc).__name__, exc,
-        )
-        try:
-            from providers.vertex_chat import call_chat as vertex_call_chat
-            answer = await vertex_call_chat(messages, max_tokens=1024)
-            actual_provider = "vertex"
-        except Exception as exc2:
-            logger.error("[chat_direct] vertex fallback also failed: %s", exc2)
-            answer = f"LLM error — please retry. ({type(exc).__name__})"
+    answer       = ""
 
-    user_id  = (user or {}).get("id")
-    anon_id  = request.headers.get("x-anon-id")
-    await _save_turn(conv_id, user_id, anon_id, msg.message, answer,
-                     msg.subject_ctx_dict())
+    if is_assamese:
+        # ── Assamese chain: Sarvam → Workers-AI → Vertex ──────────────────────
+        try:
+            from llm import _SARVAM_PROVIDERS, _call_sarvam_llm
+            if _SARVAM_PROVIDERS:
+                slot = _SARVAM_PROVIDERS[0]
+                answer = await _call_sarvam_llm(messages, slot["key"], "sarvam-m", 1024)
+                actual_provider = "sarvam"
+        except Exception as exc:
+            logger.warning("[chat_direct] Sarvam failed for Assamese: %s", exc)
+
+        if not answer:
+            try:
+                from providers.cloudflare_ai import chat as cf_chat
+                answer = await cf_chat(messages, model_key="chat", max_tokens=1024)
+                actual_provider = "workers-ai"
+            except Exception as exc:
+                logger.warning("[chat_direct] Workers-AI Assamese fallback failed: %s", exc)
+
+        if not answer:
+            try:
+                from providers.vertex_chat import call_chat as vertex_call_chat
+                answer = await vertex_call_chat(messages, max_tokens=1024)
+                actual_provider = "vertex"
+            except Exception as exc:
+                logger.error("[chat_direct] All Assamese providers failed: %s", exc)
+                answer = "AI service temporarily unavailable — please retry."
+
+    else:
+        # ── English chain: Workers-AI (model rotation) → Vertex ───────────────
+        # Honor user's preferred model first, then rotate through the rest
+        preferred = _resolve_model_key(msg.model)
+        try_models = [preferred] + [m for m in _ENGLISH_STREAM_MODELS if m != preferred]
+
+        for model_key in try_models:
+            try:
+                from providers.cloudflare_ai import chat as cf_chat
+                answer = await cf_chat(messages, model_key=model_key, max_tokens=1024)
+                actual_provider = "workers-ai"
+                if answer:
+                    break
+            except Exception as exc:
+                logger.warning("[chat_direct] Workers-AI %s failed: %s", model_key, exc)
+
+        if not answer:
+            try:
+                from providers.vertex_chat import call_chat as vertex_call_chat
+                answer = await vertex_call_chat(messages, max_tokens=1024)
+                actual_provider = "vertex"
+            except Exception as exc:
+                logger.error("[chat_direct] Vertex fallback also failed: %s", exc)
+                answer = "AI service temporarily unavailable — please retry."
+
+    user_id = (user or {}).get("id")
+    anon_id = request.headers.get("x-anon-id")
+    await _save_turn(conv_id, user_id, anon_id, msg.message, answer, msg.subject_ctx_dict())
 
     return JSONResponse({
-        "answer":           answer,
-        "conversation_id":  conv_id,
-        "meta": {"provider": actual_provider, "model_key": model_key, "mode": "direct"},
-        "rag_source":       "none",
-        "rag_chunks_used":  0,
-        "sources":          [],
+        "answer":            answer,
+        "conversation_id":   conv_id,
+        "meta": {
+            "provider": actual_provider,
+            "model_key": "sarvam-m" if is_assamese else _resolve_model_key(msg.model),
+            "mode": "direct",
+            "lang": lang,
+        },
+        "rag_source":        "none",
+        "rag_chunks_used":   0,
+        "sources":           [],
         "credits_remaining": None,
-        "credits_used":     None,
+        "credits_used":      None,
     })
 
 
@@ -383,12 +423,14 @@ async def chat_stream_direct(
 
     await _ensure_index()
 
-    conv_id   = msg.conversation_id or _l1.new_id()
-    history   = await _load_history(conv_id)
-    messages  = _build_messages(msg, history)
-    model_key = _resolve_model_key(msg.model)
-    user_id   = (user or {}).get("id")
-    anon_id   = request.headers.get("x-anon-id")
+    conv_id  = msg.conversation_id or _l1.new_id()
+    history  = await _load_history(conv_id)
+    messages = _build_messages(msg, history)
+    user_id  = (user or {}).get("id")
+    anon_id  = request.headers.get("x-anon-id")
+
+    lang        = (msg.response_lang or msg.lang or "en").lower()
+    is_assamese = lang in ("as", "assamese")
 
     meta_evt = json.dumps({
         "conversation_id": conv_id,
@@ -396,106 +438,133 @@ async def chat_stream_direct(
         "rag_quality":     "none",
         "rag_chunks":      0,
     })
-    done_evt = json.dumps({
-        "event":              "syrabit_done",
-        "conversation_id":    conv_id,
-        "route_trace":        {"mode": "direct", "model_key": model_key,
-                               "provider": "workers-ai"},
-        "sources":             [],
-        "remaining_credits":   None,
-        "credits_used_total":  None,
-    })
 
-    actual_provider = "workers-ai"
+    actual_provider = "sarvam" if is_assamese else "workers-ai"
 
     async def _body():
         nonlocal actual_provider
         yield f"data: {meta_evt}\n\n"
         accumulated: list[str] = []
-        tokens_received = 0
 
-        # ── Primary: Workers-AI streaming ────────────────────────────────────
-        _stream_exc = None
-        try:
-            from providers.cloudflare_ai import chat_stream as cf_stream
-            async for token in cf_stream(messages, model_key=model_key, max_tokens=1024):
-                tokens_received += 1
-                accumulated.append(token)
-                yield f"data: {json.dumps({'content': token})}\n\n"
-        except Exception as exc:
-            _stream_exc = exc
-            import httpx as _httpx
-            if isinstance(exc, _httpx.HTTPStatusError):
-                logger.warning(
-                    "[chat_direct] Workers AI stream HTTP %d (tokens_before=%d) — %s",
-                    exc.response.status_code,
-                    tokens_received,
-                    exc.response.text[:200],
-                )
-            else:
-                logger.warning(
-                    "[chat_direct] Workers AI stream %s (tokens_before=%d): %s",
-                    type(exc).__name__, tokens_received, str(exc)[:200],
-                )
-
-        # ── Fallback: non-stream Workers-AI → Vertex (only if 0 tokens so far) ─
-        if _stream_exc is not None and tokens_received == 0:
-            fallback_text: str | None = None
-
-            # Fallback 1: Workers-AI non-stream (same model, avoids gateway stream path)
+        if is_assamese:
+            # ── Assamese: Sarvam stream → Workers-AI chunked → Vertex chunked ──
+            sarvam_ok = False
             try:
-                from providers.cloudflare_ai import chat as cf_chat
-                fallback_text = await cf_chat(messages, model_key=model_key, max_tokens=1024)
-                if fallback_text:
-                    actual_provider = "workers-ai-nonstream"
-                    logger.info("[chat_direct] non-stream Workers-AI fallback succeeded (%d chars)", len(fallback_text))
-                else:
-                    fallback_text = None
-            except Exception as exc2:
-                logger.warning("[chat_direct] non-stream Workers-AI fallback failed (%s): %s", type(exc2).__name__, str(exc2)[:120])
+                from llm import _SARVAM_PROVIDERS, _stream_sarvam
+                if _SARVAM_PROVIDERS:
+                    slot = _SARVAM_PROVIDERS[0]
+                    async for token in _stream_sarvam(
+                        messages, slot["key"], "sarvam-m", 1024, response_lang="as"
+                    ):
+                        accumulated.append(token)
+                        yield f"data: {json.dumps({'content': token})}\n\n"
+                        sarvam_ok = True
+                    actual_provider = "sarvam"
+            except Exception as exc:
+                logger.warning("[chat_direct] Sarvam stream failed: %s", exc)
 
-            # Fallback 2: Vertex Chat
-            if not fallback_text:
+            if not sarvam_ok:
+                fallback_text: str | None = None
+                try:
+                    from providers.cloudflare_ai import chat as cf_chat
+                    fallback_text = await cf_chat(messages, model_key="chat", max_tokens=1024)
+                    actual_provider = "workers-ai"
+                except Exception as exc:
+                    logger.warning("[chat_direct] Workers-AI Assamese fallback failed: %s", exc)
+
+                if not fallback_text:
+                    try:
+                        from providers.vertex_chat import call_chat as vertex_call_chat
+                        fallback_text = await vertex_call_chat(messages, max_tokens=1024)
+                        actual_provider = "vertex"
+                    except Exception as exc:
+                        logger.error("[chat_direct] All Assamese providers exhausted: %s", exc)
+
+                if fallback_text:
+                    for _i in range(0, len(fallback_text), 6):
+                        _chunk = fallback_text[_i:_i + 6]
+                        accumulated.append(_chunk)
+                        yield f"data: {json.dumps({'content': _chunk})}\n\n"
+                else:
+                    err_tok = "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি পুনৰাই চেষ্টা কৰক।"
+                    accumulated.append(err_tok)
+                    yield f"data: {json.dumps({'content': err_tok})}\n\n"
+
+        else:
+            # ── English: Workers-AI stream (model rotation) → Vertex chunked ───
+            preferred = _resolve_model_key(msg.model)
+            try_models = [preferred] + [m for m in _ENGLISH_STREAM_MODELS if m != preferred]
+
+            tokens_received = 0
+            _stream_exc: Exception | None = None
+
+            for model_key in try_models:
+                _model_exc: Exception | None = None
+                try:
+                    from providers.cloudflare_ai import chat_stream as cf_stream
+                    async for token in cf_stream(messages, model_key=model_key, max_tokens=1024):
+                        tokens_received += 1
+                        accumulated.append(token)
+                        yield f"data: {json.dumps({'content': token})}\n\n"
+                except Exception as exc:
+                    _model_exc = exc
+                    if tokens_received > 0:
+                        # mid-stream break — partial already delivered, stop rotation
+                        _stream_exc = exc
+                        break
+                    logger.warning(
+                        "[chat_direct] Workers-AI stream %s failed (0 tokens): %s",
+                        model_key, str(exc)[:120],
+                    )
+
+                if tokens_received > 0 and _model_exc is None:
+                    actual_provider = "workers-ai"
+                    _stream_exc = None
+                    break
+                elif _model_exc is not None and tokens_received == 0:
+                    _stream_exc = _model_exc
+
+            if _stream_exc is not None and tokens_received == 0:
+                # All Workers-AI stream models failed → Vertex chunked
+                fallback_text: str | None = None
                 try:
                     from providers.vertex_chat import call_chat as vertex_call_chat
                     fallback_text = await vertex_call_chat(messages, max_tokens=1024)
-                    if fallback_text:
-                        actual_provider = "vertex"
-                        logger.info("[chat_direct] Vertex fallback succeeded (%d chars)", len(fallback_text))
-                    else:
-                        fallback_text = None
-                except Exception as exc3:
-                    logger.warning("[chat_direct] Vertex fallback failed (%s): %s", type(exc3).__name__, str(exc3)[:120])
+                    actual_provider = "vertex"
+                    logger.info("[chat_direct] Vertex fallback succeeded (%d chars)", len(fallback_text or ""))
+                except Exception as exc:
+                    logger.error("[chat_direct] Vertex fallback failed: %s", exc)
 
-            if fallback_text:
-                # Chunk the non-stream response for consistent streaming UX
-                _chunk_size = 6
-                for _i in range(0, len(fallback_text), _chunk_size):
-                    _chunk = fallback_text[_i:_i + _chunk_size]
-                    accumulated.append(_chunk)
-                    yield f"data: {json.dumps({'content': _chunk})}\n\n"
-            else:
-                # All fallbacks exhausted — emit a user-visible error
-                import httpx as _httpx2
-                if isinstance(_stream_exc, _httpx2.HTTPStatusError):
-                    _st = _stream_exc.response.status_code
-                    if _st == 429:
-                        err_token = "Service is busy right now — please try again in a moment."
-                    elif _st in (401, 403):
-                        err_token = "AI service authentication error — please contact support."
-                    else:
-                        err_token = f"AI service returned HTTP {_st} — please retry."
+                if fallback_text:
+                    for _i in range(0, len(fallback_text), 6):
+                        _chunk = fallback_text[_i:_i + 6]
+                        accumulated.append(_chunk)
+                        yield f"data: {json.dumps({'content': _chunk})}\n\n"
                 else:
-                    err_token = "AI service temporarily unavailable — please retry."
-                accumulated.append(err_token)
-                yield f"data: {json.dumps({'content': err_token})}\n\n"
+                    import httpx as _httpx
+                    if isinstance(_stream_exc, _httpx.HTTPStatusError):
+                        _st = _stream_exc.response.status_code
+                        if _st == 429:
+                            err_tok = "Service is busy right now — please try again in a moment."
+                        elif _st in (401, 403):
+                            err_tok = "AI service authentication error — please contact support."
+                        else:
+                            err_tok = f"AI service returned HTTP {_st} — please retry."
+                    else:
+                        err_tok = "AI service temporarily unavailable — please retry."
+                    accumulated.append(err_tok)
+                    yield f"data: {json.dumps({'content': err_tok})}\n\n"
 
-        # Rebuild done_evt with the actual provider used
-        _done = json.loads(done_evt)
-        _done["route_trace"]["provider"] = actual_provider
-        yield f"data: {json.dumps(_done)}\n\n"
+        done_evt = json.dumps({
+            "event":             "syrabit_done",
+            "conversation_id":   conv_id,
+            "route_trace":       {"mode": "direct", "lang": lang, "provider": actual_provider},
+            "sources":           [],
+            "remaining_credits": None,
+            "credits_used_total": None,
+        })
+        yield f"data: {done_evt}\n\n"
 
-        # Persist completed turn regardless of error
         await _save_turn(
             conv_id, user_id, anon_id,
             msg.message, "".join(accumulated),

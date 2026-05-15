@@ -1622,9 +1622,6 @@ async def admin_llm_speed_test(admin: dict = Depends(get_admin_user)):
                     result["total_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
                     result["tokens"] = token_count
                     result["ok"] = token_count > 0
-            elif p_name == "groq":
-                result["error"] = f"{p_name} provider removed from pool"
-                result["ok"] = False
         except Exception as exc:
             result["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
             result["total_ms"] = round((_time.perf_counter() - t0) * 1000, 1)
@@ -1664,9 +1661,8 @@ async def admin_llm_pool_stats(admin: dict = Depends(get_admin_user)):
     # Annotate each slot with the configured limit and env-var that controls it.
     _env_keys = {
         "workers-ai": "WORKERS_AI_RPM_LIMIT",
-        "groq":        "GROQ_RPM_LIMIT",
-        "sarvam":      "SARVAM_RPM_LIMIT",
-        "gemini":      "GEMINI_RPM_LIMIT",
+        "sarvam":     "SARVAM_RPM_LIMIT",
+        "gemini":     "GEMINI_RPM_LIMIT",
     }
     for stat in [*chat_stats, *content_stats]:
         stat["rpm_env_var"] = _env_keys.get(stat["provider"])

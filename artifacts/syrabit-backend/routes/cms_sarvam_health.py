@@ -4601,10 +4601,9 @@ _METRICS_CACHE_TTL = 5
 # recovery within the next admin-side poll (~30s by default).
 _THROTTLE_TILE_KEYS = (
     "workers_ai_throttle",
-    "groq_throttle",
     "gemini_throttle",
-    # Task #554 — `azure_openai_throttle` retired alongside the Azure
-    # OpenAI tenant (chat is now Vertex → Workers-AI Llama-3.2-3B).
+    # groq_throttle removed — groq retired in Task #347 / V4 §0
+    # azure_openai_throttle removed in Task #554 (Azure OpenAI tenant decommissioned)
     "deepgram_throttle",
     "assamese_chat_unavailable",
 )
@@ -4632,9 +4631,7 @@ def _build_throttle_tiles() -> dict:
     _wai_burst_60 = 0
     _wai_burst_180 = 0
     _wai_threshold = 5
-    _groq_burst_60 = 0
-    _groq_burst_180 = 0
-    _groq_threshold = 5
+    # groq burst tracking removed — groq retired in Task #347 / V4 §0
     _gemini_burst_60 = 0
     _gemini_burst_180 = 0
     _gemini_threshold = 5
@@ -4648,8 +4645,6 @@ def _build_throttle_tiles() -> dict:
         from llm import get_provider_429_burst_inprocess as _get_p_burst_ip
         _wai_burst_60 = _get_wai_burst_ip(60)
         _wai_burst_180 = _get_wai_burst(180)
-        _groq_burst_60 = _get_p_burst_ip("groq", 60)
-        _groq_burst_180 = _get_p_burst("groq", 180)
         _gemini_burst_60 = _get_p_burst_ip("gemini", 60)
         _gemini_burst_180 = _get_p_burst("gemini", 180)
         # Task #554 — azure_openai burst tracking removed.
@@ -4660,7 +4655,6 @@ def _build_throttle_tiles() -> dict:
     try:
         from metrics import _ALERT_THRESHOLDS as _at
         _wai_threshold = int(_at.get("workers_ai_429_burst_threshold", 5))
-        _groq_threshold = int(_at.get("groq_429_burst_threshold", 5))
         _gemini_threshold = int(_at.get("gemini_429_burst_threshold", 5))
         # Task #554 — azure_openai 429 threshold removed.
         _deepgram_threshold = int(_at.get("deepgram_429_burst_threshold", 5))
@@ -4697,12 +4691,6 @@ def _build_throttle_tiles() -> dict:
             "burst_180s": _wai_burst_180,
             "alert_threshold": _wai_threshold,
             "throttled": _wai_burst_60 >= _wai_threshold,
-        },
-        "groq_throttle": {
-            "burst_60s": _groq_burst_60,
-            "burst_180s": _groq_burst_180,
-            "alert_threshold": _groq_threshold,
-            "throttled": _groq_burst_60 >= _groq_threshold,
         },
         "gemini_throttle": {
             "burst_60s": _gemini_burst_60,

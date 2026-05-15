@@ -1033,12 +1033,11 @@ _VISION_ANALYSIS_PROMPT = (
 )
 
 
-async def _analyze_with_groq_vision(b64_img: str, mime: str = "image/jpeg") -> dict:
+async def _analyze_with_vision(b64_img: str, mime: str = "image/jpeg") -> dict:
     """Analyse a book-cover image via PROVIDER_PRIORITY['vision'] weighted dispatch.
 
-    Routes through call_vision_with_dispatch: Vertex/Gemini (weight 2000) →
-    Azure OpenAI (weight 1, 2nd-to-last) → Workers AI (weight 0, last-resort).
-    Returns {} if all providers fail — no Groq/OpenRouter fallback.
+    Routes through call_vision_with_dispatch: Vertex/Gemini (primary) →
+    Workers AI (last-resort). Returns {} if all providers fail.
     """
     raw = None
     try:
@@ -1271,7 +1270,7 @@ async def generate_cms_thumbnails(
     original_url = f"data:image/png;base64,{b64_src}"
 
     # ── Vision analysis + PIL fallback ──────────────────────────────────────
-    analysis = await _analyze_with_groq_vision(b64_src, "image/png")
+    analysis = await _analyze_with_vision(b64_src, "image/png")
     pil_colors = _extract_dominant_colors(img_bytes_resized)
 
     if analysis.get("dominant_colors"):
@@ -1367,7 +1366,7 @@ async def generate_ai_thumbnails(
     original_url = f"data:image/png;base64,{b64_src}"
 
     # ── Step 1: Groq Vision analysis — colors + text bounding boxes ──────
-    analysis = await _analyze_with_groq_vision(b64_src, "image/png")
+    analysis = await _analyze_with_vision(b64_src, "image/png")
 
     # ── Step 2: PIL color extraction (always-on fallback) ─────────────────
     pil_colors = _extract_dominant_colors(img_bytes_resized)
@@ -1488,7 +1487,7 @@ async def generate_ai_thumbnails_bulk(
             img_bytes_r = buf.read()
             pil_colors = _extract_dominant_colors(img_bytes_r)
             b64_src = base64.b64encode(img_bytes_r).decode()
-            analysis = await _analyze_with_groq_vision(b64_src, "image/png")
+            analysis = await _analyze_with_vision(b64_src, "image/png")
             all_colors = (analysis.get("dominant_colors", [])[:3] + pil_colors)[:5] or pil_colors
             text_regions = _sanitize_text_regions(analysis.get("text_regions", []))
             loop = asyncio.get_event_loop()
