@@ -979,6 +979,18 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         _mb_query_user_memories(user_id, msg.message) if user_id else asyncio.sleep(0),
         return_exceptions=True,
     )
+    # Task #360 round-9 — contextvars propagation fix.
+    # asyncio.gather() wraps each coroutine in a Task that COPIES the current
+    # context; ContextVar.set() inside those child Tasks never propagates back
+    # to the parent Task. _ns_prefetch_history() calls mark_mongo_read() from
+    # inside the gather, so the parent's _mongo_read_done flag stays False when
+    # _dispatch_llm_for_feature's assert_mongo_read_or_raise() runs later.
+    # Re-call in the parent context here so the enforcement guard sees the flag.
+    try:
+        from chat_turn_context import mark_mongo_read as _mmr_parent_ns
+        _mmr_parent_ns()
+    except Exception:
+        pass
     _subj_ctx_result = _phase0_results[0] if not isinstance(_phase0_results[0], BaseException) else {}
     _sem_class_result = _phase0_results[1] if not isinstance(_phase0_results[1], BaseException) else None
     document_text = _phase0_results[2] if not isinstance(_phase0_results[2], BaseException) else None
@@ -2797,6 +2809,17 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
                 _pre_results.append(_defaults_pre[_i])
         else:
             _pre_results.append(_defaults_pre[_i])
+
+    # Task #360 round-9 — contextvars propagation fix (stream path).
+    # asyncio.create_task() child Tasks copy the parent context; ContextVar
+    # mutations inside them (mark_mongo_read inside _prefetch_history) never
+    # propagate back. Re-call in the parent Task context so
+    # assert_mongo_read_or_raise() sees the flag when the LLM dispatches.
+    try:
+        from chat_turn_context import mark_mongo_read as _mmr_parent_st
+        _mmr_parent_st()
+    except Exception:
+        pass
 
     if _pre_results:
         _subj_ctx_result, _sem_class_result, document_text, _stream_followup_info, _prefetched_conv, _s_prefetched_chapters, _user_memories_st = _pre_results
