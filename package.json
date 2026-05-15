@@ -27,7 +27,7 @@
       "postcss": "8.5.12",
       "undici": "7.25.0",
       "protobufjs": "7.5.8",
-      "@protobufjs/utf8": "1.1.0",
+      "@protobufjs/utf8": "1.1.1",
       "ip-address": "10.2.0"
     }
   }
