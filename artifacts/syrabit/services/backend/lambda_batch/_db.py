@@ -21,9 +21,21 @@ def _sanitize_mongo_uri(uri: str) -> str:
     password includes RFC-3986-reserved characters (``@``, ``:``, ``/``, etc.)
     that are not percent-encoded.  This helper fixes the URI at the last ``@``
     boundary (i.e. the credential/host delimiter) so double-encoding is safe.
+
+    Raises ``RuntimeError`` early if ``uri`` does not start with a recognised
+    MongoDB scheme so the caller gets a clear message instead of a confusing
+    PyMongo port-parse error (V4 §12 no-silent-fallbacks).
     """
     import re
     from urllib.parse import quote_plus, unquote_plus
+
+    uri = uri.strip()
+    if not uri.startswith(("mongodb://", "mongodb+srv://")):
+        raise RuntimeError(
+            f"MONGO_URL does not look like a MongoDB URI "
+            f"(scheme={uri[:30]!r}…) — check the secret value in AWS SM "
+            f"at path syrabit/prod/mongo/url"
+        )
 
     m = re.match(r"^(mongodb(?:\+srv)?://)(.+)$", uri, re.DOTALL)
     if not m:
@@ -44,6 +56,49 @@ def _sanitize_mongo_uri(uri: str) -> str:
     return f"{prefix}{user}:{password}@{host_part}"
 
 
+def _extract_uri_from_secret(raw: str) -> str:
+    """Extract a MongoDB URI from a raw Secrets Manager secret string.
+
+    Handles both a bare URI string and JSON blobs with various key names
+    used by Atlas, Terraform, and other tooling.  Falls back to scanning
+    all string values in the JSON for the first one that starts with
+    ``mongodb``.  Raises ``RuntimeError`` if nothing usable is found.
+    """
+    raw = raw.strip()
+    # Fast path: bare URI.
+    if raw.startswith(("mongodb://", "mongodb+srv://")):
+        return raw
+    # JSON blob — try known key names in priority order.
+    if raw.startswith("{"):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"MONGO_URL secret looks like JSON but failed to parse: {exc}") from exc
+        # Ordered list of key names used by Atlas UI, Terraform, and ops tooling.
+        for key in (
+            "uri", "URI",
+            "url", "URL",
+            "value",
+            "mongo_url", "MONGO_URL",
+            "connection_string", "connectionString",
+            "secret", "key",
+        ):
+            if key in data and isinstance(data[key], str) and data[key].strip():
+                return data[key].strip()
+        # Last-resort: first string value that looks like a MongoDB URI.
+        for v in data.values():
+            if isinstance(v, str) and v.strip().startswith(("mongodb://", "mongodb+srv://")):
+                return v.strip()
+        raise RuntimeError(
+            f"MONGO_URL secret is JSON but contains no recognised URI key. "
+            f"Available keys: {list(data.keys())}"
+        )
+    raise RuntimeError(
+        f"MONGO_URL secret is not a MongoDB URI and not JSON "
+        f"(first 40 chars: {raw[:40]!r})"
+    )
+
+
 def _resolve_mongo_uri() -> str:
     # Direct env var wins (used in shadow mode + local tests).
     direct = os.environ.get("MONGO_URL", "").strip()
@@ -56,11 +111,8 @@ def _resolve_mongo_uri() -> str:
     sm = boto3.client("secretsmanager")
     resp = sm.get_secret_value(SecretId=arn)
     raw = resp.get("SecretString") or ""
-    # The secret may be a bare URI or a JSON blob with a `uri` key.
-    raw = raw.strip()
-    if raw.startswith("{"):
-        raw = json.loads(raw).get("uri", raw)
-    return _sanitize_mongo_uri(raw)
+    uri = _extract_uri_from_secret(raw)
+    return _sanitize_mongo_uri(uri)
 
 
 def get_db() -> Any:
