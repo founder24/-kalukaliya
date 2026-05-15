@@ -338,12 +338,22 @@ async def chat_direct(
     messages  = _build_messages(msg, history)
     model_key = _resolve_model_key(msg.model)
 
+    actual_provider = "workers-ai"
     try:
         from providers.cloudflare_ai import chat as cf_chat
         answer = await cf_chat(messages, model_key=model_key, max_tokens=1024)
     except Exception as exc:
-        logger.error("[chat_direct] cf_chat error: %s", exc)
-        answer = f"LLM error — please retry. ({type(exc).__name__})"
+        logger.warning(
+            "[chat_direct] workers-ai failed (%s): %s — falling back to vertex",
+            type(exc).__name__, exc,
+        )
+        try:
+            from providers.vertex_chat import call_chat as vertex_call_chat
+            answer = await vertex_call_chat(messages, max_tokens=1024)
+            actual_provider = "vertex"
+        except Exception as exc2:
+            logger.error("[chat_direct] vertex fallback also failed: %s", exc2)
+            answer = f"LLM error — please retry. ({type(exc).__name__})"
 
     user_id  = (user or {}).get("id")
     anon_id  = request.headers.get("x-anon-id")
@@ -353,7 +363,7 @@ async def chat_direct(
     return JSONResponse({
         "answer":           answer,
         "conversation_id":  conv_id,
-        "meta": {"provider": "workers-ai", "model_key": model_key, "mode": "direct"},
+        "meta": {"provider": actual_provider, "model_key": model_key, "mode": "direct"},
         "rag_source":       "none",
         "rag_chunks_used":  0,
         "sources":          [],
