@@ -1,0 +1,241 @@
+name: Lambda Smoke-Invoke — prewarm/seo_baseline/materialize_faqs (Task #5)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "If true, only check function configs (no actual invoke)"
+        required: false
+        default: "false"
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  smoke-invoke:
+    name: Invoke + verify all 3 Lambda functions
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Describe function configs
+        run: |
+          for FN in syrabit-prewarm-seo-routes syrabit-seo-baseline syrabit-materialize-chapter-faqs; do
+            echo "=== $FN ==="
+            aws lambda get-function-configuration \
+              --function-name "$FN" \
+              --region ap-south-1 \
+              --query '{State: State, LastUpdateStatus: LastUpdateStatus, Runtime: Runtime, Handler: Handler, Timeout: Timeout, MemorySize: MemorySize, LastModified: LastModified}' \
+              --output json 2>/dev/null || echo "  ERROR: function not found"
+          done
+
+      - name: Check EventBridge schedules
+        run: |
+          echo "=== EventBridge schedules ==="
+          aws scheduler list-schedules \
+            --group-name default \
+            --region ap-south-1 \
+            --query 'Schedules[?contains(Name, `syrabit`)].{Name:Name, State:State, Expression:ScheduleExpression}' \
+            --output table 2>/dev/null || echo "  ERROR: could not list schedules (may not have scheduler:ListSchedules permission)"
+
+          aws events list-rules \
+            --region ap-south-1 \
+            --query 'Rules[?contains(Name, `syrabit`)].{Name:Name, State:State, Schedule:ScheduleExpression}' \
+            --output table 2>/dev/null || echo "  (no classic EventBridge rules for syrabit)"
+
+      - name: Invoke each Lambda synchronously
+        if: inputs.dry_run != 'true'
+        id: invoke
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lambda-results
+          PASS=true
+          INVOKED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "invoked_at=$INVOKED_AT" >> "$GITHUB_OUTPUT"
+
+          invoke_fn() {
+            local FN="$1"
+            local OUT="/tmp/lambda-results/${FN}.json"
+            echo "=== Invoking ${FN} at ${INVOKED_AT} ==="
+            # Synchronous invoke (RequestResponse), capture status code + response
+            HTTP_CODE=$(aws lambda invoke \
+              --function-name "$FN" \
+              --invocation-type RequestResponse \
+              --log-type Tail \
+              --payload '{"source":"github-actions","task":"smoke-invoke","trigger":"manual-task-5-verification"}' \
+              --region ap-south-1 \
+              --cli-binary-format raw-in-base64-out \
+              --query 'StatusCode' \
+              --output text \
+              "$OUT" 2>/dev/null || echo "0")
+
+            echo "  HTTP status code: ${HTTP_CODE}"
+
+            if [ -f "$OUT" ]; then
+              echo "  Response payload:"
+              cat "$OUT" | python3 -m json.tool 2>/dev/null || cat "$OUT"
+            fi
+
+            # StatusCode 200 = success for RequestResponse
+            if [ "${HTTP_CODE}" = "200" ]; then
+              # Check for FunctionError in response
+              if grep -q '"errorMessage"\|"errorType"\|"FunctionError"' "$OUT" 2>/dev/null; then
+                echo "  ✗ Function returned an error payload"
+                PASS=false
+              else
+                echo "  ✓ ${FN}: invoked successfully (HTTP 200)"
+              fi
+            else
+              echo "  ✗ ${FN}: invoke returned HTTP ${HTTP_CODE}"
+              PASS=false
+            fi
+          }
+
+          invoke_fn "syrabit-prewarm-seo-routes"
+          invoke_fn "syrabit-seo-baseline"
+          invoke_fn "syrabit-materialize-chapter-faqs"
+
+          if [ "${PASS}" = "true" ]; then
+            echo "pass=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pass=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for CloudWatch logs to appear
+        if: inputs.dry_run != 'true' && steps.invoke.outputs.pass == 'true'
+        run: |
+          echo "Waiting 15s for CloudWatch log propagation..."
+          sleep 15
+
+      - name: Check CloudWatch log streams for evidence
+        if: inputs.dry_run != 'true'
+        id: cwlogs
+        run: |
+          set -euo pipefail
+          SINCE_EPOCH=$(python3 -c "
+          import datetime
+          t = '${{ steps.invoke.outputs.invoked_at }}'
+          dt = datetime.datetime.fromisoformat(t.replace('Z','+00:00'))
+          # subtract 60s safety margin
+          print(int((dt.timestamp() - 60) * 1000))
+          ")
+          PASS=true
+
+          check_cw() {
+            local FN="$1"
+            local LOG_GROUP="/aws/lambda/${FN}"
+            STREAMS=$(aws logs describe-log-streams \
+              --log-group-name "${LOG_GROUP}" \
+              --order-by LastEventTime \
+              --descending \
+              --max-items 3 \
+              --region ap-south-1 \
+              --query 'logStreams[?lastEventTimestamp>=`'"${SINCE_EPOCH}"'`].[logStreamName,lastEventTimestamp]' \
+              --output text 2>/dev/null || echo "")
+
+            if [ -z "${STREAMS}" ]; then
+              echo "  ✗ ${FN}: no CW log stream found after invocation"
+              PASS=false
+              return
+            fi
+
+            STREAM_NAME=$(echo "${STREAMS}" | head -1 | awk '{print $1}')
+            echo "  ✓ ${FN}: CW stream ${STREAM_NAME}"
+
+            # Fetch last few lines
+            EVENTS=$(aws logs get-log-events \
+              --log-group-name "${LOG_GROUP}" \
+              --log-stream-name "${STREAM_NAME}" \
+              --start-time "${SINCE_EPOCH}" \
+              --region ap-south-1 \
+              --query 'events[-10:].message' \
+              --output text 2>/dev/null | head -10 || echo "")
+            echo "$EVENTS"
+          }
+
+          echo "=== CloudWatch evidence ==="
+          check_cw "syrabit-prewarm-seo-routes"
+          check_cw "syrabit-seo-baseline"
+          check_cw "syrabit-materialize-chapter-faqs"
+
+          echo "=== Alarm states ==="
+          for ALARM in \
+            "syrabit-cache-prewarm-success-rate-low" \
+            "seo-baseline-score-regression" \
+            "seo-baseline-failures-high"; do
+            STATE=$(aws cloudwatch describe-alarms \
+              --alarm-names "${ALARM}" \
+              --region ap-south-1 \
+              --query 'MetricAlarms[0].StateValue' \
+              --output text 2>/dev/null || echo "UNKNOWN")
+            echo "  ${ALARM}: ${STATE}"
+          done
+
+          if [ "${PASS}" = "true" ]; then
+            echo "cwpass=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cwpass=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload invocation results as artifact
+        if: inputs.dry_run != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-smoke-invoke-results
+          path: /tmp/lambda-results/
+          retention-days: 30
+
+      - name: Stamp manifest with invocation timestamp
+        if: inputs.dry_run != 'true' && steps.invoke.outputs.pass == 'true' && steps.cwlogs.outputs.cwpass == 'true'
+        run: |
+          python3 - <<PYEOF
+          import json, os
+
+          invoked_at = "${{ steps.invoke.outputs.invoked_at }}"
+          run_url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          with open("infra/aws/lambda/manifest.json") as f:
+              m = json.load(f)
+
+          targets = {"prewarm_seo_routes", "seo_baseline", "materialize_chapter_faqs"}
+          for job in m.get("migrated_jobs", []):
+              mod = job.get("aca_module", "").split(".")[-1]
+              if mod in targets:
+                  job["cutover_verified_at"] = invoked_at
+                  job["cutover_verified_by"] = "invoke-lambda-smoke.yml"
+                  job["cutover_verification_run"] = run_url
+
+          with open("infra/aws/lambda/manifest.json", "w") as f:
+              json.dump(m, f, indent=2)
+              f.write("\n")
+
+          print(f"Stamped cutover_verified_at={invoked_at} for {targets}")
+          PYEOF
+
+      - name: Commit verification stamp
+        if: inputs.dry_run != 'true' && steps.invoke.outputs.pass == 'true' && steps.cwlogs.outputs.cwpass == 'true'
+        run: |
+          git config user.email "ci@syrabit.ai"
+          git config user.name "Syrabit CI"
+          git add infra/aws/lambda/manifest.json
+          git diff --cached --quiet || git commit -m "ci(task-5): stamp cutover_verified_at — smoke-invoke confirmed CW logs [Task #5]"
+          git push
+
+      - name: Final status
+        if: inputs.dry_run != 'true'
+        run: |
+          if [ "${{ steps.invoke.outputs.pass }}" = "true" ] && [ "${{ steps.cwlogs.outputs.cwpass }}" = "true" ]; then
+            echo "ALL CHECKS PASSED — Task #5 cutover verification complete"
+          else
+            echo "SOME CHECKS FAILED — review step outputs above"
+            exit 1
+          fi
