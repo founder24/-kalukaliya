@@ -55,6 +55,62 @@ jobs:
             echo "Seeded OK — URI: $MASKED"
           fi
 
+      - name: Inject MONGO_URL directly into Lambda env (belt-and-suspenders, Task #10)
+        env:
+          MONGO_URI: ${{ secrets.KV_SEED_MONGO_URI }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MONGO_URI:-}" ]; then
+            echo "KV_SEED_MONGO_URI not set — skipping direct Lambda env inject"
+            exit 0
+          fi
+          if ! echo "$MONGO_URI" | grep -qE '^mongodb(\+srv)?://'; then
+            echo "KV_SEED_MONGO_URI is not a valid MongoDB URI — skipping inject"
+            exit 0
+          fi
+          MASKED=$(echo "$MONGO_URI" | python3 -c \
+            "import sys,re; u=sys.stdin.read().strip(); print(re.sub(r'(://[^:]+:)[^@]+(@)',r'\1***\2',u)[:120])")
+          echo "Injecting MONGO_URL=$MASKED into Lambda env vars..."
+          for FN in syrabit-prewarm-seo-routes syrabit-seo-baseline syrabit-materialize-chapter-faqs; do
+            CURRENT_JSON=$(aws lambda get-function-configuration \
+              --function-name "$FN" --region ap-south-1 \
+              --query 'Environment.Variables' --output json 2>/dev/null || echo '{}')
+            # Write URI to temp file to avoid shell quoting issues with special chars.
+            python3 - <<PYEOF
+          import json, os, subprocess, sys, tempfile
+
+          env_vars = json.loads('''${CURRENT_JSON}''')
+          env_vars['MONGO_URL'] = os.environ['MONGO_URI']
+          payload = json.dumps({'Variables': env_vars})
+
+          with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+              f.write(payload)
+              tmp = f.name
+
+          result = subprocess.run(
+              ['aws', 'lambda', 'update-function-configuration',
+               '--function-name', '${FN}',
+               '--environment', f'file://{tmp}',
+               '--region', 'ap-south-1',
+               '--query', 'LastUpdateStatus',
+               '--output', 'text'],
+              capture_output=True, text=True
+          )
+          os.unlink(tmp)
+          if result.returncode != 0:
+              print(f'  ERROR updating {FN}: {result.stderr[:200]}', file=sys.stderr)
+              sys.exit(1)
+          print(f'  ✓ {FN}: LastUpdateStatus={result.stdout.strip()}')
+          PYEOF
+          done
+          echo "Waiting 10s for Lambda configuration updates to propagate..."
+          sleep 10
+          # Verify Active state before invoking.
+          for FN in syrabit-prewarm-seo-routes syrabit-seo-baseline syrabit-materialize-chapter-faqs; do
+            aws lambda wait function-updated --function-name "$FN" --region ap-south-1 2>/dev/null && \
+              echo "  ✓ $FN: configuration Active" || echo "  ⚠ $FN: wait timed out (continuing)"
+          done
+
       - name: Describe function configs
         run: |
           for FN in syrabit-prewarm-seo-routes syrabit-seo-baseline syrabit-materialize-chapter-faqs; do
