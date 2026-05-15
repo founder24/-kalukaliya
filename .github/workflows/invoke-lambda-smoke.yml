@@ -124,8 +124,31 @@ jobs:
             --query 'Rules[?contains(Name, `syrabit`)].{Name:Name, State:State, Schedule:ScheduleExpression}' \
             --output table 2>/dev/null || echo "  (no classic EventBridge rules for syrabit)"
 
+      - name: Self-bootstrap ec2 SG permission via BootstrapSelfUpdate (Task #10)
+        run: |
+          set -euo pipefail
+          echo "Granting ec2:AuthorizeSecurityGroupEgress to github-deploy via BootstrapSelfUpdate..."
+          aws iam put-role-policy \
+            --role-name github-deploy \
+            --policy-name smoke-invoke-sg-hotfix \
+            --policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Sid": "SgHotfix27017",
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:AuthorizeSecurityGroupEgress",
+                  "ec2:DescribeSecurityGroups",
+                  "ec2:RevokeSecurityGroupEgress"
+                ],
+                "Resource": "*"
+              }]
+            }'
+          echo "IAM inline policy set — waiting 10s for propagation..."
+          sleep 10
+          echo "EC2 SG permission ready."
+
       - name: Ensure workers_egress SG allows port 27017 (MongoDB Atlas, Task #10)
-        continue-on-error: true
         run: |
           set -euo pipefail
           SG_ID=$(aws ec2 describe-security-groups \
