@@ -1,0 +1,83 @@
+name: Seed MONGO_URL into AWS Secrets Manager (Task #8)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  seed-and-verify:
+    name: Seed syrabit/prod/mongo/url → AWS SM
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+      SECRET_PATH: syrabit/prod/mongo/url
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Verify secret is a placeholder
+        run: |
+          CURRENT=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_PATH" \
+            --region ap-south-1 \
+            --query 'SecretString' --output text 2>/dev/null || echo "NOT_FOUND")
+          echo "Current value (first 60 chars): ${CURRENT:0:60}"
+          if echo "$CURRENT" | grep -q '"_placeholder"'; then
+            echo "Confirmed placeholder — will overwrite."
+          elif echo "$CURRENT" | grep -qE '^mongodb(\+srv)?://'; then
+            echo "Secret already contains a real URI — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Secret exists but is not a placeholder or URI — will overwrite anyway."
+          fi
+        id: check
+
+      - name: Seed real MONGO_URL
+        if: steps.check.outputs.skip != 'true'
+        env:
+          MONGO_URI: ${{ secrets.KV_SEED_MONGO_URI }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MONGO_URI:-}" ]; then
+            echo "ERROR: KV_SEED_MONGO_URI secret is empty — cannot seed."
+            exit 1
+          fi
+          # Verify it looks like a MongoDB URI before writing
+          if ! echo "$MONGO_URI" | grep -qE '^mongodb(\+srv)?://'; then
+            echo "ERROR: KV_SEED_MONGO_URI does not look like a MongoDB URI (first 30: ${MONGO_URI:0:30})"
+            exit 1
+          fi
+          aws secretsmanager put-secret-value \
+            --secret-id "$SECRET_PATH" \
+            --secret-string "$MONGO_URI" \
+            --region ap-south-1
+          echo "Seeded $SECRET_PATH successfully."
+
+      - name: Verify seeded value is a real URI
+        run: |
+          SEEDED=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_PATH" \
+            --region ap-south-1 \
+            --query 'SecretString' --output text 2>/dev/null || echo "ERROR")
+          if echo "$SEEDED" | grep -qE '^mongodb(\+srv)?://'; then
+            # Show only scheme + host (mask credentials)
+            MASKED=$(echo "$SEEDED" | python3 -c "
+import sys, re
+uri = sys.stdin.read().strip()
+masked = re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', uri)
+print(masked[:120])
+")
+            echo "Verification OK — seeded URI: $MASKED"
+          else
+            echo "ERROR: Seeded value is not a MongoDB URI."
+            exit 1
+          fi
