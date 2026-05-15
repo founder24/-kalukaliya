@@ -189,4 +189,4 @@ def handler(event, context):  # noqa: ARG001
         "seo_baseline summary: %s",
         json.dumps(summary, default=str)[:600],
     )
-    return {"ok": True, "summary": summary}
+    return json.loads(json.dumps({"ok": True, "summary": summary}, default=str))
