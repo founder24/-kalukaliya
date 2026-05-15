@@ -124,6 +124,18 @@ variable "gcp_credits_start_date" {
   default     = "2025-08-01"
 }
 
+# Task #10 — Belt-and-suspenders direct URI injection. When non-empty this
+# bypasses Secrets Manager entirely on cold-start (_resolve_mongo_uri checks
+# MONGO_URL before MONGO_URL_SECRET_ARN). Set via TF_VAR_mongo_url_direct
+# or --var at apply time. Leave empty in terraform.tfvars; the actual value
+# is injected via the smoke-invoke GHA step and persists on the function.
+variable "mongo_url_direct" {
+  type        = string
+  description = "Direct MongoDB URI injected as a Lambda env var (bypasses Secrets Manager). Leave empty to rely on MONGO_URL_SECRET_ARN."
+  default     = ""
+  sensitive   = true
+}
+
 # `pinecone` and `workers_embed` data sources are already declared in
 # `sqs-reembed.tf`. We reference them directly below.
 
@@ -414,6 +426,11 @@ resource "aws_lambda_function" "batch_job" {
       # `sqs-reembed.tf` (`pinecone/api-key`, `workers-embed/secret`)
       # rather than introducing a parallel naming convention.
       # `mongo/url` is registered alongside in `secrets.tf`.
+      # Task #10 — Direct URI bypasses Secrets Manager when var is set.
+      # _resolve_mongo_uri checks MONGO_URL before MONGO_URL_SECRET_ARN.
+      # Default is "" (empty string is falsy in Python's os.environ.get + strip),
+      # so the ARN fallback remains active when TF_VAR_mongo_url_direct is unset.
+      MONGO_URL                         = var.mongo_url_direct
       MONGO_URL_SECRET_ARN              = data.aws_secretsmanager_secret.mongo_url.arn
       PINECONE_API_KEY_SECRET           = data.aws_secretsmanager_secret.pinecone.arn
       WORKERS_EMBED_SECRET_ARN          = data.aws_secretsmanager_secret.workers_embed.arn
