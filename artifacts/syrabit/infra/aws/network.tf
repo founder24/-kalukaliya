@@ -192,6 +192,18 @@ resource "aws_security_group" "workers_egress" {
     cidr_blocks = [aws_vpc.workers.cidr_block]
   }
 
+  # Task #10 — Lambda batch jobs connect to MongoDB Atlas on port 27017.
+  # The Atlas cluster endpoint resolves to public IPs routed via NAT;
+  # without this rule the TCP SYN is silently dropped by the SG, causing
+  # the driver to raise ServerSelectionTimeoutError after 15 s.
+  egress {
+    description = "MongoDB Atlas (port 27017) for Lambda batch jobs"
+    from_port   = 27017
+    to_port     = 27017
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = merge(local.lz_common_tags, {
     Name = "${local.lz_project}-workers-egress"
   })
