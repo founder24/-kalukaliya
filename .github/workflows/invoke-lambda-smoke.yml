@@ -75,33 +75,29 @@ jobs:
             CURRENT_JSON=$(aws lambda get-function-configuration \
               --function-name "$FN" --region ap-south-1 \
               --query 'Environment.Variables' --output json 2>/dev/null || echo '{}')
-            # Write URI to temp file to avoid shell quoting issues with special chars.
-            python3 - <<PYEOF
-          import json, os, subprocess, sys, tempfile
-
-          env_vars = json.loads('''${CURRENT_JSON}''')
-          env_vars['MONGO_URL'] = os.environ['MONGO_URI']
-          payload = json.dumps({'Variables': env_vars})
-
-          with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
-              f.write(payload)
-              tmp = f.name
-
-          result = subprocess.run(
-              ['aws', 'lambda', 'update-function-configuration',
-               '--function-name', '${FN}',
-               '--environment', f'file://{tmp}',
-               '--region', 'ap-south-1',
-               '--query', 'LastUpdateStatus',
-               '--output', 'text'],
-              capture_output=True, text=True
-          )
-          os.unlink(tmp)
-          if result.returncode != 0:
-              print(f'  ERROR updating {FN}: {result.stderr[:200]}', file=sys.stderr)
-              sys.exit(1)
-          print(f'  ✓ {FN}: LastUpdateStatus={result.stdout.strip()}')
-          PYEOF
+            # Build updated env JSON via Python (env vars avoid shell quoting issues
+            # with special characters in the URI).  Pass CURRENT_JSON + MONGO_URI +
+            # LAMBDA_FN as env vars so Python never needs to f-string a shell var.
+            export CURRENT_JSON LAMBDA_FN="$FN"
+            TMP=$(python3 -c "
+import json, os, tempfile
+env_vars = json.loads(os.environ['CURRENT_JSON'])
+env_vars['MONGO_URL'] = os.environ['MONGO_URI']
+with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+    json.dump({'Variables': env_vars}, f)
+    print(f.name)
+")
+            STATUS=$(aws lambda update-function-configuration \
+              --function-name "$FN" \
+              --environment "file://$TMP" \
+              --region ap-south-1 \
+              --query 'LastUpdateStatus' \
+              --output text 2>&1) && RC=0 || RC=$?
+            rm -f "$TMP"
+            if [ "$RC" -ne 0 ]; then
+              echo "  ERROR updating $FN: $STATUS"; exit 1
+            fi
+            echo "  ✓ $FN: LastUpdateStatus=$STATUS"
           done
           echo "Waiting 10s for Lambda configuration updates to propagate..."
           sleep 10
