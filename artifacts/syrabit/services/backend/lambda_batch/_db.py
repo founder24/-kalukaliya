@@ -69,8 +69,13 @@ def get_db() -> Any:
     global _client, _db
     if _db is not None:
         return _db
+    import logging, re as _re
+    _log = logging.getLogger("lambda_batch._db")
     from motor.motor_asyncio import AsyncIOMotorClient  # type: ignore
     uri = _resolve_mongo_uri()
+    # Log masked URI structure to CloudWatch for diagnostics (password hidden).
+    masked = _re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", uri)
+    _log.info("_db.get_db: scheme+host=%s len=%d", masked[:300], len(uri))
     _client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
     db_name = os.environ.get("MONGO_DB_NAME", "syrabit")
     _db = _client[db_name]
