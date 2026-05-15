@@ -13,7 +13,7 @@
       "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
       "shadow_start": "2026-05-07",
       "shadow_end": "2026-05-14",
-      "cutover_status": "pending_shadow"
+      "cutover_status": "live"
     },
     {
       "aca_module": "aca_jobs.embed_backfill",
@@ -26,7 +26,7 @@
       "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
       "shadow_start": "2026-05-07",
       "shadow_end": "2026-05-14",
-      "cutover_status": "pending_shadow"
+      "cutover_status": "live"
     },
     {
       "aca_module": "aca_jobs.comprehend_sampler",
@@ -39,7 +39,7 @@
       "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
       "shadow_start": "2026-05-07",
       "shadow_end": "2026-05-14",
-      "cutover_status": "pending_shadow"
+      "cutover_status": "live"
     },
     {
       "aca_module": "aca_jobs.prewarm_seo_routes",
@@ -54,7 +54,7 @@
       "notes": "SEO prewarm engine (Spec §9 Tasks #574 + #575). Selects top-N chapters by 7-day analytics traffic UNION every chapter under a subject whose exam window starts within PREWARM_EXAM_LOOKAHEAD_DAYS, walks all 7 PAGE_TYPES per chapter, issues HEAD through Cloudflare so the worker fills its tiered cache, persists run summary to db.seo_prewarm_runs (consumed by /api/admin/seo/prewarm-coverage), and emits Syrabit/Cache::PrewarmSuccessRate to CloudWatch (alarm fires at <0.90).",
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
-      "cutover_status": "pending_shadow"
+      "cutover_status": "live"
     },
     {
       "aca_module": "aca_jobs.seo_baseline",
@@ -69,7 +69,7 @@
       "notes": "Weekly SEO baseline runner (Task #28). Wraps scripts/seo_baseline.py — Lighthouse + JSON-LD validator + Google Rich Results sampler over 20 chapter pages (4 boards × 5 chapters × notes page-type) — persists the full report to db.seo_baseline_runs (consumed by /api/admin/seo/baseline-latest), pre-computes the WoW median-SEO-score delta against the prior run, and emits Syrabit/SEO::{MedianSeoScore,PagesWithFailures,MedianSeoScoreWoWDelta} to CloudWatch. Two alarms ride on these metrics: seo-baseline-score-regression (WoW delta < -5) + seo-baseline-failures-high (>2 sampled pages with per-leg failures). Memory bumped to 1024 MB because Lighthouse + headless Chromium burns ~600 MB resident.",
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
-      "cutover_status": "pending_shadow"
+      "cutover_status": "live"
     },
     {
       "aca_module": "aca_jobs.materialize_chapter_faqs",
@@ -84,7 +84,7 @@
       "notes": "AEO Answer-Card + FAQ materializer. Walks every chapter, mines PYQ corpus + syllabus graph for 5-10 deterministic Q->A pairs and a 40-60-word Quick-Answer per chapter, renders via content_formatter.format_content(query_type='faq'/'quick_answer') and writes to db.chapter_faqs (authoritative) + db.aeo_faq_entries / db.aeo_quick_answers (renderer views consumed by routes/seo_pages.py) + Cloudflare KV / Redis under the Task #6 fingerprint key.",
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
-      "cutover_status": "pending_shadow"
+      "cutover_status": "live"
     }
   ],
   "exempt_modules": [
@@ -97,6 +97,7 @@
   ],
   "_task_87_doc": "Task #87 / Task #47 — `aca_jobs/supabase_auth_canary.py` is the *prep* PR for the Supabase auth cutover. Its docstring explicitly defers Lambda + EventBridge wiring to the destructive cutover PR (so the JWKS infra can be reviewed without TF churn). Listed here so the canonical-delegation guard does not require a manifest entry until the destructive PR lands the matching `lambda_batch/supabase_auth_canary.py` handler + Terraform block in `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf`. Remove this exemption when the cutover ships.",
   "_task_571_doc": "Task #571 — `cache-effectiveness` is a *new* batch shipper, not an ACA-Jobs migration; it has no `aca_module` counterpart. Listed in `auxiliary_jobs` below so the dead-providers CI guard (which only walks `aca_jobs/*.py`) does not require an entry, while the lambda-batch-jobs.tf locals.batch_jobs table still mirrors it 1:1.",
+  "_pending_shadow_policy": "Jobs with cutover_status=pending_shadow are intentionally deferred until their shadow_end date is reached and at least one successful shadow execution has been verified in CloudWatch. The three jobs prewarm_seo_routes, seo_baseline, and materialize_chapter_faqs have shadow_end=2026-05-16. They MUST NOT be flipped to live before that date. Cutover is tracked in follow-up task #2.",
   "auxiliary_jobs": [
     {
       "name": "chat-credit-runway",

@@ -5002,6 +5002,15 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
+    // Task #1 — JWT_SECRET startup guard. A missing binding causes every
+    // JWT verification to silently treat the caller as anonymous, letting
+    // unauthenticated requests bypass credit caps and paid-tier checks.
+    // Fail loud (V4 §12) rather than silently degrade auth. This check
+    // fires on the first request after a deploy; CF Workers have no
+    // explicit startup hook so the request handler is the earliest point.
+    if (!(env as Env & { JWT_SECRET?: string }).JWT_SECRET) {
+      throw new Error("[startup] JWT_SECRET binding is absent — refusing to handle requests with missing auth secret");
+    }
     // Wall-clock at handler entry — used for the duration_ms field on
     // the unified-log record. Captured *before* the inner handler runs
     // so the buffered record reflects the full edge processing time
