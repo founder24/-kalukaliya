@@ -406,40 +406,94 @@ async def chat_stream_direct(
         "credits_used_total":  None,
     })
 
+    actual_provider = "workers-ai"
+
     async def _body():
+        nonlocal actual_provider
         yield f"data: {meta_evt}\n\n"
         accumulated: list[str] = []
+        tokens_received = 0
+
+        # ── Primary: Workers-AI streaming ────────────────────────────────────
+        _stream_exc = None
         try:
             from providers.cloudflare_ai import chat_stream as cf_stream
             async for token in cf_stream(messages, model_key=model_key, max_tokens=1024):
+                tokens_received += 1
                 accumulated.append(token)
                 yield f"data: {json.dumps({'content': token})}\n\n"
         except Exception as exc:
-            # Log with HTTP status code when available (helps diagnose gateway auth drift)
+            _stream_exc = exc
+            import httpx as _httpx
+            if isinstance(exc, _httpx.HTTPStatusError):
+                logger.warning(
+                    "[chat_direct] Workers AI stream HTTP %d (tokens_before=%d) — %s",
+                    exc.response.status_code,
+                    tokens_received,
+                    exc.response.text[:200],
+                )
+            else:
+                logger.warning(
+                    "[chat_direct] Workers AI stream %s (tokens_before=%d): %s",
+                    type(exc).__name__, tokens_received, str(exc)[:200],
+                )
+
+        # ── Fallback: non-stream Workers-AI → Vertex (only if 0 tokens so far) ─
+        if _stream_exc is not None and tokens_received == 0:
+            fallback_text: str | None = None
+
+            # Fallback 1: Workers-AI non-stream (same model, avoids gateway stream path)
             try:
-                import httpx as _httpx
-                if isinstance(exc, _httpx.HTTPStatusError):
-                    logger.error(
-                        "[chat_direct] Workers AI HTTP %d — %s  body=%.200s",
-                        exc.response.status_code,
-                        exc.request.url,
-                        exc.response.text,
-                    )
-                    status = exc.response.status_code
-                    if status == 429:
+                from providers.cloudflare_ai import chat as cf_chat
+                fallback_text = await cf_chat(messages, model_key=model_key, max_tokens=1024)
+                if fallback_text:
+                    actual_provider = "workers-ai-nonstream"
+                    logger.info("[chat_direct] non-stream Workers-AI fallback succeeded (%d chars)", len(fallback_text))
+                else:
+                    fallback_text = None
+            except Exception as exc2:
+                logger.warning("[chat_direct] non-stream Workers-AI fallback failed (%s): %s", type(exc2).__name__, str(exc2)[:120])
+
+            # Fallback 2: Vertex Chat
+            if not fallback_text:
+                try:
+                    from providers.vertex_chat import call_chat as vertex_call_chat
+                    fallback_text = await vertex_call_chat(messages, max_tokens=1024)
+                    if fallback_text:
+                        actual_provider = "vertex"
+                        logger.info("[chat_direct] Vertex fallback succeeded (%d chars)", len(fallback_text))
+                    else:
+                        fallback_text = None
+                except Exception as exc3:
+                    logger.warning("[chat_direct] Vertex fallback failed (%s): %s", type(exc3).__name__, str(exc3)[:120])
+
+            if fallback_text:
+                # Chunk the non-stream response for consistent streaming UX
+                _chunk_size = 6
+                for _i in range(0, len(fallback_text), _chunk_size):
+                    _chunk = fallback_text[_i:_i + _chunk_size]
+                    accumulated.append(_chunk)
+                    yield f"data: {json.dumps({'content': _chunk})}\n\n"
+            else:
+                # All fallbacks exhausted — emit a user-visible error
+                import httpx as _httpx2
+                if isinstance(_stream_exc, _httpx2.HTTPStatusError):
+                    _st = _stream_exc.response.status_code
+                    if _st == 429:
                         err_token = "Service is busy right now — please try again in a moment."
-                    elif status in (401, 403):
+                    elif _st in (401, 403):
                         err_token = "AI service authentication error — please contact support."
                     else:
-                        err_token = f"AI service returned HTTP {status} — please retry."
+                        err_token = f"AI service returned HTTP {_st} — please retry."
                 else:
-                    logger.error("[chat_direct] stream error (%s): %s", type(exc).__name__, exc)
-                    err_token = "AI service error — please retry."
-            except Exception:
-                logger.error("[chat_direct] stream error: %s", exc)
-                err_token = "AI service error — please retry."
-            accumulated.append(err_token)
-            yield f"data: {json.dumps({'content': err_token})}\n\n"
+                    err_token = "AI service temporarily unavailable — please retry."
+                accumulated.append(err_token)
+                yield f"data: {json.dumps({'content': err_token})}\n\n"
+
+        # Rebuild done_evt with the actual provider used
+        _done = json.loads(done_evt)
+        _done["route_trace"]["provider"] = actual_provider
+        yield f"data: {json.dumps(_done)}\n\n"
 
         # Persist completed turn regardless of error
         await _save_turn(
@@ -447,7 +501,6 @@ async def chat_stream_direct(
             msg.message, "".join(accumulated),
             msg.subject_ctx_dict(),
         )
-        yield f"data: {done_evt}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

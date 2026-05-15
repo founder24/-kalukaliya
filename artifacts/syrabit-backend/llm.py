@@ -3472,12 +3472,16 @@ async def call_llm_api_stream(messages: list, model: str = None, max_tokens: int
         _mt = _clamp_max_tokens(p_model, max_tokens)
         if p_name == "workers-ai":
             logger.info(f"LLM stream: provider=workers-ai, model={p_model}")
-            from providers.cloudflare_ai import stream_chat as _cf_stream
+            from providers.cloudflare_ai import chat_stream as _cf_stream
             if p_model.startswith("@cf/"):
                 model_key = p_model
             else:
                 model_key = "chat"
-                if "120b" in p_model or "gpt-oss" in p_model:
+                if "gpt-oss-120b" in p_model or ("gpt-oss" in p_model and "120b" in p_model):
+                    model_key = "chat_long"
+                elif "gpt-oss" in p_model:
+                    model_key = "chat_gpt_oss"
+                elif "120b" in p_model:
                     model_key = "chat_long"
                 elif "coder" in p_model:
                     model_key = "chat_code"
