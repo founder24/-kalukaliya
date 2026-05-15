@@ -1,0 +1,126 @@
+name: Lambda Image Rebuild + Code Update (Task #5)
+
+on:
+  workflow_dispatch:
+    inputs:
+      functions:
+        description: "Comma-separated function names (default: all 3)"
+        required: false
+        default: "syrabit-prewarm-seo-routes,syrabit-seo-baseline,syrabit-materialize-chapter-faqs"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PRIMARY_REGION: ap-south-1
+  ACCOUNT_ID: "271740379017"
+  ECR_PRI: "271740379017.dkr.ecr.ap-south-1.amazonaws.com"
+
+jobs:
+  rebuild-and-update:
+    name: Build + push ECR image → update Lambda code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Login to ECR (ap-south-1)
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+        with:
+          registries: ${{ env.ACCOUNT_ID }}
+
+      - name: Detect Lambda Dockerfile location
+        id: dockerfile
+        run: |
+          # The batch-jobs image is built from the sqs_consumers Dockerfile
+          # (same image, different handler CMD). Find it relative to the repo root.
+          CANDIDATES=(
+            "artifacts/syrabit-backend/Dockerfile.lambda"
+            "artifacts/syrabit/services/backend/Dockerfile.lambda"
+            "artifacts/syrabit/services/backend/sqs_consumers/Dockerfile"
+            "artifacts/syrabit-backend/sqs_consumers/Dockerfile"
+            "artifacts/syrabit/infra/aws/Dockerfile.lambda_batch"
+          )
+          for c in "${CANDIDATES[@]}"; do
+            if [ -f "$c" ]; then
+              echo "Found Dockerfile: $c"
+              echo "dockerfile=$c" >> "$GITHUB_OUTPUT"
+              echo "context=$(dirname "$c")" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+          if [ -z "$(grep 'dockerfile=' "$GITHUB_OUTPUT")" ]; then
+            echo "No Lambda Dockerfile found in known locations — listing candidates..."
+            find . -name "Dockerfile*" | grep -i lambda | head -20 || true
+            find . -name "Dockerfile" -path "*/sqs*" | head -10 || true
+            exit 1
+          fi
+
+      - name: Determine ECR repo + image tag
+        id: image
+        run: |
+          # All three Lambda batch jobs share one container image; the Lambda's
+          # CMD / image_config.command sets the handler module.
+          ECR_REPO="${ECR_PRI}/syrabit-lambda-batch"
+          SHORT_SHA="${GITHUB_SHA::8}"
+          IMAGE_URI="${ECR_REPO}:${SHORT_SHA}"
+          LATEST_URI="${ECR_REPO}:latest"
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+          echo "latest_uri=${LATEST_URI}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Building: ${IMAGE_URI}"
+
+      - name: Build + push Lambda batch image
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --file "${{ steps.dockerfile.outputs.dockerfile }}" \
+            --context "${{ steps.dockerfile.outputs.context }}" \
+            --tag "${{ steps.image.outputs.image_uri }}" \
+            --tag "${{ steps.image.outputs.latest_uri }}" \
+            --push \
+            --provenance false \
+            .
+
+      - name: Update Lambda function code for each target
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.image.outputs.image_uri }}"
+          IFS=',' read -ra FUNCS <<< "${{ inputs.functions || 'syrabit-prewarm-seo-routes,syrabit-seo-baseline,syrabit-materialize-chapter-faqs' }}"
+
+          for FN in "${FUNCS[@]}"; do
+            FN=$(echo "$FN" | xargs)  # trim whitespace
+            echo "=== Updating ${FN} → ${IMAGE} ==="
+            aws lambda update-function-code \
+              --function-name "$FN" \
+              --image-uri "$IMAGE" \
+              --region ap-south-1 \
+              --query '{FunctionName: FunctionName, CodeSize: CodeSize, LastUpdateStatus: LastUpdateStatus}' \
+              --output json 2>/dev/null || { echo "  ERROR updating ${FN}"; exit 1; }
+
+            echo "  Waiting for update to complete..."
+            aws lambda wait function-updated \
+              --function-name "$FN" \
+              --region ap-south-1 2>/dev/null && echo "  ✓ ${FN}: active"
+          done
+
+      - name: Verify function states after update
+        run: |
+          IFS=',' read -ra FUNCS <<< "${{ inputs.functions || 'syrabit-prewarm-seo-routes,syrabit-seo-baseline,syrabit-materialize-chapter-faqs' }}"
+          for FN in "${FUNCS[@]}"; do
+            FN=$(echo "$FN" | xargs)
+            aws lambda get-function-configuration \
+              --function-name "$FN" \
+              --region ap-south-1 \
+              --query '{State: State, LastUpdateStatus: LastUpdateStatus}' \
+              --output json 2>/dev/null
+          done
