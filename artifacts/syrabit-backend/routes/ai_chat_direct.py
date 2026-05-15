@@ -405,8 +405,29 @@ async def chat_stream_direct(
                 accumulated.append(token)
                 yield f"data: {json.dumps({'content': token})}\n\n"
         except Exception as exc:
-            logger.error("[chat_direct] stream error: %s", exc)
-            err_token = f"[LLM error — please retry. ({type(exc).__name__})]"
+            # Log with HTTP status code when available (helps diagnose gateway auth drift)
+            try:
+                import httpx as _httpx
+                if isinstance(exc, _httpx.HTTPStatusError):
+                    logger.error(
+                        "[chat_direct] Workers AI HTTP %d — %s  body=%.200s",
+                        exc.response.status_code,
+                        exc.request.url,
+                        exc.response.text,
+                    )
+                    status = exc.response.status_code
+                    if status == 429:
+                        err_token = "Service is busy right now — please try again in a moment."
+                    elif status in (401, 403):
+                        err_token = "AI service authentication error — please contact support."
+                    else:
+                        err_token = f"AI service returned HTTP {status} — please retry."
+                else:
+                    logger.error("[chat_direct] stream error (%s): %s", type(exc).__name__, exc)
+                    err_token = "AI service error — please retry."
+            except Exception:
+                logger.error("[chat_direct] stream error: %s", exc)
+                err_token = "AI service error — please retry."
             accumulated.append(err_token)
             yield f"data: {json.dumps({'content': err_token})}\n\n"
 

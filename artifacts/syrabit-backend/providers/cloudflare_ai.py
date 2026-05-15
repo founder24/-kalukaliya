@@ -89,14 +89,6 @@ _http_client: Optional[httpx.AsyncClient] = None
 _http_lock = asyncio.Lock()
 
 
-def _headers() -> Dict[str, str]:
-    h = {"Authorization": f"Bearer {_API_TOKEN}"}
-    if _GW_TOKEN:
-        h["cf-aig-authorization"] = f"Bearer {_GW_TOKEN}"
-        h["cf-aig-cache-ttl"] = str(_GW_CACHE_TTL)
-    return h
-
-
 async def _get_client() -> httpx.AsyncClient:
     global _http_client
     async with _http_lock:
@@ -108,11 +100,32 @@ async def _get_client() -> httpx.AsyncClient:
     return _http_client
 
 
-def _model_url(model_key: str) -> str:
+def _model_url(model_key: str, *, direct: bool = False) -> str:
+    """Return the Workers AI endpoint URL for model_key.
+
+    When direct=True (or the AI Gateway is not configured) always returns the
+    canonical direct Workers AI URL so the caller can bypass a misconfigured
+    or unauthorised gateway without changing credentials.
+    """
     model = MODELS.get(model_key, model_key)
-    if _ACCOUNT_ID and _GW_ID:
+    if _ACCOUNT_ID and _GW_ID and not direct:
         return f"{_BASE_URL}/{model}"
     return f"https://api.cloudflare.com/client/v4/accounts/{_ACCOUNT_ID}/ai/run/{model}"
+
+
+def _headers(*, direct: bool = False) -> Dict[str, str]:
+    """Return request headers.
+
+    When direct=True we are talking to api.cloudflare.com directly, NOT the
+    AI Gateway, so the cf-aig-* headers must be omitted — some CF edge nodes
+    treat an unexpected cf-aig-authorization on a direct-API request as a
+    routing hint and forward to the wrong backend, causing spurious 4xx.
+    """
+    h: Dict[str, str] = {"Authorization": f"Bearer {_API_TOKEN}"}
+    if _GW_TOKEN and not direct:
+        h["cf-aig-authorization"] = f"Bearer {_GW_TOKEN}"
+        h["cf-aig-cache-ttl"] = str(_GW_CACHE_TTL)
+    return h
 
 
 # ── Rate-limit retry config ────────────────────────────────────────────────────
@@ -131,78 +144,111 @@ async def _post(model_key: str, payload: dict, *, stream: bool = False,
       - 429 (rate-limited): exponential back-off with jitter, up to
         _POST_MAX_RETRIES attempts total.
       - 5xx (transient gateway error): single immediate retry.
+      - 401/403 from the CF AI Gateway (auth drift) → single retry via the
+        direct Workers AI API, bypassing the gateway.  This covers the case
+        where CF_AI_GATEWAY_TOKEN in Azure Key Vault is stale after an API
+        token rotation.
       - Any other 4xx or final failure: raise_for_status().
     Streaming responses are NOT retried (caller controls the stream lifecycle).
     """
     import random  # stdlib, cheap import
-    url = _model_url(model_key)
-    client = await _get_client()
-    headers = {**_headers(), "Content-Type": "application/json"}
-    if stream:
-        headers["Accept"] = "text/event-stream"
 
-    last_resp = None
-    for attempt in range(1, _POST_MAX_RETRIES + 1):
-        resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
-        last_resp = resp
+    use_direct = False  # upgraded to True if the gateway returns 401/403
 
-        # Task #403 — feed CF AI Gateway response headers (cf-aig-*) into the
-        # observability counters whenever the request actually went through the
-        # gateway. Pure observation: never raises, never blocks the chat path.
-        # When the direct CF API URL is in use (no _GW_ID), the headers carry
-        # no cf-aig-* values and record_aig_response() no-ops via summary.present.
-        try:
-            from ai_gateway_observability import record_aig_response
-            record_aig_response(
-                resp.headers,
-                provider="workers-ai",
-                model=MODELS.get(model_key, model_key),
-            )
-        except Exception:
-            pass
-
+    for _pass in range(2):  # pass 0 = gateway/default, pass 1 = direct fallback
+        url = _model_url(model_key, direct=use_direct)
+        client = await _get_client()
+        hdrs = {**_headers(direct=use_direct), "Content-Type": "application/json"}
         if stream:
-            resp.raise_for_status()
-            return resp
+            hdrs["Accept"] = "text/event-stream"
 
-        if resp.status_code == 429:
-            if attempt == _POST_MAX_RETRIES:
-                break
-            # Respect Retry-After header if present, else exponential back-off
-            retry_after = resp.headers.get("retry-after", "")
+        last_resp = None
+        for attempt in range(1, _POST_MAX_RETRIES + 1):
+            resp = await client.post(url, json=payload, headers=hdrs, timeout=timeout)
+            last_resp = resp
+
+            # Task #403 — feed CF AI Gateway response headers into observability.
             try:
-                wait_s = float(retry_after)
-            except (ValueError, TypeError):
-                wait_s = _POST_RETRY_BASE_S * (2 ** (attempt - 1)) * (0.5 + random.random() * 0.5)
-            wait_s = min(wait_s, 30.0)
-            logger.warning(
-                "[cf-ai] %s 429 rate-limited (attempt %d/%d) — waiting %.1fs",
-                MODELS.get(model_key, model_key), attempt, _POST_MAX_RETRIES, wait_s,
-            )
-            await asyncio.sleep(wait_s)
-            continue
+                from ai_gateway_observability import record_aig_response
+                record_aig_response(
+                    resp.headers,
+                    provider="workers-ai" if not use_direct else "workers-ai-direct",
+                    model=MODELS.get(model_key, model_key),
+                )
+            except Exception:
+                pass
 
-        if resp.status_code >= 500 and attempt < _POST_MAX_RETRIES:
-            wait_s = _POST_RETRY_BASE_S * attempt
-            logger.warning(
-                "[cf-ai] %s HTTP %d (attempt %d/%d) — retrying in %.1fs",
-                MODELS.get(model_key, model_key), resp.status_code, attempt, _POST_MAX_RETRIES, wait_s,
-            )
-            await asyncio.sleep(wait_s)
-            continue
+            if stream:
+                if resp.status_code in (401, 403) and _GW_ID and not use_direct:
+                    logger.warning(
+                        "[cf-ai] gateway %d on stream (pass 0) — falling back to direct API. "
+                        "CF_AI_GATEWAY_TOKEN may be stale. model=%s body=%.120s",
+                        resp.status_code, MODELS.get(model_key, model_key),
+                        resp.text,
+                    )
+                    use_direct = True
+                    break  # break inner loop → retry outer pass with direct URL
+                resp.raise_for_status()
+                return resp
 
-        resp.raise_for_status()
-        data = resp.json()
+            if resp.status_code in (401, 403) and _GW_ID and not use_direct:
+                logger.warning(
+                    "[cf-ai] gateway %d (pass 0) — falling back to direct Workers AI API. "
+                    "CF_AI_GATEWAY_TOKEN may be stale. model=%s body=%.120s",
+                    resp.status_code, MODELS.get(model_key, model_key),
+                    resp.text,
+                )
+                use_direct = True
+                break  # break inner loop → next outer pass uses direct URL
+
+            if resp.status_code == 429:
+                if attempt == _POST_MAX_RETRIES:
+                    break
+                retry_after = resp.headers.get("retry-after", "")
+                try:
+                    wait_s = float(retry_after)
+                except (ValueError, TypeError):
+                    wait_s = _POST_RETRY_BASE_S * (2 ** (attempt - 1)) * (0.5 + random.random() * 0.5)
+                wait_s = min(wait_s, 30.0)
+                logger.warning(
+                    "[cf-ai] %s 429 rate-limited (attempt %d/%d) — waiting %.1fs",
+                    MODELS.get(model_key, model_key), attempt, _POST_MAX_RETRIES, wait_s,
+                )
+                await asyncio.sleep(wait_s)
+                continue
+
+            if resp.status_code >= 500 and attempt < _POST_MAX_RETRIES:
+                wait_s = _POST_RETRY_BASE_S * attempt
+                logger.warning(
+                    "[cf-ai] %s HTTP %d (attempt %d/%d) — retrying in %.1fs",
+                    MODELS.get(model_key, model_key), resp.status_code, attempt, _POST_MAX_RETRIES, wait_s,
+                )
+                await asyncio.sleep(wait_s)
+                continue
+
+            resp.raise_for_status()
+            data = resp.json()
+            if "result" in data:
+                return data["result"]
+            return data
+        else:
+            # inner for-loop exhausted without break → all retries used up
+            last_resp.raise_for_status()
+            data = last_resp.json()
+            if "result" in data:
+                return data["result"]
+            return data
+        # inner loop broke (gateway auth fallback) → continue outer pass loop
+
+    # Both passes exhausted — this path is only reached if the direct fallback
+    # also returned something unexpected.  Surface whatever last_resp holds.
+    if last_resp is not None:
+        last_resp.raise_for_status()
+        data = last_resp.json()
         if "result" in data:
             return data["result"]
         return data
-
-    # All retries exhausted — surface the final 429 / 5xx
-    last_resp.raise_for_status()
-    data = last_resp.json()
-    if "result" in data:
-        return data["result"]
-    return data
+    raise RuntimeError("[cf-ai] _post: no response obtained")
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
@@ -252,7 +298,12 @@ async def chat_stream(
     model_key: str = "chat",
     max_tokens: int = 2048,
 ) -> AsyncIterator[str]:
-    """Stream chat tokens as an async generator of delta strings."""
+    """Stream chat tokens as an async generator of delta strings.
+
+    Gateway-auth fallback: if the CF AI Gateway returns 401 or 403 (e.g.
+    CF_AI_GATEWAY_TOKEN in Key Vault is stale), we automatically retry via
+    the direct Workers AI API before surfacing an error.
+    """
     if not _ENABLED:
         raise RuntimeError("Cloudflare AI not configured")
     payload: Dict[str, Any] = {
@@ -260,46 +311,72 @@ async def chat_stream(
         "max_tokens": max_tokens,
         "stream": True,
     }
-    url = _model_url(model_key)
-    client = await _get_client()
-    headers = {**_headers(), "Content-Type": "application/json", "Accept": "text/event-stream"}
-    async with client.stream("POST", url, json=payload, headers=headers, timeout=120.0) as resp:
-        # Task #403 — feed CF AI Gateway response headers (cf-aig-*) into the
-        # observability counters as soon as the streaming response object
-        # exists, before any tokens flow. Best-effort, never blocks the stream.
-        try:
-            from ai_gateway_observability import record_aig_response
-            record_aig_response(
-                resp.headers,
-                provider="workers-ai-stream",
-                model=MODELS.get(model_key, model_key),
-            )
-        except Exception:
-            pass
-        resp.raise_for_status()
-        async for line in resp.aiter_lines():
-            if not line.startswith("data: "):
-                continue
-            raw = line[6:]
-            if raw.strip() == "[DONE]":
-                break
+
+    for _pass in range(2):  # pass 0 = gateway, pass 1 = direct fallback
+        use_direct = (_pass == 1)
+        url = _model_url(model_key, direct=use_direct)
+        client = await _get_client()
+        hdrs = {
+            **_headers(direct=use_direct),
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        gateway_auth_failed = False
+        async with client.stream("POST", url, json=payload, headers=hdrs, timeout=120.0) as resp:
+            # Task #403 — observability headers, best-effort.
             try:
-                chunk = json.loads(raw)
-                # Workers AI native format: {"response": "..."}
-                delta = chunk.get("response") or ""
-                # OpenAI-compat format (e.g. gpt-oss-120b reasoning models):
-                # {"choices":[{"delta":{"content":"..."}}]}
-                # Also handle reasoning-only chunks where content is null but
-                # reasoning_content holds the token.
-                if not delta:
-                    choices = chunk.get("choices") or []
-                    if choices:
-                        d = choices[0].get("delta") or {}
-                        delta = d.get("content") or d.get("reasoning_content") or ""
-                if delta:
-                    yield delta
-            except json.JSONDecodeError:
-                continue
+                from ai_gateway_observability import record_aig_response
+                record_aig_response(
+                    resp.headers,
+                    provider="workers-ai-stream" if not use_direct else "workers-ai-stream-direct",
+                    model=MODELS.get(model_key, model_key),
+                )
+            except Exception:
+                pass
+
+            # Gateway-auth fallback: on 401/403 with a configured gateway,
+            # log and retry via direct API on the next pass.
+            if resp.status_code in (401, 403) and _GW_ID and not use_direct:
+                body_snippet = ""
+                try:
+                    body_snippet = (await resp.aread()).decode("utf-8", errors="replace")[:200]
+                except Exception:
+                    pass
+                logger.warning(
+                    "[cf-ai] chat_stream gateway HTTP %d — "
+                    "CF_AI_GATEWAY_TOKEN may be stale. model=%s body=%.120s — "
+                    "retrying via direct Workers AI API",
+                    resp.status_code, MODELS.get(model_key, model_key), body_snippet,
+                )
+                gateway_auth_failed = True
+            else:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    raw = line[6:]
+                    if raw.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                        # Workers AI native: {"response": "..."}
+                        delta = chunk.get("response") or ""
+                        # OpenAI-compat (gpt-oss-120b etc.):
+                        # {"choices":[{"delta":{"content":"..."}}]}
+                        if not delta:
+                            choices = chunk.get("choices") or []
+                            if choices:
+                                d = choices[0].get("delta") or {}
+                                delta = d.get("content") or d.get("reasoning_content") or ""
+                        if delta:
+                            yield delta
+                    except json.JSONDecodeError:
+                        continue
+                return  # stream completed — no need for fallback pass
+
+        if not gateway_auth_failed:
+            return  # exited context manager without auth failure — we're done
+        # gateway_auth_failed = True → continue outer loop with direct URL
 
 
 # ── Embeddings ────────────────────────────────────────────────────────────────
