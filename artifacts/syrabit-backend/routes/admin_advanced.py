@@ -4154,6 +4154,159 @@ async def admin_diagnostics(
     }
 
 
+# ── Sarvam CF AI Gateway probe ────────────────────────────────────────────────
+
+_SARVAM_PROBE_MESSAGES = [
+    {"role": "system", "content": "You are a test assistant. Reply concisely."},
+    {"role": "user",   "content": "Reply with exactly the word: OK"},
+]
+_SARVAM_PROBE_PAYLOAD = {
+    "model":      "sarvam-m",
+    "messages":   _SARVAM_PROBE_MESSAGES,
+    "max_tokens": 8,
+    "temperature": 0.0,
+    "stream":     False,
+}
+
+
+async def _probe_sarvam_endpoint(
+    base_url: str,
+    headers: dict,
+    label: str,
+    timeout: float = 10.0,
+) -> dict:
+    """Make a minimal non-stream call to base_url/v1/chat/completions.
+
+    Returns a dict with: ok, ttfb_ms, answer, status_code, error.
+    Never raises — all exceptions are captured in 'error'.
+    """
+    import time as _t
+    result: dict = {"label": label, "base_url": base_url, "ok": False,
+                    "ttfb_ms": None, "answer": None, "status_code": None, "error": None}
+    t0 = _t.perf_counter()
+    try:
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            headers=headers,
+            timeout=httpx.Timeout(connect=5.0, read=timeout, write=5.0, pool=2.0),
+            verify=True,
+        ) as client:
+            resp = await client.post("/v1/chat/completions", json=_SARVAM_PROBE_PAYLOAD)
+            result["ttfb_ms"] = round((_t.perf_counter() - t0) * 1000, 1)
+            result["status_code"] = resp.status_code
+            if resp.status_code >= 400:
+                result["error"] = f"HTTP {resp.status_code}: {resp.text[:300]}"
+            else:
+                data = resp.json()
+                answer = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                result["answer"] = answer.strip()
+                result["ok"] = bool(answer.strip())
+    except Exception as exc:
+        result["ttfb_ms"] = round((_t.perf_counter() - t0) * 1000, 1)
+        result["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+    return result
+
+
+@router.post("/admin/sarvam/gateway-check")
+async def admin_sarvam_gateway_check(
+    admin: dict = Depends(get_admin_user),
+    probe_direct: bool = False,
+):
+    """Verify Sarvam connectivity through the Cloudflare AI Gateway custom provider.
+
+    Tests the full production path:
+      CF AI Gateway (custom-sarvam slug) → api.sarvam.ai/v1/chat/completions
+
+    The Sarvam custom provider does NOT support BYOK key-substitution —
+    the real SARVAM_API_KEY must be present and is sent in the
+    `api-subscription-key` header directly.  The CF authenticated gateway
+    `cf-aig-authorization` header is added when CF_AI_GATEWAY_TOKEN is set.
+
+    Set ?probe_direct=true to also probe api.sarvam.ai directly for comparison.
+    """
+    from config import (
+        CF_GATEWAY_ENABLED, CF_GATEWAY_BASE,
+        CF_AI_GATEWAY_TOKEN, SARVAM_BASE_URL,
+        SARVAM_API_KEY, cf_gateway_url,
+    )
+    import os as _os
+
+    gateway_url    = cf_gateway_url("sarvam") if CF_GATEWAY_ENABLED else ""
+    key_present    = bool(SARVAM_API_KEY)
+    token_present  = bool(CF_AI_GATEWAY_TOKEN)
+    account_id     = _os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "")
+    gateway_id     = _os.environ.get("CF_AI_GATEWAY_ID", "")
+
+    config_summary = {
+        "gateway_enabled":       CF_GATEWAY_ENABLED,
+        "gateway_base":          CF_GATEWAY_BASE or None,
+        "sarvam_gateway_url":    gateway_url or None,
+        "sarvam_direct_url":     SARVAM_BASE_URL,
+        "account_id":            account_id or None,
+        "gateway_id":            gateway_id or None,
+        "sarvam_api_key_present": key_present,
+        "cf_gateway_token_present": token_present,
+        "custom_provider_byok":  False,  # Sarvam custom-provider does not support BYOK
+    }
+
+    results = []
+
+    if not CF_GATEWAY_ENABLED:
+        results.append({
+            "label": "gateway",
+            "ok": False,
+            "error": (
+                "CF_AI_GATEWAY_ID is not set — gateway is disabled. "
+                "Set CF_AI_GATEWAY_ID to the gateway slug in ACA env vars."
+            ),
+        })
+    elif not key_present:
+        results.append({
+            "label": "gateway",
+            "ok": False,
+            "error": (
+                "SARVAM_API_KEY is missing. Sarvam custom-provider does not "
+                "support BYOK — the real key must be in ACA env vars."
+            ),
+        })
+    else:
+        # Build headers exactly as deps.py does for the gateway client
+        gw_headers = {
+            "api-subscription-key": SARVAM_API_KEY,
+            "Content-Type":         "application/json",
+            "Accept":               "application/json",
+        }
+        if token_present:
+            gw_headers["cf-aig-authorization"] = f"Bearer {CF_AI_GATEWAY_TOKEN}"
+
+        results.append(
+            await _probe_sarvam_endpoint(gateway_url, gw_headers, "gateway")
+        )
+
+    if probe_direct:
+        direct_headers = {
+            "api-subscription-key": SARVAM_API_KEY or "",
+            "Content-Type":         "application/json",
+            "Accept":               "application/json",
+        }
+        results.append(
+            await _probe_sarvam_endpoint(SARVAM_BASE_URL, direct_headers, "direct")
+        )
+
+    overall_ok = any(r.get("ok") for r in results)
+    return {
+        "ok":         overall_ok,
+        "config":     config_summary,
+        "probes":     results,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "note": (
+            "Sarvam custom-provider (CF AI Gateway slug: custom-sarvam) routes "
+            "api.sarvam.ai calls through the gateway for logging + analytics. "
+            "BYOK is not supported — SARVAM_API_KEY must be set as an ACA env var."
+        ),
+    }
+
+
 # ── Background auto-warm loop (Task #282 T004) ────────────────────────────────
 # Periodically re-runs the cache warmer so the top common questions always
 # have a near-instant answer waiting in Redis. The loop is registered from
