@@ -248,6 +248,9 @@ data "aws_iam_policy_document" "github_deploy_perms" {
   # bootstrap-extra-perms inline policy so the workflow never needs manual
   # CloudShell intervention to add missing actions (e.g. iam:TagRole,
   # scheduler:CreateSchedule).
+  # Also covers syrabit-* runtime roles so smoke-invoke can hot-patch
+  # missing permissions (e.g. cloudwatch:PutMetricData) before Terraform
+  # apply propagates the full workers_runtime policy (Task #5).
   statement {
     sid    = "BootstrapSelfUpdate"
     effect = "Allow"
@@ -257,6 +260,7 @@ data "aws_iam_policy_document" "github_deploy_perms" {
     ]
     resources = [
       "arn:aws:iam::${data.aws_caller_identity.lz.account_id}:role/github-deploy",
+      "arn:aws:iam::${data.aws_caller_identity.lz.account_id}:role/syrabit-*",
     ]
   }
 
