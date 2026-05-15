@@ -124,6 +124,35 @@ jobs:
             --query 'Rules[?contains(Name, `syrabit`)].{Name:Name, State:State, Schedule:ScheduleExpression}' \
             --output table 2>/dev/null || echo "  (no classic EventBridge rules for syrabit)"
 
+      - name: Ensure workers_egress SG allows port 27017 (MongoDB Atlas, Task #10)
+        run: |
+          set -euo pipefail
+          SG_ID=$(aws ec2 describe-security-groups \
+            --region ap-south-1 \
+            --filters "Name=group-name,Values=syrabit-workers-egress" \
+            --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+          if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+            echo "workers_egress SG not found — skipping (smoke against already-running functions)"
+            exit 0
+          fi
+          echo "workers_egress SG: $SG_ID"
+          EXISTS=$(aws ec2 describe-security-groups \
+            --region ap-south-1 \
+            --group-ids "$SG_ID" \
+            --query 'SecurityGroups[0].IpPermissionsEgress[?FromPort==`27017`].FromPort' \
+            --output text 2>/dev/null || echo "")
+          if [ -n "$EXISTS" ] && [ "$EXISTS" != "None" ]; then
+            echo "Port 27017 egress already allowed (FromPort=$EXISTS) — skipping."
+          else
+            echo "Adding port 27017 (MongoDB Atlas) egress rule..."
+            aws ec2 authorize-security-group-egress \
+              --region ap-south-1 \
+              --group-id "$SG_ID" \
+              --ip-permissions '[{"IpProtocol":"tcp","FromPort":27017,"ToPort":27017,"IpRanges":[{"CidrIp":"0.0.0.0/0","Description":"MongoDB Atlas port 27017 — Task #10 smoke-invoke hotfix"}]}]' \
+              --output text 2>&1 | head -5
+            echo "Rule added — Lambda can now reach Atlas on port 27017 via NAT."
+          fi
+
       - name: Invoke each Lambda synchronously
         if: inputs.dry_run != 'true'
         id: invoke
