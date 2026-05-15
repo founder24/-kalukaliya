@@ -75,18 +75,10 @@ jobs:
             CURRENT_JSON=$(aws lambda get-function-configuration \
               --function-name "$FN" --region ap-south-1 \
               --query 'Environment.Variables' --output json 2>/dev/null || echo '{}')
-            # Build updated env JSON via Python (env vars avoid shell quoting issues
-            # with special characters in the URI).  Pass CURRENT_JSON + MONGO_URI +
-            # LAMBDA_FN as env vars so Python never needs to f-string a shell var.
-            export CURRENT_JSON LAMBDA_FN="$FN"
-            TMP=$(python3 -c "
-import json, os, tempfile
-env_vars = json.loads(os.environ['CURRENT_JSON'])
-env_vars['MONGO_URL'] = os.environ['MONGO_URI']
-with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
-    json.dump({'Variables': env_vars}, f)
-    print(f.name)
-")
+            # Build updated env JSON via Python one-liner (avoids YAML multiline
+            # heredoc issues and shell quoting issues with special chars in URI).
+            export CURRENT_JSON
+            TMP=$(MONGO_URI="$MONGO_URI" python3 -c 'import json,os,tempfile; ev=json.loads(os.environ["CURRENT_JSON"]); ev["MONGO_URL"]=os.environ["MONGO_URI"]; f=tempfile.NamedTemporaryFile("w",suffix=".json",delete=False); json.dump({"Variables":ev},f); print(f.name)')
             STATUS=$(aws lambda update-function-configuration \
               --function-name "$FN" \
               --environment "file://$TMP" \
