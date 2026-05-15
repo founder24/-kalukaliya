@@ -39,10 +39,14 @@ def _ensure_scripts_on_path() -> None:
     ``import seo_baseline`` resolves. Outside Lambda this is a no-op
     because ``aca_jobs.seo_baseline`` already prepends the path.
     """
-    candidates = [
-        Path("/var/task/scripts"),
-        Path(__file__).resolve().parents[4] / "scripts",
-    ]
+    candidates = [Path("/var/task/scripts")]
+    try:
+        # In the monorepo (local dev / CI) __file__ is 5+ levels deep.
+        # Inside a Lambda container the task root is /var/task/ (only 4
+        # parent levels exist), so parents[4] raises IndexError — guard it.
+        candidates.append(Path(__file__).resolve().parents[4] / "scripts")
+    except IndexError:
+        pass
     for c in candidates:
         if c.exists() and str(c) not in sys.path:
             sys.path.insert(0, str(c))
