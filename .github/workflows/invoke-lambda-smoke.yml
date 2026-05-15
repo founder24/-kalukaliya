@@ -124,92 +124,28 @@ jobs:
             --query 'Rules[?contains(Name, `syrabit`)].{Name:Name, State:State, Schedule:ScheduleExpression}' \
             --output table 2>/dev/null || echo "  (no classic EventBridge rules for syrabit)"
 
-      - name: Self-bootstrap ec2 SG permission via BootstrapSelfUpdate (Task #10)
-        continue-on-error: true
+      - name: Verify workers_egress SG port 27017 rule exists (Task #10 — read-only)
         run: |
           set -euo pipefail
-          echo "Granting ec2:AuthorizeSecurityGroupEgress to github-deploy via BootstrapSelfUpdate..."
-          aws iam put-role-policy \
-            --role-name github-deploy \
-            --policy-name smoke-invoke-sg-hotfix \
-            --policy-document '{
-              "Version": "2012-10-17",
-              "Statement": [{
-                "Sid": "SgHotfix27017",
-                "Effect": "Allow",
-                "Action": [
-                  "ec2:AuthorizeSecurityGroupEgress",
-                  "ec2:DescribeSecurityGroups",
-                  "ec2:RevokeSecurityGroupEgress"
-                ],
-                "Resource": "*"
-              }]
-            }'
-          echo "IAM inline policy set — waiting 10s for propagation..."
-          sleep 10
-          echo "EC2 SG permission ready."
-
-      - name: Bootstrap cloudwatch:PutMetricData on Lambda runtime role (Task #5)
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          RUNTIME_ROLE="syrabit-batch-job-prod"
-          echo "Attaching cloudwatch:PutMetricData inline policy to ${RUNTIME_ROLE}..."
-          # First extend github-deploy's own scope to cover syrabit-* runtime roles
-          aws iam put-role-policy \
-            --role-name github-deploy \
-            --policy-name smoke-invoke-runtime-iam-hotfix \
-            --policy-document '{
-              "Version": "2012-10-17",
-              "Statement": [{
-                "Sid": "RuntimeRolePolicyPut",
-                "Effect": "Allow",
-                "Action": ["iam:PutRolePolicy","iam:GetRolePolicy"],
-                "Resource": "arn:aws:iam::271740379017:role/syrabit-*"
-              }]
-            }' 2>&1 || { echo "  ⚠ Could not extend github-deploy scope (BootstrapSelfUpdate may not cover this yet)"; exit 0; }
-          sleep 8
-          # Now attach CW PutMetricData to the runtime role
-          aws iam put-role-policy \
-            --role-name "${RUNTIME_ROLE}" \
-            --policy-name smoke-invoke-cw-metrics-hotfix \
-            --policy-document '{
-              "Version": "2012-10-17",
-              "Statement": [{
-                "Sid": "MetricsPutHotfix",
-                "Effect": "Allow",
-                "Action": ["cloudwatch:PutMetricData"],
-                "Resource": "*"
-              }]
-            }' 2>&1 && echo "  ✓ cloudwatch:PutMetricData attached to ${RUNTIME_ROLE}" || echo "  ⚠ Could not attach CW policy to runtime role (will apply via Terraform)"
-
-      - name: Ensure workers_egress SG allows port 27017 (MongoDB Atlas, Task #10)
-        run: |
-          set -euo pipefail
+          # Port 27017 egress rule was added permanently in Task #10 (sgr-0f8cace4e7d327b90).
+          # This step is read-only verification — no mutation.
           SG_ID=$(aws ec2 describe-security-groups \
             --region ap-south-1 \
             --filters "Name=group-name,Values=syrabit-workers-egress" \
             --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
           if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
-            echo "workers_egress SG not found — skipping (smoke against already-running functions)"
+            echo "  ⚠ workers_egress SG not found — skipping"
             exit 0
           fi
-          echo "workers_egress SG: $SG_ID"
           EXISTS=$(aws ec2 describe-security-groups \
             --region ap-south-1 \
             --group-ids "$SG_ID" \
             --query 'SecurityGroups[0].IpPermissionsEgress[?FromPort==`27017`].FromPort' \
             --output text 2>/dev/null || echo "")
           if [ -n "$EXISTS" ] && [ "$EXISTS" != "None" ]; then
-            echo "Port 27017 egress already allowed (FromPort=$EXISTS) — skipping."
+            echo "  ✓ workers_egress SG (${SG_ID}) port 27017 egress rule confirmed"
           else
-            echo "Adding port 27017 (MongoDB Atlas) egress rule..."
-            aws ec2 authorize-security-group-egress \
-              --region ap-south-1 \
-              --group-id "$SG_ID" \
-              --ip-permissions '[{"IpProtocol":"tcp","FromPort":27017,"ToPort":27017,"IpRanges":[{"CidrIp":"0.0.0.0/0","Description":"MongoDB Atlas port 27017 — Task #10 smoke-invoke hotfix"}]}]' \
-              --output text 2>&1 | head -5
-            echo "Rule added — Lambda can now reach Atlas on port 27017 via NAT."
+            echo "  ⚠ workers_egress SG port 27017 egress rule missing — MongoDB Atlas may be unreachable from Lambda"
           fi
 
       - name: Invoke each Lambda synchronously
