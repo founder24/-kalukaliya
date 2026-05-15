@@ -311,9 +311,7 @@ jobs:
             STREAM_NAME=$(echo "${STREAMS}" | head -1 | awk '{print $1}')
             echo "  ✓ ${FN}: CW stream ${STREAM_NAME}"
 
-            # Fetch ALL events for this invocation window (up to 100)
-            # so we see diagnostic lines (URI_DIAG, host_tail) that appear
-            # at the START of the stream before any error traceback.
+            # Fetch ALL events for this invocation window.
             ALL_EVENTS=$(aws logs get-log-events \
               --log-group-name "${LOG_GROUP}" \
               --log-stream-name "${STREAM_NAME}" \
@@ -324,6 +322,20 @@ jobs:
             echo "--- CW log (all events) ---"
             echo "$ALL_EVENTS"
             echo "--- end CW log ---"
+
+            # Strict: fail on fatal error patterns.
+            # Known-benign [ERROR] lines (CW PutMetricData AccessDenied, admin
+            # POST 403 origin-gate) are excluded from this check — they are
+            # operational gaps, not Lambda execution failures.
+            if echo "$ALL_EVENTS" | grep -qE 'Task failed:|Runtime\.ExitError|errorType.*Error|Unhandled exception'; then
+              echo "  ✗ ${FN}: fatal error pattern detected in CW log"
+              PASS=false
+            fi
+            # Warn on [ERROR] lines without failing (operational issues logged separately).
+            ERR_COUNT=$(echo "$ALL_EVENTS" | grep -c '^\[ERROR\]' || echo "0")
+            if [ "$ERR_COUNT" -gt 0 ]; then
+              echo "  ⚠ ${FN}: ${ERR_COUNT} [ERROR] line(s) in log (check above for details)"
+            fi
           }
 
           echo "=== CloudWatch evidence ==="
@@ -425,11 +437,10 @@ jobs:
             echo "metpass=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify materialize_chapter_faqs DB freshness (Task #5)
+      - name: Verify materialize_chapter_faqs execution health (Task #5)
         if: inputs.dry_run != 'true' && steps.invoke.outputs.pass == 'true'
         id: dbfresh
         env:
-          MONGO_URI: ${{ secrets.KV_SEED_MONGO_URI }}
           INVOKED_AT: ${{ steps.invoke.outputs.invoked_at }}
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
@@ -437,52 +448,110 @@ jobs:
           set -euo pipefail
           DBPASS=true
 
-          echo "=== chapter_faqs MongoDB freshness ==="
-          if [ -z "${MONGO_URI:-}" ] || ! echo "$MONGO_URI" | grep -qE '^mongodb(\+srv)?://'; then
-            echo "  ⚠ MONGO_URI not set or invalid — skipping MongoDB check"
+          # --- 1. Parse materialize_chapter_faqs run summary from CW logs ---
+          # The function logs a summary JSON line on every execution:
+          # "[INFO] ... materialize_chapter_faqs summary: {...}"
+          # We extract it and fail if errors > 0 (scanned=0 is acceptable
+          # in the smoke environment where no chapter content exists yet).
+          echo "=== materialize_chapter_faqs CW execution summary ==="
+          SINCE_EPOCH=$(python3 -c "
+          import datetime
+          t = '${INVOKED_AT}'
+          dt = datetime.datetime.fromisoformat(t.replace('Z','+00:00'))
+          print(int((dt.timestamp() - 120) * 1000))
+          ")
+          SUMMARY_RAW=$(aws logs filter-log-events \
+            --log-group-name "/aws/lambda/syrabit-materialize-chapter-faqs" \
+            --filter-pattern '"materialize_chapter_faqs summary"' \
+            --start-time "${SINCE_EPOCH}" \
+            --region ap-south-1 \
+            --query 'events[0].message' \
+            --output text 2>/dev/null || echo "")
+          if [ -z "${SUMMARY_RAW}" ] || [ "${SUMMARY_RAW}" = "None" ]; then
+            echo "  ✗ No execution summary found in CW logs for this invocation"
+            DBPASS=false
           else
-            pip install --quiet pymongo dnspython 2>/dev/null || true
-            python3 - <<'PYEOF'
-          import sys, os, datetime
-          try:
-              import pymongo
-              uri = os.environ["MONGO_URI"].strip()
-              invoked_at = os.environ["INVOKED_AT"].strip()
-              since = datetime.datetime.fromisoformat(invoked_at.replace("Z", "+00:00")) \
-                      - datetime.timedelta(minutes=5)
-              client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=15000)
-              db = client.get_default_database()
-              count = db.chapter_faqs.count_documents(
-                  {"updated_at": {"$gte": since.replace(tzinfo=None)}}
-              )
-              if count > 0:
-                  print(f"  ✓ chapter_faqs: {count} rows updated at or after {since.isoformat()}")
-              else:
-                  print(f"  ⚠ chapter_faqs: 0 rows with updated_at >= {since.isoformat()} (may use collection-level TTL; check db directly)")
-          except Exception as e:
-              print(f"  ⚠ chapter_faqs check skipped: {e}")
-          PYEOF
+            echo "  Summary line: ${SUMMARY_RAW}"
+            # Extract the JSON object from the log line and check errors field
+            ERRORS=$(python3 -c "
+          import json, re, sys
+          line = '''${SUMMARY_RAW}'''
+          m = re.search(r'\{.*\}', line)
+          if not m:
+              print(0)
+              sys.exit(0)
+          d = json.loads(m.group())
+          print(d.get('errors', 0))
+          " 2>/dev/null || echo "0")
+            SCANNED=$(python3 -c "
+          import json, re
+          line = '''${SUMMARY_RAW}'''
+          m = re.search(r'\{.*\}', line)
+          d = json.loads(m.group()) if m else {}
+          print(d.get('scanned', 0))
+          " 2>/dev/null || echo "0")
+            MATERIALISED=$(python3 -c "
+          import json, re
+          line = '''${SUMMARY_RAW}'''
+          m = re.search(r'\{.*\}', line)
+          d = json.loads(m.group()) if m else {}
+          print(d.get('materialised', 0))
+          " 2>/dev/null || echo "0")
+            echo "  scanned=${SCANNED}  materialised=${MATERIALISED}  errors=${ERRORS}"
+            if [ "${ERRORS}" -gt 0 ]; then
+              echo "  ✗ chapter_faqs materializer: ${ERRORS} error(s) during execution"
+              DBPASS=false
+            elif [ "${SCANNED}" -eq 0 ]; then
+              echo "  ✓ chapter_faqs: no chapters in DB yet (smoke environment — zero errors, execution healthy)"
+            else
+              echo "  ✓ chapter_faqs: scanned=${SCANNED} materialised=${MATERIALISED} errors=0"
+            fi
           fi
 
-          echo "=== Upstash Redis FAQ / ai_input_cache key probe ==="
-          if [ -z "${UPSTASH_REDIS_REST_URL:-}" ] || [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; then
-            echo "  ⚠ Upstash credentials not set — skipping Redis check"
+          # --- 2. EventBridge scheduled execution evidence ---
+          echo "=== EventBridge scheduled execution history ==="
+          for SCHED in prewarm-seo-routes seo-baseline materialize-chapter-faqs; do
+            LAST_STATUS=$(aws scheduler get-schedule \
+              --name "syrabit-${SCHED}" \
+              --region ap-south-1 \
+              --query 'State' \
+              --output text 2>/dev/null || echo "UNKNOWN")
+            echo "  Schedule syrabit-${SCHED}: State=${LAST_STATUS}"
+          done
+          # Check CW logs for any invocation NOT from our smoke run (i.e. scheduled runs)
+          # Scheduled invocations have event {"source":"aws.scheduler",...} or omit "source"
+          SCHED_EVENTS=$(aws logs filter-log-events \
+            --log-group-name "/aws/lambda/syrabit-prewarm-seo-routes" \
+            --filter-pattern '"invoked"' \
+            --start-time 1747353600000 \
+            --region ap-south-1 \
+            --query 'length(events)' \
+            --output text 2>/dev/null || echo "0")
+          if [ "${SCHED_EVENTS}" -gt 1 ]; then
+            echo "  ✓ ${SCHED_EVENTS} total invocation events found (includes scheduled + smoke)"
           else
-            # Count keys matching the ai_input_cache fingerprint pattern
+            echo "  ⚠ Only smoke-invoke evidence found; first scheduled run not yet executed (expected pre-cutover)"
+          fi
+
+          # --- 3. Upstash Redis aic:fp: probe (advisory) ---
+          echo "=== Upstash Redis ai_input_cache key probe ==="
+          if [ -z "${UPSTASH_REDIS_REST_URL:-}" ] || [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; then
+            echo "  ⚠ Upstash credentials not set as GitHub secrets — skipping Redis check"
+          else
             KEY_RESULT=$(curl -sX GET \
               "${UPSTASH_REDIS_REST_URL}/dbsize" \
               -H "Authorization: Bearer ${UPSTASH_REDIS_REST_TOKEN}" 2>/dev/null || echo '{"result":0}')
             DB_SIZE=$(echo "$KEY_RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result',0))" 2>/dev/null || echo "0")
-            echo "  ✓ Upstash Redis dbsize = ${DB_SIZE} keys (FAQ + cache keys combined)"
-            # Spot-check for aic:fp: keys
-            AIC_RESULT=$(curl -sX POST \
-              "${UPSTASH_REDIS_REST_URL}/keys/aic:fp:*" \
-              -H "Authorization: Bearer ${UPSTASH_REDIS_REST_TOKEN}" 2>/dev/null || echo '{"result":[]}')
-            AIC_COUNT=$(echo "$AIC_RESULT" | python3 -c "import json,sys; r=json.load(sys.stdin).get('result',[]); print(len(r) if isinstance(r,list) else 0)" 2>/dev/null || echo "0")
-            echo "  ✓ aic:fp:* keys in Redis = ${AIC_COUNT}"
+            echo "  ✓ Upstash Redis dbsize = ${DB_SIZE} keys"
           fi
 
-          echo "dbpass=true" >> "$GITHUB_OUTPUT"
+          if [ "${DBPASS}" = "true" ]; then
+            echo "dbpass=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dbpass=false" >> "$GITHUB_OUTPUT"
+            echo "FAIL: materialize_chapter_faqs execution health check failed" >&2
+            exit 1
+          fi
 
       - name: Upload invocation results as artifact
         if: inputs.dry_run != 'true'
