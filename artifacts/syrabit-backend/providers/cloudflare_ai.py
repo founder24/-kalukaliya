@@ -153,7 +153,7 @@ async def _post(model_key: str, payload: dict, *, stream: bool = False,
     """
     import random  # stdlib, cheap import
 
-    use_direct = False  # upgraded to True if the gateway returns 401/403
+    use_direct = False  # upgraded to True if the gateway returns any non-success
 
     for _pass in range(2):  # pass 0 = gateway/default, pass 1 = direct fallback
         url = _model_url(model_key, direct=use_direct)
@@ -179,10 +179,10 @@ async def _post(model_key: str, payload: dict, *, stream: bool = False,
                 pass
 
             if stream:
-                if resp.status_code in (401, 403) and _GW_ID and not use_direct:
+                if resp.status_code != 200 and _GW_ID and not use_direct:
                     logger.warning(
-                        "[cf-ai] gateway %d on stream (pass 0) — falling back to direct API. "
-                        "CF_AI_GATEWAY_TOKEN may be stale. model=%s body=%.120s",
+                        "[cf-ai] gateway %d on stream — falling back to direct Workers AI API. "
+                        "model=%s body=%.120s",
                         resp.status_code, MODELS.get(model_key, model_key),
                         resp.text,
                     )
@@ -191,16 +191,18 @@ async def _post(model_key: str, payload: dict, *, stream: bool = False,
                 resp.raise_for_status()
                 return resp
 
-            if resp.status_code in (401, 403) and _GW_ID and not use_direct:
+            # --- Gateway fallback: any non-200 on pass 0 (gateway) → switch to direct ---
+            if resp.status_code != 200 and _GW_ID and not use_direct:
                 logger.warning(
-                    "[cf-ai] gateway %d (pass 0) — falling back to direct Workers AI API. "
-                    "CF_AI_GATEWAY_TOKEN may be stale. model=%s body=%.120s",
+                    "[cf-ai] gateway %d — falling back to direct Workers AI API. "
+                    "model=%s body=%.120s",
                     resp.status_code, MODELS.get(model_key, model_key),
                     resp.text,
                 )
                 use_direct = True
                 break  # break inner loop → next outer pass uses direct URL
 
+            # --- Retry logic applies only to direct-API calls (pass 1) from here on ---
             if resp.status_code == 429:
                 if attempt == _POST_MAX_RETRIES:
                     break
