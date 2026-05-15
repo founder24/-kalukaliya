@@ -1,0 +1,20 @@
+name: _tmp-query-lambda-images
+on:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+      - run: |
+          for FN in syrabit-prewarm-seo-routes syrabit-seo-baseline syrabit-materialize-chapter-faqs; do
+            echo "=== $FN ==="
+            aws lambda get-function --function-name "$FN" --region ap-south-1 \
+              --query 'Code.ImageUri' --output text 2>/dev/null
+          done
