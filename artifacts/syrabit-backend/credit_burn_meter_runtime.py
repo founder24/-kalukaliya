@@ -91,6 +91,9 @@ class _InMemoryRedis:
     def expire(self, key, ttl):
         return key in self._kv
 
+    def mget(self, *keys):
+        return [self.get(k) for k in keys]
+
 
 def _ensure_meters() -> None:
     global _METERS_INIT, _METER_A, _METER_B, _METER_C, _METER_D, _FLAG

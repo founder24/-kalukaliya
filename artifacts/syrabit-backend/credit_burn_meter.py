@@ -42,6 +42,7 @@ EMAIL_FALLBACK_KEY = "email:fallback"
 
 class _RedisLike(Protocol):
     def get(self, key: str) -> Optional[bytes]: ...
+    def mget(self, *keys: str) -> list: ...
     def set(self, key: str, value: str, ex: Optional[int] = None) -> Any: ...
     def delete(self, key: str) -> Any: ...
     def incr(self, key: str) -> int: ...
@@ -301,9 +302,10 @@ class MeterB:
             cutoff = now - self.cfg.window_s
             start_b = int(cutoff // self.cfg.bucket_seconds)
             end_b = int(now // self.cfg.bucket_seconds)
+            keys = [f"{self.cfg.redis_key_prefix}{b}" for b in range(start_b, end_b + 1)]
+            values = self.redis.mget(*keys)
             total = 0
-            for b in range(start_b, end_b + 1):
-                v = self.redis.get(f"{self.cfg.redis_key_prefix}{b}")
+            for v in values:
                 if v is not None:
                     try:
                         total += int(_decode(v))

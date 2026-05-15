@@ -824,18 +824,17 @@ async def chat(msg: ChatMessage, request: Request, user: Optional[dict] = Depend
 async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = Depends(rate_limit_chat_optional)):
     _chat_t0 = _time_mod.time()
 
-    # Task #360 — operational meter integration. Increment Meter A
-    # (daily call counter) and record Meter B (RPM-headroom sliding
-    # window) on EVERY chat request. Read the shared `chat:fallback`
-    # hot-flag they drive so the handler can short-circuit dispatch to
-    # the cheap-only chain when either meter has tripped.
+    # Task #360 — operational meter integration. Read the shared
+    # `chat:fallback` hot-flag first (single fast GET), then fire the
+    # expensive meter bookkeeping (MeterA incr + MeterB mget) in a
+    # background thread so it never blocks the asyncio event loop.
     try:
         from credit_burn_meter_runtime import (
             increment_chat_request as _meter_tick,
             is_fallback_active as _meter_is_fallback_active,
         )
-        _meter_tick()
         _fallback_active = _meter_is_fallback_active()
+        asyncio.create_task(asyncio.to_thread(_meter_tick))
     except Exception:
         _fallback_active = False
     # Round-8: do NOT mutate os.environ per request — it's a process
@@ -2095,15 +2094,16 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
     _speedup.record_chat_started()
 
     # Task #360 — operational meter integration on the streaming path
-    # too. Increment Meter A and record Meter B on every SSE chat
-    # request, then read the shared `chat:fallback` hot-flag.
+    # too. Read `chat:fallback` hot-flag first (single fast GET), then
+    # fire the expensive MeterA incr + MeterB mget in a background
+    # thread so the asyncio event loop is never blocked.
     try:
         from credit_burn_meter_runtime import (
             increment_chat_request as _meter_tick,
             is_fallback_active as _meter_is_fallback_active,
         )
-        _meter_tick()
         _stream_fallback_active = _meter_is_fallback_active()
+        asyncio.create_task(asyncio.to_thread(_meter_tick))
     except Exception:
         _stream_fallback_active = False
     # Round-8: tag request state only — no os.environ mutation (race-
