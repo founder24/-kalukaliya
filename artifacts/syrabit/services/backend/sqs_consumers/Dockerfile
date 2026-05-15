@@ -79,6 +79,11 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 COPY artifacts/syrabit-backend/ ${LAMBDA_TASK_ROOT}/
 COPY artifacts/syrabit/services/backend/lambda_batch/ ${LAMBDA_TASK_ROOT}/lambda_batch/
 COPY artifacts/syrabit/services/backend/sqs_consumers/ ${LAMBDA_TASK_ROOT}/sqs_consumers/
+# aca_jobs/seo_baseline.py lazily imports ``seo_baseline`` (the script at
+# repo-root scripts/seo_baseline.py).  lambda_batch/seo_baseline.py calls
+# _ensure_scripts_on_path() which prepends /var/task/scripts to sys.path.
+# Without this COPY the import fails with ModuleNotFoundError at runtime.
+COPY scripts/ ${LAMBDA_TASK_ROOT}/scripts/
 
 # Strip caches & test fixtures shipped under the backend tree — Lambda
 # storage is billed per MB-second of cold-start image pull and the
