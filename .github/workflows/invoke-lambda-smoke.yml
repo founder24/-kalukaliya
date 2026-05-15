@@ -51,11 +51,7 @@ jobs:
               --secret-id "$SECRET_PATH" \
               --secret-string "$MONGO_URI" \
               --region ap-south-1
-            MASKED=$(echo "$MONGO_URI" | python3 -c "
-import sys, re
-uri = sys.stdin.read().strip()
-print(re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', uri)[:120])
-")
+            MASKED=$(echo "$MONGO_URI" | python3 -c "import sys,re; u=sys.stdin.read().strip(); print(re.sub(r'(://[^:]+:)[^@]+(@)',r'\1***\2',u)[:120])")
             echo "Seeded OK — URI: $MASKED"
           fi
 
