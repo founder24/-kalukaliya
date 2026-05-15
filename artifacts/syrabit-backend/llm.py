@@ -1817,6 +1817,7 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     # in POOL_WEIGHTS so they fire only after every paid provider is
     # excluded. Each is a thin alias that routes through the canonical
     # ``workers-ai`` dispatch with a model override.
+    "workers_ai_70b":        "@cf/meta/llama-3.3-70b-instruct-fp8-fast", # head of English chat chain (Task #2 2026 blueprint)
     "workers_ai_mistral_7b": "@cf/mistral/mistral-7b-instruct-v0.3",   # balanced English fallback
     "workers_ai_llama32_3b": "@cf/meta/llama-3.2-1b-instruct",         # ultrafast 1B for burst / fast-mode (3b account-banned)
     "workers_ai_llama31_8b": "@cf/meta/llama-3.1-8b-instruct-fp8",     # Indic chat fallback tail
@@ -1849,6 +1850,7 @@ _PROVIDER_CANONICAL: dict[str, str] = {
     # Task #347 — Workers AI promotions all canonicalize to "workers-ai"
     # so the standard CF AI dispatch handles them; the per-alias model
     # comes from _PROVIDER_DEFAULT_MODELS above.
+    "workers_ai_70b":        "workers-ai",
     "workers_ai_mistral_7b": "workers-ai",
     "workers_ai_llama32_3b": "workers-ai",
     "workers_ai_llama31_8b": "workers-ai",
@@ -4560,14 +4562,15 @@ async def call_search_rag_with_dispatch(
                 if not _EXA_KEY:
                     raise RuntimeError("exa_ai: EXA_API_KEY not configured")
                 client = _exa.Exa(api_key=_EXA_KEY)
+                from exa_py.api import ContentsOptions as _ExaContentsOptions
                 results = client.search_and_contents(
                     query,
                     num_results=5,
                     use_autoprompt=True,
-                    text=True,
+                    contents=_ExaContentsOptions(text=True),
                 )
                 return [
-                    {"title": r.title, "url": r.url, "text": (r.text or "")[:500]}
+                    {"title": getattr(r, "title", "") or "", "url": getattr(r, "url", "") or "", "text": (getattr(r, "text", None) or "")[:500]}
                     for r in (results.results or [])
                 ]
             elif provider == "tavily":

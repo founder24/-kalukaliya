@@ -134,10 +134,10 @@ import time as _t_runway
 # reads. Operator override: `CHAT_PRIMARY_OVERRIDE=vertex|workers_ai`;
 # unrecognised values log + are ignored.
 _CHAT_CHAIN_DEFAULT: tuple[str, str, str] = (
-    "vertex", "vertex_flash_lite", "workers_ai_llama32_3b",
+    "workers_ai_70b", "vertex", "vertex_flash_lite",
 )
 _CHAT_CHAIN_FLIPPED: tuple[str, str, str] = (
-    "workers_ai_llama32_3b", "vertex_flash_lite", "vertex",
+    "workers_ai_70b", "vertex_flash_lite", "vertex",
 )
 _CHAT_RUNWAY_FLIP_DAYS = 90.0
 _CHAT_PRIMARY_CACHE_TTL_S = 60.0
@@ -244,7 +244,7 @@ def _compute_chat_chain() -> tuple[str, str, str]:
     if override:
         if override == "vertex":
             return _CHAT_CHAIN_DEFAULT
-        if override in {"workers_ai_llama32_3b", "workers_ai"}:
+        if override in {"workers_ai_70b", "workers_ai_llama32_3b", "workers_ai"}:
             return _CHAT_CHAIN_FLIPPED
         try:
             import logging as _lg
@@ -268,8 +268,8 @@ def _select_chat_primary() -> list[str]:
     positions 1 and 2 are the explicit fallbacks that
     `call_with_provider_fallback` advances to on primary 5xx / 429 /
     breaker-open. Default order is
-    ``["vertex", "vertex_flash_lite", "workers_ai_llama32_3b"]``; swaps
-    to ``["workers_ai_llama32_3b", "vertex_flash_lite", "vertex"]`` when
+    ``["workers_ai_70b", "vertex", "vertex_flash_lite"]``; swaps
+    to ``["workers_ai_70b", "vertex_flash_lite", "vertex"]`` when
     projected GCP credit runway is ≤ 90 days. Cached for 60 s on a
     monotonic clock so the hot dispatch path never re-reads env / redis
     per turn.
@@ -615,15 +615,14 @@ def _select_chat_model(
     primary_provider = _chain[0]
     primary_model = (
         "gemini-2.5-flash" if primary_provider == "vertex"
-        else "@cf/meta/llama-3.2-1b-instruct"
+        else "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
     )
     # Task #581 §L1 — free users are HARD-ROUTED off Vertex. Even when
     # the credit-runway-aware chain head is `vertex`, free callers
-    # always get Workers-AI Llama-3.2-1B (or Mistral-7B in the cheap
-    # bucket). Vertex spend is reserved for paid traffic + admin
-    # generation.  Paid users keep the runway-aware primary.
-    free_primary_provider = "workers_ai_llama32_3b"
-    free_primary_model = "@cf/meta/llama-3.2-1b-instruct"
+    # always get Workers-AI Llama-3.3-70B (the chain head). Vertex
+    # spend is reserved for paid traffic + admin generation.
+    free_primary_provider = "workers_ai_70b"
+    free_primary_model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 
     # Rule D LOCKED — global monthly USD cap reached. Force the
     # cheap-tier (Workers-AI Mistral-7B) for English chat regardless of
