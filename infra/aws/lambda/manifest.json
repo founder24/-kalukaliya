@@ -1,5 +1,5 @@
 {
-  "_doc": "Task #551 §B / §E — registry of ACA Jobs that have been migrated to AWS Lambda + EventBridge. The CI guard `artifacts/syrabit-backend/scripts/check_dead_providers.py` walks `artifacts/syrabit-backend/aca_jobs/*.py` and fails the build for any module not represented here. Adding a new ACA Job without first landing its Lambda counterpart (handler + Terraform + EventBridge schedule) is a CI hard-fail.",
+  "_doc": "Task #551 \u00a7B / \u00a7E \u2014 registry of ACA Jobs that have been migrated to AWS Lambda + EventBridge. The CI guard `artifacts/syrabit-backend/scripts/check_dead_providers.py` walks `artifacts/syrabit-backend/aca_jobs/*.py` and fails the build for any module not represented here. Adding a new ACA Job without first landing its Lambda counterpart (handler + Terraform + EventBridge schedule) is a CI hard-fail.",
   "schema_version": 1,
   "migrated_jobs": [
     {
@@ -51,10 +51,13 @@
       "timeout_s": 900,
       "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
       "task": 13,
-      "notes": "SEO prewarm engine (Spec §9 Tasks #574 + #575). Selects top-N chapters by 7-day analytics traffic UNION every chapter under a subject whose exam window starts within PREWARM_EXAM_LOOKAHEAD_DAYS, walks all 7 PAGE_TYPES per chapter, issues HEAD through Cloudflare so the worker fills its tiered cache, persists run summary to db.seo_prewarm_runs (consumed by /api/admin/seo/prewarm-coverage), and emits Syrabit/Cache::PrewarmSuccessRate to CloudWatch (alarm fires at <0.90).",
+      "notes": "SEO prewarm engine (Spec \u00a79 Tasks #574 + #575). Selects top-N chapters by 7-day analytics traffic UNION every chapter under a subject whose exam window starts within PREWARM_EXAM_LOOKAHEAD_DAYS, walks all 7 PAGE_TYPES per chapter, issues HEAD through Cloudflare so the worker fills its tiered cache, persists run summary to db.seo_prewarm_runs (consumed by /api/admin/seo/prewarm-coverage), and emits Syrabit/Cache::PrewarmSuccessRate to CloudWatch (alarm fires at <0.90).",
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
-      "cutover_status": "live"
+      "cutover_status": "live",
+      "cutover_verified_at": "2026-05-15T02:56:04Z",
+      "cutover_verified_by": "invoke-lambda-smoke.yml",
+      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25897606645"
     },
     {
       "aca_module": "aca_jobs.seo_baseline",
@@ -66,10 +69,13 @@
       "timeout_s": 900,
       "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
       "task": 28,
-      "notes": "Weekly SEO baseline runner (Task #28). Wraps scripts/seo_baseline.py — Lighthouse + JSON-LD validator + Google Rich Results sampler over 20 chapter pages (4 boards × 5 chapters × notes page-type) — persists the full report to db.seo_baseline_runs (consumed by /api/admin/seo/baseline-latest), pre-computes the WoW median-SEO-score delta against the prior run, and emits Syrabit/SEO::{MedianSeoScore,PagesWithFailures,MedianSeoScoreWoWDelta} to CloudWatch. Two alarms ride on these metrics: seo-baseline-score-regression (WoW delta < -5) + seo-baseline-failures-high (>2 sampled pages with per-leg failures). Memory bumped to 1024 MB because Lighthouse + headless Chromium burns ~600 MB resident.",
+      "notes": "Weekly SEO baseline runner (Task #28). Wraps scripts/seo_baseline.py \u2014 Lighthouse + JSON-LD validator + Google Rich Results sampler over 20 chapter pages (4 boards \u00d7 5 chapters \u00d7 notes page-type) \u2014 persists the full report to db.seo_baseline_runs (consumed by /api/admin/seo/baseline-latest), pre-computes the WoW median-SEO-score delta against the prior run, and emits Syrabit/SEO::{MedianSeoScore,PagesWithFailures,MedianSeoScoreWoWDelta} to CloudWatch. Two alarms ride on these metrics: seo-baseline-score-regression (WoW delta < -5) + seo-baseline-failures-high (>2 sampled pages with per-leg failures). Memory bumped to 1024 MB because Lighthouse + headless Chromium burns ~600 MB resident.",
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
-      "cutover_status": "live"
+      "cutover_status": "live",
+      "cutover_verified_at": "2026-05-15T02:56:04Z",
+      "cutover_verified_by": "invoke-lambda-smoke.yml",
+      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25897606645"
     },
     {
       "aca_module": "aca_jobs.materialize_chapter_faqs",
@@ -84,7 +90,10 @@
       "notes": "AEO Answer-Card + FAQ materializer. Walks every chapter, mines PYQ corpus + syllabus graph for 5-10 deterministic Q->A pairs and a 40-60-word Quick-Answer per chapter, renders via content_formatter.format_content(query_type='faq'/'quick_answer') and writes to db.chapter_faqs (authoritative) + db.aeo_faq_entries / db.aeo_quick_answers (renderer views consumed by routes/seo_pages.py) + Cloudflare KV / Redis under the Task #6 fingerprint key.",
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
-      "cutover_status": "live"
+      "cutover_status": "live",
+      "cutover_verified_at": "2026-05-15T02:56:04Z",
+      "cutover_verified_by": "invoke-lambda-smoke.yml",
+      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25897606645"
     }
   ],
   "exempt_modules": [
@@ -92,11 +101,11 @@
       "module": "supabase_auth_canary",
       "_expires_iso": "2026-07-31",
       "_blocking_task": "#87",
-      "_reason": "Prep PR for Supabase auth cutover — Lambda + EventBridge wiring deferred to the destructive cutover PR (Task #87 / Task #47) so the JWKS infra can be reviewed without Terraform churn. Remove this exemption when the cutover ships its matching lambda_batch/supabase_auth_canary.py handler + Terraform block."
+      "_reason": "Prep PR for Supabase auth cutover \u2014 Lambda + EventBridge wiring deferred to the destructive cutover PR (Task #87 / Task #47) so the JWKS infra can be reviewed without Terraform churn. Remove this exemption when the cutover ships its matching lambda_batch/supabase_auth_canary.py handler + Terraform block."
     }
   ],
-  "_task_87_doc": "Task #87 / Task #47 — `aca_jobs/supabase_auth_canary.py` is the *prep* PR for the Supabase auth cutover. Its docstring explicitly defers Lambda + EventBridge wiring to the destructive cutover PR (so the JWKS infra can be reviewed without TF churn). Listed here so the canonical-delegation guard does not require a manifest entry until the destructive PR lands the matching `lambda_batch/supabase_auth_canary.py` handler + Terraform block in `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf`. Remove this exemption when the cutover ships.",
-  "_task_571_doc": "Task #571 — `cache-effectiveness` is a *new* batch shipper, not an ACA-Jobs migration; it has no `aca_module` counterpart. Listed in `auxiliary_jobs` below so the dead-providers CI guard (which only walks `aca_jobs/*.py`) does not require an entry, while the lambda-batch-jobs.tf locals.batch_jobs table still mirrors it 1:1.",
+  "_task_87_doc": "Task #87 / Task #47 \u2014 `aca_jobs/supabase_auth_canary.py` is the *prep* PR for the Supabase auth cutover. Its docstring explicitly defers Lambda + EventBridge wiring to the destructive cutover PR (so the JWKS infra can be reviewed without TF churn). Listed here so the canonical-delegation guard does not require a manifest entry until the destructive PR lands the matching `lambda_batch/supabase_auth_canary.py` handler + Terraform block in `artifacts/syrabit/infra/aws/lambda-batch-jobs.tf`. Remove this exemption when the cutover ships.",
+  "_task_571_doc": "Task #571 \u2014 `cache-effectiveness` is a *new* batch shipper, not an ACA-Jobs migration; it has no `aca_module` counterpart. Listed in `auxiliary_jobs` below so the dead-providers CI guard (which only walks `aca_jobs/*.py`) does not require an entry, while the lambda-batch-jobs.tf locals.batch_jobs table still mirrors it 1:1.",
   "_pending_shadow_policy": "Jobs with cutover_status=pending_shadow are intentionally deferred until their shadow_end date is reached and at least one successful shadow execution has been verified in CloudWatch. The three jobs prewarm_seo_routes, seo_baseline, and materialize_chapter_faqs have shadow_end=2026-05-16. They MUST NOT be flipped to live before that date. Cutover is tracked in follow-up task #2.",
   "auxiliary_jobs": [
     {
@@ -121,7 +130,7 @@
       "timeout_s": 60,
       "terraform": "artifacts/syrabit/infra/aws/lambda-batch-jobs.tf",
       "task": 565,
-      "notes": "Independent Sentry-backed >24h missing-runway alert. Reads chat:credit_runway_days from Upstash Redis directly (the publisher stamps a 48h TTL, so age = publish_ttl - remaining_pttl), and sentry_sdk.capture_message's when the value is missing or older than RUNWAY_FRESHNESS_THRESHOLD_S (default 24h). Hourly cadence × Sentry first-event dedup → on-call paged within ~1h of any publisher outage. Independence from the publisher matters: if the publisher Lambda fails to invoke, this probe is the only Sentry-side detector."
+      "notes": "Independent Sentry-backed >24h missing-runway alert. Reads chat:credit_runway_days from Upstash Redis directly (the publisher stamps a 48h TTL, so age = publish_ttl - remaining_pttl), and sentry_sdk.capture_message's when the value is missing or older than RUNWAY_FRESHNESS_THRESHOLD_S (default 24h). Hourly cadence \u00d7 Sentry first-event dedup \u2192 on-call paged within ~1h of any publisher outage. Independence from the publisher matters: if the publisher Lambda fails to invoke, this probe is the only Sentry-side detector."
     },
     {
       "name": "cache-effectiveness",
