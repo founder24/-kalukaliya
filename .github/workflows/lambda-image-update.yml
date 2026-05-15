@@ -16,6 +16,8 @@ env:
   PRIMARY_REGION: ap-south-1
   ACCOUNT_ID: "271740379017"
   ECR_PRI: "271740379017.dkr.ecr.ap-south-1.amazonaws.com"
+  ECR_REPO: "271740379017.dkr.ecr.ap-south-1.amazonaws.com/syrabit/queue-fanout"
+  DOCKERFILE: "artifacts/syrabit/services/backend/sqs_consumers/Dockerfile"
 
 jobs:
   rebuild-and-update:
@@ -30,6 +32,24 @@ jobs:
           role-to-assume: ${{ secrets.AWS_GITHUB_DEPLOY_ROLE_ARN }}
           aws-region: ap-south-1
 
+      - name: Download arm64 binary wheels (no QEMU compilation needed)
+        run: |
+          mkdir -p .build/arm64-wheels
+          REQS="artifacts/syrabit-backend/requirements-lambda.txt"
+          if [ ! -f "$REQS" ]; then
+            REQS="artifacts/syrabit-backend/requirements.txt"
+          fi
+          echo "Downloading arm64 wheels from: $REQS"
+          pip3 download \
+            --platform manylinux_2_17_aarch64 \
+            --platform manylinux_2_28_aarch64 \
+            --only-binary=:all: \
+            --python-version "3.11" \
+            -r "$REQS" \
+            -d .build/arm64-wheels \
+            --quiet 2>&1 | tail -5 || true
+          echo "Wheel count: $(ls .build/arm64-wheels/*.whl 2>/dev/null | wc -l)"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
@@ -38,79 +58,40 @@ jobs:
         with:
           registries: ${{ env.ACCOUNT_ID }}
 
-      - name: Detect Lambda Dockerfile location
-        id: dockerfile
-        run: |
-          # The batch-jobs image is built from the sqs_consumers Dockerfile
-          # (same image, different handler CMD). Find it relative to the repo root.
-          CANDIDATES=(
-            "artifacts/syrabit-backend/Dockerfile.lambda"
-            "artifacts/syrabit/services/backend/Dockerfile.lambda"
-            "artifacts/syrabit/services/backend/sqs_consumers/Dockerfile"
-            "artifacts/syrabit-backend/sqs_consumers/Dockerfile"
-            "artifacts/syrabit/infra/aws/Dockerfile.lambda_batch"
-          )
-          for c in "${CANDIDATES[@]}"; do
-            if [ -f "$c" ]; then
-              echo "Found Dockerfile: $c"
-              echo "dockerfile=$c" >> "$GITHUB_OUTPUT"
-              echo "context=$(dirname "$c")" >> "$GITHUB_OUTPUT"
-              break
-            fi
-          done
-          if [ -z "$(grep 'dockerfile=' "$GITHUB_OUTPUT")" ]; then
-            echo "No Lambda Dockerfile found in known locations — listing candidates..."
-            find . -name "Dockerfile*" | grep -i lambda | head -20 || true
-            find . -name "Dockerfile" -path "*/sqs*" | head -10 || true
-            exit 1
-          fi
-
-      - name: Determine ECR repo + image tag
-        id: image
-        run: |
-          # All three Lambda batch jobs share one container image; the Lambda's
-          # CMD / image_config.command sets the handler module.
-          ECR_REPO="${ECR_PRI}/syrabit-lambda-batch"
-          SHORT_SHA="${GITHUB_SHA::8}"
-          IMAGE_URI="${ECR_REPO}:${SHORT_SHA}"
-          LATEST_URI="${ECR_REPO}:latest"
-          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
-          echo "latest_uri=${LATEST_URI}" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "Building: ${IMAGE_URI}"
-
       - name: Build + push Lambda batch image
-        run: |
-          docker buildx build \
-            --platform linux/arm64 \
-            --file "${{ steps.dockerfile.outputs.dockerfile }}" \
-            --context "${{ steps.dockerfile.outputs.context }}" \
-            --tag "${{ steps.image.outputs.image_uri }}" \
-            --tag "${{ steps.image.outputs.latest_uri }}" \
-            --push \
-            --provenance false \
-            .
+        uses: docker/build-push-action@14487ce63c7e6e32b62fa2ced5a3e1e2d325b19d # v6.16.0
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.ECR_REPO }}:sqs-consumers-latest
+            ${{ env.ECR_REPO }}:task5-${{ github.sha }}
+          cache-from: type=gha,scope=sqs-consumers
+          cache-to: type=gha,scope=sqs-consumers,mode=max
 
       - name: Update Lambda function code for each target
         run: |
           set -euo pipefail
-          IMAGE="${{ steps.image.outputs.image_uri }}"
+          IMAGE="${{ env.ECR_REPO }}:sqs-consumers-latest"
           IFS=',' read -ra FUNCS <<< "${{ inputs.functions || 'syrabit-prewarm-seo-routes,syrabit-seo-baseline,syrabit-materialize-chapter-faqs' }}"
 
           for FN in "${FUNCS[@]}"; do
-            FN=$(echo "$FN" | xargs)  # trim whitespace
+            FN=$(echo "$FN" | xargs)
             echo "=== Updating ${FN} → ${IMAGE} ==="
             aws lambda update-function-code \
               --function-name "$FN" \
               --image-uri "$IMAGE" \
               --region ap-south-1 \
-              --query '{FunctionName: FunctionName, CodeSize: CodeSize, LastUpdateStatus: LastUpdateStatus}' \
-              --output json 2>/dev/null || { echo "  ERROR updating ${FN}"; exit 1; }
+              --query '{FunctionName: FunctionName, LastUpdateStatus: LastUpdateStatus}' \
+              --output json
 
             echo "  Waiting for update to complete..."
             aws lambda wait function-updated \
               --function-name "$FN" \
-              --region ap-south-1 2>/dev/null && echo "  ✓ ${FN}: active"
+              --region ap-south-1 && echo "  ✓ ${FN}: active"
           done
 
       - name: Verify function states after update
@@ -118,9 +99,10 @@ jobs:
           IFS=',' read -ra FUNCS <<< "${{ inputs.functions || 'syrabit-prewarm-seo-routes,syrabit-seo-baseline,syrabit-materialize-chapter-faqs' }}"
           for FN in "${FUNCS[@]}"; do
             FN=$(echo "$FN" | xargs)
+            echo "=== $FN ==="
             aws lambda get-function-configuration \
               --function-name "$FN" \
               --region ap-south-1 \
-              --query '{State: State, LastUpdateStatus: LastUpdateStatus}' \
-              --output json 2>/dev/null
+              --query '{State: State, LastUpdateStatus: LastUpdateStatus, CodeSha256: CodeSha256}' \
+              --output json
           done
