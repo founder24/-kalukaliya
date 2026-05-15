@@ -59,7 +59,7 @@ jobs:
           registries: ${{ env.ACCOUNT_ID }}
 
       - name: Build + push Lambda batch image
-        uses: docker/build-push-action@14487ce63c7e6e32b62fa2ced5a3e1e2d325b19d # v6.16.0
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           file: ${{ env.DOCKERFILE }}
