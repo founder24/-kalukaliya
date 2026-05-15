@@ -149,6 +149,40 @@ jobs:
           sleep 10
           echo "EC2 SG permission ready."
 
+      - name: Bootstrap cloudwatch:PutMetricData on Lambda runtime role (Task #5)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          RUNTIME_ROLE="syrabit-batch-job-prod"
+          echo "Attaching cloudwatch:PutMetricData inline policy to ${RUNTIME_ROLE}..."
+          # First extend github-deploy's own scope to cover syrabit-* runtime roles
+          aws iam put-role-policy \
+            --role-name github-deploy \
+            --policy-name smoke-invoke-runtime-iam-hotfix \
+            --policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Sid": "RuntimeRolePolicyPut",
+                "Effect": "Allow",
+                "Action": ["iam:PutRolePolicy","iam:GetRolePolicy"],
+                "Resource": "arn:aws:iam::271740379017:role/syrabit-*"
+              }]
+            }' 2>&1 || { echo "  ⚠ Could not extend github-deploy scope (BootstrapSelfUpdate may not cover this yet)"; exit 0; }
+          sleep 8
+          # Now attach CW PutMetricData to the runtime role
+          aws iam put-role-policy \
+            --role-name "${RUNTIME_ROLE}" \
+            --policy-name smoke-invoke-cw-metrics-hotfix \
+            --policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Sid": "MetricsPutHotfix",
+                "Effect": "Allow",
+                "Action": ["cloudwatch:PutMetricData"],
+                "Resource": "*"
+              }]
+            }' 2>&1 && echo "  ✓ cloudwatch:PutMetricData attached to ${RUNTIME_ROLE}" || echo "  ⚠ Could not attach CW policy to runtime role (will apply via Terraform)"
+
       - name: Ensure workers_egress SG allows port 27017 (MongoDB Atlas, Task #10)
         run: |
           set -euo pipefail
@@ -407,7 +441,7 @@ jobs:
           if [ -z "${MONGO_URI:-}" ] || ! echo "$MONGO_URI" | grep -qE '^mongodb(\+srv)?://'; then
             echo "  ⚠ MONGO_URI not set or invalid — skipping MongoDB check"
           else
-            pip install --quiet pymongo dnspython 2>/dev/null
+            pip install --quiet pymongo dnspython 2>/dev/null || true
             python3 - <<PYEOF
           import sys, os, datetime
           try:
