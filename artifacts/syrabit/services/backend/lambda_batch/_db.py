@@ -23,7 +23,7 @@ def _sanitize_mongo_uri(uri: str) -> str:
     boundary (i.e. the credential/host delimiter) so double-encoding is safe.
     """
     import re
-    from urllib.parse import quote_plus
+    from urllib.parse import quote_plus, unquote_plus
 
     m = re.match(r"^(mongodb(?:\+srv)?://)(.+)$", uri, re.DOTALL)
     if not m:
@@ -37,11 +37,10 @@ def _sanitize_mongo_uri(uri: str) -> str:
     if colon_idx == -1:
         return uri  # username only (no password)
     user, password = creds[:colon_idx], creds[colon_idx + 1 :]
-    # Only encode if not already percent-encoded (idempotent guard).
-    if "%" not in password:
-        password = quote_plus(password)
-    if "%" not in user:
-        user = quote_plus(user)
+    # Decode-then-re-encode is idempotent and handles both raw and
+    # partially-encoded passwords (avoids double-encoding and missed @/:).
+    password = quote_plus(unquote_plus(password))
+    user = quote_plus(unquote_plus(user))
     return f"{prefix}{user}:{password}@{host_part}"
 
 
@@ -75,8 +74,19 @@ def get_db() -> Any:
     uri = _resolve_mongo_uri()
     # Log masked URI structure to CloudWatch for diagnostics (password hidden).
     masked = _re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", uri)
-    _log.info("_db.get_db: scheme+host=%s len=%d", masked[:300], len(uri))
-    _client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
+    _log.info("_db.get_db: URI_DIAG scheme+host=%s total_len=%d", masked[:300], len(uri))
+    try:
+        _client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
+    except ValueError as _exc:
+        # Log enough context to diagnose without exposing password.
+        # Shows everything AFTER the last @ (i.e. host+path+query).
+        at_pos = uri.rfind("@")
+        host_tail = uri[at_pos + 1 :] if at_pos != -1 else uri
+        _log.error(
+            "_db.get_db: ValueError — host_tail=%s uri_len=%d error=%s",
+            host_tail[:200], len(uri), _exc,
+        )
+        raise
     db_name = os.environ.get("MONGO_DB_NAME", "syrabit")
     _db = _client[db_name]
     return _db
