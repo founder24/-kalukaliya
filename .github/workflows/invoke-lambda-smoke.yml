@@ -442,7 +442,7 @@ jobs:
             echo "  ⚠ MONGO_URI not set or invalid — skipping MongoDB check"
           else
             pip install --quiet pymongo dnspython 2>/dev/null || true
-            python3 - <<PYEOF
+            python3 - <<'PYEOF'
           import sys, os, datetime
           try:
               import pymongo
