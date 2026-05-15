@@ -1954,6 +1954,7 @@ from routes.admin_topic_audit import router as admin_topic_audit_router
 # Same auth surface as topic_answer_cards (public, edge-cached).
 from routes.topic_graph import router as topic_graph_router
 from routes.syllabus import router as syllabus_router
+from routes.ai_chat_direct import router as ai_chat_direct_router
 from routes.ai_chat import router as ai_chat_router
 from routes.conversations import router as conversations_router
 from routes.user import router as user_router
@@ -2184,6 +2185,7 @@ api.include_router(topic_answer_cards_router)
 api.include_router(admin_topic_audit_router)
 api.include_router(topic_graph_router)
 api.include_router(syllabus_router)
+api.include_router(ai_chat_direct_router)
 api.include_router(ai_chat_router)
 api.include_router(conversations_router)
 api.include_router(user_router)
