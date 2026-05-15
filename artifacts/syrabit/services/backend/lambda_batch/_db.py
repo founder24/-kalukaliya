@@ -192,6 +192,18 @@ _bootstrapped = False
 
 
 def _fetch_secret_value(arn: str) -> str:
+    """Fetch a raw secret from Secrets Manager and return the scalar value.
+
+    Handles both bare string secrets and JSON blobs with various key names.
+    Key list is aligned with ``_extract_uri_from_secret`` so any JSON-wrapped
+    secret (e.g. ``{"MONGO_URL": "mongodb+srv://..."}``) is correctly
+    unwrapped regardless of which key Atlas / Terraform / ops tooling chose.
+
+    When the resolved value looks like a MongoDB URI it is also run through
+    ``_sanitize_mongo_uri`` so a malformed URI raises a loud ``RuntimeError``
+    here rather than a confusing ``ValueError: Port contains non-digit
+    characters`` deep inside PyMongo (V4 §12 no-silent-fallbacks).
+    """
     import boto3  # type: ignore
     sm = boto3.client("secretsmanager")
     resp = sm.get_secret_value(SecretId=arn)
@@ -199,11 +211,36 @@ def _fetch_secret_value(arn: str) -> str:
     if raw.startswith("{"):
         try:
             data = json.loads(raw)
-            for k in ("value", "uri", "secret", "key"):
-                if k in data:
-                    return str(data[k])
+            # Full ordered key list matching _extract_uri_from_secret so
+            # MONGO_URL_SECRET_ARN always resolves to the bare URI string.
+            for k in (
+                "uri", "URI",
+                "url", "URL",
+                "value",
+                "mongo_url", "MONGO_URL",
+                "connection_string", "connectionString",
+                "secret", "key",
+            ):
+                if k in data and isinstance(data[k], str) and data[k].strip():
+                    raw = data[k].strip()
+                    break
+            else:
+                # Last-resort: first string value that starts with mongodb.
+                for v in data.values():
+                    if isinstance(v, str) and v.strip().startswith(
+                        ("mongodb://", "mongodb+srv://")
+                    ):
+                        raw = v.strip()
+                        break
         except Exception:
             pass
+    # Belt-and-suspenders: if the resolved value looks like a MongoDB URI,
+    # sanitize it now so any encoding issue (special chars in password)
+    # raises a clear RuntimeError rather than propagating a malformed value
+    # to PyMongo.  _resolve_mongo_uri also calls _sanitize_mongo_uri, but
+    # catching it here gives a better traceback in CloudWatch.
+    if raw.startswith(("mongodb://", "mongodb+srv://")):
+        raw = _sanitize_mongo_uri(raw)
     return raw
 
 
