@@ -125,6 +125,7 @@ jobs:
             --output table 2>/dev/null || echo "  (no classic EventBridge rules for syrabit)"
 
       - name: Ensure workers_egress SG allows port 27017 (MongoDB Atlas, Task #10)
+        continue-on-error: true
         run: |
           set -euo pipefail
           SG_ID=$(aws ec2 describe-security-groups \
