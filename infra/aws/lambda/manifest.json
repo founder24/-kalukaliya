@@ -55,9 +55,9 @@
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
       "cutover_status": "live",
-      "cutover_verified_at": "2026-05-15T03:29:05Z",
+      "cutover_verified_at": "2026-05-15T03:37:21Z",
       "cutover_verified_by": "invoke-lambda-smoke.yml",
-      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25898592017"
+      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25898826581"
     },
     {
       "aca_module": "aca_jobs.seo_baseline",
@@ -73,9 +73,9 @@
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
       "cutover_status": "live",
-      "cutover_verified_at": "2026-05-15T03:29:05Z",
+      "cutover_verified_at": "2026-05-15T03:37:21Z",
       "cutover_verified_by": "invoke-lambda-smoke.yml",
-      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25898592017"
+      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25898826581"
     },
     {
       "aca_module": "aca_jobs.materialize_chapter_faqs",
@@ -91,9 +91,9 @@
       "shadow_start": "2026-05-09",
       "shadow_end": "2026-05-16",
       "cutover_status": "live",
-      "cutover_verified_at": "2026-05-15T03:29:05Z",
+      "cutover_verified_at": "2026-05-15T03:37:21Z",
       "cutover_verified_by": "invoke-lambda-smoke.yml",
-      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25898592017"
+      "cutover_verification_run": "https://github.com/founder24/-kalukaliya/actions/runs/25898826581"
     }
   ],
   "exempt_modules": [
