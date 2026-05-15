@@ -128,7 +128,7 @@ def get_db() -> Any:
     masked = _re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", uri)
     _log.info("_db.get_db: URI_DIAG scheme+host=%s total_len=%d", masked[:300], len(uri))
     try:
-        _client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
+        _client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=15000)
     except ValueError as _exc:
         # Log enough context to diagnose without exposing password.
         # Shows everything AFTER the last @ (i.e. host+path+query).
