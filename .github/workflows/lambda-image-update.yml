@@ -58,7 +58,16 @@ jobs:
         with:
           registries: ${{ env.ACCOUNT_ID }}
 
-      - name: Build + push Lambda batch image
+      - name: Compute patch tag
+        id: tag
+        run: |
+          TAG="task5-patch-${GITHUB_SHA::8}"
+          IMAGE="${{ env.ECR_REPO }}:${TAG}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Patch image URI: ${IMAGE}"
+
+      - name: Build + push Lambda batch image (SHA-tagged only — ECR is IMMUTABLE)
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
@@ -66,16 +75,14 @@ jobs:
           platforms: linux/arm64
           push: true
           provenance: false
-          tags: |
-            ${{ env.ECR_REPO }}:sqs-consumers-latest
-            ${{ env.ECR_REPO }}:task5-${{ github.sha }}
+          tags: ${{ steps.tag.outputs.image }}
           cache-from: type=gha,scope=sqs-consumers
           cache-to: type=gha,scope=sqs-consumers,mode=max
 
       - name: Update Lambda function code for each target
         run: |
           set -euo pipefail
-          IMAGE="${{ env.ECR_REPO }}:sqs-consumers-latest"
+          IMAGE="${{ steps.tag.outputs.image }}"
           IFS=',' read -ra FUNCS <<< "${{ inputs.functions || 'syrabit-prewarm-seo-routes,syrabit-seo-baseline,syrabit-materialize-chapter-faqs' }}"
 
           for FN in "${FUNCS[@]}"; do
