@@ -69,13 +69,7 @@ jobs:
             --region ap-south-1 \
             --query 'SecretString' --output text 2>/dev/null || echo "ERROR")
           if echo "$SEEDED" | grep -qE '^mongodb(\+srv)?://'; then
-            # Show only scheme + host (mask credentials)
-            MASKED=$(echo "$SEEDED" | python3 -c "
-import sys, re
-uri = sys.stdin.read().strip()
-masked = re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', uri)
-print(masked[:120])
-")
+            MASKED=$(echo "$SEEDED" | python3 -c "import sys,re; uri=sys.stdin.read().strip(); print(re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', uri)[:120])")
             echo "Verification OK — seeded URI: $MASKED"
           else
             echo "ERROR: Seeded value is not a MongoDB URI."
