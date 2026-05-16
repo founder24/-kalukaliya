@@ -56,25 +56,22 @@ const FIXTURES: Array<[string, Fixture]> = [
   ['/api/admin/kv-health', () => ({ configured: false })],
   ['/api/admin/ci-status', () => ({
     configured: true,
-    github_token_set: true,
-    workflows: [
-      {
-        name: 'azure-container-apps-deploy',
-        status: 'completed',
-        conclusion: 'success',
-        run_number: 42,
+    branch: 'main',
+    repo: 'syrabit/syrabit',
+    runs: {
+      'azure-container-apps-deploy': {
+        status: 'completed', conclusion: 'success',
+        run_number: 42, head_sha: 'abc1234', event: 'push',
+        age_seconds: 3600, id: 12345,
         html_url: 'https://github.com/syrabit/syrabit/actions/runs/42',
-        updated_at: '2026-05-15T08:00:00Z',
       },
-      {
-        name: 'edge-proxy-deploy',
-        status: 'completed',
-        conclusion: 'success',
-        run_number: 38,
+      'edge-proxy-deploy': {
+        status: 'completed', conclusion: 'success',
+        run_number: 38, head_sha: 'def5678', event: 'push',
+        age_seconds: 5400, id: 12344,
         html_url: 'https://github.com/syrabit/syrabit/actions/runs/38',
-        updated_at: '2026-05-15T07:30:00Z',
       },
-    ],
+    },
   })],
 
   // --- Dashboard data -----------------------------------------------------
