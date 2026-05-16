@@ -9,11 +9,13 @@
  *   2. Fires POST /api/admin/ci-rerun with { run_id, failed_only: true }.
  *   3. Returns the button to "re-run" (enabled) once the POST settles.
  *
- * Four cases:
+ * Six cases:
  *   A. Re-run button is visible on a failed row and absent on a success row.
  *   B. Clicking re-run fires the POST with the correct run_id payload.
  *   C. Button is disabled and shows "re-running…" while POST is in flight.
  *   D. Button returns to "re-run" (enabled) after the POST resolves.
+ *   E. 4xx from the backend re-enables the button and surfaces a toast error.
+ *   F. 5xx from the backend re-enables the button and surfaces a toast error.
  */
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { installAdminApiMocks, seedAdminSession } from './admin-mocks';
@@ -163,5 +165,61 @@ test.describe('Admin Dashboard — CI re-run button', () => {
     // POST resolves quickly — button must return to "re-run" and be enabled.
     await expect(failedRow.getByRole('button', { name: /re-run/i })).toBeEnabled({ timeout: 8_000 });
     await expect(failedRow.getByRole('button', { name: /re-running/i })).toHaveCount(0);
+  });
+
+  test('4xx response re-enables the button and surfaces a toast error', async ({ page }) => {
+    await openDashboardWithCiStatus(page, CI_ONE_FAILED);
+
+    await page.route('**/api/admin/ci-rerun**', async (route: Route) => {
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'GitHub token lacks workflow scope' }),
+      });
+    });
+
+    const card = page.getByTestId('notif-prefs-ci-status');
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    const failedRow = card.getByTestId(`notif-prefs-ci-status-row-${DEPLOY_WF}`);
+    await expect(failedRow).toBeVisible({ timeout: 10_000 });
+
+    await failedRow.getByRole('button', { name: /re-run/i }).click();
+
+    // handleCiRerun's finally block resets ciRerunning → button re-enables.
+    await expect(failedRow.getByRole('button', { name: /re-run/i })).toBeEnabled({ timeout: 8_000 });
+
+    // toast.error("Re-run failed: …") must be visible in the Sonner toast container.
+    await expect(
+      page.getByText(/re-run failed|GitHub token|workflow scope/i).first(),
+    ).toBeVisible({ timeout: 8_000 });
+  });
+
+  test('5xx response re-enables the button and surfaces a toast error', async ({ page }) => {
+    await openDashboardWithCiStatus(page, CI_ONE_FAILED);
+
+    await page.route('**/api/admin/ci-rerun**', async (route: Route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'upstream GitHub API error' }),
+      });
+    });
+
+    const card = page.getByTestId('notif-prefs-ci-status');
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    const failedRow = card.getByTestId(`notif-prefs-ci-status-row-${DEPLOY_WF}`);
+    await expect(failedRow).toBeVisible({ timeout: 10_000 });
+
+    await failedRow.getByRole('button', { name: /re-run/i }).click();
+
+    // Button must recover regardless of error type.
+    await expect(failedRow.getByRole('button', { name: /re-run/i })).toBeEnabled({ timeout: 8_000 });
+
+    // Error detail surfaced via toast.error.
+    await expect(
+      page.getByText(/re-run failed|upstream GitHub|api error/i).first(),
+    ).toBeVisible({ timeout: 8_000 });
   });
 });
