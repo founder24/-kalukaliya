@@ -137,7 +137,7 @@ _POST_RETRY_BASE_S = float(os.environ.get("CF_AI_POST_RETRY_BASE_S", "1.0"))
 
 
 async def _post(model_key: str, payload: dict, *, stream: bool = False,
-                timeout: float = 90.0) -> Any:
+                timeout: float = 90.0, force_direct: bool = False) -> Any:
     """POST to a Workers AI model endpoint with automatic 429/5xx retry.
 
     Retry policy (non-streaming only):
@@ -150,10 +150,14 @@ async def _post(model_key: str, payload: dict, *, stream: bool = False,
         token rotation.
       - Any other 4xx or final failure: raise_for_status().
     Streaming responses are NOT retried (caller controls the stream lifecycle).
+
+    force_direct=True skips the CF AI Gateway entirely (no gateway round-trip),
+    routing directly to api.cloudflare.com.  Use this for fallback calls where
+    reliability matters more than caching.
     """
     import random  # stdlib, cheap import
 
-    use_direct = False  # upgraded to True if the gateway returns any non-success
+    use_direct = force_direct  # upgraded to True if the gateway returns any non-success
 
     for _pass in range(2):  # pass 0 = gateway/default, pass 1 = direct fallback
         url = _model_url(model_key, direct=use_direct)
@@ -261,8 +265,13 @@ async def chat(
     max_tokens: int = 2048,
     temperature: float = 0.7,
     stream: bool = False,
+    direct: bool = False,
 ) -> str:
-    """Run a chat completion. Returns the full text response."""
+    """Run a chat completion. Returns the full text response.
+
+    direct=True bypasses the CF AI Gateway entirely (faster, more reliable
+    for fallback calls where latency matters over caching).
+    """
     if not _ENABLED:
         raise RuntimeError("Cloudflare AI not configured (missing CLOUDFLARE_API_TOKEN or CF_AI_GATEWAY_ACCOUNT_ID)")
     t0 = time.perf_counter()
@@ -273,7 +282,7 @@ async def chat(
     }
     if stream:
         payload["stream"] = True
-    result = await _post(model_key, payload, stream=stream)
+    result = await _post(model_key, payload, stream=stream, force_direct=direct)
     if stream:
         return result
     # Workers AI native: {"response": "..."}
@@ -299,9 +308,11 @@ async def chat_stream(
     *,
     model_key: str = "chat",
     max_tokens: int = 2048,
+    direct: bool = False,
 ) -> AsyncIterator[str]:
     """Stream chat tokens as an async generator of delta strings.
 
+    direct=True skips the CF AI Gateway entirely (no gateway round-trip).
     Gateway-auth fallback: if the CF AI Gateway returns 401 or 403 (e.g.
     CF_AI_GATEWAY_TOKEN in Key Vault is stale), we automatically retry via
     the direct Workers AI API before surfacing an error.
@@ -314,7 +325,8 @@ async def chat_stream(
         "stream": True,
     }
 
-    for _pass in range(2):  # pass 0 = gateway, pass 1 = direct fallback
+    _start_pass = 1 if direct else 0
+    for _pass in range(_start_pass, 2):  # pass 0 = gateway, pass 1 = direct
         use_direct = (_pass == 1)
         url = _model_url(model_key, direct=use_direct)
         client = await _get_client()
