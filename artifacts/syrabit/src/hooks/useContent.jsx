@@ -126,6 +126,8 @@ export const useLibraryBundleSlim = () =>
     queryFn: fetchLibraryBundleSlim,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
+    retry: 4,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 15000),
   });
 
 /**

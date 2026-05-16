@@ -353,8 +353,6 @@ export default function ChatPage() {
       const response = await fetch(`${API_BASE}/ai/chat/stream`, {
         method: 'POST', headers: fetchHeaders,
         credentials: 'include', body: JSON.stringify(payload), signal: controller.signal,
-        keepalive: false,
-        priority: 'high',
       });
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
