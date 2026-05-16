@@ -122,7 +122,7 @@ export default function EmbedBackfillPill({ adminToken }) {
         </p>
       )}
 
-      {!error && (
+      {!error && data !== null && (
         <>
           <div className="flex items-baseline gap-3 flex-wrap">
             <span

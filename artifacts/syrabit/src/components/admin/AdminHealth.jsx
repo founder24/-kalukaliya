@@ -2815,7 +2815,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                                         ? ts.toLocaleTimeString([], { hour12: false })
                                         : '—';
                                       const legLabels = {
-                                        sarvam_workers_indic_chain: 'Sarvam → Workers-AI IndicTrans2',
+                                        sarvam_workers_indic_chain: 'Sarvam → Vertex/Gemini',
                                         workers_ai_unavailable: 'Workers-AI Phase-2 unavailable',
                                         workers_ai_phase2: 'Workers-AI Phase-2 errored',
                                       };
@@ -3769,7 +3769,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           const signupBlockedHour = blockedLastHour.signup || 0;
           const signupTotal = totalByPrefix.signup || 0;
           const ratio = signupTotal > 0 ? signupBlockedLifetime / signupTotal : 0;
-          const tone = signupBlockedHour > 0 ? 'amber' : 'emerald';
+          const tone = signupBlockedLifetime > 0 ? 'amber' : 'emerald';
           const colors = tone === 'amber'
             ? { tile: 'bg-amber-50 border-amber-200', icon: 'bg-amber-100 text-amber-500', heading: 'text-amber-600' }
             : { tile: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-100 text-emerald-500', heading: 'text-emerald-600' };
@@ -3810,11 +3810,8 @@ export default function AdminHealth({ adminToken, onNavigate }) {
                   >
                     {signupBlockedHour}
                   </p>
-                  <p
-                    className="text-[10px] text-gray-400 mt-0.5"
-                    data-testid="signup-throttle-blocked"
-                  >
-                    {signupBlockedLifetime} since pod start
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    <span data-testid="signup-throttle-blocked">{signupBlockedLifetime}</span> since pod start
                   </p>
                 </div>
                 <div className="rounded-xl p-3 border border-gray-200 bg-white">

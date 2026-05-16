@@ -53,7 +53,7 @@ function AssameseRecentPanel({ recent, expanded }) {
                   ? ts.toLocaleTimeString([], { hour12: false })
                   : '—';
                 const legLabels = {
-                  sarvam_workers_indic_chain: 'Sarvam → Workers-AI IndicTrans2',
+                  sarvam_workers_indic_chain: 'Sarvam → Vertex/Gemini',
                   workers_ai_unavailable: 'Workers-AI Phase-2 unavailable',
                   workers_ai_phase2: 'Workers-AI Phase-2 errored',
                 };

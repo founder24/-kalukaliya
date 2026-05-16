@@ -292,7 +292,6 @@ export function AlertSettings({ token, onSaved }) {
             data-testid="alert-settings-save-btn"
             onClick={save}
             disabled={saving || !!thresholdInputError}
-            data-testid="save-button"
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors"
           >
             {saving ? <RefreshCw size={9} className="animate-spin" /> : <Check size={9} />}

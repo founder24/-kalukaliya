@@ -92,7 +92,7 @@ function getError() {
 }
 
 function getSaveButton() {
-  return screen.getByTestId('save-button');
+  return screen.getByTestId('alert-settings-save-btn');
 }
 
 /* ── Task #59 helpers ────────────────────────────────────────────────────── */
