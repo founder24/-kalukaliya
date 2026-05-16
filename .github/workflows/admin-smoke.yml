@@ -76,6 +76,14 @@ jobs:
       - name: Install Playwright Chromium + system deps
         run: pnpm --filter @workspace/syrabit exec playwright install --with-deps chromium
 
+      - name: Build frontend (required by vite preview webserver)
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          NODE_ENV: production
+          VITE_GA4_ID: G-CXJJPSV096
+          BUILD_BUDGET_MS: "480000"
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
       - name: Run admin dashboard smoke suite
         run: pnpm --filter @workspace/syrabit run test:e2e
         env:
