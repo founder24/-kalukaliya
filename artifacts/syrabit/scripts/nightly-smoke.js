@@ -122,33 +122,44 @@ async function main() {
   console.log(`Zone: ${ZONE_ID}\n`);
 
   // ── Phase 1: Zone settings ────────────────────────────────────────────
+  // Uses cfGetOrSkip so a token lacking Zone Settings: Read scope degrades
+  // to a warning rather than aborting the run (matches Phase 2–6 behaviour).
   console.log('Phase 1 — Zone settings:');
 
-  const sqsc = await cfGet(`/zones/${ZONE_ID}/settings/sort_query_string_for_cache`);
-  assert('sort_query_string_for_cache', sqsc.result.value, 'on');
+  const sqsc = await cfGetOrSkip(`/zones/${ZONE_ID}/settings/sort_query_string_for_cache`);
+  if (!sqsc) { warn('sort_query_string_for_cache', 'token lacks Zone Settings: Read'); }
+  else { assert('sort_query_string_for_cache', sqsc.result.value, 'on'); }
 
-  const tcip = await cfGet(`/zones/${ZONE_ID}/settings/true_client_ip_header`);
-  assert('true_client_ip_header', tcip.result.value, 'on');
+  const tcip = await cfGetOrSkip(`/zones/${ZONE_ID}/settings/true_client_ip_header`);
+  if (!tcip) { warn('true_client_ip_header', 'token lacks Zone Settings: Read'); }
+  else { assert('true_client_ip_header', tcip.result.value, 'on'); }
 
-  const ech  = await cfGet(`/zones/${ZONE_ID}/settings/ech`);
-  assert('ech', ech.result.value, 'on');
+  const ech  = await cfGetOrSkip(`/zones/${ZONE_ID}/settings/ech`);
+  if (!ech) { warn('ech', 'token lacks Zone Settings: Read'); }
+  else { assert('ech', ech.result.value, 'on'); }
 
   // ── Phase 1: Bot Management ───────────────────────────────────────────
   console.log('\nPhase 1 — Bot Management:');
-  const bm = await cfGet(`/zones/${ZONE_ID}/bot_management`);
-  assert('sbfm_likely_automated',   bm.result.sbfm_likely_automated,   'managed_challenge');
-  assert('content_bots_protection', bm.result.content_bots_protection, 'block');
-  // Task #259: sbfm_verified_bots MUST be 'allow' so Googlebot / Bingbot can
-  // crawl. Any other value (e.g. 'block' or 'managed_challenge') silently drops
-  // all verified-bot traffic and causes zero indexing even when sitemaps are
-  // valid. This is asserted as a hard failure (not a warning) because it is the
-  // single most impactful crawlability knob in the Cloudflare dashboard.
-  assert('sbfm_verified_bots',      bm.result.sbfm_verified_bots,      'allow');
+  const bm = await cfGetOrSkip(`/zones/${ZONE_ID}/bot_management`);
+  if (!bm) {
+    warn('bot_management', 'token lacks Bot Management: Read — add scope to check');
+  } else {
+    assert('sbfm_likely_automated',   bm.result.sbfm_likely_automated,   'managed_challenge');
+    assert('content_bots_protection', bm.result.content_bots_protection, 'block');
+    // Task #259: sbfm_verified_bots MUST be 'allow' so Googlebot / Bingbot can
+    // crawl. Any other value (e.g. 'block' or 'managed_challenge') silently drops
+    // all verified-bot traffic and causes zero indexing even when sitemaps are
+    // valid. This is asserted as a hard failure (not a warning) because it is the
+    // single most impactful crawlability knob in the Cloudflare dashboard.
+    assert('sbfm_verified_bots',      bm.result.sbfm_verified_bots,      'allow');
+  }
 
   // ── Phase 1: DMARC ────────────────────────────────────────────────────
   console.log('\nPhase 1 — DMARC:');
-  const dns = await cfGet(`/zones/${ZONE_ID}/dns_records?name=_dmarc.syrabit.ai&type=TXT`);
-  if (!dns.result.length) {
+  const dns = await cfGetOrSkip(`/zones/${ZONE_ID}/dns_records?name=_dmarc.syrabit.ai&type=TXT`);
+  if (!dns) {
+    warn('_dmarc.syrabit.ai DMARC', 'token lacks DNS: Read — add scope to check');
+  } else if (!dns.result.length) {
     failures.push('_dmarc.syrabit.ai TXT record (NOT FOUND)');
     console.log('  ✗  _dmarc.syrabit.ai TXT: NOT FOUND');
   } else {
