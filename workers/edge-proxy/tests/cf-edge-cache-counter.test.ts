@@ -144,6 +144,7 @@ function makeEnv(overrides: Partial<TestEnv> = {}): TestEnv {
     KV_ALERT_SECRET: ALERT_SECRET,
     DISPATCH_SHARED_SECRET: "dispatch-secret",
     ORIGIN_TARGET: "azure",
+    JWT_SECRET: "test-jwt-secret",
     ...overrides,
   };
 }

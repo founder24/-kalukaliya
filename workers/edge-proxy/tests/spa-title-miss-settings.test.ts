@@ -78,6 +78,7 @@ function makeEnv(
     BOT_HTML_CACHE: undefined as unknown,
     CONTENT_DB:   undefined as unknown,
     D1_SYNC_SECRET: SECRET,
+    JWT_SECRET: "test-jwt-secret",
     ...(opts.threshold !== undefined
       ? { SPA_TITLE_MISS_ALERT_THRESHOLD: opts.threshold }
       : {}),

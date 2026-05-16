@@ -451,6 +451,7 @@ describe("worker default fetch handler under a KV outage", () => {
       BOT_HTML_CACHE: failingKv,
       BACKEND_URL: "https://backend.example.com",
       PAGES_ORIGIN: "https://pages.example.com",
+      JWT_SECRET: "test-jwt-secret",
     } as unknown as Parameters<typeof worker.fetch>[1];
 
     const ctx = {
@@ -559,6 +560,7 @@ describe("CF_EDGE_CACHE cross-isolate aggregation (Task #511)", () => {
       CF_EDGE_CACHE: cfEdgeCache,
       BACKEND_URL: "https://backend.example.com",
       D1_SYNC_SECRET: "admin-secret",
+      JWT_SECRET: "test-jwt-secret",
     } as unknown as Parameters<typeof worker.fetch>[1];
 
     const ctx = {
@@ -606,6 +608,7 @@ describe("CF_EDGE_CACHE cross-isolate aggregation (Task #511)", () => {
       // CF_EDGE_CACHE intentionally absent.
       BACKEND_URL: "https://backend.example.com",
       D1_SYNC_SECRET: "admin-secret",
+      JWT_SECRET: "test-jwt-secret",
     } as unknown as Parameters<typeof worker.fetch>[1];
 
     const ctx = {
@@ -810,6 +813,7 @@ describe("/api/edge/kv-usage exposes bot_cache block", () => {
       BOT_HTML_CACHE: new FakeKv(),
       BACKEND_URL: "https://backend.example.com",
       D1_SYNC_SECRET: "admin-secret",
+      JWT_SECRET: "test-jwt-secret",
     } as unknown as Parameters<typeof worker.fetch>[1];
 
     const ctx = {
@@ -857,6 +861,7 @@ describe("/api/edge/kv-usage exposes bot_cache block", () => {
       BOT_HTML_CACHE: new FakeKv(),
       BACKEND_URL: "https://backend.example.com",
       D1_SYNC_SECRET: "admin-secret",
+      JWT_SECRET: "test-jwt-secret",
     } as unknown as Parameters<typeof worker.fetch>[1];
     const ctx = {
       waitUntil: () => undefined,

@@ -48,6 +48,7 @@ function makeEnv(over: Record<string, unknown> = {}) {
     BACKEND_URL: "https://example.invalid",
     D1_SYNC_SECRET: "topsecret",
     RATE_LIMIT: new FakeKv() as unknown as KVNamespace,
+    JWT_SECRET: "test-jwt-secret",
     ...over,
   } as unknown as Parameters<typeof worker.fetch>[1];
 }

@@ -45,6 +45,7 @@ const env = {
   RATE_LIMIT: undefined as unknown as KVNamespace,
   CONTENT_DB: fakeDb,
   D1_SYNC_SECRET: "x",
+  JWT_SECRET: "test-jwt-secret",
 } as unknown as Parameters<typeof worker.fetch>[1];
 
 const ctx = {

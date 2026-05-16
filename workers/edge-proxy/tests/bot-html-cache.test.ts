@@ -66,6 +66,7 @@ function makeEnv(opts: { botCache?: Kv | null; rateLimit?: Kv } = {}) {
     BOT_HTML_CACHE: botCache as unknown,
     CONTENT_DB: undefined as unknown,
     D1_SYNC_SECRET: "secret",
+    JWT_SECRET: "test-jwt-secret",
   } as unknown as Parameters<typeof workerHandler.fetch>[1];
 }
 

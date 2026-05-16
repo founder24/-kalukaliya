@@ -73,6 +73,7 @@ function makeEnv(kv: FakeKv): Record<string, unknown> {
     BOT_HTML_CACHE: undefined,
     CONTENT_DB: undefined, // omit D1 so cache path goes straight to backend fetch
     D1_SYNC_SECRET: "",
+    JWT_SECRET: "test-jwt-secret",
   };
 }
 

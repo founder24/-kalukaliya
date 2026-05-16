@@ -61,6 +61,7 @@ function makeEnv(over: Record<string, unknown> = {}) {
     CF_EDGE_CACHE: makeKv(),
     CONTENT_DB: undefined,
     D1_SYNC_SECRET: "smoke-secret",
+    JWT_SECRET: "test-jwt-secret",
     ...over,
   } as unknown as Parameters<typeof workerHandler.fetch>[1];
 }
