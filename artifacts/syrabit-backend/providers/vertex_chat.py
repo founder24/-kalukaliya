@@ -35,25 +35,25 @@ _CACHE: dict = {}
 # ── Shared pooled HTTP client (one per process, created lazily) ───────────────
 # Eliminates per-call TCP + TLS handshake to aiplatform.googleapis.com.
 # HTTP/2 multiplexing keeps concurrent requests on the same connection.
+# No asyncio.Lock here — asyncio is single-threaded; if two coroutines both
+# see _shared_client=None they each create one and the last write wins, which
+# is harmless (both are valid clients with identical config).
 _shared_client: Optional[httpx.AsyncClient] = None
-_client_lock = asyncio.Lock()
 
 
 async def _get_shared_client() -> httpx.AsyncClient:
     global _shared_client
     if _shared_client is None or _shared_client.is_closed:
-        async with _client_lock:
-            if _shared_client is None or _shared_client.is_closed:
-                _shared_client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0),
-                    limits=httpx.Limits(
-                        max_connections=20,
-                        max_keepalive_connections=10,
-                        keepalive_expiry=120,
-                    ),
-                    http2=True,
-                )
-                logger.info("[vertex_chat] shared HTTP/2 client created")
+        _shared_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=120,
+            ),
+            http2=True,
+        )
+        logger.info("[vertex_chat] shared HTTP/2 client created")
     return _shared_client
 
 
