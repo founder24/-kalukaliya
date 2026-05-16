@@ -456,7 +456,7 @@ async def chat_direct(
         "conversation_id":   conv_id,
         "meta": {
             "provider": actual_provider,
-            "model_key": "sarvam-m" if is_assamese else "vertex/gemini-2.0-flash",
+            "model_key": "sarvam-m" if is_assamese else "vertex/gemini-2.5-flash",
             "mode": "direct",
             "lang": lang,
         },
