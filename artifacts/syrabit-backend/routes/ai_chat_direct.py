@@ -6,8 +6,10 @@ Architecture (two-layer):
   L2  — MongoDB `direct_chat_history` (durable, 30-day auto-expiry TTL index)
 
 Hardcoded provider routing (V4 §12 — no silent fallbacks):
-  English chat  : Workers-AI chat_stream (llama-3.3-70b → gpt-oss-20b → gpt-oss-120b) → Vertex
-  Assamese chat : Sarvam (sarvam-m) → Workers-AI chat → Vertex
+  English chat  : Vertex AI (gemini-2.0-flash) PRIMARY — hardcoded
+                  → Workers-AI chat_fast (8B, direct, no gateway) fallback
+  Assamese chat : Sarvam (sarvam-m) PRIMARY — thinks AND responds in Assamese
+                  → Vertex AI (gemini-2.0-flash, Assamese-mode prompt) fallback
 
 Pipeline per request:
   1. Resolve / mint conversation_id
@@ -39,12 +41,13 @@ logger = logging.getLogger("routes.ai_chat_direct")
 router = APIRouter()
 
 # ── Hardcoded provider chains (V4 §12 — no silent fallbacks) ──────────────────
-# English chat  : llama-3.3-70b (TTFT ≈ 770ms, total ≈ 2.1s — within 3s budget)
-#                 → Vertex fallback ONLY if Workers-AI fails.  No model rotation.
-# Assamese chat : Sarvam (sarvam-m) → Workers-AI chat (with think-strip) → error
+# English chat  : Vertex AI gemini-2.0-flash — PRIMARY (hardcoded, HTTP/2 pooled)
+#                 → Workers-AI chat_fast (8B direct, no gateway) — FALLBACK ONLY
+# Assamese chat : Sarvam sarvam-m — PRIMARY (thinks in Assamese, responds in Assamese)
+#                 → Vertex AI (Assamese-mode system prompt) — FALLBACK ONLY
 # English content: Vertex primary, Workers-AI fallback  [in content_format POOL_WEIGHTS]
 # Assamese content: Workers-AI IndicTrans2 primary, Sarvam fallback [in assamese_content POOL_WEIGHTS]
-_ENGLISH_PRIMARY_MODEL = "chat"   # @cf/meta/llama-3.3-70b-instruct-fp8-fast
+_WORKERS_FALLBACK_MODEL = "chat_fast"   # @cf/meta/llama-3.1-8b-instruct-fp8 (reliable direct fallback)
 
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -344,11 +347,15 @@ def _build_messages(msg: DirectChatMessage,
     if lang in ("as", "assamese"):
         system_parts.append(
             "STRICT ASSAMESE MODE — MANDATORY RULES:\n"
-            "1. Your ENTIRE answer MUST be in Assamese script (অসমীয়া). No English words, no reasoning in English.\n"
-            "2. Start your answer IMMEDIATELY. No 'Okay', 'Sure', 'Let me', or any English opener.\n"
-            "3. Do NOT output <think>, </think>, or any reasoning/chain-of-thought text.\n"
-            "4. Latin script is allowed ONLY for: numbers, scientific units (cm, kg, Hz, °C, eV), math symbols/equations, code/URLs, and well-known proper nouns (AHSEC, SEBA, NCERT, DNA, GDP, Newton, Magh Bihu).\n"
-            "5. For everyday nouns and verbs, always use the Assamese word — never the English equivalent.\n"
+            "1. THINK in Assamese (অসমীয়া). Even if the question is in English, your internal reasoning "
+            "   and chain-of-thought MUST be in Assamese. Never reason in English first then translate.\n"
+            "2. Your ENTIRE answer MUST be in Assamese script (অসমীয়া).\n"
+            "3. Start your answer IMMEDIATELY. No 'Okay', 'Sure', 'Let me', or any English opener.\n"
+            "4. Do NOT output <think>, </think>, or any reasoning/chain-of-thought text.\n"
+            "5. Latin script is allowed ONLY for: numbers, scientific units (cm, kg, Hz, °C, eV), "
+            "   math symbols/equations, code/URLs, and well-known proper nouns (AHSEC, SEBA, NCERT, "
+            "   DNA, GDP, Newton, Magh Bihu).\n"
+            "6. For everyday nouns and verbs, always use the Assamese word — never the English equivalent.\n"
             "EXAMPLES:\n"
             "  WRONG: 'Newton ৰ first law explains inertia.'\n"
             "  RIGHT:  'Newton ৰ গতিৰ প্ৰথম সূত্ৰে জড়তা ব্যাখ্যা কৰে।'\n"
@@ -385,52 +392,59 @@ async def chat_direct(
 
     lang         = (msg.response_lang or msg.lang or "en").lower()
     is_assamese  = lang in ("as", "assamese")
-    actual_provider = "workers-ai"
+    actual_provider = "vertex"
     answer       = ""
 
     if is_assamese:
-        # ── Assamese chain: Sarvam → Workers-AI (think-stripped) ──────────────
-        # _call_sarvam_llm already strips <think> blocks (llm.py line 1474).
+        # ── Assamese chain: Sarvam PRIMARY → Vertex fallback ──────────────────
+        # Sarvam sarvam-m thinks AND responds in Assamese (even for English Qs).
+        # The system prompt injected by _build_messages enforces Assamese thinking.
         try:
-            from llm import _SARVAM_PROVIDERS, _call_sarvam_llm
-            if _SARVAM_PROVIDERS:
-                slot = _SARVAM_PROVIDERS[0]
-                answer = await _call_sarvam_llm(messages, slot["key"], "sarvam-m", 1024)
-                actual_provider = "sarvam"
+            from providers.sarvam import chat as sarvam_chat
+            resp = await sarvam_chat(
+                messages, language="as", user_id=(user or {}).get("id"),
+                max_tokens=700, thinking_budget=256,
+            )
+            answer = resp.text
+            actual_provider = "sarvam"
         except Exception as exc:
-            logger.warning("[chat_direct] Sarvam failed for Assamese: %s", exc)
+            logger.warning("[chat_direct] Sarvam primary failed for Assamese: %s", exc)
 
         if not answer:
-            # Workers-AI fallback: strip <think> blocks before returning
+            # Vertex fallback — Assamese system prompt already in messages
             try:
-                from providers.cloudflare_ai import chat as cf_chat
-                raw = await cf_chat(messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024)
-                answer = _strip_think(raw)
-                actual_provider = "workers-ai"
+                from providers.vertex_chat import call_chat as vertex_call
+                answer = await vertex_call(messages, max_tokens=800)
+                actual_provider = "vertex"
             except Exception as exc:
-                logger.warning("[chat_direct] Workers-AI Assamese fallback failed: %s", exc)
+                logger.error("[chat_direct] Vertex Assamese fallback failed: %s", exc)
 
         if not answer:
             answer = "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি পুনৰাই চেষ্টা কৰক।"
 
     else:
-        # ── English chain: llama-3.3-70b (hardcoded) → Vertex fallback ────────
-        # No model rotation — single fast model meets the 3s latency budget.
+        # ── English chain: Vertex PRIMARY (hardcoded) → Workers-AI fallback ───
+        # Vertex gemini-2.0-flash via shared HTTP/2 client — no per-call handshake.
         try:
-            from providers.cloudflare_ai import chat as cf_chat
-            raw    = await cf_chat(messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024)
-            answer = _strip_think(raw)
-            actual_provider = "workers-ai"
+            from providers.vertex_chat import call_chat as vertex_call
+            answer = await vertex_call(messages, max_tokens=1024)
+            actual_provider = "vertex"
         except Exception as exc:
-            logger.warning("[chat_direct] Workers-AI English failed: %s", exc)
+            logger.warning("[chat_direct] Vertex primary failed: %s", exc)
 
         if not answer:
+            # Workers-AI fallback: chat_fast (8B), direct to api.cloudflare.com
+            # (bypass CF AI Gateway — 70B fails through gateway, 8B is reliable direct).
             try:
-                from providers.vertex_chat import call_chat as vertex_call_chat
-                answer = await vertex_call_chat(messages, max_tokens=1024)
-                actual_provider = "vertex"
+                from providers.cloudflare_ai import chat as cf_chat
+                raw    = await cf_chat(
+                    messages, model_key=_WORKERS_FALLBACK_MODEL,
+                    max_tokens=1024, direct=True,
+                )
+                answer = _strip_think(raw)
+                actual_provider = "workers-ai"
             except Exception as exc:
-                logger.error("[chat_direct] Vertex fallback also failed: %s", exc)
+                logger.warning("[chat_direct] Workers-AI fallback failed: %s", exc)
                 answer = "AI service temporarily unavailable — please retry."
 
     user_id = (user or {}).get("id")
@@ -481,7 +495,7 @@ async def chat_stream_direct(
         "rag_chunks":      0,
     })
 
-    actual_provider = "sarvam" if is_assamese else "workers-ai"
+    actual_provider = "sarvam" if is_assamese else "vertex"
 
     async def _body():
         nonlocal actual_provider
@@ -489,16 +503,16 @@ async def chat_stream_direct(
         accumulated: list[str] = []
 
         if is_assamese:
-            # ── Assamese: Sarvam stream (think-stripped) → Workers-AI fallback ──
-            # _stream_sarvam may emit raw <think> tokens when thinking=enabled;
-            # _stream_strip_think discards them before they reach the student.
+            # ── Assamese: Sarvam PRIMARY stream (think-stripped) → Vertex fallback
+            # Sarvam sarvam-m thinks in Assamese, responds in Assamese.
+            # _stream_sarvam emits raw <think> tokens — _stream_strip_think discards them.
             sarvam_ok = False
             try:
                 from llm import _SARVAM_PROVIDERS, _stream_sarvam
                 if _SARVAM_PROVIDERS:
                     slot = _SARVAM_PROVIDERS[0]
                     async for token in _stream_strip_think(
-                        _stream_sarvam(messages, slot["key"], "sarvam-m", 1024, response_lang="as")
+                        _stream_sarvam(messages, slot["key"], "sarvam-m", 700, response_lang="as")
                     ):
                         accumulated.append(token)
                         yield f"data: {json.dumps({'content': token})}\n\n"
@@ -508,17 +522,14 @@ async def chat_stream_direct(
                 logger.warning("[chat_direct] Sarvam stream failed: %s", exc)
 
             if not sarvam_ok:
-                # Workers-AI fallback: fetch full text then strip think blocks
+                # Vertex fallback for Assamese — Assamese system prompt already in messages
                 fallback_text: str | None = None
                 try:
-                    from providers.cloudflare_ai import chat as cf_chat
-                    raw_fb = await cf_chat(
-                        messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024
-                    )
-                    fallback_text = _strip_think(raw_fb)
-                    actual_provider = "workers-ai"
+                    from providers.vertex_chat import call_chat as vertex_call
+                    fallback_text = await vertex_call(messages, max_tokens=800)
+                    actual_provider = "vertex"
                 except Exception as exc:
-                    logger.warning("[chat_direct] Workers-AI Assamese fallback failed: %s", exc)
+                    logger.warning("[chat_direct] Vertex Assamese fallback failed: %s", exc)
 
                 if fallback_text:
                     for _i in range(0, len(fallback_text), 6):
@@ -531,55 +542,41 @@ async def chat_stream_direct(
                     yield f"data: {json.dumps({'content': err_tok})}\n\n"
 
         else:
-            # ── English: llama-3.3-70b (hardcoded, no rotation) → Vertex fallback
-            # _stream_strip_think removes any <think> blocks in the token stream.
-            tokens_received = 0
-            _stream_exc: Exception | None = None
-
+            # ── English: Vertex PRIMARY (chunked SSE) → Workers-AI chat_fast direct fallback
+            # Vertex non-streaming response is chunked into SSE tokens for the frontend.
+            vertex_text: str | None = None
             try:
-                from providers.cloudflare_ai import chat_stream as cf_stream
-                async for token in _stream_strip_think(
-                    cf_stream(messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024)
-                ):
-                    tokens_received += 1
-                    accumulated.append(token)
-                    yield f"data: {json.dumps({'content': token})}\n\n"
-                actual_provider = "workers-ai"
+                from providers.vertex_chat import call_chat as vertex_call
+                vertex_text = await vertex_call(messages, max_tokens=1024)
+                actual_provider = "vertex"
+                logger.info("[chat_direct/stream] Vertex primary succeeded (%d chars)", len(vertex_text or ""))
             except Exception as exc:
-                _stream_exc = exc
-                if tokens_received == 0:
-                    logger.warning(
-                        "[chat_direct] Workers-AI stream failed (0 tokens): %s", str(exc)[:120]
-                    )
+                logger.warning("[chat_direct/stream] Vertex primary failed: %s", exc)
 
-            if tokens_received == 0:
-                # Workers-AI failed with 0 tokens → Vertex chunked fallback
-                fallback_text: str | None = None
+            if vertex_text:
+                for _i in range(0, len(vertex_text), 6):
+                    _chunk = vertex_text[_i:_i + 6]
+                    accumulated.append(_chunk)
+                    yield f"data: {json.dumps({'content': _chunk})}\n\n"
+            else:
+                # Workers-AI fallback: chat_fast (8B), direct to api.cloudflare.com
+                # (bypass CF AI Gateway — 70B fails through gateway; 8B is reliable).
+                tokens_received = 0
                 try:
-                    from providers.vertex_chat import call_chat as vertex_call_chat
-                    fallback_text = await vertex_call_chat(messages, max_tokens=1024)
-                    actual_provider = "vertex"
-                    logger.info("[chat_direct] Vertex fallback succeeded (%d chars)", len(fallback_text or ""))
+                    from providers.cloudflare_ai import chat_stream as cf_stream
+                    async for token in _stream_strip_think(
+                        cf_stream(messages, model_key=_WORKERS_FALLBACK_MODEL,
+                                  max_tokens=1024, direct=True)
+                    ):
+                        tokens_received += 1
+                        accumulated.append(token)
+                        yield f"data: {json.dumps({'content': token})}\n\n"
+                    actual_provider = "workers-ai"
                 except Exception as exc:
-                    logger.error("[chat_direct] Vertex fallback failed: %s", exc)
+                    logger.warning("[chat_direct/stream] Workers-AI fallback failed: %s", exc)
 
-                if fallback_text:
-                    for _i in range(0, len(fallback_text), 6):
-                        _chunk = fallback_text[_i:_i + 6]
-                        accumulated.append(_chunk)
-                        yield f"data: {json.dumps({'content': _chunk})}\n\n"
-                else:
-                    import httpx as _httpx
-                    if _stream_exc and isinstance(_stream_exc, _httpx.HTTPStatusError):
-                        _st = _stream_exc.response.status_code
-                        if _st == 429:
-                            err_tok = "Service is busy right now — please try again in a moment."
-                        elif _st in (401, 403):
-                            err_tok = "AI service authentication error — please contact support."
-                        else:
-                            err_tok = f"AI service returned HTTP {_st} — please retry."
-                    else:
-                        err_tok = "AI service temporarily unavailable — please retry."
+                if tokens_received == 0:
+                    err_tok = "AI service temporarily unavailable — please retry."
                     accumulated.append(err_tok)
                     yield f"data: {json.dumps({'content': err_tok})}\n\n"
 
