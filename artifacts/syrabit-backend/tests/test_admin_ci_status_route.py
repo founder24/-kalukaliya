@@ -1,4 +1,4 @@
-"""Task #470 — admin route tests for /admin/ci-status."""
+"""Task #470 — admin route tests for /admin/ci-status and /admin/ci-rerun."""
 import os
 import pytest
 from unittest.mock import patch, MagicMock
@@ -66,12 +66,13 @@ def _mock_response(status_code: int, json_payload):
 
 class _FakeAsyncClient:
     """Minimal stand-in for httpx.AsyncClient supporting the async context
-    manager protocol + ``get``."""
+    manager protocol + ``get`` / ``post``."""
 
     def __init__(self, responses):
-        # responses is a list consumed in order.
+        # responses is a list consumed in order across get + post calls.
         self._responses = list(responses)
-        self.calls = []
+        self.calls = []          # (method, url) tuples
+        self.post_bodies = []    # raw content bytes passed to post()
 
     async def __aenter__(self):
         return self
@@ -80,7 +81,12 @@ class _FakeAsyncClient:
         return False
 
     async def get(self, url):
-        self.calls.append(url)
+        self.calls.append(("GET", url))
+        return self._responses.pop(0)
+
+    async def post(self, url, *, content=b""):
+        self.calls.append(("POST", url))
+        self.post_bodies.append(content)
         return self._responses.pop(0)
 
 
@@ -120,9 +126,9 @@ def test_ci_status_returns_latest_run_per_workflow(app_client_authed):
     assert be["head_sha"] == "abcdef1"  # truncated to 7
     assert be["age_seconds"] is not None
     # Both API calls must be branch-pinned to avoid feature-branch leaks.
-    for call in fake.calls:
-        assert "branch=main" in call
-        assert "per_page=1" in call
+    for _method, url in fake.calls:
+        assert "branch=main" in url
+        assert "per_page=1" in url
 
 
 def test_ci_status_handles_failure_conclusion(app_client_authed):
@@ -242,4 +248,153 @@ def test_ci_status_respects_workflow_and_branch_overrides(app_client_authed):
     body = res.json()
     assert body["branch"] == "release"
     assert "ci.yml" in body["runs"]
-    assert any("branch=release" in u and "ci.yml" in u for u in fake.calls)
+    assert any("branch=release" in url and "ci.yml" in url for _m, url in fake.calls)
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/ci-rerun tests
+# ---------------------------------------------------------------------------
+
+def test_ci_rerun_requires_admin_auth(app_client_no_auth):
+    """The re-run endpoint must reject unauthenticated callers."""
+    res = app_client_no_auth.post(
+        "/admin/ci-rerun",
+        json={"run_id": 1},
+    )
+    assert res.status_code in (401, 403)
+
+
+def test_ci_rerun_returns_503_when_repo_not_configured(app_client_authed):
+    """When GITHUB_REPO is absent the route must fail with 503 rather than
+    silently accepting the request and sending it to the wrong repo."""
+    with patch.dict(os.environ, {"GITHUB_REPO": "", "GITHUB_TOKEN": "tok"},
+                    clear=False):
+        res = app_client_authed.post("/admin/ci-rerun", json={"run_id": 99})
+    assert res.status_code == 503
+    assert "GITHUB_REPO" in res.json()["detail"]
+
+
+def test_ci_rerun_returns_503_when_token_not_configured(app_client_authed):
+    """Without GITHUB_TOKEN the route must fail with 503 — there is no
+    point forwarding the request because GitHub would reject it anyway."""
+    with patch.dict(os.environ, {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": ""},
+                    clear=False):
+        res = app_client_authed.post("/admin/ci-rerun", json={"run_id": 99})
+    assert res.status_code == 503
+    assert "GITHUB_TOKEN" in res.json()["detail"]
+
+
+def test_ci_rerun_happy_path_failed_only(app_client_authed):
+    """failed_only=True (default) must POST to .../rerun-failed-jobs and
+    return {queued: true, run_id: <id>, failed_only: true}."""
+    fake = _FakeAsyncClient([_mock_response(201, {})])
+    with patch.dict(os.environ,
+                    {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": "ghp_tok"},
+                    clear=False), \
+            patch("routes.admin_ci_status.httpx.AsyncClient", return_value=fake):
+        res = app_client_authed.post(
+            "/admin/ci-rerun",
+            json={"run_id": 12345, "failed_only": True},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["queued"] is True
+    assert body["run_id"] == 12345
+    assert body["failed_only"] is True
+    # Must have hit the failed-jobs path, not the all-jobs path.
+    assert len(fake.calls) == 1
+    _method, url = fake.calls[0]
+    assert _method == "POST"
+    assert "rerun-failed-jobs" in url
+    assert "12345" in url
+
+
+def test_ci_rerun_happy_path_all_jobs(app_client_authed):
+    """failed_only=False must POST to .../rerun (re-run all jobs) and
+    return {failed_only: false}."""
+    fake = _FakeAsyncClient([_mock_response(201, {})])
+    with patch.dict(os.environ,
+                    {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": "ghp_tok"},
+                    clear=False), \
+            patch("routes.admin_ci_status.httpx.AsyncClient", return_value=fake):
+        res = app_client_authed.post(
+            "/admin/ci-rerun",
+            json={"run_id": 99, "failed_only": False},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["queued"] is True
+    assert body["failed_only"] is False
+    _method, url = fake.calls[0]
+    # Must use the "rerun" path, NOT "rerun-failed-jobs".
+    assert url.endswith("/rerun")
+    assert "rerun-failed-jobs" not in url
+
+
+def test_ci_rerun_forwards_github_403_as_502(app_client_authed):
+    """A 403 from GitHub (token lacks actions:write) must be surfaced as
+    502 — not 200 — so the frontend can display the error detail."""
+    error_body = {"message": "Resource not accessible by integration"}
+    fake = _FakeAsyncClient([_mock_response(403, error_body)])
+    resp_mock = fake._responses[0]
+    resp_mock.text = "Resource not accessible by integration"
+
+    with patch.dict(os.environ,
+                    {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": "ghp_tok"},
+                    clear=False), \
+            patch("routes.admin_ci_status.httpx.AsyncClient", return_value=fake):
+        res = app_client_authed.post("/admin/ci-rerun", json={"run_id": 1})
+    assert res.status_code == 502
+    detail = res.json()["detail"]
+    assert "403" in detail
+
+
+def test_ci_rerun_forwards_github_500_as_502(app_client_authed):
+    """GitHub 5xx responses must also be surfaced as 502."""
+    fake = _FakeAsyncClient([_mock_response(500, {})])
+    resp_mock = fake._responses[0]
+    resp_mock.text = "Internal Server Error"
+
+    with patch.dict(os.environ,
+                    {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": "ghp_tok"},
+                    clear=False), \
+            patch("routes.admin_ci_status.httpx.AsyncClient", return_value=fake):
+        res = app_client_authed.post("/admin/ci-rerun", json={"run_id": 7})
+    assert res.status_code == 502
+    assert "500" in res.json()["detail"]
+
+
+def test_ci_rerun_network_exception_raises_502(app_client_authed):
+    """A network-level failure must raise 502 — not propagate as an
+    unhandled 500 — so the dashboard error message is actionable."""
+    class _BrokenClient(_FakeAsyncClient):
+        async def post(self, url, **_kw):
+            raise RuntimeError("connect timeout")
+
+    fake = _BrokenClient([])
+    with patch.dict(os.environ,
+                    {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": "ghp_tok"},
+                    clear=False), \
+            patch("routes.admin_ci_status.httpx.AsyncClient", return_value=fake):
+        res = app_client_authed.post("/admin/ci-rerun", json={"run_id": 5})
+    assert res.status_code == 502
+    assert "GitHub unreachable" in res.json()["detail"]
+
+
+def test_ci_rerun_sends_authorization_header(app_client_authed):
+    """The re-run POST must include Authorization: Bearer <token> so
+    private-repo callers are authenticated with actions:write scope."""
+    captured: dict = {}
+    fake = _FakeAsyncClient([_mock_response(201, {})])
+
+    def _factory(*args, **kwargs):
+        captured.update(kwargs.get("headers") or {})
+        return fake
+
+    with patch.dict(os.environ,
+                    {"GITHUB_REPO": "x/y", "GITHUB_TOKEN": "ghp_write_tok"},
+                    clear=False), \
+            patch("routes.admin_ci_status.httpx.AsyncClient", _factory):
+        res = app_client_authed.post("/admin/ci-rerun", json={"run_id": 1})
+    assert res.status_code == 200
+    assert captured.get("Authorization") == "Bearer ghp_write_tok"
