@@ -33,9 +33,13 @@ name: enforce-branch-protection
 #                             branch protection rules — a named PAT is required.
 #                             Do NOT reuse secrets.GITHUB_TOKEN here.
 #
-# Required status check contexts applied:
-#   "post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)"
-#   "all-tests / Backend import smoke test"
+# Required status check contexts applied (branch-specific):
+#   main:
+#     "post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)"
+#     "all-tests / Backend import smoke test"
+#   Replit-agent:
+#     "post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)"
+#     "backend-tests / Backend import smoke test"
 #
 # Trigger: workflow_dispatch (one-shot admin tool) + weekly cron (guard).
 # The weekly run catches any accidental removal of the protection rule.

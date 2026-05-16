@@ -48,13 +48,39 @@
 
 'use strict';
 
-// All contexts that must be present as required status checks.
-// Add new entries here; the script adds any that are missing in one PUT.
-const REQUIRED_CONTEXTS = [
-  // Task #141 — post-deploy Lighthouse perf gate (LCP / CLS / INP)
+// Required status-check contexts per branch.
+//
+// Context strings follow GitHub Actions' convention: "<workflow-name> / <job-name>".
+// Each workflow only runs on its own target branch, so the lists must be kept
+// in sync with the `on.push.branches` / `on.pull_request.branches` triggers:
+//
+//   all-tests.yml      → triggers on `main`      only
+//   backend-tests.yml  → triggers on `Replit-agent` only
+//
+// Adding a new required check: append the context string to the appropriate
+// branch entry below.  For a check that spans all branches, add it to every
+// entry AND to DEFAULT_REQUIRED_CONTEXTS.
+const REQUIRED_CONTEXTS_BY_BRANCH = {
+  // ── main ─────────────────────────────────────────────────────────────────
+  'main': [
+    // Task #141  — Lighthouse perf gate (LCP / CLS / INP)
+    'post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)',
+    // Task #141b — Python backend import smoke (all-tests workflow, main only)
+    'all-tests / Backend import smoke test',
+  ],
+
+  // ── Replit-agent ──────────────────────────────────────────────────────────
+  'Replit-agent': [
+    // Task #141  — Lighthouse perf gate (LCP / CLS / INP)
+    'post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)',
+    // Task #141b — Python backend import smoke (backend-tests workflow, Replit-agent only)
+    'backend-tests / Backend import smoke test',
+  ],
+};
+
+// Fallback for any branch not explicitly listed above.
+const DEFAULT_REQUIRED_CONTEXTS = [
   'post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)',
-  // Task #141b — Python backend import smoke test (all-tests workflow)
-  'all-tests / Backend import smoke test',
 ];
 
 function env(name, fallback) {
@@ -186,11 +212,14 @@ async function enforceBranch(repo, branch, dryRun) {
   const existingContexts = current?.required_status_checks?.contexts ?? [];
   const strict           = current?.required_status_checks?.strict    ?? true;
 
-  const missingContexts = REQUIRED_CONTEXTS.filter(c => !existingContexts.includes(c));
+  // Resolve the required contexts for this specific branch.
+  const requiredContexts = REQUIRED_CONTEXTS_BY_BRANCH[branch] ?? DEFAULT_REQUIRED_CONTEXTS;
+
+  const missingContexts = requiredContexts.filter(c => !existingContexts.includes(c));
 
   if (missingContexts.length === 0) {
-    console.log(`  ✓  All ${REQUIRED_CONTEXTS.length} required contexts already present:`);
-    for (const c of REQUIRED_CONTEXTS) console.log(`       • "${c}"`);
+    console.log(`  ✓  All ${requiredContexts.length} required contexts already present:`);
+    for (const c of requiredContexts) console.log(`       • "${c}"`);
     console.log('     No update needed.');
     return 'ok';
   }
@@ -202,8 +231,8 @@ async function enforceBranch(repo, branch, dryRun) {
   );
 
   // ── Step 3: Build PUT payload ────────────────────────────────────────────
-  // Merge existing + missing; deduplicate in case of partial overlap.
-  const newContexts = [...new Set([...existingContexts, ...REQUIRED_CONTEXTS])];
+  // Merge existing + required; deduplicate in case of partial overlap.
+  const newContexts = [...new Set([...existingContexts, ...requiredContexts])];
   const payload     = buildPayload(current, newContexts, strict);
 
   if (dryRun) {
@@ -247,8 +276,12 @@ async function main() {
 
   console.log(`enforce-branch-protection — repo: ${repo}`);
   console.log(`  Branches to check: ${branches.join(', ')}`);
-  console.log(`  Required contexts (${REQUIRED_CONTEXTS.length}):`);
-  for (const c of REQUIRED_CONTEXTS) console.log(`    • "${c}"`);
+  console.log('  Required contexts (branch-specific):');
+  for (const b of branches) {
+    const ctxs = REQUIRED_CONTEXTS_BY_BRANCH[b] ?? DEFAULT_REQUIRED_CONTEXTS;
+    console.log(`    ${b} (${ctxs.length}):`);
+    for (const c of ctxs) console.log(`      • "${c}"`);
+  }
   if (dryRun) console.log('  DRY_RUN=1 — no writes will be made.\n');
 
   const results = {};

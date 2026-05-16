@@ -41,10 +41,56 @@ permissions:
   pull-requests: write
 
 jobs:
+  backend-import-smoke:
+    name: Backend import smoke test
+    runs-on: ubuntu-latest
+    # Fast gate: verifies every route module imports cleanly (no missing
+    # dependency, no circular import, no syntax error) before the heavier
+    # pytest run starts.  Mirrors the manual check in replit.md:
+    #   `cd artifacts/syrabit-backend && python -c "import server"`
+    # Produces required-status-check context:
+    #   "backend-tests / Backend import smoke test"
+    # which enforce-branch-protection.js enforces on the Replit-agent branch.
+    timeout-minutes: 5
+
+    defaults:
+      run:
+        working-directory: artifacts/syrabit-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: artifacts/syrabit-backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Import server (validates all route modules load)
+        # Provide the minimum env vars the module-level code reads at import
+        # time (JWT_SECRET length guard, DB_NAME, MONGODB_URL).  No real
+        # secrets are needed — the smoke test never makes network calls.
+        env:
+          MONGODB_URL: "mongodb://localhost:27017/test"
+          DB_NAME: "syrabit_test"
+          JWT_SECRET: "ci-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-aaaaaa"
+          ADMIN_JWT_SECRET: "ci-admin-test-secret-not-real-padded-to-64-chars-of-throwaway-entropy-bbbbbb"
+        run: python -c "import server; print('server import OK')"
+
   pytest:
     name: pytest --cov
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [backend-import-smoke]
 
     defaults:
       run:
