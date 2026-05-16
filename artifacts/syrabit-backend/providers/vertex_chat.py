@@ -1,26 +1,21 @@
-"""providers.vertex_chat — Vertex AI Gemini 2.5 Flash chat dispatch (Task #554).
+"""providers.vertex_chat — Vertex AI Gemini chat dispatch (Task #554, latency-opt 2026-05).
 
-Re-introduces a hot-path Gemini chat surface that was removed in Task #490
-when Vertex was scoped to `content_format` only. Task #554 makes Vertex
-the head of `PROVIDER_PRIORITY['english_rag_chat']` (with Workers-AI
-Llama-3.2-3B as the SOLE allowed fallback) so the perpetual $100/month
-budget still uses GCP startup credits while they last; the credit-runway
-selector in ``cost_caps._select_chat_primary`` flips the chain to
-workers-first when the projected credit runway falls below 90 days.
+Primary English chat provider (hardcoded). Uses a module-level shared
+httpx.AsyncClient (HTTP/2, connection pooling) to eliminate per-call TCP
+handshake overhead.  Default model: ``gemini-2.0-flash`` (lower TTFT than
+2.5-flash; same quality for exam-QA workloads).  Override via
+``VERTEX_GEMINI_MODEL`` env var.
 
-Auth: GOOGLE_APPLICATION_CREDENTIALS_JSON service account JSON
-(same blob ``vertex_format`` consumes). Region from VERTEX_LOCATION
-(default ``us-central1``); model from VERTEX_GEMINI_MODEL
-(default ``gemini-2.5-flash``).
+Auth: GOOGLE_APPLICATION_CREDENTIALS_JSON service account JSON.
+Region from VERTEX_LOCATION (default ``us-central1``).
 
 Public API:
 
     await call_chat(messages, *, model=None, max_tokens=2048) -> str
 
 Failure mode: raises ``RuntimeError`` on misconfig / HTTP error /
-empty / safety-blocked response. Callers (``llm._dispatch_llm_for_feature``,
-``call_with_provider_fallback``) own the fall-through to Workers-AI
-(V4 §12 — no silent fallbacks).
+empty / safety-blocked response. Callers own the fall-through to
+Workers-AI (V4 §12 — no silent fallbacks).
 """
 from __future__ import annotations
 
@@ -36,6 +31,30 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _CACHE: dict = {}
+
+# ── Shared pooled HTTP client (one per process, created lazily) ───────────────
+# Eliminates per-call TCP + TLS handshake to aiplatform.googleapis.com.
+# HTTP/2 multiplexing keeps concurrent requests on the same connection.
+_shared_client: Optional[httpx.AsyncClient] = None
+_client_lock = asyncio.Lock()
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        async with _client_lock:
+            if _shared_client is None or _shared_client.is_closed:
+                _shared_client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0),
+                    limits=httpx.Limits(
+                        max_connections=20,
+                        max_keepalive_connections=10,
+                        keepalive_expiry=120,
+                    ),
+                    http2=True,
+                )
+                logger.info("[vertex_chat] shared HTTP/2 client created")
+    return _shared_client
 
 
 def is_configured() -> bool:
@@ -103,10 +122,12 @@ async def call_chat(
     *,
     model: Optional[str] = None,
     max_tokens: int = 2048,
-    timeout_s: float = 30.0,
+    timeout_s: float = 20.0,
 ) -> str:
-    """Non-streaming Vertex AI Gemini 2.5 Flash chat completion.
+    """Non-streaming Vertex AI Gemini chat completion.
 
+    Uses a shared HTTP/2 pooled client (no per-call TCP handshake).
+    Default model: gemini-2.0-flash (lower TTFT than 2.5-flash).
     Returns the assistant text. Raises ``RuntimeError`` on misconfig /
     HTTP error / safety-blocked / empty Vertex response so the
     dispatcher's exclusion-redraw loop can advance to Workers-AI.
@@ -117,8 +138,8 @@ async def call_chat(
     location = (os.environ.get("VERTEX_LOCATION", "us-central1") or "us-central1").strip()
     deployment = (
         model
-        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
-        or "gemini-2.5-flash"
+        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.0-flash")
+        or "gemini-2.0-flash"
     ).strip()
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
@@ -138,15 +159,15 @@ async def call_chat(
         payload["systemInstruction"] = {"parts": [{"text": system_text}]}
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as c:
-            r = await c.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {creds.token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
+        c = await _get_shared_client()
+        r = await c.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {creds.token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
         if r.status_code >= 400:
             raise RuntimeError(
                 f"vertex_chat: HTTP {r.status_code} — {r.text[:300]}"
