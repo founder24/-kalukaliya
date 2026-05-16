@@ -691,7 +691,16 @@ export default function ChatPage() {
     if (lastUser) { setMessages((prev) => prev.slice(0, -1)); sendMsg(lastUser.content); }
   }, [messages]); // eslint-disable-line
 
-  const { contentLang } = useContentLang();
+  const { contentLang, switchLang } = useContentLang();
+
+  // Sync contentLang (EmptyState heading + suggestion chips) with responseLang
+  // (the chat language toggle). They are stored under separate localStorage
+  // keys; this effect bridges them so the UI switches to Assamese the moment
+  // the user picks it in the header dropdown.
+  useEffect(() => {
+    switchLang(responseLang);
+  }, [responseLang, switchLang]);
+
   const defaultPrompts = (() => {
     if (subject) {
       return contentLang === 'as'

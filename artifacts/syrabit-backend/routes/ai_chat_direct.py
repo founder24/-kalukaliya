@@ -420,7 +420,11 @@ async def chat_direct(
                 logger.error("[chat_direct] Vertex Assamese fallback failed: %s", exc)
 
         if not answer:
-            answer = "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি পুনৰাই চেষ্টা কৰক।"
+            logger.error("[chat_direct] All Assamese providers failed — returning error to user")
+            answer = (
+                "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত পুনৰাই চেষ্টা কৰক।\n\n"
+                "(Service temporarily unavailable — please try again in a moment.)"
+            )
 
     else:
         # ── English chain: Vertex PRIMARY (hardcoded) → Workers-AI fallback ───
@@ -537,7 +541,11 @@ async def chat_stream_direct(
                         accumulated.append(_chunk)
                         yield f"data: {json.dumps({'content': _chunk})}\n\n"
                 else:
-                    err_tok = "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি পুনৰাই চেষ্টা কৰক।"
+                    logger.error("[chat_direct/stream] All Assamese providers failed — returning error to user")
+                    err_tok = (
+                        "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত পুনৰাই চেষ্টা কৰক।\n\n"
+                        "(Service temporarily unavailable — please try again in a moment.)"
+                    )
                     accumulated.append(err_tok)
                     yield f"data: {json.dumps({'content': err_tok})}\n\n"
 
