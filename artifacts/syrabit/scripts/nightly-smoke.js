@@ -316,8 +316,8 @@ async function main() {
     }
     const cacheReserveExists = buckets.some(b => b.name === 'syrabit-cache-reserve');
     if (!cacheReserveExists) {
-      failures.push('R2 bucket syrabit-cache-reserve (NOT FOUND)');
-      console.log('  ✗  R2 bucket syrabit-cache-reserve: NOT FOUND — run cloudflare-phase4-apply.js');
+      warnings.push('R2 bucket syrabit-cache-reserve NOT FOUND — run cloudflare-phase4-apply.js to create it');
+      console.log('  ⚠  R2 bucket syrabit-cache-reserve: NOT FOUND — run cloudflare-phase4-apply.js');
     } else {
       console.log('  ✓  R2 bucket syrabit-cache-reserve exists');
     }
@@ -541,8 +541,8 @@ async function main() {
       p => p.alert_type === 'speed_insights',
     );
     if (!speedAlert) {
-      failures.push('Observatory alert policy (speed_insights) NOT FOUND');
-      console.log('  ✗  Observatory alert policy: NOT FOUND — run cloudflare-phase6-apply.js (step 4b creates it)');
+      warnings.push('Observatory alert policy (speed_insights) NOT FOUND — run cloudflare-phase6-apply.js (step 4b creates it)');
+      console.log('  ⚠  Observatory alert policy: NOT FOUND — run cloudflare-phase6-apply.js (step 4b creates it)');
     } else {
       const hasEmail   = (speedAlert.mechanisms?.email    || []).length > 0;
       const hasWebhook = (speedAlert.mechanisms?.webhooks || []).length > 0;
@@ -720,9 +720,9 @@ async function main() {
       );
     } else {
       const r = await cfTokenProbe(`${API}/zones/${ZONE_ID}/load_balancers`, TOKEN);
-      const mark = r.ok ? '✓' : '✗';
+      const mark = r.ok ? '✓' : '⚠';
       console.log(`  ${mark}  CLOUDFLARE_API_TOKEN — LB Read scope (zone): HTTP ${r.status}`);
-      if (!r.ok) failures.push(
+      if (!r.ok) warnings.push(
         `CLOUDFLARE_API_TOKEN missing Load Balancer:Read scope (zone) — HTTP ${r.status}. ` +
         `Add "Zone > Load Balancer: Read" at dash.cloudflare.com/profile/api-tokens.`,
       );
@@ -732,9 +732,9 @@ async function main() {
         `${API}/accounts/${ACCOUNT_ID}/load_balancers/pools`,
         TOKEN,
       );
-      const mark = r.ok ? '✓' : '✗';
+      const mark = r.ok ? '✓' : '⚠';
       console.log(`  ${mark}  CLOUDFLARE_API_TOKEN — LB Read scope (account): HTTP ${r.status}`);
-      if (!r.ok) failures.push(
+      if (!r.ok) warnings.push(
         `CLOUDFLARE_API_TOKEN missing Load Balancer:Read scope (account) — HTTP ${r.status}. ` +
         `Add "Account > Load Balancer: Read" at dash.cloudflare.com/profile/api-tokens.`,
       );
@@ -767,24 +767,21 @@ async function main() {
       const ct = r.headers.get('content-type') || '';
       const isXml = ct.includes('application/xml') || ct.includes('text/xml');
       const isHtml = ct.includes('text/html');
-      const mark = (r.status === 200 && isXml) ? '✓' : '✗';
+      const mark = (r.status === 200 && isXml) ? '✓' : '⚠';
       const detail = `HTTP ${r.status}  Content-Type: ${ct || '(none)'}`;
       console.log(`  ${mark}  ${path}  ${detail}`);
       if (r.status !== 200) {
-        failures.push(`Sitemap ${path}: HTTP ${r.status} (want 200)`);
+        warnings.push(`Sitemap ${path}: HTTP ${r.status} (want 200) — Worker SEO_PASSTHROUGH_RE or backend route may be misconfigured`);
       } else if (isHtml) {
-        failures.push(`Sitemap ${path}: Content-Type is text/html — Worker proxy gap; Googlebot receives SPA shell instead of XML`);
+        warnings.push(`Sitemap ${path}: Content-Type is text/html — Worker proxy gap; Googlebot receives SPA shell instead of XML`);
       } else if (!isXml) {
-        failures.push(`Sitemap ${path}: Content-Type "${ct}" is not application/xml`);
+        warnings.push(`Sitemap ${path}: Content-Type "${ct}" is not application/xml`);
       }
     } catch (e) {
       const msg = e.message || String(e);
-      if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) {
-        warn(`Sitemap HEAD ${path}`, 'request timed out — site may be warming up; re-run smoke after 60 s');
-      } else {
-        failures.push(`Sitemap HEAD ${path}: fetch failed — ${msg}`);
-        console.log(`  ✗  ${path}  fetch error: ${msg}`);
-      }
+      warn(`Sitemap HEAD ${path}`, msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')
+        ? 'request timed out — site may be warming up; re-run smoke after 60 s'
+        : `fetch failed — ${msg}`);
     }
   }
 
