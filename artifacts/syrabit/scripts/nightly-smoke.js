@@ -97,7 +97,14 @@ async function cfGetOrSkip(path) {
   } catch (e) {
     if (e._rate_limited) return null;   // degrade gracefully — caller sees null like a scope gap
     const msg = e.message || '';
-    if (msg.includes('"code":10000') || msg.includes('"code": 10000')) return null;
+    // 10000 = Authentication error (token lacks the required scope)
+    // 9109  = Unauthorized to access requested resource (same root cause)
+    // 7003  = Could not route to /zones/... (zone not found for this token)
+    if (
+      msg.includes('"code":10000') || msg.includes('"code": 10000') ||
+      msg.includes('"code":9109')  || msg.includes('"code": 9109')  ||
+      msg.includes('"code":7003')  || msg.includes('"code": 7003')
+    ) return null;
     throw e;
   }
 }
