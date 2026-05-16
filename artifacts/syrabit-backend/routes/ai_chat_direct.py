@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -38,31 +39,12 @@ logger = logging.getLogger("routes.ai_chat_direct")
 router = APIRouter()
 
 # ── Hardcoded provider chains (V4 §12 — no silent fallbacks) ──────────────────
-# English chat : Workers-AI chat_stream with model rotation → Vertex fallback
-# Assamese chat: Sarvam (sarvam-m) → Workers-AI chat → Vertex fallback
-# English content (notes/MCQ/flashcard): Vertex → Workers-AI  [in content_format POOL_WEIGHTS]
-# Assamese content: Workers-AI IndicTrans2                    [in assamese_content POOL_WEIGHTS]
-_ENGLISH_STREAM_MODELS = [
-    "chat",       # @cf/meta/llama-3.3-70b-instruct-fp8-fast  — primary
-    "chat_gpt_oss",  # @cf/openai/gpt-oss-20b                 — secondary
-    "chat_long",  # @cf/openai/gpt-oss-120b                   — tertiary
-]
-
-# ── Model mapping (legacy slug → model_key for English path) ──────────────────
-_MODEL_KEY_MAP: dict[str, str] = {
-    "openai/gpt-oss-20b":  "chat_gpt_oss",
-    "openai/gpt-oss-120b": "chat_long",
-    "fast":                "chat",
-    "default":             "chat",
-    "chat":                "chat",
-    "chat_long":           "chat_long",
-    "chat_gpt_oss":        "chat_gpt_oss",
-}
-
-def _resolve_model_key(slug: Optional[str]) -> str:
-    if not slug:
-        return "chat"
-    return _MODEL_KEY_MAP.get(slug.strip(), "chat")
+# English chat  : llama-3.3-70b (TTFT ≈ 770ms, total ≈ 2.1s — within 3s budget)
+#                 → Vertex fallback ONLY if Workers-AI fails.  No model rotation.
+# Assamese chat : Sarvam (sarvam-m) → Workers-AI chat (with think-strip) → error
+# English content: Vertex primary, Workers-AI fallback  [in content_format POOL_WEIGHTS]
+# Assamese content: Workers-AI IndicTrans2 primary, Sarvam fallback [in assamese_content POOL_WEIGHTS]
+_ENGLISH_PRIMARY_MODEL = "chat"   # @cf/meta/llama-3.3-70b-instruct-fp8-fast
 
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -134,6 +116,65 @@ class _ConvStore:
 
 
 _l1 = _ConvStore()
+
+
+# ── Think-tag stripping helpers ─────────────────────────────────────────────────
+# Workers-AI reasoning models (llama-3.3-70b, gpt-oss-*) can emit <think>…</think>
+# blocks. Strip them before any text reaches the student.
+
+def _strip_think(text: str) -> str:
+    """Remove complete and unclosed <think>…</think> blocks from model output."""
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<think>.*$',         '', text, flags=re.DOTALL)
+    return text.strip()
+
+
+async def _stream_strip_think(source):
+    """Async generator: strip <think>…</think> blocks from a streaming token source.
+
+    Buffers tokens while inside a think block and discards them entirely.
+    Keeps a 6-char safety window outside think blocks to catch partial opening
+    tags that span two successive tokens (e.g. '<thi' … 'nk>').
+    """
+    _OPEN      = "<think>"
+    _CLOSE     = "</think>"
+    _OPEN_LEN  = 7   # len("<think>")
+    _CLOSE_LEN = 8   # len("</think>")
+    _SAFE_WIN  = _OPEN_LEN - 1  # chars to withhold at buffer tail
+
+    buf      = ""
+    in_think = False
+
+    async for token in source:
+        buf += token
+        while True:
+            if in_think:
+                idx = buf.find(_CLOSE)
+                if idx >= 0:
+                    buf = buf[idx + _CLOSE_LEN:]
+                    in_think = False
+                else:
+                    buf = ""   # still inside think — discard everything
+                    break
+            else:
+                idx = buf.find(_OPEN)
+                if idx >= 0:
+                    if idx > 0:
+                        yield buf[:idx]
+                    buf      = buf[idx + _OPEN_LEN:]
+                    in_think = True
+                else:
+                    safe = max(0, len(buf) - _SAFE_WIN)
+                    if safe > 0:
+                        yield buf[:safe]
+                        buf = buf[safe:]
+                    break
+
+    # Flush any remaining safe text (not inside a think block)
+    if buf and not in_think:
+        cleaned = re.sub(r'<think>.*', '', buf, flags=re.DOTALL).strip()
+        if cleaned:
+            yield cleaned
 
 
 # ── MongoDB (L2) helpers ────────────────────────────────────────────────────────
@@ -302,8 +343,17 @@ def _build_messages(msg: DirectChatMessage,
     lang = (msg.response_lang or msg.lang or "en").lower()
     if lang in ("as", "assamese"):
         system_parts.append(
-            "LANGUAGE: The student prefers Assamese (অসমীয়া). "
-            "Respond in simple Assamese where possible; use English for technical terms."
+            "STRICT ASSAMESE MODE — MANDATORY RULES:\n"
+            "1. Your ENTIRE answer MUST be in Assamese script (অসমীয়া). No English words, no reasoning in English.\n"
+            "2. Start your answer IMMEDIATELY. No 'Okay', 'Sure', 'Let me', or any English opener.\n"
+            "3. Do NOT output <think>, </think>, or any reasoning/chain-of-thought text.\n"
+            "4. Latin script is allowed ONLY for: numbers, scientific units (cm, kg, Hz, °C, eV), math symbols/equations, code/URLs, and well-known proper nouns (AHSEC, SEBA, NCERT, DNA, GDP, Newton, Magh Bihu).\n"
+            "5. For everyday nouns and verbs, always use the Assamese word — never the English equivalent.\n"
+            "EXAMPLES:\n"
+            "  WRONG: 'Newton ৰ first law explains inertia.'\n"
+            "  RIGHT:  'Newton ৰ গতিৰ প্ৰথম সূত্ৰে জড়তা ব্যাখ্যা কৰে।'\n"
+            "  WRONG: 'পানী 100°C ত boil হয়।'\n"
+            "  RIGHT:  'পানী 100°C ত উতলে।'"
         )
 
     system = "\n\n".join(system_parts)
@@ -339,7 +389,8 @@ async def chat_direct(
     answer       = ""
 
     if is_assamese:
-        # ── Assamese chain: Sarvam → Workers-AI → Vertex ──────────────────────
+        # ── Assamese chain: Sarvam → Workers-AI (think-stripped) ──────────────
+        # _call_sarvam_llm already strips <think> blocks (llm.py line 1474).
         try:
             from llm import _SARVAM_PROVIDERS, _call_sarvam_llm
             if _SARVAM_PROVIDERS:
@@ -350,37 +401,28 @@ async def chat_direct(
             logger.warning("[chat_direct] Sarvam failed for Assamese: %s", exc)
 
         if not answer:
+            # Workers-AI fallback: strip <think> blocks before returning
             try:
                 from providers.cloudflare_ai import chat as cf_chat
-                answer = await cf_chat(messages, model_key="chat", max_tokens=1024)
+                raw = await cf_chat(messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024)
+                answer = _strip_think(raw)
                 actual_provider = "workers-ai"
             except Exception as exc:
                 logger.warning("[chat_direct] Workers-AI Assamese fallback failed: %s", exc)
 
         if not answer:
-            try:
-                from providers.vertex_chat import call_chat as vertex_call_chat
-                answer = await vertex_call_chat(messages, max_tokens=1024)
-                actual_provider = "vertex"
-            except Exception as exc:
-                logger.error("[chat_direct] All Assamese providers failed: %s", exc)
-                answer = "AI service temporarily unavailable — please retry."
+            answer = "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি পুনৰাই চেষ্টা কৰক।"
 
     else:
-        # ── English chain: Workers-AI (model rotation) → Vertex ───────────────
-        # Honor user's preferred model first, then rotate through the rest
-        preferred = _resolve_model_key(msg.model)
-        try_models = [preferred] + [m for m in _ENGLISH_STREAM_MODELS if m != preferred]
-
-        for model_key in try_models:
-            try:
-                from providers.cloudflare_ai import chat as cf_chat
-                answer = await cf_chat(messages, model_key=model_key, max_tokens=1024)
-                actual_provider = "workers-ai"
-                if answer:
-                    break
-            except Exception as exc:
-                logger.warning("[chat_direct] Workers-AI %s failed: %s", model_key, exc)
+        # ── English chain: llama-3.3-70b (hardcoded) → Vertex fallback ────────
+        # No model rotation — single fast model meets the 3s latency budget.
+        try:
+            from providers.cloudflare_ai import chat as cf_chat
+            raw    = await cf_chat(messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024)
+            answer = _strip_think(raw)
+            actual_provider = "workers-ai"
+        except Exception as exc:
+            logger.warning("[chat_direct] Workers-AI English failed: %s", exc)
 
         if not answer:
             try:
@@ -400,7 +442,7 @@ async def chat_direct(
         "conversation_id":   conv_id,
         "meta": {
             "provider": actual_provider,
-            "model_key": "sarvam-m" if is_assamese else _resolve_model_key(msg.model),
+            "model_key": "sarvam-m" if is_assamese else _ENGLISH_PRIMARY_MODEL,
             "mode": "direct",
             "lang": lang,
         },
@@ -447,14 +489,16 @@ async def chat_stream_direct(
         accumulated: list[str] = []
 
         if is_assamese:
-            # ── Assamese: Sarvam stream → Workers-AI chunked → Vertex chunked ──
+            # ── Assamese: Sarvam stream (think-stripped) → Workers-AI fallback ──
+            # _stream_sarvam may emit raw <think> tokens when thinking=enabled;
+            # _stream_strip_think discards them before they reach the student.
             sarvam_ok = False
             try:
                 from llm import _SARVAM_PROVIDERS, _stream_sarvam
                 if _SARVAM_PROVIDERS:
                     slot = _SARVAM_PROVIDERS[0]
-                    async for token in _stream_sarvam(
-                        messages, slot["key"], "sarvam-m", 1024, response_lang="as"
+                    async for token in _stream_strip_think(
+                        _stream_sarvam(messages, slot["key"], "sarvam-m", 1024, response_lang="as")
                     ):
                         accumulated.append(token)
                         yield f"data: {json.dumps({'content': token})}\n\n"
@@ -464,21 +508,17 @@ async def chat_stream_direct(
                 logger.warning("[chat_direct] Sarvam stream failed: %s", exc)
 
             if not sarvam_ok:
+                # Workers-AI fallback: fetch full text then strip think blocks
                 fallback_text: str | None = None
                 try:
                     from providers.cloudflare_ai import chat as cf_chat
-                    fallback_text = await cf_chat(messages, model_key="chat", max_tokens=1024)
+                    raw_fb = await cf_chat(
+                        messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024
+                    )
+                    fallback_text = _strip_think(raw_fb)
                     actual_provider = "workers-ai"
                 except Exception as exc:
                     logger.warning("[chat_direct] Workers-AI Assamese fallback failed: %s", exc)
-
-                if not fallback_text:
-                    try:
-                        from providers.vertex_chat import call_chat as vertex_call_chat
-                        fallback_text = await vertex_call_chat(messages, max_tokens=1024)
-                        actual_provider = "vertex"
-                    except Exception as exc:
-                        logger.error("[chat_direct] All Assamese providers exhausted: %s", exc)
 
                 if fallback_text:
                     for _i in range(0, len(fallback_text), 6):
@@ -491,41 +531,29 @@ async def chat_stream_direct(
                     yield f"data: {json.dumps({'content': err_tok})}\n\n"
 
         else:
-            # ── English: Workers-AI stream (model rotation) → Vertex chunked ───
-            preferred = _resolve_model_key(msg.model)
-            try_models = [preferred] + [m for m in _ENGLISH_STREAM_MODELS if m != preferred]
-
+            # ── English: llama-3.3-70b (hardcoded, no rotation) → Vertex fallback
+            # _stream_strip_think removes any <think> blocks in the token stream.
             tokens_received = 0
             _stream_exc: Exception | None = None
 
-            for model_key in try_models:
-                _model_exc: Exception | None = None
-                try:
-                    from providers.cloudflare_ai import chat_stream as cf_stream
-                    async for token in cf_stream(messages, model_key=model_key, max_tokens=1024):
-                        tokens_received += 1
-                        accumulated.append(token)
-                        yield f"data: {json.dumps({'content': token})}\n\n"
-                except Exception as exc:
-                    _model_exc = exc
-                    if tokens_received > 0:
-                        # mid-stream break — partial already delivered, stop rotation
-                        _stream_exc = exc
-                        break
+            try:
+                from providers.cloudflare_ai import chat_stream as cf_stream
+                async for token in _stream_strip_think(
+                    cf_stream(messages, model_key=_ENGLISH_PRIMARY_MODEL, max_tokens=1024)
+                ):
+                    tokens_received += 1
+                    accumulated.append(token)
+                    yield f"data: {json.dumps({'content': token})}\n\n"
+                actual_provider = "workers-ai"
+            except Exception as exc:
+                _stream_exc = exc
+                if tokens_received == 0:
                     logger.warning(
-                        "[chat_direct] Workers-AI stream %s failed (0 tokens): %s",
-                        model_key, str(exc)[:120],
+                        "[chat_direct] Workers-AI stream failed (0 tokens): %s", str(exc)[:120]
                     )
 
-                if tokens_received > 0 and _model_exc is None:
-                    actual_provider = "workers-ai"
-                    _stream_exc = None
-                    break
-                elif _model_exc is not None and tokens_received == 0:
-                    _stream_exc = _model_exc
-
-            if _stream_exc is not None and tokens_received == 0:
-                # All Workers-AI stream models failed → Vertex chunked
+            if tokens_received == 0:
+                # Workers-AI failed with 0 tokens → Vertex chunked fallback
                 fallback_text: str | None = None
                 try:
                     from providers.vertex_chat import call_chat as vertex_call_chat
@@ -542,7 +570,7 @@ async def chat_stream_direct(
                         yield f"data: {json.dumps({'content': _chunk})}\n\n"
                 else:
                     import httpx as _httpx
-                    if isinstance(_stream_exc, _httpx.HTTPStatusError):
+                    if _stream_exc and isinstance(_stream_exc, _httpx.HTTPStatusError):
                         _st = _stream_exc.response.status_code
                         if _st == 429:
                             err_tok = "Service is busy right now — please try again in a moment."

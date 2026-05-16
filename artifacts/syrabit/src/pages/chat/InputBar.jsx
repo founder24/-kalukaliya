@@ -19,6 +19,7 @@ export function InputBar({
   textareaRef, adjustTextarea, sendMsg, handleStop,
   isAnon,
   activeChapter, onDismissChapter,
+  responseLang,
 }) {
   const navigate = useNavigate();
   const [maxTextareaHeight, setMaxTextareaHeight] = useState(160);
@@ -355,10 +356,16 @@ export function InputBar({
                     ? 'Free daily messages used — sign in to keep chatting'
                     : 'No credits remaining — upgrade to continue')
                 : activeChapter
-                ? `Ask about ${activeChapter.title}…`
+                ? (responseLang === 'as'
+                    ? `${activeChapter.title} সম্পৰ্কে প্ৰশ্ন সুধিব…`
+                    : `Ask about ${activeChapter.title}…`)
                 : subject
-                ? `Ask about ${subject.name}…`
-                : 'Ask anything about your Syllabus...'
+                ? (responseLang === 'as'
+                    ? `${subject.name} সম্পৰ্কে অসমীয়াত প্ৰশ্ন সুধিব…`
+                    : `Ask about ${subject.name}…`)
+                : (responseLang === 'as'
+                    ? 'অসমীয়াত প্ৰশ্ন সুধিব...'
+                    : 'Ask anything about your Syllabus...')
             }
             disabled={isOutOfCredits}
             rows={1}

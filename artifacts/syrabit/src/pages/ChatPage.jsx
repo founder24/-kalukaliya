@@ -890,6 +890,7 @@ export default function ChatPage() {
           isAnon={!user}
           activeChapter={activeChapter}
           onDismissChapter={onDismissChapter}
+          responseLang={responseLang}
         />
       </div>
       </AppLayout>
