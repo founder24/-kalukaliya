@@ -169,10 +169,13 @@ test.describe('AdminHealth alert-state caption', () => {
     // Wait for the alert-state GET to fire — proves AdminHealth's
     // `loadEdgeProxyDeployCronAlertState` ran and the polling
     // useEffect's dependency array still includes it.
+    // waitForRequest (not waitForResponse) fires when the browser
+    // issues the request, before the mock route handler responds,
+    // so it is unaffected by any response-detection timing issue.
     await Promise.all([
       openAdminHealth(page),
-      page.waitForResponse(
-        (res) => res.url().includes(EDGE_PROXY_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(EDGE_PROXY_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
     ]);
@@ -217,8 +220,8 @@ test.describe('AdminHealth alert-state caption', () => {
 
     await Promise.all([
       openAdminHealth(page),
-      page.waitForResponse(
-        (res) => res.url().includes(CF_WAF_DRIFT_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(CF_WAF_DRIFT_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
     ]);
@@ -241,8 +244,8 @@ test.describe('AdminHealth alert-state caption', () => {
 
     await Promise.all([
       openAdminHealth(page),
-      page.waitForResponse(
-        (res) => res.url().includes(TRUSTPILOT_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(TRUSTPILOT_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
     ]);
@@ -270,8 +273,8 @@ test.describe('AdminHealth alert-state caption', () => {
 
     await Promise.all([
       openAdminHealth(page),
-      page.waitForResponse(
-        (res) => res.url().includes(UNIFIED_LOGS_CF_PULL_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(UNIFIED_LOGS_CF_PULL_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
     ]);
@@ -309,22 +312,25 @@ test.describe('AdminHealth alert-state caption', () => {
     // Asserting that all four actually fire closes the false-negative gap
     // where a typo in the endpoint wiring would 404 and silently satisfy
     // the `toHaveCount(0)` check below for the wrong reason.
+    // waitForRequest fires when the browser issues the request (before
+    // the mock responds) — more reliable than waitForResponse for mocked
+    // routes and semantically correct: we are asserting the loaders run.
     await Promise.all([
       openAdminHealth(page),
-      page.waitForResponse(
-        (res) => res.url().includes(EDGE_PROXY_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(EDGE_PROXY_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
-      page.waitForResponse(
-        (res) => res.url().includes(CF_WAF_DRIFT_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(CF_WAF_DRIFT_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
-      page.waitForResponse(
-        (res) => res.url().includes(TRUSTPILOT_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(TRUSTPILOT_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
-      page.waitForResponse(
-        (res) => res.url().includes(UNIFIED_LOGS_CF_PULL_ALERT_STATE_ENDPOINT),
+      page.waitForRequest(
+        (req) => req.url().includes(UNIFIED_LOGS_CF_PULL_ALERT_STATE_ENDPOINT),
         { timeout: 55_000 },
       ),
     ]);

@@ -54,7 +54,28 @@ const FIXTURES: Array<[string, Fixture]> = [
   ['/api/admin/alert-settings', () => ({ channel_status: { push: null } })],
   ['/api/admin/seo/daily-summary-dispatches', () => ({ dispatches: [] })],
   ['/api/admin/kv-health', () => ({ configured: false })],
-  ['/api/admin/ci-status', () => ({ configured: false })],
+  ['/api/admin/ci-status', () => ({
+    configured: true,
+    github_token_set: true,
+    workflows: [
+      {
+        name: 'azure-container-apps-deploy',
+        status: 'completed',
+        conclusion: 'success',
+        run_number: 42,
+        html_url: 'https://github.com/syrabit/syrabit/actions/runs/42',
+        updated_at: '2026-05-15T08:00:00Z',
+      },
+      {
+        name: 'edge-proxy-deploy',
+        status: 'completed',
+        conclusion: 'success',
+        run_number: 38,
+        html_url: 'https://github.com/syrabit/syrabit/actions/runs/38',
+        updated_at: '2026-05-15T07:30:00Z',
+      },
+    ],
+  })],
 
   // --- Dashboard data -----------------------------------------------------
   ['/api/admin/dashboard/metrics', () => ({})],
@@ -75,7 +96,11 @@ const FIXTURES: Array<[string, Fixture]> = [
   ['/api/admin/monetization/funnel', () => ({})],
   ['/api/admin/content/coverage', () => ({})],
   ['/api/admin/pwa/stats', () => ({})],
-  ['/api/admin/analytics/bot-traffic', () => ({})],
+  ['/api/admin/analytics/bot-traffic', () => ({
+    ok: true, period: '24h', total_requests: 48200, bot_requests: 1400,
+    bot_pct: 2.9, status: 'green', threshold_amber: 15, threshold_red: 30,
+    breakdown: { verified_bot: 900, automated: 300, likely_automated: 200 },
+  })],
   ['/api/admin/indexnow/stats', () => ({ endpoints: [] })],
   ['/api/admin/indexnow/history', () => ({ history: [] })],
   ['/api/admin/alerts', () => ({ alerts: [] })],
@@ -83,7 +108,11 @@ const FIXTURES: Array<[string, Fixture]> = [
   ['/api/admin/seo/deep-scan-history', () => ({})],
   // Corrected from /api/admin/cf/overview — the real backend path is
   // /api/admin/analytics/cf-overview (confirmed in server.py + api.jsx).
-  ['/api/admin/analytics/cf-overview', () => ({})],
+  ['/api/admin/analytics/cf-overview', () => ({
+    ok: true, zone: 'syrabit.ai', requests_total: 48200,
+    bandwidth_gb: 18.4, threats: 17, cached_pct: 82,
+    cloudflare_token_set: true,
+  })],
   // Corrected from /api/seo/pipeline/status — the real backend path is
   // /api/admin/seo/pipeline-status (confirmed in server.py + api.jsx).
   ['/api/admin/seo/pipeline-status', () => ({

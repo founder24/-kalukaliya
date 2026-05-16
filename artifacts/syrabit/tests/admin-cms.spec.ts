@@ -25,7 +25,8 @@ async function openContentHub(page: Page) {
 async function openVertexPanel(page: Page) {
   await page.goto('/admin');
   await expect(page.getByTestId('admin-dashboard')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('admin-nav-vertex').click();
+  await page.getByTestId('admin-nav-ai').click();
+  await page.getByTestId('admin-ai-hub-subtab-vertex').click();
 }
 
 test.describe('Admin CMS & Vertex Panel', () => {

@@ -53,7 +53,8 @@ async function openBotSecurity(page: Page, botTraffic: unknown) {
 
   await page.goto('/admin');
   await expect(page.getByTestId('admin-dashboard')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('admin-nav-botsecurity').click();
+  await page.getByTestId('admin-nav-security').click();
+  await page.getByTestId('admin-security-hub-tab-botsecurity').click();
 }
 
 test.describe('Admin Bot Security', () => {
