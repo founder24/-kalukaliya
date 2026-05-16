@@ -2,13 +2,14 @@
 /**
  * enforce-branch-protection.js
  *
- * Task #141 — Idempotently adds the post-deploy Lighthouse check as a
- * required status check on the master/main branch protection rule so that
- * any PR introducing an LCP / CLS / INP regression cannot be merged until
- * the performance issue is fixed.
+ * Task #141  — Idempotently adds the post-deploy Lighthouse check as a
+ *              required status check on the master/main branch protection rule.
+ * Task #141b — Also enforces the backend-import-smoke check (all-tests workflow)
+ *              so a broken server.py import cannot be merged.
  *
- * Required status check context (GitHub Actions format: workflow name / job name):
+ * Required status check contexts (GitHub Actions format: "workflow / job"):
  *   "post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)"
+ *   "all-tests / Backend import smoke test"
  *
  * The script:
  *   1. Iterates over BRANCHES (comma-separated, default: "Replit-agent,main").
@@ -17,9 +18,9 @@
  *        - 403 → PAT lacks admin permission → exits 1 immediately.
  *        - branch not found (422/404 on branch) → skips silently (repo may
  *          use only one of master/main).
- *   3. Checks whether the Lighthouse context is already present → no-op if so.
- *   4. If absent: PUTs the updated rule, preserving *all* known settings from
- *      the GET response including:
+ *   3. Checks whether ALL required contexts are already present → no-op if so.
+ *   4. If any are missing: PUTs the updated rule, preserving *all* known
+ *      settings from the GET response including:
  *        required_status_checks (strict, contexts)
  *        enforce_admins
  *        required_pull_request_reviews (all sub-fields)
@@ -47,8 +48,14 @@
 
 'use strict';
 
-const REQUIRED_CONTEXT =
-  'post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)';
+// All contexts that must be present as required status checks.
+// Add new entries here; the script adds any that are missing in one PUT.
+const REQUIRED_CONTEXTS = [
+  // Task #141 — post-deploy Lighthouse perf gate (LCP / CLS / INP)
+  'post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)',
+  // Task #141b — Python backend import smoke test (all-tests workflow)
+  'all-tests / Backend import smoke test',
+];
 
 function env(name, fallback) {
   const val = process.env[name];
@@ -129,13 +136,13 @@ function buildPayload(current, newContexts, strict) {
       : null,
 
     // ── Additional protection flags (preserve; default to false/off) ──────
-    required_linear_history:         current?.required_linear_history?.enabled         ?? false,
-    allow_force_pushes:              current?.allow_force_pushes?.enabled               ?? false,
-    allow_deletions:                 current?.allow_deletions?.enabled                  ?? false,
-    block_creations:                 current?.block_creations?.enabled                  ?? false,
+    required_linear_history:          current?.required_linear_history?.enabled          ?? false,
+    allow_force_pushes:               current?.allow_force_pushes?.enabled               ?? false,
+    allow_deletions:                  current?.allow_deletions?.enabled                  ?? false,
+    block_creations:                  current?.block_creations?.enabled                  ?? false,
     required_conversation_resolution: current?.required_conversation_resolution?.enabled ?? false,
-    lock_branch:                     current?.lock_branch?.enabled                      ?? false,
-    allow_fork_syncing:              current?.allow_fork_syncing?.enabled               ?? false,
+    lock_branch:                      current?.lock_branch?.enabled                      ?? false,
+    allow_fork_syncing:               current?.allow_fork_syncing?.enabled               ?? false,
   };
 }
 
@@ -179,21 +186,24 @@ async function enforceBranch(repo, branch, dryRun) {
   const existingContexts = current?.required_status_checks?.contexts ?? [];
   const strict           = current?.required_status_checks?.strict    ?? true;
 
-  if (existingContexts.includes(REQUIRED_CONTEXT)) {
-    console.log(
-      `  ✓  Already present: "${REQUIRED_CONTEXT}"\n` +
-      '     No update needed.',
-    );
+  const missingContexts = REQUIRED_CONTEXTS.filter(c => !existingContexts.includes(c));
+
+  if (missingContexts.length === 0) {
+    console.log(`  ✓  All ${REQUIRED_CONTEXTS.length} required contexts already present:`);
+    for (const c of REQUIRED_CONTEXTS) console.log(`       • "${c}"`);
+    console.log('     No update needed.');
     return 'ok';
   }
 
+  console.log(`  Adding ${missingContexts.length} missing context(s):`);
+  for (const c of missingContexts) console.log(`    + "${c}"`);
   console.log(
-    `  Adding:\n   "${REQUIRED_CONTEXT}"\n` +
     `  Existing contexts (${existingContexts.length}): ${existingContexts.join(', ') || '(none)'}`,
   );
 
   // ── Step 3: Build PUT payload ────────────────────────────────────────────
-  const newContexts = [...existingContexts, REQUIRED_CONTEXT];
+  // Merge existing + missing; deduplicate in case of partial overlap.
+  const newContexts = [...new Set([...existingContexts, ...REQUIRED_CONTEXTS])];
   const payload     = buildPayload(current, newContexts, strict);
 
   if (dryRun) {
@@ -221,16 +231,15 @@ async function enforceBranch(repo, branch, dryRun) {
 
   console.log(
     `  ✓  Branch protection updated on ${repo}@${branch}.\n` +
-    `     "${REQUIRED_CONTEXT}" is now a required status check.\n` +
-    '     PRs breaching LCP > 2.5 s / CLS > 0.1 / INP > 200 ms cannot merge\n' +
-    '     until fixed or bypassed via the emergency workflow dispatch.',
+    `     ${newContexts.length} required status checks now enforced:\n` +
+    newContexts.map(c => `       • "${c}"`).join('\n'),
   );
   return 'updated';
 }
 
 async function main() {
-  const repo    = env('GITHUB_REPOSITORY');
-  const dryRun  = process.env.DRY_RUN === '1';
+  const repo     = env('GITHUB_REPOSITORY');
+  const dryRun   = process.env.DRY_RUN === '1';
   const branches = (env('BRANCHES', 'Replit-agent,main'))
     .split(',')
     .map(b => b.trim())
@@ -238,6 +247,8 @@ async function main() {
 
   console.log(`enforce-branch-protection — repo: ${repo}`);
   console.log(`  Branches to check: ${branches.join(', ')}`);
+  console.log(`  Required contexts (${REQUIRED_CONTEXTS.length}):`);
+  for (const c of REQUIRED_CONTEXTS) console.log(`    • "${c}"`);
   if (dryRun) console.log('  DRY_RUN=1 — no writes will be made.\n');
 
   const results = {};
@@ -247,7 +258,7 @@ async function main() {
 
   console.log('\n── Summary ──');
   for (const [branch, result] of Object.entries(results)) {
-    const icon = result === 'ok' ? '✓' : result === 'updated' ? '✓' : result === 'skipped' ? '─' : '?';
+    const icon = result === 'updated' || result === 'ok' ? '✓' : result === 'skipped' ? '─' : '?';
     console.log(`  ${icon}  ${branch}: ${result}`);
   }
 }

@@ -8,16 +8,19 @@ name: enforce-branch-protection
 # 2025 — would let an attacker silently exfiltrate this repo's secrets on the
 # next push. See https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
 #
-# Task #141 — Enforce the post-deploy Lighthouse check as a required status
-# check on the master/main branch protection rule so a PR that introduces an
-# LCP / CLS / INP regression cannot be merged until it is fixed.
+# Task #141  — Enforce the post-deploy Lighthouse check as a required status
+#              check so a PR introducing an LCP / CLS / INP regression cannot
+#              be merged until it is fixed.
+# Task #141b — Also enforces the backend-import-smoke check so a broken
+#              server.py import (missing dep, circular import, syntax error)
+#              cannot be merged.
 #
 # What it does:
 #   Runs artifacts/syrabit/scripts/enforce-branch-protection.js which:
-#   1. Iterates over BRANCHES (default: "master,main"), skipping any that
-#      don't exist in this repository.
+#   1. Iterates over BRANCHES (default: "Replit-agent,main"), skipping any
+#      that don't exist in this repository.
 #   2. For each branch: GETs the current protection rule (tolerates 404/new).
-#   3. Idempotently adds the Lighthouse context to required_status_checks,
+#   3. Idempotently adds ALL missing required contexts to required_status_checks,
 #      preserving ALL existing settings (including required_linear_history,
 #      allow_force_pushes, allow_deletions, required_conversation_resolution,
 #      lock_branch, etc.) in the PUT payload.
@@ -30,8 +33,9 @@ name: enforce-branch-protection
 #                             branch protection rules — a named PAT is required.
 #                             Do NOT reuse secrets.GITHUB_TOKEN here.
 #
-# Required status check context applied:
+# Required status check contexts applied:
 #   "post-deploy-lighthouse / Lighthouse post-deploy check (LCP / CLS / INP)"
+#   "all-tests / Backend import smoke test"
 #
 # Trigger: workflow_dispatch (one-shot admin tool) + weekly cron (guard).
 # The weekly run catches any accidental removal of the protection rule.
