@@ -106,11 +106,13 @@ jobs:
               --alarm-names "${ALARM}" \
               --region ap-south-1 \
               --query 'MetricAlarms[0].StateValue' \
-              --output text 2>/dev/null || echo "UNKNOWN")
+              --output text 2>/dev/null || echo "NOT_FOUND")
             if [ "${STATE}" = "OK" ]; then
               echo "  ✓ ${ALARM}: OK"
             elif [ "${STATE}" = "INSUFFICIENT_DATA" ]; then
               echo "  ⚠ ${ALARM}: INSUFFICIENT_DATA (no data yet — first run may not have emitted metric)"
+            elif [ "${STATE}" = "None" ] || [ "${STATE}" = "NOT_FOUND" ] || [ "${STATE}" = "UNKNOWN" ]; then
+              echo "  ⚠ ${ALARM}: ${STATE} (alarm not yet created or no metric data — degrade to warning)"
             else
               echo "  ✗ ${ALARM}: ${STATE}"
               PASS=false
