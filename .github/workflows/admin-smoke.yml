@@ -87,6 +87,11 @@ jobs:
           VITE_BACKEND_URL: "http://127.0.0.1:4317"
           BUILD_BUDGET_MS: "480000"
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+          # Phase 6 (vite.config.js ga4Plugin) throws a hard build error when
+          # VITE_GA4_ID is set in a production build — Cloudflare Zaraz handles
+          # GA4 server-side. Explicitly unset it here so the repo-level secret
+          # (set for other workflows) does not leak into this build.
+          VITE_GA4_ID: ""
 
       - name: Run admin dashboard smoke suite
         run: pnpm --filter @workspace/syrabit run test:e2e
