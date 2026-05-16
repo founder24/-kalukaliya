@@ -364,7 +364,7 @@ async function main() {
   // (Workers: Read, Durable Objects: Read) that are separate from the main
   // zone-settings token — degrade gracefully on code 10000.
   console.log('\nPhase 5 — Analytics Engine dataset + Durable Object rate limiter:');
-  const WORKER_NAME = 'syrabit-edge';
+  const WORKER_NAME = 'syrabitworker';
   const AE_DATASET  = 'syrabit-edge-metrics';
 
   // 5a: Analytics Engine binding
