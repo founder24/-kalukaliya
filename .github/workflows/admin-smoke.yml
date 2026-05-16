@@ -80,7 +80,11 @@ jobs:
         run: pnpm --filter @workspace/syrabit run build
         env:
           NODE_ENV: production
-          VITE_BACKEND_URL: "https://api.syrabit.ai"
+          # Point API calls at the local Vite preview server so Playwright's
+          # page.route('**/api/**') mock intercepts every axios request.
+          # Using the production URL bakes https://api.syrabit.ai into the bundle
+          # and routes all XHR cross-origin, where route mocks can miss them.
+          VITE_BACKEND_URL: "http://127.0.0.1:4317"
           BUILD_BUDGET_MS: "480000"
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
