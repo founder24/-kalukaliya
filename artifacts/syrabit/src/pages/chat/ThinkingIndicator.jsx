@@ -6,10 +6,21 @@ import { useState, useEffect, useRef, useMemo } from 'react';
  *   Phase 1 → "Searching <Subject Name>"          (shown for ≥ 0.8 s)
  *   Phase 2 → "Searching <Chapter Name>"          (cycles until response)
  *
+ * When lang="as" all labels are rendered in Assamese so the entire
+ * thinking animation stays in the response language.
+ *
  * Each phase replaces the previous with a quick fade-out / fade-in.
  * Discovery events from the backend can advance phases early, but the
  * 0.8-second minimum per phase is always respected.
  */
+
+const AS = {
+  syllabus:        'অসম বোৰ্ড পাঠ্যক্ৰম বিচাৰিছো',
+  subject:         (name) => `${name || 'আপোনাৰ বিষয়'} বিচাৰিছো`,
+  chapter:         (label) => `${label} বিচাৰিছো`,
+  chapterWord:     'অধ্যায়',
+  relevantChapter: 'প্ৰাসংগিক অধ্যায়',
+};
 
 const MIN_PHASE_MS    = 800;  // each phase visible for at least 0.8 s
 const PHASE_SCHEDULE  = [800, 1800]; // default timers: advance at 0.8 s, then at 1.8 s
@@ -31,7 +42,9 @@ export function ThinkingIndicator({
   scopedChapters  = [],
   chapterMatch    = null,
   discoveryEvents = [],
+  lang            = 'en',
 }) {
+  const isAs = lang === 'as';
   const [phase,    setPhase]    = useState(0);
   const [fading,   setFading]   = useState(false);
   const [chapIdx,  setChapIdx]  = useState(0);
@@ -52,22 +65,28 @@ export function ThinkingIndicator({
   // ----- label derivation ------------------------------------------------
 
   const chapterLabel = useMemo(() => {
+    const chWord = isAs ? AS.chapterWord : 'Chapter';
     if (chapterMatch) {
       const num   = chapterMatch.chapter_number;
       const title = chapterMatch.chapter_title;
-      return num ? `Chapter\u00a0${num}\u00a0\u2014\u00a0${title}` : title;
+      return num ? `${chWord}\u00a0${num}\u00a0\u2014\u00a0${title}` : title;
     }
-    if (!sortedChapters.length) return 'relevant chapters';
+    if (!sortedChapters.length) return isAs ? AS.relevantChapter : 'relevant chapters';
     const ch  = sortedChapters[chapIdx] || sortedChapters[0];
     const num = ch.chapter_number ?? ch.order_index ?? chapIdx + 1;
-    return `Chapter\u00a0${num}\u00a0\u2014\u00a0${ch.title || ch.name || 'chapter'}`;
-  }, [chapterMatch, sortedChapters, chapIdx]);
+    return `${chWord}\u00a0${num}\u00a0\u2014\u00a0${ch.title || ch.name || (isAs ? 'অধ্যায়' : 'chapter')}`;
+  }, [chapterMatch, sortedChapters, chapIdx, isAs]);
 
   const label = useMemo(() => {
+    if (isAs) {
+      if (phase === 0) return AS.syllabus;
+      if (phase === 1) return AS.subject(subject?.name);
+      return AS.chapter(chapterLabel);
+    }
     if (phase === 0) return 'Searching Assam Board Syllabus';
     if (phase === 1) return `Searching ${subject?.name || 'your subject'}`;
     return `Searching ${chapterLabel}`;
-  }, [phase, subject, chapterLabel]);
+  }, [phase, subject, chapterLabel, isAs]);
 
   // ----- phase advancement -----------------------------------------------
 
