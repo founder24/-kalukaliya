@@ -138,8 +138,8 @@ async def call_chat(
     location = (os.environ.get("VERTEX_LOCATION", "us-central1") or "us-central1").strip()
     deployment = (
         model
-        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.0-flash")
-        or "gemini-2.0-flash"
+        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
+        or "gemini-2.5-flash"
     ).strip()
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
