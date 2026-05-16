@@ -111,8 +111,11 @@ async def get_conversation(conv_id: str, user: Optional[dict] = Depends(get_curr
     messages = conv.get("messages", [])
     if isinstance(messages, str):
         import json as _json
-        try: messages = _json.loads(messages)
-        except: messages = []
+        try:
+            messages = _json.loads(messages)
+        except Exception:
+            logger.warning(f"Failed to parse messages JSON for conversation {conv_id}", exc_info=True)
+            messages = []
     _cache = {}
     for m in messages:
         if m.get("role") != "assistant":
@@ -139,7 +142,8 @@ async def get_conversation(conv_id: str, user: Optional[dict] = Depends(get_curr
                         _cache[sid] = {}
                 else:
                     _cache[sid] = {}
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to fetch RAG context for subject {sid}: {e}", exc_info=True)
                 _cache[sid] = {}
         ctx = _cache.get(sid, {})
         if ctx.get("stream_name"):

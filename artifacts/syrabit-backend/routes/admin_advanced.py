@@ -350,7 +350,7 @@ async def admin_monetization_overview(admin: dict = Depends(get_admin_user)):
 
 @router.get("/admin/monetization/referrals")
 async def admin_monetization_referrals(admin: dict = Depends(get_admin_user)):
-    referrals = await db.referrals.find({}, {"_id": 0}).to_list(500)
+    referrals = await db.referrals.find({}, {"_id": 0}).limit(500).to_list(500)
     return {
         "total_referrals": len(referrals),
         "successful_conversions": sum(1 for r in referrals if r.get("converted")),
@@ -389,7 +389,7 @@ async def seo_internal_links_analyze(admin: dict = Depends(get_admin_user)):
     topics = await db.seo_topics.find(
         {"status": "published"},
         {"_id": 0, "slug": 1, "title": 1, "subject_name": 1, "class_name": 1}
-    ).to_list(500)
+    ).limit(500).to_list(500)
 
     if not topics:
         return {"links": [], "topics_analyzed": 0}
@@ -438,7 +438,7 @@ async def seo_internal_links_inject(slug: str, admin: dict = Depends(get_admin_u
     all_topics = await db.seo_topics.find(
         {"status": "published", "slug": {"$ne": slug}},
         {"slug": 1, "title": 1}
-    ).to_list(200)
+    ).limit(200).to_list(200)
 
     injected_count = 0
     injected_links = []
@@ -490,14 +490,14 @@ async def seo_internal_links_inject(slug: str, admin: dict = Depends(get_admin_u
 @router.get("/admin/seo/internal-links/validate")
 async def seo_internal_links_validate(admin: dict = Depends(get_admin_user)):
     """Validate all tracked internal links. Flag broken links where target is unpublished."""
-    all_links = await db.seo_internal_links.find({}).to_list(5000)
+    all_links = await db.seo_internal_links.find({}).limit(5000).to_list(5000)
     if not all_links:
         return {"total_links": 0, "valid": 0, "broken": 0, "broken_links": []}
 
     published_slugs = set()
     published_topics = await db.seo_topics.find(
         {"status": "published"}, {"_id": 0, "slug": 1}
-    ).to_list(5000)
+    ).limit(5000).to_list(5000)
     for t in published_topics:
         published_slugs.add(t.get("slug", ""))
 

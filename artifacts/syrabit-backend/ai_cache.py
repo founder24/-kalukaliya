@@ -277,7 +277,14 @@ def _retrieval_fingerprint(retrieval: Any) -> str:
         raw = json.dumps([str(x) for x in retrieval][:64], sort_keys=True)
     else:
         raw = str(retrieval)
+def _cache_key_md5(raw: str) -> str:
+    """Generate cache key using MD5 (legacy, kept for backward compatibility)."""
     return hashlib.md5(raw.encode("utf-8", "ignore")).hexdigest()[:16]
+
+
+def _cache_key_sha256(raw: str) -> str:
+    """Generate secure cache key using SHA-256."""
+    return hashlib.sha256(raw.encode("utf-8", "ignore")).hexdigest()[:32]
 
 
 def build_ai_cache_key(

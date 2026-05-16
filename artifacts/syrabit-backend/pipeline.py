@@ -300,6 +300,7 @@ _STAGE1_CACHE_TTL = 600
 _STAGE1_CACHE_MAX = 768
 
 def _stage1_cache_key(query: str) -> str:
+    # Using MD5 for cache key (non-cryptographic use case, collision risk acceptable)
     return hashlib.md5(query.strip().lower().encode()).hexdigest()
 
 async def stage1_resolve_topic(query: str, context: dict = None) -> Optional[dict]:

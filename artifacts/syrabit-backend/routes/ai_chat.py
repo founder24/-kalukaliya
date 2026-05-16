@@ -1720,8 +1720,11 @@ async def _chat_impl(msg: ChatMessage, request: Request, user: Optional[dict] = 
         if conv:
             existing_msgs = conv.get("messages", [])
             if isinstance(existing_msgs, str):
-                try: existing_msgs = json.loads(existing_msgs)
-                except: existing_msgs = []
+                try:
+                    existing_msgs = json.loads(existing_msgs)
+                except Exception as e:
+                    logger.warning(f"Failed to parse existing messages JSON for conversation {conv_id}: {e}", exc_info=True)
+                    existing_msgs = []
             updated_msgs = existing_msgs + new_messages
             _update_payload = {
                 "messages": json.dumps(updated_msgs) if supa else updated_msgs,
@@ -2018,8 +2021,11 @@ async def _persist_chat_turn(
         if conv:
             existing = conv.get("messages", [])
             if isinstance(existing, str):
-                try: existing = json.loads(existing)
-                except: existing = []
+                try:
+                    existing = json.loads(existing)
+                except Exception as e:
+                    logger.warning(f"Failed to parse existing messages JSON for conversation {conv_id}: {e}", exc_info=True)
+                    existing = []
             updated = existing + new_msgs
             _persist_payload = {
                 "messages": json.dumps(updated) if supa else updated,
@@ -3744,7 +3750,8 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
                                     logger.warning(f"[guardrails] LLM output violation mid-stream ({_out_tag})")
                                     break
                                 _output_buf = _output_buf[-80:]
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Error in streaming guardrails check: {e}", exc_info=True)
                             pass
                     if _output_violation:
                         break

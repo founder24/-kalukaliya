@@ -1144,16 +1144,19 @@ async def admin_apply_supabase(data: dict, admin: dict = Depends(get_admin_user)
 # MARKDOWN PROCESSING HELPERS (WordPress-style auto-format)
 # ─────────────────────────────────────────────────────────────────────────────
 
+from html_sanitizer import sanitize_markdown as _sanitize_markdown
+
 _md_renderer = _mistune.create_markdown(
     plugins=["table", "strikethrough", "footnotes", "task_lists"],
     escape=True,
 )
 
 def _md_to_html(raw: str) -> str:
-    """Convert markdown to safe HTML using mistune with GFM plugins."""
+    """Convert markdown to safe HTML using mistune with GFM plugins, then sanitize."""
     if not raw:
         return ""
-    return _md_renderer(raw) or ""
+    # Sanitize markdown before rendering to prevent XSS
+    return _sanitize_markdown(raw)
 
 def _extract_headings_json(raw: str) -> str:
     """Return JSON array of {level, text, anchor} extracted from markdown content."""
