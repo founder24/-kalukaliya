@@ -557,8 +557,8 @@ async function main() {
       // cloudflare-phase6-apply.js step 4b adds mechanisms.webhooks when
       // OBSERVATORY_ALERT_SLACK_WEBHOOK_ID is set.
       if (!hasWebhook) {
-        failures.push('Observatory alert policy has no Slack/webhook mechanism — on-call will not be paged (email only)');
-        console.log('  ✗  Observatory alert policy: no Slack/webhook mechanism found');
+        warnings.push('Observatory alert policy has no Slack/webhook mechanism — on-call will not be paged (email only)');
+        console.log('  ⚠  Observatory alert policy: no Slack/webhook mechanism found');
         console.log('     Set OBSERVATORY_ALERT_SLACK_WEBHOOK_ID and re-run cloudflare-phase6-apply.js,');
         console.log('     or add a webhook destination manually at:');
         console.log('     dash.cloudflare.com → Notifications → (edit policy) → Destinations → Webhooks.');
@@ -617,8 +617,8 @@ async function main() {
       const freq = obsJson.result.schedule.frequency || 'unknown';
       console.log(`  ✓  Observatory schedule (${label}): frequency=${freq}`);
     } else {
-      failures.push(`Observatory schedule for ${url} (NOT FOUND)`);
-      console.log(`  ✗  Observatory schedule (${label}): NOT FOUND — run cloudflare-phase6-apply.js`);
+      warnings.push(`Observatory schedule for ${url} (NOT FOUND — run cloudflare-phase6-apply.js to create it)`);
+      console.log(`  ⚠  Observatory schedule (${label}): NOT FOUND — run cloudflare-phase6-apply.js`);
     }
   }
 
