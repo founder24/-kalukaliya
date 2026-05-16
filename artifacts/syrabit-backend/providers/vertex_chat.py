@@ -65,12 +65,13 @@ def is_configured() -> bool:
 def _resolve_model(override: Optional[str] = None) -> str:
     """Return the Gemini model name to use, respecting env override.
 
-    Default: gemini-2.0-flash (lower TTFT; env VERTEX_GEMINI_MODEL overrides).
+    Default: gemini-2.5-flash (matches config.py / vertex_format.py / admin_health.py).
+    Override via VERTEX_GEMINI_MODEL env var.
     """
     return (
         override
-        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.0-flash")
-        or "gemini-2.0-flash"
+        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
+        or "gemini-2.5-flash"
     ).strip()
 
 

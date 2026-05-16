@@ -567,7 +567,7 @@ async def chat_stream_direct(
                 logger.warning("[chat_direct/stream] Vertex stream failed: %s", exc)
 
             if vertex_streamed == 0:
-                # Workers-AI native SSE fallback — streams directly from CF edge.
+                # Workers-AI tier-1: native SSE streaming — lowest TTFT.
                 tokens_received = 0
                 try:
                     from providers.cloudflare_ai import chat_stream as cf_stream
@@ -581,7 +581,38 @@ async def chat_stream_direct(
                     if tokens_received > 0:
                         actual_provider = "workers-ai"
                 except Exception as exc:
-                    logger.warning("[chat_direct/stream] Workers-AI fallback failed: %s", exc)
+                    logger.warning(
+                        "[chat_direct/stream] Workers-AI stream fallback failed (%s: %s) — "
+                        "trying non-streaming path",
+                        type(exc).__name__, exc,
+                    )
+
+                if tokens_received == 0:
+                    # Workers-AI tier-2: non-streaming chat() uses _post() with
+                    # 429 backoff + 5xx retry — more resilient than the SSE path.
+                    # Simulate streaming by yielding word-by-word once the full
+                    # response arrives (same pattern as the Assamese Sarvam path).
+                    try:
+                        from providers.cloudflare_ai import chat as cf_chat
+                        raw = await cf_chat(
+                            messages, model_key=_WORKERS_FALLBACK_MODEL,
+                            max_tokens=1024, direct=True,
+                        )
+                        text = _strip_think(raw)
+                        if text:
+                            words = text.split(" ")
+                            for i, word in enumerate(words):
+                                chunk = word if i == 0 else " " + word
+                                tokens_received += 1
+                                accumulated.append(chunk)
+                                yield f"data: {json.dumps({'content': chunk})}\n\n"
+                            actual_provider = "workers-ai"
+                    except Exception as exc2:
+                        logger.warning(
+                            "[chat_direct/stream] Workers-AI non-stream fallback also failed "
+                            "(%s: %s)",
+                            type(exc2).__name__, exc2,
+                        )
 
                 if tokens_received == 0:
                     err_tok = "AI service temporarily unavailable — please retry."
