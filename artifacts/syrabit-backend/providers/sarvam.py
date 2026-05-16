@@ -168,6 +168,7 @@ async def chat(
     user_id: Optional[str] = None,
     max_tokens: int = 800,
     temperature: float = _DEFAULT_TEMPERATURE,
+    thinking_budget: int = 256,
     **kwargs: Any,
 ) -> ChatResponse:
     """Non-streaming Assamese chat completion via Sarvam ``sarvam-m``.
@@ -227,6 +228,8 @@ async def chat(
         "stream": False,
         "response_language": response_language,
     }
+    if thinking_budget > 0:
+        payload["thinking_budget"] = thinking_budget
 
     t0 = time.perf_counter()
     success = False
