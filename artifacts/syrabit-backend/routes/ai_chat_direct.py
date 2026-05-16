@@ -403,7 +403,7 @@ async def chat_direct(
             from providers.sarvam import chat as sarvam_chat
             resp = await sarvam_chat(
                 messages, language="as", user_id=(user or {}).get("id"),
-                max_tokens=700, thinking_budget=256,
+                max_tokens=700, thinking_budget=0,
             )
             answer = resp.text
             actual_provider = "sarvam"
@@ -507,68 +507,67 @@ async def chat_stream_direct(
         accumulated: list[str] = []
 
         if is_assamese:
-            # ── Assamese: Sarvam PRIMARY stream (think-stripped) → Vertex fallback
-            # Sarvam sarvam-m thinks in Assamese, responds in Assamese.
-            # _stream_sarvam emits raw <think> tokens — _stream_strip_think discards them.
-            sarvam_ok = False
+            # ── Assamese: Sarvam PRIMARY (no-think fast path) → Vertex fallback ──────
+            # thinking_budget=0 skips the <think> block entirely — cuts ~3-4 s of
+            # latency versus the default thinking_budget=256 path.  The direct-chat
+            # surface is optimised for speed; deep research keeps thinking enabled.
+            sarvam_text: str | None = None
             try:
-                from llm import _SARVAM_PROVIDERS, _stream_sarvam
-                if _SARVAM_PROVIDERS:
-                    slot = _SARVAM_PROVIDERS[0]
-                    async for token in _stream_strip_think(
-                        _stream_sarvam(messages, slot["key"], "sarvam-m", 700, response_lang="as")
-                    ):
-                        accumulated.append(token)
-                        yield f"data: {json.dumps({'content': token})}\n\n"
-                        sarvam_ok = True
-                    actual_provider = "sarvam"
+                from providers.sarvam import chat as sarvam_chat
+                resp = await sarvam_chat(
+                    messages, language="as", user_id=user_id,
+                    max_tokens=700, thinking_budget=0,
+                )
+                sarvam_text = resp.text
+                actual_provider = "sarvam"
             except Exception as exc:
-                logger.warning("[chat_direct] Sarvam stream failed: %s", exc)
+                logger.warning("[chat_direct/stream] Sarvam fast-path failed: %s", exc)
 
-            if not sarvam_ok:
-                # Vertex fallback for Assamese — Assamese system prompt already in messages
-                fallback_text: str | None = None
+            if not sarvam_text:
+                # Vertex fallback for Assamese
                 try:
                     from providers.vertex_chat import call_chat as vertex_call
-                    fallback_text = await vertex_call(messages, max_tokens=800)
+                    sarvam_text = await vertex_call(messages, max_tokens=800)
                     actual_provider = "vertex"
                 except Exception as exc:
-                    logger.warning("[chat_direct] Vertex Assamese fallback failed: %s", exc)
+                    logger.error("[chat_direct/stream] Vertex Assamese fallback failed: %s", exc)
 
-                if fallback_text:
-                    for _i in range(0, len(fallback_text), 6):
-                        _chunk = fallback_text[_i:_i + 6]
-                        accumulated.append(_chunk)
-                        yield f"data: {json.dumps({'content': _chunk})}\n\n"
-                else:
-                    logger.error("[chat_direct/stream] All Assamese providers failed — returning error to user")
-                    err_tok = (
-                        "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত পুনৰাই চেষ্টা কৰক।\n\n"
-                        "(Service temporarily unavailable — please try again in a moment.)"
-                    )
-                    accumulated.append(err_tok)
-                    yield f"data: {json.dumps({'content': err_tok})}\n\n"
+            if sarvam_text:
+                # Stream word-by-word so the frontend renders progressively
+                # rather than waiting for the whole payload at once.
+                words = sarvam_text.split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == 0 else " " + word
+                    accumulated.append(chunk)
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+            else:
+                logger.error("[chat_direct/stream] All Assamese providers failed")
+                err_tok = (
+                    "সেৱা এতিয়া উপলব্ধ নহয় — অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত পুনৰাই চেষ্টা কৰক।\n\n"
+                    "(Service temporarily unavailable — please try again in a moment.)"
+                )
+                accumulated.append(err_tok)
+                yield f"data: {json.dumps({'content': err_tok})}\n\n"
 
         else:
-            # ── English: Vertex PRIMARY (chunked SSE) → Workers-AI chat_fast direct fallback
-            # Vertex non-streaming response is chunked into SSE tokens for the frontend.
-            vertex_text: str | None = None
+            # ── English: Vertex PRIMARY native streaming → Workers-AI chat_fast fallback
+            # stream_chat() uses :streamGenerateContent?alt=sse — tokens arrive as
+            # they are generated (true TTFT) instead of waiting for the full response.
+            vertex_streamed = 0
             try:
-                from providers.vertex_chat import call_chat as vertex_call
-                vertex_text = await vertex_call(messages, max_tokens=1024)
-                actual_provider = "vertex"
-                logger.info("[chat_direct/stream] Vertex primary succeeded (%d chars)", len(vertex_text or ""))
+                from providers.vertex_chat import stream_chat as vertex_stream
+                async for chunk in vertex_stream(messages, max_tokens=1024):
+                    vertex_streamed += 1
+                    accumulated.append(chunk)
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+                if vertex_streamed > 0:
+                    actual_provider = "vertex"
+                    logger.info("[chat_direct/stream] Vertex stream OK (%d chunks)", vertex_streamed)
             except Exception as exc:
-                logger.warning("[chat_direct/stream] Vertex primary failed: %s", exc)
+                logger.warning("[chat_direct/stream] Vertex stream failed: %s", exc)
 
-            if vertex_text:
-                for _i in range(0, len(vertex_text), 6):
-                    _chunk = vertex_text[_i:_i + 6]
-                    accumulated.append(_chunk)
-                    yield f"data: {json.dumps({'content': _chunk})}\n\n"
-            else:
-                # Workers-AI fallback: chat_fast (8B), direct to api.cloudflare.com
-                # (bypass CF AI Gateway — 70B fails through gateway; 8B is reliable).
+            if vertex_streamed == 0:
+                # Workers-AI native SSE fallback — streams directly from CF edge.
                 tokens_received = 0
                 try:
                     from providers.cloudflare_ai import chat_stream as cf_stream
@@ -579,7 +578,8 @@ async def chat_stream_direct(
                         tokens_received += 1
                         accumulated.append(token)
                         yield f"data: {json.dumps({'content': token})}\n\n"
-                    actual_provider = "workers-ai"
+                    if tokens_received > 0:
+                        actual_provider = "workers-ai"
                 except Exception as exc:
                     logger.warning("[chat_direct/stream] Workers-AI fallback failed: %s", exc)
 

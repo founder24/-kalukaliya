@@ -12,6 +12,7 @@ Region from VERTEX_LOCATION (default ``us-central1``).
 Public API:
 
     await call_chat(messages, *, model=None, max_tokens=2048) -> str
+    stream_chat(messages, *, model=None, max_tokens=1024) -> AsyncIterator[str]
 
 Failure mode: raises ``RuntimeError`` on misconfig / HTTP error /
 empty / safety-blocked response. Callers own the fall-through to
@@ -24,7 +25,7 @@ import json
 import logging
 import os
 import re
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
@@ -45,7 +46,7 @@ async def _get_shared_client() -> httpx.AsyncClient:
     global _shared_client
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=25.0, write=10.0, pool=5.0),
             limits=httpx.Limits(
                 max_connections=20,
                 max_keepalive_connections=10,
@@ -59,6 +60,18 @@ async def _get_shared_client() -> httpx.AsyncClient:
 
 def is_configured() -> bool:
     return bool((os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "") or "").strip())
+
+
+def _resolve_model(override: Optional[str] = None) -> str:
+    """Return the Gemini model name to use, respecting env override.
+
+    Default: gemini-2.0-flash (lower TTFT; env VERTEX_GEMINI_MODEL overrides).
+    """
+    return (
+        override
+        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.0-flash")
+        or "gemini-2.0-flash"
+    ).strip()
 
 
 async def _ensure_creds():
@@ -117,6 +130,19 @@ def _split_system(messages: list) -> tuple[str, list]:
     return "\n\n".join(system_parts).strip(), contents
 
 
+def _build_payload(contents: list, system_text: str, max_tokens: int) -> dict:
+    payload: dict = {
+        "contents": contents,
+        "generationConfig": {
+            "maxOutputTokens": max(1, int(max_tokens)),
+            "temperature": 0.2,
+        },
+    }
+    if system_text:
+        payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+    return payload
+
+
 async def call_chat(
     messages: list,
     *,
@@ -136,11 +162,7 @@ async def call_chat(
         raise RuntimeError("vertex_chat: GOOGLE_APPLICATION_CREDENTIALS_JSON not set")
     creds, project = await _ensure_creds()
     location = (os.environ.get("VERTEX_LOCATION", "us-central1") or "us-central1").strip()
-    deployment = (
-        model
-        or os.environ.get("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
-        or "gemini-2.5-flash"
-    ).strip()
+    deployment = _resolve_model(model)
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
         f"/locations/{location}/publishers/google/models/{deployment}:generateContent"
@@ -148,15 +170,7 @@ async def call_chat(
     system_text, contents = _split_system(messages)
     if not contents:
         raise RuntimeError("vertex_chat: no user/assistant messages to send")
-    payload: dict = {
-        "contents": contents,
-        "generationConfig": {
-            "maxOutputTokens": max(1, int(max_tokens)),
-            "temperature": 0.2,
-        },
-    }
-    if system_text:
-        payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+    payload = _build_payload(contents, system_text, max_tokens)
 
     try:
         c = await _get_shared_client()
@@ -182,3 +196,76 @@ async def call_chat(
     if not out:
         raise RuntimeError("vertex_chat: Vertex returned empty / safety-blocked response")
     return out
+
+
+async def stream_chat(
+    messages: list,
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 1024,
+) -> AsyncIterator[str]:
+    """Streaming Vertex AI Gemini chat — yields text chunks as they arrive.
+
+    Uses :streamGenerateContent?alt=sse for true server-sent token streaming.
+    TTFT is dramatically lower than call_chat() which waits for the complete
+    response before returning. Same HTTP/2 pooled client — no extra TCP cost.
+
+    Raises ``RuntimeError`` on misconfig or HTTP error. Callers own fallback.
+
+    Usage::
+
+        async for chunk in stream_chat(messages):
+            yield f"data: {json.dumps({'content': chunk})}\\n\\n"
+    """
+    if not is_configured():
+        raise RuntimeError("vertex_chat: GOOGLE_APPLICATION_CREDENTIALS_JSON not set")
+    creds, project = await _ensure_creds()
+    location = (os.environ.get("VERTEX_LOCATION", "us-central1") or "us-central1").strip()
+    deployment = _resolve_model(model)
+    url = (
+        f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
+        f"/locations/{location}/publishers/google/models/{deployment}"
+        f":streamGenerateContent?alt=sse"
+    )
+    system_text, contents = _split_system(messages)
+    if not contents:
+        raise RuntimeError("vertex_chat: no user/assistant messages to send")
+    payload = _build_payload(contents, system_text, max_tokens)
+
+    c = await _get_shared_client()
+    try:
+        async with c.stream(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {creds.token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=httpx.Timeout(connect=5.0, read=25.0, write=10.0, pool=5.0),
+        ) as resp:
+            if resp.status_code >= 400:
+                body = await resp.aread()
+                raise RuntimeError(
+                    f"vertex_chat stream: HTTP {resp.status_code} — {body[:300]}"
+                )
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if not raw or raw == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(raw)
+                    parts = (
+                        (chunk.get("candidates") or [{}])[0]
+                        .get("content", {})
+                        .get("parts") or []
+                    )
+                    text = "".join(p.get("text", "") for p in parts)
+                    if text:
+                        yield text
+                except Exception:
+                    continue
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"vertex_chat stream: transport error — {exc}")
