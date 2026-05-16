@@ -1,92 +1,47 @@
-# Environment files
-.env
-.env.local
-.env.*
-
-# Logs and temporary files
-*.log
-*.tmp
+```
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
 
 # Dependencies
-node_modules/
+.venv/
+venv/
 
-# Build artifacts
-dist/
-build/
-target/
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
 
 # Python specific
-__pycache__/
 *.pyc
+__pycache__/
 *.pyo
 *.pyd
 .Python
-env/
-venv/
-.venv/
-.venv-bak/
-.venv-py3/
-.venv-py3-bak/
-.venv-prod/
-.python-deps/
-.python-version
+*.so
+
+# Build directories
+build/
+dist/
+*.egg-info/
+
+# Cache directories
 .mypy_cache/
 .pytest_cache/
-.coverage
-coverage/
+.hypothesis/
 
-# TypeScript/JavaScript
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# IDE specific
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS specific
-.DS_Store
-Thumbs.db
-
-# Infra (Terraform local state / providers — Task #94)
-**/.terraform/
-
-# Audits — keep summary docs, ignore raw dumps (Task #94)
-# Covers both directory dumps (`*-raw/`, `raw*/`) and the symlink/file aliases
-# that pointed at them in the original tree (`*-raw` no trailing slash).
-docs/audits/**/*-raw/
-docs/audits/**/*-raw
-docs/audits/**/raw*/
-
-# Archived attached assets (Task #8 — purged from tracked tree, kept locally for reference)
-docs/archive/attached/
-
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
-
-# Playwright test artifacts
-test-results/
-playwright-report/
+# Artifacts directory (based on file structure)
+artifacts/
+```

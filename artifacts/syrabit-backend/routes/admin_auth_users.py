@@ -58,32 +58,10 @@ except ImportError:
     class _SupaAuthApiError(Exception):  # noqa: N818
         pass
 
-# E2E test backdoor — only active when ENABLE_E2E_ADMIN=1/true/yes.
-# Never set this in production.
-_E2E_ADMIN_ENABLED: bool = _os.environ.get("ENABLE_E2E_ADMIN", "").strip().lower() in ("1", "true", "yes")
-_E2E_ADMIN: dict = {
-    "email": "e2e-admin@syrabit-e2e.com",
-    "password": "e2e-test-admin-2026",
-    "name": "E2E Test Admin",
-}
-
-# Dev/Replit env-var fallback — only active when ADMIN_EMAILS and ADMIN_PASSWORDS
-# are both set AND Supabase auth fails. These env vars remain set in the Replit
-# dev environment from before the Supabase migration. Format: comma-separated
-# lists where index N in ADMIN_EMAILS matches index N in ADMIN_PASSWORDS
-# (and optionally ADMIN_NAMES). Never relied upon in Railway/production.
-def _parse_env_admin_creds() -> list[dict]:
-    emails = [e.strip().lower() for e in _os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
-    passwords = [p.strip() for p in _os.environ.get("ADMIN_PASSWORDS", "").split(",") if p.strip()]
-    names = [n.strip() for n in _os.environ.get("ADMIN_NAMES", "").split(",") if n.strip()]
-    if not emails or not passwords or len(emails) != len(passwords):
-        return []
-    return [
-        {"email": emails[i], "password": passwords[i], "name": names[i] if i < len(names) else emails[i]}
-        for i in range(len(emails))
-    ]
-
-_ENV_ADMIN_CREDS: list[dict] = _parse_env_admin_creds()
+# SECURITY FIX 2026-01-XX: Removed E2E test backdoor and env-var auth fallback.
+# All admin authentication MUST go through Supabase Auth with MFA enabled.
+# For E2E tests, use dedicated test accounts provisioned via Supabase CLI.
+# See docs/SECURITY_FIXES.md for migration guide.
 
 logger = logging.getLogger(__name__)
 
@@ -113,79 +91,62 @@ async def admin_login(
     submitted_email = (data.email or "").strip().lower()
     submitted_password = (data.password or "").strip()
 
-    # ── E2E test backdoor ────────────────────────────────────────────────────
-    # Only active when ENABLE_E2E_ADMIN=1/true/yes. Never set in production.
-    # Bypasses Supabase Auth so integration test suites don't need a live
-    # Supabase instance.
-    if (
-        _E2E_ADMIN_ENABLED
-        and submitted_email == _E2E_ADMIN["email"]
-        and submitted_password == _E2E_ADMIN["password"]
-    ):
-        matched_email = _E2E_ADMIN["email"]
-        matched_name  = _E2E_ADMIN["name"]
-    else:
-        # ── Verify credentials via Supabase Auth ─────────────────────────────
-        # Admin accounts live in Supabase Auth + the `users` table
-        # (is_admin=True). No credentials are stored in Railway env vars.
-        if deps.supa is None:
-            logger.critical(
-                "admin_login refused — Supabase client not initialized; "
-                "check SUPABASE_URL and SUPABASE_SERVICE_KEY. submitted_email=%r",
-                submitted_email,
-            )
-            raise HTTPException(status_code=503, detail="Admin login is not configured")
+    # SECURITY FIX 2026-01-XX: All authentication MUST go through Supabase Auth.
+    # Removed E2E backdoor and env-var fallback paths.
+    
+    # ── Verify credentials via Supabase Auth ─────────────────────────────────
+    # Admin accounts live in Supabase Auth + the `users` table (is_admin=True).
+    # No credentials are stored in environment variables.
+    if deps.supa is None:
+        logger.critical(
+            "admin_login refused — Supabase client not initialized; "
+            "check SUPABASE_URL and SUPABASE_SERVICE_KEY. submitted_email=%r",
+            submitted_email,
+        )
+        raise HTTPException(status_code=503, detail="Admin login is not configured")
 
-        try:
-            auth_resp = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: deps.supa.auth.sign_in_with_password(
-                    {"email": submitted_email, "password": submitted_password}
-                ),
-            )
-            auth_user = auth_resp.user if auth_resp else None
-        except _SupaAuthApiError:
-            # ── Dev env-var fallback ──────────────────────────────────────────
-            # When Supabase rejects the credentials AND the pre-migration
-            # ADMIN_EMAILS / ADMIN_PASSWORDS env vars are present (Replit dev
-            # environment), attempt a plaintext match against them. This lets
-            # the dev environment work without a matching Supabase account.
-            _env_match = next(
-                (c for c in _ENV_ADMIN_CREDS
-                 if c["email"] == submitted_email and c["password"] == submitted_password),
-                None,
-            )
-            if _env_match:
-                logger.info(
-                    "admin_login via env-var fallback (dev only). submitted_email=%r",
-                    submitted_email,
-                )
-                matched_email = _env_match["email"]
-                matched_name  = _env_match["name"]
-            else:
-                logger.warning(
-                    "admin_login rejected — Supabase rejected credentials. submitted_email=%r",
-                    submitted_email,
-                )
-                raise HTTPException(status_code=401, detail="Invalid admin credentials")
-        except Exception as _auth_exc:
-            logger.error("admin_login Supabase auth error: %s", _auth_exc)
-            raise HTTPException(status_code=503, detail="Authentication service unavailable")
-        else:
-            if not auth_user:
-                raise HTTPException(status_code=401, detail="Invalid admin credentials")
+    try:
+        auth_resp = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: deps.supa.auth.sign_in_with_password(
+                {"email": submitted_email, "password": submitted_password}
+            ),
+        )
+        auth_user = auth_resp.user if auth_resp else None
+    except _SupaAuthApiError:
+        correlation_id = str(uuid.uuid4())
+        logger.error(
+            f"admin_login rejected — Supabase rejected credentials [corr_id={correlation_id}]. "
+            f"submitted_email=%r",
+            submitted_email,
+        )
+        raise HTTPException(status_code=401, detail=f"Invalid credentials. Reference ID: {correlation_id}")
+    except Exception as _auth_exc:
+        correlation_id = str(uuid.uuid4())
+        logger.error(
+            f"admin_login Supabase auth error [corr_id={correlation_id}]: %s",
+            _auth_exc,
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Authentication service unavailable. Reference ID: {correlation_id}"
+        )
+    
+    if not auth_user:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
-            # ── Confirm is_admin in the users table ──────────────────────────
-            user_record = await supa_get_user(submitted_email)
-            if not user_record or not user_record.get("is_admin"):
-                logger.warning(
-                    "admin_login denied — account not flagged is_admin. submitted_email=%r",
-                    submitted_email,
-                )
-                raise HTTPException(status_code=403, detail="Not an admin account")
+    # ── Confirm is_admin in the users table ──────────────────────────────────
+    user_record = await supa_get_user(submitted_email)
+    if not user_record or not user_record.get("is_admin"):
+        logger.warning(
+            "admin_login denied — account not flagged is_admin. submitted_email=%r",
+            submitted_email,
+        )
+        raise HTTPException(status_code=403, detail="Not an admin account")
 
-            matched_email = submitted_email
-            matched_name  = user_record.get("name") or submitted_email
+    matched_email = submitted_email
+    matched_name  = user_record.get("name") or submitted_email
 
     # ── Issue admin JWT (24-hour session) ────────────────────────────────────
     # Token payload includes name so the frontend welcome toast can greet
@@ -342,8 +303,11 @@ async def _compute_dashboard():
                 for row in batch:
                     msgs = row.get("messages")
                     if isinstance(msgs, str):
-                        try: row["messages"] = json.loads(msgs)
-                        except: row["messages"] = []
+                        try:
+                            row["messages"] = json.loads(msgs)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse messages JSON for conversation {row.get('id', 'unknown')}: {e}", exc_info=True)
+                            row["messages"] = []
                     elif msgs is None:
                         row["messages"] = []
                 all_supa.extend(batch)
@@ -829,8 +793,11 @@ async def admin_get_conversations(admin: dict = Depends(get_admin_user)):
             r = await _supa(lambda: supa.table("conversations").select("*").order("updated_at", desc=True).limit(1000).execute())
             for row in (r.data or []):
                 if isinstance(row.get("messages"), str):
-                    try: row["messages"] = json.loads(row["messages"])
-                    except: row["messages"] = []
+                    try:
+                        row["messages"] = json.loads(row["messages"])
+                    except Exception as e:
+                        logger.warning(f"Failed to parse messages JSON for conversation {row.get('id', 'unknown')}: {e}", exc_info=True)
+                        row["messages"] = []
                 elif row.get("messages") is None:
                     row["messages"] = []
             supa_convs = r.data or []

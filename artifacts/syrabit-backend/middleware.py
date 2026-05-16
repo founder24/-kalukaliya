@@ -64,6 +64,8 @@ _SEC_REFERRER = _env_bool("SEC_REFERRER", True)
 _SEC_PERM = _env_bool("SEC_PERM", True)
 _SEC_CSP_REPORT_ONLY = _env_bool("SEC_CSP_REPORT_ONLY", False)
 
+# Enhanced CSP with stricter controls for markdown-rendered content
+# Implements defense-in-depth against XSS from user-generated content
 _CSP_VALUE = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://accounts.google.com https://apis.google.com https://widget.trustpilot.com https://challenges.cloudflare.com; "
@@ -72,7 +74,11 @@ _CSP_VALUE = (
     "font-src 'self' data:; "
     "connect-src 'self' https:; "
     "frame-src https://accounts.google.com https://widget.trustpilot.com https://challenges.cloudflare.com; "
-    "frame-ancestors 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "object-src 'none'; "
+    "upgrade-insecure-requests; "
     "report-uri /api/security/csp-report"
 )
 

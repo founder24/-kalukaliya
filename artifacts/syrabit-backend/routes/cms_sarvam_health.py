@@ -1432,7 +1432,7 @@ async def upload_pdf_document(
         # Ensure bucket exists (create if not)
         try:
             supa.storage.get_bucket("study-materials")
-        except:
+        except Exception:
             try:
                 supa.storage.create_bucket("study-materials", options={"public": True})
                 logger.info("Created 'study-materials' bucket")

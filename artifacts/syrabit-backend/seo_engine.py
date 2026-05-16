@@ -140,6 +140,7 @@ AUTO_PAGE_TYPES = ["notes", "mcqs"]
 
 def _topic_hash(topic_title: str, page_type: str, n_variants: int) -> int:
     """Deterministic variant selector based on topic+type. Stable across regenerations."""
+    # Using MD5 for deterministic hashing (non-cryptographic use case)
     h = hashlib.md5(f"{topic_title}:{page_type}".encode()).hexdigest()
     return int(h, 16) % n_variants
 

@@ -193,6 +193,7 @@ def _stable_citation_key(item: dict) -> str:
     if "chapter_id" in item and item["chapter_id"]:
         return f"chapter:{item['chapter_id']}"
     title = (item.get("title") or "").strip().lower()
+    # Using MD5 for non-cryptographic deduplication (collision risk acceptable)
     return "title:" + hashlib.md5(title.encode()).hexdigest()[:10]
 
 
