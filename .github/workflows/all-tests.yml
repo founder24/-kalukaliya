@@ -18,7 +18,7 @@ name: all-tests
 # Wire-up CI gate for all 75 tests (Task #2).
 #
 # Runs the complete test suite — Vitest unit/component tests AND the full
-# Playwright E2E suite — on every push and pull request to `master`, with no
+# Playwright E2E suite — on every push and pull request to `main`, with no
 # path filtering. A single red test blocks the merge.
 #
 # Why a separate workflow rather than extending frontend-tests.yml?
@@ -31,9 +31,9 @@ name: all-tests
 
 on:
   push:
-    branches: [Replit-agent]
+    branches: [main]
   pull_request:
-    branches: [Replit-agent]
+    branches: [main]
 
 # Read-only token: checks out the repo, runs tests, uploads a Playwright
 # report artifact on failure. Does not write back to the repo.
