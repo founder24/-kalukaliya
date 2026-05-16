@@ -23,6 +23,15 @@ addopts = "-v --tb=short"
 # which both unblocks tests that the original authors forgot to mark and
 # keeps the existing sync-wrapper-around-`_run(coro)` pattern working.
 asyncio_mode = "auto"
+# replit.md Backend test gates — promote "coroutine X was never awaited" to
+# a hard error so a missing `await` is caught at test time rather than
+# silently producing a coroutine leak.  The message filter is intentionally
+# narrow: other RuntimeWarnings (e.g. test_shared_module_all fallback path)
+# remain as warnings and do not fail the build.
+# Fix: add the missing `await`; do NOT suppress with filterwarnings="ignore".
+filterwarnings = [
+    "error:coroutine .* was never awaited:RuntimeWarning",
+]
 markers = [
     "live: marks tests that make real HTTP calls to external services (skip when credentials absent)",
 ]
