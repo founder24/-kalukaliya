@@ -141,7 +141,7 @@ AUTO_PAGE_TYPES = ["notes", "mcqs"]
 def _topic_hash(topic_title: str, page_type: str, n_variants: int) -> int:
     """Deterministic variant selector based on topic+type. Stable across regenerations."""
     # Using MD5 for deterministic hashing (non-cryptographic use case)
-    h = hashlib.md5(f"{topic_title}:{page_type}".encode()).hexdigest()
+    h = hashlib.md5(f"{topic_title}:{page_type}".encode(), usedforsecurity=False).hexdigest()
     return int(h, 16) % n_variants
 
 
@@ -8220,7 +8220,7 @@ def _content_fingerprint(text: str, k: int = 5, num_hashes: int = 64) -> list[in
         return [0] * num_hashes
     sigs = [(1 << 63) - 1] * num_hashes
     for s in shingles:
-        base = int(hashlib.md5(s.encode("utf-8")).hexdigest(), 16)
+        base = int(hashlib.md5(s.encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
         for i in range(num_hashes):
             h = (base * (i * 2654435761 + 1)) & ((1 << 63) - 1)
             if h < sigs[i]:
@@ -8405,7 +8405,7 @@ async def run_duplicate_scan(
     # when the page content hasn't changed since the last scan.
     for p in pages:
         content = p.get("content", "") or ""
-        content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+        content_hash = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
         fp = _content_fingerprint(content)
         prev_hash = (p.get("content_hash") if isinstance(p.get("content_hash"), str) else None)
         if prev_hash != content_hash or not isinstance(p.get("content_fingerprint"), list):

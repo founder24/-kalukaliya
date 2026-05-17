@@ -39,7 +39,7 @@ _playwright_available: Optional[bool] = None
 
 
 def _url_cache_key(url: str) -> str:
-    return hashlib.md5(url.strip().lower().encode()).hexdigest()
+    return hashlib.md5(url.strip().lower().encode(), usedforsecurity=False).hexdigest()
 
 
 def _get_cached_content(url: str) -> Optional[str]:

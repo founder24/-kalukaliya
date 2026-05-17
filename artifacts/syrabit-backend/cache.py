@@ -190,7 +190,7 @@ _content_card_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=2048, t
 def _content_card_cache_key(query: str, subject_id: Optional[str], subject_name: Optional[str], intent: Optional[str] = None, chapter_title: Optional[str] = None) -> str:
     raw = f"{query.strip().lower()}|{subject_id or ''}|{subject_name or ''}|{intent or ''}|{chapter_title or ''}"
     # Using MD5 for cache key (non-cryptographic use case, collision risk acceptable for cache invalidation)
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 # Syllabus cache — syllabi almost never change; 1h TTL.
 # Flex tier: 1024 entries (up from 256).
@@ -202,12 +202,12 @@ def _syllabus_cache_key(board_id: str, class_id: str, stream_id: Optional[str], 
 def _rag_cache_key(query: str, subject_id: Optional[str], subject_name: Optional[str]) -> str:
     raw = f"{query.strip().lower()}|{subject_id or ''}|{subject_name or ''}"
     # Using MD5 for cache key (non-cryptographic use case)
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 def _vector_rag_cache_key(query: str, subject_id: Optional[str], top_k: int) -> str:
     raw = f"{query.strip().lower()}|{subject_id or ''}|{top_k}"
     # Using MD5 for cache key (non-cryptographic use case)
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 # Embedding cache — Flex tier: 4096 entries (up from 1024), 30-min TTL.
 _embedding_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=4096, ttl=1800, name="_embedding_cache")
@@ -215,7 +215,7 @@ _embedding_cache: cachetools.TTLCache = _InstrumentedTTLCache(maxsize=4096, ttl=
 def _embedding_cache_key(text: str, task_type: str) -> str:
     raw = f"{text[:200].strip().lower()}|{task_type}"
     # Using MD5 for cache key (non-cryptographic use case)
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 # Task #609 — TTLs are env-tunable; defaults preserved for back-compat.
 # Pulled from config.py so any change to the env vars is picked up without
@@ -245,7 +245,7 @@ _redis_hit_count = 0
 def _cache_key(query: str, subject_id: str = "", board_id: str = "", conversation_id: str = "") -> str:
     normalized = f"{query.lower().strip()}|{subject_id or ''}|{board_id or ''}|{conversation_id or ''}"
     # Using MD5 for cache key (non-cryptographic use case)
-    return hashlib.md5(normalized.encode()).hexdigest()
+    return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()
 
 def _redis_get(prefix: str, key: str) -> Optional[str]:
     global _redis_hit_count, _redis_miss_count

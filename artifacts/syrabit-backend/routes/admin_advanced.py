@@ -2053,7 +2053,7 @@ async def _pipeline_generate_chapter_notes(chapter: dict, subject_name: str, cla
     topics = chapter.get("topics") or []
     chapter_id = chapter.get("id", "")
 
-    cache_key = f"pipeline_notes:{chapter_id}:{hashlib.md5((title + subject_name).lower().encode()).hexdigest()}"
+    cache_key = f"pipeline_notes:{chapter_id}:{hashlib.md5((title + subject_name).lower().encode(), usedforsecurity=False).hexdigest()}"
     cached = _redis_get("pipeline_notes", cache_key)
     if cached and len(cached.strip()) > 100:
         return cached
@@ -2153,7 +2153,7 @@ async def _pipeline_web_search_pyqs(subject_name: str, chapter_title: str, class
 
 def _pipeline_content_hash(content: str, subject: str, chapter: str, kind: str) -> str:
     raw = f"{kind}|{subject}|{chapter}|{content[:2000]}".lower()
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 async def _pipeline_generate_mark_wise_pyq(
     content: str, subject_name: str, chapter_title: str, class_name: str, paper_type: str = "",
@@ -2794,7 +2794,7 @@ async def _pipeline_process_one_chapter(
             # miss after TTL or dispatcher dual-outage path).
             _fmt_cache_key = (
                 f"pipeline_notes:{chapter_id}:"
-                f"{hashlib.md5((chapter_title + subject_name).lower().encode()).hexdigest()}"
+                f"{hashlib.md5((chapter_title + subject_name).lower().encode(), usedforsecurity=False).hexdigest()}"
             )
             _formatted_by = "passthrough"
             try:
@@ -3350,7 +3350,7 @@ async def admin_content_auto_heal(admin: dict = Depends(get_admin_user)):
                             "new_word_count": new_wc,
                             "regenerated_at": datetime.now(timezone.utc).isoformat(),
                             "reason": "auto_heal_thin_content",
-                            "previous_content_hash": hashlib.md5(old_content.encode()).hexdigest(),
+                            "previous_content_hash": hashlib.md5(old_content.encode(), usedforsecurity=False).hexdigest(),
                         },
                     }}
                 )

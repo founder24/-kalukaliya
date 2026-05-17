@@ -40,3 +40,22 @@ htmlcov/
 .DS_Store
 Thumbs.db
 ```
+# ── Security: secrets & credentials ─────────────────────────────────────────
+.env.local
+.env.*.local
+.env.production.local
+secrets.json
+credentials.json
+*.pem
+*.key
+*.p12
+.aws/credentials
+.aws/config
+*_token.txt
+*_key.txt
+apikey.json
+.dockercfg
+.docker/config.json
+security-fix.log
+backup_*/
+work_*/

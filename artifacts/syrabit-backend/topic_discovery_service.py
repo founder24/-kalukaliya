@@ -194,7 +194,7 @@ def _hash_id(prefix: str, *parts: str) -> str:
     raw = "|".join(parts)
     # Deterministic per (run, query) so reruns don't duplicate.
     import hashlib
-    h = hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    h = hashlib.sha1(raw.encode("utf-8", errors="ignore"), usedforsecurity=False).hexdigest()[:16]
     return f"{prefix}_{h}"
 
 

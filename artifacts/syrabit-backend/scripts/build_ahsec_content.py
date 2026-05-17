@@ -53,7 +53,7 @@ def slugify(s: str) -> str:
 
 def stable_id(prefix: str, *parts: str) -> str:
     raw = "::".join(parts).encode("utf-8")
-    return f"{prefix}_{hashlib.md5(raw).hexdigest()[:16]}"
+    return f"{prefix}_{hashlib.md5(raw, usedforsecurity=False).hexdigest()[:16]}"
 
 
 def load_manifest() -> dict:

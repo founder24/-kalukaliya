@@ -1531,7 +1531,7 @@ def _generate_chapter_card_wallpaper(chapter_title: str, subject_name: str, vari
     from PIL import Image as _PILImage, ImageDraw as _Draw
     import io as _io, hashlib as _hl
 
-    seed = int(_hl.md5(f"{chapter_title}:{subject_name}:{variant}".encode()).hexdigest()[:8], 16)
+    seed = int(_hl.md5(f"{chapter_title}:{subject_name}:{variant}".encode(), usedforsecurity=False).hexdigest()[:8], 16)
     palette_sets = [
         [(99, 58, 237), (139, 92, 246), (59, 130, 246)],
         [(16, 185, 129), (6, 182, 212), (59, 130, 246)],

@@ -362,7 +362,7 @@ async def _assamese_translate_gemini_main_sarvam_polish(
     _bare_lang = (target_lang_code or "as-IN").split("-", 1)[0].lower() or "as"
 
     # ── Redis translation cache ────────────────────────────────────────────
-    _cache_key = "tr:" + hashlib.md5(f"{_bare_lang}:{src[:1000]}".encode()).hexdigest()
+    _cache_key = "tr:" + hashlib.md5(f"{_bare_lang}:{src[:1000]}".encode(), usedforsecurity=False).hexdigest()
     _TRANSLATE_CACHE_TTL = 1800  # 30 minutes
 
     def _tr_cache_store(result: str) -> str:
@@ -2717,7 +2717,7 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
         the event loop — critical when the Phase-0 asyncio.wait fires."""
         import hashlib as _hl, json as _json
         _sid = msg.subject_id or ""
-        _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
+        _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode(), usedforsecurity=False).hexdigest()}"
         if redis_client:
             try:
                 _loop = asyncio.get_event_loop()
@@ -2735,7 +2735,7 @@ async def _chat_stream_impl(msg: ChatMessage, request: Request, user: Optional[d
         """Redis check + _fetch_internal_chapters fallback. Kept for Phase 2 if needed."""
         import hashlib as _hl, json as _json
         _sid = msg.subject_id or ""
-        _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode()).hexdigest()}"
+        _wkey = f"warm_ch:{_hl.md5(f'{msg.message.strip()}|{_sid}'.encode(), usedforsecurity=False).hexdigest()}"
         if redis_client:
             try:
                 _loop = asyncio.get_event_loop()
@@ -4348,7 +4348,7 @@ async def warm_query_endpoint(request: Request):
         return {"status": "skip"}
 
     _sid = _subject_id or ""
-    _wkey = f"warm_ch:{_hl.md5(f'{query}|{_sid}'.encode()).hexdigest()}"
+    _wkey = f"warm_ch:{_hl.md5(f'{query}|{_sid}'.encode(), usedforsecurity=False).hexdigest()}"
 
     # Skip if already warmed for this exact query
     if redis_client:

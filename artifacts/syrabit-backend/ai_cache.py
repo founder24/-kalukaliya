@@ -279,7 +279,7 @@ def _retrieval_fingerprint(retrieval: Any) -> str:
         raw = str(retrieval)
 def _cache_key_md5(raw: str) -> str:
     """Generate cache key using MD5 (legacy, kept for backward compatibility)."""
-    return hashlib.md5(raw.encode("utf-8", "ignore")).hexdigest()[:16]
+    return hashlib.md5(raw.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()[:16]
 
 
 def _cache_key_sha256(raw: str) -> str:

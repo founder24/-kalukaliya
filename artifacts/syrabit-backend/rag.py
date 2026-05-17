@@ -262,7 +262,7 @@ async def web_search_with_fallback(
     enrich_top_n: int = 2,
 ) -> list:
     # Using MD5 for cache key (non-cryptographic use case)
-    cache_key = hashlib.md5(f"{query}:{board_name}:{class_name}:{subject_name}:{chapter_name}".lower().encode()).hexdigest()
+    cache_key = hashlib.md5(f"{query}:{board_name}:{class_name}:{subject_name}:{chapter_name}".lower().encode(), usedforsecurity=False).hexdigest()
     cached = _WEB_SEARCH_CACHE.get(cache_key)
     if cached:
         ts, results = cached

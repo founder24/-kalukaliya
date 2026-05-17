@@ -860,7 +860,7 @@ def normalize_cf_http_request_row(row: Dict[str, Any]) -> Dict[str, Any]:
     cache_status_raw = dim.get("cacheStatus") or ""
     idem = (f"cf|{minute_iso}|{method}|{path}|{host}|{country}|{colo}"
             f"|{edge_status}|{origin_status}|{cache_status_raw}")
-    rec_id = "cf_" + hashlib.sha1(idem.encode("utf-8")).hexdigest()
+    rec_id = "cf_" + hashlib.sha1(idem.encode("utf-8"), usedforsecurity=False).hexdigest()
     return {
         "_id": rec_id,
         "source": "cloudflare",
