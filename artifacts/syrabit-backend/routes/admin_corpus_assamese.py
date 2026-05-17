@@ -143,6 +143,65 @@ class BackfillRequest(BaseModel):
     )
 
 
+def _preflight_warnings() -> List[str]:
+    """Return a list of human-readable warnings for missing translation credentials.
+
+    Runs synchronously in the request handler (pure env-var reads, zero I/O)
+    so the 202 body tells the caller immediately why a pass might produce zero
+    translations, rather than burying the reason in server logs minutes later.
+
+    Chain requirements (Task #291 locked order):
+      Step 1 — IndicTrans2 via Workers AI:
+        CLOUDFLARE_API_TOKEN    (API auth)
+        CF_AI_GATEWAY_ACCOUNT_ID (account routing)
+        → If either is absent every translation call returns empty and nothing
+          is written to MongoDB. This is the highest-priority warning.
+      Step 2 — Vertex / Gemini 2.5 Flash polish:
+        VERTEX_PROJECT_ID or GOOGLE_APPLICATION_CREDENTIALS_JSON
+        → If absent the polish step is skipped; IndicTrans2 raw output is
+          still accepted and written (graceful degradation per V4 §4).
+
+    Sarvam (SARVAM_API_KEY) is intentionally not checked here — it is scoped
+    to assamese_rag_chat only (Task #291) and is not part of the bulk
+    translate chain.
+    """
+    import os
+    warnings: List[str] = []
+
+    cf_token   = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    cf_account = os.environ.get("CF_AI_GATEWAY_ACCOUNT_ID", "").strip()
+    if not cf_token and not cf_account:
+        warnings.append(
+            "CRITICAL — CLOUDFLARE_API_TOKEN and CF_AI_GATEWAY_ACCOUNT_ID are "
+            "both unset: IndicTrans2 (primary translator) cannot run. Every "
+            "translation call will return empty and nothing will be written to "
+            "MongoDB. Set both env vars and restart the server before triggering "
+            "a production backfill."
+        )
+    elif not cf_token:
+        warnings.append(
+            "CRITICAL — CLOUDFLARE_API_TOKEN is unset: IndicTrans2 cannot "
+            "authenticate. Translations will silently return empty."
+        )
+    elif not cf_account:
+        warnings.append(
+            "CRITICAL — CF_AI_GATEWAY_ACCOUNT_ID is unset: Workers AI routing "
+            "will fail. Translations will silently return empty."
+        )
+
+    vertex_project = os.environ.get("VERTEX_PROJECT_ID", "").strip()
+    gcp_creds      = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
+    if not vertex_project and not gcp_creds:
+        warnings.append(
+            "WARN — VERTEX_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS_JSON "
+            "are both unset: the Vertex/Gemini 2.5 Flash polish step will be "
+            "skipped. IndicTrans2 raw output will still be written (acceptable "
+            "quality, no fluency polish)."
+        )
+
+    return warnings
+
+
 async def _run_backfill_bg(
     collections: Optional[List[str]],
     max_docs: int,
@@ -215,6 +274,7 @@ async def trigger_assamese_backfill(
         )
 
     already_running = _run_lock.locked()
+    warnings = _preflight_warnings()
 
     background_tasks.add_task(
         _run_backfill_bg,
@@ -237,4 +297,6 @@ async def trigger_assamese_backfill(
         "batch_size":       body.batch_size,
         "pyq_skip":         sorted(SKIP_CHAPTER_CONTENT_TYPES),
         "poll":             "GET /api/health/corpus/assamese",
+        "preflight_warnings": warnings,
+        "preflight_ok":     len(warnings) == 0,
     }
