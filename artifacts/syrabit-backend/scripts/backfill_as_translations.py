@@ -9,22 +9,36 @@ delegating to the centralized V4 §4 Assamese chain in
 caching and script-validation). State is persisted in the
 ``as_translation_state`` Mongo collection so the run is resumable.
 
+PYQ chapters (content_type in {"pyq", "question_paper"}) are
+**automatically skipped** — they are image-based question papers with no
+translatable prose.  This filter is enforced by the backfill driver itself
+(``aca_jobs.as_translation_backfill.SKIP_CHAPTER_CONTENT_TYPES``) and
+mirrors the ``has_assamese=False`` behaviour the reader API already applies
+to those chapters (routes/content.py:1081).  You do not need a flag to
+opt in; it is always on.
+
+For an immediate on-demand run without deploying this script, use the
+admin API instead:
+
+    POST /api/admin/corpus/assamese/backfill
+    Body: {"collections": ["chapters"], "max_docs": 500}
+
 Prerequisites
 -------------
     MONGO_URL                                    — required
     CF_AI_GATEWAY_ACCOUNT_ID + CLOUDFLARE_API_TOKEN — IndicTrans2 path
-    GEMINI_API_KEY                               — polish step
+    GEMINI_API_KEY                               — Vertex/Gemini polish step
 
 Usage
 -----
-    # Run until every targeted doc has been translated.
+    # Translate ALL notes chapters (skips pyq automatically).
+    python scripts/backfill_as_translations.py --collection chapters
+
+    # Run all four collections until fully covered.
     python scripts/backfill_as_translations.py
 
     # Cap a single pass to 50 docs per collection then exit.
     python scripts/backfill_as_translations.py --max-docs 50
-
-    # Restrict to one collection.
-    python scripts/backfill_as_translations.py --collection seo_pages
 
     # Print current progress without doing any work.
     python scripts/backfill_as_translations.py --status

@@ -56,6 +56,15 @@ FIELD_MAP: dict[str, list[str]] = {
 }
 
 # Empty / very-short fields aren't worth a translate round-trip.
+# PYQ chapters are image-based question papers (scanned PDFs / photos).
+# Their `content` field is either empty or raw OCR noise — nothing worth
+# translating, and storing garbage under `content_as` would mislead the
+# coverage metric.  The reader API already hard-codes `has_assamese=False`
+# for these (routes/content.py:1081) and the Assamese chat path never
+# routes PYQ image content through the translation pipeline.
+# Mirror that filter here so the backfill never touches them.
+SKIP_CHAPTER_CONTENT_TYPES: frozenset[str] = frozenset({"pyq", "question_paper"})
+
 MIN_SOURCE_CHARS = 8
 
 # Threshold for "already translated": the destination field must be
@@ -252,15 +261,21 @@ async def _count_remaining(db: Any, collection: str) -> int:
     """Cheap upper-bound estimate: docs that don't yet carry every
     expected ``_as`` sibling. Exact counting would require scanning the
     body of each doc to check the script ratio, which is too expensive
-    to do repeatedly. The driver itself does the precise check per doc."""
+    to do repeatedly. The driver itself does the precise check per doc.
+
+    The collection's base filter (e.g. PYQ exclusion for ``chapters``) is
+    applied so the count only covers docs the backfill will actually touch.
+    """
     fields = FIELD_MAP.get(collection, [])
     if not fields:
         return 0
     or_clauses = []
     for f in fields:
         or_clauses.append({f"{f}_as": {"$in": [None, ""]}})
+    base = _collection_base_filter(collection)
+    query = {"$and": [base, {"$or": or_clauses}]} if base else {"$or": or_clauses}
     try:
-        return int(await db[collection].count_documents({"$or": or_clauses}))
+        return int(await db[collection].count_documents(query))
     except Exception as exc:
         logger.debug(
             "[as_translation_backfill] count_remaining(%s) failed: %s",
@@ -278,8 +293,9 @@ async def get_progress(db: Any) -> dict:
     for collection in FIELD_MAP:
         state = await _load_state(db, collection)
         remaining = await _count_remaining(db, collection)
+        base = _collection_base_filter(collection)
         try:
-            total = int(await db[collection].count_documents({}))
+            total = int(await db[collection].count_documents(base if base else {}))
         except Exception:
             total = 0
         done = max(total - remaining, 0)
@@ -302,8 +318,27 @@ async def get_progress(db: Any) -> dict:
 
 # ── Main backfill loop ──────────────────────────────────────────────────────
 
-def _id_filter(after_id: Any | None) -> dict:
-    return {"_id": {"$gt": after_id}} if after_id is not None else {}
+def _collection_base_filter(collection: str) -> dict:
+    """Return the MongoDB base query filter for *collection*.
+
+    For ``chapters`` this excludes image-based PYQ / question-paper docs
+    that carry no translatable prose — their ``content`` field is empty or
+    raw OCR noise, and the reader API already returns ``has_assamese=False``
+    for them (routes/content.py:1081).  Keeping them out of every cursor and
+    count_documents call avoids wasting API quota and keeps the coverage
+    metric honest (we only count docs we can actually translate).
+    """
+    if collection == "chapters":
+        return {"content_type": {"$nin": sorted(SKIP_CHAPTER_CONTENT_TYPES)}}
+    return {}
+
+
+def _query_filter(collection: str, after_id: Any | None) -> dict:
+    """Merge the collection's base filter with the pagination cursor gate."""
+    base = _collection_base_filter(collection)
+    if after_id is not None:
+        return {**base, "_id": {"$gt": after_id}}
+    return base
 
 
 async def _process_one_collection(
@@ -344,7 +379,7 @@ async def _process_one_collection(
         take = min(batch_size, max_docs - processed)
         cursor = (
             db[collection]
-            .find(_id_filter(last_id))
+            .find(_query_filter(collection, last_id))
             .sort("_id", 1)
             .limit(take)
         )
@@ -645,7 +680,9 @@ async def _coverage_for_collection(db: Any, collection: str) -> dict:
     # same gate. Without `$strLenCP` the count includes empty / very
     # short rows that the backfill correctly skips, dragging the
     # ratio down and tripping false alarms.
+    base = _collection_base_filter(collection)
     total_filter = {
+        **base,
         field: {"$type": "string"},
         "$expr": {
             "$gte": [{"$strLenCP": f"${field}"}, MIN_SOURCE_CHARS],
