@@ -1,6 +1,10 @@
-```
 # Dependencies
 node_modules/
+.venv/
+venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
 
 # Build artifacts
 dist/
@@ -8,15 +12,12 @@ build/
 target/
 
 # Python
-__pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.py.class
 .Python
 env/
-venv/
-.venv/
 .venv.bak/
 pip-log.txt
 pip-delete-this-directory.txt
@@ -27,19 +28,19 @@ pip-delete-this-directory.txt
 nosetests.xml
 coverage.xml
 *.cover
+
+# Environment files
+.env
+.env.local
+*.env.*
+
+# Logs and temporary files
 *.log
 *.tmp
-*.swp
-*.swo
 .DS_Store
 Thumbs.db
 
-# Environment variables
-.env
-.env.local
-.env.*
-
-# IDE
+# Editors and IDEs
 .vscode/
 .idea/
 *.swp
@@ -48,8 +49,6 @@ Thumbs.db
 # Testing
 coverage/
 htmlcov/
-.pytest_cache/
-.mypy_cache/
 
 # Compression
 *.zip
@@ -74,4 +73,3 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
