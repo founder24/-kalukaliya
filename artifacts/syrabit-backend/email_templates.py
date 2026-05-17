@@ -308,23 +308,33 @@ async def send_topup_confirmation(email: str, name: str, credits: int, amount_pa
 
 
 async def send_password_reset(email: str, token: str, reset_url: str):
-    """Password reset email — replaces the raw httpx version in server.py."""
+    """Password reset email — replaces the raw httpx version in server.py.
+
+    reset_url must include ?token=<token> so the button is a direct one-click
+    link.  The token is also shown as a fallback code block for email clients
+    that strip links.
+    """
     body = _base(f"""
       <h2 style="color:{_BRAND};margin:0 0 8px;">Reset your password</h2>
       <p style="color:{_MUTED};margin:0 0 24px;">
         We received a request to reset your Syrabit.ai password.
-        Use the token below on the reset page.
+        Click the button below — it takes you straight to the reset page.
+      </p>
+      <p style="margin-bottom:24px;">
+        {_button("Reset My Password", reset_url)}
       </p>
       {_card(f'''
-        <p style="color:{_MUTED};font-size:12px;margin:0 0 8px;">Your reset token (valid 1 hour)</p>
-        <code style="font-size:14px;color:#a78bfa;word-break:break-all;
+        <p style="color:{_MUTED};font-size:11px;margin:0 0 6px;">
+          Button not working? Paste this token on
+          <a href="https://syrabit.ai/reset-password"
+             style="color:#a78bfa;text-decoration:none;">syrabit.ai/reset-password</a>
+        </p>
+        <code style="font-size:13px;color:#a78bfa;word-break:break-all;
                      letter-spacing:0.5px;">{token}</code>
       ''')}
-      <p style="margin-bottom:24px;">
-        {_button("Go to Reset Page", reset_url)}
-      </p>
-      <p style="color:#475569;font-size:12px;">
-        If you didn't request this, ignore this email — your password won't change.
+      <p style="color:#475569;font-size:12px;margin-top:24px;">
+        This link expires in 1 hour. If you didn't request this, ignore this
+        email — your password won't change.
       </p>
     """)
     await _send(email, "Reset your Syrabit.ai password", body)

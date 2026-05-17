@@ -376,7 +376,7 @@ async def supabase_session(
 
 async def _send_password_reset_email(email: str, token: str):
     """Send password reset email via email_templates (Amazon SES via boto3)."""
-    reset_url = f"{FRONTEND_URL}/reset-password"
+    reset_url = f"{FRONTEND_URL}/reset-password?token={token}"
     await email_templates.send_password_reset(email=email, token=token, reset_url=reset_url)
 
 @router.post("/auth/reset-request", dependencies=[Depends(require_turnstile)])

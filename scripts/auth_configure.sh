@@ -217,6 +217,44 @@ print(json.dumps({'deployment_configs': {'production': {'env_vars': env}, 'previ
   fi
 fi
 
+# ── Check 14: Reset URL embeds token ─────────────────────────────────────────
+echo "[14/14] Verifying reset email URL embeds ?token= …"
+if grep -q 'reset-password?token=' artifacts/syrabit-backend/routes/auth.py; then
+  ok 'Reset URL embeds token — email button is a direct one-click link'
+else
+  fail 'Reset URL does NOT embed token — users must copy-paste from email'
+fi
+
+# ── Check 15: Supabase SITE_URL via Management API ────────────────────────────
+echo "[15/15] Verifying Supabase SITE_URL = https://syrabit.ai …"
+SB_PAT="${SUPABASE_ACCESS_TOKEN:-}"
+if [[ -z "$SB_PAT" ]]; then
+  fail "Supabase SITE_URL check skipped — add SUPABASE_ACCESS_TOKEN to Replit Secrets"
+  echo "         Get it at: https://app.supabase.com/account/tokens → New token"
+else
+  SB_CFG=$(curl -sf --max-time 10 \
+    "https://api.supabase.com/v1/projects/czeznmqogtwecidhpysa/config/auth" \
+    -H "Authorization: Bearer ${SB_PAT}" 2>/dev/null || echo "{}")
+  SITE_URL=$(echo "$SB_CFG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('SITE_URL',''))" 2>/dev/null || echo "")
+  if [[ "$SITE_URL" == "https://syrabit.ai" ]]; then
+    ok "Supabase SITE_URL = https://syrabit.ai"
+  else
+    # Attempt to patch it
+    PATCH=$(curl -sf --max-time 10 \
+      -X PATCH "https://api.supabase.com/v1/projects/czeznmqogtwecidhpysa/config/auth" \
+      -H "Authorization: Bearer ${SB_PAT}" \
+      -H "Content-Type: application/json" \
+      -d '{"SITE_URL":"https://syrabit.ai","URI_ALLOW_LIST":"https://syrabit.ai/**,https://syrabit.ai/reset-password,https://syrabit.ai/login"}' \
+      2>/dev/null || echo '{}')
+    NEW_URL=$(echo "$PATCH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('SITE_URL',''))" 2>/dev/null || echo "")
+    if [[ "$NEW_URL" == "https://syrabit.ai" ]]; then
+      ok "Supabase SITE_URL patched → https://syrabit.ai"
+    else
+      fail "Supabase SITE_URL patch failed (was: ${SITE_URL:-empty}) — check token permissions"
+    fi
+  fi
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "============================================="

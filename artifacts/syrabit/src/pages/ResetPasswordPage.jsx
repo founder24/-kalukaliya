@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useRef, useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Mail, Loader2, ArrowLeft, CheckCircle, Lock, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,15 @@ export default function ResetPasswordPage() {
   const [step, setStep] = useState('request');
   const [loading, setLoading] = useState(false);
   const turnstileRef = useRef(null);
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const urlToken = searchParams.get('token');
+    if (urlToken) {
+      setToken(urlToken);
+      setStep('confirm');
+    }
+  }, [searchParams]);
 
   const handleRequest = async (e) => {
     e.preventDefault();
