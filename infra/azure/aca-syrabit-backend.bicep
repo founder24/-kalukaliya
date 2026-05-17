@@ -143,7 +143,14 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
         { name: 'google-application-credentials-json', keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/GOOGLE-APPLICATION-CREDENTIALS-JSON', identity: 'system' }
         // Task #chat-infra — Supabase auth.
         // Required for `/api/auth/supabase-session` JWT exchange (student login).
+        // Populate via: az keyvault secret set --vault-name syrabit-prod-kv --name SUPABASE-SERVICE-ROLE-KEY --value <service_role_key>
         { name: 'supabase-service-role-key',  keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/SUPABASE-SERVICE-ROLE-KEY',  identity: 'system' }
+        // Cloudflare Turnstile bot-protection (server-side verify + browser widget).
+        // TURNSTILE-SECRET-KEY: server-side secret, never sent to browser.
+        // TURNSTILE-SITE-KEY: public key embedded in the JS widget.
+        // Populate via: scripts/wire_prod_auth.sh (Phase 1).
+        { name: 'turnstile-secret-key',       keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/TURNSTILE-SECRET-KEY',       identity: 'system' }
+        { name: 'turnstile-site-key',         keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/TURNSTILE-SITE-KEY',         identity: 'system' }
         // Task #chat-infra — Pinecone vector store.
         { name: 'pinecone-api-key',           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/PINECONE-API-KEY',           identity: 'system' }
         // CF_AI_GATEWAY_TOKEN — cf-aig-authorization header value for Workers AI + Sarvam
@@ -284,6 +291,25 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = {
             // must set it explicitly so the SA JSON project is used correctly.
             { name: 'GOOGLE_APPLICATION_CREDENTIALS_JSON', secretRef: 'google-application-credentials-json' }
             { name: 'VERTEX_LOCATION',                 value: 'us-central1' }
+            // Auth hardening — cookie domain, HTTPS-only cookies, canonical frontend URL.
+            // COOKIE_DOMAIN=.syrabit.ai scopes httpOnly session + refresh cookies to the
+            // root domain so they work across syrabit.ai AND admin.syrabit.ai. Without
+            // this the backend sets cookies for the ACA FQDN and the CF-proxied browser
+            // never receives them → every login attempt fails silently.
+            // FRONTEND_URL is the base used in password-reset / verification email links.
+            // SECURE_COOKIES=true is the config.py default but made explicit here so any
+            // future config drift cannot silently downgrade it.
+            { name: 'COOKIE_DOMAIN',                   value: '.syrabit.ai' }
+            { name: 'FRONTEND_URL',                    value: 'https://syrabit.ai' }
+            { name: 'SECURE_COOKIES',                  value: 'true' }
+            // Cloudflare Turnstile — bot-protection on /auth/signup and /auth/login.
+            // TURNSTILE_ON=true activates the require_turnstile FastAPI dependency;
+            // TURNSTILE_SITE_KEY is returned by /api/turnstile/config for the browser widget;
+            // TURNSTILE_SECRET_KEY is used server-side to verify widget challenge tokens.
+            // Both keys come from Cloudflare dashboard → Turnstile → your site.
+            { name: 'TURNSTILE_ON',                    value: 'true' }
+            { name: 'TURNSTILE_SITE_KEY',              secretRef: 'turnstile-site-key' }
+            { name: 'TURNSTILE_SECRET_KEY',            secretRef: 'turnstile-secret-key' }
             // Task #chat-infra — Supabase auth (JWT exchange + user lookups).
             // SUPABASE_URL is the REST API base; SUPABASE_SERVICE_ROLE_KEY is the
             // service-role key for admin-level Supabase REST calls in auth_deps.py.
