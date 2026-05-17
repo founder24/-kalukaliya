@@ -235,22 +235,49 @@ else
   SB_CFG=$(curl -sf --max-time 10 \
     "https://api.supabase.com/v1/projects/czeznmqogtwecidhpysa/config/auth" \
     -H "Authorization: Bearer ${SB_PAT}" 2>/dev/null || echo "{}")
-  SITE_URL=$(echo "$SB_CFG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('SITE_URL',''))" 2>/dev/null || echo "")
-  if [[ "$SITE_URL" == "https://syrabit.ai" ]]; then
-    ok "Supabase SITE_URL = https://syrabit.ai"
+  SITE_URL=$(echo "$SB_CFG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('site_url',''))" 2>/dev/null || echo "")
+  URI_LIST=$(echo "$SB_CFG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('uri_allow_list',''))" 2>/dev/null || echo "")
+
+  NEED_PATCH=0
+  [[ "$SITE_URL" != "https://syrabit.ai" ]] && NEED_PATCH=1
+  echo "$URI_LIST" | grep -q "syrabit.ai/reset-password" || NEED_PATCH=1
+
+  if [[ "$NEED_PATCH" == "0" ]]; then
+    ok "Supabase site_url = https://syrabit.ai, reset-password in uri_allow_list"
   else
-    # Attempt to patch it
-    PATCH=$(curl -sf --max-time 10 \
+    # Merge reset-password into existing allow list
+    NEW_LIST=$(python3 -c "
+import os
+existing = os.environ.get('_SB_URI_LIST', '')
+entries = [e.strip() for e in existing.split(',') if e.strip()]
+must_have = [
+  'https://syrabit.ai/**',
+  'https://syrabit.ai/reset-password',
+  'https://syrabit.ai/login',
+  'https://www.syrabit.ai/**',
+]
+for m in must_have:
+    if m not in entries:
+        entries.append(m)
+print(','.join(entries))
+" 2>/dev/null || echo "https://syrabit.ai/**,https://syrabit.ai/reset-password,https://syrabit.ai/login")
+    PATCH=$(_SB_URI_LIST="$URI_LIST" python3 -c "
+import os, subprocess, json, sys
+entries = [e.strip() for e in os.environ.get('_SB_URI_LIST','').split(',') if e.strip()]
+for m in ['https://syrabit.ai/**','https://syrabit.ai/reset-password','https://syrabit.ai/login','https://www.syrabit.ai/**']:
+    if m not in entries: entries.append(m)
+print(json.dumps({'site_url':'https://syrabit.ai','uri_allow_list':','.join(entries)}))
+" 2>/dev/null)
+    RESP=$(curl -sf --max-time 10 \
       -X PATCH "https://api.supabase.com/v1/projects/czeznmqogtwecidhpysa/config/auth" \
       -H "Authorization: Bearer ${SB_PAT}" \
       -H "Content-Type: application/json" \
-      -d '{"SITE_URL":"https://syrabit.ai","URI_ALLOW_LIST":"https://syrabit.ai/**,https://syrabit.ai/reset-password,https://syrabit.ai/login"}' \
-      2>/dev/null || echo '{}')
-    NEW_URL=$(echo "$PATCH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('SITE_URL',''))" 2>/dev/null || echo "")
+      -d "$PATCH" 2>/dev/null || echo '{}')
+    NEW_URL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('site_url',''))" 2>/dev/null || echo "")
     if [[ "$NEW_URL" == "https://syrabit.ai" ]]; then
-      ok "Supabase SITE_URL patched → https://syrabit.ai"
+      ok "Supabase site_url + uri_allow_list patched → https://syrabit.ai"
     else
-      fail "Supabase SITE_URL patch failed (was: ${SITE_URL:-empty}) — check token permissions"
+      fail "Supabase PATCH failed — check token has project:write permission (site_url was: ${SITE_URL:-empty})"
     fi
   fi
 fi
