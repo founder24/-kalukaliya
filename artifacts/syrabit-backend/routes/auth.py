@@ -114,6 +114,7 @@ async def signup(
         "consent_dpdp_version": "1.0" if data.consent_dpdp else None,
         "consent_dpdp_at": now if data.consent_dpdp else None,
         "created_at": now,
+        "auth_provider": "email",
     }
 
     # Task #337 — Fraud Detector risk score on signup. Outage policy

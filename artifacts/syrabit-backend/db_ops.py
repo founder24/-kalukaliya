@@ -182,7 +182,7 @@ async def supa_insert_user(user: dict):
                     user.get("stream_id"), user.get("stream_name"),
                     user.get("referred_by_code"), user.get("referred_by_user_id"),
                     user.get("created_at",""),
-                    user.get("google_id"), user.get("auth_provider"),
+                    user.get("google_id"), user.get("auth_provider", "email"),
                 )
             _supa_mirror(lambda: supa.table("users").upsert(user).execute())
             # ADR-0001 Phase 2: mirror to Mongo (best-effort; PG is SoT).
