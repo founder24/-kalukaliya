@@ -8852,15 +8852,15 @@ async def get_pyq_year_paper_html(year: int, paper: str, lang: Optional[str] = Q
             or d.get("exam_title")
             or slug
         )
-        title = html_mod.escape(_t_raw)
-        subj = html_mod.escape(_localized(d, "subject_name", lang) or d.get("subject_name", ""))
-        board = html_mod.escape(_localized(d, "board_name", lang) or d.get("board_name", ""))
-        desc = html_mod.escape(_localized(d, "meta_description", lang) or d.get("meta_description", ""))
+        title = html_mod.escape(str(_t_raw))
+        subj = html_mod.escape(str(_localized(d, "subject_name", lang) or d.get("subject_name", "")))
+        board = html_mod.escape(str(_localized(d, "board_name", lang) or d.get("board_name", "")))
+        desc = html_mod.escape(str(_localized(d, "meta_description", lang) or d.get("meta_description", "")))
         items.append(
             f'<li><a href="/pyq/{slug}"><strong>{title}</strong></a>'
             f' — {subj} ({board})<p>{desc}</p></li>'
         )
-    items_html = "\n".join(items) or f"<li>{_t('No PYQ papers indexed yet.', lang)}</li>"
+    items_html = "\n".join(items) or f"<li>{html_mod.escape(_t('No PYQ papers indexed yet.', lang))}</li>"
     if is_as:
         title = f"{py} {pp} বিগত বছৰৰ প্ৰশ্ন পত্ৰ | Syrabit"
         desc = (

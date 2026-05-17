@@ -12,6 +12,7 @@ through the same SSRF defences:
 * Follow redirects manually and re-run the full check on every hop —
   httpx's ``follow_redirects=True`` is a known SSRF sink because a
   hostile upstream can 302 us into an internal IP.
+* Use proper URL parsing instead of substring matching to prevent bypass.
 
 Prior to Task #616 these helpers lived as private (`_`-prefixed)
 functions on ``edu_reader`` and were imported across module boundaries
