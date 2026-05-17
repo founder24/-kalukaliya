@@ -381,6 +381,47 @@ async def _send_password_reset_email(email: str, token: str):
 
 @router.post("/auth/reset-request", dependencies=[Depends(require_turnstile)])
 async def reset_request(data: PasswordResetReq, request: Request):
+    # ── Rate-limit guard (Task #407 pattern) ──────────────────────────────────
+    # Two complementary buckets, both fail-open so Redis unavailability never
+    # blocks a legitimate user.
+    #
+    # 1) Per-email  — 3 requests / hour:  stops a caller who knows an address
+    #    from flooding that inbox.
+    # 2) Per-IP     — 5 requests / 10 min: stops enumeration across many
+    #    addresses from the same network.
+    #
+    # Turnstile already sits in front of this route, so these are the secondary
+    # anti-abuse layers.
+    try:
+        from do_chat import rate_check as _rate_check
+
+        _email_key = f"reset:email:{data.email.lower()}"
+        _allowed, _ = await _rate_check(_email_key, limit=3, window_s=3600)
+        if not _allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many password-reset requests for this email. Please wait an hour and try again.",
+                headers={"Retry-After": "3600", "X-RateLimit-Limit": "3"},
+            )
+
+        _ip = _real_client_ip(request)
+        if _ip and _ip != "unknown":
+            _ip_allowed, _ = await _rate_check(
+                f"reset:ip:{_ip}", limit=5, window_s=600,
+            )
+            if not _ip_allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many password-reset requests from this network. Please wait a few minutes and try again.",
+                    headers={"Retry-After": "600", "X-RateLimit-Limit": "5"},
+                )
+    except HTTPException:
+        raise
+    except Exception as _rate_err:
+        # Never block a real reset because rate_check itself crashed.
+        logger.debug("reset-request rate_check skipped: %s", _rate_err)
+    # ── End rate-limit guard ──────────────────────────────────────────────────
+
     user = await supa_get_user_for_reset(data.email.lower())
     if user:
         token = str(uuid.uuid4())
