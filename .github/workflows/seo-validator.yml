@@ -16,6 +16,9 @@ on:
       - "artifacts/syrabit-backend/seo_engine.py"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   seo-validator:
     name: Structured-data linter (5 sample chapter pages)
