@@ -2907,6 +2907,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
                     ? 'bg-violet-50 text-violet-700 border-violet-200'
                     : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-violet-50 hover:text-violet-600 hover:border-violet-200'
                 }`}
+                data-testid="notif-prefs-toggle"
               >
                 <Bell size={10} />
                 Preferences

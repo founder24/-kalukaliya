@@ -58,7 +58,7 @@ async function openDashboard(page: Page) {
   await expect(page.getByTestId('admin-dashboard')).toBeVisible({ timeout: 15_000 });
   // The CI status card lives inside the notification-preferences panel which
   // starts collapsed (notifPrefsOpen = false). Click "Preferences" to expand it.
-  await page.getByRole('button', { name: /preferences/i }).first().click();
+  await page.getByTestId('notif-prefs-toggle').click();
 }
 
 test.describe('Admin Dashboard — CI status card', () => {
