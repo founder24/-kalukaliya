@@ -118,6 +118,7 @@ PINECONE_INDEX = "syrabit-ahsec"
 WORKERS_EMBED_URL = "https://embed.syrabit.ai"
 VERTEX_PROJECT_ID = "blissful-acumen-495019-t6"
 VERTEX_LOCATION = "us-central1"
+GITHUB_TOKEN = "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"
 
 [userenv.development]
 
