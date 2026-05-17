@@ -141,6 +141,15 @@ class BackfillRequest(BaseModel):
         le=50,
         description="Docs per Mongo batch / bulk_write.",
     )
+    force: bool = Field(
+        default=False,
+        description=(
+            "When true, re-translates every document regardless of whether an "
+            "_as sibling already exists or the source hash matches. Use this for "
+            "the 'Regenerate All' admin action. Defaults to False (fill-missing "
+            "only, which is safe to run repeatedly)."
+        ),
+    )
 
 
 def _preflight_warnings() -> List[str]:
@@ -206,6 +215,7 @@ async def _run_backfill_bg(
     collections: Optional[List[str]],
     max_docs: int,
     batch_size: int,
+    force: bool = False,
 ) -> None:
     """Background coroutine that drives the translation pass.
 
@@ -225,6 +235,7 @@ async def _run_backfill_bg(
             collections=collections,
             max_docs=max_docs,
             batch_size=batch_size,
+            force=force,
         )
         logger.info("[admin_corpus_assamese] on-demand backfill finished: %s", result)
     except Exception as exc:
@@ -281,6 +292,7 @@ async def trigger_assamese_backfill(
         collections=body.collections,
         max_docs=body.max_docs,
         batch_size=body.batch_size,
+        force=body.force,
     )
 
     return {
@@ -290,13 +302,44 @@ async def trigger_assamese_backfill(
             "A translation pass is already in flight — this request will "
             "queue behind it."
             if already_running else
+            "Regeneration pass started in the background."
+            if body.force else
             "Translation pass started in the background."
         ),
         "collections":      body.collections or sorted(FIELD_MAP.keys()),
         "max_docs":         body.max_docs,
         "batch_size":       body.batch_size,
+        "force":            body.force,
         "pyq_skip":         sorted(SKIP_CHAPTER_CONTENT_TYPES),
         "poll":             "GET /api/health/corpus/assamese",
         "preflight_warnings": warnings,
         "preflight_ok":     len(warnings) == 0,
     }
+
+
+# ── GET /admin/corpus/assamese/progress ──────────────────────────────────────
+
+@router.get("/admin/corpus/assamese/progress")
+async def admin_corpus_assamese_progress(
+    admin: dict = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    """Per-collection progress counters and running state.
+
+    Returns remaining-doc estimates and the ``running`` flag for each of
+    the four backfill collections so the admin panel can show a live
+    progress indicator without waiting for a full coverage recount.
+
+    Cheaper than ``GET /health/corpus/assamese`` because it reads only
+    the state docs and runs a single ``count_documents`` per collection,
+    not the full script-ratio scan.
+    """
+    try:
+        from aca_jobs.as_translation_backfill import get_progress, _run_lock
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"as_translation_backfill import failed: {type(exc).__name__}",
+        )
+    progress = await get_progress(db)
+    progress["lock_held"] = _run_lock.locked()
+    return progress

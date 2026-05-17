@@ -9,6 +9,7 @@ import UnifiedLogsCfPullCronPill from './UnifiedLogsCfPullCronPill';
 import EmbedBackfillPill from './EmbedBackfillPill';
 import EmbedStackHealthPill from './EmbedStackHealthPill';
 import AssameseCorpusCoveragePill from './AssameseCorpusCoveragePill';
+import AssameseBackfillPanel from './AssameseBackfillPanel';
 import SarvamHealthCard from './SarvamHealthCard';
 import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
@@ -3698,8 +3699,11 @@ export default function AdminHealth({ adminToken, onNavigate }) {
           tracked collections (subjects, chapters, seo_pages,
           pyq_html_pages) and the latest run report's accept/reject
           counts so on-call can see WHY a collection isn't moving.
+          AssameseBackfillPanel supersedes AssameseCorpusCoveragePill
+          by adding a full trigger UI with force-regenerate mode,
+          per-collection progress tracking and live polling.
         */}
-        <AssameseCorpusCoveragePill adminToken={adminToken} />
+        <AssameseBackfillPanel adminToken={adminToken} />
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="AI Gateway Cache by Model">

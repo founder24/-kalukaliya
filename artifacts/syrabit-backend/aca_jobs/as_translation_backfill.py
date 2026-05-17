@@ -140,10 +140,20 @@ def _hash_source(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
-def _doc_needs_translation(doc: dict, fields: list[str]) -> list[tuple[str, str]]:
+def _doc_needs_translation(
+    doc: dict,
+    fields: list[str],
+    *,
+    force: bool = False,
+) -> list[tuple[str, str]]:
     """Return ``[(field, source_text), …]`` for every field whose ``_as``
     sibling is missing / empty / not-actually-Assamese, or whose source
-    English text has changed since the last translation."""
+    English text has changed since the last translation.
+
+    When *force=True* the already-translated and src-hash checks are
+    skipped so every field with enough source text is re-queued — used by
+    the on-demand "regenerate" path from the admin panel.
+    """
     pending: list[tuple[str, str]] = []
     for field in fields:
         src = (doc.get(field) or "")
@@ -152,19 +162,20 @@ def _doc_needs_translation(doc: dict, fields: list[str]) -> list[tuple[str, str]
         src = src.strip()
         if len(src) < MIN_SOURCE_CHARS:
             continue
-        dst = (doc.get(f"{field}_as") or "")
-        if not isinstance(dst, str):
-            dst = ""
-        # Already-translated check: destination must contain enough
-        # Assamese script. We sample only the first 1 KB so very long
-        # mostly-Assamese pages aren't dragged below the threshold by a
-        # trailing English citation block.
-        if dst and _bengali_letter_ratio(dst[:1024]) >= MIN_AS_SCRIPT_RATIO:
-            # Re-translate iff the source English text changed since we
-            # last wrote the destination.
-            stored_hash = doc.get(f"{field}_as_src_hash") or ""
-            if stored_hash == _hash_source(src):
-                continue
+        if not force:
+            dst = (doc.get(f"{field}_as") or "")
+            if not isinstance(dst, str):
+                dst = ""
+            # Already-translated check: destination must contain enough
+            # Assamese script. We sample only the first 1 KB so very long
+            # mostly-Assamese pages aren't dragged below the threshold by a
+            # trailing English citation block.
+            if dst and _bengali_letter_ratio(dst[:1024]) >= MIN_AS_SCRIPT_RATIO:
+                # Re-translate iff the source English text changed since we
+                # last wrote the destination.
+                stored_hash = doc.get(f"{field}_as_src_hash") or ""
+                if stored_hash == _hash_source(src):
+                    continue
         pending.append((field, src))
     return pending
 
@@ -347,12 +358,13 @@ async def _process_one_collection(
     *,
     max_docs: int,
     batch_size: int,
+    force: bool = False,
 ) -> dict:
     fields = FIELD_MAP[collection]
     state = await _load_state(db, collection)
     last_id = state.get("last_processed_id")
-    if state.get("completed_at") and not state.get("running"):
-        last_id = None  # Restart sweep — picks up newly written docs.
+    if force or (state.get("completed_at") and not state.get("running")):
+        last_id = None  # Force-regenerate or restart sweep for newly written docs.
 
     started = _dt.datetime.utcnow()
     await _write_state(db, collection, {
@@ -402,7 +414,7 @@ async def _process_one_collection(
         for doc in batch:
             processed += 1
             last_id = doc["_id"]
-            pending = _doc_needs_translation(doc, fields)
+            pending = _doc_needs_translation(doc, fields, force=force)
             if not pending:
                 skipped += 1
                 continue
@@ -539,9 +551,14 @@ async def run_backfill(
     collections: Optional[Iterable[str]] = None,
     max_docs: int = DEFAULT_PER_CALL_LIMIT,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    force: bool = False,
 ) -> dict:
     """Run one pass of the backfill across the requested *collections*
     (defaults to every key in :data:`FIELD_MAP`).
+
+    When *force=True* every field is re-translated regardless of whether
+    an ``_as`` sibling already exists or the source hash matches — used by
+    the admin "Regenerate All" action.
 
     Returns ``{"results": [<per-collection summary>, …]}`` (or
     ``{"skipped": "already_running"}`` if another pass is in flight).
@@ -562,6 +579,7 @@ async def run_backfill(
                 db, collection,
                 max_docs=max_docs,
                 batch_size=batch_size,
+                force=force,
             )
             results.append(summary)
         # Task #45 — coverage snapshot + per-run report persisted to
