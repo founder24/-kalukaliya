@@ -349,6 +349,20 @@ def _html_escape(s: str) -> str:
              .replace('"', "&quot;").replace("'", "&#39;"))
 
 
+def _normalize_reader_url(raw_url: str) -> tuple[bool, str, str]:
+    p = urlparse(raw_url)
+    if p.scheme not in ("http", "https"):
+        return False, raw_url, "bad_url_scheme"
+    if not p.hostname:
+        return False, raw_url, "bad_url"
+    if p.username is not None or p.password is not None:
+        return False, raw_url, "bad_url"
+    if p.port is not None:
+        if (p.scheme == "http" and p.port != 80) or (p.scheme == "https" and p.port != 443):
+            return False, raw_url, "bad_url"
+    return True, p.geturl(), "ok"
+
+
 # ───────────────────────── Public API ─────────────────────────
 
 async def fetch_and_extract(
@@ -359,6 +373,12 @@ async def fetch_and_extract(
     bypass_cache: bool = False,
 ) -> dict:
     """Fetch `url`, extract clean article content, return a structured payload.
+
+    ok_norm, normalized_url, norm_reason = _normalize_reader_url(url)
+    if not ok_norm:
+        _reader_metrics["fetches_failed"] += 1
+        return {"ok": False, "error": "fetch_failed", "detail": norm_reason, "url": url}
+    url = normalized_url
 
     Result shape::
 
