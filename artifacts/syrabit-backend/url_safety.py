@@ -146,12 +146,30 @@ async def safe_get_with_redirects(
     the last successful hop but callers should treat the request as
     rejected.
     """
+    def _normalize_and_validate_http_url(raw_url: str) -> tuple[bool, str, str]:
+        p = urlparse(raw_url)
+        if p.scheme not in ("http", "https"):
+            return False, raw_url, "bad_redirect_scheme"
+        if not p.hostname:
+            return False, raw_url, "bad_redirect_url"
+        # Reject credential-bearing URLs (userinfo in netloc).
+        if p.username is not None or p.password is not None:
+            return False, raw_url, "bad_redirect_url"
+        # Keep behavior predictable: do not allow explicit non-default ports.
+        if p.port is not None:
+            if (p.scheme == "http" and p.port != 80) or (p.scheme == "https" and p.port != 443):
+                return False, raw_url, "bad_redirect_url"
+        return True, p.geturl(), "ok"
+
     current = url
     resp: "httpx.Response | None" = None
     for _ in range(max_hops):
+        ok_url, normalized_current, url_reason = _normalize_and_validate_http_url(current)
+        if not ok_url:
+            return resp, current, url_reason
+        current = normalized_current
+
         p0 = urlparse(current)
-        if p0.scheme not in ("http", "https"):
-            return resp, current, "bad_redirect_scheme"
         ok0, why0 = await validate_host_for_ssrf((p0.hostname or "").lower())
         if not ok0:
             return resp, current, f"redirect_{why0}"
@@ -162,9 +180,12 @@ async def safe_get_with_redirects(
         if not loc:
             return resp, current, "no_location"
         nxt = urljoin(current, loc)
+        ok_nxt_url, normalized_nxt, nxt_reason = _normalize_and_validate_http_url(nxt)
+        if not ok_nxt_url:
+            return resp, current, nxt_reason
+        nxt = normalized_nxt
+
         p = urlparse(nxt)
-        if p.scheme not in ("http", "https"):
-            return resp, current, "bad_redirect_scheme"
         ok, why = await validate_host_for_ssrf((p.hostname or "").lower())
         if not ok:
             return resp, current, f"redirect_{why}"
