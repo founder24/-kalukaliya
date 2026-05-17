@@ -1903,7 +1903,7 @@ export default function AdminBotSecurity({ adminToken, navContext }) {
                 {botTraffic.bot_requests?.toLocaleString() || 0} / {botTraffic.total_requests?.toLocaleString() || 0} requests
               </div>
               {botTraffic.break_glass && (
-                <div className="mt-2 text-xs font-bold text-red-600 bg-red-50 rounded px-2 py-1">Break-glass threshold exceeded</div>
+                <div className="mt-2 text-xs font-bold text-red-600 bg-red-50 rounded px-2 py-1" data-testid="break-glass-banner">Break-glass threshold exceeded</div>
               )}
             </div>
           </GlassCard>

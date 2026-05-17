@@ -78,7 +78,7 @@ test.describe('Admin Bot Security', () => {
     await openBotSecurity(page, CRITICAL_BOT_TRAFFIC);
 
     await expect(
-      page.getByText(/break.?glass|critical|40|red|emergency/i).first(),
+      page.getByTestId('break-glass-banner'),
     ).toBeVisible({ timeout: 10_000 });
   });
 });
