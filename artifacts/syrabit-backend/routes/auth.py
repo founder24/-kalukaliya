@@ -432,6 +432,46 @@ async def reset_request(data: PasswordResetReq, request: Request):
 
 @router.post("/auth/reset-confirm")
 async def reset_confirm(data: PasswordResetConfirm, request: Request):
+    # ── Rate-limit guard ───────────────────────────────────────────────────────
+    # UUID v4 tokens have 122 bits of entropy — theoretically infeasible to
+    # brute-force — but we gate anyway as defence-in-depth.
+    #
+    # 1) Per-IP — 10 attempts / 15 min: shuts down scripted guessing from one
+    #    network even before a single UUID could plausibly be hit.
+    # 2) Per-token — 5 attempts / 1 hour: locks out repeated probing of the
+    #    *same* token (e.g. attacker who intercepted a partial token and is
+    #    trying variations), and automatically expires with the token itself.
+    #
+    # Both buckets fail-open so Redis unavailability never blocks a real user.
+    try:
+        from do_chat import rate_check as _rate_check
+
+        _ip = _real_client_ip(request)
+        if _ip and _ip != "unknown":
+            _ip_ok, _ = await _rate_check(f"reset_confirm:ip:{_ip}", limit=10, window_s=900)
+            if not _ip_ok:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many password-reset attempts from this network. Please wait 15 minutes and try again.",
+                    headers={"Retry-After": "900", "X-RateLimit-Limit": "10"},
+                )
+
+        # Truncate token to 36 chars so an oversized probe can't create an
+        # unbounded Redis key.
+        _tok_key = f"reset_confirm:tok:{data.token[:36]}"
+        _tok_ok, _ = await _rate_check(_tok_key, limit=5, window_s=3600)
+        if not _tok_ok:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts for this reset token. Request a new one.",
+                headers={"Retry-After": "3600", "X-RateLimit-Limit": "5"},
+            )
+    except HTTPException:
+        raise
+    except Exception as _rate_err:
+        logger.debug("reset-confirm rate_check skipped: %s", _rate_err)
+    # ── End rate-limit guard ──────────────────────────────────────────────────
+
     record = await supa_get_password_reset(data.token)
     if not record:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")

@@ -2,7 +2,7 @@
 # =============================================================================
 # auth_configure.sh — Local dev auth setup + verification for Replit
 #
-# What this does (13 checks):
+# What this does (16 checks):
 #   1.  Write artifacts/syrabit/.env.local  (VITE_SUPABASE_* for local Vite)
 #   2.  Verify auth_provider="email" is set in routes/auth.py signup dict
 #   3.  Verify auth_provider fallback "email" in db_ops.supa_insert_user
@@ -217,16 +217,25 @@ print(json.dumps({'deployment_configs': {'production': {'env_vars': env}, 'previ
   fi
 fi
 
-# ── Check 14: Reset URL embeds token ─────────────────────────────────────────
-echo "[14/14] Verifying reset email URL embeds ?token= …"
+# ── Check 14: reset-confirm rate limit present ───────────────────────────────
+echo "[14/15] Verifying reset-confirm dual rate-limit guard …"
+if grep -q "reset_confirm:ip:" artifacts/syrabit-backend/routes/auth.py && \
+   grep -q "reset_confirm:tok:" artifacts/syrabit-backend/routes/auth.py; then
+  ok 'reset-confirm has per-IP + per-token rate-limit guard'
+else
+  fail 'reset-confirm rate-limit guard missing — add dual-bucket guard'
+fi
+
+# ── Check 15: Reset URL embeds token ─────────────────────────────────────────
+echo "[15/16] Verifying reset email URL embeds ?token= …"
 if grep -q 'reset-password?token=' artifacts/syrabit-backend/routes/auth.py; then
   ok 'Reset URL embeds token — email button is a direct one-click link'
 else
   fail 'Reset URL does NOT embed token — users must copy-paste from email'
 fi
 
-# ── Check 15: Supabase SITE_URL via Management API ────────────────────────────
-echo "[15/15] Verifying Supabase SITE_URL = https://syrabit.ai …"
+# ── Check 16: Supabase SITE_URL via Management API ────────────────────────────
+echo "[16/16] Verifying Supabase SITE_URL = https://syrabit.ai …"
 SB_PAT="${SUPABASE_ACCESS_TOKEN:-}"
 if [[ -z "$SB_PAT" ]]; then
   fail "Supabase SITE_URL check skipped — add SUPABASE_ACCESS_TOKEN to Replit Secrets"
