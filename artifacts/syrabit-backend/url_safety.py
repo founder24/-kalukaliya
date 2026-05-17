@@ -135,8 +135,8 @@ async def safe_get_with_redirects(
     destination URL *before* the next GET is issued. If it returns
     ``False`` the chain is aborted and ``"hop_policy_rejected"`` is
     returned as the reason without issuing the blocked request. The
-    caller is responsible for validating the initial ``url`` itself;
-    this callback only fires for redirect destinations (hops >= 2).
+    initial ``url`` and each redirect destination are validated for
+    scheme and host SSRF safety before any outbound GET is issued.
 
     Returns ``(response, final_url, reason)`` where ``reason`` is
     ``"ok"`` on success or an error code (``bad_redirect_scheme`` /
@@ -149,6 +149,12 @@ async def safe_get_with_redirects(
     current = url
     resp: "httpx.Response | None" = None
     for _ in range(max_hops):
+        p0 = urlparse(current)
+        if p0.scheme not in ("http", "https"):
+            return resp, current, "bad_redirect_scheme"
+        ok0, why0 = await validate_host_for_ssrf((p0.hostname or "").lower())
+        if not ok0:
+            return resp, current, f"redirect_{why0}"
         resp = await client.get(current, headers=headers) if headers else await client.get(current)
         if resp.status_code not in (301, 302, 303, 307, 308):
             return resp, current, "ok"
