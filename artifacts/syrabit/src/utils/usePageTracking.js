@@ -39,12 +39,14 @@ function getOrCreateVisitorId() {
   try {
     let vid = localStorage.getItem('syrabit:visitor_id');
     if (!vid) {
-      vid = 'v_' + Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
+      // Use crypto.randomUUID() for cryptographically secure random IDs
+      vid = 'v_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 22) : Math.random().toString(36).slice(2, 11) + Date.now().toString(36));
       localStorage.setItem('syrabit:visitor_id', vid);
     }
     return vid;
   } catch {
-    return 'v_anon_' + Math.random().toString(36).slice(2, 11);
+    // Fallback for environments without crypto.randomUUID
+    return 'v_anon_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 22) : Math.random().toString(36).slice(2, 11));
   }
 }
 
@@ -52,12 +54,14 @@ function getOrCreateSessionId() {
   try {
     let sid = sessionStorage.getItem('syrabit:session_id');
     if (!sid) {
-      sid = 's_' + Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
+      // Use crypto.randomUUID() for cryptographically secure random IDs
+      sid = 's_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 22) : Math.random().toString(36).slice(2, 11) + Date.now().toString(36));
       sessionStorage.setItem('syrabit:session_id', sid);
     }
     return sid;
   } catch {
-    return 's_anon_' + Math.random().toString(36).slice(2, 11);
+    // Fallback for environments without crypto.randomUUID
+    return 's_anon_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 22) : Math.random().toString(36).slice(2, 11));
   }
 }
 

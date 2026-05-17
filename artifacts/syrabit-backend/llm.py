@@ -1,5 +1,6 @@
 """Syrabit.ai — LLM infrastructure: batching, smart key pool, streaming."""
 import os, re, json, asyncio, uuid, time, logging, httpx, hashlib
+from utils.safe_logger import mask_api_key, safe_log_data
 import openai as _oai  # noqa: legacy — Task #347 transport reuse: AsyncOpenAI SDK is the HTTP transport for Azure OpenAI / Workers AI / CF AI Gateway only; no api.openai.com traffic. Removed-provider audit (#360 ci_grep_gate) excludes this line via the noqa marker.
 
 _INDIC_LANG_CODES = frozenset({"as", "hi", "bn", "hi-in", "bn-in", "as-in"})
@@ -96,13 +97,17 @@ _OAI_HTTP_TRANSPORT = httpx.AsyncHTTPTransport(
 )
 
 def _get_oai_client(api_key: str, base_url: str) -> _oai.AsyncOpenAI:
+    # Use SHA256 hash for cache key - secure cryptographic hashing (Task #50 fix)
     key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
     ck = f"{base_url}|{key_hash}"
     client = _oai_client_cache.get(ck)
     if client is None:
+        # Use masked API key in logs to prevent sensitive data exposure
+        key_masked = mask_api_key(api_key, visible_chars=8)
         # Custom httpx client shares the high-limit HTTP/2 transport above.
         # Each unique base_url gets its own AsyncClient so cookies / headers
         # don't bleed between providers, but the underlying TCP pool is shared.
+        logger.debug("Creating new OpenAI client for base_url=%s, api_key=%s", base_url, key_masked)
         http_client = httpx.AsyncClient(
             transport=_OAI_HTTP_TRANSPORT,
             timeout=httpx.Timeout(connect=5.0, read=90.0, write=15.0, pool=10.0),
