@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, ORJSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.exceptions import HTTPException as _StarletteHTTPException
@@ -1864,7 +1864,11 @@ try:
 except Exception as _hz_err:
     logger.warning(f"[healthz] install_health_routes failed (non-fatal): {_hz_err}")
 
-app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Set default response class to ORJSONResponse for faster JSON serialization
+# ORJSON is 2-3x faster than stdlib json and uses less memory
+app.router.default_response_class = ORJSONResponse
 
 
 # Task #2 — 2026 blueprint: Assamese-aware regional cache ingest.

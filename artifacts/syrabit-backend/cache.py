@@ -1,10 +1,86 @@
-"""Syrabit.ai — Redis + in-memory caching helpers."""
+"""Syrabit.ai — Redis + in-memory caching helpers with 3-tier caching."""
 import asyncio, hashlib, json, logging, os, threading, time
 from typing import Any, Optional
 import cachetools
 from deps import redis_client
 
 logger = logging.getLogger(__name__)
+
+
+# ── Tiered Cache Implementation (Performance Optimization Phase 2) ──────────
+# 3-tier cache hierarchy: L1 (in-memory TTLCache) → L2 (Redis) → L3 (Database/Origin)
+# This provides optimal performance with automatic promotion/demotion between tiers
+
+class TieredCache:
+    """Multi-level cache with automatic L1↔L2 synchronization.
+    
+    Architecture:
+    - L1: In-process TTLCache (fastest, ~100ns access, per-pod)
+    - L2: Redis shared cache (fast, ~1-5ms access, cross-pod)
+    - L3: Database/origin (slow, fallback)
+    
+    Features:
+    - Automatic L2→L1 promotion on hit
+    - Write-through to both L1 and L2
+    - Configurable TTL per tier
+    - Thread-safe counters for monitoring
+    """
+    
+    def __init__(self, l1_maxsize: int = 1024, l1_ttl: int = 60, l2_ttl: int = 300, name: str = "tiered"):
+        self.l1 = _InstrumentedTTLCache(maxsize=l1_maxsize, ttl=l1_ttl, name=f"{name}_l1")
+        self.l2_prefix = f"tiered:{name}"
+        self.l2_ttl = l2_ttl
+        self.name = name
+        
+    async def get(self, key: str) -> Optional[Any]:
+        """Get value from cache with automatic L2→L1 promotion."""
+        # L1 check (fastest path)
+        try:
+            if key in self.l1:
+                return self.l1[key]
+        except Exception:
+            pass
+        
+        # L2 check (Redis)
+        val = await _redis_get_async(self.l2_prefix, key)
+        if val is not None:
+            try:
+                data = json.loads(val)
+                # Promote to L1 for faster subsequent access
+                self.l1[key] = data
+                return data
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        return None
+    
+    async def set(self, key: str, value: Any) -> None:
+        """Set value in both L1 and L2 caches (write-through)."""
+        # Set in L1
+        self.l1[key] = value
+        
+        # Set in L2 (Redis)
+        try:
+            serialized = json.dumps(value, default=str)
+            if redis_client:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, 
+                    lambda: redis_client.set(f"{self.l2_prefix}:{key}", serialized, ex=self.l2_ttl)
+                )
+        except Exception as e:
+            logger.debug(f"TieredCache L2 set failed for {key}: {e}")
+    
+    async def delete(self, key: str) -> None:
+        """Delete from both L1 and L2 caches."""
+        # Delete from L1
+        try:
+            if key in self.l1:
+                del self.l1[key]
+        except Exception:
+            pass
+        
+        # Delete from L2
+        _redis_del(self.l2_prefix, key)
 
 
 # ── Task #571 — L1 in-process cache instrumentation ──────────────────────────
