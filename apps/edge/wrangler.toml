@@ -1,0 +1,17 @@
+name = "syrabit-edge"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+account_id = "{{ CF_ACCOUNT_ID }}"
+
+[vars]
+AZURE_BACKEND_URL = "https://ca-syrabit-api.azurecontainerapps.io"
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets"
+
+[triggers]
+crons = []
+
+[env.production]
+name = "syrabit-edge-prod"
