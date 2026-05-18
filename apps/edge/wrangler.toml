@@ -1,7 +1,7 @@
-name = "syrabit-edge"
+name = "syrabitworker"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
-account_id = "{{ CF_ACCOUNT_ID }}"
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
 AZURE_BACKEND_URL = "https://ca-syrabit-api.azurecontainerapps.io"
@@ -14,4 +14,4 @@ bucket_name = "syrabit-assets"
 crons = []
 
 [env.production]
-name = "syrabit-edge-prod"
+name = "syrabitworker-prod"

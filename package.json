@@ -1,0 +1,21 @@
+{
+  "name": "syrabit-monorepo",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Syrabit Monorepo - Edge Workers, Frontend, and Backend",
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev:edge": "pnpm --filter syrabit-edge run dev",
+    "dev:frontend": "pnpm --filter syrabit-frontend run dev",
+    "build:edge": "pnpm --filter syrabit-edge run build",
+    "build:frontend": "pnpm --filter syrabit-frontend run build",
+    "deploy:edge": "pnpm --filter syrabit-edge run deploy",
+    "test": "pnpm --recursive run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
