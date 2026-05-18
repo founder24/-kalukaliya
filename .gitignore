@@ -1,78 +1,36 @@
 ```
-# Environment variables
+# Dependencies
+*.txt
+*.in
+
+# Environment
 .env
 .env.local
 .env.*
 
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-*.egg-info/
-.Python
-
-# Build artifacts
-dist/
-build/
-target/
-*.pyc
-*.pyo
-*.pyd
-*.so
-*.dylib
-*.dll
-*.exe
-*.out
-
-# Logs
+# Logs and temp files
 *.log
-logs/
-
-# Coverage reports
-.coverage
-coverage/
-htmlcov/
+*.tmp
+*.swp
 
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Docker
-.dockerenv
-!docker-compose.yml
-
-# Python specific
-*.py[cod]
-*$py.class
-*.so
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+*.so
 
-# Replit
-.replit
+# Build and distribution
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Security
+SECURITY_PATCH_REPORT.md
 ```
