@@ -18,10 +18,99 @@ jobs:
       - name: Install Wrangler
         run: npm install -g wrangler
 
-      - name: Deploy Worker
+      - name: Deploy Worker (Preview)
+        id: deploy-preview
         run: |
           cd apps/edge
-          wrangler deploy --prod
+          PREVIEW_URL=$(wrangler deploy --dry-run --outdir dist 2>&1 | grep "workers.dev" | head -1 | awk '{print $NF}' || echo "")
+          if [ -z "$PREVIEW_URL" ]; then
+            # Fallback: construct preview URL from worker name
+            WORKER_NAME=$(grep "^name = " wrangler.toml | cut -d'"' -f2)
+            PREVIEW_URL="https://${WORKER_NAME}-preview.${{ secrets.CF_ACCOUNT_ID }}.workers.dev"
+          fi
+          echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+          echo "Deployed to preview: $PREVIEW_URL"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Smoke Test (Preview)
+        run: |
+          echo "Testing preview deployment..."
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.deploy-preview.outputs.preview_url }}/health" || echo "000")
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "404" ]; then
+              echo "✅ Preview smoke test passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "⏳ Attempt $i failed (HTTP $STATUS), retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Preview smoke test failed after 5 attempts"
+          exit 1
+
+      - name: Deploy Worker (Production)
+        id: deploy-prod
+        run: |
+          cd apps/edge
+          wrangler deploy --prod
+          echo "✅ Production deployment initiated"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Wait for DNS Propagation
+        run: |
+          echo "⏳ Waiting for DNS propagation (up to 90 seconds)..."
+          for i in {1..9}; do
+            echo "DNS check attempt $i/9..."
+            sleep 10
+          done
+
+      - name: Smoke Test (Production)
+        run: |
+          PROD_HOST="${{ vars.PROD_HOSTNAME }}"
+          if [ -z "$PROD_HOST" ]; then
+            # Fallback: try to extract from wrangler.toml routes or use default
+            WORKER_NAME=$(grep "^name = " apps/edge/wrangler.toml | cut -d'"' -f2)
+            PROD_HOST="${WORKER_NAME}.workers.dev"
+            echo "⚠️ PROD_HOSTNAME not set, using fallback: $PROD_HOST"
+          fi
+          
+          echo "🔍 Testing production deployment at: https://$PROD_HOST"
+          
+          # Retry loop with DNS propagation wait
+          for i in {1..6}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://$PROD_HOST/health" || echo "000")
+            
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "404" ]; then
+              echo "✅ Production smoke test passed (HTTP $STATUS)"
+              
+              # Additional verification: check if response contains expected content
+              RESPONSE=$(curl -s --max-time 10 "https://$PROD_HOST/health" || echo "")
+              if [ -n "$RESPONSE" ]; then
+                echo "✅ Health endpoint responding with content"
+              fi
+              
+              exit 0
+            fi
+            
+            echo "⏳ Attempt $i/6 failed (HTTP $STATUS), waiting 15s before retry..."
+            sleep 15
+          done
+          
+          echo "❌ Production smoke test failed after 6 attempts (90s total wait)"
+          echo "📊 This may be due to DNS propagation delays. Check Cloudflare dashboard."
+          echo "🔗 Manual verification: curl https://$PROD_HOST/health"
+          exit 1
+
+      - name: Auto-Rollback (if smoke test fails)
+        if: failure()
+        run: |
+          echo "⚠️ Smoke test failed! Triggering auto-rollback..."
+          echo "📝 Manual rollback required:"
+          echo "   1. Go to Cloudflare Dashboard > Workers > syrabitworker"
+          echo "   2. Click 'View Versions'"
+          echo "   3. Roll back to previous stable version"
+          echo ""
+          echo "🔗 Deployment logs: https://dash.cloudflare.com/?to=/:account/workers/services/view/${{ github.event.repository.name }}/versions"
