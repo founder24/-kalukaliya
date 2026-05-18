@@ -22,7 +22,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
       - name: Build Edge Worker
         run: pnpm --filter syrabit-edge run build
