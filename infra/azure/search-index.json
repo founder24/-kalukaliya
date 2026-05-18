@@ -1,0 +1,89 @@
+{
+  "name": "syrabit-edu-index",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "filterable": true
+    },
+    {
+      "name": "title",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "analyzer": "en.microsoft"
+    },
+    {
+      "name": "content",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true,
+      "analyzer": "en.microsoft"
+    },
+    {
+      "name": "content_vector",
+      "type": "Collection(Edm.Single)",
+      "dimensions": 1536,
+      "vectorSearchProfile": "my-vector-config"
+    },
+    {
+      "name": "language",
+      "type": "Edm.String",
+      "filterable": true,
+      "facetable": true
+    },
+    {
+      "name": "tier_access",
+      "type": "Edm.String",
+      "filterable": true,
+      "default": "free"
+    },
+    {
+      "name": "source_url",
+      "type": "Edm.String",
+      "retrievable": true
+    },
+    {
+      "name": "last_updated",
+      "type": "Edm.DateTimeOffset",
+      "filterable": true
+    }
+  ],
+  "vectorSearch": {
+    "profiles": [
+      {
+        "name": "my-vector-config",
+        "algorithmConfiguration": "my-algo-config"
+      }
+    ],
+    "algorithms": [
+      {
+        "name": "my-algo-config",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "metric": "cosine",
+          "m": 4,
+          "efConstruction": 400
+        }
+      }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "default",
+        "prioritizedFields": {
+          "titleField": {
+            "fieldName": "title"
+          },
+          "contentFields": [
+            {
+              "fieldName": "content"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

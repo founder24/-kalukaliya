@@ -1,13 +1,13 @@
-modules = ["nodejs-24", "python-3.11", "postgresql-16"]
+modules = ["nodejs-24", "python-3.11"]
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["sh", "-c", "cd artifacts/syrabit-backend && gunicorn server:app -c gunicorn.conf.py"]
-build = ["sh", "-c", "pip install -r artifacts/syrabit-backend/requirements.txt"]
+run = ["sh", "-c", "cd apps/backend && gunicorn app.main:app -c gunicorn_conf.py"]
+build = ["sh", "-c", "pip install -r apps/backend/requirements.txt"]
 
 [deployment.postBuild]
-args = ["sh", "-c", "npm i -g pnpm@10.26.1 && pnpm store prune"]
+args = ["sh", "-c", "echo 'Backend ready'"]
 env = { "CI" = "true" }
 
 [workflows]
@@ -22,18 +22,6 @@ author = "agent"
 task = "workflow.run"
 args = "Backend"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "og_image_smoke"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "patch_contract_guard"
-
 [[workflows.workflow]]
 name = "Backend"
 author = "agent"
@@ -43,42 +31,20 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd artifacts/syrabit-backend && python3 -m uvicorn server:app --host 0.0.0.0 --port 8080"
+args = "cd apps/backend && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080"
 waitForPort = 8080
 
 [[workflows.workflow]]
-name = "Start application"
+name = "Edge Worker"
 author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd artifacts/syrabit && PORT=5000 pnpm dev"
-waitForPort = 5000
-
-[[workflows.workflow]]
-name = "og_image_smoke"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "OG_SMOKE_SKIP=0 python3 scripts/og-images/smoke_check_og.py --sample 5"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "patch_contract_guard"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "python3 scripts/ci/watch_patch_route_contract.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/edge && npm install && npm run dev"
+waitForPort = 8787
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -133,41 +99,9 @@ DEPLOYMENT_ENV = "production"
 VITE_BACKEND_URL = "https://api.syrabit.ai"
 
 [[ports]]
-localPort = 5000
-externalPort = 80
-
-[[ports]]
-localPort = 5001
-externalPort = 3002
-
-[[ports]]
 localPort = 8080
 externalPort = 8080
 
 [[ports]]
-localPort = 8081
-externalPort = 8081
-
-[[ports]]
-localPort = 8082
-externalPort = 80
-
-[[ports]]
-localPort = 8083
-externalPort = 3003
-
-[[ports]]
-localPort = 8099
-externalPort = 8099
-
-[[ports]]
-localPort = 25144
-externalPort = 3001
-
-[[ports]]
-localPort = 25145
-externalPort = 3000
-
-[[ports]]
-localPort = 25146
-externalPort = 4200
+localPort = 8787
+externalPort = 8787

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: syrabit-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: localdevpassword
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - syrabit-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: syrabit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass localdevpassword
+    networks:
+      - syrabit-net
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: syrabit-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=mongodb://admin:localdevpassword@mongo:27017/syrabit?authSource=admin
+      - UPSTASH_REDIS_REST_URL=http://redis:6379
+      - DEBUG=True
+      - APP_ENV=development
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - syrabit-net
+    volumes:
+      - ./apps/backend/app:/app/app
+
+networks:
+  syrabit-net:
+    driver: bridge
+
+volumes:
+  mongo_data:
