@@ -4,16 +4,26 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Payments"])
 
 
+_RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
+
+
 def calculate_next_billing_date() -> str:
     """Calculate next billing date (1 month from now)"""
     from datetime import datetime, timedelta
     return (datetime.utcnow() + timedelta(days=30)).isoformat()
+
+
+def _validate_subscription_id(value) -> str:
+    if not isinstance(value, str) or not _RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value):
+        raise HTTPException(status_code=400, detail="Invalid subscription id")
+    return value
 
 
 @router.post("/razorpay")
@@ -45,7 +55,7 @@ async def handle_razorpay_webhook(request: Request):
 
     # 2. Handle Event Types
     if event.get("event") == "subscription.charged":
-        sub_id = payload["subscription"]["id"]
+        sub_id = _validate_subscription_id(payload["subscription"]["id"])
         customer_id = payload["customer"]["id"]
         amount = payload["payment"]["amount"]
 
@@ -89,7 +99,7 @@ async def handle_razorpay_webhook(request: Request):
 
     elif event.get("event") == "subscription.cancelled":
         # Mark subscription as cancelled at period end
-        sub_id = payload["subscription"]["id"]
+        sub_id = _validate_subscription_id(payload["subscription"]["id"])
         from app.db.mongo import get_mongo_client
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
