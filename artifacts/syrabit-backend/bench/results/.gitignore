@@ -1,3 +1,0 @@
-# Per-run archival snapshots — keep only the latest pointer tracked.
-grounded_recall-*.json
-!latest.json

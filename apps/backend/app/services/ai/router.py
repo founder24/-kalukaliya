@@ -1,0 +1,74 @@
+import re
+import logging
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def detect_language(text: str) -> str:
+    """
+    Detect language of input text.
+    Returns 'as' for Assamese, 'en' for English
+    """
+    # Assamese Unicode range: U+0980 to U+09FF
+    assamese_pattern = re.compile(r'[\u0980-\u09FF]')
+    
+    # Count Assamese characters
+    assamese_chars = len(assamese_pattern.findall(text))
+    total_chars = len(text.replace(' ', ''))
+    
+    if total_chars == 0:
+        return 'en'  # Default to English
+    
+    # If >30% Assamese characters, consider it Assamese
+    assamese_ratio = assamese_chars / total_chars
+    
+    if assamese_ratio > 0.3 or assamese_chars >= 5:
+        return 'as'
+    return 'en'
+
+
+def detect_language_and_route(text: str) -> tuple[str, str]:
+    """
+    Detect language and route to appropriate LLM.
+    
+    Returns:
+        tuple: (language_code, model_name)
+    """
+    lang = detect_language(text)
+    
+    if lang == 'as':
+        # Route to Sarvam for Assamese
+        logger.info("Routing to Sarvam AI for Assamese content")
+        return 'as', settings.SARVAM_MODEL
+    else:
+        # Route to Vertex AI for English
+        logger.info("Routing to Vertex AI for English content")
+        return 'en', settings.VERTEX_GEMINI_MODEL
+
+
+async def generate_response(
+    system_prompt: str,
+    user_message: str,
+    model: str,
+    stream: bool = False
+) -> str:
+    """
+    Generate response using appropriate AI client based on model.
+    """
+    if 'sarvam' in model.lower() or 'openhathi' in model.lower():
+        from app.services.ai.sarvam_client import generate_with_sarvam
+        return await generate_with_sarvam(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            stream=stream
+        )
+    else:
+        from app.services.ai.vertex_client import generate_with_vertex
+        return await generate_with_vertex(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            model=model,
+            stream=stream
+        )

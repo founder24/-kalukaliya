@@ -1,3 +1,0 @@
-**Q:** {question}
-
-**A:** {answer}

@@ -1,1 +1,0 @@
-"""Syrabit.ai benchmarks."""

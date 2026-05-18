@@ -1,6 +1,0 @@
-{
-  "_recorded": "2026-05-07T19:03:00Z",
-  "_note": "VCR-style cassette for providers.sarvam.chat transport-timeout path. The cassette `raise` field tells the mock transport to raise httpx.ReadTimeout instead of returning an HTTP response.",
-  "request": {"method": "POST", "url": "/v1/chat/completions"},
-  "response": {"raise": "httpx.ReadTimeout", "message": "read operation timed out"}
-}
