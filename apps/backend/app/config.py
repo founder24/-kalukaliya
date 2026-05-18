@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 from typing import Optional
 import json
 
@@ -9,7 +10,7 @@ class Settings(BaseSettings):
     Strict typing enforced via Pydantic
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra='forbid')
 
     # --- P1: Cloudflare (Edge) ---
     CF_ACCOUNT_ID: str
@@ -89,6 +90,13 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "https://syrabit.ai,https://app.syrabit.ai"
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
+
+    @field_validator('JWT_SECRET')
+    @classmethod
+    def validate_jwt_strength(cls, v: str) -> str:
+        if len(v) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters long for security")
+        return v
 
     @property
     def allowed_origins_list(self) -> list[str]:
