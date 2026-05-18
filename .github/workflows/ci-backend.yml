@@ -1,0 +1,47 @@
+name: Deploy Backend to Azure
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/backend/', 'infra/azure/']
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies & Test
+        run: |
+          pip install -r apps/backend/requirements.txt
+          pytest apps/backend/tests
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build & Push Docker Image
+        run: |
+          az acr build --registry syrabitregistry --image syrabit-backend:${{ github.sha }} --file apps/backend/Dockerfile apps/backend
+
+      - name: Deploy to Container Apps
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az containerapp update \
+              --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --image syrabitregistry.azurecr.io/syrabit-backend:${{ github.sha }}
+
+      - name: Sync Search Index Schema (Idempotent)
+        run: |
+          python infra/scripts/deploy-search-index.py \
+            --endpoint ${{ secrets.AZURE_SEARCH_ENDPOINT }} \
+            --key ${{ secrets.AZURE_SEARCH_ADMIN_KEY }}

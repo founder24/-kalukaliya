@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import sentry_sdk
 from posthog import Posthog
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
@@ -15,8 +18,15 @@ from app.api.webhooks import razorpay
 async def lifespan(app: FastAPI):
     """Application Lifespan Events - Startup and Shutdown"""
     # Startup
-    await init_mongo()
-    await init_redis()
+    try:
+        await init_mongo()
+    except Exception as e:
+        logger.warning(f"MongoDB initialization failed (expected in local dev without DB): {e}")
+    
+    try:
+        await init_redis()
+    except Exception as e:
+        logger.warning(f"Redis initialization failed (expected in local dev without DB): {e}")
     
     # Initialize Sentry
     if settings.SENTRY_DSN:
