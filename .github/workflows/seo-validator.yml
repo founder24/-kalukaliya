@@ -29,7 +29,7 @@ jobs:
         working-directory: artifacts/syrabit-backend
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.11"
           cache: pip
