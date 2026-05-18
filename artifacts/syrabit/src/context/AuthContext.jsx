@@ -240,13 +240,18 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password, turnstileToken) => {
     if (!supabase) throw new Error('Authentication is not configured.');
+    // Mark as direct-auth BEFORE the Supabase call so onAuthStateChange
+    // (which fires during the await) sees the flag and skips its own exchange.
+    justAuthenticated.current = true;
     const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password });
     if (sbError) {
+      justAuthenticated.current = false;
       const err = new Error(sbError.message);
       err.response = { data: { detail: sbError.message } };
       throw err;
     }
     if (!sbData?.session?.access_token) {
+      justAuthenticated.current = false;
       throw new Error('No session returned from Supabase');
     }
     const userData = await _exchangeSupabaseSession(
@@ -258,18 +263,27 @@ export const AuthProvider = ({ children }) => {
 
   const signup = async (name, email, password, consent_dpdp = false, turnstileToken) => {
     if (!supabase) throw new Error('Authentication is not configured.');
+    // Same guard as login() — set before the Supabase call.
+    justAuthenticated.current = true;
     const { data: sbData, error: sbError } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: name } },
     });
     if (sbError) {
+      justAuthenticated.current = false;
       const err = new Error(sbError.message);
       err.response = { data: { detail: sbError.message } };
       throw err;
     }
     if (!sbData?.session?.access_token) {
-      throw new Error('Please check your email to confirm your account before signing in.');
+      // Supabase requires email confirmation — no session yet.
+      // Clear the flag so the onAuthStateChange handler will pick up the
+      // SIGNED_IN event when the user clicks their confirmation link.
+      justAuthenticated.current = false;
+      const confirmErr = new Error('EMAIL_CONFIRMATION_REQUIRED');
+      confirmErr.email = email;
+      throw confirmErr;
     }
     const userData = await _exchangeSupabaseSession(
       sbData.session.access_token, name, consent_dpdp, turnstileToken,
@@ -278,31 +292,36 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  // Task #156 — Handle Google OAuth redirect callback.
-  // After supabase.auth.signInWithOAuth() redirects the user back to the app,
-  // Supabase fires SIGNED_IN with provider='google'. We exchange the Supabase
-  // access token at /api/auth/supabase-session (same path as email/password)
-  // to get our custom httpOnly cookie + JWT.
-  // Email/password sign-ins have provider='email' and are skipped here —
-  // they call _exchangeSupabaseSession directly in login()/signup().
+  // Task #156 / fix — Handle ALL Supabase SIGNED_IN events, not just Google.
+  //
+  // Covers:
+  //   • Google OAuth redirect callback (provider='google')
+  //   • Email-confirmation link callback (provider='email', no login() call)
+  //   • Magic-link / future OAuth providers
+  //
+  // login() and signup() set justAuthenticated.current = true BEFORE their
+  // Supabase call, so when the SIGNED_IN event fires for a direct
+  // email/password flow, this handler detects the flag and exits early —
+  // avoiding a redundant second round-trip to /api/auth/supabase-session.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!supabase) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event !== 'SIGNED_IN') return;
-        const provider = session?.user?.app_metadata?.provider;
-        if (provider !== 'google') return;
+        // login() / signup() are handling this — skip to avoid double exchange.
+        if (justAuthenticated.current) return;
+        if (!session?.access_token) return;
         try {
           const userData = await _exchangeSupabaseSession(session.access_token);
           try { Analytics.login(userData.id, userData.email); } catch {}
         } catch (err) {
-          console.error('[Auth] Google OAuth token exchange failed:', err);
+          console.error('[Auth] Token exchange failed:', err);
         }
       },
     );
     return () => subscription.unsubscribe();
-  }, []); // empty — all captures (_exchangeSupabaseSession, Analytics) are stable
+  }, []); // empty — justAuthenticated ref + _exchangeSupabaseSession are stable
 
   const logout = async () => {
     try {

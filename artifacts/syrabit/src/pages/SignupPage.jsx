@@ -48,6 +48,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [emailConfirmationSent, setEmailConfirmationSent] = useState(false);
   const { signup } = useAuth();
   const navigate = useNavigate();
   const turnstileRef = useRef(null);
@@ -123,6 +124,10 @@ export default function SignupPage() {
         navigate('/onboarding');
       }
     } catch (err) {
+      if (err.message === 'EMAIL_CONFIRMATION_REQUIRED') {
+        setEmailConfirmationSent(true);
+        return;
+      }
       setError(formatAuthError(err, 'Signup failed. Please try again.'));
     } finally {
       // Tokens are one-shot per the Turnstile contract.
@@ -223,6 +228,38 @@ export default function SignupPage() {
           </Link>
 
           <div className="rounded-2xl p-5 sm:p-7 overflow-y-auto auth-form-card glass-card">
+
+            {emailConfirmationSent ? (
+              <div className="py-4 text-center">
+                <div className="mx-auto mb-4 flex items-center justify-center w-14 h-14 rounded-full"
+                  style={{ background: 'rgba(124,58,237,0.1)' }}>
+                  <Mail size={28} className="text-violet-600" />
+                </div>
+                <h2 className="text-xl font-bold text-foreground mb-2">Check your inbox</h2>
+                <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                  We sent a confirmation link to <span className="font-medium text-foreground">{email}</span>.
+                  Click the link in that email to activate your account and get started.
+                </p>
+                <p className="text-xs text-muted-foreground mb-6">
+                  Didn&apos;t receive it? Check your spam folder, or{' '}
+                  <button
+                    type="button"
+                    className="font-medium text-violet-600 hover:text-violet-700 transition-colors underline underline-offset-2"
+                    onClick={() => setEmailConfirmationSent(false)}
+                  >
+                    try again
+                  </button>.
+                </p>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center justify-center w-full rounded-lg py-2.5 text-sm font-semibold transition-colors"
+                  style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '1px solid rgba(124,58,237,0.2)' }}
+                >
+                  Go to Sign In
+                </Link>
+              </div>
+            ) : (
+            <>
             <div className="mb-7">
               <h1 className="text-2xl font-bold text-foreground tracking-tight">Create your account</h1>
               <p className="mt-1.5 text-sm text-muted-foreground">Start for free — no credit card required</p>
@@ -473,6 +510,8 @@ export default function SignupPage() {
                 Sign in
               </Link>
             </p>
+            </>
+            )}
           </div>
         </div>
       </div>
