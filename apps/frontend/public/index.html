@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en-IN" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!-- ── PWA & Theme ── -->
+    <meta name="theme-color" content="#7c3aed" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#7c3aed" media="(prefers-color-scheme: light)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Syrabit.ai" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-72x72.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+
+    <!-- ── SEO ── -->
+    <title>Syrabit.ai — Educational Browser For Assam Board Students</title>
+    <meta name="description" content="Syrabit.ai is the educational browser for Assam Board students. Browse AHSEC (Class 11-12) and Degree (B.Com, B.A, B.Sc) syllabus content, get instant answers, and study smarter. Trusted by 500+ students." />
+    <meta name="keywords" content="AHSEC educational browser, Assam board study app, Class 11 12 exam prep, AHSEC syllabus browser, degree exam prep Assam, B.Com B.A B.Sc notes, SEBA AHSEC study tool, Assam Higher Secondary, SEBA HSLC, Gauhati University, Dibrugarh University, Cotton University, NEP FYUGP, study notes, MCQ, important questions, previous year questions, PYQ, solved examples, definitions, exam preparation, Assam board exam, HS 1st Year, HS 2nd Year, Class 9, Class 10, HSLC exam, syllabus-aligned notes" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="canonical" href="https://syrabit.ai/" />
+    <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
+
+    <!-- ── Open Graph ── -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Syrabit.ai" />
+    <meta property="og:title" content="Syrabit.ai — Educational Browser For Assam Board Students" />
+    <meta property="og:description" content="Browse AHSEC & Degree syllabus content, get instant answers, and ace your exams. The educational browser built for Assam board students. Start free." />
+    <meta property="og:url" content="https://syrabit.ai/" />
+    <meta property="og:image" content="https://syrabit.ai/opengraph.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Syrabit.ai — AI-Powered AHSEC Exam Preparation" />
+    <meta property="og:locale" content="en_IN" />
+
+    <!-- ── Twitter / X Card ── -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Syrabit.ai — AI-Powered AHSEC Exam Prep" />
+    <meta name="twitter:description" content="Ace your AHSEC &amp; Degree exams with AI. Syllabus-aligned, instant answers." />
+    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />
+    <meta name="twitter:image:alt" content="Syrabit.ai — AI-Powered AHSEC Exam Preparation" />
+    <meta name="twitter:site" content="@syrabit_ai" />
+
+    <!-- ── Performance: preconnect to external origins ── -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://posthog.com" />
+
+    <!-- Fonts loaded via CSS (display=swap prevents render blocking) -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+
+    <!-- ── Security Meta Headers ── -->
+    <!-- Security: handled by backend HTTP headers, not meta tags -->
+
+    <!-- ── JSON-LD Structured Data ── -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": "https://syrabit.ai/#website",
+      "name": "Syrabit.ai",
+      "url": "https://syrabit.ai",
+      "description": "AI-powered exam preparation platform for AHSEC Class 11-12 and Degree students in Assam, India.",
+      "inLanguage": "en-IN",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://syrabit.ai/library?q={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      "@id": "https://syrabit.ai/#organization",
+      "name": "Syrabit.ai",
+      "url": "https://syrabit.ai",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://syrabit.ai/icons/icon-192x192.png",
+        "width": 192,
+        "height": 192
+      },
+      "description": "AI-powered exam preparation for AHSEC (Class 11-12) and Degree students in Assam, India.",
+      "areaServed": {
+        "@type": "State",
+        "name": "Assam",
+        "containedInPlace": { "@type": "Country", "name": "India" }
+      },
+      "hasOfferCatalog": {
+        "@type": "OfferCatalog",
+        "name": "Study Plans",
+        "itemListElement": [
+          { "@type": "Offer", "name": "Free Plan", "price": "0", "priceCurrency": "INR" },
+          { "@type": "Offer", "name": "Starter Plan", "price": "99", "priceCurrency": "INR" },
+          { "@type": "Offer", "name": "Pro Plan", "price": "999", "priceCurrency": "INR" }
+        ]
+      }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Syrabit.ai",
+      "url": "https://syrabit.ai",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Any",
+      "description": "AI-powered exam preparation platform for AHSEC Class 11-12 and Degree students in Assam, India.",
+      "offers": [
+        { "@type": "Offer", "name": "Free Plan", "price": "0", "priceCurrency": "INR" },
+        { "@type": "Offer", "name": "Starter Plan", "price": "99", "priceCurrency": "INR" },
+        { "@type": "Offer", "name": "Pro Plan", "price": "999", "priceCurrency": "INR" }
+      ],
+      "provider": {
+        "@type": "Organization",
+        "name": "Syrabit.ai",
+        "url": "https://syrabit.ai",
+        "sameAs": ["https://syrabit.ai"]
+      },
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "4.8",
+        "reviewCount": "127"
+      }
+    }
+    </script>
+
+    <!-- Emergent scripts (do not remove) -->
+    <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
+    <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
+
+    <!-- Emergent badge — ULTRA MINIMIZED: transparent, invisible, non-clickable -->
+    <style>
+      /* NUCLEAR CSS — Maximum hiding with all possible properties */
+      #emergent-badge,
+      a[href*="emergent.sh"],
+      a[href*="emergent-badge"],
+      a[href*="emergent"],
+      [id*="emergent-badge"],
+      [id*="emergent"],
+      [class*="emergent-badge"],
+      [class*="emergent"] {
+        /* Size: absolute minimum */
+        width: 0 !important;
+        height: 0 !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        max-width: 0 !important;
+        max-height: 0 !important;
+        
+        /* Visibility: completely hidden */
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        
+        /* Positioning: off-screen */
+        position: fixed !important;
+        top: -9999px !important;
+        left: -9999px !important;
+        bottom: auto !important;
+        right: auto !important;
+        z-index: -99999 !important;
+        
+        /* Spacing: zero */
+        padding: 0 !important;
+        margin: 0 !important;
+        
+        /* Appearance: transparent */
+        background: transparent !important;
+        background-color: transparent !important;
+        background-image: none !important;
+        border: 0 !important;
+        outline: 0 !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+        
+        /* Text: invisible */
+        color: transparent !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+        
+        /* Interaction: disabled */
+        pointer-events: none !important;
+        user-select: none !important;
+        cursor: default !important;
+        
+        /* Clipping: hidden */
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        clip-path: inset(50%) !important;
+        
+        /* Transform: invisible */
+        transform: scale(0) translateX(-9999px) translateY(-9999px) !important;
+        transform-origin: 0 0 !important;
+        
+        /* Content: removed */
+        content: '' !important;
+        content-visibility: hidden !important;
+        
+        /* Filter: invisible */
+        filter: opacity(0) !important;
+        backdrop-filter: none !important;
+      }
+      
+      /* Hide all children and pseudo-elements */
+      #emergent-badge *,
+      #emergent-badge::before,
+      #emergent-badge::after,
+      a[href*="emergent.sh"] *,
+      a[href*="emergent.sh"]::before,
+      a[href*="emergent.sh"]::after,
+      [id*="emergent"] *,
+      [id*="emergent"]::before,
+      [id*="emergent"]::after,
+      [class*="emergent"] *,
+      [class*="emergent"]::before,
+      [class*="emergent"]::after {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+        font-size: 0 !important;
+        color: transparent !important;
+        pointer-events: none !important;
+        user-select: none !important;
+        position: absolute !important;
+        top: -9999px !important;
+        left: -9999px !important;
+      }
+    </style>
+    <script>
+    (function() {
+      'use strict';
+      
+      // Ultimate badge obliteration script
+      var NUCLEAR_HIDE = [
+        'display:none!important',
+        'visibility:hidden!important',
+        'opacity:0!important',
+        'width:0!important',
+        'height:0!important',
+        'max-width:0!important',
+        'max-height:0!important',
+        'min-width:0!important',
+        'min-height:0!important',
+        'overflow:hidden!important',
+        'clip:rect(0,0,0,0)!important',
+        'clip-path:inset(50%)!important',
+        'transform:scale(0)translateX(-9999px)translateY(-9999px)!important',
+        'border:0!important',
+        'padding:0!important',
+        'margin:0!important',
+        'background:transparent!important',
+        'box-shadow:none!important',
+        'position:fixed!important',
+        'top:-9999px!important',
+        'left:-9999px!important',
+        'z-index:-99999!important',
+        'pointer-events:none!important',
+        'user-select:none!important',
+        'cursor:default!important',
+        'color:transparent!important',
+        'font-size:0!important',
+        'line-height:0!important',
+        'filter:opacity(0)!important'
+      ].join(';');
+
+      function obliterateBadge() {
+        // All possible selectors
+        var selectors = [
+          '#emergent-badge',
+          'a[href*="emergent.sh"]',
+          'a[href*="emergent-badge"]',
+          'a[href*="emergent"]',
+          '[id*="emergent-badge"]',
+          '[id*="emergent"]',
+          '[class*="emergent-badge"]',
+          '[class*="emergent"]'
+        ];
+        
+        selectors.forEach(function(selector) {
+          try {
+            document.querySelectorAll(selector).forEach(function(el) {
+              // Apply nuclear styles
+              el.style.cssText = NUCLEAR_HIDE;
+              
+              // Remove from DOM entirely
+              if (el.parentNode) {
+                el.parentNode.removeChild(el);
+              }
+              
+              // Also nuke all children before removal
+              el.querySelectorAll('*').forEach(function(child) {
+                child.style.cssText = NUCLEAR_HIDE;
+                if (child.parentNode) {
+                  child.parentNode.removeChild(child);
+                }
+              });
+            });
+          } catch(e) {
+            // Silently ignore errors
+          }
+        });
+      }
+
+      // Intercept element creation
+      var _origCreate = document.createElement.bind(document);
+      document.createElement = function(tag) {
+        var el = _origCreate(tag);
+        if (tag && tag.toLowerCase() === 'a') {
+          var _origSetAttr = el.setAttribute.bind(el);
+          el.setAttribute = function(name, value) {
+            _origSetAttr(name, value);
+            if ((name === 'id' && String(value).includes('emergent')) ||
+                (name === 'href' && String(value).includes('emergent')) ||
+                (name === 'class' && String(value).includes('emergent'))) {
+              el.style.cssText = NUCLEAR_HIDE;
+              // Prevent click events
+              el.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+              }, true);
+              // Remove immediately
+              setTimeout(function() {
+                if (el.parentNode) el.parentNode.removeChild(el);
+              }, 0);
+            }
+          };
+        }
+        return el;
+      };
+
+      // MutationObserver with aggressive removal
+      var mo = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          if (mutation.addedNodes.length) {
+            obliterateBadge();
+          }
+        });
+      });
+
+      // Initialize
+      function init() {
+        obliterateBadge();
+        
+        if (document.documentElement) {
+          mo.observe(document.documentElement, { 
+            childList: true, 
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['id', 'class', 'href']
+          });
+        }
+      }
+
+      // Run immediately
+      obliterateBadge();
+      
+      // Run on DOMContentLoaded
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+
+      // Run on load
+      window.addEventListener('load', function() {
+        obliterateBadge();
+        // Ultra-aggressive intervals
+        [100, 200, 300, 500, 800, 1000, 1500, 2000, 3000, 5000, 8000].forEach(function(delay) {
+          setTimeout(obliterateBadge, delay);
+        });
+      });
+
+      // Continuous monitoring (aggressive for first 10 seconds)
+      var counter = 0;
+      var aggressiveInterval = setInterval(function() {
+        obliterateBadge();
+        counter++;
+        if (counter > 100) { // After 10 seconds (100ms × 100)
+          clearInterval(aggressiveInterval);
+          // Then check every 2 seconds indefinitely
+          setInterval(obliterateBadge, 2000);
+        }
+      }, 100);
+
+      // Intercept all click events on emergent elements
+      document.addEventListener('click', function(e) {
+        var target = e.target;
+        var href = target.getAttribute && target.getAttribute('href');
+        var id = target.getAttribute && target.getAttribute('id');
+        var className = target.getAttribute && target.getAttribute('class');
+        
+        if ((href && href.includes('emergent')) ||
+            (id && id.includes('emergent')) ||
+            (className && className.includes('emergent'))) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          obliterateBadge();
+          return false;
+        }
+      }, true);
+
+    })();
+    </script>
+  </head>
+  <body>
+    <!-- Skip link for keyboard users (WCAG 2.1) -->
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-primary focus:text-white focus:rounded-xl focus:font-semibold">
+      Skip to main content
+    </a>
+
+
+    <script>
+      (function(){
+        var CURRENT='syrabit-v3.0-clean';
+        if('caches' in window){
+          caches.keys().then(function(names){
+            names.forEach(function(name){
+              if(name!==CURRENT) caches.delete(name);
+            });
+          });
+        }
+        if('serviceWorker' in navigator){
+          navigator.serviceWorker.getRegistrations().then(function(regs){
+            regs.forEach(function(r){ r.update(); });
+          });
+        }
+      })();
+    </script>
+    <noscript>You need to enable JavaScript to run Syrabit.ai. Please enable JavaScript in your browser settings.</noscript>
+    <div id="root"></div>
+        <!--
+      This HTML file is a template.
+      If you open it directly in the browser, you will see an empty page.
+
+      You can add webfonts, meta tags, or analytics to this file.
+      The build step will place the bundled scripts into the <body> tag.
+
+      To begin the development, run `npm start` or `yarn start`.
+      To create a production bundle, use `npm run build` or `yarn build`.
+    -->
+        <script>
+            !(function (t, e) {
+                var o, n, p, r;
+                e.__SV ||
+                    ((window.posthog = e),
+                    (e._i = []),
+                    (e.init = function (i, s, a) {
+                        function g(t, e) {
+                            var o = e.split(".");
+                            2 == o.length && ((t = t[o[0]]), (e = o[1])),
+                                (t[e] = function () {
+                                    t.push(
+                                        [e].concat(
+                                            Array.prototype.slice.call(
+                                                arguments,
+                                                0,
+                                            ),
+                                        ),
+                                    );
+                                });
+                        }
+                        ((p = t.createElement("script")).type =
+                            "text/javascript"),
+                            (p.crossOrigin = "anonymous"),
+                            (p.async = !0),
+                            (p.src =
+                                s.api_host.replace(
+                                    ".i.posthog.com",
+                                    "-assets.i.posthog.com",
+                                ) + "/static/array.js"),
+                            (r =
+                                t.getElementsByTagName(
+                                    "script",
+                                )[0]).parentNode.insertBefore(p, r);
+                        var u = e;
+                        for (
+                            void 0 !== a ? (u = e[a] = []) : (a = "posthog"),
+                                u.people = u.people || [],
+                                u.toString = function (t) {
+                                    var e = "posthog";
+                                    return (
+                                        "posthog" !== a && (e += "." + a),
+                                        t || (e += " (stub)"),
+                                        e
+                                    );
+                                },
+                                u.people.toString = function () {
+                                    return u.toString(1) + ".people (stub)";
+                                },
+                                o =
+                                    "init me ws ys ps bs capture je Di ks register register_once register_for_session unregister unregister_for_session Ps getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey canRenderSurveyAsync identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty Es $s createPersonProfile Is opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing Ss debug xs getPageViewId captureTraceFeedback captureTraceMetric".split(
+                                        " ",
+                                    ),
+                                n = 0;
+                            n < o.length;
+                            n++
+                        )
+                            g(u, o[n]);
+                        e._i.push([i, s, a]);
+                    }),
+                    (e.__SV = 1));
+            })(document, window.posthog || []);
+            posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
+                api_host: "https://us.i.posthog.com",
+                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
+                session_recording: {
+                    recordCrossOriginIframes: true,
+                    capturePerformance: false,
+                },
+            });
+        </script>
+
+    </body>
+</html>

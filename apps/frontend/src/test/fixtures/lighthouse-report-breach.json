@@ -1,0 +1,39 @@
+{
+  "requestedUrl": "https://syrabit.ai/",
+  "finalUrl": "https://syrabit.ai/",
+  "fetchTime": "2026-05-01T07:00:00.000Z",
+  "lighthouseVersion": "12.0.0",
+  "audits": {
+    "largest-contentful-paint": {
+      "id": "largest-contentful-paint",
+      "title": "Largest Contentful Paint",
+      "score": 0.24,
+      "numericValue": 4200,
+      "numericUnit": "millisecond",
+      "displayValue": "4.2 s"
+    },
+    "cumulative-layout-shift": {
+      "id": "cumulative-layout-shift",
+      "title": "Cumulative Layout Shift",
+      "score": 0.51,
+      "numericValue": 0.28,
+      "numericUnit": "unitless",
+      "displayValue": "0.28"
+    },
+    "interaction-to-next-paint": {
+      "id": "interaction-to-next-paint",
+      "title": "Interaction to Next Paint",
+      "score": 0.53,
+      "numericValue": 320,
+      "numericUnit": "millisecond",
+      "displayValue": "320 ms"
+    }
+  },
+  "categories": {
+    "performance": {
+      "id": "performance",
+      "title": "Performance",
+      "score": 0.41
+    }
+  }
+}
