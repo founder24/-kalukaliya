@@ -10,19 +10,19 @@ class Settings(BaseSettings):
     Strict typing enforced via Pydantic
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra='forbid')
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra='ignore')
 
-    # --- P1: Cloudflare (Edge) ---
-    CF_ACCOUNT_ID: str
-    CF_API_TOKEN: str
-    CF_TURNSTILE_SECRET: str
+    # --- P1: Cloudflare (Edge) — not used at runtime by backend, only by edge worker ---
+    CF_ACCOUNT_ID: Optional[str] = None
+    CF_API_TOKEN: Optional[str] = None
+    CF_TURNSTILE_SECRET: Optional[str] = None
     CF_R2_BUCKET: str = "syrabit-assets"
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
 
-    # --- P2: Azure Compute (Backend) ---
-    AZURE_SUBSCRIPTION_ID: str
+    # --- P2: Azure Compute (Backend) — metadata, not used in request handling ---
+    AZURE_SUBSCRIPTION_ID: Optional[str] = None
     AZURE_RESOURCE_GROUP: str = "rg-syrabit-prod"
     AZURE_CONTAINER_APP_NAME: str = "ca-syrabit-api"
     AZURE_LOG_ANALYTICS_WORKSPACE: str = "law-syrabit"
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
-    RAZORPAY_WEBHOOK_SECRET: str
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
     RAZORPAY_PLAN_ID: str = "plan_pro_monthly"
     RAZORPAY_CURRENCY: str = "INR"
 
