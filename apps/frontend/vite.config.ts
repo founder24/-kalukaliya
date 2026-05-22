@@ -7,4 +7,8 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  server: {
+    host: true,
+    allowedHosts: ['.e2b.app'],
+  },
 })

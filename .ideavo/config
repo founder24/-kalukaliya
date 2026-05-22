@@ -1,0 +1,78 @@
+{
+  "systemSetup": [
+    {
+      "name": "Install pnpm",
+      "command": "npm install -g pnpm"
+    }
+  ],
+  "templateName": "custom",
+  "projectDependencies": [
+    {
+      "name": "Install Dependencies",
+      "command": "pnpm install"
+    },
+    {
+      "name": "Install Python Dependencies",
+      "command": "cd apps/backend && pip install -r requirements.txt"
+    }
+  ],
+  "codeChecks": [
+    {
+      "name": "Type Check Frontend",
+      "command": "pnpm --filter syrabit-frontend exec tsc --noEmit"
+    },
+    {
+      "name": "Type Check Edge",
+      "command": "pnpm --filter syrabit-edge exec tsc --noEmit"
+    }
+  ],
+  "buildSteps": [
+    {
+      "name": "Build Frontend",
+      "command": "pnpm --filter syrabit-frontend run build"
+    },
+    {
+      "name": "Build Edge Worker",
+      "command": "pnpm --filter syrabit-edge run build"
+    }
+  ],
+  "runStep": [
+    {
+      "name": "Run Frontend Dev Server",
+      "command": "pnpm --filter syrabit-frontend run dev --port 3000 --host",
+      "port": "3000"
+    }
+  ],
+  "deploySteps": [
+    {
+      "name": "Build Frontend",
+      "command": "pnpm --filter syrabit-frontend run build"
+    },
+    {
+      "name": "Deploy Edge Worker",
+      "command": "pnpm --filter syrabit-edge run deploy"
+    }
+  ],
+  "cleanupFiles": [
+    "node_modules",
+    "apps/frontend/node_modules",
+    "apps/frontend/dist",
+    "apps/edge/node_modules",
+    "apps/edge/.wrangler",
+    "apps/backend/__pycache__",
+    "apps/backend/.pytest_cache",
+    "apps/backend/app/__pycache__",
+    "apps/backend/tests/__pycache__"
+  ],
+  "packageManager": "pnpm",
+  "envPaths": [
+    {
+      "name": "root",
+      "path": ".env"
+    },
+    {
+      "name": "backend",
+      "path": "apps/backend/.env"
+    }
+  ]
+}
