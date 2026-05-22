@@ -45,8 +45,8 @@
   ],
   "deploySteps": [
     {
-      "name": "Build Frontend",
-      "command": "pnpm --filter syrabit-frontend run build"
+      "name": "Deploy Frontend to Cloudflare Pages",
+      "command": "pnpm --filter syrabit-frontend run build && wrangler pages deploy apps/frontend/dist --project-name=syrabit-frontend"
     },
     {
       "name": "Deploy Edge Worker",
