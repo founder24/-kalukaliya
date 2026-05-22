@@ -1,9 +1,10 @@
 name: PR Lockfile Refresh + Frontend Build Verification
 
 # This workflow runs on PRs that touch package manifests or the lockfile.
-# It regenerates pnpm-lock.yaml against the latest registry data, builds the
-# frontend to verify the upgrade is clean, and pushes the refreshed lockfile
-# back to the PR branch when it changes.
+# It regenerates pnpm-lock.yaml against the live registry, builds the
+# frontend to verify the upgrade is clean, posts a status comment with
+# resolved versions and outcomes, and pushes the refreshed lockfile back
+# to the PR branch when both install and build succeed.
 
 on:
   pull_request:
@@ -45,27 +46,119 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: pnpm version
-        run: pnpm --version
+        id: pnpm_version
+        run: |
+          PNPM_V=$(pnpm --version)
+          echo "version=$PNPM_V" >> "$GITHUB_OUTPUT"
 
       - name: Install (regenerate lockfile)
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Show resolved versions for vite / esbuild / ws
+        id: install
+        continue-on-error: true
         run: |
-          echo "::group::vite"
-          pnpm --filter syrabit-frontend why vite || true
-          echo "::endgroup::"
-          echo "::group::esbuild"
-          pnpm why -r esbuild || true
-          echo "::endgroup::"
-          echo "::group::ws"
-          pnpm why -r ws || true
-          echo "::endgroup::"
+          set -o pipefail
+          pnpm install --no-frozen-lockfile 2>&1 | tee install.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Capture resolved versions
+        id: versions
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p .ci-out
+          pnpm --filter syrabit-frontend why vite      > .ci-out/why-vite.txt 2>&1 || true
+          pnpm why -r esbuild                          > .ci-out/why-esbuild.txt 2>&1 || true
+          pnpm why -r ws                               > .ci-out/why-ws.txt 2>&1 || true
+          # Pull the actually installed versions
+          {
+            echo "vite (frontend):"
+            grep -m1 -E "^vite[ @]" .ci-out/why-vite.txt || echo "  (not resolved)"
+            echo
+            echo "esbuild (any):"
+            grep -m5 -E "^esbuild[ @]" .ci-out/why-esbuild.txt || echo "  (not resolved)"
+            echo
+            echo "ws (any):"
+            grep -m5 -E "^ws[ @]" .ci-out/why-ws.txt || echo "  (not resolved)"
+          } > .ci-out/summary.txt
 
       - name: Build frontend
-        run: pnpm --filter syrabit-frontend run build
+        id: build
+        if: steps.install.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm --filter syrabit-frontend run build 2>&1 | tee build.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Post status comment to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const read = (p, n=120) => {
+              try {
+                const content = fs.readFileSync(p, 'utf8');
+                const lines = content.split('\n');
+                if (lines.length <= n) return content;
+                return lines.slice(-n).join('\n');
+              } catch (e) { return `(missing: ${p})`; }
+            };
+            const installOk  = '${{ steps.install.outputs.exit_code }}' === '0';
+            const buildSkipped = '${{ steps.build.outcome }}' === 'skipped';
+            const buildOk    = '${{ steps.build.outputs.exit_code }}' === '0';
+            const summary    = read('.ci-out/summary.txt', 60);
+            const installTail = read('install.log', 80);
+            const buildTail   = buildSkipped ? '(skipped because install failed)' : read('build.log', 80);
+            const body = [
+              '### PR Lockfile Refresh + Frontend Build Report',
+              '',
+              `- pnpm version: \`${{ steps.pnpm_version.outputs.version }}\``,
+              `- \`pnpm install --no-frozen-lockfile\`: ${installOk ? '✅ ok' : '❌ failed'}`,
+              `- \`pnpm --filter syrabit-frontend run build\`: ${buildSkipped ? '⏭️ skipped' : (buildOk ? '✅ ok' : '❌ failed')}`,
+              '',
+              '#### Resolved versions',
+              '```',
+              summary,
+              '```',
+              '',
+              '<details><summary>install.log (tail)</summary>',
+              '',
+              '```',
+              installTail,
+              '```',
+              '</details>',
+              '',
+              '<details><summary>build.log (tail)</summary>',
+              '',
+              '```',
+              buildTail,
+              '```',
+              '</details>',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const me = comments.find(c =>
+              c.user && c.user.login === 'github-actions[bot]' &&
+              c.body && c.body.startsWith('### PR Lockfile Refresh'));
+            if (me) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: me.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body,
+              });
+            }
 
       - name: Commit refreshed lockfile if changed
+        if: steps.install.outputs.exit_code == '0' && steps.build.outputs.exit_code == '0'
         run: |
           if [[ -n "$(git status --porcelain pnpm-lock.yaml)" ]]; then
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -79,3 +172,9 @@ versions resolved on this CI run."
           else
             echo "pnpm-lock.yaml is already up to date with the new constraints."
           fi
+
+      - name: Fail if install or build failed
+        if: steps.install.outputs.exit_code != '0' || (steps.build.outcome != 'skipped' && steps.build.outputs.exit_code != '0')
+        run: |
+          echo "Install or build failed. See PR comment for details."
+          exit 1
