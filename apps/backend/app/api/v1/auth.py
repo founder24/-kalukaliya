@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime, timedelta
@@ -91,7 +91,7 @@ def create_reset_token(user_id: str) -> str:
 # ─── Auth Dependencies ───────────────────────────────────────────────────────
 
 
-async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> User:
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
     """Get current user from JWT token (required — raises 401 if invalid)"""
     token = credentials.credentials
     try:
@@ -118,7 +118,7 @@ security_optional = HTTPBearer(auto_error=False)
 
 
 async def get_current_user_optional(
-    credentials: Optional[HTTPAuthCredentials] = Depends(security_optional),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
 ) -> Optional[User]:
     """
     Get current user from JWT token if present.
