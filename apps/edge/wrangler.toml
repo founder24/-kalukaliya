@@ -27,9 +27,13 @@ name = "syrabitworker-prod"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
+id = "2983094e249d4094b66e4b9dacc38719"
+preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET
 # - CF_TURNSTILE_SECRET
+
+[env.production.vars]
+AZURE_BACKEND_URL = "https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io"
+ALLOWED_ORIGIN = "https://syrabit.ai"
