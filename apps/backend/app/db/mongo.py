@@ -4,6 +4,7 @@ from beanie import init_beanie
 from app.config import settings
 from app.models.user import User
 from app.models.chat import Chat
+from app.models.feedback import ChatFeedback
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ async def init_mongo() -> None:
         # Initialize Beanie with document models
         await init_beanie(
             database=_client[settings.MONGODB_DB_NAME],
-            document_models=[User, Chat],
+            document_models=[User, Chat, ChatFeedback],
         )
         
         # Create indexes

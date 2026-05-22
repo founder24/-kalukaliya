@@ -1,5 +1,7 @@
 import httpx
+import json
 import logging
+from typing import AsyncGenerator
 
 from app.config import settings
 
@@ -61,8 +63,7 @@ class VertexAIClient:
         # In production, use google.auth library with service account
         # This is a placeholder - implement proper auth
         from google.oauth2 import service_account
-        import json
-        
+
         creds = service_account.Credentials.from_service_account_info(
             settings.google_credentials,
             scopes=["https://www.googleapis.com/auth/cloud-platform"]
@@ -74,6 +75,64 @@ class VertexAIClient:
         creds.refresh(request)
         
         return creds.token
+
+    async def stream_generate(
+        self,
+        system_prompt: str,
+        user_message: str,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream response using Gemini streamGenerateContent endpoint.
+
+        Yields text chunks as they arrive via SSE.
+        Uses ?alt=sse to get Server-Sent Events format from Vertex AI.
+        """
+        full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
+
+        url = f"{self.base_url}/{self.model}:streamGenerateContent?alt=sse"
+        headers = {
+            "Authorization": f"Bearer {await self._get_access_token()}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "contents": [{"parts": [{"text": full_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 2048,
+            },
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        raw = line[6:].strip()
+                        if not raw:
+                            continue
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # Extract text from Gemini SSE response
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            continue
+                        content = candidates[0].get("content", {})
+                        parts = content.get("parts", [])
+                        for part in parts:
+                            text = part.get("text", "")
+                            if text:
+                                yield text
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
+            raise RuntimeError(f"Vertex AI stream failed: HTTP {e.response.status_code}")
+        except Exception as e:
+            logger.error(f"Vertex AI stream error: {str(e)}")
+            raise RuntimeError(f"Vertex AI stream failed: {e}")
 
 
 # Singleton instance
