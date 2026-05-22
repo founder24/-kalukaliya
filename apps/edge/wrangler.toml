@@ -11,16 +11,24 @@ ALLOWED_ORIGIN = "https://syrabit.ai"
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
 
-[[kv_namespaces]]
-binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
+# KV bindings are scoped to the production env so that local builds and
+# `wrangler deploy --dry-run` don't require a real namespace ID. Before the
+# first real production deploy you MUST:
+#   1. npx wrangler kv:namespace create RATE_LIMIT_KV
+#   2. npx wrangler kv:namespace create RATE_LIMIT_KV --preview
+#   3. Replace the placeholder ids in [env.production] below with the values
+#      that the two commands above print.
 
 [triggers]
 crons = []
 
 [env.production]
 name = "syrabitworker-prod"
+
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
 
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET
