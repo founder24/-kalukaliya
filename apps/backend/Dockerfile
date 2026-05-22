@@ -9,7 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Fix: pytest-asyncio 0.26 requires pytest<9, but requirements.txt pins pytest==9.0.3.
+# Strip the conflicting pytest-asyncio block, install everything else, then add a compatible version.
+RUN sed -i '/^pytest-asyncio==0\.26\.0/,/^[^ #]/{ /^pytest-asyncio/d; /^    --hash/d; /^    #/d; }' requirements.txt \
+    && pip install --no-cache-dir --user -r requirements.txt \
+    && pip install --no-cache-dir --user "pytest-asyncio>=1.0,<2"
 
 FROM python:3.11-slim
 
