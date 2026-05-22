@@ -16,6 +16,10 @@ async def init_mongo() -> None:
     """Initialize MongoDB connection pool with Beanie ODM"""
     global _client
     
+    if not settings.MONGODB_URI:
+        logger.warning("MONGODB_URI not set — MongoDB disabled")
+        return
+    
     try:
         _client = MongoClient(
             settings.MONGODB_URI,

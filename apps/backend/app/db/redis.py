@@ -11,6 +11,10 @@ async def init_redis() -> None:
     """Initialize Upstash Redis connection"""
     global _redis
     
+    if not settings.UPSTASH_REDIS_REST_URL or not settings.UPSTASH_REDIS_REST_TOKEN:
+        logger.warning("UPSTASH_REDIS_REST_URL/TOKEN not set — Redis disabled")
+        return
+    
     try:
         _redis = Redis(
             url=settings.UPSTASH_REDIS_REST_URL,
