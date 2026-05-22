@@ -1,14 +1,16 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Optional, List
 import logging
 import time
+from datetime import datetime, timedelta
 
 from app.config import settings
 from app.models.user import User
 from app.services.ai.router import detect_language_and_route
 from app.services.search.azure_search import search_service
 from app.db.redis import get_redis
+from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +30,21 @@ class ChatResponse(BaseModel):
     sources: List[dict] = []
 
 
-async def check_rate_limit(user_id: str, user_tier: str) -> bool:
+async def check_rate_limit(user_id: str, user_tier: str, client_ip: str = None) -> bool:
     """Check if user has exceeded rate limit"""
     redis = get_redis()
     
     limit = settings.RATE_LIMIT_PRO_TIER if user_tier == "pro" else settings.RATE_LIMIT_FREE_TIER
-    key = f"rate:{user_id}:{time.strftime('%Y-%m')}"
+    
+    # Use IP-based tracking for anonymous users to prevent quota collision
+    if user_id == "anonymous" and client_ip:
+        key = f"rate_anon:{client_ip}:{time.strftime('%Y-%m')}"
+    else:
+        key = f"rate:{user_id}:{time.strftime('%Y-%m')}"
     
     current_count = await redis.incr(key)
     if current_count == 1:
         # Set expiry to end of month
-        from datetime import datetime
         next_month = datetime.now().replace(day=28) + timedelta(days=4)
         expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
         ttl = int(expire_at.timestamp() - time.time())
@@ -48,19 +54,26 @@ async def check_rate_limit(user_id: str, user_tier: str) -> bool:
 
 
 @router.post("/", response_model=ChatResponse)
-async def chat(request: ChatRequest, user: User = None):
+async def chat(
+    request: ChatRequest,
+    user: User = Depends(get_current_user),
+    http_request: Request = None
+):
     """
     Main chat endpoint with RAG and streaming support
     Handles language detection, hybrid search, and LLM routing
     """
     start_time = time.time()
     
-    # Determine user tier
-    user_tier = user.subscription_tier if user else "free"
-    user_id = str(user.id) if user else request.session_id or "anonymous"
+    # Get client IP for anonymous rate limiting
+    client_ip = http_request.client.host if http_request and hasattr(http_request, 'client') else None
+    
+    # User tier and ID (user guaranteed to exist via dependency injection)
+    user_tier = user.subscription_tier if hasattr(user, 'subscription_tier') else "free"
+    user_id = str(user.id)
     
     # Check rate limit
-    if not await check_rate_limit(user_id, user_tier):
+    if not await check_rate_limit(user_id, user_tier, client_ip):
         raise HTTPException(
             status_code=429, 
             detail="Rate limit exceeded. Upgrade to Pro for unlimited messages."

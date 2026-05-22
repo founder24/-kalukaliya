@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi.security import HTTPBearer, HTTPAuthCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, timedelta
@@ -11,6 +12,7 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Authentication"])
+security = HTTPBearer()
 
 
 class LoginRequest(BaseModel):
@@ -44,13 +46,19 @@ def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-async def get_current_user(token: str = Depends(lambda: None)) -> User:
-    """Get current user from JWT token (placeholder - implement proper dependency)"""
+async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> User:
+    """Get current user from JWT token"""
+    token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         user_id = payload.get("sub")
+        token_type = payload.get("type")
+        
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
+        
+        if token_type != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
         
         user = await User.get(user_id)
         if not user:
@@ -106,8 +114,23 @@ async def login(request: LoginRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(refresh_token: str):
+async def refresh_token(refresh_token: str, request = None):
     """Refresh access token using refresh token"""
+    # Rate limit refresh endpoint (10 attempts per minute per IP)
+    if request:
+        from app.db.redis import get_redis
+        import time
+        redis = get_redis()
+        client_ip = request.client.host if hasattr(request, 'client') else "unknown"
+        rate_key = f"refresh_limit:{client_ip}:{int(time.time() // 60)}"
+        
+        attempt_count = await redis.incr(rate_key)
+        if attempt_count == 1:
+            await redis.expire(rate_key, 60)
+        
+        if attempt_count > 10:
+            raise HTTPException(status_code=429, detail="Too many refresh attempts. Try again later.")
+    
     try:
         payload = jwt.decode(refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         if payload.get("type") != "refresh":
