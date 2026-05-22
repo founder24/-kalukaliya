@@ -68,7 +68,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Authenticate to GCP (OIDC)
         uses: google-github-actions/auth@v2
@@ -77,7 +77,7 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Authenticate to Azure
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -118,7 +118,7 @@ jobs:
     # Edge worker doesn't depend on LLM endpoints — it only proxies. Don't
     # block its deploy on validate-endpoints (which needs GCP/Azure secrets).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -153,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     # Frontend is a static SPA — doesn't need LLM endpoints to build/deploy.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:

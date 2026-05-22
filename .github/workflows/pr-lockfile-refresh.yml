@@ -23,13 +23,17 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  # Opt into Node.js 24 early to avoid deprecation warnings (Node 20 EOL: Sep 2026)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   refresh-and-build:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR head branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -75,8 +79,8 @@ jobs:
             git add pnpm-lock.yaml
             git commit -m "chore: regenerate pnpm-lock.yaml after security upgrades
 
-Auto-committed by pr-lockfile-refresh workflow against the registry
-versions resolved on this CI run."
+          Auto-committed by pr-lockfile-refresh workflow against the registry
+          versions resolved on this CI run."
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           else
             echo "pnpm-lock.yaml is already up to date with the new constraints."
