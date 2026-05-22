@@ -13,7 +13,8 @@ COPY requirements.txt .
 # Strip the conflicting pytest-asyncio block, install everything else, then add a compatible version.
 RUN sed -i '/^pytest-asyncio==0\.26\.0/,/^[^ #]/{ /^pytest-asyncio/d; /^    --hash/d; /^    #/d; }' requirements.txt \
     && pip install --no-cache-dir --user -r requirements.txt \
-    && pip install --no-cache-dir --user "pytest-asyncio>=1.0,<2"
+    && pip install --no-cache-dir --user "pytest-asyncio>=1.0,<2" \
+    && pip install --no-cache-dir --user "email-validator>=2.0"
 
 FROM python:3.11-slim
 
