@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Update apps/frontend/package.json with all dependencies from the original frontend to ensure the recovered code can build. The original package.json at artifacts/syrabit/package.json lists all required deps. Some used 'catalog:' references (workspace protocol) which need to be replaced with actual version numbers. Also update scripts to match original.",
+  "status": "pending",
+  "steps": [
+    "Step 1: Read the full original package.json from git show 663d43b0:artifacts/syrabit/package.json",
+    "Step 2: Update apps/frontend/package.json name to '@workspace/syrabit' and version to '2.1.0'",
+    "Step 3: Add all production dependencies with resolved versions (replace 'catalog:' refs with actual versions): @mdxeditor/editor ^3.53.1, @radix-ui/react-accordion ^1.2.8, @radix-ui/react-dropdown-menu ^2.1.12, @radix-ui/react-label ^2.1.4, @radix-ui/react-slot ^1.2.0, @radix-ui/react-switch ^1.2.2, @radix-ui/react-tooltip ^1.2.4, @supabase/supabase-js ^2.105.1, @tanstack/react-query ^5.60.0, @tanstack/react-virtual ^3.13.23, axios ^1.15.2, class-variance-authority ^0.7.1, clsx ^2.1.1, date-fns ^4.1.0, dompurify ^3.4.1, firebase ^10.14.1, lamejs ^1.2.1, lucide-react ^0.460.0, react ^18.3.1, react-dom ^18.3.1, react-helmet-async 3.0.0, react-markdown ^8.0.7, react-router-dom ^7.5.1, recharts ^3.6.0, rehype-sanitize ^6.0.0, remark-gfm ^3.0.1, sonner ^2.0.3, tailwind-merge ^2.6.0, tailwindcss-animate ^1.0.7, web-vitals ^5.2.0",
+    "Step 4: Add all devDependencies: @playwright/test ^1.59.1, @testing-library/dom ^10.4.1, @testing-library/jest-dom ^6.9.1, @testing-library/react ^16.3.2, @types/node ^22.0.0, @types/react ^18.3.3, @types/react-dom ^18.3.0, @vitejs/plugin-react ^4.7.0, autoprefixer ^10.4.20, beasties ^0.4.2, jest-axe ^10.0.0, jsdom ^29.0.2, playwright ^1.59.1, postcss ^8.4.49, rollup-plugin-visualizer ^7.0.1, tailwindcss ^3.4.17, typescript ~5.9.2, vite ^7.3.2, vitest ^4.1.4",
+    "Step 5: Update scripts section to match the original: dev (vite --port ${PORT:-25144} --host 0.0.0.0), build (node scripts/build.mjs), build:client (vite build), build:ssr (vite build --ssr src/entry-server.jsx --outDir dist-ssr --emptyOutDir), preview (vite preview), typecheck (tsc --noEmit), test (vitest run)",
+    "Step 6: Ensure 'type': 'module' is set in package.json",
+    "Step 7: Run npm install in apps/frontend/ to install all dependencies and generate a lockfile"
+  ],
+  "acceptance_criteria": [
+    "apps/frontend/package.json contains all 30+ production dependencies from the original",
+    "apps/frontend/package.json contains all devDependencies including vitest, playwright, testing-library",
+    "apps/frontend/package.json scripts include dev, build, test, typecheck commands",
+    "No 'catalog:' references remain - all replaced with actual semver versions",
+    "npm install succeeds without errors (or only peer dep warnings)"
+  ],
+  "verification": [
+    "Run: node -e \"const p=require('./apps/frontend/package.json'); console.log(Object.keys(p.dependencies).length)\" - should show 30+",
+    "Run: grep -c 'catalog:' apps/frontend/package.json - should be 0",
+    "Run: grep 'react-router-dom' apps/frontend/package.json - should show the dependency",
+    "Run: grep '@tanstack/react-query' apps/frontend/package.json - should show the dependency",
+    "Run: grep '@supabase/supabase-js' apps/frontend/package.json - should show the dependency"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

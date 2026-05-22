@@ -1,0 +1,9 @@
+{
+  "_comment": "Build-time cache for Trustpilot aggregate-rating JSON-LD (Task #729 / #747). Updated automatically on every successful fetch by scripts/inject-trustpilot-jsonld.mjs. Committed to the repo so the build still ships a sane aggregate when the live source is unreachable. The values below were sourced from the public Trustpilot profile at https://www.trustpilot.com/review/syrabit.ai on 2026-04-23 because the production container's egress is blocked by Trustpilot's CloudFront/WAF (Task #747). Refresh by either: (a) running a build from an environment that CAN reach api.trustpilot.com (the script will overwrite this file), (b) setting TRUSTPILOT_AGGREGATE_OVERRIDE_JSON='{\"ratingValue\":4.1,\"ratingCount\":7}' before `pnpm build` (the override path persists too), or (c) editing this file by hand and committing. Set ratingValue + ratingCount to null to disable injection until the next successful fetch.",
+  "ratingValue": 4.1,
+  "ratingCount": 7,
+  "bestRating": 5,
+  "worstRating": 1,
+  "fetched_at": "2026-04-23T00:00:00.000Z",
+  "source": "manual_public_profile_snapshot"
+}

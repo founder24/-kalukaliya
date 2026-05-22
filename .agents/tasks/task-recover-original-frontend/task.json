@@ -1,0 +1,7 @@
+{
+  "task_id": "task-recover-original-frontend",
+  "task_description": "Recover the full-featured original frontend from commit 663d43b0 (artifacts/syrabit/) and update the current apps/frontend/ to match it. The original had 377 source files with full routing, auth, library browsing, chat, history, profile, pricing pages, bilingual support, and purple/violet design system. The current frontend is a barebones 18-file chat prototype.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}
