@@ -102,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
+    app.include_router(health.router, prefix="/api/health", tags=["Health"])  # Legacy probe path
     app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
 

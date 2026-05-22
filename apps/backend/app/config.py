@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     RAZORPAY_CURRENCY: str = "INR"
 
     # --- P9: Resend (Email) ---
-    RESEND_API_KEY: str
+    RESEND_API_KEY: Optional[str] = None
     RESEND_FROM_ADDRESS: str = "noreply@syrabit.ai"
     RESEND_FROM_NAME: str = "Syrabit Education"
 

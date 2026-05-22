@@ -5,8 +5,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize Resend client
-resend.api_key = settings.RESEND_API_KEY
+# Initialize Resend client (graceful no-op if API key is not set)
+if settings.RESEND_API_KEY:
+    resend.api_key = settings.RESEND_API_KEY
+else:
+    logger.warning("RESEND_API_KEY not set — email sending will be disabled")
 
 
 async def send_welcome_email(email: str, name: str = None) -> bool:
