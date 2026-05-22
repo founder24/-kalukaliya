@@ -47,7 +47,7 @@ def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
 
 
 async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> User:
-    """Get current user from JWT token"""
+    """Get current user from JWT token (required — raises 401 if invalid)"""
     token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
@@ -66,6 +66,41 @@ async def get_current_user(credentials: HTTPAuthCredentials = Depends(security))
         return user
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+# Optional security scheme — does NOT raise if header is missing
+security_optional = HTTPBearer(auto_error=False)
+
+
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthCredentials] = Depends(security_optional),
+) -> Optional[User]:
+    """
+    Get current user from JWT token if present.
+    Returns None for anonymous/unsigned users (no 401 raised).
+
+    Use this for endpoints that serve both authenticated and anonymous users
+    (e.g., chat with free-tier rate limiting by IP).
+    """
+    if credentials is None:
+        return None
+
+    token = credentials.credentials
+    if not token:
+        return None
+
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        token_type = payload.get("type")
+
+        if not user_id or token_type != "access":
+            return None
+
+        user = await User.get(user_id)
+        return user  # May be None if user deleted
+    except JWTError:
+        return None
 
 
 @router.post("/signup", response_model=TokenResponse)

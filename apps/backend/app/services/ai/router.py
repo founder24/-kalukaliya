@@ -1,5 +1,6 @@
 import re
 import logging
+from typing import AsyncGenerator
 
 from app.config import settings
 
@@ -72,3 +73,39 @@ async def generate_response(
             model=model,
             stream=stream
         )
+
+
+
+async def stream_response(
+    system_prompt: str,
+    user_message: str,
+    model: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream response from the appropriate AI client based on model name.
+
+    Routes to:
+    - Sarvam AI (with retry) for Assamese models (sarvam, openhathi, saaras)
+    - Vertex AI for English/Gemini models
+
+    Yields text chunks as they arrive from the provider.
+    Raises RuntimeError on failure (caller handles fallback).
+    """
+    if "sarvam" in model.lower() or "openhathi" in model.lower() or "saaras" in model.lower():
+        from app.services.ai.sarvam_client import sarvam_client
+
+        logger.info(f"Streaming from Sarvam AI (model={model})")
+        async for chunk in sarvam_client.stream_generate_with_retry(
+            system_prompt=system_prompt,
+            user_message=user_message,
+        ):
+            yield chunk
+    else:
+        from app.services.ai.vertex_client import vertex_client
+
+        logger.info(f"Streaming from Vertex AI (model={model})")
+        async for chunk in vertex_client.stream_generate(
+            system_prompt=system_prompt,
+            user_message=user_message,
+        ):
+            yield chunk

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
-from app.api.v1 import chat, auth, subscription, users, health
+from app.api.v1 import chat, auth, subscription, users, health, feedback
 from app.api.webhooks import razorpay
 
 
@@ -92,12 +92,17 @@ def create_app() -> FastAPI:
             response.headers["X-Request-ID"] = request_id
             return response
 
+    # Initialize OpenTelemetry (no-op if packages not installed)
+    from app.core.telemetry import init_telemetry
+    init_telemetry(app)
+
     # Register Routes
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
+    app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
 
     return app

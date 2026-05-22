@@ -5,13 +5,23 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 AZURE_BACKEND_URL = "https://ca-syrabit-api.azurecontainerapps.io"
+ALLOWED_ORIGIN = "https://syrabit.ai"
 
 [[r2_buckets]]
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
 
 [triggers]
 crons = []
 
 [env.production]
 name = "syrabitworker-prod"
+
+# Secrets (set via: npx wrangler secret put <NAME>):
+# - JWT_SECRET
+# - CF_TURNSTILE_SECRET
