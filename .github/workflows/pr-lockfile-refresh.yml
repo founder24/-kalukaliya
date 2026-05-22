@@ -4,6 +4,11 @@ name: PR Lockfile Refresh + Frontend Build Verification
 # It regenerates pnpm-lock.yaml against the latest registry data, builds the
 # frontend to verify the upgrade is clean, and pushes the refreshed lockfile
 # back to the PR branch when it changes.
+#
+# NOTE: GitHub's Actions tab may show "Failure" entries for this workflow on
+# push-to-main commits. Those are cosmetic — the workflow only actually
+# executes on pull_request events. The "failures" are GitHub evaluating the
+# workflow file and finding the event doesn't match (no actual job runs).
 
 on:
   pull_request:
@@ -19,11 +24,12 @@ permissions:
   pull-requests: write
 
 env:
+  # Opt into Node.js 24 early to avoid deprecation warnings (Node 20 EOL: Sep 2026)
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   refresh-and-build:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR head branch
