@@ -155,7 +155,7 @@ jobs:
       - name: Install dependencies
         run: |
           corepack enable
-          pnpm install
+          pnpm install --no-frozen-lockfile
         working-directory: apps/frontend
 
       - name: Build
