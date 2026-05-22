@@ -38,9 +38,9 @@
   ],
   "runStep": [
     {
-      "name": "Run Frontend Dev Server",
-      "command": "pnpm --filter syrabit-frontend run dev --port 3000 --host",
-      "port": "3000"
+      "name": "Run Backend Dev Server",
+      "command": "bash /home/user/project/start-backend.sh",
+      "port": "4000"
     }
   ],
   "deploySteps": [
