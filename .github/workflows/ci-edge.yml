@@ -25,13 +25,17 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Dependencies
+        # --no-frozen-lockfile: PR #39 added frontend deps without regenerating
+        # pnpm-lock.yaml. Until the lockfile is regenerated locally and
+        # committed, allow CI to resolve missing entries on the fly.
         run: pnpm install --no-frozen-lockfile
 
       - name: Build Edge Worker
-        run: pnpm --filter syrabit-edge run build
+        # Build against the production env (where KV bindings live).
+        run: pnpm --filter syrabit-edge exec wrangler deploy --dry-run --env production --config apps/edge/wrangler.toml
 
       - name: Deploy Worker
-        run: npx wrangler versions upload --config apps/edge/wrangler.toml
+        run: pnpm --filter syrabit-edge exec wrangler versions upload --env production --config apps/edge/wrangler.toml
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
