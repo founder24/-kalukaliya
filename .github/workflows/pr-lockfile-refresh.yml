@@ -1,15 +1,5 @@
 name: PR Lockfile Refresh + Frontend Build Verification
 
-# This workflow runs on PRs that touch package manifests or the lockfile.
-# It regenerates pnpm-lock.yaml against the latest registry data, builds the
-# frontend to verify the upgrade is clean, and pushes the refreshed lockfile
-# back to the PR branch when it changes.
-#
-# NOTE: GitHub's Actions tab may show "Failure" entries for this workflow on
-# push-to-main commits. Those are cosmetic — the workflow only actually
-# executes on pull_request events. The "failures" are GitHub evaluating the
-# workflow file and finding the event doesn't match (no actual job runs).
-
 on:
   pull_request:
     branches: [main]
@@ -55,7 +45,7 @@ jobs:
       - name: Show resolved versions for vite / esbuild / ws
         run: |
           echo "::group::vite"
-          pnpm --filter syrabit-frontend why vite || true
+          pnpm --filter @workspace/syrabit why vite || true
           echo "::endgroup::"
           echo "::group::esbuild"
           pnpm why -r esbuild || true
@@ -65,7 +55,11 @@ jobs:
           echo "::endgroup::"
 
       - name: Build frontend
-        run: pnpm --filter syrabit-frontend run build
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          VITE_BACKEND_URL: https://api.syrabit.ai
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: placeholder
 
       - name: Commit refreshed lockfile if changed
         run: |
@@ -73,10 +67,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git config user.name "github-actions[bot]"
             git add pnpm-lock.yaml
-            git commit -m "chore: regenerate pnpm-lock.yaml after security upgrades
-
-Auto-committed by pr-lockfile-refresh workflow against the registry
-versions resolved on this CI run."
+            git commit -m "chore: regenerate pnpm-lock.yaml"
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           else
             echo "pnpm-lock.yaml is already up to date with the new constraints."
