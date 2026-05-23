@@ -27,30 +27,16 @@ module containerApp './container-app.bicep' = {
   }
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
-  name: 'syrabitassets${uniqueString(resourceGroup.id)}'
-  location: location
-  sku: {
-    name: 'Standard_LRS'
-  }
-  kind: 'StorageV2'
-  properties: {
-    accessTier: 'Hot'
-  }
-}
-
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: 'syrabit-kv'
-  location: location
-  properties: {
-    tenantId: subscription().tenantId
-    accessPolicies: []
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
+module sharedResources './shared-resources.bicep' = {
+  scope: resourceGroup
+  name: 'syrabit-shared'
+  params: {
+    location: location
+    resourceGroupId: resourceGroup.id
   }
 }
 
 output searchEndpoint string = searchService.outputs.endpoint
 output containerAppUrl string = containerApp.outputs.url
+output storageAccountName string = sharedResources.outputs.storageAccountName
+output keyVaultUri string = sharedResources.outputs.keyVaultUri

@@ -388,3 +388,74 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/history")
+async def get_chat_history(
+    skip: int = 0,
+    limit: int = 20,
+    user: User = Depends(get_current_user),
+):
+    """Get paginated chat history for the current user"""
+    from app.models.chat import Chat
+
+    # Clamp limit to prevent abuse
+    limit = min(limit, 100)
+
+    chats = await Chat.find(
+        {"user_id": str(user.id)}
+    ).sort("-updated_at").skip(skip).limit(limit).to_list()
+
+    total = await Chat.find({"user_id": str(user.id)}).count()
+
+    return {
+        "chats": [
+            {
+                "id": str(chat.id),
+                "session_id": chat.session_id,
+                "title": chat.title,
+                "message_count": len(chat.messages),
+                "updated_at": chat.updated_at.isoformat(),
+            }
+            for chat in chats
+        ],
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": total,
+            "has_more": skip + limit < total,
+        }
+    }
+
+
+@router.get("/{session_id}/messages")
+async def get_chat_messages(
+    session_id: str,
+    skip: int = 0,
+    limit: int = 50,
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Get paginated messages for a specific chat session"""
+    from app.models.chat import Chat
+
+    chat = await Chat.find_one({"session_id": session_id})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # Verify ownership (if authenticated)
+    if user and chat.user_id and chat.user_id != str(user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Paginate messages
+    limit = min(limit, 200)
+    messages = chat.messages[skip:skip + limit]
+
+    return {
+        "messages": messages,
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": len(chat.messages),
+            "has_more": skip + limit < len(chat.messages),
+        }
+    }

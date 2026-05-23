@@ -1,3 +1,18 @@
+/**
+ * Supabase Client - Used ONLY for OAuth Social Login (Google).
+ *
+ * Auth Flow:
+ * 1. User clicks "Sign in with Google"
+ * 2. Supabase handles the OAuth redirect and returns a Supabase session
+ * 3. Frontend extracts Supabase access token
+ * 4. Frontend calls POST /api/v1/auth/google with the Supabase token
+ * 5. Backend verifies the Supabase token, creates/finds the user in MongoDB
+ * 6. Backend returns its own JWT (access_token + refresh_token)
+ * 7. Frontend stores the backend JWT for all subsequent API calls
+ *
+ * The Supabase session is NOT used for API authentication - only for
+ * initiating the OAuth flow. All API calls use the backend-issued JWT.
+ */
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;

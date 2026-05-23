@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
-from app.api.v1 import chat, auth, subscription, users, health, feedback
+from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
 from app.api.webhooks import razorpay
 
 
@@ -116,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/health", tags=["Health"])  # Legacy probe path
     app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
 
     return app
 
