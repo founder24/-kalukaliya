@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Phase 2+3: Backend code quality and performance fixes. Covers findings H-2, H-3, H-4, H-5, H-6, M-1, H-7, H-8, H-9, M-9.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/api/v1/health.py: Fix mongo_ping to use 'from app.db.mongo import get_mongo_client' then 'client = get_mongo_client()' and 'client.admin.command(\"ping\")' (sync, no await). Fix redis_ping to use 'from app.db.redis import get_redis' then 'redis = get_redis()' and 'result = await redis.ping()'. These fix H-2.",
     "In apps/backend/app/models/chat.py: Change 'class Message(Document)' to 'class Message(BaseModel)' and 'class RAGSource(Document)' to 'class RAGSource(BaseModel)'. Add 'from pydantic import BaseModel' import. Keep Chat as Document. Remove Indexed import if unused. This fixes H-3.",
@@ -39,5 +39,5 @@
     "python -m py_compile apps/backend/app/services/ai/sarvam_client.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 9 files pass py_compile. No environment issues encountered since pyenv was already configured from FEAT-001."
 }
