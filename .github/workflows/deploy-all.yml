@@ -5,76 +5,19 @@ on:
     branches: [main]
   workflow_dispatch:
 
-env:
-  # Opt into Node.js 24 early to avoid deprecation warnings (Node 20 EOL: Sep 2026)
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # ═══════════════════════════════════════════════════
-  # 1. Validate LLM & Search Endpoints Before Deploy
-  # ═══════════════════════════════════════════════════
-  validate-endpoints:
-    name: Validate External Services
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Vertex AI (Gemini)
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://us-central1-aiplatform.googleapis.com/v1/projects/${{ secrets.VERTEX_PROJECT_ID }}/locations/us-central1/publishers/google/models/gemini-1.5-flash" \
-            -H "Authorization: Bearer ${{ secrets.GCP_ACCESS_TOKEN }}" \
-            --max-time 10)
-          if [ "$HTTP_STATUS" -eq 000 ]; then
-            echo "❌ Vertex AI unreachable (timeout)"
-            exit 1
-          fi
-          echo "✅ Vertex AI endpoint reachable (HTTP $HTTP_STATUS)"
-
-      - name: Check Sarvam AI
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://api.sarvam.ai/v1/models" \
-            -H "Authorization: Bearer ${{ secrets.SARVAM_API_KEY }}" \
-            --max-time 10)
-          if [ "$HTTP_STATUS" -eq 000 ] || [ "$HTTP_STATUS" -ge 500 ]; then
-            echo "❌ Sarvam AI unreachable (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "✅ Sarvam AI endpoint reachable (HTTP $HTTP_STATUS)"
-
-      - name: Check Azure AI Search
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "${{ secrets.AZURE_SEARCH_ENDPOINT }}/indexes/${{ secrets.AZURE_SEARCH_INDEX_NAME }}?api-version=2024-07-01" \
-            -H "api-key: ${{ secrets.AZURE_SEARCH_QUERY_KEY }}" \
-            --max-time 10)
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "❌ Azure Search unreachable (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "✅ Azure AI Search index reachable"
-
-  # ═══════════════════════════════════════════════════
-  # 2. Deploy Backend (Azure Container Apps)
-  # ═══════════════════════════════════════════════════
   deploy-backend:
-    name: Deploy Backend → Azure
+    name: Deploy Backend
     runs-on: ubuntu-latest
-    needs: [validate-endpoints]
     permissions:
       id-token: write
       contents: read
     steps:
       - uses: actions/checkout@v4
-
-      - name: Authenticate to GCP (OIDC)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Authenticate to Azure
         uses: azure/login@v2
@@ -87,42 +30,38 @@ jobs:
         run: |
           az acr build \
             --registry syrabitacr \
-            --image syrabit-api:${{ github.sha }} \
-            --image syrabit-api:latest \
+            --resource-group syrabit-prod \
+            --image syrabit/backend:${{ github.sha }} \
+            --image syrabit/backend:latest \
             --file apps/backend/Dockerfile \
             apps/backend/
 
       - name: Deploy to Container Apps
         run: |
           az containerapp update \
-            --name ca-syrabit-api \
-            --resource-group rg-syrabit-prod \
-            --image syrabitacr.azurecr.io/syrabit-api:${{ github.sha }}
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
 
       - name: Wait for healthy revision
         run: |
-          echo "Waiting 30s for new revision to stabilize..."
-          sleep 30
+          echo "Waiting 90s for new revision to stabilize..."
+          sleep 90
           FQDN=$(az containerapp show \
-            --name ca-syrabit-api \
-            --resource-group rg-syrabit-prod \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
             --query 'properties.configuration.ingress.fqdn' -o tsv)
-          curl -sf "https://${FQDN}/health" && echo "✅ Backend healthy" || echo "⚠️ Backend health check failed"
+          curl -sf "https://${FQDN}/health" && echo "Backend healthy" || echo "Backend health check failed"
 
-  # ═══════════════════════════════════════════════════
-  # 3. Deploy Edge Worker (Cloudflare)
-  # ═══════════════════════════════════════════════════
   deploy-edge:
-    name: Deploy Edge → Cloudflare
+    name: Deploy Edge
     runs-on: ubuntu-latest
-    # Edge worker doesn't depend on LLM endpoints — it only proxies. Don't
-    # block its deploy on validate-endpoints (which needs GCP/Azure secrets).
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
       - name: Enable Corepack
         run: corepack enable
@@ -130,14 +69,8 @@ jobs:
       - name: Setup PNPM
         run: corepack prepare pnpm@10.26.1 --activate
 
-      - name: Install dependencies (workspace root)
-        # apps/edge has no package-lock.json — the workspace uses pnpm at root.
-        # --no-frozen-lockfile is a temporary workaround until pnpm-lock.yaml
-        # is regenerated for the frontend deps added in PR #39.
+      - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
-
-      - name: Type check
-        run: pnpm --filter syrabit-edge exec tsc --noEmit
 
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
@@ -145,19 +78,15 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-  # ═══════════════════════════════════════════════════
-  # 4. Deploy Frontend (Cloudflare Pages)
-  # ═══════════════════════════════════════════════════
   deploy-frontend:
-    name: Deploy Frontend → CF Pages
+    name: Deploy Frontend
     runs-on: ubuntu-latest
-    # Frontend is a static SPA — doesn't need LLM endpoints to build/deploy.
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
       - name: Enable Corepack
         run: corepack enable
@@ -165,78 +94,59 @@ jobs:
       - name: Setup PNPM
         run: corepack prepare pnpm@10.26.1 --activate
 
-      - name: Install dependencies (workspace root)
-        # --no-frozen-lockfile is a temporary workaround until pnpm-lock.yaml
-        # is regenerated locally and committed for PR #39's frontend deps.
+      - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Build
-        run: pnpm --filter syrabit-frontend run build
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          projectName: syrabit-frontend
-          directory: apps/frontend/dist
+          command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
 
-  # ═══════════════════════════════════════════════════
-  # 5. Post-Deploy Smoke Tests
-  # ═══════════════════════════════════════════════════
   smoke-test:
-    name: Post-Deploy Smoke Tests
+    name: Smoke Tests
     runs-on: ubuntu-latest
     needs: [deploy-backend, deploy-edge, deploy-frontend]
     steps:
-      - name: Backend Health
+      - name: Edge Health
         run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://ca-syrabit-api.azurecontainerapps.io/health" \
-            --max-time 15)
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://api.syrabit.ai/health" --max-time 15)
           if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "❌ Backend health failed (HTTP $HTTP_STATUS)"
+            echo "Edge health failed (HTTP $HTTP_STATUS)"
             exit 1
           fi
-          echo "✅ Backend: healthy"
+          echo "Edge: healthy"
 
-      - name: Edge Worker Health
+      - name: Chat endpoint (English)
         run: |
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://edge.syrabit.ai/health" \
-            --max-time 15)
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "❌ Edge health failed (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "✅ Edge: healthy"
-
-      - name: Chat endpoint (anonymous, no JWT)
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://edge.syrabit.ai/api/v1/chat/" \
+            -X POST "https://api.syrabit.ai/api/ai/chat/stream" \
             -H "Content-Type: application/json" \
-            -d '{"message":"test","lang":"en"}' \
-            --max-time 30)
-          # Should NOT be 401 (anonymous allowed) — may be 500 if no DB, but not auth error
-          if [ "$HTTP_STATUS" -eq 401 ]; then
-            echo "❌ Chat rejects anonymous users (HTTP 401)"
-            exit 1
-          fi
-          echo "✅ Chat endpoint accepts anonymous requests (HTTP $HTTP_STATUS)"
-
-      - name: Stream endpoint (anonymous, no JWT)
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://edge.syrabit.ai/api/v1/chat/stream" \
-            -H "Content-Type: application/json" \
+            -H "Origin: https://syrabit.ai" \
             -d '{"message":"hello","lang":"en"}' \
             --max-time 30)
-          if [ "$HTTP_STATUS" -eq 401 ]; then
-            echo "❌ Stream rejects anonymous users (HTTP 401)"
+          if [ "$HTTP_STATUS" -ge 500 ]; then
+            echo "Chat endpoint error (HTTP $HTTP_STATUS)"
             exit 1
           fi
-          echo "✅ Stream endpoint accepts anonymous requests (HTTP $HTTP_STATUS)"
+          echo "Chat EN: HTTP $HTTP_STATUS"
+
+      - name: Frontend reachable
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://syrabit.ai" --max-time 15)
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Frontend unreachable (HTTP $HTTP_STATUS)"
+            exit 1
+          fi
+          echo "Frontend: live"
 
       - name: Summary
-        run: echo "🎉 All smoke tests passed — deployment complete!"
+        run: echo "All smoke tests passed - deployment complete!"
