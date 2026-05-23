@@ -2,7 +2,7 @@
 Rate Limiter: Token Bucket Implementation with Upstash Redis
 Supports atomic operations and rate limit headers
 """
-from upstash_redis import Redis
+from upstash_redis.asyncio import Redis
 from app.config import settings
 from typing import Tuple
 import time
