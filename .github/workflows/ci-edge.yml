@@ -27,9 +27,6 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Approve build scripts
-        run: pnpm approve-builds --global esbuild workerd protobufjs || true
-
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
         env:
