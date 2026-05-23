@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 from posthog import Posthog
 import logging
 import uuid
@@ -40,7 +42,7 @@ async def lifespan(app: FastAPI):
             traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
             profiles_sample_rate=0.1,
             integrations=[
-                sentry_sdk.integrations.fastapi.FastApiIntegration(transaction_style="endpoint"),
+                FastApiIntegration(transaction_style="endpoint"),
             ],
         )
         logger.info("Sentry initialized")
