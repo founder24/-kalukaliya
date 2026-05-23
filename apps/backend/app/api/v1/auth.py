@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import secrets
 import logging
+import time
 
 from app.config import settings
 from app.models.user import User
@@ -149,23 +150,55 @@ async def get_current_user_optional(
         return None
 
 
+# ─── Rate Limiting Helper ─────────────────────────────────────────────────────
+
+
+async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
+    """
+    IP-based rate limiting using Upstash Redis.
+    Raises HTTP 429 if limit exceeded. Silently skips if Redis unavailable.
+    """
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        client_ip = request.client.host if request.client else "unknown"
+        minute_bucket = int(time.time() // 60)
+        rate_key = f"auth_limit:{endpoint}:{client_ip}:{minute_bucket}"
+
+        attempt_count = redis.incr(rate_key)
+        if attempt_count == 1:
+            redis.expire(rate_key, 60)
+
+        if attempt_count > max_attempts:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many {endpoint} attempts. Please try again in 1 minute."
+            )
+    except HTTPException:
+        raise  # Re-raise 429
+    except Exception:
+        pass  # Redis unavailable - skip rate limiting gracefully
+
+
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
 
 @router.post("/signup", response_model=TokenResponse)
-async def signup(request: SignupRequest):
+async def signup(request_body: SignupRequest, request: Request):
     """Register a new user with email + password. Sends a welcome email via Resend."""
+    await _check_rate_limit(request, "signup", 5)
+
     # Check if user exists
-    existing_user = await User.find_one({"email": request.email})
+    existing_user = await User.find_one({"email": request_body.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # Create user
-    hashed_pw = User.hash_password(request.password)
+    hashed_pw = User.hash_password(request_body.password)
     user = User(
-        email=request.email,
+        email=request_body.email,
         hashed_password=hashed_pw,
-        name=request.name,
+        name=request_body.name,
         auth_provider="local",
     )
     await user.insert()
@@ -176,30 +209,32 @@ async def signup(request: SignupRequest):
 
     # Send welcome email (fire-and-forget — don't block signup on email delivery)
     try:
-        await send_welcome_email(email=request.email, name=request.name)
+        await send_welcome_email(email=request_body.email, name=request_body.name)
     except Exception as e:
-        logger.warning(f"Welcome email failed for {request.email}: {e}")
+        logger.warning(f"Welcome email failed for {request_body.email}: {e}")
 
-    logger.info(f"New user signed up: {request.email}")
+    logger.info(f"New user signed up: {request_body.email}")
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request_body: LoginRequest, request: Request):
     """Authenticate user with email + password and return tokens"""
-    user = await User.find_one({"email": request.email})
+    await _check_rate_limit(request, "login", 10)
+
+    user = await User.find_one({"email": request_body.email})
 
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not user.verify_password(request.password):
+    if not user.verify_password(request_body.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Generate tokens
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
-    logger.info(f"User logged in: {request.email}")
+    logger.info(f"User logged in: {request_body.email}")
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
