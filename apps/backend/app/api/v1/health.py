@@ -14,9 +14,9 @@ router = APIRouter(prefix="/health", tags=["Health"])
 async def mongo_ping() -> Dict[str, Any]:
     """Ping MongoDB connection"""
     try:
-        from app.db.mongo import database
-        # Simple command to test connection
-        await database.client.admin.command('ping')
+        from app.db.mongo import get_mongo_client
+        client = get_mongo_client()
+        await client.admin.command('ping')
         return {"status": "healthy", "latency_ms": "N/A"}
     except Exception as e:
         logger.error(f"MongoDB ping failed: {str(e)}")
@@ -26,8 +26,9 @@ async def mongo_ping() -> Dict[str, Any]:
 async def redis_ping() -> Dict[str, Any]:
     """Ping Upstash Redis connection"""
     try:
-        from app.db.redis import redis_client
-        result = await redis_client.ping()
+        from app.db.redis import get_redis
+        redis = get_redis()
+        result = await redis.ping()
         if result:
             return {"status": "healthy"}
         else:

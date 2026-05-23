@@ -1,11 +1,11 @@
-from beanie import Document, Indexed
-from pydantic import Field
+from beanie import Document
+from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime
 import uuid
 
 
-class Message(Document):
+class Message(BaseModel):
     """Chat Message Model"""
     
     role: Literal["user", "assistant", "system"]
@@ -16,7 +16,7 @@ class Message(Document):
     thumbs_up: Optional[bool] = None
 
 
-class RAGSource(Document):
+class RAGSource(BaseModel):
     """RAG Source Citation"""
     
     doc_id: str

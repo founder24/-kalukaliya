@@ -14,6 +14,7 @@ from app.services.ai.router import detect_language_and_route
 from app.services.search.azure_search import search_service
 from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
+from app.core.security import sanitize_user_input
 
 logger = logging.getLogger(__name__)
 
@@ -94,20 +95,23 @@ async def chat(
         )
     
     try:
+        # Sanitize input to prevent prompt injection
+        sanitized_message = sanitize_user_input(request.message)
+
         # 1. Resolve language: explicit param > auto-detection
         if request.lang:
             detected_lang = request.lang
             target_model = settings.SARVAM_MODEL if request.lang == "as" else settings.VERTEX_GEMINI_MODEL
         else:
-            detected_lang, target_model = detect_language_and_route(request.message)
+            detected_lang, target_model = detect_language_and_route(sanitized_message)
         
         # 2. Generate embedding for RAG
         from app.services.ai.embedder import generate_embedding
-        embedding = await generate_embedding(request.message)
+        embedding = await generate_embedding(sanitized_message)
         
         # 3. Hybrid search with semantic reranking
         context_chunks = await search_service.search_context(
-            query=request.message,
+            query=sanitized_message,
             embedding=embedding,
             user_tier=user_tier,
             limit=settings.MAX_CONTEXT_DOCS
@@ -176,9 +180,11 @@ async def chat(
             sources=[{"doc_id": c["id"], "title": c["title"], "score": c["score"], "url": c["url"]} for c in context_chunks]
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again later.")
 
 
 
@@ -278,6 +284,9 @@ async def chat_stream(
     if not await check_rate_limit(user_id, user_tier, client_ip):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.")
 
+    # Sanitize input to prevent prompt injection
+    sanitized_message = sanitize_user_input(request.message)
+
     # ── Resolve language & model ──
     detected_lang, target_model = _resolve_lang_and_model(request)
 
@@ -293,9 +302,9 @@ async def chat_stream(
         rag_span.set_attribute("user.tier", user_tier)
         rag_span.set_attribute("user.id", user_id)
 
-        embedding = await generate_embedding(request.message)
+        embedding = await generate_embedding(sanitized_message)
         context_chunks = await search_service.search_context(
-            query=request.message,
+            query=sanitized_message,
             embedding=embedding,
             user_tier=user_tier,
             limit=settings.MAX_CONTEXT_DOCS,

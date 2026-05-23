@@ -63,6 +63,10 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    from app.services.ai.vertex_client import vertex_client
+    from app.services.ai.sarvam_client import sarvam_client
+    await vertex_client.close()
+    await sarvam_client.close()
     await close_mongo()
     await close_redis()
     logger.info("Application shutdown complete")
@@ -83,8 +87,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Razorpay-Signature", "Accept", "Origin"],
     )
 
     # Request ID Middleware for structured logging
@@ -105,7 +109,6 @@ def create_app() -> FastAPI:
 
     # Register Routes
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
-    app.include_router(chat.router, prefix="/api/ai/chat", tags=["Chat"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
