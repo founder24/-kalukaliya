@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Phase 0+1: Repository hygiene and critical auth/payment fixes. Covers findings C-1, L-1, C-5, M-16, C-2, C-3, C-4, H-1.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Replace .gitignore with comprehensive ignore rules covering .env files, Python caches, node_modules, IDE files, Docker overrides, and .canvas/ directory. Keep .env.example and .env.shared un-ignored.",
     "Remove .env and apps/backend/.env from git tracking using 'git rm --cached' commands.",
@@ -33,5 +33,5 @@
     "git ls-files | grep '\\.env$' should return empty"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "pyenv needed global set (pyenv global 3.11.15) for python command. Also removed all __pycache__ and .canvas/ files from git tracking since .gitignore now excludes them."
 }
