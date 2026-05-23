@@ -58,13 +58,13 @@ resource containerApp 'Microsoft.App/containerApps@2023-11-02-preview' = {
       ]
       scale: {
         minReplicas: 1
-        maxReplicas: 5
+        maxReplicas: 3
         rules: [
           {
             name: 'http-scale'
             http: {
               metadata: {
-                concurrentRequests: '50'
+                concurrentRequests: '20'
               }
             }
           }
