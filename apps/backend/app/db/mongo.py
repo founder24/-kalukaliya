@@ -63,7 +63,12 @@ async def create_indexes() -> None:
     await db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
     await db.chats.create_index([("session_id", ASCENDING)])
     await db.chats.create_index([("updated_at", DESCENDING)])
-    
+
+    # Dead letters collection indexes
+    await db.dead_letters.create_index([("timestamp", DESCENDING)], expireAfterSeconds=30*24*60*60)  # 30 day TTL
+    await db.dead_letters.create_index([("user_id", ASCENDING), ("timestamp", DESCENDING)])
+    await db.dead_letters.create_index([("status", ASCENDING), ("timestamp", DESCENDING)])
+
     logger.info("MongoDB indexes created/verified")
 
 

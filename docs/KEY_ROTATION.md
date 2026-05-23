@@ -126,7 +126,48 @@ This document provides step-by-step procedures for rotating all secrets used by 
 
 ---
 
-## 4. JWT Secret
+## 4. Upstash Redis Token
+
+### Pre-requisites
+- Upstash Console access (project owner)
+- Azure CLI authenticated
+- Access to Azure Key Vault
+
+### Steps
+1. Log in to the Upstash Console and navigate to your Redis database.
+2. Under the "REST API" section, click "Reset Token" to generate a new REST token.
+3. Copy the new token value.
+4. Update the Azure Key Vault secret:
+   ```bash
+   az keyvault secret set \
+     --vault-name syrabit-prod-kv \
+     --name upstash-redis-token \
+     --value "<NEW_TOKEN>"
+   ```
+5. Update the container app environment variable:
+   ```bash
+   az containerapp update \
+     --name syrabit-backend \
+     --resource-group syrabit-prod-rg \
+     --set-env-vars UPSTASH_REDIS_REST_TOKEN=secretref:upstash-redis-token
+   ```
+
+### Verification
+- Hit the health check endpoint and confirm Redis connectivity:
+  ```bash
+  curl https://api.syrabit.com/api/v1/health
+  ```
+- Send a test chat message and verify rate limiting still works (check that the response does not return a 500 error related to Redis).
+- Monitor application logs for `upstash` or `redis` connection errors for 10 minutes.
+
+### Rollback
+- The old token is invalidated immediately upon reset in the Upstash Console.
+- If the new token is not working, generate another token from the Upstash Console and repeat the update steps.
+- There is no way to restore the old token; you must ensure the new token is correctly deployed.
+
+---
+
+## 5. JWT Secret
 
 ### Pre-requisites
 - Azure CLI authenticated
@@ -167,7 +208,7 @@ This document provides step-by-step procedures for rotating all secrets used by 
 
 ---
 
-## 5. Supabase Anon Key
+## 6. Supabase Anon Key
 
 ### Pre-requisites
 - Supabase Dashboard access (project owner)
@@ -205,7 +246,7 @@ This document provides step-by-step procedures for rotating all secrets used by 
 
 ---
 
-## 6. Cloudflare API Token
+## 7. Cloudflare API Token
 
 ### Pre-requisites
 - Cloudflare Dashboard access (Super Administrator)
