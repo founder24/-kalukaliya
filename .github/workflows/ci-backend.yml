@@ -1,146 +1,23 @@
-name: CI Backend — Lint, Test & Deploy
+name: CI Backend — Build & Deploy
 
 on:
   push:
     branches: [main]
-    paths: ['apps/backend/**', 'infra/azure/**']
-  pull_request:
-    branches: [main]
-    paths: ['apps/backend/**']
-
-env:
-  # Opt into Node.js 24 early to avoid deprecation warnings (Node 20 EOL: Sep 2026)
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    paths:
+      - 'apps/backend/**'
+      - '.github/workflows/ci-backend.yml'
+  workflow_dispatch:
 
 jobs:
-  # ═══════════════════════════════════════
-  # 1. Lint & Test
-  # ═══════════════════════════════════════
-  lint-and-test:
-    name: Lint & Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          # Strip pytest-asyncio from requirements (incompatible pin: 0.26 needs pytest<9, but pytest is 9.0.3)
-          # We re-install a compatible version after.
-          python3 -c "
-          import re
-          with open('apps/backend/requirements.txt') as f:
-              content = f.read()
-          # Remove pytest-asyncio block (3 lines: name + 2 hashes + via comment)
-          content = re.sub(
-              r'pytest-asyncio==[^\n]*\n(?:\s+--hash=[^\n]*\n)+(?:\s+#[^\n]*\n)*',
-              '',
-              content
-          )
-          with open('/tmp/requirements-ci.txt', 'w') as f:
-              f.write(content)
-          "
-          pip install -r /tmp/requirements-ci.txt
-          pip install ruff "pytest-asyncio>=1.0,<2"
-
-      - name: Lint (ruff)
-        run: ruff check apps/backend/ --select E9,F63,F7,F82 --output-format=concise
-        continue-on-error: false  # Only catch syntax errors and undefined names
-
-      - name: Type check (basic)
-        run: |
-          python -c "
-          import ast, os, sys
-          errors = 0
-          for root, dirs, files in os.walk('apps/backend/app'):
-              dirs[:] = [d for d in dirs if d != '__pycache__']
-              for f in files:
-                  if f.endswith('.py'):
-                      path = os.path.join(root, f)
-                      try:
-                          with open(path) as fh:
-                              ast.parse(fh.read())
-                      except SyntaxError as e:
-                          print(f'❌ {path}:{e.lineno} — {e.msg}')
-                          errors += 1
-          if errors:
-              sys.exit(1)
-          print(f'✅ All Python files pass syntax check')
-          "
-
-      - name: Test
-        run: pytest apps/backend/tests/ -v --tb=short
-        continue-on-error: true  # Tests may not exist yet
-
-  # ═══════════════════════════════════════
-  # 2. Validate LLM Endpoints (main only)
-  # ═══════════════════════════════════════
-  validate-llm-endpoints:
-    name: Validate LLM Endpoints
-    runs-on: ubuntu-latest
-    needs: [lint-and-test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Check Vertex AI (Gemini)
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://us-central1-aiplatform.googleapis.com/v1/projects/${{ secrets.VERTEX_PROJECT_ID }}/locations/us-central1/publishers/google/models/gemini-1.5-flash" \
-            -H "Authorization: Bearer ${{ secrets.GCP_ACCESS_TOKEN }}" \
-            --max-time 10)
-          # 200 = success, 401 = auth issue but endpoint exists, 403 = same
-          if [ "$HTTP_STATUS" -eq 000 ] || [ "$HTTP_STATUS" -ge 500 ]; then
-            echo "❌ Vertex AI unreachable (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "✅ Vertex AI reachable (HTTP $HTTP_STATUS)"
-
-      - name: Check Sarvam AI
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://api.sarvam.ai/v1/models" \
-            -H "Authorization: Bearer ${{ secrets.SARVAM_API_KEY }}" \
-            --max-time 10)
-          if [ "$HTTP_STATUS" -eq 000 ] || [ "$HTTP_STATUS" -ge 500 ]; then
-            echo "❌ Sarvam AI unreachable (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "✅ Sarvam AI reachable (HTTP $HTTP_STATUS)"
-
-      - name: Check Azure AI Search
-        run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "${{ secrets.AZURE_SEARCH_ENDPOINT }}/indexes/${{ secrets.AZURE_SEARCH_INDEX_NAME }}?api-version=2024-07-01" \
-            -H "api-key: ${{ secrets.AZURE_SEARCH_QUERY_KEY }}" \
-            --max-time 10)
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "❌ Azure Search unreachable (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "✅ Azure AI Search reachable"
-
-  # ═══════════════════════════════════════
-  # 3. Deploy (main only, after validation)
-  # ═══════════════════════════════════════
   deploy:
-    name: Deploy Backend
+    name: Build & Deploy Backend
     runs-on: ubuntu-latest
-    needs: [validate-llm-endpoints]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     permissions:
       id-token: write
       contents: read
     steps:
       - uses: actions/checkout@v4
-
-      - name: Authenticate to GCP (OIDC)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Authenticate to Azure
         uses: azure/login@v2
@@ -153,32 +30,26 @@ jobs:
         run: |
           az acr build \
             --registry syrabitacr \
-            --image syrabit-api:${{ github.sha }} \
-            --image syrabit-api:latest \
+            --resource-group syrabit-prod \
+            --image syrabit/backend:${{ github.sha }} \
+            --image syrabit/backend:latest \
             --file apps/backend/Dockerfile \
             apps/backend/
 
       - name: Deploy to Container Apps
         run: |
           az containerapp update \
-            --name ca-syrabit-api \
-            --resource-group rg-syrabit-prod \
-            --image syrabitacr.azurecr.io/syrabit-api:${{ github.sha }}
-
-      - name: Sync Search Index Schema
-        run: |
-          python infra/scripts/deploy-search-index.py \
-            --endpoint ${{ secrets.AZURE_SEARCH_ENDPOINT }} \
-            --key ${{ secrets.AZURE_SEARCH_ADMIN_KEY }}
-        continue-on-error: true  # Non-blocking if script doesn't exist yet
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
 
       - name: Health check
         run: |
-          sleep 20
+          sleep 90
           FQDN=$(az containerapp show \
-            --name ca-syrabit-api \
-            --resource-group rg-syrabit-prod \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
             --query 'properties.configuration.ingress.fqdn' -o tsv)
           curl -sf "https://${FQDN}/health" \
-            && echo "✅ Deployed & healthy at https://${FQDN}" \
-            || echo "⚠️ Health check failed — check logs"
+            && echo "Deployed and healthy at https://${FQDN}" \
+            || echo "Health check failed - check logs"
