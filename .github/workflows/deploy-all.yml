@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   deploy-backend:
-    name: Deploy Backend → Azure
+    name: Deploy Backend
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -45,6 +45,7 @@ jobs:
 
       - name: Wait for healthy revision
         run: |
+          echo "Waiting 90s for new revision to stabilize..."
           sleep 90
           FQDN=$(az containerapp show \
             --name syrabit-backend \
@@ -53,7 +54,7 @@ jobs:
           curl -sf "https://${FQDN}/health" && echo "Backend healthy" || echo "Backend health check failed"
 
   deploy-edge:
-    name: Deploy Edge → Cloudflare
+    name: Deploy Edge
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +79,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
   deploy-frontend:
-    name: Deploy Frontend → CF Pages
+    name: Deploy Frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +112,7 @@ jobs:
           command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
 
   smoke-test:
-    name: Post-Deploy Smoke Tests
+    name: Smoke Tests
     runs-on: ubuntu-latest
     needs: [deploy-backend, deploy-edge, deploy-frontend]
     steps:
