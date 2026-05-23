@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
 
     # Register Routes
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+    app.include_router(chat.router, prefix="/api/ai/chat", tags=["Chat"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
