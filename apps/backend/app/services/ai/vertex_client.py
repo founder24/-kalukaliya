@@ -77,7 +77,7 @@ class VertexAIClient:
         # Refresh token if needed (blocking call wrapped in executor)
         import google.auth.transport.requests
         request = google.auth.transport.requests.Request()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, creds.refresh, request)
         
         return creds.token

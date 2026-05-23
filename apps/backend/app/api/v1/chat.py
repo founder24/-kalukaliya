@@ -442,9 +442,12 @@ async def get_chat_messages(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # Verify ownership (if authenticated)
-    if user and chat.user_id and chat.user_id != str(user.id):
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Verify ownership: authenticated chats require the owner to be logged in
+    if chat.user_id:
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if chat.user_id != str(user.id):
+            raise HTTPException(status_code=403, detail="Access denied")
 
     # Paginate messages
     limit = min(limit, 200)

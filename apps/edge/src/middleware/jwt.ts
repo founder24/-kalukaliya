@@ -62,7 +62,6 @@ export async function verifyJWT(
   }
 
   // Extract Bearer token
-  const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return { valid: false, error: 'Missing or invalid Authorization header' };
   }

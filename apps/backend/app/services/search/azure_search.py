@@ -81,7 +81,7 @@ class AzureSearchService:
             )
 
             # 2. Execute Hybrid Search with Semantic Reranking via thread pool
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             try:
                 results = await loop.run_in_executor(
                     None,
