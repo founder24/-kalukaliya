@@ -139,6 +139,40 @@ class VertexAIClient:
             logger.error(f"Vertex AI stream error: {str(e)}")
             raise RuntimeError(f"Vertex AI stream failed: {e}")
 
+    async def stream_generate_with_retry(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_retries: int = 1,
+        retry_delay: float = 0.3,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream with retry logic for resilience.
+
+        - On 5xx or timeout: retries up to max_retries times
+        - If all retries exhausted, raises to let caller handle fallback
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                async for chunk in self.stream_generate(system_prompt, user_message):
+                    yield chunk
+                return  # Success - exit after full stream
+            except RuntimeError as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Vertex AI stream attempt {attempt + 1} failed: {e}, "
+                        f"retrying in {retry_delay}s..."
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    break
+
+        # All retries exhausted
+        raise last_error or RuntimeError("Vertex AI stream failed after retries")
+
 
 # Singleton instance
 vertex_client = VertexAIClient()
