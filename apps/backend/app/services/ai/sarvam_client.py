@@ -16,6 +16,14 @@ class SarvamAIClient:
         self.api_key = settings.SARVAM_API_KEY
         self.base_url = settings.SARVAM_BASE_URL
         self.model = settings.SARVAM_MODEL
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+    async def close(self):
+        """Close the HTTP client (call on app shutdown)"""
+        await self._client.aclose()
 
     async def generate(
         self,
@@ -25,31 +33,30 @@ class SarvamAIClient:
     ) -> str:
         """Generate response using Sarvam OpenHathi"""
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_message}
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 1024,
-                        "stream": stream
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                
-                # Extract response text
-                if 'choices' in data and len(data['choices']) > 0:
-                    return data['choices'][0]['message']['content']
-                return "মই কোনো উত্তৰ সৃষ্টি কৰিব পৰা নাইলো। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।"
+            response = await self._client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1024,
+                    "stream": stream
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract response text
+            if 'choices' in data and len(data['choices']) > 0:
+                return data['choices'][0]['message']['content']
+            return "মই কোনো উত্তৰ সৃষ্টি কৰিব পৰা নাইলো। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।"
                 
         except httpx.HTTPStatusError as e:
             logger.error(f"Sarvam API HTTP error: {e.response.status_code}")
@@ -89,30 +96,29 @@ class SarvamAIClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        raw = line[6:].strip()
-                        if raw == "[DONE]":
-                            return
-                        if not raw:
-                            continue
-                        try:
-                            chunk = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
+            async with self._client.stream("POST", url, headers=headers, json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    raw = line[6:].strip()
+                    if raw == "[DONE]":
+                        return
+                    if not raw:
+                        continue
+                    try:
+                        chunk = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
 
-                        # OpenAI-compatible: choices[0].delta.content
-                        choices = chunk.get("choices", [])
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
+                    # OpenAI-compatible: choices[0].delta.content
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield content
         except httpx.HTTPStatusError as e:
             logger.error(f"Sarvam stream HTTP error: {e.response.status_code}")
             raise RuntimeError(f"Sarvam stream failed: HTTP {e.response.status_code}")

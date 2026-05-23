@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>You're offline — Syrabit.ai</title>
+  <meta name="theme-color" content="#7c3aed" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+      background: #06060e;
+      color: #e2e8f0;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .icon {
+      width: 72px;
+      height: 72px;
+      margin-bottom: 24px;
+      opacity: 0.9;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      font-size: 1rem;
+      color: #94a3b8;
+      max-width: 360px;
+      line-height: 1.65;
+      margin-bottom: 32px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.15s;
+      box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.3), 0 4px 16px rgba(124, 58, 237, 0.25);
+    }
+
+    .btn:hover { opacity: 0.88; }
+
+    .status {
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: #475569;
+    }
+
+    .pulse {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      margin-right: 6px;
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.85); }
+    }
+  </style>
+</head>
+<body>
+  <img class="icon" src="/icons/icon-192x192.png" alt="Syrabit.ai" onerror="this.style.display='none'" />
+
+  <h1>You're offline</h1>
+  <p>
+    No internet connection right now. Check your signal and try again — your
+    study sessions and chat history are waiting for you.
+  </p>
+
+  <button class="btn" onclick="location.reload()">
+    Try again
+  </button>
+
+  <p class="status">
+    <span class="pulse"></span>
+    Waiting for connection&hellip;
+  </p>
+
+  <script>
+    window.addEventListener('online', () => location.reload());
+  </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "project_type": "Monorepo: Python/FastAPI backend, TypeScript Cloudflare Worker edge, React/Vite frontend, Azure Bicep infra",
+  "language": "Python (backend), TypeScript (edge/frontend)",
+  "build_system": "pnpm workspaces for JS, pip-compile for Python, Azure Bicep for infra",
+  "test_framework": "No test files found - project lacks test infrastructure",
+  "build_command": "N/A - no unified build command; individual apps have their own",
+  "test_command": "N/A - no tests exist currently",
+  "verification_instructions": "Verify Python syntax with python -c 'import ast; ast.parse(open(file).read())' for backend files. Verify YAML/JSON with parsing. Verify Bicep syntax visually.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install for backend, pnpm install for JS apps",
+  "environment_constraints": "INTEGRATIONS_ONLY network - cannot install packages or pull images. Use AST validation for Python files, syntax checks for other files.",
+  "contribution_requirements": "Commit on feature branch with descriptive messages. One commit per task.",
+  "key_patterns": "Backend uses FastAPI with lifespan pattern, Upstash Redis (HTTP-based, sync client), httpx for AI clients with retry/streaming patterns, Beanie ODM for MongoDB, pydantic models for request/response",
+  "relevant_files": [
+    ".github/dependabot.yml (to create)",
+    "apps/backend/app/db/redis.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/api/v1/auth.py",
+    "apps/backend/app/services/ai/vertex_client.py",
+    "apps/backend/app/services/ai/sarvam_client.py",
+    "apps/backend/app/core/rate_limiter.py",
+    "infra/azure/container-app.bicep",
+    "infra/uptime-checks.md (to create)",
+    "docs/RUNBOOK.md (to create)",
+    "docs/ARCHITECTURE.md (to create)"
+  ],
+  "directory_structure": "apps/backend/ - FastAPI app with app/ subdirectory; apps/edge/ - Cloudflare Worker; apps/frontend/ - React/Vite; infra/azure/ - Bicep templates; .github/workflows/ - CI/CD; docs/ - documentation"
+}

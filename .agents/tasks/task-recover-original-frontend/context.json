@@ -1,0 +1,24 @@
+{
+  "project_type": "React SPA (JSX) with Vite, Tailwind CSS, React Router, React Query, Supabase Auth, SSR prerendering",
+  "language": "JavaScript (JSX) - NOT TypeScript for the original frontend code",
+  "build_system": "Vite with custom plugins, pnpm workspace (original used catalog: references)",
+  "test_framework": "vitest with jsdom, @testing-library/react, playwright for e2e",
+  "build_command": "Run from apps/frontend/: npx vite build (after setup)",
+  "test_command": "Run from apps/frontend/: npx vitest run (after setup)",
+  "verification_instructions": "1. Ensure all recovered src/ files are in place. 2. Run vite build to verify no import errors. 3. Confirm vite.config.js has proper @/ alias. 4. Confirm package.json has all needed dependencies.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. cd apps/frontend 2. npm install (after package.json is updated with all deps)",
+  "environment_constraints": "Sandbox environment. Focus on file recovery and configuration. Cannot run full build without all backend env vars (VITE_SUPABASE_URL, VITE_BACKEND_URL etc.) but structure should be correct.",
+  "contribution_requirements": "Frontend lives at apps/frontend/. Uses path alias @/ -> src/. Original code is JSX (not TypeScript). Current setup has TypeScript config but original source is .jsx/.js files.",
+  "key_patterns": "Path alias @/ for src/, React Router v7, @tanstack/react-query, Supabase auth via @supabase/supabase-js, sonner for toasts, lucide-react for icons, tailwind with CSS variables for theming, lazy loading with React.lazy and Suspense, custom vite plugins for bot rendering/modulepreload/codemirror-stub",
+  "relevant_files": [
+    "apps/frontend/package.json",
+    "apps/frontend/vite.config.ts (to be replaced with .js)",
+    "apps/frontend/tailwind.config.js",
+    "apps/frontend/postcss.config.js",
+    "apps/frontend/index.html",
+    "apps/frontend/src/ (entire directory to be replaced)",
+    "apps/frontend/tsconfig.json (to be updated for JSX paths)"
+  ],
+  "directory_structure": "apps/frontend/ - the frontend app directory. Original had: src/ (App.jsx, index.jsx, index.css, components/, context/, hooks/, lib/, pages/, utils/, queryClient.js, entry-server.jsx, test/), plus root-level: vite.config.js, vitest.config.js, tailwind.config.js, postcss.config.cjs, tsconfig.json, index.html, scripts/, vite-plugins/, public/, tests/ (e2e)"
+}

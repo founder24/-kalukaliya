@@ -4,7 +4,7 @@ compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-AZURE_BACKEND_URL = "https://ca-syrabit-api.azurecontainerapps.io"
+AZURE_BACKEND_URL = "http://localhost:8000"
 ALLOWED_ORIGIN = "https://syrabit.ai"
 
 [[r2_buckets]]
@@ -35,5 +35,5 @@ preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 # - CF_TURNSTILE_SECRET
 
 [env.production.vars]
-AZURE_BACKEND_URL = "https://syrabit-backend.lemonstone-ce3c87e1.eastus.azurecontainerapps.io"
+# AZURE_BACKEND_URL set as Wrangler secret: npx wrangler secret put AZURE_BACKEND_URL --env production
 ALLOWED_ORIGIN = "https://syrabit.ai"

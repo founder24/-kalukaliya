@@ -1,0 +1,14 @@
+{
+  "task_id": "task-implement-remediation",
+  "task_description": "Implement all 37 audit findings from REMEDIATION_PLAN.md across 10 phases: repository hygiene, critical auth/payment fixes, backend code quality, backend performance, API design, edge layer security, frontend cleanup, infrastructure, CI/CD gates, and testing.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All Python files pass py_compile. Firebase removed from frontend. OPTIONAL_AUTH_PATHS in edge JWT. .env removed from tracking. Bicep modules created. CI workflows have test/lint gates. Post-review fixes applied: duplicate authHeader removed from jwt.ts, chat messages endpoint now requires auth for owned sessions, deprecated get_event_loop replaced with get_running_loop."
+  }
+}

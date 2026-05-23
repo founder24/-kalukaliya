@@ -1,0 +1,56 @@
+{
+  "requestedUrl": "https://syrabit.ai/",
+  "finalUrl": "https://syrabit.ai/",
+  "fetchTime": "2026-05-01T07:00:00.000Z",
+  "lighthouseVersion": "12.0.0",
+  "audits": {
+    "largest-contentful-paint": {
+      "id": "largest-contentful-paint",
+      "title": "Largest Contentful Paint",
+      "score": 0.92,
+      "numericValue": 1850,
+      "numericUnit": "millisecond",
+      "displayValue": "1.9 s"
+    },
+    "cumulative-layout-shift": {
+      "id": "cumulative-layout-shift",
+      "title": "Cumulative Layout Shift",
+      "score": 0.97,
+      "numericValue": 0.06,
+      "numericUnit": "unitless",
+      "displayValue": "0.06"
+    },
+    "interaction-to-next-paint": {
+      "id": "interaction-to-next-paint",
+      "title": "Interaction to Next Paint",
+      "score": 0.95,
+      "numericValue": 112,
+      "numericUnit": "millisecond",
+      "displayValue": "110 ms"
+    },
+    "first-contentful-paint": {
+      "id": "first-contentful-paint",
+      "score": 0.95,
+      "numericValue": 980,
+      "displayValue": "1.0 s"
+    },
+    "speed-index": {
+      "id": "speed-index",
+      "score": 0.91,
+      "numericValue": 2100,
+      "displayValue": "2.1 s"
+    }
+  },
+  "categories": {
+    "performance": {
+      "id": "performance",
+      "title": "Performance",
+      "score": 0.92,
+      "auditRefs": [
+        { "id": "largest-contentful-paint", "weight": 25 },
+        { "id": "cumulative-layout-shift",  "weight": 15 },
+        { "id": "interaction-to-next-paint","weight": 10 }
+      ]
+    }
+  }
+}
