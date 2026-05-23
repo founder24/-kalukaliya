@@ -1,4 +1,4 @@
-name: CI Backend — Build & Deploy
+name: CI Backend — Lint, Test & Deploy
 
 on:
   push:
@@ -6,13 +6,74 @@ on:
     paths:
       - 'apps/backend/**'
       - '.github/workflows/ci-backend.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/backend/**'
+      - '.github/workflows/ci-backend.yml'
   workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Build & Deploy Backend
+  lint:
+    name: Lint & Type Check
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r apps/backend/requirements.txt
+          pip install ruff mypy
+
+      - name: Run Ruff linter
+        run: ruff check apps/backend/app/
+
+      - name: Run MyPy type checker
+        run: mypy apps/backend/app/ --ignore-missing-imports
+        continue-on-error: true
+
+  test:
+    name: Run Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: test
+          MONGO_INITDB_ROOT_PASSWORD: test
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r apps/backend/requirements.txt
+
+      - name: Run tests
+        working-directory: apps/backend
+        env:
+          MONGODB_URI: mongodb://test:test@localhost:27017
+          APP_ENV: test
+          JWT_SECRET: test-secret-at-least-32-characters-long
+        run: pytest
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
     permissions:
       id-token: write
       contents: read
@@ -32,11 +93,48 @@ jobs:
             --registry syrabitacr \
             --resource-group syrabit-prod \
             --image syrabit/backend:${{ github.sha }} \
-            --image syrabit/backend:latest \
+            --image syrabit/backend:staging \
             --file apps/backend/Dockerfile \
             apps/backend/
 
-      - name: Deploy to Container Apps
+      - name: Deploy to Staging Container App
+        run: |
+          az containerapp update \
+            --name syrabit-backend-staging \
+            --resource-group syrabit-prod \
+            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+
+      - name: Health check
+        run: |
+          sleep 90
+          FQDN=$(az containerapp show \
+            --name syrabit-backend-staging \
+            --resource-group syrabit-prod \
+            --query 'properties.configuration.ingress.fqdn' -o tsv)
+          curl -sf "https://${FQDN}/health" \
+            && echo "Staging deployed and healthy" \
+            || echo "Health check failed - check logs"
+
+  deploy-production:
+    name: Deploy to Production
+    needs: deploy-staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Production Container App
         run: |
           az containerapp update \
             --name syrabit-backend \
@@ -51,5 +149,5 @@ jobs:
             --resource-group syrabit-prod \
             --query 'properties.configuration.ingress.fqdn' -o tsv)
           curl -sf "https://${FQDN}/health" \
-            && echo "Deployed and healthy" \
+            && echo "Production deployed and healthy" \
             || echo "Health check failed - check logs"

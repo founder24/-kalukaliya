@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-004",
+  "type": "chore",
+  "description": "Phase 8+9: CI/CD quality gates and testing infrastructure. Covers findings M-2, T-1, T-2, T-3.",
+  "status": "in_progress",
+  "steps": [
+    "Replace .github/workflows/ci-backend.yml with a multi-job workflow: lint (ruff + mypy), test (pytest with MongoDB service container), deploy-staging (on main push after tests pass), deploy-production (after staging health check). Add pull_request trigger for lint+test jobs.",
+    "Replace .github/workflows/ci-edge.yml with a multi-job workflow: lint-and-typecheck (tsc --noEmit + eslint), test (vitest, continue-on-error: true), deploy (only on main push after lint passes).",
+    "Replace .github/workflows/ci-frontend.yml with a multi-job workflow: lint-and-typecheck (tsc/eslint), test (vitest), deploy (only on main push after tests pass).",
+    "Create apps/backend/tests/conftest.py with pytest fixtures: anyio_backend, async client using httpx ASGITransport, mock_user fixture, auth_headers fixture.",
+    "Create apps/backend/tests/test_auth.py with tests: signup_success, signup_weak_password, login_invalid_credentials, refresh_token_in_body (verifies query param rejected), protected_endpoint_without_token.",
+    "Create apps/backend/tests/test_chat.py with tests: chat_empty_message (422), chat_message_too_long (422), chat_rate_limit (429 with mocked rate limiter), chat_error_does_not_leak_details.",
+    "Create apps/backend/tests/test_webhook.py with tests: webhook_missing_signature (400), webhook_invalid_signature (400), webhook_valid_signature (200 with correct HMAC), webhook_invalid_subscription_id (400 with regex-failing ID).",
+    "Create apps/edge/tests/jwt.test.ts with vitest tests: allows public paths, rejects missing auth header, rejects expired tokens, rejects refresh tokens on protected paths, accepts valid access tokens, rejects wrong-secret tokens.",
+    "Create apps/edge/vitest.config.ts with test environment configuration.",
+    "Create apps/backend/tests/locustfile.py with load test scenarios for anonymous chat, authenticated chat, auth flow, and health checks."
+  ],
+  "acceptance_criteria": [
+    "ci-backend.yml has lint, test, deploy-staging, deploy-production jobs with proper dependencies",
+    "ci-edge.yml has lint-and-typecheck, test, deploy jobs",
+    "ci-frontend.yml has lint-and-typecheck, test, deploy jobs",
+    "All three CI workflows trigger on pull_request to main (for quality gates)",
+    "apps/backend/tests/conftest.py exists with proper fixtures",
+    "apps/backend/tests/test_auth.py, test_chat.py, test_webhook.py exist with meaningful test cases",
+    "apps/edge/tests/jwt.test.ts exists with JWT verification tests",
+    "apps/backend/tests/locustfile.py exists with load test scenarios",
+    "All new Python test files pass py_compile"
+  ],
+  "verification": [
+    "python -m py_compile apps/backend/tests/conftest.py",
+    "python -m py_compile apps/backend/tests/test_auth.py",
+    "python -m py_compile apps/backend/tests/test_chat.py",
+    "python -m py_compile apps/backend/tests/test_webhook.py",
+    "python -m py_compile apps/backend/tests/locustfile.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
