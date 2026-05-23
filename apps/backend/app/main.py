@@ -91,6 +91,23 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Razorpay-Signature", "Accept", "Origin"],
     )
 
+    # CSRF Origin Validation Middleware
+    @app.middleware("http")
+    async def csrf_origin_check(request: Request, call_next):
+        """Validate Origin header on mutating requests to prevent CSRF."""
+        if request.method in ("POST", "PUT", "DELETE"):
+            origin = request.headers.get("origin")
+            # Skip for health checks
+            if request.url.path.startswith("/health") or request.url.path.startswith("/api/health"):
+                return await call_next(request)
+            if origin and origin not in settings.allowed_origins_list:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Origin not allowed"}
+                )
+        return await call_next(request)
+
     # Request ID Middleware for structured logging
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
