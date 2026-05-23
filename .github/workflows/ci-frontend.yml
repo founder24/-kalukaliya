@@ -5,9 +5,6 @@ on:
     branches: [main]
     paths: ['apps/frontend/**']
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -31,7 +28,11 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build Frontend
-        run: pnpm --filter syrabit-frontend run build
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
