@@ -1,18 +1,24 @@
-from fastapi import APIRouter, HTTPException, Depends, Header
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
+import secrets
 import logging
+import time
 
 from app.config import settings
 from app.models.user import User
+from app.services.comms.resend_client import send_welcome_email, send_password_reset_email
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Authentication"])
 security = HTTPBearer()
+
+
+# ─── Request / Response Models ───────────────────────────────────────────────
 
 
 class LoginRequest(BaseModel):
@@ -25,11 +31,45 @@ class SignupRequest(BaseModel):
     password: str
     name: Optional[str] = None
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+# ─── Token Helpers ───────────────────────────────────────────────────────────
 
 
 def create_access_token(user_id: str, expires_delta: timedelta = None) -> str:
@@ -46,20 +86,30 @@ def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> User:
+def create_reset_token(user_id: str) -> str:
+    """Create a password-reset JWT token (1 hour expiry)"""
+    expire = datetime.utcnow() + timedelta(hours=1)
+    to_encode = {"sub": user_id, "exp": expire, "type": "reset"}
+    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+# ─── Auth Dependencies ───────────────────────────────────────────────────────
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
     """Get current user from JWT token (required — raises 401 if invalid)"""
     token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         user_id = payload.get("sub")
         token_type = payload.get("type")
-        
+
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
+
         if token_type != "access":
             raise HTTPException(status_code=401, detail="Invalid token type")
-        
+
         user = await User.get(user_id)
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -73,14 +123,11 @@ security_optional = HTTPBearer(auto_error=False)
 
 
 async def get_current_user_optional(
-    credentials: Optional[HTTPAuthCredentials] = Depends(security_optional),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
 ) -> Optional[User]:
     """
     Get current user from JWT token if present.
     Returns None for anonymous/unsigned users (no 401 raised).
-
-    Use this for endpoints that serve both authenticated and anonymous users
-    (e.g., chat with free-tier rate limiting by IP).
     """
     if credentials is None:
         return None
@@ -98,25 +145,60 @@ async def get_current_user_optional(
             return None
 
         user = await User.get(user_id)
-        return user  # May be None if user deleted
+        return user
     except JWTError:
         return None
 
 
+# ─── Rate Limiting Helper ─────────────────────────────────────────────────────
+
+
+async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
+    """
+    IP-based rate limiting using Upstash Redis.
+    Raises HTTP 429 if limit exceeded. Silently skips if Redis unavailable.
+    """
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        client_ip = request.client.host if request.client else "unknown"
+        minute_bucket = int(time.time() // 60)
+        rate_key = f"auth_limit:{endpoint}:{client_ip}:{minute_bucket}"
+
+        attempt_count = redis.incr(rate_key)
+        if attempt_count == 1:
+            redis.expire(rate_key, 60)
+
+        if attempt_count > max_attempts:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many {endpoint} attempts. Please try again in 1 minute."
+            )
+    except HTTPException:
+        raise  # Re-raise 429
+    except Exception:
+        pass  # Redis unavailable - skip rate limiting gracefully
+
+
+# ─── Routes ──────────────────────────────────────────────────────────────────
+
+
 @router.post("/signup", response_model=TokenResponse)
-async def signup(request: SignupRequest):
-    """Register a new user"""
+async def signup(request_body: SignupRequest, request: Request):
+    """Register a new user with email + password. Sends a welcome email via Resend."""
+    await _check_rate_limit(request, "signup", 5)
+
     # Check if user exists
-    existing_user = await User.find_one({"email": request.email})
+    existing_user = await User.find_one({"email": request_body.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # Create user
-    hashed_pw = User.hash_password(request.password)
+    hashed_pw = User.hash_password(request_body.password)
     user = User(
-        email=request.email,
+        email=request_body.email,
         hashed_password=hashed_pw,
-        name=request.name,
+        name=request_body.name,
         auth_provider="local",
     )
     await user.insert()
@@ -125,52 +207,118 @@ async def signup(request: SignupRequest):
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
-    logger.info(f"New user signed up: {request.email}")
+    # Send welcome email (fire-and-forget — don't block signup on email delivery)
+    try:
+        await send_welcome_email(email=request_body.email, name=request_body.name)
+    except Exception as e:
+        logger.warning(f"Welcome email failed for {request_body.email}: {e}")
+
+    logger.info(f"New user signed up: {request_body.email}")
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
-    """Authenticate user and return tokens"""
-    user = await User.find_one({"email": request.email})
-    
+async def login(request_body: LoginRequest, request: Request):
+    """Authenticate user with email + password and return tokens"""
+    await _check_rate_limit(request, "login", 10)
+
+    user = await User.find_one({"email": request_body.email})
+
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not user.verify_password(request.password):
+    if not user.verify_password(request_body.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Generate tokens
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
-    logger.info(f"User logged in: {request.email}")
+    logger.info(f"User logged in: {request_body.email}")
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(request: ForgotPasswordRequest):
+    """
+    Request a password reset email.
+    Always returns success (don't reveal whether email exists).
+    """
+    user = await User.find_one({"email": request.email})
+
+    if user and user.auth_provider == "local":
+        # Generate a signed reset token (1 hour expiry)
+        reset_token = create_reset_token(str(user.id))
+
+        # Send reset email via Resend
+        try:
+            await send_password_reset_email(email=request.email, reset_token=reset_token)
+            logger.info(f"Password reset email sent to {request.email}")
+        except Exception as e:
+            logger.error(f"Failed to send password reset email to {request.email}: {e}")
+    else:
+        # Don't reveal whether the email exists — log and return same response
+        logger.info(f"Password reset requested for non-existent/non-local email: {request.email}")
+
+    return MessageResponse(message="If an account with that email exists, a password reset link has been sent.")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(request: ResetPasswordRequest):
+    """
+    Reset password using the token from the email link.
+    Token is a JWT with type=reset, 1 hour expiry.
+    """
+    try:
+        payload = jwt.decode(request.token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        token_type = payload.get("type")
+        user_id = payload.get("sub")
+
+        if token_type != "reset" or not user_id:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    user = await User.get(user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    # Update password
+    user.hashed_password = User.hash_password(request.new_password)
+    user.updated_at = datetime.utcnow()
+    await user.save()
+
+    logger.info(f"Password reset successful for user {user.email}")
+    return MessageResponse(message="Password reset successful. You can now log in with your new password.")
+
+
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(refresh_token: str, request = None):
+async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = None):
     """Refresh access token using refresh token"""
     # Rate limit refresh endpoint (10 attempts per minute per IP)
     if request:
-        from app.db.redis import get_redis
-        import time
-        redis = get_redis()
-        client_ip = request.client.host if hasattr(request, 'client') else "unknown"
-        rate_key = f"refresh_limit:{client_ip}:{int(time.time() // 60)}"
-        
-        attempt_count = await redis.incr(rate_key)
-        if attempt_count == 1:
-            await redis.expire(rate_key, 60)
-        
-        if attempt_count > 10:
-            raise HTTPException(status_code=429, detail="Too many refresh attempts. Try again later.")
-    
+        try:
+            from app.db.redis import get_redis
+            import time
+            redis = get_redis()
+            client_ip = request.client.host if hasattr(request, "client") else "unknown"
+            rate_key = f"refresh_limit:{client_ip}:{int(time.time() // 60)}"
+
+            attempt_count = await redis.incr(rate_key)
+            if attempt_count == 1:
+                await redis.expire(rate_key, 60)
+
+            if attempt_count > 10:
+                raise HTTPException(status_code=429, detail="Too many refresh attempts. Try again later.")
+        except ImportError:
+            pass  # Redis not available — skip rate limiting
+
     try:
-        payload = jwt.decode(refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
-        
+
         user_id = payload.get("sub")
         user = await User.get(user_id)
         if not user:
@@ -183,3 +331,56 @@ async def refresh_token(refresh_token: str, request = None):
         return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token)
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+
+class GoogleAuthRequest(BaseModel):
+    supabase_token: str
+
+
+@router.post("/google", response_model=TokenResponse)
+async def google_auth(request: GoogleAuthRequest):
+    """
+    Exchange a Supabase OAuth token for a backend JWT.
+    Verifies the token with Supabase, then finds or creates the user.
+    """
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+        raise HTTPException(status_code=503, detail="OAuth not configured")
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.SUPABASE_URL}/auth/v1/user",
+                headers={
+                    "Authorization": f"Bearer {request.supabase_token}",
+                    "apikey": settings.SUPABASE_SERVICE_KEY,
+                }
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid OAuth token")
+
+            supabase_user = resp.json()
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="OAuth verification failed")
+
+    email = supabase_user.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email not available from OAuth provider")
+
+    # Find or create user
+    user = await User.find_one({"email": email})
+    if not user:
+        user = User(
+            email=email,
+            name=supabase_user.get("user_metadata", {}).get("full_name"),
+            auth_provider="google",
+        )
+        await user.insert()
+        logger.info(f"New OAuth user created: {email}")
+
+    # Generate backend tokens
+    access_token = create_access_token(str(user.id))
+    refresh_token = create_refresh_token(str(user.id))
+
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)

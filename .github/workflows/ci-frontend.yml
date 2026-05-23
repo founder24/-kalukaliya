@@ -1,20 +1,26 @@
-name: Deploy Frontend to Cloudflare Pages
+name: CI Frontend — Lint, Test & Deploy
 
 on:
   push:
     branches: [main]
-    paths: ['apps/frontend/**']
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/ci-frontend.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/ci-frontend.yml'
+  workflow_dispatch:
 
 jobs:
-  deploy:
+  lint-and-typecheck:
+    name: Lint & Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
@@ -25,13 +31,67 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Dependencies
-        # --no-frozen-lockfile: PR #39 added frontend deps without regenerating
-        # pnpm-lock.yaml. Until the lockfile is regenerated locally and
-        # committed, allow CI to resolve missing entries on the fly.
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Type Check
+        run: pnpm --filter @workspace/syrabit exec tsc --noEmit
+        continue-on-error: true
+
+      - name: Lint
+        run: pnpm --filter @workspace/syrabit exec eslint src/
+        continue-on-error: true
+
+  test:
+    name: Run Tests
+    needs: lint-and-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Run Tests
+        run: pnpm --filter @workspace/syrabit test
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Cloudflare Pages
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Build Frontend
-        run: pnpm --filter syrabit-frontend run build
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

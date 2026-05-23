@@ -1,4 +1,5 @@
-from pymongo import MongoClient, ASCENDING, DESCENDING
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure
 from beanie import init_beanie
 from app.config import settings
@@ -9,15 +10,19 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_client: MongoClient | None = None
+_client: AsyncIOMotorClient | None = None
 
 
 async def init_mongo() -> None:
     """Initialize MongoDB connection pool with Beanie ODM"""
     global _client
     
+    if not settings.MONGODB_URI:
+        logger.warning("MONGODB_URI not set — MongoDB disabled")
+        return
+    
     try:
-        _client = MongoClient(
+        _client = AsyncIOMotorClient(
             settings.MONGODB_URI,
             maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
             minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
@@ -49,20 +54,25 @@ async def create_indexes() -> None:
         return
     
     # Users collection indexes
-    db.users.create_index([("email", ASCENDING)], unique=True)
-    db.users.create_index([("subscription.razorpay_subscription_id", ASCENDING)], sparse=True)
-    db.users.create_index([("profile.preferences.language", ASCENDING)])
-    db.users.create_index([("created_at", DESCENDING)])
+    await db.users.create_index([("email", ASCENDING)], unique=True)
+    await db.users.create_index([("subscription.razorpay_subscription_id", ASCENDING)], sparse=True)
+    await db.users.create_index([("profile.preferences.language", ASCENDING)])
+    await db.users.create_index([("created_at", DESCENDING)])
     
     # Chats collection indexes
-    db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
-    db.chats.create_index([("session_id", ASCENDING)])
-    db.chats.create_index([("updated_at", DESCENDING)])
-    
+    await db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
+    await db.chats.create_index([("session_id", ASCENDING)])
+    await db.chats.create_index([("updated_at", DESCENDING)])
+
+    # Dead letters collection indexes
+    await db.dead_letters.create_index([("timestamp", DESCENDING)], expireAfterSeconds=30*24*60*60)  # 30 day TTL
+    await db.dead_letters.create_index([("user_id", ASCENDING), ("timestamp", DESCENDING)])
+    await db.dead_letters.create_index([("status", ASCENDING), ("timestamp", DESCENDING)])
+
     logger.info("MongoDB indexes created/verified")
 
 
-def get_mongo_client() -> MongoClient:
+def get_mongo_client() -> AsyncIOMotorClient:
     """Get MongoDB client instance"""
     if _client is None:
         raise RuntimeError("MongoDB not initialized. Call init_mongo() first.")

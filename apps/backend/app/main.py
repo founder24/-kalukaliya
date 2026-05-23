@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 from posthog import Posthog
 import logging
 import uuid
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
-from app.api.v1 import chat, auth, subscription, users, health, feedback
+from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
 from app.api.webhooks import razorpay
 
 
@@ -32,6 +33,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis initialization failed (expected in local dev without DB): {e}")
     
+    if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+        logger.warning(
+            "WARNING: Using default JWT_SECRET. "
+            "This is acceptable for local dev but MUST be changed in production."
+        )
+
     # Initialize Sentry with FastAPI integration
     if settings.SENTRY_DSN:
         sentry_sdk.init(
@@ -40,7 +47,7 @@ async def lifespan(app: FastAPI):
             traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
             profiles_sample_rate=0.1,
             integrations=[
-                sentry_sdk.integrations.fastapi.FastApiIntegration(transaction_style="endpoint"),
+                FastApiIntegration(transaction_style="endpoint"),
             ],
         )
         logger.info("Sentry initialized")
@@ -56,6 +63,10 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    from app.services.ai.vertex_client import vertex_client
+    from app.services.ai.sarvam_client import sarvam_client
+    await vertex_client.close()
+    await sarvam_client.close()
     await close_mongo()
     await close_redis()
     logger.info("Application shutdown complete")
@@ -76,9 +87,38 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Razorpay-Signature", "Accept", "Origin"],
     )
+
+    # CSRF Origin Validation Middleware
+    @app.middleware("http")
+    async def csrf_origin_check(request: Request, call_next):
+        """Validate Origin header on mutating requests to prevent CSRF."""
+        if request.method in ("POST", "PUT", "DELETE"):
+            origin = request.headers.get("origin")
+            # Skip for health checks
+            if request.url.path.startswith("/health") or request.url.path.startswith("/api/health"):
+                return await call_next(request)
+            if origin and origin not in settings.allowed_origins_list:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Origin not allowed"}
+                )
+        return await call_next(request)
+
+    # Security Headers Middleware
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        """Add security response headers to all responses."""
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-XSS-Protection"] = "0"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
 
     # Request ID Middleware for structured logging
     @app.middleware("http")
@@ -102,8 +142,10 @@ def create_app() -> FastAPI:
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
+    app.include_router(health.router, prefix="/api/health", tags=["Health"])  # Legacy probe path
     app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
 
     return app
 

@@ -13,7 +13,8 @@ COPY requirements.txt .
 # Strip the conflicting pytest-asyncio block, install everything else, then add a compatible version.
 RUN sed -i '/^pytest-asyncio==0\.26\.0/,/^[^ #]/{ /^pytest-asyncio/d; /^    --hash/d; /^    #/d; }' requirements.txt \
     && pip install --no-cache-dir --user -r requirements.txt \
-    && pip install --no-cache-dir --user "pytest-asyncio>=1.0,<2"
+    && pip install --no-cache-dir --user "pytest-asyncio>=1.0,<2" \
+    && pip install --no-cache-dir --user "email-validator>=2.0"
 
 FROM python:3.11-slim
 
@@ -24,9 +25,9 @@ RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 COPY --from=builder /root/.local /home/appuser/.local
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 
 COPY app/ ./app/
+COPY gunicorn_conf.py ./gunicorn_conf.py
 
 ENV PATH=/home/appuser/.local/bin:$PATH
 

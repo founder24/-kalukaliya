@@ -25,8 +25,17 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/login',
   '/api/v1/auth/signup',
   '/api/v1/auth/refresh',
+  '/api/v1/auth/forgot-password',
+  '/api/v1/auth/reset-password',
   '/api/webhooks',
-  '/api/v1/chat',  // Chat allows anonymous (backend handles via optional auth)
+];
+
+/**
+ * Paths where JWT is optional - validate if present, allow anonymous if absent.
+ * The backend handles anonymous users via get_current_user_optional.
+ */
+const OPTIONAL_AUTH_PATHS = [
+  '/api/v1/chat',
 ];
 
 /**
@@ -44,8 +53,15 @@ export async function verifyJWT(
     return { valid: true, userId: 'anonymous' };
   }
 
-  // Extract Bearer token
+  // For optional-auth paths: validate token if present, allow anonymous if absent
+  const isOptionalAuth = OPTIONAL_AUTH_PATHS.some((p) => url.pathname.startsWith(p));
   const authHeader = request.headers.get('Authorization');
+
+  if (isOptionalAuth && (!authHeader || !authHeader.startsWith('Bearer '))) {
+    return { valid: true, userId: 'anonymous' };
+  }
+
+  // Extract Bearer token
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return { valid: false, error: 'Missing or invalid Authorization header' };
   }

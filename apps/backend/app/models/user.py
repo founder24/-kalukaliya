@@ -10,8 +10,7 @@ class User(Document):
     
     email: Optional[EmailStr] = None
     hashed_password: Optional[str] = None
-    auth_provider: Literal["local", "google", "anonymous"] = "anonymous"
-    external_auth_id: Optional[str] = None
+    auth_provider: Literal["local", "anonymous"] = "anonymous"
     
     # Subscription
     subscription_tier: Literal["free", "pro"] = "free"
