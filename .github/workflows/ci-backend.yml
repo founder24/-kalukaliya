@@ -51,5 +51,5 @@ jobs:
             --resource-group syrabit-prod \
             --query 'properties.configuration.ingress.fqdn' -o tsv)
           curl -sf "https://${FQDN}/health" \
-            && echo "Deployed and healthy at https://${FQDN}" \
+            && echo "Deployed and healthy" \
             || echo "Health check failed - check logs"
