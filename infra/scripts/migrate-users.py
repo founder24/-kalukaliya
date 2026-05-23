@@ -2,13 +2,12 @@
 MongoDB Index Migration Script
 Creates required indexes for users and chats collections
 """
-import asyncio
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.operations import IndexModel
 import os
 
 
-async def create_indexes(mongodb_uri: str, db_name: str = "syrabit_prod"):
+def create_indexes(mongodb_uri: str, db_name: str = "syrabit_prod"):
     """Create all required MongoDB indexes"""
     
     client = MongoClient(mongodb_uri)
@@ -67,4 +66,4 @@ if __name__ == "__main__":
         print("✗ Error: MONGODB_URI environment variable not set")
         exit(1)
     
-    asyncio.run(create_indexes(mongodb_uri, db_name))
+    create_indexes(mongodb_uri, db_name)

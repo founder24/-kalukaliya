@@ -1,3 +1,5 @@
+import asyncio
+from functools import partial
 from azure.search.documents import SearchClient
 from azure.search.documents.models import (
     VectorizedQuery,
@@ -31,6 +33,28 @@ class AzureSearchService:
             credential=AzureKeyCredential(settings.AZURE_SEARCH_QUERY_KEY),
         )
 
+    def _sync_search(self, query: str, vector_query, user_tier: str, limit: int, semantic: bool):
+        """Synchronous search - runs in thread pool executor."""
+        if semantic:
+            return list(self.client.search(
+                search_text=query,
+                vector_queries=[vector_query],
+                filter=f"tier_access eq '{user_tier}'",
+                query_type=QueryType.SEMANTIC,
+                semantic_configuration_name=settings.AZURE_SEARCH_SEMANTIC_CONFIG,
+                query_caption=QueryCaptionType.EXTRACTIVE,
+                query_answer=QueryAnswerType.EXTRACTIVE,
+                top=limit,
+            ))
+        else:
+            return list(self.client.search(
+                search_text=query,
+                vector_queries=[vector_query],
+                filter=f"tier_access eq '{user_tier}'",
+                query_type=QueryType.VECTOR,
+                top=limit,
+            ))
+
     async def search_context(
         self, query: str, embedding: list[float], user_tier: str, limit: int = 5
     ):
@@ -56,31 +80,21 @@ class AzureSearchService:
                 exhaustive=True,  # Ensure accuracy over speed for small sets
             )
 
-            # 2. Execute Hybrid Search with Semantic Reranking
+            # 2. Execute Hybrid Search with Semantic Reranking via thread pool
+            loop = asyncio.get_running_loop()
             try:
-                results = self.client.search(
-                    search_text=query,  # BM25 Keyword matching
-                    vector_queries=[vector_query],  # Semantic Vector matching
-                    filter=f"tier_access eq '{user_tier}'",  # Security Filter
-                    query_type=QueryType.SEMANTIC,  # Enable Neural Reranker
-                    semantic_configuration_name=settings.AZURE_SEARCH_SEMANTIC_CONFIG,
-                    query_caption=QueryCaptionType.EXTRACTIVE,  # Generate snippets
-                    query_answer=QueryAnswerType.EXTRACTIVE,  # Generate direct answers
-                    top=limit,  # Final return count
+                results = await loop.run_in_executor(
+                    None,
+                    partial(self._sync_search, query, vector_query, user_tier, limit, True)
                 )
                 logger.info(f"Using SEMANTIC search for query '{query[:20]}...'")
-                
             except AzureError as e:
-                # Fallback to vector-only search if semantic ranker fails
                 logger.warning(
                     f"Semantic ranker failed ({str(e)}), falling back to VECTOR-ONLY search"
                 )
-                results = self.client.search(
-                    search_text=query,
-                    vector_queries=[vector_query],
-                    filter=f"tier_access eq '{user_tier}'",
-                    query_type=QueryType.VECTOR,  # Fallback to vector only
-                    top=limit,
+                results = await loop.run_in_executor(
+                    None,
+                    partial(self._sync_search, query, vector_query, user_tier, limit, False)
                 )
 
             context_chunks = []

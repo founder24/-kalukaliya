@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-001",
+  "type": "docs",
+  "description": "Create a comprehensive REMEDIATION_PLAN.md document covering all 37 audit findings organized into 10 phases (Phase 0-9), progressing from basic repository hygiene to advanced testing infrastructure. Each step includes exact file paths, code changes, and verification instructions.",
+  "status": "completed",
+  "steps": [
+    "Create REMEDIATION_PLAN.md at the repository root with the following structure:",
+    "Phase 0 - Repository Hygiene: Fix .gitignore (C-1), remove .env from tracking (L-1), add config startup validation (C-5, M-16)",
+    "Phase 1 - Critical Auth & Payment: Fix broken Depends() in subscription.py (C-3) and users.py (C-4), fix Razorpay webhook await crash (C-2), fix hmac.new typo, fix JWT_SECRET default (C-5)",
+    "Phase 2 - Backend Code Quality: Fix health.py imports (H-2), fix chat model inheritance (H-3), call sanitize_user_input (H-4), fix migrate-users.py async (H-5), remove duplicate route (H-6)",
+    "Phase 3 - Backend Performance: Replace sync MongoClient with AsyncIOMotorClient (M-1), wrap Azure Search in executor (H-7), fix Vertex AI token refresh blocking (H-8), add httpx connection pooling (H-9)",
+    "Phase 4 - API Design: Move refresh token to body (M-7), fix PUT /users/me to use body (M-8), sanitize error messages (M-9), add pagination (M-10)",
+    "Phase 5 - Edge Layer: Remove /api/v1/chat from PUBLIC_PATHS (C-6), move production URLs to secrets (M-15)",
+    "Phase 6 - Frontend: Implement auth bridge for Supabase+custom JWT (M-11), remove/lazy-load Firebase (M-12), verify AdminGuard calls backend (M-13)",
+    "Phase 7 - Infrastructure: Fix Dockerfile COPY (M-3), fix docker-compose Redis (M-4), create missing Bicep modules (M-5), fix Bicep scope (M-6), fix CORS localhost (M-14)",
+    "Phase 8 - CI/CD: Add test/lint stages before deploy (M-2), add staging environment, add branch protection recommendations",
+    "Phase 9 - Testing: Add backend API tests (T-1), add edge worker tests (T-2), add locustfile for load testing (T-3), document frontend test coverage expansion (T-4), fix CORS allow_methods/headers (L-2)",
+    "Each finding entry must include: Finding ID, severity, what to fix, which files to modify, the exact before/after code, and how to verify"
+  ],
+  "acceptance_criteria": [
+    "REMEDIATION_PLAN.md exists at the repository root",
+    "All 37 findings from the audit are addressed (C-1 through C-6, H-1 through H-9, M-1 through M-16, L-1, L-2, T-1 through T-4)",
+    "Plan is organized into 10 phases (Phase 0-9) progressing from basic to advanced",
+    "Each step includes specific file paths and exact code changes",
+    "Each step includes verification instructions",
+    "Phases are ordered so dependencies come first (gitignore before code, auth before features, backend before edge)"
+  ],
+  "verification": [
+    "Read REMEDIATION_PLAN.md and confirm it contains all 37 findings",
+    "Verify the document has 10 phases labeled Phase 0 through Phase 9",
+    "Confirm each finding has file paths, code changes, and verification steps"
+  ],
+  "blocked_reason": null,
+  "findings": "Documentation-only change, no build/test needed. All 37 findings addressed across 10 phases with exact code blocks and verification steps. The document is 4050 lines covering all severity levels."
+}

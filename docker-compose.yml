@@ -25,6 +25,21 @@ services:
     networks:
       - syrabit-net
 
+  redis-rest:
+    image: hiett/serverless-redis-http:latest
+    container_name: syrabit-redis-rest
+    restart: unless-stopped
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: local_dev_token
+      SRH_CONNECTION_STRING: redis://:localdevpassword@redis:6379
+    ports:
+      - "8079:80"
+    depends_on:
+      - redis
+    networks:
+      - syrabit-net
+
   backend:
     build:
       context: ./apps/backend
@@ -35,14 +50,15 @@ services:
       - .env
     environment:
       - MONGODB_URI=mongodb://admin:localdevpassword@mongo:27017/syrabit?authSource=admin
-      - UPSTASH_REDIS_REST_URL=http://redis:6379
+      - UPSTASH_REDIS_REST_URL=http://redis-rest:80
+      - UPSTASH_REDIS_REST_TOKEN=local_dev_token
       - DEBUG=True
       - APP_ENV=development
     ports:
       - "8000:8000"
     depends_on:
       - mongo
-      - redis
+      - redis-rest
     networks:
       - syrabit-net
     volumes:

@@ -14,6 +14,7 @@ from app.services.ai.router import detect_language_and_route
 from app.services.search.azure_search import search_service
 from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
+from app.core.security import sanitize_user_input
 
 logger = logging.getLogger(__name__)
 
@@ -94,20 +95,23 @@ async def chat(
         )
     
     try:
+        # Sanitize input to prevent prompt injection
+        sanitized_message = sanitize_user_input(request.message)
+
         # 1. Resolve language: explicit param > auto-detection
         if request.lang:
             detected_lang = request.lang
             target_model = settings.SARVAM_MODEL if request.lang == "as" else settings.VERTEX_GEMINI_MODEL
         else:
-            detected_lang, target_model = detect_language_and_route(request.message)
+            detected_lang, target_model = detect_language_and_route(sanitized_message)
         
         # 2. Generate embedding for RAG
         from app.services.ai.embedder import generate_embedding
-        embedding = await generate_embedding(request.message)
+        embedding = await generate_embedding(sanitized_message)
         
         # 3. Hybrid search with semantic reranking
         context_chunks = await search_service.search_context(
-            query=request.message,
+            query=sanitized_message,
             embedding=embedding,
             user_tier=user_tier,
             limit=settings.MAX_CONTEXT_DOCS
@@ -176,9 +180,11 @@ async def chat(
             sources=[{"doc_id": c["id"], "title": c["title"], "score": c["score"], "url": c["url"]} for c in context_chunks]
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again later.")
 
 
 
@@ -278,6 +284,9 @@ async def chat_stream(
     if not await check_rate_limit(user_id, user_tier, client_ip):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.")
 
+    # Sanitize input to prevent prompt injection
+    sanitized_message = sanitize_user_input(request.message)
+
     # ── Resolve language & model ──
     detected_lang, target_model = _resolve_lang_and_model(request)
 
@@ -293,9 +302,9 @@ async def chat_stream(
         rag_span.set_attribute("user.tier", user_tier)
         rag_span.set_attribute("user.id", user_id)
 
-        embedding = await generate_embedding(request.message)
+        embedding = await generate_embedding(sanitized_message)
         context_chunks = await search_service.search_context(
-            query=request.message,
+            query=sanitized_message,
             embedding=embedding,
             user_tier=user_tier,
             limit=settings.MAX_CONTEXT_DOCS,
@@ -379,3 +388,77 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/history")
+async def get_chat_history(
+    skip: int = 0,
+    limit: int = 20,
+    user: User = Depends(get_current_user),
+):
+    """Get paginated chat history for the current user"""
+    from app.models.chat import Chat
+
+    # Clamp limit to prevent abuse
+    limit = min(limit, 100)
+
+    chats = await Chat.find(
+        {"user_id": str(user.id)}
+    ).sort("-updated_at").skip(skip).limit(limit).to_list()
+
+    total = await Chat.find({"user_id": str(user.id)}).count()
+
+    return {
+        "chats": [
+            {
+                "id": str(chat.id),
+                "session_id": chat.session_id,
+                "title": chat.title,
+                "message_count": len(chat.messages),
+                "updated_at": chat.updated_at.isoformat(),
+            }
+            for chat in chats
+        ],
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": total,
+            "has_more": skip + limit < total,
+        }
+    }
+
+
+@router.get("/{session_id}/messages")
+async def get_chat_messages(
+    session_id: str,
+    skip: int = 0,
+    limit: int = 50,
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Get paginated messages for a specific chat session"""
+    from app.models.chat import Chat
+
+    chat = await Chat.find_one({"session_id": session_id})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # Verify ownership: authenticated chats require the owner to be logged in
+    if chat.user_id:
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if chat.user_id != str(user.id):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    # Paginate messages
+    limit = min(limit, 200)
+    messages = chat.messages[skip:skip + limit]
+
+    return {
+        "messages": messages,
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": len(chat.messages),
+            "has_more": skip + limit < len(chat.messages),
+        }
+    }

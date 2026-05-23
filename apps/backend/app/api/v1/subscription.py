@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 import logging
 
 from app.models.user import User
 from app.config import settings
+from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,8 @@ class SubscriptionStatus(BaseModel):
 
 
 @router.get("/status", response_model=SubscriptionStatus)
-async def get_subscription_status(user: User = None):
+async def get_subscription_status(user: User = Depends(get_current_user)):
     """Get current subscription status"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
     return SubscriptionStatus(
         tier=user.subscription_tier,
         status=user.subscription_status,
@@ -34,32 +32,26 @@ async def get_subscription_status(user: User = None):
 
 
 @router.post("/create-order")
-async def create_subscription_order(user: User = None):
+async def create_subscription_order(user: User = Depends(get_current_user)):
     """Create Razorpay subscription order for Pro plan"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
     from app.services.payment.razorpay_client import create_subscription_order
-    
+
     try:
         order = await create_subscription_order(user)
         return order
     except Exception as e:
         logger.error(f"Failed to create subscription order: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create order: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create order")
 
 
 @router.post("/cancel")
-async def cancel_subscription(user: User = None):
+async def cancel_subscription(user: User = Depends(get_current_user)):
     """Cancel subscription at end of billing period"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
     if not user.razorpay_subscription_id:
         raise HTTPException(status_code=400, detail="No active subscription found")
-    
+
     from app.services.payment.razorpay_client import cancel_razorpay_subscription
-    
+
     try:
         await cancel_razorpay_subscription(user.razorpay_subscription_id)
         await user.update({"$set": {"cancel_at_period_end": True}})
@@ -67,4 +59,4 @@ async def cancel_subscription(user: User = None):
         return {"status": "success", "message": "Subscription will end at period end"}
     except Exception as e:
         logger.error(f"Failed to cancel subscription: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to cancel: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to cancel subscription")

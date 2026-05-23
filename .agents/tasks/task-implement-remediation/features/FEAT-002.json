@@ -1,0 +1,43 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Phase 2+3: Backend code quality and performance fixes. Covers findings H-2, H-3, H-4, H-5, H-6, M-1, H-7, H-8, H-9, M-9.",
+  "status": "completed",
+  "steps": [
+    "In apps/backend/app/api/v1/health.py: Fix mongo_ping to use 'from app.db.mongo import get_mongo_client' then 'client = get_mongo_client()' and 'client.admin.command(\"ping\")' (sync, no await). Fix redis_ping to use 'from app.db.redis import get_redis' then 'redis = get_redis()' and 'result = await redis.ping()'. These fix H-2.",
+    "In apps/backend/app/models/chat.py: Change 'class Message(Document)' to 'class Message(BaseModel)' and 'class RAGSource(Document)' to 'class RAGSource(BaseModel)'. Add 'from pydantic import BaseModel' import. Keep Chat as Document. Remove Indexed import if unused. This fixes H-3.",
+    "In apps/backend/app/api/v1/chat.py: Add 'from app.core.security import sanitize_user_input' import. In both chat() and chat_stream() functions, after rate limit check, add 'sanitized_message = sanitize_user_input(request.message)' and use sanitized_message for language detection and embedding generation. Also fix error detail leak: change the final except block to return generic error message instead of str(e). This fixes H-4 and M-9.",
+    "In infra/scripts/migrate-users.py: Remove 'import asyncio', change 'async def create_indexes' to 'def create_indexes', change 'asyncio.run(create_indexes(...))' to 'create_indexes(...)' at the bottom. This fixes H-5.",
+    "In apps/backend/app/main.py: Remove the duplicate route 'app.include_router(chat.router, prefix=\"/api/ai/chat\", tags=[\"Chat\"])'. This fixes H-6. Also restrict CORS: change allow_methods from [\"*\"] to [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"OPTIONS\"] and allow_headers from [\"*\"] to [\"Authorization\", \"Content-Type\", \"X-Request-ID\", \"X-Razorpay-Signature\", \"Accept\", \"Origin\"]. This fixes L-2.",
+    "In apps/backend/app/db/mongo.py: Replace 'from pymongo import MongoClient' with 'from motor.motor_asyncio import AsyncIOMotorClient'. Change type annotation '_client: MongoClient | None' to '_client: AsyncIOMotorClient | None'. Replace MongoClient(...) with AsyncIOMotorClient(...). In create_indexes(), add 'await' before each db.*.create_index() call. Change get_mongo_client return type to AsyncIOMotorClient. This fixes M-1.",
+    "In apps/backend/app/services/search/azure_search.py: Add 'import asyncio' and 'from functools import partial'. Create _sync_search() method that calls self.client.search() synchronously and returns list(results). In search_context(), wrap calls with 'await asyncio.get_event_loop().run_in_executor(None, partial(self._sync_search, ...))'. This fixes H-7.",
+    "In apps/backend/app/services/ai/vertex_client.py: Add 'import asyncio' import. In _get_access_token(), wrap creds.refresh(request) with 'await asyncio.get_event_loop().run_in_executor(None, creds.refresh, request)'. Replace per-request 'async with httpx.AsyncClient() as client' with a persistent self._client created in __init__ with connection pooling (httpx.Limits). Add async close() method. Update generate() and stream_generate() to use self._client. This fixes H-8 and H-9.",
+    "In apps/backend/app/services/ai/sarvam_client.py: Replace per-request 'async with httpx.AsyncClient() as client' with a persistent self._client created in __init__ with connection pooling. Add async close() method. Update generate() and stream_generate() to use self._client. This fixes H-9.",
+    "In apps/backend/app/main.py lifespan shutdown: Add imports for vertex_client and sarvam_client, call await vertex_client.close() and await sarvam_client.close() before close_mongo/close_redis."
+  ],
+  "acceptance_criteria": [
+    "health.py imports get_mongo_client and get_redis correctly",
+    "chat.py models Message and RAGSource inherit from BaseModel, not Document",
+    "chat.py calls sanitize_user_input before processing messages and does not leak error details",
+    "migrate-users.py is a synchronous script with no asyncio",
+    "main.py has no duplicate /api/ai/chat route and has restricted CORS",
+    "mongo.py uses AsyncIOMotorClient with await on create_index calls",
+    "azure_search.py wraps sync search calls in run_in_executor",
+    "vertex_client.py has persistent httpx client and non-blocking token refresh",
+    "sarvam_client.py has persistent httpx client",
+    "All modified Python files pass py_compile syntax check"
+  ],
+  "verification": [
+    "python -m py_compile apps/backend/app/api/v1/health.py",
+    "python -m py_compile apps/backend/app/models/chat.py",
+    "python -m py_compile apps/backend/app/api/v1/chat.py",
+    "python -m py_compile infra/scripts/migrate-users.py",
+    "python -m py_compile apps/backend/app/main.py",
+    "python -m py_compile apps/backend/app/db/mongo.py",
+    "python -m py_compile apps/backend/app/services/search/azure_search.py",
+    "python -m py_compile apps/backend/app/services/ai/vertex_client.py",
+    "python -m py_compile apps/backend/app/services/ai/sarvam_client.py"
+  ],
+  "blocked_reason": null,
+  "findings": "All 9 files pass py_compile. No environment issues encountered since pyenv was already configured from FEAT-001."
+}

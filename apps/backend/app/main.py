@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
-from app.api.v1 import chat, auth, subscription, users, health, feedback
+from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
 from app.api.webhooks import razorpay
 
 
@@ -33,6 +33,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis initialization failed (expected in local dev without DB): {e}")
     
+    if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+        logger.warning(
+            "WARNING: Using default JWT_SECRET. "
+            "This is acceptable for local dev but MUST be changed in production."
+        )
+
     # Initialize Sentry with FastAPI integration
     if settings.SENTRY_DSN:
         sentry_sdk.init(
@@ -57,6 +63,10 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    from app.services.ai.vertex_client import vertex_client
+    from app.services.ai.sarvam_client import sarvam_client
+    await vertex_client.close()
+    await sarvam_client.close()
     await close_mongo()
     await close_redis()
     logger.info("Application shutdown complete")
@@ -77,8 +87,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Razorpay-Signature", "Accept", "Origin"],
     )
 
     # Request ID Middleware for structured logging
@@ -99,7 +109,6 @@ def create_app() -> FastAPI:
 
     # Register Routes
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
-    app.include_router(chat.router, prefix="/api/ai/chat", tags=["Chat"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
@@ -107,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/health", tags=["Health"])  # Legacy probe path
     app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
 
     return app
 

@@ -1,2 +1,49 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+!.env.shared
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.eggs/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+.output/
+.cache/
+.turbo/
+.vercel/
+.wrangler/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Project-specific
 *.log
 .ideavo/project
+.canvas/

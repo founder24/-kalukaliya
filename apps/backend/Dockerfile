@@ -25,7 +25,6 @@ RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 COPY --from=builder /root/.local /home/appuser/.local
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 
 COPY app/ ./app/
 COPY gunicorn_conf.py ./gunicorn_conf.py
