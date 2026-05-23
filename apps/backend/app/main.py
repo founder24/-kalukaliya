@@ -74,7 +74,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Factory function to create FastAPI application"""
-    
+    from app.core.logging_config import setup_logging
+    setup_logging()
+
     app = FastAPI(
         title="Syrabit API",
         description="Educational AI Assistant for Assamese Students",
