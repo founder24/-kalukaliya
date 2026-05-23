@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix Redis initialization to use AsyncRedis from upstash_redis, add graceful degradation for Assamese chat route_trace, create dead letter storage module, and add CSRF/security headers middleware. Also create KEY_ROTATION.md docs.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Fix Redis (apps/backend/app/db/redis.py): Replace `from upstash_redis import Redis` with `from upstash_redis.asyncio import Redis`. The Upstash SDK 1.7.0 provides `upstash_redis.asyncio.Redis` which returns coroutines that can be awaited. Keep the same init_redis(), get_redis(), close_redis() signatures. The `init_redis()` function should remain async-compatible. Also update `apps/backend/app/core/rate_limiter.py` which imports `from upstash_redis import Redis` - change to `from upstash_redis.asyncio import Redis`.",
+    "Step 2 - Fix Assamese chat route_trace (apps/backend/app/api/v1/chat.py): In the `event_stream()` generator, the final 'done' event already uses `detected_lang` (which is 'as' for Assamese even after Vertex fallback). Add a `route_trace` field to the final done event JSON: `'route_trace': {'decision': 'sarvam' if 'sarvam' in target_model.lower() or 'openhathi' in target_model.lower() else 'vertex', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}`. This enables the frontend QA badge to show routing decisions.",
+    "Step 3 - Create dead letter storage (apps/backend/app/services/dead_letter.py): Create a new module with an async function `store_dead_letter(user_id: str, message: str, lang: str, error: str) -> None` that stores failed chat attempts to MongoDB collection 'dead_letters'. Use motor directly via `get_mongo_client()` from `app.db.mongo`. Document schema: {user_id, message, lang, error, timestamp (datetime.utcnow()), status: 'pending'}. Add try/except to silently log failures. Then, in `apps/backend/app/api/v1/chat.py`, in the `event_stream()` generator where both Sarvam AND Vertex fail (the `except Exception as fallback_err:` block), call `asyncio.create_task(store_dead_letter(user_id, request.message, detected_lang, str(fallback_err)))` before yielding the error event.",
+    "Step 4 - Add CSRF origin validation middleware (apps/backend/app/main.py): In `create_app()`, add a middleware after the CORS middleware that checks the `Origin` header on POST/PUT/DELETE requests. If the request method is in ['POST', 'PUT', 'DELETE'] and has an Origin header, verify Origin is in `settings.allowed_origins_list`. If Origin is present but not in the allowed list, return 403 JSON response. Allow requests without Origin header (e.g., server-to-server). Skip validation for health check paths (/health, /api/health).",
+    "Step 5 - Add security headers middleware (apps/backend/app/main.py): Add another middleware (or combine with CSRF middleware) that adds the following response headers to every response: X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Strict-Transport-Security: max-age=31536000; includeSubDomains, X-XSS-Protection: 0, Referrer-Policy: strict-origin-when-cross-origin.",
+    "Step 6 - Create KEY_ROTATION.md (docs/KEY_ROTATION.md): Create documentation with step-by-step instructions for rotating each of: Sarvam API key (Azure Container Apps secret + wrangler secret), Vertex AI credentials (Google Cloud service account JSON in Key Vault), Razorpay keys (Key Vault + container app env), JWT secret (Key Vault, requires all active tokens to expire), Supabase anon key (GitHub Secrets + Cloudflare Pages env vars), Cloudflare API token. Include rollback procedures and verification steps for each.",
+    "Step 7 - Commit each task separately: Make 6 separate commits: (1) fix: use async Upstash Redis client for proper await support, (2) feat: add route_trace to streaming chat done event for Assamese fallback tracking, (3) feat: add dead letter storage for failed chat messages, (4) feat: add CSRF origin validation middleware, (5) feat: add security response headers middleware, (6) docs: add API key rotation documentation"
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/db/redis.py imports from upstash_redis.asyncio and all Redis calls can be awaited",
+    "apps/backend/app/core/rate_limiter.py imports from upstash_redis.asyncio",
+    "The streaming chat final done event includes a route_trace object with lang set to detected_lang",
+    "apps/backend/app/services/dead_letter.py exists and has store_dead_letter function",
+    "The chat.py fallback-failure path calls store_dead_letter",
+    "CSRF middleware in main.py validates Origin on mutating requests",
+    "Security headers middleware adds all 5 required headers",
+    "docs/KEY_ROTATION.md exists with rotation steps for all 6 key types",
+    "6 separate commits exist on feat/production-hardening branch",
+    "Python files pass syntax validation (python -m py_compile)"
+  ],
+  "verification": [
+    "Run: python -m py_compile apps/backend/app/db/redis.py",
+    "Run: python -m py_compile apps/backend/app/core/rate_limiter.py",
+    "Run: python -m py_compile apps/backend/app/api/v1/chat.py",
+    "Run: python -m py_compile apps/backend/app/services/dead_letter.py",
+    "Run: python -m py_compile apps/backend/app/main.py",
+    "Run: git log --oneline -6 to verify 6 separate commits"
+  ],
+  "blocked_reason": null,
+  "findings": "All 6 tasks implemented and committed separately. Python 3.9.25 available via python3 (not python). All py_compile checks pass. Used pyenv environment."
+}
