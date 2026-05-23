@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Create new branch feat/production-hardening, add dependabot.yml, fix Redis await issue in redis.py, and update container-app.bicep auto-scaling rules",
+  "status": "completed",
+  "steps": [
+    "Create and switch to branch feat/production-hardening from main",
+    "Create .github/dependabot.yml monitoring: pip (apps/backend), npm (root /, apps/frontend, apps/edge), and github-actions (.github/workflows). Use weekly schedule.",
+    "Commit: 'chore: add dependabot.yml for dependency vulnerability scanning'",
+    "In apps/backend/app/db/redis.py - the init_redis() function is already async and returns None correctly. However, verify and ensure it works with await in main.py. The upstash_redis.Redis constructor is synchronous - no await needed inside. The function signature is correct. No code change needed if already correct.",
+    "Update infra/azure/container-app.bicep scale section: change maxReplicas from 5 to 3, change concurrentRequests from '50' to '20' to match the requirements (min 1, max 3, scale on HTTP concurrency > 20)",
+    "Commit: 'feat: update container-app auto-scaling (max 3 replicas, concurrency 20)'"
+  ],
+  "acceptance_criteria": [
+    ".github/dependabot.yml exists with valid YAML covering pip, npm (3 directories), and github-actions",
+    "infra/azure/container-app.bicep has minReplicas: 1, maxReplicas: 3, concurrentRequests: '20'",
+    "All changes committed on feat/production-hardening branch"
+  ],
+  "verification": [
+    "Run python3 -c \"import yaml; yaml.safe_load(open('.github/dependabot.yml'))\" to validate YAML (or manual check)",
+    "Verify git log shows commits on the new branch"
+  ],
+  "blocked_reason": null,
+  "findings": "redis.py already correct - no changes needed. PyYAML not available in sandbox so used manual validation for dependabot.yml. Both commits successful on feat/production-hardening branch."
+}
