@@ -3,7 +3,10 @@ name: Deploy Frontend to Cloudflare Pages
 on:
   push:
     branches: [main]
-    paths: ['apps/frontend/**']
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/ci-frontend.yml'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -22,9 +25,6 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Dependencies
-        # --no-frozen-lockfile: PR #39 added frontend deps without regenerating
-        # pnpm-lock.yaml. Until the lockfile is regenerated locally and
-        # committed, allow CI to resolve missing entries on the fly.
         run: pnpm install --no-frozen-lockfile
 
       - name: Build Frontend
