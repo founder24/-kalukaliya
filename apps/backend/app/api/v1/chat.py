@@ -346,6 +346,10 @@ async def chat_stream(
                         yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:
                     logger.error(f"Vertex fallback also failed: {fallback_err}")
+                    from app.services.dead_letter import store_dead_letter
+                    asyncio.create_task(
+                        store_dead_letter(user_id, request.message, detected_lang, str(fallback_err))
+                    )
                     yield f"data: {json.dumps({'error': f'Both providers failed: {fallback_err}'})}\n\n"
                     return
             else:
