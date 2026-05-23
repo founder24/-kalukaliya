@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create Azure Monitor alert rules (Bicep) and health check dashboard (ARM JSON template) for production monitoring.",
+  "status": "pending",
+  "steps": [
+    "Step 1 - Create infra/azure/alerts.bicep defining: an action group with email notification (placeholder email alerts@syrabit.ai), and four metric alert rules: (a) HTTP 5xx error rate > 5% over 5min, severity 1; (b) Response time p95 > 3s over 5min, severity 2; (c) Container app restarts > 3 in 10min, severity 1; (d) Memory usage > 80%, severity 2. Use Microsoft.Insights/metricAlerts resource type targeting the container app resource. Reference the container app via a parameter.",
+    "Step 2 - Create infra/azure/dashboard.json as an Azure Monitor dashboard ARM template (JSON). Include 5 tiles: (a) Requests per second (line chart), (b) Response latency p50/p95 (line chart), (c) Error rate by status code (bar chart), (d) Container CPU & Memory usage (area chart), (e) Active revisions (table). Use resource ID format: /subscriptions/{sub}/resourceGroups/syrabit-prod/providers/Microsoft.App/containerApps/syrabit-backend",
+    "Step 3 - Commit with message 'feat: add Azure Monitor alerts and dashboard configuration'"
+  ],
+  "acceptance_criteria": [
+    "infra/azure/alerts.bicep exists with 4 alert rules and 1 action group",
+    "infra/azure/dashboard.json exists with 5 dashboard tiles in valid JSON format",
+    "alerts.bicep defines severity levels correctly (1 for critical, 2 for warning)",
+    "dashboard.json references the correct Azure Container Apps resource ID format",
+    "Committed on feat/observability branch"
+  ],
+  "verification": [
+    "python3 -c \"import json; json.load(open('infra/azure/dashboard.json'))\"",
+    "grep -c 'metricAlerts' infra/azure/alerts.bicep should return 4",
+    "grep 'severity' infra/azure/alerts.bicep should show severity values",
+    "git log --oneline -1 should show the alerts commit"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
