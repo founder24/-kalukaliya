@@ -1,3 +1,1 @@
 cd ~/-kalukaliya && git checkout fix/all-open-issues-batch && git merge main && pnpm install --no-frozen-lockfile && git add pnpm-lock.yaml && git commit -m "chore: regenerate lockfile after merge" && git push
-
-   
