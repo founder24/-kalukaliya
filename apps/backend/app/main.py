@@ -33,6 +33,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis initialization failed (expected in local dev without DB): {e}")
     
+    if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+        logger.warning(
+            "WARNING: Using default JWT_SECRET. "
+            "This is acceptable for local dev but MUST be changed in production."
+        )
+
     # Initialize Sentry with FastAPI integration
     if settings.SENTRY_DSN:
         sentry_sdk.init(

@@ -2,6 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
 from typing import Optional
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -95,7 +98,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
-    ALLOWED_ORIGINS: str = "https://syrabit.ai,https://app.syrabit.ai,http://localhost:5173"
+    ALLOWED_ORIGINS: str = "https://syrabit.ai,https://app.syrabit.ai"
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
@@ -109,9 +112,35 @@ class Settings(BaseSettings):
                     values[key] = None
         return values
 
+    @model_validator(mode='after')
+    def validate_production_secrets(self):
+        """Validate critical secrets are properly configured in production."""
+        if self.APP_ENV == "production":
+            if self.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+                raise ValueError(
+                    "JWT_SECRET must be changed from the default value in production"
+                )
+            if len(self.JWT_SECRET) < 32:
+                raise ValueError(
+                    "JWT_SECRET must be at least 32 characters long in production"
+                )
+            if not self.MONGODB_URI:
+                logger.warning("MONGODB_URI is not set in production")
+            if not self.UPSTASH_REDIS_REST_URL:
+                logger.warning("UPSTASH_REDIS_REST_URL is not set in production")
+            if not self.AZURE_SEARCH_ENDPOINT:
+                logger.warning("AZURE_SEARCH_ENDPOINT is not set in production")
+        return self
+
     @property
     def allowed_origins_list(self) -> list[str]:
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
+        origins = [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
+        if self.APP_ENV == "production":
+            origins = [
+                o for o in origins
+                if "localhost" not in o and "127.0.0.1" not in o
+            ]
+        return origins
 
     @property
     def google_credentials(self) -> dict:

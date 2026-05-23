@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, status
 from app.config import settings
+from app.models.user import User
 import hashlib
 import hmac
 import json
@@ -40,10 +41,10 @@ async def handle_razorpay_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Missing Signature")
 
     # 1. Verify Signature
-    expected_sig = hmac.new(
-        settings.RAZORPAY_WEBHOOK_SECRET.encode(),
-        body,
-        hashlib.sha256,
+    expected_sig = hmac.HMAC(
+        key=settings.RAZORPAY_WEBHOOK_SECRET.encode(),
+        msg=body,
+        digestmod=hashlib.sha256,
     ).hexdigest()
 
     if not hmac.compare_digest(expected_sig, signature):
@@ -60,35 +61,28 @@ async def handle_razorpay_webhook(request: Request):
         amount = payload["payment"]["amount"]
 
         # Find User
-        from app.db.mongo import get_mongo_client
-        client = get_mongo_client()
-        db = client[settings.MONGODB_DB_NAME]
-        
-        user = await db.users.find_one(
-            {"razorpay_subscription_id": sub_id}
-        )
-        
+        user = await User.find_one({"razorpay_subscription_id": sub_id})
+
         if not user:
             logger.error(f"User not found for sub {sub_id}")
             return {"status": "ignored", "reason": "user_not_found"}
 
         # Update Subscription Status
-        await db.users.update_one(
-            {"_id": user["_id"]},
+        await user.update(
             {
                 "$set": {
                     "subscription_status": "active",
                     "current_period_end": calculate_next_billing_date(),
                     "monthly_message_count": 0,  # Reset usage on new charge
                 }
-            },
+            }
         )
 
         # Send Receipt Email (async)
         try:
             from app.services.comms.resend_client import send_receipt_email
-            await send_receipt_email(user["email"], amount, event["id"])
-            logger.info(f"Subscription renewed for user {user['email']}")
+            await send_receipt_email(user.email, amount, event["id"])
+            logger.info(f"Subscription renewed for user {user.email}")
         except Exception as e:
             logger.error(f"Failed to send receipt email: {e}")
 
@@ -100,14 +94,10 @@ async def handle_razorpay_webhook(request: Request):
     elif event.get("event") == "subscription.cancelled":
         # Mark subscription as cancelled at period end
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
-        from app.db.mongo import get_mongo_client
-        client = get_mongo_client()
-        db = client[settings.MONGODB_DB_NAME]
-        
-        await db.users.update_one(
-            {"razorpay_subscription_id": sub_id},
-            {"$set": {"cancel_at_period_end": True}},
-        )
+
+        user = await User.find_one({"razorpay_subscription_id": sub_id})
+        if user:
+            await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
 
     return {"status": "ok"}

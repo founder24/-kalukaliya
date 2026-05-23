@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from typing import Optional
 import logging
 
 from app.models.user import User
 from app.config import settings
+from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +20,14 @@ class UserProfile(BaseModel):
     preferred_language: str
 
 
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    preferred_language: Optional[str] = None
+
+
 @router.get("/me", response_model=UserProfile)
-async def get_current_user_profile(user: User = None):
+async def get_current_user_profile(user: User = Depends(get_current_user)):
     """Get current user profile"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
     return UserProfile(
         name=user.name or "",
         email=user.email or "",
@@ -35,38 +39,31 @@ async def get_current_user_profile(user: User = None):
 
 @router.put("/me")
 async def update_user_profile(
-    name: str = None,
-    preferred_language: str = None,
-    user: User = None
+    body: UpdateProfileRequest,
+    user: User = Depends(get_current_user),
 ):
     """Update user profile"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
     updates = {}
-    if name:
-        updates["name"] = name
-    if preferred_language:
-        updates["preferred_language"] = preferred_language
-    
+    if body.name:
+        updates["name"] = body.name
+    if body.preferred_language:
+        updates["preferred_language"] = body.preferred_language
+
     if updates:
         await user.update({"$set": updates})
-    
+
     return {"status": "success", "message": "Profile updated"}
 
 
 @router.delete("/me")
-async def delete_account(user: User = None):
+async def delete_account(user: User = Depends(get_current_user)):
     """Delete user account (GDPR/DPDP compliance)"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
     # Cascade delete chats
     from app.models.chat import Chat
     await Chat.find({"user_id": str(user.id)}).delete()
-    
+
     # Delete user
     await user.delete()
-    
+
     logger.info(f"User account deleted: {user.email}")
     return {"status": "success", "message": "Account deleted"}

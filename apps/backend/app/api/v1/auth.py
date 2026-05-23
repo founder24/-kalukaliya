@@ -64,6 +64,10 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
 # ─── Token Helpers ───────────────────────────────────────────────────────────
 
 
@@ -255,7 +259,7 @@ async def reset_password(request: ResetPasswordRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token_endpoint(refresh_token: str, request: Request = None):
+async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = None):
     """Refresh access token using refresh token"""
     # Rate limit refresh endpoint (10 attempts per minute per IP)
     if request:
@@ -276,7 +280,7 @@ async def refresh_token_endpoint(refresh_token: str, request: Request = None):
             pass  # Redis not available — skip rate limiting
 
     try:
-        payload = jwt.decode(refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
 

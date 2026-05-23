@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Phase 0+1: Repository hygiene and critical auth/payment fixes. Covers findings C-1, L-1, C-5, M-16, C-2, C-3, C-4, H-1.",
+  "status": "in_progress",
+  "steps": [
+    "Replace .gitignore with comprehensive ignore rules covering .env files, Python caches, node_modules, IDE files, Docker overrides, and .canvas/ directory. Keep .env.example and .env.shared un-ignored.",
+    "Remove .env and apps/backend/.env from git tracking using 'git rm --cached' commands.",
+    "In apps/backend/app/config.py: Add a @model_validator(mode='after') method 'validate_production_secrets' inside the Settings class that (a) raises ValueError if JWT_SECRET is the default in production, (b) raises ValueError if JWT_SECRET < 32 chars in production, (c) logs warnings for missing MONGODB_URI, UPSTASH_REDIS_REST_URL, AZURE_SEARCH_ENDPOINT in production. Also remove 'http://localhost:5173' from the default ALLOWED_ORIGINS value (M-14) and add logic to allowed_origins_list property to filter localhost in production.",
+    "In apps/backend/app/api/v1/subscription.py: Add 'from fastapi import Depends' and 'from app.api.v1.auth import get_current_user' imports. Change all 'user: User = None' to 'user: User = Depends(get_current_user)'. Remove all 'if not user' guards. Change error detail in exceptions from f-string with str(e) to generic messages.",
+    "In apps/backend/app/api/v1/users.py: Add 'from fastapi import Depends' and 'from app.api.v1.auth import get_current_user' and 'from typing import Optional' imports. Change all 'user: User = None' to 'user: User = Depends(get_current_user)'. Create UpdateProfileRequest(BaseModel) with optional name and preferred_language fields. Change PUT /me to accept body: UpdateProfileRequest instead of query params. Remove all 'if not user' guards.",
+    "In apps/backend/app/api/webhooks/razorpay.py: Fix hmac.new() to hmac.HMAC(key=..., msg=..., digestmod=...). Replace raw PyMongo db.users.find_one/update_one calls with Beanie User model: 'from app.models.user import User', use 'await User.find_one({...})' and 'await user.update({...})'. Remove get_mongo_client imports.",
+    "In apps/backend/app/api/v1/auth.py: Add RefreshTokenRequest(BaseModel) with refresh_token field. Change refresh_token_endpoint to accept 'body: RefreshTokenRequest' parameter and use body.refresh_token instead of bare string parameter (M-7).",
+    "In apps/backend/app/main.py lifespan: Add a warning log after init_mongo/init_redis if JWT_SECRET equals the default value (H-1 additional hardening)."
+  ],
+  "acceptance_criteria": [
+    ".gitignore contains rules for .env, __pycache__/, node_modules/, .venv/, IDE files, and .canvas/",
+    ".env and apps/backend/.env are removed from git tracking",
+    "config.py has validate_production_secrets model_validator that raises for default JWT_SECRET in production",
+    "subscription.py uses Depends(get_current_user) on all endpoints",
+    "users.py uses Depends(get_current_user) and UpdateProfileRequest body model",
+    "razorpay.py uses hmac.HMAC and Beanie User model instead of raw PyMongo",
+    "auth.py refresh endpoint accepts token in request body via RefreshTokenRequest model",
+    "All modified Python files pass py_compile syntax check"
+  ],
+  "verification": [
+    "python -m py_compile apps/backend/app/config.py",
+    "python -m py_compile apps/backend/app/api/v1/subscription.py",
+    "python -m py_compile apps/backend/app/api/v1/users.py",
+    "python -m py_compile apps/backend/app/api/webhooks/razorpay.py",
+    "python -m py_compile apps/backend/app/api/v1/auth.py",
+    "python -m py_compile apps/backend/app/main.py",
+    "git ls-files | grep '\\.env$' should return empty"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
