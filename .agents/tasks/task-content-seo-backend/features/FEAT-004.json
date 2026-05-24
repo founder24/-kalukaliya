@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-004",
+  "type": "chore",
+  "description": "Integration tests for the Content & SEO backend. Write comprehensive tests covering all 4 layers - model validation, CRUD endpoints, AI generation (mocked), publish pipeline (mocked), and public endpoints.",
+  "status": "completed",
+  "steps": [
+    "Step 1: Create apps/backend/tests/test_content_models.py - test Beanie model instantiation, field validation, defaults for Board, Class, Stream, Subject, Chapter, Topic. Verify Settings.name, required vs optional fields, slug generation logic.",
+    "Step 2: Create apps/backend/tests/test_content_endpoints.py - test all Layer 1+2 admin content endpoints using httpx AsyncClient. Mock MongoDB (Beanie operations). Test: create board, list boards, update board, create class filtered by board, create stream, create subject, create chapter, get chapter, update chapter, delete chapter, add topics, list topics, update topic, delete topic, save EN content, save AS content, get content by lang. Verify auth is required (401 without cookie). Verify 404 on missing resources.",
+    "Step 3: Create apps/backend/tests/test_content_generation.py - test AI generation service with mocked Vertex and Sarvam clients. Test: generate_notes produces content_en and content_as, updates chapter status to 'generated', extracts meta_description. Test: generate_assamese_only works from existing EN content. Verify error handling when AI services are unavailable.",
+    "Step 4: Create apps/backend/tests/test_seo_pipeline.py - test SEO/publish endpoints with mocked Azure Search and Cloudflare. Test: publish_to_azure_search chunks content correctly, publish_chapter updates status to 'published', faq-jsonld generation creates proper schema, public endpoints return correct data without auth."
+  ],
+  "acceptance_criteria": [
+    "All test files exist and import correctly",
+    "Tests cover model validation, CRUD endpoints, AI generation (mocked), publish pipeline (mocked), public endpoints",
+    "Tests mock external services (MongoDB, Vertex AI, Sarvam AI, Azure Search) appropriately",
+    "Tests verify auth requirements (401 without session)",
+    "pytest discovers and can collect all tests (even if some fail due to missing env vars, they should be properly skipped or mocked)"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_content_models.py tests/test_content_endpoints.py tests/test_content_generation.py tests/test_seo_pipeline.py --collect-only 2>&1 | tail -20",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_content_models.py -x -v --timeout=30 2>&1 | tail -30"
+  ],
+  "blocked_reason": null,
+  "findings": "All 81 tests pass across 4 files (42 model, 15 endpoint, 7 generation, 17 SEO pipeline). Key findings: (1) Beanie Documents require get_pymongo_collection mock for instantiation without DB init. (2) pytest-asyncio 1.3+ strict mode requires pytest_asyncio.fixture decorator for async fixtures. (3) CSRF middleware in main.py checks origin header - tests should omit origin header since _csrf_check is mocked at the endpoint level. (4) Must patch _validate_admin_session at the import location (admin_content/admin_seo modules) not at the definition site (admin module)."
+}

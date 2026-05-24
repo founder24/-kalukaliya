@@ -1,0 +1,33 @@
+{
+  "project_type": "Python FastAPI backend with MongoDB (Beanie ODM), Redis (Upstash), Vertex AI, Sarvam AI, Azure Search",
+  "language": "Python 3.11",
+  "build_system": "pip with requirements.in/requirements.txt, Docker for production",
+  "test_framework": "pytest with pytest-asyncio, httpx AsyncClient for integration tests",
+  "build_command": "cd apps/backend && pip install -r requirements.in && python -c 'from app.main import app; print(\"OK\")'",
+  "test_command": "cd apps/backend && python -m pytest tests/ -x --timeout=30",
+  "verification_instructions": "1. Run pytest tests to confirm no regressions. 2. Verify imports succeed. 3. Docker build validates full environment.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd apps/backend && pip install -r requirements.in",
+  "environment_constraints": "OPEN_INTERNET mode - full network access. No live MongoDB/Redis/AI services available in sandbox, so tests must mock external dependencies.",
+  "contribution_requirements": "Follow existing patterns: Beanie Documents for models, router modules in app/api/v1/, services in app/services/, admin auth via _validate_admin_session from admin.py",
+  "key_patterns": "1. Routers use APIRouter with prefix registered in main.py under /api/v1/admin. 2. Admin endpoints call _validate_admin_session(request) and _csrf_check(request) for auth. 3. Models are Beanie Documents with Settings.name for collection. 4. Services are singleton instances (e.g., search_service, vertex_client, sarvam_client). 5. DB access via get_mongo_client() for raw motor or Beanie Document class methods. 6. Config via app.config.settings Pydantic Settings. 7. Tests use httpx AsyncClient with ASGITransport.",
+  "relevant_files": [
+    "apps/backend/app/api/v1/admin_content.py",
+    "apps/backend/app/api/v1/admin_seo.py",
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/api/v1/seo.py",
+    "apps/backend/app/models/user.py",
+    "apps/backend/app/models/chat.py",
+    "apps/backend/app/models/feedback.py",
+    "apps/backend/app/db/mongo.py",
+    "apps/backend/app/db/redis.py",
+    "apps/backend/app/services/ai/vertex_client.py",
+    "apps/backend/app/services/ai/sarvam_client.py",
+    "apps/backend/app/services/search/azure_search.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/core/circuit_breaker.py",
+    "apps/backend/tests/conftest.py"
+  ],
+  "directory_structure": "apps/backend/app/ - main app. api/v1/ - route modules. models/ - Beanie Documents. services/ - AI, search, payment clients. db/ - mongo.py and redis.py. core/ - circuit breaker, logging, telemetry. tests/ - pytest suite."
+}

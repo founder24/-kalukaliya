@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Layer 4: SEO/GEO/AEO Pipeline Integration + Public Endpoints. Implement the SEO pipeline status, bulk generation, coverage stats, FAQ JSON-LD generation, public content endpoints (published-topics, faq-jsonld), entity health refresh, and deep scan history. Add a public content router for non-admin endpoints.",
+  "status": "completed",
+  "steps": [
+    "Step 1: Update admin_seo.py - replace placeholder implementations with real ones. Implement: GET /seo/pipeline-status (query chapters grouped by subject, show generated/published/draft counts), POST /seo/bulk-generate (accept list of topic IDs, generate all SEO page types for each), GET /seo/coverage (published vs draft counts per subject), POST /seo/entity/refresh (re-probe entity SEO health - check indexing status via stored data), GET /seo/deep-scan-history (return history of sitemap scans from a scans collection or embedded field).",
+    "Step 2: Add to admin_content.py: POST /content/chapters/{id}/faq-jsonld - Generate FAQ JSON-LD entries from chapter topics (question=title, answer=definition). Store faq_jsonld field on chapter document.",
+    "Step 3: Create apps/backend/app/api/v1/public_content.py - new router for public (non-admin) endpoints: GET /content/chapters/{id}/faq-jsonld (returns stored FAQ JSON-LD for schema markup), GET /content/chapters/{id}/published-topics (returns published_topics array for TopicAnswerCard rendering). These endpoints do NOT require admin auth - they are public-facing.",
+    "Step 4: Register the public_content router in main.py with prefix '/api/v1' and tags=['Public Content'].",
+    "Step 5: Update the Chapter model in models/content.py to add faq_jsonld field (Optional[list[dict]] = None) if not already present."
+  ],
+  "acceptance_criteria": [
+    "admin_seo.py has pipeline-status, bulk-generate, coverage, entity/refresh, deep-scan-history endpoints with real implementations",
+    "admin_content.py has faq-jsonld generation endpoint",
+    "public_content.py exists with 2 public endpoints (faq-jsonld GET, published-topics GET)",
+    "public_content router is registered in main.py",
+    "Chapter model includes faq_jsonld field",
+    "Pipeline-status endpoint queries chapters grouped by subject and returns meaningful status data",
+    "Public endpoints do NOT call _validate_admin_session",
+    "Python imports resolve correctly"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.public_content import router; print(f\"Public routes: {len(router.routes)}\"); assert len(router.routes) >= 2'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.admin_seo import router; print(f\"SEO routes: {len(router.routes)}\"); assert len(router.routes) >= 7'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.main import app; routes = [r.path for r in app.routes]; print(\"App routes loaded OK\")'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.models.content import Chapter; assert hasattr(Chapter, \"faq_jsonld\") or \"faq_jsonld\" in Chapter.model_fields; print(\"Model OK\")'"
+  ],
+  "blocked_reason": null,
+  "findings": "All endpoints implemented and verified. admin_seo.py has 10 routes total (entity/status, entity/history, pipeline-status, bulk-generate, coverage, entity/refresh, deep-scan-history, extract, generate, regenerate-sitemap). public_content.py has 2 routes (faq-jsonld GET, published-topics GET). Admin content router has faq-jsonld POST. All routes registered in main.py and imports resolve correctly. Scan history is stored in-memory per process - sufficient for MVP."
+}
