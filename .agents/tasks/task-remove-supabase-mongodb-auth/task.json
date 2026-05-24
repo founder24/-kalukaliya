@@ -1,0 +1,7 @@
+{
+  "task_id": "task-remove-supabase-mongodb-auth",
+  "task_description": "Remove Supabase completely and rewire authentication to use MongoDB directly. Remove Google OAuth. Make email login/signup work with backend endpoints. Fix admin login to accept email/password.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

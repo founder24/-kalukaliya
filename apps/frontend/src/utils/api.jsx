@@ -2,12 +2,12 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
-export const API_BASE = `${BACKEND_URL}/api`;
+export const API_BASE = `${BACKEND_URL}/api/v1`;
 
 const _RENDER_URL = (import.meta.env.VITE_RENDER_API_URL || '').replace(/\/+$/, '');
 const _WORKER_URL = (import.meta.env.VITE_WORKER_API_URL || '').replace(/\/+$/, '');
-const RENDER_API = _RENDER_URL ? `${_RENDER_URL}/api` : API_BASE;
-export const WORKER_API = _WORKER_URL ? `${_WORKER_URL}/api` : API_BASE;
+const RENDER_API = _RENDER_URL ? `${_RENDER_URL}/api/v1` : API_BASE;
+export const WORKER_API = _WORKER_URL ? `${_WORKER_URL}/api/v1` : API_BASE;
 
 let _authToken = null;
 

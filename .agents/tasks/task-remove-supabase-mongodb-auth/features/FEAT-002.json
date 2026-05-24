@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Rewire frontend AuthContext to call backend directly (no Supabase), fix admin login to accept email/password, and fix API path routing (API_BASE must include /v1 prefix)",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: In `apps/frontend/src/utils/api.jsx`, change API_BASE to include the /v1 path segment. Change from `export const API_BASE = \\`${BACKEND_URL}/api\\`;` to `export const API_BASE = \\`${BACKEND_URL}/api/v1\\`;`. Also update RENDER_API similarly: `const RENDER_API = _RENDER_URL ? \\`${_RENDER_URL}/api/v1\\` : API_BASE;`. NOTE: WORKER_API should remain as `${_WORKER_URL}/api` because the edge worker content routes may use a different prefix structure - but since WORKER_API falls back to API_BASE when VITE_WORKER_API_URL is not set, and content routes are also at /api/v1/... on the backend, this should be fine. Actually WORKER_API also falls back to API_BASE. So just update API_BASE.",
+    "Step 2: Completely rewrite `apps/frontend/src/context/AuthContext.jsx` to remove all Supabase logic and call backend directly. The new implementation should: (a) Remove import of `supabase` from '@/lib/supabase'. (b) Remove the `_exchangeSupabaseSession` function entirely. (c) Rewrite `login(email, password, turnstileToken)` to: POST `${API_BASE}/auth/login` with body `{email, password}` and header `x-turnstile-token` if provided, get back `{access_token, refresh_token}`, store access_token via `_storeToken(access_token)`, store refresh_token in a module-level variable `_inMemoryRefreshToken`, call `fetchMe()` to hydrate user, return user. (d) Rewrite `signup(name, email, password, consent_dpdp, turnstileToken)` to: POST `${API_BASE}/auth/signup` with body `{email, password, name}` and header `x-turnstile-token` if provided, get back `{access_token, refresh_token}`, store tokens, call fetchMe(), return user. (e) Rewrite `logout()` to: POST `${API_BASE}/auth/logout` with body `{refresh_token: _inMemoryRefreshToken}` using the Bearer access token, then clear tokens and user state. (f) Update the token refresh logic: when fetchMe gets 401 with 'token_expired', POST `${API_BASE}/auth/refresh` with body `{refresh_token: _inMemoryRefreshToken}` to get new tokens. (g) Remove the entire `useEffect` that subscribes to `supabase.auth.onAuthStateChange`. (h) Keep fetchMe calling `${API_BASE}/users/me` (note: with new API_BASE this resolves to /api/v1/users/me which matches the backend). (i) Keep all the existing anonymous data claiming logic, ads config integration, and pin reset logic unchanged. (j) Keep the `justAuthenticated` ref pattern for the initial mount/probe logic. (k) Store _inMemoryRefreshToken alongside _inMemoryToken. Also persist refresh_token in sessionStorage as `syrabit_refresh_token` for session-restore (same pattern as access token).",
+    "Step 3: Fix `apps/backend/app/api/v1/admin.py` to accept email+password login directly. Rewrite the `admin_login` endpoint: (a) Change the body parsing to expect `{email, password}` instead of `{token}`. (b) Import `User` model and verify the user exists with that email, verify password with `user.verify_password(password)`. (c) Check the user has admin role by checking a `role` field on the User model (or an `is_admin` flag). Since the current User model doesn't have a `role` field, check if the email is in an admin allowlist OR add a role field. Looking at the codebase - the frontend checks `user.role === 'admin'` so there must be a role field somewhere. For now, add an `admin_emails` setting to config OR check a 'role' field on the User document. The safest approach: add an optional `role` field to User model with default None, and check `user.role == 'admin'` in the admin login. (d) On successful verification, mint an admin JWT with `{sub: user_id, type: 'admin', role: 'admin', exp: now+8h}` using the existing JWT_SECRET. (e) Set the httpOnly cookie `syrabit_admin_session` with the minted JWT. (f) Return `{status: 'ok', name: user.name, user_id: str(user.id)}`.",
+    "Step 4: Add `role` field to `apps/backend/app/models/user.py` User model. Add: `role: Optional[str] = None` (allowed values: 'student', 'educator', 'staff', 'admin', or None for default). This field already appears to be returned to the frontend (the frontend checks user.role), so it may already exist in the MongoDB documents even if not in the Beanie model definition. Make it explicit.",
+    "Step 5: Update the `adminLogin` function in `apps/frontend/src/utils/api.jsx` - it already sends `{email, password}` with turnstile header which matches our new backend. Verify it matches: `axios.post(\\`${API_BASE}/admin/login\\`, { email, password }, { withCredentials: true, headers })`. With the new API_BASE (/api/v1), this correctly hits /api/v1/admin/login.",
+    "Step 6: Update the edge worker public paths in `apps/edge/src/middleware/jwt.ts` - ensure `/api/v1/admin/login` is in the PUBLIC_PATHS array (it needs to be accessible without a JWT since that's where you GET a JWT). Add '/api/v1/admin/login' to the PUBLIC_PATHS list.",
+    "Step 7: Update all existing frontend tests that mock GoogleSignInButton. In these test files, remove the `vi.mock('@/components/GoogleSignInButton', ...)` lines since the component no longer exists and is no longer imported by the pages under test: (a) `apps/frontend/src/pages/LoginPage.handleSubmit.test.jsx`, (b) `apps/frontend/src/pages/SignupPage.handleSubmit.test.jsx`, (c) `apps/frontend/src/pages/LoginPage.aria.test.jsx`, (d) `apps/frontend/src/pages/LoginPage.axe.test.jsx`, (e) `apps/frontend/src/pages/AuthPage.turnstile.test.jsx`. Also update any test that mocks or references `@/lib/supabase` - remove those mocks.",
+    "Step 8: Verify the `fetchMe` function now correctly calls `${API_BASE}/users/me` (which with new API_BASE resolves to /api/v1/users/me matching the backend's users router at prefix /api/v1/users with a GET /me endpoint). Note: the current AuthContext calls `${API_BASE}/auth/me` - this needs to change to `${API_BASE}/users/me` since the backend endpoint is at /api/v1/users/me, NOT /api/v1/auth/me.",
+    "Step 9: Add an `admin_logout` endpoint to `apps/backend/app/api/v1/admin.py` that clears the httpOnly cookie. Add `@router.post('/logout')` that returns a response with the cookie set to empty/expired. This is needed because the frontend calls `adminLogout()` which posts to `${API_BASE}/admin/logout`."
+  ],
+  "acceptance_criteria": [
+    "Frontend login function calls POST /api/v1/auth/login directly (no Supabase)",
+    "Frontend signup function calls POST /api/v1/auth/signup directly (no Supabase)",
+    "Frontend logout calls POST /api/v1/auth/logout with refresh_token",
+    "Frontend fetchMe calls GET /api/v1/users/me with Bearer token",
+    "Token refresh calls POST /api/v1/auth/refresh with refresh_token in body",
+    "Admin login endpoint accepts {email, password} body and returns session cookie",
+    "Admin login verifies user exists in MongoDB and has admin role",
+    "User model has explicit `role` field",
+    "No references to supabase in AuthContext.jsx",
+    "Edge worker allows /api/v1/admin/login without JWT",
+    "All existing frontend tests pass after removing GoogleSignInButton mocks",
+    "The adminLogin function in api.jsx correctly posts to /api/v1/admin/login (via API_BASE)"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/-kalukaliya/apps/frontend && pnpm test` - all tests should pass",
+    "Run `cd /projects/sandbox/-kalukaliya && pytest apps/backend/ --tb=short -q` - all backend tests should pass",
+    "grep -r 'supabase' apps/frontend/src/context/AuthContext.jsx should return no results"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

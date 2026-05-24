@@ -42,10 +42,6 @@ vi.mock('@/components/Logo', () => ({
   LogoFull: () => <div data-testid="logo" />,
 }));
 
-vi.mock('@/components/GoogleSignInButton', () => ({
-  default: () => <div data-testid="google-btn" />,
-}));
-
 vi.mock('@/lib/authErrors', () => ({
   formatAuthError: (_err, fallback) => fallback,
 }));
