@@ -97,26 +97,37 @@ jobs:
         run: |
           set -euo pipefail
           JWT_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name jwt-secret --query value -o tsv)
+          echo "::add-mask::$JWT_SECRET"
           echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
           MONGODB_URI=$(az keyvault secret show --vault-name syrabit-kv --name mongodb-uri --query value -o tsv)
+          echo "::add-mask::$MONGODB_URI"
           echo "MONGODB_URI=$MONGODB_URI" >> "$GITHUB_ENV"
           UPSTASH_REDIS_URL=$(az keyvault secret show --vault-name syrabit-kv --name upstash-redis-url --query value -o tsv)
+          echo "::add-mask::$UPSTASH_REDIS_URL"
           echo "UPSTASH_REDIS_URL=$UPSTASH_REDIS_URL" >> "$GITHUB_ENV"
           AZURE_SEARCH_KEY=$(az keyvault secret show --vault-name syrabit-kv --name azure-search-key --query value -o tsv)
+          echo "::add-mask::$AZURE_SEARCH_KEY"
           echo "AZURE_SEARCH_KEY=$AZURE_SEARCH_KEY" >> "$GITHUB_ENV"
           AZURE_SEARCH_ENDPOINT=$(az keyvault secret show --vault-name syrabit-kv --name azure-search-endpoint --query value -o tsv)
+          echo "::add-mask::$AZURE_SEARCH_ENDPOINT"
           echo "AZURE_SEARCH_ENDPOINT=$AZURE_SEARCH_ENDPOINT" >> "$GITHUB_ENV"
           VERTEX_AI_KEY=$(az keyvault secret show --vault-name syrabit-kv --name vertex-ai-key --query value -o tsv)
+          echo "::add-mask::$VERTEX_AI_KEY"
           echo "VERTEX_AI_KEY=$VERTEX_AI_KEY" >> "$GITHUB_ENV"
           SARVAM_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name sarvam-api-key --query value -o tsv)
+          echo "::add-mask::$SARVAM_API_KEY"
           echo "SARVAM_API_KEY=$SARVAM_API_KEY" >> "$GITHUB_ENV"
           RAZORPAY_KEY_ID=$(az keyvault secret show --vault-name syrabit-kv --name razorpay-key-id --query value -o tsv)
+          echo "::add-mask::$RAZORPAY_KEY_ID"
           echo "RAZORPAY_KEY_ID=$RAZORPAY_KEY_ID" >> "$GITHUB_ENV"
           RAZORPAY_KEY_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name razorpay-key-secret --query value -o tsv)
+          echo "::add-mask::$RAZORPAY_KEY_SECRET"
           echo "RAZORPAY_KEY_SECRET=$RAZORPAY_KEY_SECRET" >> "$GITHUB_ENV"
           RESEND_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name resend-api-key --query value -o tsv)
+          echo "::add-mask::$RESEND_API_KEY"
           echo "RESEND_API_KEY=$RESEND_API_KEY" >> "$GITHUB_ENV"
           POSTHOG_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name posthog-api-key --query value -o tsv)
+          echo "::add-mask::$POSTHOG_API_KEY"
           echo "POSTHOG_API_KEY=$POSTHOG_API_KEY" >> "$GITHUB_ENV"
 
       - name: Build & Push to ACR
