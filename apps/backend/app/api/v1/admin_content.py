@@ -688,3 +688,48 @@ async def publish_pages(request: Request, chapter_id: PydanticObjectId):
     except Exception as e:
         logger.error(f"Cloudflare publish failed for {chapter_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Page publishing failed: {e}")
+
+
+# ==============================================================================
+# Layer 4: FAQ JSON-LD Generation
+# ==============================================================================
+
+
+@router.post("/content/chapters/{chapter_id}/faq-jsonld")
+async def generate_faq_jsonld(request: Request, chapter_id: PydanticObjectId):
+    """Generate FAQ JSON-LD from chapter published topics and store on document."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    chapter = await Chapter.get(chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    if not chapter.published_topics:
+        raise HTTPException(
+            status_code=400,
+            detail="Chapter has no published topics to generate FAQ from",
+        )
+
+    # Generate FAQ JSON-LD entries from topics
+    faq_entries = []
+    for topic in chapter.published_topics:
+        faq_entries.append({
+            "@type": "Question",
+            "name": topic.title,
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": topic.definition or "",
+            },
+        })
+
+    # Store on chapter
+    chapter.faq_jsonld = faq_entries
+    chapter.updated_at = datetime.now(timezone.utc)
+    await chapter.save()
+
+    return {
+        "chapter_id": str(chapter.id),
+        "faq_jsonld": faq_entries,
+        "entries_count": len(faq_entries),
+    }

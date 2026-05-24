@@ -27,6 +27,7 @@ from app.api.v1 import (
     admin_alerts,
     seo,
     indexnow,
+    public_content,
 )
 from app.api.webhooks import razorpay
 
@@ -243,6 +244,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(seo.router, prefix="/api/v1/seo", tags=["SEO"])
     app.include_router(indexnow.router, prefix="/api/v1/indexnow", tags=["IndexNow"])
+    app.include_router(
+        public_content.router, prefix="/api/v1", tags=["Public Content"]
+    )
 
     # Legacy health probe redirects for backward compatibility
     @app.get("/api/health")
