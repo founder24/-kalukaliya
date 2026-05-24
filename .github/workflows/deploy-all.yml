@@ -47,6 +47,12 @@ jobs:
           pip install ruff
           ruff check apps/backend/app/
 
+      - name: Test Backend
+        run: pytest apps/backend/ --tb=short -q
+        env:
+          APP_ENV: test
+          JWT_SECRET: test-secret-at-least-32-characters-long-for-ci
+
       - name: Test Edge
         run: pnpm --filter syrabit-edge test
 

@@ -1,11 +1,6 @@
 name: CI Edge — Lint & Test
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/edge/**'
-      - '.github/workflows/ci-edge.yml'
   pull_request:
     branches: [main]
     paths:
@@ -44,7 +39,7 @@ jobs:
     needs: lint-and-typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
