@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix all 11 P0 security, performance, API, chat, RAG, payment, and observability bugs in the backend and edge code",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "STEP 1 - #90 [SEC-C1] Dangerous Default JWT Secret: In .env.shared, replace JWT_SECRET=super_secret_jwt_key_32_chars_min with a clear placeholder like JWT_SECRET=GENERATE_A_SECURE_RANDOM_SECRET_HERE_MIN_32_CHARS that cannot be mistaken for a real secret. Add a comment warning that this MUST be replaced. Also ensure config.py validate_production_secrets includes this new placeholder in KNOWN_PLACEHOLDER_SECRETS.",
     "STEP 2 - #91 [SEC-C2] Turnstile Bot Protection Optional for Chat: In apps/edge/src/index.ts, make Turnstile mandatory for BOTH auth AND chat POST endpoints. Currently only auth endpoints reject missing tokens. For chat POST endpoints (method POST on /api/v1/chat), require CF-Turnstile-Response header and reject with 403 if missing, matching the auth endpoint behavior.",
@@ -35,5 +35,5 @@
     "Run: pnpm --filter syrabit-edge exec tsc --noEmit (verifies TypeScript compiles)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Pre-existing test failures confirmed: (1) test_login_invalid_credentials fails due to Beanie not initialized (no MongoDB), (2) test_chat_rate_limit_returns_429 and test_chat_error_does_not_leak_details fail due to check_rate_limit returning bool when Redis unavailable. Pre-existing TypeScript error in bot.ts:20 (data is unknown type). Webhook test updated to include event id field per new validation requirement."
 }
