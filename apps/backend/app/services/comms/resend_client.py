@@ -22,17 +22,17 @@ async def send_welcome_email(email: str, name: str = None) -> bool:
             "subject": "Welcome to Syrabit! 🎓",
             "html": f"""
             <h1>Welcome to Syrabit!</h1>
-            <p>Hi {name or 'there'},</p>
+            <p>Hi {name or "there"},</p>
             <p>Thank you for joining Syrabit - your AI-powered educational assistant for Assamese students.</p>
             <p>Get started by asking your first question!</p>
             <p>Best regards,<br>The Syrabit Team</p>
             """,
         }
-        
+
         await asyncio.to_thread(resend.Emails.send, params)
         logger.info(f"Welcome email sent to {email}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to send welcome email: {e}")
         return False
@@ -42,7 +42,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
     """Send payment receipt email"""
     try:
         amount_inr = amount / 100  # Convert paise to rupees
-        
+
         params = {
             "from": f"{settings.RESEND_FROM_NAME} <{settings.RESEND_FROM_ADDRESS}>",
             "to": email,
@@ -68,11 +68,11 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
             <p>Best regards,<br>The Syrabit Team</p>
             """,
         }
-        
+
         await asyncio.to_thread(resend.Emails.send, params)
         logger.info(f"Receipt email sent to {email}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to send receipt email: {e}")
         return False
@@ -82,7 +82,7 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
     """Send password reset email"""
     try:
         reset_link = f"https://syrabit.ai/reset-password?token={reset_token}"
-        
+
         params = {
             "from": f"{settings.RESEND_FROM_NAME} <{settings.RESEND_FROM_ADDRESS}>",
             "to": email,
@@ -96,11 +96,11 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
             <p>Best regards,<br>The Syrabit Team</p>
             """,
         }
-        
+
         await asyncio.to_thread(resend.Emails.send, params)
         logger.info(f"Password reset email sent to {email}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to send password reset email: {e}")
         return False

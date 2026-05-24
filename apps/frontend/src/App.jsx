@@ -6,7 +6,6 @@ import { LanguageProvider } from "@/context/LanguageContext";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AdminGuard } from "@/components/AdminGuard";
 import { StaffGuard } from "@/components/StaffGuard";
-import GoogleOAuthCallbackEffect from "@/components/GoogleOAuthCallbackEffect";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./queryClient";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -272,7 +271,6 @@ function LegacyTopicRedirect() {
 export function AppRoutes() {
   return (
     <>
-      <GoogleOAuthCallbackEffect />
       <Routes>
       {/* ── Public routes ── */}
       <Route path="/"         element={<Navigate to="/chat" replace />} />

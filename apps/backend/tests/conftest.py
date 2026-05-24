@@ -12,6 +12,7 @@ def anyio_backend():
 async def client():
     """Create async test client"""
     from app.main import app
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -21,6 +22,7 @@ async def client():
 def mock_user():
     """Create a mock authenticated user"""
     from app.models.user import User
+
     user = MagicMock(spec=User)
     user.id = "test-user-id-123"
     user.email = "test@example.com"
@@ -37,5 +39,6 @@ def mock_user():
 def auth_headers():
     """Generate valid JWT headers for testing"""
     from app.api.v1.auth import create_access_token
+
     token = create_access_token("test-user-id-123")
     return {"Authorization": f"Bearer {token}"}

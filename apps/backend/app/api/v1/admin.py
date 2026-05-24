@@ -4,12 +4,17 @@ Validates the httponly syrabit_admin_session cookie for admin panel access.
 CSRF Protection: Admin cookies MUST use SameSite=Strict.
 Origin validation is enforced on all mutating (non-GET) requests.
 """
+
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from jose import jwt, JWTError
 import logging
 
 from app.config import settings
+from app.models.user import User
+from app.api.v1.auth import _check_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +27,9 @@ async def _csrf_check(request: Request):
         origin = request.headers.get("origin") or request.headers.get("referer", "")
         allowed = settings.allowed_origins_list
         if not any(origin.startswith(o) for o in allowed):
-            raise HTTPException(status_code=403, detail="CSRF validation failed: origin not allowed")
+            raise HTTPException(
+                status_code=403, detail="CSRF validation failed: origin not allowed"
+            )
 
 
 def _validate_admin_session(request: Request) -> dict:
@@ -31,7 +38,9 @@ def _validate_admin_session(request: Request) -> dict:
     if not session_cookie:
         raise HTTPException(status_code=401, detail="No admin session")
     try:
-        payload = jwt.decode(session_cookie, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            session_cookie, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         if payload.get("type") != "admin" or payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return payload
@@ -52,30 +61,65 @@ async def admin_verify(request: Request):
 
 @router.post("/login")
 async def admin_login(request: Request):
-    """Admin login - sets httponly SameSite=Strict cookie for CSRF protection."""
+    """Admin login - accepts email/password, verifies admin role, sets httponly cookie."""
     await _csrf_check(request)
+    await _check_rate_limit(request, "admin_login", 5)
 
     body = await request.json()
-    token = body.get("token")
-    if not token:
-        raise HTTPException(status_code=400, detail="Token required")
+    email = body.get("email")
+    password = body.get("password")
 
-    # Validate the provided token
-    try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        if payload.get("type") != "admin" or payload.get("role") != "admin":
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password required")
 
-    response = JSONResponse({"status": "ok", "user_id": payload.get("sub")})
+    # Find user and verify credentials
+    user = await User.find_one({"email": email})
+    if not user or not user.hashed_password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not user.verify_password(password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Check admin role
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    # Mint admin JWT (8-hour session)
+    expire = datetime.now(timezone.utc) + timedelta(hours=8)
+    token_payload = {
+        "sub": str(user.id),
+        "type": "admin",
+        "role": "admin",
+        "exp": expire,
+    }
+    admin_token = jwt.encode(
+        token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
+
+    response = JSONResponse(
+        {"status": "ok", "name": user.name or "", "user_id": str(user.id)}
+    )
     response.set_cookie(
         key="syrabit_admin_session",
-        value=token,
+        value=admin_token,
         httponly=True,
         secure=True,
         samesite="strict",
-        max_age=3600,  # 1 hour
+        max_age=28800,  # 8 hours
         path="/api/v1/admin",
+    )
+    return response
+
+
+@router.post("/logout")
+async def admin_logout(request: Request):
+    """Clear admin session cookie."""
+    await _csrf_check(request)
+    response = JSONResponse({"status": "ok", "message": "Logged out"})
+    response.delete_cookie(
+        key="syrabit_admin_session",
+        path="/api/v1/admin",
+        secure=True,
+        samesite="strict",
     )
     return response

@@ -9,7 +9,9 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -22,13 +24,34 @@ class JSONFormatter(logging.Formatter):
 
         # Include additional extra fields passed via the extra dict
         standard_attrs = {
-            "name", "msg", "args", "created", "relativeCreated",
-            "pathname", "filename", "module", "funcName", "lineno",
-            "levelno", "levelname", "exc_info", "exc_text", "stack_info",
-            "thread", "threadName", "process", "processName", "message",
-            "msecs", "taskName",
+            "name",
+            "msg",
+            "args",
+            "created",
+            "relativeCreated",
+            "pathname",
+            "filename",
+            "module",
+            "funcName",
+            "lineno",
+            "levelno",
+            "levelname",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "thread",
+            "threadName",
+            "process",
+            "processName",
+            "message",
+            "msecs",
+            "taskName",
             # Already handled above
-            "request_id", "user_id", "lang", "provider", "latency_ms",
+            "request_id",
+            "user_id",
+            "lang",
+            "provider",
+            "latency_ms",
         }
         for key, value in record.__dict__.items():
             if key not in standard_attrs and not key.startswith("_"):

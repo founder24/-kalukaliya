@@ -53,8 +53,6 @@ jobs:
         env:
           NODE_ENV: production
           VITE_BACKEND_URL: https://api.syrabit.ai
-          VITE_SUPABASE_URL: https://placeholder.supabase.co
-          VITE_SUPABASE_ANON_KEY: placeholder
 
       - name: Commit refreshed lockfile if changed
         run: |

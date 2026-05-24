@@ -23,6 +23,7 @@ router = APIRouter(tags=["Feedback"])
 
 class FeedbackRequest(BaseModel):
     """Request body for submitting feedback."""
+
     message_id: str = Field(..., min_length=1, max_length=100)
     rating: Literal[1, -1]
     lang: Literal["en", "as"]
@@ -114,9 +115,7 @@ async def get_feedback_stats(
         },
         {
             "$addFields": {
-                "accuracy": {
-                    "$round": [{"$divide": ["$positive", "$total"]}, 3]
-                },
+                "accuracy": {"$round": [{"$divide": ["$positive", "$total"]}, 3]},
                 "satisfaction_pct": {
                     "$round": [
                         {"$multiply": [{"$divide": ["$positive", "$total"]}, 100]},

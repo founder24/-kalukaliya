@@ -11,7 +11,10 @@ import uuid
 
 from app.config import settings
 from app.models.user import User
-from app.services.comms.resend_client import send_welcome_email, send_password_reset_email
+from app.services.comms.resend_client import (
+    send_welcome_email,
+    send_password_reset_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     name: Optional[str] = None
+    consent_dpdp: bool = False
 
     @field_validator("password")
     @classmethod
@@ -91,15 +95,24 @@ class LogoutRequest(BaseModel):
 
 def create_access_token(user_id: str, expires_delta: timedelta = None) -> str:
     """Create JWT access token"""
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.JWT_EXPIRY_MINUTES))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.JWT_EXPIRY_MINUTES)
+    )
     to_encode = {"sub": user_id, "exp": expire, "type": "access"}
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
 def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
     """Create JWT refresh token"""
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS))
-    to_encode = {"sub": user_id, "exp": expire, "type": "refresh", "jti": str(uuid.uuid4())}
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS)
+    )
+    to_encode = {
+        "sub": user_id,
+        "exp": expire,
+        "type": "refresh",
+        "jti": str(uuid.uuid4()),
+    }
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -113,11 +126,15 @@ def create_reset_token(user_id: str) -> str:
 # ─── Auth Dependencies ───────────────────────────────────────────────────────
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> User:
     """Get current user from JWT token (required — raises 401 if invalid)"""
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
@@ -130,6 +147,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         # Check if token has been blacklisted (logout)
         try:
             from app.db.redis import get_redis
+
             redis = get_redis()
             token_hash = hashlib.sha256(token.encode()).hexdigest()
             blacklisted = await redis.get(f"blacklisted_token:{token_hash}")
@@ -170,7 +188,9 @@ async def get_current_user_optional(
         return None
 
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
@@ -193,6 +213,7 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
     """
     try:
         from app.db.redis import get_redis
+
         redis = get_redis()
         client_ip = request.client.host if request.client else "unknown"
         minute_bucket = int(time.time() // 60)
@@ -205,7 +226,7 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
         if attempt_count > max_attempts:
             raise HTTPException(
                 status_code=429,
-                detail=f"Too many {endpoint} attempts. Please try again in 1 minute."
+                detail=f"Too many {endpoint} attempts. Please try again in 1 minute.",
             )
     except HTTPException:
         raise  # Re-raise 429
@@ -233,6 +254,7 @@ async def signup(request_body: SignupRequest, request: Request):
         hashed_password=hashed_pw,
         name=request_body.name,
         auth_provider="local",
+        consent_dpdp=request_body.consent_dpdp,
     )
     await user.insert()
 
@@ -285,15 +307,21 @@ async def forgot_password(request: ForgotPasswordRequest):
 
         # Send reset email via Resend
         try:
-            await send_password_reset_email(email=request.email, reset_token=reset_token)
+            await send_password_reset_email(
+                email=request.email, reset_token=reset_token
+            )
             logger.info(f"Password reset email sent to {request.email}")
         except Exception as e:
             logger.error(f"Failed to send password reset email to {request.email}: {e}")
     else:
         # Don't reveal whether the email exists — log and return same response
-        logger.info(f"Password reset requested for non-existent/non-local email: {request.email}")
+        logger.info(
+            f"Password reset requested for non-existent/non-local email: {request.email}"
+        )
 
-    return MessageResponse(message="If an account with that email exists, a password reset link has been sent.")
+    return MessageResponse(
+        message="If an account with that email exists, a password reset link has been sent."
+    )
 
 
 @router.post("/reset-password", response_model=MessageResponse)
@@ -304,12 +332,16 @@ async def reset_password(request: ResetPasswordRequest):
     Tokens are single-use (enforced via Redis).
     """
     try:
-        payload = jwt.decode(request.token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            request.token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         token_type = payload.get("type")
         user_id = payload.get("sub")
 
         if token_type != "reset" or not user_id:
-            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+            raise HTTPException(
+                status_code=400, detail="Invalid or expired reset token"
+            )
 
     except JWTError:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
@@ -318,10 +350,13 @@ async def reset_password(request: ResetPasswordRequest):
     token_hash = hashlib.sha256(request.token.encode()).hexdigest()
     try:
         from app.db.redis import get_redis
+
         redis = get_redis()
         used = await redis.get(f"used_reset:{token_hash}")
         if used:
-            raise HTTPException(status_code=400, detail="Reset token has already been used")
+            raise HTTPException(
+                status_code=400, detail="Reset token has already been used"
+            )
     except HTTPException:
         raise
     except Exception as e:
@@ -333,10 +368,14 @@ async def reset_password(request: ResetPasswordRequest):
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
     # AUTH-W4: Reject password reset for OAuth accounts
-    if hasattr(user, 'auth_provider') and user.auth_provider and user.auth_provider != "local":
+    if (
+        hasattr(user, "auth_provider")
+        and user.auth_provider
+        and user.auth_provider != "local"
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Password reset is not available for OAuth accounts. Please sign in with your OAuth provider."
+            detail="Password reset is not available for OAuth accounts. Please sign in with your OAuth provider.",
         )
 
     # Update password
@@ -347,13 +386,16 @@ async def reset_password(request: ResetPasswordRequest):
     # Mark token as used in Redis
     try:
         from app.db.redis import get_redis
+
         redis = get_redis()
         await redis.set(f"used_reset:{token_hash}", "1", ex=3600)  # 1 hour TTL
     except Exception as e:
         logger.error(f"Redis unavailable for marking reset token as used: {e}")
 
     logger.info(f"Password reset successful for user {user.email}")
-    return MessageResponse(message="Password reset successful. You can now log in with your new password.")
+    return MessageResponse(
+        message="Password reset successful. You can now log in with your new password."
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -364,7 +406,9 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         await _check_rate_limit(request, "refresh", 10)
 
     try:
-        payload = jwt.decode(body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
 
@@ -375,10 +419,13 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         if jti:
             try:
                 from app.db.redis import get_redis
+
                 redis = get_redis()
                 revoked = await redis.get(f"revoked_refresh:{jti}")
                 if revoked:
-                    raise HTTPException(status_code=401, detail="Token has been revoked")
+                    raise HTTPException(
+                        status_code=401, detail="Token has been revoked"
+                    )
             except HTTPException:
                 raise
             except Exception as e:
@@ -396,73 +443,25 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         if jti:
             try:
                 from app.db.redis import get_redis
-                redis = get_redis()
-                await redis.set(f"revoked_refresh:{jti}", "1", ex=settings.REFRESH_TOKEN_EXPIRY_DAYS * 86400)
-            except Exception as e:
-                logger.error(f"Redis unavailable for refresh token revocation storage: {e}")
 
-        return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token)
+                redis = get_redis()
+                await redis.set(
+                    f"revoked_refresh:{jti}",
+                    "1",
+                    ex=settings.REFRESH_TOKEN_EXPIRY_DAYS * 86400,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Redis unavailable for refresh token revocation storage: {e}"
+                )
+
+        return TokenResponse(
+            access_token=new_access_token, refresh_token=new_refresh_token
+        )
     except HTTPException:
         raise
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-
-
-class GoogleAuthRequest(BaseModel):
-    supabase_token: str
-
-
-@router.post("/google", response_model=TokenResponse)
-async def google_auth(request: GoogleAuthRequest):
-    """
-    Exchange a Supabase OAuth token for a backend JWT.
-    Verifies the token with Supabase, then finds or creates the user.
-    """
-    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
-        raise HTTPException(status_code=503, detail="OAuth not configured")
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{settings.SUPABASE_URL}/auth/v1/user",
-                headers={
-                    "Authorization": f"Bearer {request.supabase_token}",
-                    "apikey": settings.SUPABASE_SERVICE_KEY,
-                }
-            )
-            if resp.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid OAuth token")
-
-            supabase_user = resp.json()
-    except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="OAuth verification failed")
-
-    # Verify email is confirmed by the OAuth provider
-    if not supabase_user.get("email_verified", False):
-        raise HTTPException(status_code=400, detail="Email not verified by OAuth provider")
-
-    email = supabase_user.get("email")
-    if not email:
-        raise HTTPException(status_code=400, detail="Email not available from OAuth provider")
-
-    # Find or create user
-    user = await User.find_one({"email": email})
-    if not user:
-        user = User(
-            email=email,
-            name=supabase_user.get("user_metadata", {}).get("full_name"),
-            auth_provider="google",
-        )
-        await user.insert()
-        logger.info(f"New OAuth user created: {email}")
-
-    # Generate backend tokens
-    access_token = create_access_token(str(user.id))
-    refresh_token = create_refresh_token(str(user.id))
-
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/logout", response_model=MessageResponse)
@@ -479,11 +478,14 @@ async def logout(
 
     try:
         from app.db.redis import get_redis
+
         redis = get_redis()
 
         # Blacklist the access token
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         exp = payload.get("exp", 0)
         now = int(datetime.now(timezone.utc).timestamp())
         ttl = max(exp - now, 0)
@@ -494,7 +496,9 @@ async def logout(
         if body.refresh_token:
             try:
                 refresh_payload = jwt.decode(
-                    body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+                    body.refresh_token,
+                    settings.JWT_SECRET,
+                    algorithms=[settings.JWT_ALGORITHM],
                 )
                 jti = refresh_payload.get("jti")
                 if jti:

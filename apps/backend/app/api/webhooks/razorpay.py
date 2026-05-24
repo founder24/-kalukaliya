@@ -18,6 +18,7 @@ _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
 def calculate_next_billing_date() -> str:
     """Calculate next billing date (1 month from now)"""
     from datetime import datetime, timedelta, timezone
+
     return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
 
 
@@ -62,6 +63,7 @@ async def handle_razorpay_webhook(request: Request):
     if event_id:
         try:
             from app.db.redis import get_redis
+
             redis = get_redis()
             exists = await redis.get(f"webhook_processed:{event_id}")
             if exists:
@@ -95,6 +97,7 @@ async def handle_razorpay_webhook(request: Request):
         # Send Receipt Email (async)
         try:
             from app.services.comms.resend_client import send_receipt_email
+
             await send_receipt_email(user.email, amount, event["id"])
             logger.info(f"Subscription renewed for user {user.email}")
         except Exception as e:
@@ -102,7 +105,9 @@ async def handle_razorpay_webhook(request: Request):
 
     elif event.get("event") == "payment.failed":
         # Handle dunning logic (optional: downgrade user after N failures)
-        logger.info(f"Payment failed for customer {payload.get('customer', {}).get('id')}")
+        logger.info(
+            f"Payment failed for customer {payload.get('customer', {}).get('id')}"
+        )
         # Could implement retry logic or user notification here
 
     elif event.get("event") == "subscription.cancelled":
@@ -118,6 +123,7 @@ async def handle_razorpay_webhook(request: Request):
     if event_id:
         try:
             from app.db.redis import get_redis
+
             redis = get_redis()
             await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
         except Exception as e:
