@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix all 11 P0 security, performance, API, and reliability bugs in the backend and edge worker code. Also remove all Azure OpenAI references (the project uses Azure Search built-in vectorization).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "STEP 1 - Issue #90 [SEC-C1]: In apps/backend/.env.shared, change JWT_SECRET default from 'super_secret_jwt_key_32_chars_min' to 'CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG'. In apps/backend/app/config.py, the validator already exists (validate_production_secrets) and checks against KNOWN_PLACEHOLDER_SECRETS. Add this new default to that set if not already there. In main.py, the lifespan already logs a warning when the default is used. This is already mostly done - just ensure .env.shared uses the placeholder value that is in the KNOWN_PLACEHOLDER_SECRETS set.",
     "STEP 2 - Issue #91 [SEC-C2]: In apps/edge/src/index.ts, modify the Turnstile section (step 3) so that for chat POST requests (url.pathname starts with '/api/v1/chat' AND request.method === 'POST'), Turnstile verification is MANDATORY (require CF-Turnstile-Response header) UNLESS the path is '/api/v1/chat/feedback' (feedback is exempted). Return 403 'Bot verification required' if missing. Keep current behavior for auth endpoints (already mandatory). Keep the optional verification for non-POST chat requests.",
@@ -39,5 +39,5 @@
     "Run: grep -n 'close_resend_client\\|httpx.AsyncClient' apps/backend/app/services/comms/resend_client.py to confirm async client"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Pre-existing test failures (3): test_login_invalid_credentials (Beanie CollectionWasNotInitialized - no MongoDB), test_chat_rate_limit_returns_429 (mock returns bool instead of tuple), test_chat_error_does_not_leak_details (same mock issue). These were verified to fail on the base branch as well. Tests require AZURE_SEARCH_QUERY_KEY and AZURE_SEARCH_ENDPOINT env vars to be set (even as dummy values) for the AzureSearchService singleton to initialize at import time."
 }
