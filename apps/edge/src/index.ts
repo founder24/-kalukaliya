@@ -15,6 +15,7 @@ import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
 import { handleISR } from './routes/isr';
+import { handleRobots } from './routes/robots';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -24,6 +25,21 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: getCorsHeaders(env.ALLOWED_ORIGIN || 'https://syrabit.ai'),
+      });
+    }
+
+    // ── 1b. robots.txt ──
+    if (url.pathname === '/robots.txt' && request.method === 'GET') {
+      return handleRobots(env);
+    }
+
+    // ── 1c. Sitemap proxy to backend ──
+    if (url.pathname === '/sitemap.xml' || /^\/sitemap-[a-z]+\.xml$/.test(url.pathname)) {
+      const backendUrl = `${env.AZURE_BACKEND_URL}/api/seo${url.pathname}`;
+      const backendResponse = await fetch(backendUrl);
+      return new Response(backendResponse.body, {
+        status: backendResponse.status,
+        headers: backendResponse.headers,
       });
     }
 

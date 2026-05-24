@@ -13,6 +13,7 @@ from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
 from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
+from app.api.v1 import seo
 from app.api.webhooks import razorpay
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+    app.include_router(seo.router, prefix="/api/seo", tags=["SEO"])
 
     # Legacy health probe redirects for backward compatibility
     @app.get("/api/health")
