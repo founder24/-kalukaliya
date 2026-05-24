@@ -2,7 +2,7 @@
   "task_id": "task-content-seo-backend",
   "task_description": "Implement full Content & SEO/GEO/AEO Backend across 4 layers: Layer 1 (Content Hierarchy CRUD), Layer 2 (Topic Management + Content Editing), Layer 3 (AI Generation + Publish to CF & Azure), Layer 4 (SEO Pipeline Integration). Includes Beanie models, admin endpoints, AI services, publish pipeline, public endpoints, and tests.",
   "status": "in_progress",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
   "blocked_reason": null,
   "verification": {
     "build": "pass",
