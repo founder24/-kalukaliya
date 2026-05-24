@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
@@ -10,12 +10,16 @@ def anyio_backend():
 
 @pytest.fixture
 async def client():
-    """Create async test client"""
+    """Create async test client with rate limiting disabled (no Redis in tests)."""
     from app.main import app
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    async def _noop_rate_limit(*args, **kwargs):
+        pass
+
+    with patch("app.api.v1.auth._check_rate_limit", _noop_rate_limit):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
 
 @pytest.fixture

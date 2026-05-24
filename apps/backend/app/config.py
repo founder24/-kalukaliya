@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     APP_ENV: str = "production"
     DEBUG: bool = False
     JWT_SECRET: str
+    ADMIN_JWT_SECRET: Optional[str] = None
+    RESET_TOKEN_SECRET: Optional[str] = None
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7

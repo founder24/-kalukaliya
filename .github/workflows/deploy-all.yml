@@ -58,7 +58,7 @@ jobs:
           ruff check apps/backend/app/
 
       - name: Test Backend
-        run: pytest apps/backend/ --tb=short -q
+        run: pytest apps/backend/ --tb=short -q --cov=apps/backend/app --cov-report=term-missing --cov-fail-under=40
         env:
           APP_ENV: test
           JWT_SECRET: test-secret-at-least-32-characters-long-for-ci

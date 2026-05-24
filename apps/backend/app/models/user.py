@@ -1,7 +1,7 @@
 from beanie import Document
 from pydantic import EmailStr, Field
 from typing import Optional, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 import bcrypt
 
 
@@ -26,7 +26,7 @@ class User(Document):
 
     # Usage
     monthly_message_count: int = 0
-    last_reset_date: datetime = Field(default_factory=datetime.utcnow)
+    last_reset_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     total_lifetime_messages: int = 0
 
     # Profile
@@ -40,8 +40,8 @@ class User(Document):
     # Metadata
     ip_address_first_seen: Optional[str] = None
     user_agent_first_seen: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
         name = "users"
