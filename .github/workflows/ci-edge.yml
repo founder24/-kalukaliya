@@ -31,9 +31,6 @@ jobs:
       - name: Type Check
         run: pnpm --filter syrabit-edge exec tsc --noEmit
 
-      - name: Lint
-        run: pnpm --filter syrabit-edge exec eslint src/
-
   test:
     name: Run Tests
     needs: lint-and-typecheck

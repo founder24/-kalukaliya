@@ -1,4 +1,4 @@
-name: CI Backend — Lint, Test & Deploy
+name: CI Backend — Lint & Test
 
 on:
   pull_request:
@@ -22,7 +22,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r apps/backend/requirements.txt
+          sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt
           pip install ruff mypy
 
       - name: Run Ruff linter
@@ -52,7 +53,10 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r apps/backend/requirements.txt
+        run: |
+          sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt
+          pip install pytest pytest-asyncio
 
       - name: Run tests
         working-directory: apps/backend

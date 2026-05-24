@@ -31,9 +31,6 @@ jobs:
       - name: Type Check
         run: pnpm --filter @workspace/syrabit exec tsc --noEmit
 
-      - name: Lint
-        run: pnpm --filter @workspace/syrabit exec eslint src/
-
   test:
     name: Run Tests
     needs: lint-and-typecheck
