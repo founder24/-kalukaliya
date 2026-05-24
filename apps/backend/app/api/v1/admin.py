@@ -13,6 +13,7 @@ import logging
 
 from app.config import settings
 from app.models.user import User
+from app.api.v1.auth import _check_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ async def admin_verify(request: Request):
 async def admin_login(request: Request):
     """Admin login - accepts email/password, verifies admin role, sets httponly cookie."""
     await _csrf_check(request)
+    await _check_rate_limit(request, "admin_login", 5)
 
     body = await request.json()
     email = body.get("email")
@@ -74,7 +76,7 @@ async def admin_login(request: Request):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Check admin role
-    if not hasattr(user, 'role') or user.role != 'admin':
+    if user.role != 'admin':
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     # Mint admin JWT (8-hour session)
@@ -103,6 +105,7 @@ async def admin_login(request: Request):
 @router.post("/logout")
 async def admin_logout(request: Request):
     """Clear admin session cookie."""
+    await _csrf_check(request)
     response = JSONResponse({"status": "ok", "message": "Logged out"})
     response.delete_cookie(
         key="syrabit_admin_session",

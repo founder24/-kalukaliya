@@ -31,6 +31,7 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     name: Optional[str] = None
+    consent_dpdp: bool = False
 
     @field_validator("password")
     @classmethod
@@ -233,6 +234,7 @@ async def signup(request_body: SignupRequest, request: Request):
         hashed_password=hashed_pw,
         name=request_body.name,
         auth_provider="local",
+        consent_dpdp=request_body.consent_dpdp,
     )
     await user.insert()
 

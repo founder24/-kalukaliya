@@ -261,7 +261,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await axios.post(
         `${API_BASE}/auth/signup`,
-        { email, password, name },
+        { email, password, name, consent_dpdp },
         { withCredentials: true, headers },
       );
       const { access_token, refresh_token } = res.data;

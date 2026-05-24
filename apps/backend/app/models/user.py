@@ -30,6 +30,7 @@ class User(Document):
     # Profile
     name: Optional[str] = None
     avatar_url: Optional[str] = None
+    consent_dpdp: bool = False
     preferred_language: Literal["en", "as"] = "as"
     voice_enabled: bool = True
     theme: str = "light"
