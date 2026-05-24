@@ -26,19 +26,22 @@
 // traffic data still ships a sensible set of pages.
 //
 // Limits are env-tunable so we can scale up gradually:
-//   PRERENDER_SUBJECTS_LIMIT          (default 50, raised from 20 by Task #2)
-//   PRERENDER_CHAPTERS_PER_SUBJECT    (default 6, raised from 3 by Task #2)
+//   PRERENDER_SUBJECTS_LIMIT          (default 999 - all subjects)
+//   PRERENDER_CHAPTERS_PER_SUBJECT    (default 999 - all chapters)
 //   PRERENDER_TRAFFIC_DAYS            (default 30)
 //   PRERENDER_BACKEND_URL / VITE_BACKEND_URL  (default https://syrabit.ai)
 //
 // Task #544: defaults were lowered to 20 subjects / 3 chapters to keep
 // the worklist under ~80 routes within the 12-min wall budget.
 // Task #2 (SEO Quick Wins): raised back to 50 subjects / 6 chapters
-// (50 + 50×6 = 350 routes). The 12-min PRERENDER_BUDGET_MS wall-clock
-// cap still applies — the build soft-fails gracefully on budget overrun,
-// serving the SPA shell for un-prerendered routes. Override via env:
+// (50 + 50x6 = 350 routes).
+// SEO/GEO/AEO: raised to 999/999 to cover all 1000+ routes. The
+// 30-min PRERENDER_BUDGET_MS wall-clock cap soft-fails gracefully on
+// budget overrun, serving the SPA shell for un-prerendered routes.
+// Non-prerendered routes are served via ISR in the edge worker for bots.
+// Override via env:
 //   PRERENDER_BUDGET_MS=<ms>  (max 30 min)
-// if 350 routes exceeds 12 min on a cold Cloudflare build.
+// if the full route set exceeds 30 min on a cold Cloudflare build.
 
 import fs from "fs";
 import path from "path";
@@ -58,11 +61,11 @@ const ssrEntry = path.join(distSsrDir, "entry-server.js");
 
 const BACKEND = SHARED_BACKEND;
 const SUBJECTS_LIMIT = parseInt(
-  process.env.PRERENDER_SUBJECTS_LIMIT || "50",
+  process.env.PRERENDER_SUBJECTS_LIMIT || "999",
   10,
 );
 const CHAPTERS_PER_SUBJECT = parseInt(
-  process.env.PRERENDER_CHAPTERS_PER_SUBJECT || "6",
+  process.env.PRERENDER_CHAPTERS_PER_SUBJECT || "999",
   10,
 );
 const TRAFFIC_DAYS = parseInt(
@@ -102,7 +105,7 @@ const FETCH_CONCURRENCY = envInt("PRERENDER_FETCH_CONCURRENCY", 8, {
 // Global wall-clock budget for the entire prerender pass. If we exceed
 // it (e.g. backend hard-down), we soft-fail with whatever we managed to
 // produce so far — the SPA shell still serves the rest.
-const PRERENDER_BUDGET_MS = envInt("PRERENDER_BUDGET_MS", 12 * 60 * 1000, {
+const PRERENDER_BUDGET_MS = envInt("PRERENDER_BUDGET_MS", 30 * 60 * 1000, {
   min: 60_000, max: 30 * 60 * 1000,
 });
 

@@ -24,14 +24,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STEP_BUDGET_MS = (() => {
   const raw = process.env.PRERENDER_STEP_BUDGET_MS;
   const n = raw ? Number.parseInt(raw, 10) : NaN;
-  // Task #543: bumped default 6m → 8m to accommodate 429 retry-with-
-  // backoff in _prerender-data.mjs without prematurely SIGTERMing
-  // the child. build.mjs allots prerender 8m, which is the matching
-  // outer budget; the inner deadline is ε shorter to surface clean
-  // errors before the outer guard nukes the process.
+  // SEO/GEO/AEO: bumped default 8m → 20m to accommodate 1000+ routes
+  // prerender with retry-with-backoff in _prerender-data.mjs. build.mjs
+  // allots prerender 25m, which is the matching outer budget.
   return Number.isFinite(n) && n >= 30_000 && n <= 30 * 60_000
     ? n
-    : 8 * 60_000 - 5_000;
+    : 20 * 60_000;
 })();
 
 // Task #544: concurrency restored to 4 (run all scripts in parallel).

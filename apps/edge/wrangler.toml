@@ -16,8 +16,16 @@ bucket_name = "syrabit-assets"
 # first real production deploy you MUST:
 #   1. npx wrangler kv:namespace create RATE_LIMIT_KV
 #   2. npx wrangler kv:namespace create RATE_LIMIT_KV --preview
-#   3. Replace the placeholder ids in [env.production] below with the values
-#      that the two commands above print.
+#   3. npx wrangler kv:namespace create ISR_CACHE_KV
+#   4. npx wrangler kv:namespace create ISR_CACHE_KV --preview
+#   5. Replace the placeholder ids in [env.production] below with the values
+#      that the commands above print.
+
+# TODO: Replace placeholder IDs after running `wrangler kv:namespace create ISR_CACHE_KV`
+[[kv_namespaces]]
+binding = "ISR_CACHE_KV"
+id = "placeholder-isr-cache-kv-dev-id"
+preview_id = "placeholder-isr-cache-kv-dev-preview-id"
 
 [triggers]
 crons = []
@@ -29,6 +37,12 @@ name = "syrabitworker-prod"
 binding = "RATE_LIMIT_KV"
 id = "2983094e249d4094b66e4b9dacc38719"
 preview_id = "fd70db2acf7045d6a8d6ba4334316297"
+
+# TODO: Replace placeholder IDs after running `wrangler kv:namespace create ISR_CACHE_KV --env production`
+[[env.production.kv_namespaces]]
+binding = "ISR_CACHE_KV"
+id = "placeholder-isr-cache-kv-production-id"
+preview_id = "placeholder-isr-cache-kv-production-preview-id"
 
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET

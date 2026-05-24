@@ -40,4 +40,5 @@ interface Env {
   // ── Bindings ──
   R2_BUCKET: R2Bucket;
   RATE_LIMIT_KV: KVNamespace;
+  ISR_CACHE_KV: KVNamespace;
 }
