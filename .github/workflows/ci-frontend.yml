@@ -35,11 +35,9 @@ jobs:
 
       - name: Type Check
         run: pnpm --filter @workspace/syrabit exec tsc --noEmit
-        continue-on-error: true
 
       - name: Lint
         run: pnpm --filter @workspace/syrabit exec eslint src/
-        continue-on-error: true
 
   test:
     name: Run Tests
@@ -63,7 +61,6 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter @workspace/syrabit test
-        continue-on-error: true
 
   deploy:
     name: Deploy to Cloudflare Pages

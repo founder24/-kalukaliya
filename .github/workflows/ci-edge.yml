@@ -38,7 +38,6 @@ jobs:
 
       - name: Lint
         run: pnpm --filter syrabit-edge exec eslint src/
-        continue-on-error: true
 
   test:
     name: Run Tests
@@ -62,11 +61,10 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter syrabit-edge test
-        continue-on-error: true
 
   deploy:
     name: Deploy to Cloudflare
-    needs: lint-and-typecheck
+    needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
