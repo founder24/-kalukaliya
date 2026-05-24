@@ -240,6 +240,7 @@ async def chat(
                 if detected_lang == "as":
                     logger.warning(f"Sarvam failed ({e}), falling back to Vertex AI")
                     from app.services.ai.vertex_client import vertex_client
+
                     target_model = settings.VERTEX_GEMINI_MODEL
                     response_text = await vertex_client.generate(
                         system_prompt=system_prompt,
