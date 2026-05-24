@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     INDEXNOW_API_KEY: Optional[str] = None
     INDEXNOW_INTERNAL_SECRET: Optional[str] = None
 
+    # --- Cloudflare KV (Content Edge Cache) ---
+    CLOUDFLARE_KV_API_TOKEN: str = ""
+    CLOUDFLARE_ACCOUNT_ID: str = ""
+    CLOUDFLARE_KV_NAMESPACE_ID: str = ""
+    INDEXNOW_KEY: str = ""
+
     # --- Observability ---
     SENTRY_DSN: Optional[str] = None
     SENTRY_ENVIRONMENT: str = "production"

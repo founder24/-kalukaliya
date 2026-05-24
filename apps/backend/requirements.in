@@ -11,6 +11,8 @@ google-auth
 google-cloud-aiplatform
 gunicorn
 httpx
+jinja2
+markdown
 passlib
 posthog
 pydantic
