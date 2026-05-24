@@ -4,10 +4,9 @@ Supports ISR (Incremental Static Regeneration) via Cache-Control headers.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 
 from app.models.knowledge import KnowledgeObject
 from app.services.content.renderer import content_renderer, PAGE_TYPES
@@ -111,24 +110,30 @@ async def list_chapters(
     limit: int = Query(50, ge=1, le=100),
 ):
     """List all published chapters for a given board/class/subject."""
-    chapters = await KnowledgeObject.find(
-        {
-            "metadata.board": board,
-            "metadata.class_level": class_level,
-            "metadata.subject": subject,
-            "status": "published",
-        }
-    ).project(
-        {
-            "slug": 1,
-            "title": 1,
-            "description": 1,
-            "metadata.chapter": 1,
-            "metadata.chapter_number": 1,
-            "metadata.difficulty": 1,
-            "metadata.estimated_read_time_minutes": 1,
-        }
-    ).skip(skip).limit(limit).to_list()
+    chapters = (
+        await KnowledgeObject.find(
+            {
+                "metadata.board": board,
+                "metadata.class_level": class_level,
+                "metadata.subject": subject,
+                "status": "published",
+            }
+        )
+        .project(
+            {
+                "slug": 1,
+                "title": 1,
+                "description": 1,
+                "metadata.chapter": 1,
+                "metadata.chapter_number": 1,
+                "metadata.difficulty": 1,
+                "metadata.estimated_read_time_minutes": 1,
+            }
+        )
+        .skip(skip)
+        .limit(limit)
+        .to_list()
+    )
 
     return {
         "board": board,
@@ -145,14 +150,17 @@ async def list_chapters(
 )
 async def get_by_slug(slug: str):
     """Get a published knowledge object by slug (excludes derivatives and page_views)."""
-    obj = await KnowledgeObject.find_one(
-        {"slug": slug, "status": "published"}
-    )
+    obj = await KnowledgeObject.find_one({"slug": slug, "status": "published"})
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")
 
     # Exclude heavy/private fields
     data = obj.model_dump(
-        exclude={"rendered_html", "derivative_hashes", "page_views", "search_impressions"}
+        exclude={
+            "rendered_html",
+            "derivative_hashes",
+            "page_views",
+            "search_impressions",
+        }
     )
     return data

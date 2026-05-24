@@ -3,7 +3,6 @@ SearchIndexer - Chunks content and upserts to Azure AI Search.
 """
 
 import logging
-from typing import Optional
 
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError
@@ -101,9 +100,7 @@ class SearchIndexer:
         try:
             chunks = self.chunk_text(knowledge_obj.body_markdown)
             if not chunks:
-                logger.warning(
-                    f"No content to index for slug={knowledge_obj.slug}"
-                )
+                logger.warning(f"No content to index for slug={knowledge_obj.slug}")
                 return False
 
             meta = knowledge_obj.metadata
@@ -146,9 +143,7 @@ class SearchIndexer:
             )
             return False
         except Exception as e:
-            logger.error(
-                f"Unexpected error indexing slug={knowledge_obj.slug}: {e}"
-            )
+            logger.error(f"Unexpected error indexing slug={knowledge_obj.slug}: {e}")
             return False
 
 
