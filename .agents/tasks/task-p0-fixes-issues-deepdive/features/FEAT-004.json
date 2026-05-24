@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "fix",
   "description": "Layer 2 (Intermediate) deep-dive fixes: Performance optimizations, caching, connection pooling, and API correctness improvements.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "PERF-C2: In apps/backend/app/services/search/azure_search.py, replace the synchronous SearchClient with the async variant (azure.search.documents.aio.SearchClient). Remove the run_in_executor wrappers and make the search methods natively async. Update imports accordingly.",
     "PERF-C3: Wire circuit breakers into AI clients. In apps/backend/app/services/ai/vertex_client.py, wrap the actual API call with vertex_circuit_breaker.call(). In apps/backend/app/services/ai/sarvam_client.py, wrap with sarvam_circuit_breaker.call(). Import from app.core.circuit_breaker.",
@@ -34,5 +34,5 @@
     "Run: APP_ENV=test JWT_SECRET=test_secret_that_is_at_least_32_characters_long pytest apps/backend/tests/ -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Pre-existing test failures in test_auth, test_chat, test_webhook due to AzureKeyCredential requiring a non-None AZURE_SEARCH_QUERY_KEY env var at module import time. These failures exist on the base state before this feature. All other tests (circuit_breaker, security) pass. The azure.search.documents.aio async SearchClient.search() returns an async iterator so we use 'async for' to collect results."
 }
