@@ -26,6 +26,7 @@ from app.api.v1 import (
     admin_revenue,
     admin_alerts,
 )
+from app.api.v1 import content, admin_knowledge, seo
 from app.api.webhooks import razorpay
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,11 @@ def create_app() -> FastAPI:
     app.include_router(
         admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"]
     )
+    app.include_router(content.router, prefix="/api/v1/content", tags=["Content"])
+    app.include_router(
+        admin_knowledge.router, prefix="/api/v1/admin", tags=["Admin Knowledge"]
+    )
+    app.include_router(seo.router, prefix="/api/v1/seo", tags=["SEO"])
 
     # Legacy health probe redirects for backward compatibility
     @app.get("/api/health")
