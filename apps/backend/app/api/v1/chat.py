@@ -201,7 +201,7 @@ async def chat(
             )
             chat_doc.add_message(
                 role="user",
-                content=request.message,
+                content=sanitized_message,
             )
             chat_doc.add_message(
                 role="assistant",
