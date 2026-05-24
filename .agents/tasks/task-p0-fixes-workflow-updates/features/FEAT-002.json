@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "chore",
   "description": "Update GitHub Actions workflow files: wire canary deploy into deploy-all.yml as a pre-step, add KeyVault secret fetching (11 secrets, no Azure OpenAI), and update agent-accuracy-report.yml to use MongoDB connection secret.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "STEP 1 - Wire canary deploy into deploy-all.yml: Add a new job 'canary-deploy' that runs AFTER ci-checks but BEFORE the deploy-backend/deploy-edge/deploy-frontend jobs. This job should use 'uses: ./.github/workflows/agent-canary-deploy.yml' (reusable workflow call). The deploy-backend, deploy-edge, and deploy-frontend jobs should then have 'needs: [ci-checks, canary-deploy]' instead of just 'needs: [ci-checks]'.",
     "STEP 2 - Add KeyVault secret fetching to deploy-all.yml: In the deploy-backend job, add a step AFTER 'Authenticate to Azure' and BEFORE 'Build & Push to ACR' named 'Fetch secrets from Azure KeyVault'. This step should: (a) Use 'set -euo pipefail' at the top. (b) Fetch exactly 11 secrets from Azure KeyVault (vault name: syrabit-kv): jwt-secret, mongodb-uri, upstash-redis-url, azure-search-key, azure-search-endpoint, vertex-ai-key, sarvam-api-key, razorpay-key-id, razorpay-key-secret, resend-api-key, posthog-api-key. (c) Export each as an environment variable using GITHUB_ENV. Map kebab-case secret names to UPPER_SNAKE_CASE env vars (e.g., jwt-secret -> JWT_SECRET, mongodb-uri -> MONGODB_URI, etc.). (d) Do NOT include azure-openai-endpoint or azure-openai-key. (e) After fetching, pass these as --set-env-vars in the 'Deploy to Container Apps' step.",
