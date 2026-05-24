@@ -61,7 +61,8 @@ class ContentGenerationService:
             "Format: META: <description>\nKEYWORDS: <keywords>"
         )
         meta_response = await vertex_client.generate(
-            "You are an SEO specialist.", f"{meta_prompt}\n\nContent:\n{content_en[:2000]}"
+            "You are an SEO specialist.",
+            f"{meta_prompt}\n\nContent:\n{content_en[:2000]}",
         )
 
         # Parse meta response
@@ -89,7 +90,9 @@ class ContentGenerationService:
             raise ValueError(f"Chapter {chapter_id} not found")
 
         if not chapter.content_en:
-            raise ValueError(f"Chapter {chapter_id} has no English content to translate")
+            raise ValueError(
+                f"Chapter {chapter_id} has no English content to translate"
+            )
 
         translate_prompt = (
             "You are a professional translator. "

@@ -37,8 +37,15 @@ async def init_mongo() -> None:
         await init_beanie(
             database=_client[settings.MONGODB_DB_NAME],
             document_models=[
-                User, Chat, ChatFeedback, KnowledgeObject,
-                Board, Class, Stream, Subject, Chapter,
+                User,
+                Chat,
+                ChatFeedback,
+                KnowledgeObject,
+                Board,
+                Class,
+                Stream,
+                Subject,
+                Chapter,
             ],
         )
 
@@ -87,9 +94,7 @@ async def create_indexes() -> None:
     await db.classes.create_index([("board_id", ASCENDING)])
     await db.streams.create_index([("class_id", ASCENDING)])
     await db.subjects.create_index([("stream_id", ASCENDING)])
-    await db.chapters.create_index(
-        [("subject_id", ASCENDING), ("status", ASCENDING)]
-    )
+    await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
 
     logger.info("MongoDB indexes created/verified")
 

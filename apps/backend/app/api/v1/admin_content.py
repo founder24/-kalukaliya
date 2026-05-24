@@ -164,7 +164,12 @@ async def update_board(request: Request, board_id: str, body: BoardUpdate):
     board.updated_at = datetime.now(timezone.utc)
     await board.save()
 
-    return {"id": str(board.id), "name": board.name, "slug": board.slug, "status": board.status}
+    return {
+        "id": str(board.id),
+        "name": board.name,
+        "slug": board.slug,
+        "status": board.status,
+    }
 
 
 # ============================
@@ -258,7 +263,11 @@ async def create_subject(request: Request, body: SubjectCreate):
 
     subject = Subject(name=body.name, stream_id=PydanticObjectId(body.stream_id))
     await subject.insert()
-    return {"id": str(subject.id), "name": subject.name, "stream_id": str(subject.stream_id)}
+    return {
+        "id": str(subject.id),
+        "name": subject.name,
+        "stream_id": str(subject.stream_id),
+    }
 
 
 @router.get("/content/subjects")
@@ -571,16 +580,18 @@ async def get_topic_index(request: Request, subject_id: str):
     index = []
     for ch in chapters:
         for topic in ch.published_topics:
-            index.append({
-                "chapter_id": str(ch.id),
-                "chapter_title": ch.title,
-                "chapter_number": ch.chapter_number,
-                "topic_id": topic.id,
-                "title": topic.title,
-                "definition": topic.definition,
-                "topic_slug": topic.topic_slug,
-                "definition_status": topic.definition_status,
-            })
+            index.append(
+                {
+                    "chapter_id": str(ch.id),
+                    "chapter_title": ch.title,
+                    "chapter_number": ch.chapter_number,
+                    "topic_id": topic.id,
+                    "title": topic.title,
+                    "definition": topic.definition,
+                    "topic_slug": topic.topic_slug,
+                    "definition_status": topic.definition_status,
+                }
+            )
 
     return {"subject_id": subject_id, "topics": index, "total": len(index)}
 

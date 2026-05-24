@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
 
-from app.models.content import Chapter, Topic
+from app.models.content import Chapter
 from app.services.ai.vertex_client import vertex_client
 
 logger = logging.getLogger(__name__)
@@ -68,18 +68,20 @@ class SEOGeneratorService:
             )
             examples = await vertex_client.generate(system_prompt, examples_prompt)
 
-            results.append({
-                "topic_slug": topic_slug,
-                "title": title,
-                "generated": {
-                    "notes": notes,
-                    "definition": definition,
-                    "mcqs": mcqs,
-                    "important_questions": important_questions,
-                    "examples": examples,
-                },
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            })
+            results.append(
+                {
+                    "topic_slug": topic_slug,
+                    "title": title,
+                    "generated": {
+                        "notes": notes,
+                        "definition": definition,
+                        "mcqs": mcqs,
+                        "important_questions": important_questions,
+                        "examples": examples,
+                    },
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         return results
 
@@ -111,17 +113,21 @@ class SEOGeneratorService:
             if line.startswith("TOPIC:"):
                 parts = line[6:].split("|")
                 if len(parts) >= 3:
-                    topics.append({
-                        "title": parts[0].strip(),
-                        "definition": parts[1].strip(),
-                        "topic_slug": parts[2].strip(),
-                    })
+                    topics.append(
+                        {
+                            "title": parts[0].strip(),
+                            "definition": parts[1].strip(),
+                            "topic_slug": parts[2].strip(),
+                        }
+                    )
                 elif len(parts) == 2:
-                    topics.append({
-                        "title": parts[0].strip(),
-                        "definition": parts[1].strip(),
-                        "topic_slug": parts[0].strip().lower().replace(" ", "-"),
-                    })
+                    topics.append(
+                        {
+                            "title": parts[0].strip(),
+                            "definition": parts[1].strip(),
+                            "topic_slug": parts[0].strip().lower().replace(" ", "-"),
+                        }
+                    )
 
         return topics
 

@@ -80,23 +80,25 @@ async def seo_pipeline_status(request: Request):
     pipelines = []
 
     for subj in subjects:
-        chapters = await Chapter.find(
-            {"subject_id": subj.id}
-        ).to_list()
+        chapters = await Chapter.find({"subject_id": subj.id}).to_list()
         total = len(chapters)
         published = sum(1 for c in chapters if c.status == "published")
         generated = sum(1 for c in chapters if c.status == "generated")
         draft = sum(1 for c in chapters if c.status == "draft")
 
-        pipelines.append({
-            "subject_id": str(subj.id),
-            "subject_name": subj.name,
-            "total_chapters": total,
-            "published": published,
-            "generated": generated,
-            "draft": draft,
-            "completion_pct": round((published / total * 100) if total > 0 else 0, 1),
-        })
+        pipelines.append(
+            {
+                "subject_id": str(subj.id),
+                "subject_name": subj.name,
+                "total_chapters": total,
+                "published": published,
+                "generated": generated,
+                "draft": draft,
+                "completion_pct": round(
+                    (published / total * 100) if total > 0 else 0, 1
+                ),
+            }
+        )
 
     return {"pipelines": pipelines, "total_subjects": len(pipelines)}
 
@@ -114,11 +116,13 @@ async def seo_bulk_generate(request: Request, body: BulkGenerateRequest):
         for ch in chapters:
             for t in ch.published_topics:
                 if t.id == topic_id:
-                    topics_to_generate.append({
-                        "title": t.title,
-                        "topic_slug": t.topic_slug,
-                        "definition": t.definition,
-                    })
+                    topics_to_generate.append(
+                        {
+                            "title": t.title,
+                            "topic_slug": t.topic_slug,
+                            "definition": t.definition,
+                        }
+                    )
 
     if not topics_to_generate:
         raise HTTPException(status_code=404, detail="No topics found for given IDs")
@@ -155,7 +159,10 @@ async def seo_coverage(request: Request, subject_id: Optional[str] = Query(None)
         "draft": sum(1 for c in chapters if c.status == "draft"),
     }
     coverage["coverage_pct"] = round(
-        (coverage["published"] / coverage["total"] * 100) if coverage["total"] > 0 else 0, 1
+        (coverage["published"] / coverage["total"] * 100)
+        if coverage["total"] > 0
+        else 0,
+        1,
     )
 
     return coverage
@@ -201,7 +208,9 @@ async def seo_extract_topics(request: Request, body: ExtractRequest):
     await _csrf_check(request)
 
     try:
-        topics = await seo_generator_service.extract_topics_from_content(body.chapter_id)
+        topics = await seo_generator_service.extract_topics_from_content(
+            body.chapter_id
+        )
         return {"chapter_id": body.chapter_id, "topics": topics, "count": len(topics)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
