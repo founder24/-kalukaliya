@@ -2,36 +2,81 @@
 Security Utilities: Input Sanitization, URL Validation, SSRF Protection
 """
 
+import asyncio
+import logging
 import re
+import unicodedata
 from urllib.parse import urlparse
 import ipaddress
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Zero-width characters to strip before pattern matching
+_ZERO_WIDTH_CHARS = re.compile(
+    "[\u200b\u200c\u200d\ufeff\u00ad]"
+)
+
+# Prompt injection patterns (case-insensitive, whitespace-flexible)
+_INJECTION_PATTERNS = [
+    re.compile(r"ignore\s+.*?instructions", re.IGNORECASE),
+    re.compile(r"system\s*:", re.IGNORECASE),
+    re.compile(r"you\s+are\s+now", re.IGNORECASE),
+    re.compile(r"forget\s+all", re.IGNORECASE),
+    re.compile(r"BEGINNING\s+OF\s+CONVERSATION", re.IGNORECASE),
+    re.compile(r"<\|(?:im_end|im_start)\|>", re.IGNORECASE),
+    re.compile(r"###\s*(?:Instruction|System|User)\s*:", re.IGNORECASE),
+    re.compile(r"ASSISTANT\s*:", re.IGNORECASE),
+    re.compile(r"Human\s*:", re.IGNORECASE),
+    re.compile(r"<\|(?:system|user|assistant|im_start|im_end)\|>", re.IGNORECASE),
+    re.compile(r"DAN\s+mode", re.IGNORECASE),
+    re.compile(r"(?:jail|jail)\s*break", re.IGNORECASE),
+    re.compile(r"disregard\s+(?:previous|above|prior)", re.IGNORECASE),
+    re.compile(r"override\s+.*?instructions", re.IGNORECASE),
+]
 
 
 def sanitize_user_input(text: str) -> str:
     """
     Sanitize user input to prevent prompt injection and DoS attacks.
 
-    - Strips potential prompt injection markers
+    - Normalizes Unicode (NFKC) to defeat homoglyph attacks
+    - Strips zero-width characters
+    - Detects and strips prompt injection markers
+    - Uses scoring: if 2+ patterns match, rejects input entirely
     - Limits length to prevent buffer overflow/DoS
     - Removes control characters
     """
     if not text:
         return ""
 
-    # Strip potential prompt injection markers
-    injection_patterns = [
-        r"Ignore previous instructions",
-        r"System:",
-        r"You are now",
-        r"Forget all",
-        r"BEGINNING OF CONVERSATION",
-        r"<\|im_end\|>",
-        r"### Instruction:",
-    ]
+    # Normalize Unicode to NFKC to defeat homoglyph attacks
+    text = unicodedata.normalize("NFKC", text)
 
-    for pattern in injection_patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    # Strip zero-width characters
+    text = _ZERO_WIDTH_CHARS.sub("", text)
+
+    # Count how many distinct injection patterns match
+    match_count = 0
+    matched_patterns = []
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(text):
+            match_count += 1
+            matched_patterns.append(pattern.pattern)
+
+    # If 2+ patterns match, reject the input entirely
+    if match_count >= 2:
+        logger.warning(
+            "Prompt injection detected: %d patterns matched (%s)",
+            match_count,
+            ", ".join(matched_patterns[:5]),
+        )
+        return ""
+
+    # If 1 pattern matches, strip it
+    if match_count == 1:
+        for pattern in _INJECTION_PATTERNS:
+            text = pattern.sub("", text)
 
     # Remove control characters except newlines and tabs
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
@@ -44,7 +89,7 @@ def sanitize_user_input(text: str) -> str:
     return text.strip()
 
 
-def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
+async def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
     """
     Validate URL to prevent SSRF attacks.
 
@@ -80,11 +125,12 @@ def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
             return False
 
         # Resolve hostname to IP and check if it's private
-        # Note: In production, use async DNS resolution with timeout
-        import socket
-
         try:
-            ip_addresses = socket.getaddrinfo(parsed.hostname, None)
+            loop = asyncio.get_event_loop()
+            ip_addresses = await asyncio.wait_for(
+                loop.getaddrinfo(parsed.hostname, None),
+                timeout=3.0,
+            )
             for family, socktype, proto, canonname, sockaddr in ip_addresses:
                 ip_str = sockaddr[0]
                 try:
@@ -102,7 +148,10 @@ def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
                         return False
                 except ValueError:
                     continue
-        except socket.gaierror:
+        except asyncio.TimeoutError:
+            # DNS resolution timed out - treat as unsafe
+            return False
+        except OSError:
             # DNS resolution failed - treat as unsafe
             return False
 
