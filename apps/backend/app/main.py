@@ -30,6 +30,7 @@ from app.api.v1 import (
     seo,
     indexnow,
     content,
+    public_content,
 )
 from app.api.webhooks import razorpay
 
@@ -247,6 +248,9 @@ def create_app() -> FastAPI:
     app.include_router(seo.router, prefix="/api/v1/seo", tags=["SEO"])
     app.include_router(indexnow.router, prefix="/api/v1/indexnow", tags=["IndexNow"])
     app.include_router(content.router, prefix="/api/v1/content", tags=["Content"])
+    app.include_router(
+        public_content.router, prefix="/api/v1/content", tags=["Public Content"]
+    )
     app.include_router(
         admin_knowledge.router, prefix="/api/v1/admin", tags=["Admin Knowledge"]
     )
