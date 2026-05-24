@@ -1,0 +1,199 @@
+name: "Agent: Quality Gate"
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  backend-quality:
+    name: Backend Quality Checks
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.coverage_pct }}
+      complexity_warnings: ${{ steps.complexity.outputs.warnings }}
+      dead_code: ${{ steps.deadcode.outputs.findings }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt
+
+      - name: Install quality tools
+        run: pip install pytest pytest-cov radon vulture ruff
+
+      - name: Run pytest with coverage
+        id: coverage
+        run: |
+          set +e
+          OUTPUT=$(pytest apps/backend/ --cov=apps/backend/app --cov-report=term --cov-fail-under=60 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+
+          # Extract coverage percentage
+          COV_PCT=$(echo "$OUTPUT" | grep -oP 'TOTAL.*?(\d+)%' | grep -oP '\d+%' | tail -1 || echo "unknown")
+          echo "coverage_pct=$COV_PCT" >> "$GITHUB_OUTPUT"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "coverage_failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "coverage_failed=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit $EXIT_CODE
+
+      - name: Run radon complexity analysis
+        id: complexity
+        continue-on-error: true
+        run: |
+          set +e
+          OUTPUT=$(radon cc apps/backend/app/ -nc 2>&1)
+          echo "$OUTPUT"
+
+          if [ -n "$OUTPUT" ]; then
+            # Count functions with high complexity
+            WARNING_COUNT=$(echo "$OUTPUT" | grep -cE '^\s+\w' || echo "0")
+            echo "warnings=$WARNING_COUNT functions with complexity > C grade" >> "$GITHUB_OUTPUT"
+            echo "has_warnings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "warnings=No complexity issues found" >> "$GITHUB_OUTPUT"
+            echo "has_warnings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run vulture for dead code
+        id: deadcode
+        continue-on-error: true
+        run: |
+          set +e
+          OUTPUT=$(vulture apps/backend/app/ --min-confidence 80 2>&1)
+          echo "$OUTPUT"
+
+          if [ -n "$OUTPUT" ]; then
+            FINDING_COUNT=$(echo "$OUTPUT" | wc -l)
+            echo "findings=$FINDING_COUNT potential dead code items" >> "$GITHUB_OUTPUT"
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+            echo "$OUTPUT" > /tmp/vulture-report.txt
+          else
+            echo "findings=No dead code detected" >> "$GITHUB_OUTPUT"
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  frontend-quality:
+    name: Frontend Quality Checks
+    runs-on: ubuntu-latest
+    outputs:
+      bundle_size_kb: ${{ steps.bundle-size.outputs.size_kb }}
+      bundle_exceeded: ${{ steps.bundle-size.outputs.exceeded }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --filter @workspace/syrabit run build
+
+      - name: Check bundle size
+        id: bundle-size
+        run: |
+          BUNDLE_SIZE_BYTES=$(du -sb apps/frontend/dist/ | cut -f1)
+          BUNDLE_SIZE_KB=$((BUNDLE_SIZE_BYTES / 1024))
+          MAX_SIZE_KB=$(cat .github/scripts/performance-baseline.json | python3 -c "import sys,json; print(json.load(sys.stdin)['bundle']['max_total_kb'])")
+
+          echo "size_kb=$BUNDLE_SIZE_KB" >> "$GITHUB_OUTPUT"
+          echo "max_kb=$MAX_SIZE_KB" >> "$GITHUB_OUTPUT"
+
+          if [ "$BUNDLE_SIZE_KB" -gt "$MAX_SIZE_KB" ]; then
+            echo "exceeded=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Bundle size ${BUNDLE_SIZE_KB}KB exceeds maximum ${MAX_SIZE_KB}KB"
+          else
+            echo "exceeded=false" >> "$GITHUB_OUTPUT"
+            echo "Bundle size ${BUNDLE_SIZE_KB}KB is within limit of ${MAX_SIZE_KB}KB"
+          fi
+
+  comment-results:
+    name: Comment Quality Report
+    needs: [backend-quality, frontend-quality]
+    if: github.event_name == 'pull_request' && always()
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const coverage = '${{ needs.backend-quality.outputs.coverage }}' || 'N/A';
+            const complexityWarnings = '${{ needs.backend-quality.outputs.complexity_warnings }}' || 'N/A';
+            const deadCode = '${{ needs.backend-quality.outputs.dead_code }}' || 'N/A';
+            const bundleSizeKb = '${{ needs.frontend-quality.outputs.bundle_size_kb }}' || 'N/A';
+            const bundleExceeded = '${{ needs.frontend-quality.outputs.bundle_exceeded }}' === 'true';
+
+            let body = '## Quality Gate Report\n\n';
+
+            body += '### Backend\n';
+            body += `| Metric | Value |\n`;
+            body += `|--------|-------|\n`;
+            body += `| Test Coverage | ${coverage} |\n`;
+            body += `| Complexity Warnings | ${complexityWarnings} |\n`;
+            body += `| Dead Code | ${deadCode} |\n\n`;
+
+            body += '### Frontend\n';
+            body += `| Metric | Value |\n`;
+            body += `|--------|-------|\n`;
+            body += `| Bundle Size | ${bundleSizeKb} KB |\n`;
+            body += `| Exceeds Limit | ${bundleExceeded ? ':x: Yes' : ':white_check_mark: No'} |\n\n`;
+
+            if (bundleExceeded) {
+              body += ':warning: **Frontend bundle size exceeds the configured maximum.** Please review and optimize.\n\n';
+            }
+
+            body += '---\n*Generated by agent-quality-gate workflow*';
+
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.body.includes('## Quality Gate Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }

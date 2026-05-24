@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create Layer 1 Core Agent Workflows (PR/Issue Automation) plus supporting config files (CODEOWNERS, labeler.yml). These handle PR auto-labeling/review, issue triage, stale cleanup, and auto-fix on PRs.",
+  "status": "completed",
+  "steps": [
+    "Create .github/CODEOWNERS defining ownership: apps/backend/* -> @founder24, apps/edge/* -> @founder24, apps/frontend/* -> @founder24, infra/* -> @founder24, .github/* -> @founder24",
+    "Create .github/labeler.yml with path-based labeling rules: backend (apps/backend/**), edge (apps/edge/**), frontend (apps/frontend/**), infra (infra/**), ci (*.github/workflows/**), docs (*.md)",
+    "Create .github/workflows/agent-pr-review.yml: triggers on pull_request opened/synchronize/ready_for_review. Steps: (1) Label by size using lines changed (XS <10, S <50, M <200, L <500, XL 500+), (2) Label by component using paths-filter or manual path detection for backend/edge/frontend/infra, (3) Label type (feature/bugfix/chore) from branch name prefix, (4) Auto-assign reviewers from CODEOWNERS, (5) Add 'needs-review' label, (6) Check for BREAKING CHANGE in commits or PR body, (7) Validate PR description has ## Summary and ## Testing sections. Use workflow_dispatch, concurrency group, permissions: pull-requests write + contents read",
+    "Create .github/workflows/agent-issue-triage.yml: triggers on issues opened. Steps: (1) Parse issue title+body for keywords to assign labels (security/performance/bug/feature/documentation/enhancement), (2) Assign priority label (P0 for 'critical'/'outage'/'security vulnerability', P1 for 'urgent'/'blocker', P2 for 'bug'/'broken', P3 for 'feature'/'enhancement'/'nice to have'), (3) Comment with expected response SLA (P0: 4h, P1: 24h, P2: 3 days, P3: 1 week). Use workflow_dispatch, permissions: issues write",
+    "Create .github/workflows/agent-stale-cleanup.yml: runs on schedule (weekly cron: '0 9 * * 1') and workflow_dispatch. Uses actions/stale@v9. Marks issues stale after 14 days, closes after 7 more days. Excludes labels: P0, P1, pinned, security. Marks PRs stale after 14 days, closes after 7 more. Exempt PR labels: P0, P1, pinned. Add stale message explaining policy",
+    "Create .github/workflows/agent-auto-fix.yml: triggers on pull_request opened/synchronize for .py/.ts/.tsx files. Steps: (1) Checkout with PR ref + fetch-depth 0, (2) Setup Python 3.11 + install ruff, (3) Setup Node 22 + pnpm, (4) Run ruff format + ruff check --fix on apps/backend/, (5) Run pnpm install then pnpm exec prettier --write on changed TS/TSX files in apps/edge and apps/frontend, (6) If git diff detects changes, commit with message 'chore: auto-fix lint issues [skip ci]' and push to PR branch. Use permissions: contents write + pull-requests write, concurrency group per PR"
+  ],
+  "acceptance_criteria": [
+    "All 4 workflow YAML files exist in .github/workflows/ with valid YAML syntax",
+    "CODEOWNERS file exists at .github/CODEOWNERS with correct format",
+    "labeler.yml exists at .github/labeler.yml with correct format",
+    "All workflows include workflow_dispatch trigger",
+    "All workflows include concurrency groups",
+    "All workflows include permissions blocks with least-privilege",
+    "All workflows pin action versions to @v4+ or specific versions",
+    "agent-pr-review.yml correctly computes size labels based on line thresholds",
+    "agent-issue-triage.yml maps keywords to priority labels",
+    "agent-stale-cleanup.yml excludes P0/P1/pinned labels",
+    "agent-auto-fix.yml commits fixes back to PR branch with skip-ci"
+  ],
+  "verification": [
+    "Run: python3 -c \"import yaml; [yaml.safe_load(open(f)) for f in __import__('glob').glob('.github/workflows/agent-*.yml')]\" to validate YAML syntax",
+    "Run: grep -l 'workflow_dispatch' .github/workflows/agent-pr-review.yml .github/workflows/agent-issue-triage.yml .github/workflows/agent-stale-cleanup.yml .github/workflows/agent-auto-fix.yml to confirm all have manual trigger",
+    "Run: grep -l 'concurrency' .github/workflows/agent-pr-review.yml .github/workflows/agent-issue-triage.yml .github/workflows/agent-stale-cleanup.yml .github/workflows/agent-auto-fix.yml to confirm concurrency groups"
+  ],
+  "blocked_reason": null,
+  "findings": "All 6 files created successfully. YAML validation passes. All workflows have workflow_dispatch, concurrency groups, permissions blocks, and pinned action versions. Used @v6 for checkout/setup-node/setup-python, @v5 for labeler, @v9 for stale, @v7 for github-script."
+}

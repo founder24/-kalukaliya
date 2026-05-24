@@ -1,0 +1,173 @@
+name: "Agent: Canary Deployment"
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: canary-deploy
+  cancel-in-progress: false
+
+jobs:
+  canary-deploy:
+    name: Deploy Canary Revision
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Authenticate to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get current active revision
+        id: current
+        run: |
+          CURRENT_REVISION=$(az containerapp revision list \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --query "[?properties.active && properties.trafficWeight > \`0\`].name | [0]" -o tsv)
+          echo "revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "Current active revision: $CURRENT_REVISION"
+
+      - name: Deploy canary revision
+        id: canary
+        run: |
+          az containerapp revision copy \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+
+          # Get the new revision name
+          CANARY_REVISION=$(az containerapp revision list \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --query "sort_by([], &properties.createdTime) | [-1].name" -o tsv)
+          echo "revision=$CANARY_REVISION" >> "$GITHUB_OUTPUT"
+          echo "Canary revision: $CANARY_REVISION"
+
+      - name: Set traffic split (90/10)
+        run: |
+          CURRENT="${{ steps.current.outputs.revision }}"
+          CANARY="${{ steps.canary.outputs.revision }}"
+
+          az containerapp ingress traffic set \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --revision-weight "${CURRENT}=90" "${CANARY}=10"
+
+          echo "Traffic split: ${CURRENT}=90%, ${CANARY}=10%"
+
+      - name: Wait for stabilization
+        run: |
+          echo "Waiting 60 seconds for canary to stabilize..."
+          sleep 60
+
+      - name: Monitor health
+        id: monitor
+        run: |
+          FQDN=$(az containerapp show \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --query 'properties.configuration.ingress.fqdn' -o tsv)
+
+          HEALTH_URL="https://${FQDN}/health"
+          echo "Monitoring: $HEALTH_URL"
+          echo "Running 20 checks over 10 minutes (30s intervals)..."
+
+          SUCCESS_COUNT=0
+          FAILURE_COUNT=0
+
+          for i in $(seq 1 20); do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" --max-time 10 || echo "000")
+
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              echo "Check $i/20: OK (HTTP $HTTP_STATUS)"
+            else
+              FAILURE_COUNT=$((FAILURE_COUNT + 1))
+              echo "Check $i/20: FAILED (HTTP $HTTP_STATUS)"
+            fi
+
+            if [ "$i" -lt 20 ]; then
+              sleep 30
+            fi
+          done
+
+          TOTAL=$((SUCCESS_COUNT + FAILURE_COUNT))
+          if [ "$TOTAL" -gt 0 ]; then
+            ERROR_RATE=$(echo "scale=2; ($FAILURE_COUNT * 100) / $TOTAL" | bc)
+          else
+            ERROR_RATE="100"
+          fi
+
+          echo "success_count=$SUCCESS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "failure_count=$FAILURE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "error_rate=$ERROR_RATE" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "Results: $SUCCESS_COUNT successes, $FAILURE_COUNT failures, error rate: ${ERROR_RATE}%"
+
+      - name: Validate error rate
+        id: validate
+        run: |
+          ERROR_RATE="${{ steps.monitor.outputs.error_rate }}"
+          if [ -z "$ERROR_RATE" ]; then
+            echo "ERROR: error_rate is empty - health monitor may have failed"
+            echo "Failing workflow to prevent unsafe promotion"
+            exit 1
+          fi
+          echo "Error rate validated: ${ERROR_RATE}%"
+
+      - name: Rollback canary (unhealthy)
+        if: steps.monitor.outputs.error_rate > 2
+        run: |
+          CURRENT="${{ steps.current.outputs.revision }}"
+          CANARY="${{ steps.canary.outputs.revision }}"
+
+          echo "Error rate (${{ steps.monitor.outputs.error_rate }}%) exceeds 2% threshold"
+          echo "Rolling back: deactivating canary revision ${CANARY}"
+
+          # Set 100% traffic to the original revision
+          az containerapp ingress traffic set \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --revision-weight "${CURRENT}=100"
+
+          # Deactivate the canary revision
+          az containerapp revision deactivate \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --revision "$CANARY"
+
+          echo "Rollback complete. All traffic restored to ${CURRENT}"
+          exit 1
+
+      - name: Promote canary (healthy)
+        if: steps.monitor.outputs.error_rate <= 2
+        run: |
+          CURRENT="${{ steps.current.outputs.revision }}"
+          CANARY="${{ steps.canary.outputs.revision }}"
+
+          echo "Canary healthy (error rate: ${{ steps.monitor.outputs.error_rate }}%)"
+          echo "Promoting canary revision ${CANARY} to 100% traffic"
+
+          # Set 100% traffic to canary
+          az containerapp ingress traffic set \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --revision-weight "${CANARY}=100"
+
+          # Deactivate the old revision
+          az containerapp revision deactivate \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --revision "$CURRENT"
+
+          echo "Promotion complete. All traffic now on ${CANARY}"

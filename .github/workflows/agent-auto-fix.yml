@@ -1,0 +1,77 @@
+name: Agent Auto Fix
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '**.py'
+      - '**.ts'
+      - '**.tsx'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-fix-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  auto-fix:
+    name: Auto-fix Lint Issues
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable corepack and install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Node dependencies
+        run: pnpm install --ignore-scripts --no-frozen-lockfile
+
+      - name: Run ruff format on backend
+        run: ruff format apps/backend/
+
+      - name: Run ruff check --fix on backend
+        run: ruff check --fix apps/backend/ || true
+
+      - name: Run prettier on changed TS/TSX files
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 -- '*.ts' '*.tsx' 2>/dev/null || true)
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "$CHANGED_FILES" | xargs pnpm exec prettier --write || true
+          fi
+
+      - name: Commit and push fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/backend/ apps/edge/ apps/frontend/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: auto-fix lint issues [skip ci]"
+            git push
+          fi

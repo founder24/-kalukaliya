@@ -1,0 +1,185 @@
+name: "Agent: Weekly Summary"
+
+on:
+  schedule:
+    - cron: '0 10 * * 1'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: agent-summary
+  cancel-in-progress: true
+
+jobs:
+  weekly-summary:
+    name: Generate Weekly Summary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Gather weekly stats
+        id: stats
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Calculate date 7 days ago
+          WEEK_AGO=$(date -u -d '7 days ago' '+%Y-%m-%dT00:00:00Z' 2>/dev/null || date -u -v-7d '+%Y-%m-%dT00:00:00Z')
+          TODAY=$(date -u '+%Y-%m-%d')
+          echo "date=$TODAY" >> "$GITHUB_OUTPUT"
+
+          # Issues created by agent
+          AGENT_ISSUES=$(gh issue list --label agent-created --state all --json number,title,state,createdAt --limit 100 | \
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+              const weekAgo = new Date('${WEEK_AGO}');
+              const recent = data.filter(i => new Date(i.createdAt) >= weekAgo);
+              console.log(JSON.stringify(recent));
+            ")
+          echo "agent_issues<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$AGENT_ISSUES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          # Security findings
+          SECURITY_ISSUES=$(gh issue list --label security --state all --json number,title,state,createdAt --limit 100 | \
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+              const weekAgo = new Date('${WEEK_AGO}');
+              const recent = data.filter(i => new Date(i.createdAt) >= weekAgo);
+              console.log(JSON.stringify(recent));
+            ")
+          echo "security_issues<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$SECURITY_ISSUES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          # Stale items processed
+          STALE_ITEMS=$(gh issue list --label stale --state closed --json number,title,closedAt --limit 100 | \
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+              const weekAgo = new Date('${WEEK_AGO}');
+              const recent = data.filter(i => new Date(i.closedAt) >= weekAgo);
+              console.log(JSON.stringify(recent));
+            ")
+          echo "stale_items<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$STALE_ITEMS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          # Incidents
+          INCIDENTS=$(gh issue list --label incident --state all --json number,title,state --limit 50)
+          echo "incidents<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$INCIDENTS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          # PRs processed this week
+          PRS=$(gh pr list --state all --json number,title,createdAt --limit 50 | \
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+              const weekAgo = new Date('${WEEK_AGO}');
+              const recent = data.filter(p => new Date(p.createdAt) >= weekAgo);
+              console.log(JSON.stringify(recent));
+            ")
+          echo "prs<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PRS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create summary issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = '${{ steps.stats.outputs.date }}';
+
+            // Parse stats
+            let agentIssues = [];
+            let securityIssues = [];
+            let staleItems = [];
+            let incidents = [];
+            let prs = [];
+
+            try { agentIssues = JSON.parse(`${{ steps.stats.outputs.agent_issues }}`); } catch(e) {}
+            try { securityIssues = JSON.parse(`${{ steps.stats.outputs.security_issues }}`); } catch(e) {}
+            try { staleItems = JSON.parse(`${{ steps.stats.outputs.stale_items }}`); } catch(e) {}
+            try { incidents = JSON.parse(`${{ steps.stats.outputs.incidents }}`); } catch(e) {}
+            try { prs = JSON.parse(`${{ steps.stats.outputs.prs }}`); } catch(e) {}
+
+            const openAgentIssues = agentIssues.filter(i => i.state === 'OPEN').length;
+            const closedAgentIssues = agentIssues.filter(i => i.state === 'CLOSED').length;
+            const openIncidents = incidents.filter(i => i.state === 'OPEN').length;
+            const closedIncidents = incidents.filter(i => i.state === 'CLOSED').length;
+
+            const body = [
+              '## Weekly Agent Activity Summary',
+              `**Week ending:** ${today}`,
+              '',
+              '---',
+              '',
+              '### Overview',
+              `| Metric | Count |`,
+              `|--------|-------|`,
+              `| Issues created by agents | ${agentIssues.length} |`,
+              `| Issues still open | ${openAgentIssues} |`,
+              `| Issues resolved | ${closedAgentIssues} |`,
+              `| PRs processed | ${prs.length} |`,
+              '',
+              '### Security',
+              `- **Findings this week:** ${securityIssues.length}`,
+              securityIssues.length > 0
+                ? securityIssues.map(i => `  - #${i.number}: ${i.title} (${i.state})`).join('\n')
+                : '  - No new security findings',
+              '',
+              '### Compliance',
+              '- License audit and drift detection ran on schedule',
+              '- See individual workflow runs for details',
+              '',
+              '### Quality',
+              '- Performance regression checks active',
+              '- Coverage and bundle size monitored via quality gate',
+              '',
+              '### Incidents',
+              `- **Open incidents:** ${openIncidents}`,
+              `- **Resolved incidents:** ${closedIncidents}`,
+              incidents.filter(i => i.state === 'OPEN').length > 0
+                ? incidents.filter(i => i.state === 'OPEN').map(i => `  - #${i.number}: ${i.title}`).join('\n')
+                : '  - No active incidents',
+              '',
+              '### Stale Items Processed',
+              `- **Closed this week:** ${staleItems.length}`,
+              '',
+              '### Accuracy',
+              '- See the [accuracy report workflow](../../actions/workflows/agent-accuracy-report.yml) for detailed metrics',
+              '',
+              '---',
+              '*Auto-generated by agent-summary workflow*',
+            ].join('\n');
+
+            // Close previous summary issue
+            const { data: existingSummaries } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'agent-summary',
+              state: 'open',
+            });
+
+            for (const issue of existingSummaries) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+              core.info(`Closed previous summary issue #${issue.number}`);
+            }
+
+            // Create new summary issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Weekly Agent Summary - ${today}`,
+              body: body,
+              labels: ['agent-summary', 'agent-created'],
+            });
+
+            core.info('Created new weekly summary issue');

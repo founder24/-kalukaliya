@@ -1,0 +1,26 @@
+# Path-based labeling config for actions/labeler@v5
+# See: https://github.com/actions/labeler
+
+backend:
+  - changed-files:
+      - any-glob-to-any-file: 'apps/backend/**'
+
+edge:
+  - changed-files:
+      - any-glob-to-any-file: 'apps/edge/**'
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file: 'apps/frontend/**'
+
+infra:
+  - changed-files:
+      - any-glob-to-any-file: 'infra/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file: '**/*.md'

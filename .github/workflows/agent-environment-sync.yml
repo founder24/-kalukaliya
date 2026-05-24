@@ -1,0 +1,128 @@
+name: "Agent: Environment Sync"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - '.env.shared'
+      - 'infra/**'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: env-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-env-sync:
+    name: Validate Environment Variables
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run environment sync check
+        id: sync_check
+        continue-on-error: true
+        run: |
+          chmod +x .github/scripts/check-env-sync.sh
+          set +e
+          OUTPUT=$(bash .github/scripts/check-env-sync.sh 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          echo "output<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$OUTPUT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Handle missing variables
+        if: steps.sync_check.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const timestamp = new Date().toISOString();
+            const output = `${{ steps.sync_check.outputs.output }}`.replace(/`/g, "'");
+
+            // Search for existing open env-sync issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'env-sync',
+              state: 'open',
+            });
+
+            const body = [
+              '## Environment Variable Sync Report',
+              '',
+              `**Checked at:** ${timestamp}`,
+              `**Commit:** ${context.sha}`,
+              '',
+              '### Discrepancies Found',
+              '```',
+              output,
+              '```',
+              '',
+              '### Resolution',
+              'Please ensure all required environment variables are configured in each deployment environment.',
+              '',
+              '---',
+              '*Auto-created by agent-environment-sync workflow*',
+            ].join('\n');
+
+            if (issues.length > 0) {
+              // Update existing issue body with new findings
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                body: body,
+              });
+              core.info(`Updated existing env-sync issue #${issues[0].number}`);
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Environment Variable Sync Required',
+                body: body,
+                labels: ['env-sync', 'agent-created'],
+              });
+              core.info('Created new env-sync issue');
+            }
+
+      - name: Handle all synced
+        if: steps.sync_check.outputs.exit_code == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Search for existing open env-sync issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'env-sync',
+              state: 'open',
+            });
+
+            if (issues.length > 0) {
+              for (const issue of issues) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: 'All variables are now in sync.',
+                });
+
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+
+                core.info(`Closed env-sync issue #${issue.number}`);
+              }
+            }
