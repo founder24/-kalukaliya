@@ -5,7 +5,6 @@ Supports 5 page types: notes, mcqs, summary, definitions, important-questions.
 
 import hashlib
 import logging
-from typing import Optional
 
 from jinja2 import Environment, BaseLoader
 from markupsafe import Markup
@@ -80,7 +79,11 @@ class ContentRenderer:
         if page_type not in PAGE_TYPES:
             page_type = "notes"
 
-        meta = knowledge_obj.metadata if hasattr(knowledge_obj, "metadata") else knowledge_obj.get("metadata", {})
+        meta = (
+            knowledge_obj.metadata
+            if hasattr(knowledge_obj, "metadata")
+            else knowledge_obj.get("metadata", {})
+        )
         if hasattr(meta, "model_dump"):
             meta_dict = meta.model_dump()
         elif isinstance(meta, dict):
@@ -95,8 +98,18 @@ class ContentRenderer:
         language = meta_dict.get("language", "en")
         keywords = meta_dict.get("keywords", [])
 
-        title = getattr(knowledge_obj, "title", "") or knowledge_obj.get("title", "") if isinstance(knowledge_obj, dict) else knowledge_obj.title
-        description = getattr(knowledge_obj, "description", "") if hasattr(knowledge_obj, "description") else knowledge_obj.get("description", "") if isinstance(knowledge_obj, dict) else ""
+        title = (
+            getattr(knowledge_obj, "title", "") or knowledge_obj.get("title", "")
+            if isinstance(knowledge_obj, dict)
+            else knowledge_obj.title
+        )
+        description = (
+            getattr(knowledge_obj, "description", "")
+            if hasattr(knowledge_obj, "description")
+            else knowledge_obj.get("description", "")
+            if isinstance(knowledge_obj, dict)
+            else ""
+        )
 
         base_path = f"/render/{board}/{class_level}/{subject}/{chapter}"
         canonical_url = f"{base_url}{base_path}/{page_type}"
@@ -146,7 +159,11 @@ class ContentRenderer:
 
     def _render_notes(self, obj) -> str:
         """Render notes page from body_markdown."""
-        body = obj.body_markdown if hasattr(obj, "body_markdown") else obj.get("body_markdown", "")
+        body = (
+            obj.body_markdown
+            if hasattr(obj, "body_markdown")
+            else obj.get("body_markdown", "")
+        )
         # Simple markdown-to-html: wrap paragraphs
         paragraphs = body.split("\n\n") if body else []
         html_parts = []
@@ -166,7 +183,9 @@ class ContentRenderer:
 
     def _render_mcqs(self, obj) -> str:
         """Render MCQ page."""
-        generated = obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        generated = (
+            obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        )
         if hasattr(generated, "model_dump"):
             generated = generated.model_dump()
         mcqs = generated.get("mcqs", []) if isinstance(generated, dict) else []
@@ -174,44 +193,54 @@ class ContentRenderer:
         if not mcqs:
             return "<p>No MCQs available yet.</p>"
 
-        html_parts = ["<section class=\"mcqs\">"]
+        html_parts = ['<section class="mcqs">']
         for i, mcq in enumerate(mcqs, 1):
             question = mcq.get("question", "")
             options = mcq.get("options", [])
             answer = mcq.get("answer", "")
-            html_parts.append(f"<article class=\"mcq\" data-index=\"{i}\">")
+            html_parts.append(f'<article class="mcq" data-index="{i}">')
             html_parts.append(f"<h3>Q{i}. {_escape(question)}</h3>")
-            html_parts.append("<ol type=\"A\">")
+            html_parts.append('<ol type="A">')
             for opt in options:
                 html_parts.append(f"<li>{_escape(opt)}</li>")
             html_parts.append("</ol>")
-            html_parts.append(f"<details><summary>Answer</summary><p>{_escape(answer)}</p></details>")
+            html_parts.append(
+                f"<details><summary>Answer</summary><p>{_escape(answer)}</p></details>"
+            )
             html_parts.append("</article>")
         html_parts.append("</section>")
         return "\n".join(html_parts)
 
     def _render_summary(self, obj) -> str:
         """Render summary page."""
-        generated = obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        generated = (
+            obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        )
         if hasattr(generated, "model_dump"):
             generated = generated.model_dump()
         summary = generated.get("summary", "") if isinstance(generated, dict) else ""
         if not summary:
             return "<p>No summary available yet.</p>"
         paragraphs = summary.split("\n\n")
-        return "\n".join(f"<p>{_escape(p.strip())}</p>" for p in paragraphs if p.strip())
+        return "\n".join(
+            f"<p>{_escape(p.strip())}</p>" for p in paragraphs if p.strip()
+        )
 
     def _render_definitions(self, obj) -> str:
         """Render definitions page."""
-        generated = obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        generated = (
+            obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        )
         if hasattr(generated, "model_dump"):
             generated = generated.model_dump()
-        definitions = generated.get("definitions", []) if isinstance(generated, dict) else []
+        definitions = (
+            generated.get("definitions", []) if isinstance(generated, dict) else []
+        )
 
         if not definitions:
             return "<p>No definitions available yet.</p>"
 
-        html_parts = ["<dl class=\"definitions\">"]
+        html_parts = ['<dl class="definitions">']
         for defn in definitions:
             term = defn.get("term", "")
             definition = defn.get("definition", "")
@@ -222,24 +251,30 @@ class ContentRenderer:
 
     def _render_important_questions(self, obj) -> str:
         """Render important questions page."""
-        generated = obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        generated = (
+            obj.generated if hasattr(obj, "generated") else obj.get("generated", {})
+        )
         if hasattr(generated, "model_dump"):
             generated = generated.model_dump()
-        questions = generated.get("important_questions", []) if isinstance(generated, dict) else []
+        questions = (
+            generated.get("important_questions", [])
+            if isinstance(generated, dict)
+            else []
+        )
 
         if not questions:
             return "<p>No important questions available yet.</p>"
 
-        html_parts = ["<section class=\"important-questions\">"]
+        html_parts = ['<section class="important-questions">']
         for i, q in enumerate(questions, 1):
             question = q.get("question", "")
             answer = q.get("answer", "")
             marks = q.get("marks", "")
             marks_str = f" [{marks} marks]" if marks else ""
-            html_parts.append(f"<article>")
+            html_parts.append("<article>")
             html_parts.append(f"<h3>Q{i}. {_escape(question)}{_escape(marks_str)}</h3>")
             if answer:
-                html_parts.append(f"<div class=\"answer\"><p>{_escape(answer)}</p></div>")
+                html_parts.append(f'<div class="answer"><p>{_escape(answer)}</p></div>')
             html_parts.append("</article>")
         html_parts.append("</section>")
         return "\n".join(html_parts)
@@ -251,7 +286,11 @@ class ContentRenderer:
         import json
 
         title = obj.title if hasattr(obj, "title") else obj.get("title", "")
-        description = obj.description if hasattr(obj, "description") else obj.get("description", "")
+        description = (
+            obj.description
+            if hasattr(obj, "description")
+            else obj.get("description", "")
+        )
         meta = obj.metadata if hasattr(obj, "metadata") else obj.get("metadata", {})
         if hasattr(meta, "model_dump"):
             meta_dict = meta.model_dump()
@@ -266,10 +305,30 @@ class ContentRenderer:
             "@type": "BreadcrumbList",
             "itemListElement": [
                 {"@type": "ListItem", "position": 1, "name": "Home", "item": base_url},
-                {"@type": "ListItem", "position": 2, "name": meta_dict.get("board", ""), "item": f"{base_url}/render/{meta_dict.get('board', '')}"},
-                {"@type": "ListItem", "position": 3, "name": f"Class {meta_dict.get('class_level', '')}", "item": f"{base_url}/render/{meta_dict.get('board', '')}/{meta_dict.get('class_level', '')}"},
-                {"@type": "ListItem", "position": 4, "name": meta_dict.get("subject", "").replace("-", " ").title(), "item": f"{base_url}/render/{meta_dict.get('board', '')}/{meta_dict.get('class_level', '')}/{meta_dict.get('subject', '')}"},
-                {"@type": "ListItem", "position": 5, "name": title, "item": canonical_url},
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": meta_dict.get("board", ""),
+                    "item": f"{base_url}/render/{meta_dict.get('board', '')}",
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": f"Class {meta_dict.get('class_level', '')}",
+                    "item": f"{base_url}/render/{meta_dict.get('board', '')}/{meta_dict.get('class_level', '')}",
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 4,
+                    "name": meta_dict.get("subject", "").replace("-", " ").title(),
+                    "item": f"{base_url}/render/{meta_dict.get('board', '')}/{meta_dict.get('class_level', '')}/{meta_dict.get('subject', '')}",
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 5,
+                    "name": title,
+                    "item": canonical_url,
+                },
             ],
         }
 

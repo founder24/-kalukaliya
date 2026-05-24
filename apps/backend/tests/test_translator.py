@@ -4,17 +4,12 @@ Tests for the ContentTranslator service and admin translation endpoints.
 
 import os
 
-os.environ.setdefault(
-    "JWT_SECRET", "test-secret-at-least-32-chars-long-for-testing"
-)
-os.environ.setdefault(
-    "ALLOWED_ORIGINS", "http://test,https://syrabit.ai"
-)
+os.environ.setdefault("JWT_SECRET", "test-secret-at-least-32-chars-long-for-testing")
+os.environ.setdefault("ALLOWED_ORIGINS", "http://test,https://syrabit.ai")
 os.environ.setdefault("APP_ENV", "test")
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from httpx import AsyncClient, ASGITransport
 
 
 @pytest.fixture
@@ -128,9 +123,7 @@ class TestTranslateText:
 
         translator = ContentTranslator()
         # Create text with more than 800 words
-        long_text = "\n\n".join(
-            [f"Paragraph {i} " + "word " * 100 for i in range(10)]
-        )
+        long_text = "\n\n".join([f"Paragraph {i} " + "word " * 100 for i in range(10)])
 
         with patch(
             "app.services.content.translator.sarvam_client.generate",
@@ -153,19 +146,20 @@ class TestTranslateKnowledgeObject:
 
         translator = ContentTranslator()
 
-        with patch(
-            "app.services.content.translator.sarvam_client.generate",
-            new_callable=AsyncMock,
-            return_value="translated_text",
-        ), patch(
-            "app.services.content.translator.KnowledgeObject",
-        ) as MockKO:
+        with (
+            patch(
+                "app.services.content.translator.sarvam_client.generate",
+                new_callable=AsyncMock,
+                return_value="translated_text",
+            ),
+            patch(
+                "app.services.content.translator.KnowledgeObject",
+            ) as MockKO,
+        ):
             mock_instance = MagicMock()
             MockKO.return_value = mock_instance
 
-            result = await translator.translate_knowledge_object(
-                sample_knowledge_obj
-            )
+            result = await translator.translate_knowledge_object(sample_knowledge_obj)
             # Check the constructor was called with slug ending in -as
             call_kwargs = MockKO.call_args[1]
             assert call_kwargs["slug"] == "seba-10-science-chemical-reactions-as"
@@ -177,13 +171,16 @@ class TestTranslateKnowledgeObject:
 
         translator = ContentTranslator()
 
-        with patch(
-            "app.services.content.translator.sarvam_client.generate",
-            new_callable=AsyncMock,
-            return_value="translated_text",
-        ), patch(
-            "app.services.content.translator.KnowledgeObject",
-        ) as MockKO:
+        with (
+            patch(
+                "app.services.content.translator.sarvam_client.generate",
+                new_callable=AsyncMock,
+                return_value="translated_text",
+            ),
+            patch(
+                "app.services.content.translator.KnowledgeObject",
+            ) as MockKO,
+        ):
             mock_instance = MagicMock()
             MockKO.return_value = mock_instance
 
@@ -198,13 +195,16 @@ class TestTranslateKnowledgeObject:
 
         translator = ContentTranslator()
 
-        with patch(
-            "app.services.content.translator.sarvam_client.generate",
-            new_callable=AsyncMock,
-            return_value="translated_text",
-        ), patch(
-            "app.services.content.translator.KnowledgeObject",
-        ) as MockKO:
+        with (
+            patch(
+                "app.services.content.translator.sarvam_client.generate",
+                new_callable=AsyncMock,
+                return_value="translated_text",
+            ),
+            patch(
+                "app.services.content.translator.KnowledgeObject",
+            ) as MockKO,
+        ):
             mock_instance = MagicMock()
             MockKO.return_value = mock_instance
 
@@ -224,13 +224,16 @@ class TestTranslateKnowledgeObject:
 
         translator = ContentTranslator()
 
-        with patch(
-            "app.services.content.translator.sarvam_client.generate",
-            new_callable=AsyncMock,
-            return_value="translated_text",
-        ), patch(
-            "app.services.content.translator.KnowledgeObject",
-        ) as MockKO:
+        with (
+            patch(
+                "app.services.content.translator.sarvam_client.generate",
+                new_callable=AsyncMock,
+                return_value="translated_text",
+            ),
+            patch(
+                "app.services.content.translator.KnowledgeObject",
+            ) as MockKO,
+        ):
             mock_instance = MagicMock()
             MockKO.return_value = mock_instance
 
@@ -249,9 +252,7 @@ class TestTranslateKnowledgeObject:
             assert generated.definitions[0]["definition"] == "translated_text"
             # Important questions translated
             assert len(generated.important_questions) == 1
-            assert (
-                generated.important_questions[0]["question"] == "translated_text"
-            )
+            assert generated.important_questions[0]["question"] == "translated_text"
             # Summary translated
             assert generated.summary == "translated_text"
 
@@ -262,24 +263,29 @@ class TestAdminTranslateEndpoints:
 
     async def test_bulk_translate_returns_started(self, client):
         """Test bulk translate endpoint returns started status."""
-        with patch(
-            "app.api.v1.admin._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._csrf_check",
-            new_callable=AsyncMock,
-        ), patch(
-            "app.api.v1.admin_translate.translator.bulk_translate",
-            new_callable=AsyncMock,
-            return_value={
-                "translated": 0,
-                "skipped": 0,
-                "failed": 0,
-                "errors": [],
-            },
+        with (
+            patch(
+                "app.api.v1.admin._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._csrf_check",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.api.v1.admin_translate.translator.bulk_translate",
+                new_callable=AsyncMock,
+                return_value={
+                    "translated": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "errors": [],
+                },
+            ),
         ):
             response = await client.post(
                 "/api/v1/admin/content/translate/bulk",
@@ -291,12 +297,15 @@ class TestAdminTranslateEndpoints:
 
     async def test_status_endpoint_no_job(self, client):
         """Test status endpoint when no job has run."""
-        with patch(
-            "app.api.v1.admin._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+        with (
+            patch(
+                "app.api.v1.admin._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
         ):
             # Clear any translation_status from previous test
             from app.main import app
@@ -304,27 +313,30 @@ class TestAdminTranslateEndpoints:
             if hasattr(app.state, "translation_status"):
                 del app.state.translation_status
 
-            response = await client.get(
-                "/api/v1/admin/content/translate/status"
-            )
+            response = await client.get("/api/v1/admin/content/translate/status")
             assert response.status_code == 200
             data = response.json()
             assert data["running"] is False
 
     async def test_translate_single_not_found(self, client):
         """Test single translate returns 404 for missing object."""
-        with patch(
-            "app.api.v1.admin._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._csrf_check",
-            new_callable=AsyncMock,
-        ), patch(
-            "app.api.v1.admin_translate.KnowledgeObject",
-        ) as MockKO:
+        with (
+            patch(
+                "app.api.v1.admin._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._csrf_check",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.api.v1.admin_translate.KnowledgeObject",
+            ) as MockKO,
+        ):
             MockKO.find_one = AsyncMock(return_value=None)
             response = await client.post(
                 "/api/v1/admin/content/translate/nonexistent-slug",
@@ -337,18 +349,23 @@ class TestAdminTranslateEndpoints:
         mock_ko = MagicMock()
         mock_ko.slug = "test-slug"
 
-        with patch(
-            "app.api.v1.admin._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._validate_admin_session",
-            return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-        ), patch(
-            "app.api.v1.admin_translate._csrf_check",
-            new_callable=AsyncMock,
-        ), patch(
-            "app.api.v1.admin_translate.KnowledgeObject",
-        ) as MockKO:
+        with (
+            patch(
+                "app.api.v1.admin._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._validate_admin_session",
+                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
+            ),
+            patch(
+                "app.api.v1.admin_translate._csrf_check",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.api.v1.admin_translate.KnowledgeObject",
+            ) as MockKO,
+        ):
             # First call finds the object, second call finds existing translation
             MockKO.find_one = AsyncMock(return_value=mock_ko)
             response = await client.post(
