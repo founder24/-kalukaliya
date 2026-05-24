@@ -25,6 +25,8 @@ from app.api.v1 import (
     admin_ai,
     admin_revenue,
     admin_alerts,
+    admin_seo_pipeline,
+    content_public,
 )
 from app.api.webhooks import razorpay
 
@@ -113,7 +115,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
             "Authorization",
             "Content-Type",
@@ -128,7 +130,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def csrf_origin_check(request: Request, call_next):
         """Validate Origin header on mutating requests to prevent CSRF."""
-        if request.method in ("POST", "PUT", "DELETE"):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             origin = request.headers.get("origin")
             # Skip for health checks
             if request.url.path.startswith("/health") or request.url.path.startswith(
@@ -240,6 +242,12 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"]
+    )
+    app.include_router(
+        admin_seo_pipeline.router, prefix="/api/v1", tags=["Admin SEO Pipeline"]
+    )
+    app.include_router(
+        content_public.router, prefix="/api/v1", tags=["Content Public"]
     )
 
     # Legacy health probe redirects for backward compatibility
