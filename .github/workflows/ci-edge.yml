@@ -1,11 +1,6 @@
-name: CI Edge — Lint, Test & Deploy
+name: CI Edge — Lint & Test
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/edge/**'
-      - '.github/workflows/ci-edge.yml'
   pull_request:
     branches: [main]
     paths:
@@ -38,14 +33,13 @@ jobs:
 
       - name: Lint
         run: pnpm --filter syrabit-edge exec eslint src/
-        continue-on-error: true
 
   test:
     name: Run Tests
     needs: lint-and-typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -62,31 +56,3 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter syrabit-edge test
-        continue-on-error: true
-
-  deploy:
-    name: Deploy to Cloudflare
-    needs: lint-and-typecheck
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup PNPM
-        run: corepack prepare pnpm@10.26.1 --activate
-
-      - name: Install Dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Deploy Worker
-        run: pnpm --filter syrabit-edge exec wrangler deploy --env production
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

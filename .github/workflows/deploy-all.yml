@@ -10,8 +10,58 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci-checks:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Node dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Install Python dependencies
+        run: pip install -r apps/backend/requirements.txt
+
+      - name: Lint Edge
+        run: pnpm --filter syrabit-edge exec tsc --noEmit
+
+      - name: Lint Frontend
+        run: pnpm --filter @workspace/syrabit exec tsc --noEmit
+
+      - name: Lint Backend
+        run: |
+          pip install ruff
+          ruff check apps/backend/app/
+
+      - name: Test Backend
+        run: pytest apps/backend/ --tb=short -q
+        env:
+          APP_ENV: test
+          JWT_SECRET: test-secret-at-least-32-characters-long-for-ci
+
+      - name: Test Edge
+        run: pnpm --filter syrabit-edge test
+
+      - name: Test Frontend
+        run: pnpm --filter @workspace/syrabit test
+
   deploy-backend:
     name: Deploy Backend
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -55,6 +105,7 @@ jobs:
 
   deploy-edge:
     name: Deploy Edge
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -80,6 +131,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

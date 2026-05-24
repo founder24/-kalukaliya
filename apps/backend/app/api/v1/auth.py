@@ -165,9 +165,9 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
         minute_bucket = int(time.time() // 60)
         rate_key = f"auth_limit:{endpoint}:{client_ip}:{minute_bucket}"
 
-        attempt_count = redis.incr(rate_key)
+        attempt_count = await redis.incr(rate_key)
         if attempt_count == 1:
-            redis.expire(rate_key, 60)
+            await redis.expire(rate_key, 60)
 
         if attempt_count > max_attempts:
             raise HTTPException(

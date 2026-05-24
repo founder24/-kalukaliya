@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "docs",
+  "description": "Generate comprehensive audit report covering git hygiene, codebase quality, CI/CD, IaC, cloud-native practices, security, configuration, dependencies, and documentation accuracy. Write it as a single well-structured markdown file.",
+  "status": "completed",
+  "steps": [
+    "Create COMPREHENSIVE_AUDIT_REPORT.md at the repository root with the full audit findings organized into sections",
+    "Section 1: Executive Summary with overall health score and top-priority findings",
+    "Section 2: Git Hygiene - single branch (main only), only 1 commit visible, .gitignore is well-configured, .env.shared contains placeholder secrets (acceptable template), no leaked real secrets found",
+    "Section 3: Codebase Quality - well-structured monorepo with clear separation (apps/backend, apps/edge, apps/frontend), strong typing with Pydantic models, proper async patterns, circuit breaker pattern for resilience, prompt injection protection, SSRF protection, good use of bcrypt for password hashing",
+    "Section 4: CI/CD Workflows - 8 workflows covering backend/edge/frontend CI, deploy-all, lockfile refresh, dependency bumping. Issues: continue-on-error on tests/lint in edge and frontend CI means broken code can deploy; deploy-all.yml and ci-backend.yml both deploy to production on push to main (duplicate/conflicting); inconsistent action versions (@v4 vs @v6 within same workflow); _tmp-read-cw-diag.yml is a debugging workflow that should be removed; bump-deps.yml uses sed for version bumping (brittle); no branch protection enforced in CI",
+    "Section 5: Infrastructure as Code - Azure Bicep templates for Container Apps, Search, KeyVault, Storage. Issues: KeyVault has empty accessPolicies (no RBAC configured), container app has no health probes defined in Bicep, no network security (VNET integration), Standard_LRS storage (no redundancy for prod), alerts use 'UsageNanoCores' for memory (incorrect metric)",
+    "Section 6: Cloud-Native Practices - Docker multi-stage build is good, gunicorn with uvicorn workers configured properly, horizontal scaling 1-3 replicas, health endpoints exist. Issues: no readiness/liveness probes in container-app.bicep, no resource requests/limits verified at IaC level, docker-compose uses version 3.8 (deprecated key), no graceful shutdown signal handling documented",
+    "Section 7: Security - JWT HS256 auth with proper expiry, CSRF origin check, security headers (HSTS, nosniff, frame-deny), input sanitization against prompt injection, SSRF protection, rate limiting at edge and backend. Issues: JWT_SECRET has insecure default in config.py (only validated in production mode), HS256 is symmetric (RS256 preferred for distributed systems), password policy only checks length >= 8 (no complexity), no account lockout after failed attempts, rate limiting in auth.py uses synchronous redis.incr but redis client is async, refresh token rotation not invalidating old tokens, no CORS origin validation on the edge worker responses (only preflight)",
+    "Section 8: Configuration Management - 42 env vars well-documented in .env.shared, Pydantic Settings with validation, production validator checks critical secrets. Issues: .env.shared contains example secrets that look like real patterns (could confuse developers), Google credentials stored as JSON string in env var (should use mounted file or managed identity), no .env.local template for development, ALLOWED_ORIGINS hardcoded in config default",
+    "Section 9: Dependency Management - pip-compile with hashes (excellent supply chain security), pnpm lockfile with overrides for known vulns (esbuild, ws). Issues: TypeScript 6.0.3 in root (extremely bleeding edge, possibly unstable), requirements.txt compiled with Python 3.12 but Dockerfile uses 3.11, Dockerfile has hacky sed command to fix pytest-asyncio conflict (should fix in requirements.in), no requirements.in file committed (can't regenerate requirements.txt), dependabot configured for all ecosystems (good)",
+    "Section 10: Documentation Accuracy - README claims Node.js 18+ but package.json requires >=22, README says 'npm install' for edge but project uses pnpm, .node-version and .nvmrc exist for version pinning, multiple overlapping audit reports already exist (FULL_STACK_AUDIT.md, BUILD_AUDIT_REPORT.md, etc.) creating confusion, README references docs/architecture.md which exists, STACKBLITZ_SETUP.md and .replit file suggest multiple development environments",
+    "Section 11: Recommendations prioritized as Critical/High/Medium/Low with actionable remediation steps"
+  ],
+  "acceptance_criteria": [
+    "COMPREHENSIVE_AUDIT_REPORT.md exists at the repo root",
+    "Report covers all 9 audit areas specified by the user",
+    "Each section contains specific findings with file paths and line references where applicable",
+    "Recommendations are prioritized by severity",
+    "Report is well-formatted markdown with table of contents"
+  ],
+  "verification": [
+    "Check that /projects/sandbox/-kalukaliya/COMPREHENSIVE_AUDIT_REPORT.md exists and has substantial content (>500 lines)"
+  ],
+  "blocked_reason": null,
+  "findings": "Report generated successfully at 670 lines. Covers all 11 sections with table of contents, severity tables, file references, and prioritized recommendations. Documentation-only change - no build/test verification needed."
+}

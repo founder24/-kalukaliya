@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Layer 1 - Quick wins: Delete debug workflow, remove continue-on-error from CI, fix await bug in rate limiting, fix deploy job dependencies",
+  "status": "completed",
+  "steps": [
+    "Delete the file .github/workflows/_tmp-read-cw-diag.yml entirely - it reads production Lambda env vars and is a security risk",
+    "In .github/workflows/ci-edge.yml: (a) Remove 'continue-on-error: true' from the Lint step in lint-and-typecheck job, (b) Remove 'continue-on-error: true' from the 'Run Tests' step in test job, (c) Change the deploy job 'needs' from [lint-and-typecheck] to [test] so deploy gates on tests passing",
+    "In .github/workflows/ci-frontend.yml: (a) Remove 'continue-on-error: true' from the 'Type Check' step, (b) Remove 'continue-on-error: true' from the 'Lint' step, (c) Remove 'continue-on-error: true' from the 'Run Tests' step in test job",
+    "In apps/backend/app/api/v1/auth.py: Fix the _check_rate_limit function - the Redis client (from upstash_redis.asyncio) is async, so redis.incr() and redis.expire() must be awaited. Change 'attempt_count = redis.incr(rate_key)' to 'attempt_count = await redis.incr(rate_key)' and 'redis.expire(rate_key, 60)' to 'await redis.expire(rate_key, 60)'. Also fix the same bug in the refresh_token_endpoint inline rate limiting where 'attempt_count = await redis.incr(rate_key)' and 'await redis.expire(rate_key, 60)' - verify these already have await (they do) but the HTTPException re-raise is missing from the except block there."
+  ],
+  "acceptance_criteria": [
+    ".github/workflows/_tmp-read-cw-diag.yml no longer exists",
+    "No 'continue-on-error: true' lines remain in ci-edge.yml or ci-frontend.yml",
+    "ci-edge.yml deploy job has 'needs: [test]' instead of 'needs: lint-and-typecheck'",
+    "All redis.incr() and redis.expire() calls in auth.py are properly awaited",
+    "Python file parses without syntax errors"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/api/v1/auth.py').read()); print('OK')\"",
+    "Run: python3 -c \"import yaml; [yaml.safe_load(open(f'.github/workflows/{f}').read()) for f in ['ci-edge.yml','ci-frontend.yml']]; print('OK')\"",
+    "Run: test ! -f .github/workflows/_tmp-read-cw-diag.yml && echo 'Deleted OK'",
+    "Run: grep -c 'continue-on-error' .github/workflows/ci-edge.yml .github/workflows/ci-frontend.yml | grep -v ':0' && echo 'FAIL: continue-on-error still present' || echo 'OK: no continue-on-error'"
+  ],
+  "blocked_reason": null,
+  "findings": "All changes verified: Python AST parse OK, no continue-on-error remains in CI files, debug workflow deleted, deploy job now gates on test job."
+}
