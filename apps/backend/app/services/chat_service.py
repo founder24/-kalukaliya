@@ -103,7 +103,7 @@ class ChatService:
         self, query: str, text: str, user_tier: str, limit: int = 5
     ) -> list[dict]:
         """Search Azure with Redis caching (PERF-04). TTL 5 minutes."""
-        cache_key = f"search:{hashlib.md5((query + user_tier + str(limit)).encode()).hexdigest()}"
+        cache_key = f"search:{hashlib.sha256((query + text + user_tier + str(limit)).encode()).hexdigest()[:32]}"
 
         try:
             redis = get_redis()
@@ -276,25 +276,15 @@ class ChatService:
         latency_ms = int((time.time() - start_time) * 1000) if start_time else 0
 
         # Save chat to MongoDB and invalidate cache
-        from app.models.chat import Chat
-
-        chat_doc = Chat(
-            user_id=user_id if user else None,
+        await self.save_chat(
+            user_id=user_id,
             session_id=session_id,
-        )
-        chat_doc.add_message(role="user", content=sanitized_message)
-        chat_doc.add_message(
-            role="assistant",
-            content=response_text,
-            model_used=target_model,
+            user_message=sanitized_message,
+            assistant_response=response_text,
+            target_model=target_model,
             latency_ms=latency_ms,
-            rag_sources=[
-                {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
-                for c in context_chunks
-            ],
+            context_chunks=context_chunks,
         )
-        await chat_doc.save()
-        await self.invalidate_conversation_cache(session_id)
 
         # Update usage counter
         if user:

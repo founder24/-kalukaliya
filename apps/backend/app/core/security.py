@@ -67,16 +67,19 @@ def sanitize_user_input(text: str) -> str:
     # If 2+ patterns match, reject the input entirely
     if match_count >= 2:
         logger.warning(
-            "Prompt injection detected: %d patterns matched (%s)",
+            "Prompt injection detected (multi-pattern): %d patterns matched (%s)",
             match_count,
             ", ".join(matched_patterns[:5]),
         )
         return ""
 
-    # If 1 pattern matches, strip it
+    # If 1 pattern matches, also reject the input
     if match_count == 1:
-        for pattern in _INJECTION_PATTERNS:
-            text = pattern.sub("", text)
+        logger.warning(
+            "Prompt injection detected (single-pattern): %s",
+            matched_patterns[0],
+        )
+        return ""
 
     # Remove control characters except newlines and tabs
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)

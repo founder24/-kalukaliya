@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address remaining issues from semantic review v1: process_chat save duplication, search cache key collision, single-pattern injection gap, user_id bug",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Fix process_chat save duplication: Replace inline save logic in process_chat with call to self.save_chat()",
+    "Step 2 - Fix search cache key: Include text parameter and switch from MD5 to SHA-256 truncated to 32 chars",
+    "Step 3 - Fix single-pattern injection: Reject (return empty) on any injection pattern match, not just 2+",
+    "Step 4 - Fix user_id argument in process_chat save: Pass user_id directly instead of conditional"
+  ],
+  "acceptance_criteria": [
+    "process_chat uses self.save_chat() instead of inline Chat document creation",
+    "search_with_cache cache key includes the text parameter and uses SHA-256",
+    "sanitize_user_input rejects input when even 1 injection pattern matches",
+    "Python files parse without syntax errors"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/services/chat_service.py').read()); ast.parse(open('apps/backend/app/core/security.py').read()); print('OK')\""
+  ],
+  "blocked_reason": null,
+  "findings": "All 4 fixes applied and verified. All 20 security tests pass. Python files parse cleanly. The single-pattern rejection is stricter but all existing test assertions still hold since they checked the pattern text was not present in output (empty string satisfies that)."
+}
