@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix all 10 P0 Critical Issues identified in the code audit. These are security vulnerabilities, correctness bugs, and performance problems that must be resolved before production.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "SEC-C1: In apps/backend/app/config.py, add to the validate_production_secrets method a check that rejects known placeholder JWT secrets. Add a set of KNOWN_PLACEHOLDER_SECRETS = {'super_secret_jwt_key_32_chars_min', 'CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG', 'test-secret-at-least-32-characters-long'} and raise ValueError if JWT_SECRET matches any of them in production mode.",
     "SEC-C2: In apps/edge/src/index.ts, modify the Turnstile bot protection section (lines 44-51) to make Turnstile verification MANDATORY for auth endpoints (/api/v1/auth/signup, /api/v1/auth/login, /api/v1/auth/forgot-password). If the CF-Turnstile-Response header is missing for these paths, return a 403 JSON error. Keep it optional for chat endpoints.",
@@ -33,5 +33,5 @@
     "Run: APP_ENV=test JWT_SECRET=test_secret_that_is_at_least_32_characters_long pytest apps/backend/tests/ -v to verify existing tests still pass"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 10 P0 fixes implemented and verified. Python AST parsing confirms all files are syntactically valid. TypeScript compiles cleanly (only pre-existing error in bot.ts unrelated to changes). Test suite: 32 tests pass, 5 pre-existing failures (4 webhook tests fail due to double-prefix on razorpay router - tests hit /api/webhooks/razorpay but actual path is /api/webhooks/webhooks/razorpay because razorpay.py router has prefix=/webhooks AND main.py uses prefix=/api/webhooks; 1 auth test fails due to Beanie ODM not initialized without MongoDB). Health endpoint confirmed working at /health and /api/health after prefix fix."
 }
