@@ -12,11 +12,16 @@ router = APIRouter(tags=["Users"])
 
 
 class UserProfile(BaseModel):
+    id: str
     name: str
     email: str
+    role: Optional[str] = None
     subscription_tier: str
+    plan: Optional[str] = None  # alias for subscription_tier for frontend compat
     monthly_message_count: int
     preferred_language: str
+    onboarding_done: bool = False
+    ads_opt_out: bool = False
 
 
 class UpdateProfileRequest(BaseModel):
@@ -28,11 +33,16 @@ class UpdateProfileRequest(BaseModel):
 async def get_current_user_profile(user: User = Depends(get_current_user)):
     """Get current user profile"""
     return UserProfile(
+        id=str(user.id),
         name=user.name or "",
         email=user.email or "",
+        role=user.role,
         subscription_tier=user.subscription_tier,
+        plan=user.subscription_tier,
         monthly_message_count=user.monthly_message_count,
         preferred_language=user.preferred_language,
+        onboarding_done=getattr(user, "onboarding_done", False),
+        ads_opt_out=getattr(user, "ads_opt_out", False),
     )
 
 

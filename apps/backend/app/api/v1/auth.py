@@ -165,7 +165,9 @@ async def get_current_user(
         return user
     except HTTPException:
         raise
-    except JWTError:
+    except JWTError as e:
+        if "expired" in str(e).lower():
+            raise HTTPException(status_code=401, detail="token_expired")
         raise HTTPException(status_code=401, detail="Invalid token")
 
 

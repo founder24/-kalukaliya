@@ -39,7 +39,7 @@ export default function ResetPasswordPage() {
     const turnstileToken = turnstileRef.current?.getToken?.() || '';
     try {
       await axios.post(
-        `${API_BASE}/auth/reset-request`,
+        `${API_BASE}/auth/forgot-password`,
         { email },
         {
           headers: turnstileToken
@@ -63,7 +63,7 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       await axios.post(
-        `${API_BASE}/auth/reset-confirm`,
+        `${API_BASE}/auth/reset-password`,
         { token, new_password: newPassword },
       );
       setStep('done');
