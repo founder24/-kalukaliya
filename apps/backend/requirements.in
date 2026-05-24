@@ -17,7 +17,7 @@ pydantic
 pydantic-settings
 pyjwt
 pymongo
-pytest
+pytest<9
 pytest-asyncio
 pytest-cov
 python-dateutil
