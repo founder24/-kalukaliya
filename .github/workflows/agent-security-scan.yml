@@ -1,0 +1,213 @@
+name: "Agent: Security Scan"
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly Sunday 3AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  security-events: write
+
+concurrency:
+  group: security-scan-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  security-scan:
+    name: Security & Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION="8.18.4"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+
+      - name: Run gitleaks secret detection
+        id: gitleaks
+        continue-on-error: true
+        run: |
+          gitleaks detect --source . --report-format json --report-path gitleaks-report.json --exit-code 1
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Grep-based pattern scan (dangerous functions)
+        id: pattern-scan
+        continue-on-error: true
+        run: |
+          FINDINGS=""
+          CRITICAL=0
+
+          # Scan for eval/exec in Python
+          if grep -rn '\b\(eval\|exec\)\s*(' apps/backend/ --include="*.py" 2>/dev/null | grep -v '#.*noqa' | grep -v 'test_'; then
+            FINDINGS="${FINDINGS}DANGEROUS: Python eval/exec usage found\n"
+            CRITICAL=$((CRITICAL+1))
+          fi
+
+          # Scan for innerHTML in TypeScript
+          if grep -rn '\.innerHTML\s*=' apps/ --include="*.ts" --include="*.tsx" 2>/dev/null; then
+            FINDINGS="${FINDINGS}DANGEROUS: innerHTML assignment found\n"
+          fi
+
+          # Scan for dangerouslySetInnerHTML
+          if grep -rn 'dangerouslySetInnerHTML' apps/ --include="*.ts" --include="*.tsx" 2>/dev/null; then
+            FINDINGS="${FINDINGS}WARNING: dangerouslySetInnerHTML usage found\n"
+          fi
+
+          # Scan for NoSQL injection patterns
+          if grep -rn '\.\(find\|findOne\|aggregate\|updateOne\|deleteOne\)(\s*f['\''"]' apps/backend/ --include="*.py" 2>/dev/null; then
+            FINDINGS="${FINDINGS}CRITICAL: Potential NoSQL injection (f-string in query)\n"
+            CRITICAL=$((CRITICAL+1))
+          fi
+
+          if [ -n "$FINDINGS" ]; then
+            echo -e "$FINDINGS" > pattern-scan-report.txt
+            echo "findings=true" >> "$GITHUB_OUTPUT"
+            echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+          else
+            echo "findings=false" >> "$GITHUB_OUTPUT"
+            echo "critical=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Python dependency audit (pip-audit)
+        id: pip-audit
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
+          pip-audit -r /tmp/requirements-nohash.txt --output pip-audit-report.json --format json || true
+          pip-audit -r /tmp/requirements-nohash.txt --desc 2>&1 | tee pip-audit-report.txt
+          if grep -q "CRITICAL\|HIGH" pip-audit-report.txt 2>/dev/null; then
+            echo "vulnerabilities=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vulnerabilities=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Node dependency audit (pnpm audit)
+        id: pnpm-audit
+        continue-on-error: true
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm audit --audit-level=high 2>&1 | tee pnpm-audit-report.txt || true
+          if grep -qE "(high|critical)" pnpm-audit-report.txt 2>/dev/null; then
+            echo "vulnerabilities=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vulnerabilities=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment findings on PR
+        if: github.event_name == 'pull_request' && (steps.gitleaks.outcome == 'failure' || steps.pattern-scan.outputs.findings == 'true' || steps.pip-audit.outputs.vulnerabilities == 'true' || steps.pnpm-audit.outputs.vulnerabilities == 'true')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## :shield: Security Scan Findings\n\n';
+
+            if ('${{ steps.gitleaks.outcome }}' === 'failure') {
+              body += '### Secrets Detection (gitleaks)\n';
+              body += ':rotating_light: **Potential secrets detected in the codebase.**\n';
+              body += 'Review `gitleaks-report.json` in the workflow artifacts.\n\n';
+            }
+
+            if ('${{ steps.pattern-scan.outputs.findings }}' === 'true') {
+              body += '### Dangerous Code Patterns\n';
+              try {
+                const report = fs.readFileSync('pattern-scan-report.txt', 'utf8');
+                body += '```\n' + report + '```\n\n';
+              } catch (e) {
+                body += 'Pattern scan found issues. Check workflow logs.\n\n';
+              }
+            }
+
+            if ('${{ steps.pip-audit.outputs.vulnerabilities }}' === 'true') {
+              body += '### Python Dependencies (pip-audit)\n';
+              body += ':warning: Vulnerabilities found in Python dependencies.\n';
+              try {
+                const report = fs.readFileSync('pip-audit-report.txt', 'utf8');
+                const lines = report.split('\n').slice(0, 20).join('\n');
+                body += '```\n' + lines + '\n```\n\n';
+              } catch (e) {
+                body += 'Check workflow logs for details.\n\n';
+              }
+            }
+
+            if ('${{ steps.pnpm-audit.outputs.vulnerabilities }}' === 'true') {
+              body += '### Node Dependencies (pnpm audit)\n';
+              body += ':warning: High/critical vulnerabilities found in Node dependencies.\n';
+              try {
+                const report = fs.readFileSync('pnpm-audit-report.txt', 'utf8');
+                const lines = report.split('\n').slice(0, 20).join('\n');
+                body += '```\n' + lines + '\n```\n\n';
+              } catch (e) {
+                body += 'Check workflow logs for details.\n\n';
+              }
+            }
+
+            body += '---\n*Generated by agent-security-scan workflow*';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Create issue on scheduled run
+        if: github.event_name == 'schedule' && (steps.gitleaks.outcome == 'failure' || steps.pattern-scan.outputs.findings == 'true' || steps.pip-audit.outputs.vulnerabilities == 'true' || steps.pnpm-audit.outputs.vulnerabilities == 'true')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## Weekly Security Scan Report\n\n';
+            body += `**Run date:** ${new Date().toISOString()}\n\n`;
+
+            if ('${{ steps.gitleaks.outcome }}' === 'failure') {
+              body += '### :rotating_light: Secrets Detection\nPotential secrets found. Immediate review required.\n\n';
+            }
+            if ('${{ steps.pattern-scan.outputs.findings }}' === 'true') {
+              body += '### Dangerous Code Patterns\nDangerous function usage detected in codebase.\n\n';
+            }
+            if ('${{ steps.pip-audit.outputs.vulnerabilities }}' === 'true') {
+              body += '### Python Dependency Vulnerabilities\nKnown CVEs found in Python packages.\n\n';
+            }
+            if ('${{ steps.pnpm-audit.outputs.vulnerabilities }}' === 'true') {
+              body += '### Node Dependency Vulnerabilities\nHigh/critical issues in npm packages.\n\n';
+            }
+
+            body += '---\n*Auto-created by weekly security scan*';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Security] Weekly scan findings - ${new Date().toISOString().split('T')[0]}`,
+              body: body,
+              labels: ['security', 'agent-created']
+            });
+
+      - name: Fail on critical findings
+        if: steps.gitleaks.outcome == 'failure' || steps.pattern-scan.outputs.critical > 0
+        run: |
+          echo "Critical security findings detected. Failing workflow."
+          exit 1

@@ -1,0 +1,87 @@
+name: "Agent: Container Vulnerability Scan"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/backend/Dockerfile'
+      - 'apps/backend/requirements.txt'
+  schedule:
+    - cron: '0 4 * * 0'  # Weekly Sunday 4AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+concurrency:
+  group: container-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-scan:
+    name: Trivy Container Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -t syrabit-backend:scan apps/backend/
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'syrabit-backend:scan'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          output: 'trivy-results.txt'
+
+      - name: Run Trivy (SARIF output)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'syrabit-backend:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Create issue on vulnerability findings
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## :whale: Container Vulnerability Scan\n\n';
+            body += `**Image:** syrabit-backend:scan\n`;
+            body += `**Date:** ${new Date().toISOString()}\n`;
+            body += `**Severity filter:** CRITICAL, HIGH\n\n`;
+
+            try {
+              const report = fs.readFileSync('trivy-results.txt', 'utf8');
+              const lines = report.split('\n').slice(0, 50).join('\n');
+              body += '### Findings\n```\n' + lines + '\n```\n\n';
+            } catch (e) {
+              body += 'Vulnerabilities detected. See workflow run for full report.\n\n';
+            }
+
+            body += '### Remediation\n';
+            body += '- Update base image to latest patch version\n';
+            body += '- Update affected packages in requirements.txt\n';
+            body += '- Re-run this scan after fixes\n\n';
+            body += '---\n*Auto-created by container-scan workflow*';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Container] Vulnerabilities found in backend image - ${new Date().toISOString().split('T')[0]}`,
+              body: body,
+              labels: ['security', 'container', 'agent-created']
+            });

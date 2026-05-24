@@ -1,0 +1,126 @@
+name: "Agent: License Audit"
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'  # Weekly Monday 5AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: license-audit
+  cancel-in-progress: true
+
+jobs:
+  license-audit:
+    name: License Compatibility Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Python dependencies
+        run: |
+          sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt
+          pip install pip-licenses
+
+      - name: Install Node dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Audit Python licenses
+        id: python-licenses
+        continue-on-error: true
+        run: |
+          pip-licenses --format=csv --with-urls --output-file=python-licenses.csv
+          pip-licenses --format=table | tee python-licenses.txt
+
+          # Flag incompatible licenses (GPL, AGPL, SSPL, EUPL)
+          INCOMPATIBLE=$(pip-licenses --format=csv | grep -iE '(GPL|AGPL|SSPL|EUPL)' | grep -viE '(LGPL)' || true)
+
+          if [ -n "$INCOMPATIBLE" ]; then
+            echo "INCOMPATIBLE PYTHON LICENSES FOUND:"
+            echo "$INCOMPATIBLE" | tee python-incompatible.txt
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No incompatible Python licenses found."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Audit Node licenses
+        id: node-licenses
+        continue-on-error: true
+        run: |
+          pnpm licenses list 2>&1 | tee node-licenses.txt || true
+
+          # Flag incompatible licenses (GPL, AGPL, SSPL, EUPL but not LGPL)
+          INCOMPATIBLE=$(grep -iE '(GPL|AGPL|SSPL|EUPL)' node-licenses.txt | grep -viE '(LGPL)' || true)
+
+          if [ -n "$INCOMPATIBLE" ]; then
+            echo "INCOMPATIBLE NODE LICENSES FOUND:"
+            echo "$INCOMPATIBLE" | tee node-incompatible.txt
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No incompatible Node licenses found."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create issue for incompatible licenses
+        if: steps.python-licenses.outputs.found == 'true' || steps.node-licenses.outputs.found == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## :page_facing_up: License Audit - Incompatible Licenses Found\n\n';
+            body += `**Date:** ${new Date().toISOString()}\n\n`;
+            body += 'The following dependencies use licenses that may be incompatible ';
+            body += 'with the project (GPL, AGPL, SSPL, EUPL):\n\n';
+
+            if ('${{ steps.python-licenses.outputs.found }}' === 'true') {
+              body += '### Python Dependencies\n';
+              try {
+                const report = fs.readFileSync('python-incompatible.txt', 'utf8');
+                body += '```\n' + report + '\n```\n\n';
+              } catch (e) {
+                body += 'Incompatible licenses detected. Check workflow logs.\n\n';
+              }
+            }
+
+            if ('${{ steps.node-licenses.outputs.found }}' === 'true') {
+              body += '### Node Dependencies\n';
+              try {
+                const report = fs.readFileSync('node-incompatible.txt', 'utf8');
+                body += '```\n' + report + '\n```\n\n';
+              } catch (e) {
+                body += 'Incompatible licenses detected. Check workflow logs.\n\n';
+              }
+            }
+
+            body += '### Recommended Actions\n';
+            body += '- Review if the dependency is actually used at runtime\n';
+            body += '- Check if an alternative with a permissive license exists\n';
+            body += '- Consult legal if the dependency is required\n\n';
+            body += '---\n*Auto-created by weekly license audit*';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Compliance] Incompatible licenses detected - ${new Date().toISOString().split('T')[0]}`,
+              body: body,
+              labels: ['compliance', 'agent-created']
+            });

@@ -1,0 +1,61 @@
+# Security Scan Patterns for Syrabit AI
+# Used by agent-security-scan.yml
+
+patterns:
+  secrets:
+    - name: "AWS Access Key"
+      pattern: "AKIA[A-Z0-9]{16}"
+      severity: critical
+    - name: "Generic API Key"
+      pattern: "(?i)(api[_-]?key|apikey)\\s*[=:]\\s*['\"][a-zA-Z0-9]{20,}"
+      severity: high
+    - name: "JWT Secret Hardcoded"
+      pattern: "(?i)jwt[_-]?secret\\s*=\\s*['\"][^'\"]{8,}"
+      severity: critical
+    - name: "Private Key"
+      pattern: "-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----"
+      severity: critical
+    - name: "MongoDB Connection String"
+      pattern: "mongodb(\\+srv)?://[^\\s'\"]+:[^\\s'\"]+@"
+      severity: critical
+
+  dangerous_functions:
+    - name: "Python eval/exec"
+      pattern: "\\b(eval|exec)\\s*\\("
+      language: python
+      severity: high
+    - name: "JavaScript innerHTML"
+      pattern: "\\.innerHTML\\s*="
+      language: typescript
+      severity: medium
+    - name: "dangerouslySetInnerHTML"
+      pattern: "dangerouslySetInnerHTML"
+      language: typescript
+      severity: medium
+
+  injection:
+    - name: "NoSQL Injection (string interpolation in query)"
+      pattern: "\\.(find|findOne|aggregate|updateOne|deleteOne)\\(\\s*f['\"]"
+      language: python
+      severity: high
+    - name: "SQL-like string concatenation"
+      pattern: "(?i)(select|insert|update|delete).*\\+.*\\b(request|params|query|body)\\b"
+      severity: high
+    - name: "Unsanitized f-string in DB query"
+      pattern: "\\$\\{.*\\}.*\\.(find|update|delete|insert)"
+      language: typescript
+      severity: high
+
+  ssrf:
+    - name: "User-controlled URL fetch"
+      pattern: "(?i)(requests?\\.get|fetch|axios|httpx)\\(.*\\b(request|params|query|body|url)\\b"
+      severity: medium
+    - name: "URL from user input without validation"
+      pattern: "(?i)url\\s*=\\s*(request|params|query)\\."
+      severity: medium
+
+  path_traversal:
+    - name: "Path traversal in file operations"
+      pattern: "\\.\\./"
+      severity: low
+      context: "Only flag when combined with open/read/write file operations"
