@@ -39,18 +39,22 @@ jobs:
       - name: Install (regenerate lockfile)
         run: pnpm install --no-frozen-lockfile
 
+      - name: Type check edge worker
+        working-directory: apps/edge
+        run: npx tsc --noEmit
+
       - name: Type check frontend
-        run: pnpm --filter @workspace/syrabit exec tsc --noEmit
+        working-directory: apps/frontend
+        run: npx tsc --noEmit
 
       - name: Build frontend (client only)
-        run: pnpm --filter @workspace/syrabit run build:client
+        working-directory: apps/frontend
+        run: npx vite build
         env:
+          NODE_ENV: production
           VITE_BACKEND_URL: https://api.syrabit.ai
           VITE_SUPABASE_URL: https://placeholder.supabase.co
           VITE_SUPABASE_ANON_KEY: placeholder
-
-      - name: Type check edge worker
-        run: pnpm --filter syrabit-edge exec tsc --noEmit
 
       - name: Commit refreshed lockfile if changed
         run: |
