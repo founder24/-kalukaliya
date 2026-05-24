@@ -34,7 +34,9 @@ class AzureSearchService:
                 credential=AzureKeyCredential(settings.AZURE_SEARCH_QUERY_KEY),
             )
         else:
-            logger.warning("Azure Search not configured - RAG search will return empty results")
+            logger.warning(
+                "Azure Search not configured - RAG search will return empty results"
+            )
 
     async def _async_search(
         self,
@@ -88,7 +90,9 @@ class AzureSearchService:
             List of context chunks with scores and metadata
         """
         if not self.client:
-            logger.warning("Azure Search client not initialized - returning empty context")
+            logger.warning(
+                "Azure Search client not initialized - returning empty context"
+            )
             return []
 
         try:

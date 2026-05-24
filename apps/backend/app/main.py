@@ -211,9 +211,7 @@ def create_app() -> FastAPI:
     app.include_router(
         admin_dashboard.router, prefix="/api/v1/admin", tags=["Admin Dashboard"]
     )
-    app.include_router(
-        admin_users.router, prefix="/api/v1/admin", tags=["Admin Users"]
-    )
+    app.include_router(admin_users.router, prefix="/api/v1/admin", tags=["Admin Users"])
     app.include_router(
         admin_conversations.router,
         prefix="/api/v1/admin",

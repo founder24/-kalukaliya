@@ -1,4 +1,5 @@
 """PostHog utility - safe accessor for the PostHog client from app state."""
+
 from fastapi import Request
 from typing import Optional
 
@@ -11,6 +12,6 @@ def get_posthog(request: Optional[Request] = None):
     if not request:
         return None
     try:
-        return getattr(request.app.state, 'posthog', None)
+        return getattr(request.app.state, "posthog", None)
     except Exception:
         return None

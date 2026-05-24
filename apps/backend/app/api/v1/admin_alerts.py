@@ -45,12 +45,16 @@ async def alert_cooldowns(request: Request):
 
         cooldowns = []
         for c in cooldowns_raw:
-            cooldowns.append({
-                "id": str(c["_id"]),
-                "alert_type": c.get("alert_type"),
-                "expires_at": c.get("expires_at", "").isoformat() if c.get("expires_at") else None,
-                "active": c.get("active", True),
-            })
+            cooldowns.append(
+                {
+                    "id": str(c["_id"]),
+                    "alert_type": c.get("alert_type"),
+                    "expires_at": c.get("expires_at", "").isoformat()
+                    if c.get("expires_at")
+                    else None,
+                    "active": c.get("active", True),
+                }
+            )
 
         return {"cooldowns": cooldowns}
     except Exception as e:

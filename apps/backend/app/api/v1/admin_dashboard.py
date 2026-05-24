@@ -3,10 +3,9 @@ Admin Dashboard Endpoints
 Aggregate stats, health checks, and Cloudflare overview.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 import logging
 
 from app.api.v1.admin import _validate_admin_session
@@ -39,18 +38,24 @@ async def admin_dashboard(request: Request):
             {"created_at": {"$gte": today_start}}
         )
 
-        total_messages = await db.chats.aggregate([
-            {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
-            {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
-        ]).to_list(1)
+        total_messages = await db.chats.aggregate(
+            [
+                {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+                {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
+            ]
+        ).to_list(1)
         total_messages = total_messages[0]["total"] if total_messages else 0
 
-        messages_today_result = await db.chats.aggregate([
-            {"$match": {"updated_at": {"$gte": today_start}}},
-            {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
-            {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
-        ]).to_list(1)
-        messages_today = messages_today_result[0]["total"] if messages_today_result else 0
+        messages_today_result = await db.chats.aggregate(
+            [
+                {"$match": {"updated_at": {"$gte": today_start}}},
+                {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+                {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
+            ]
+        ).to_list(1)
+        messages_today = (
+            messages_today_result[0]["total"] if messages_today_result else 0
+        )
 
         pro_users = await db.users.count_documents({"subscription_tier": "pro"})
         free_users = await db.users.count_documents({"subscription_tier": "free"})

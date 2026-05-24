@@ -28,14 +28,18 @@ async def analytics_overview(request: Request):
         total_chats = await db.chats.count_documents({})
 
         # Total messages across all chats
-        msg_agg = await db.chats.aggregate([
-            {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
-            {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
-        ]).to_list(1)
+        msg_agg = await db.chats.aggregate(
+            [
+                {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+                {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
+            ]
+        ).to_list(1)
         total_messages = msg_agg[0]["total"] if msg_agg else 0
 
         # Average messages per chat
-        avg_messages_per_chat = round(total_messages / total_chats, 2) if total_chats > 0 else 0
+        avg_messages_per_chat = (
+            round(total_messages / total_chats, 2) if total_chats > 0 else 0
+        )
 
         # Feedback stats
         total_feedback = await db.chat_feedback.count_documents({})
@@ -46,7 +50,9 @@ async def analytics_overview(request: Request):
             "total": total_feedback,
             "positive": positive_feedback,
             "negative": negative_feedback,
-            "positive_rate": round(positive_feedback / total_feedback, 4) if total_feedback > 0 else 0,
+            "positive_rate": round(positive_feedback / total_feedback, 4)
+            if total_feedback > 0
+            else 0,
         }
 
         return {
@@ -63,5 +69,10 @@ async def analytics_overview(request: Request):
             "total_chats": 0,
             "total_messages": 0,
             "avg_messages_per_chat": 0,
-            "feedback_stats": {"total": 0, "positive": 0, "negative": 0, "positive_rate": 0},
+            "feedback_stats": {
+                "total": 0,
+                "positive": 0,
+                "negative": 0,
+                "positive_rate": 0,
+            },
         }

@@ -88,7 +88,7 @@ async def check_rate_limit(
     )
 
     # Use IP-based tracking for anonymous users to prevent quota collision
-    month_key = time.strftime('%Y-%m', time.gmtime())
+    month_key = time.strftime("%Y-%m", time.gmtime())
     if user_id == "anonymous" and client_ip:
         key = f"rate_anon:{client_ip}:{month_key}"
     else:
