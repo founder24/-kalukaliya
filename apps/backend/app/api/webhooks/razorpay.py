@@ -9,7 +9,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/webhooks", tags=["Payments"])
+router = APIRouter(tags=["Payments"])
 
 
 _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
@@ -66,8 +66,8 @@ async def handle_razorpay_webhook(request: Request):
             exists = await redis.get(f"webhook_processed:{event_id}")
             if exists:
                 return {"status": "duplicate", "event_id": event_id}
-        except Exception:
-            pass  # Redis unavailable - proceed without idempotency check
+        except Exception as e:
+            logger.error(f"Redis unavailable for webhook idempotency check: {e}")
 
     # 2. Handle Event Types
     if event.get("event") == "subscription.charged":
@@ -120,7 +120,7 @@ async def handle_razorpay_webhook(request: Request):
             from app.db.redis import get_redis
             redis = get_redis()
             await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
-        except Exception:
-            pass  # Redis unavailable - skip idempotency storage
+        except Exception as e:
+            logger.error(f"Redis unavailable for webhook idempotency storage: {e}")
 
     return {"status": "ok"}

@@ -137,7 +137,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 raise HTTPException(status_code=401, detail="Token has been revoked")
         except HTTPException:
             raise
-        except Exception:
+        except Exception as e:
+            logger.error(f"Redis unavailable for token blacklist check: {e}")
             pass  # Redis unavailable - skip blacklist check gracefully
 
         user = await User.get(user_id)
@@ -323,7 +324,8 @@ async def reset_password(request: ResetPasswordRequest):
             raise HTTPException(status_code=400, detail="Reset token has already been used")
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        logger.error(f"Redis unavailable for reset token single-use check: {e}")
         pass  # Redis unavailable - allow reset (defense in depth, token still has 1h expiry)
 
     user = await User.get(user_id)
@@ -347,8 +349,8 @@ async def reset_password(request: ResetPasswordRequest):
         from app.db.redis import get_redis
         redis = get_redis()
         await redis.set(f"used_reset:{token_hash}", "1", ex=3600)  # 1 hour TTL
-    except Exception:
-        pass  # Non-critical
+    except Exception as e:
+        logger.error(f"Redis unavailable for marking reset token as used: {e}")
 
     logger.info(f"Password reset successful for user {user.email}")
     return MessageResponse(message="Password reset successful. You can now log in with your new password.")
@@ -379,8 +381,8 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                     raise HTTPException(status_code=401, detail="Token has been revoked")
             except HTTPException:
                 raise
-            except Exception:
-                pass  # Redis unavailable - skip revocation check gracefully
+            except Exception as e:
+                logger.error(f"Redis unavailable for token revocation check: {e}")
 
         user = await User.get(user_id)
         if not user:
@@ -396,8 +398,8 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                 from app.db.redis import get_redis
                 redis = get_redis()
                 await redis.set(f"revoked_refresh:{jti}", "1", ex=settings.REFRESH_TOKEN_EXPIRY_DAYS * 86400)
-            except Exception:
-                pass  # Redis unavailable - skip revocation storage gracefully
+            except Exception as e:
+                logger.error(f"Redis unavailable for refresh token revocation storage: {e}")
 
         return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token)
     except HTTPException:
@@ -504,7 +506,7 @@ async def logout(
                 pass  # Invalid refresh token - ignore
     except HTTPException:
         raise
-    except Exception:
-        pass  # Redis unavailable - graceful degradation
+    except Exception as e:
+        logger.error(f"Redis unavailable for token blacklisting during logout: {e}")
 
     return MessageResponse(message="Logged out successfully")

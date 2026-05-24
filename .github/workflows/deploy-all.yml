@@ -242,15 +242,17 @@ jobs:
       - name: Rollback to previous revision
         run: |
           echo "Smoke tests failed - initiating rollback..."
-          # Get the previous revision name
-          REVISIONS=$(az containerapp revision list \
+          # Get revisions sorted by creation time (newest first)
+          CURRENT=$(az containerapp revision list \
             --name syrabit-backend \
             --resource-group syrabit-prod \
-            --query "[].name" -o tsv | tail -2)
-          PREVIOUS=$(echo "$REVISIONS" | head -1)
-          CURRENT=$(echo "$REVISIONS" | tail -1)
-
-          if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$CURRENT" ]; then
+            --query "sort_by([?properties.active], &properties.createdTime) | [-1].name" -o tsv)
+          PREVIOUS=$(az containerapp revision list \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --query "sort_by([?properties.active], &properties.createdTime) | [-2].name" -o tsv)
+          
+          if [ -n "$PREVIOUS" ] && [ -n "$CURRENT" ] && [ "$PREVIOUS" != "$CURRENT" ]; then
             echo "Rolling back: deactivating $CURRENT, activating $PREVIOUS"
             az containerapp revision deactivate \
               --name syrabit-backend \

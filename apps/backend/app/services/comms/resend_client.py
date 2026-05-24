@@ -29,7 +29,7 @@ async def send_welcome_email(email: str, name: str = None) -> bool:
             """,
         }
         
-        email = await asyncio.get_event_loop().run_in_executor(None, resend.Emails.send, params)
+        await asyncio.to_thread(resend.Emails.send, params)
         logger.info(f"Welcome email sent to {email}")
         return True
         
@@ -69,7 +69,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
             """,
         }
         
-        await asyncio.get_event_loop().run_in_executor(None, resend.Emails.send, params)
+        await asyncio.to_thread(resend.Emails.send, params)
         logger.info(f"Receipt email sent to {email}")
         return True
         
@@ -97,7 +97,7 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
             """,
         }
         
-        await asyncio.get_event_loop().run_in_executor(None, resend.Emails.send, params)
+        await asyncio.to_thread(resend.Emails.send, params)
         logger.info(f"Password reset email sent to {email}")
         return True
         

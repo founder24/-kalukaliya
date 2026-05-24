@@ -9,6 +9,20 @@ logger = logging.getLogger(__name__)
 
 
 _http_client: httpx.AsyncClient | None = None
+_azure_credential = None
+_token_provider = None
+
+
+def _get_token_provider():
+    global _azure_credential, _token_provider
+    if _token_provider is None:
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+        _azure_credential = DefaultAzureCredential()
+        _token_provider = get_bearer_token_provider(
+            _azure_credential,
+            "https://cognitiveservices.azure.com/.default"
+        )
+    return _token_provider
 
 
 def get_http_client() -> httpx.AsyncClient:
@@ -50,14 +64,8 @@ async def generate_embedding(text: str) -> list[float]:
         pass  # Cache miss or Redis unavailable - proceed with API call
 
     try:
-        # Use Azure OpenAI embedding endpoint
-        # Note: This requires Azure OpenAI service configured
-        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-        
-        token_provider = get_bearer_token_provider(
-            DefaultAzureCredential(),
-            "https://cognitiveservices.azure.com/.default"
-        )
+        # Use Azure OpenAI embedding endpoint with cached credential
+        token_provider = _get_token_provider()
         
         client = get_http_client()
         response = await client.post(

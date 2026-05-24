@@ -462,7 +462,7 @@ async def chat_stream(
             _save_chat_async(
                 user_id=user_id,
                 session_id=request.session_id,
-                user_message=request.message,
+                user_message=sanitized_message,
                 assistant_response=full_response,
                 target_model=actual_model,
                 latency_ms=latency_ms,
