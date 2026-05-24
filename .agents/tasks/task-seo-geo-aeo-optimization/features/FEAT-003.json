@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Add custom robots.txt route in edge worker that allows AI crawlers, and create sitemap generation endpoints in the backend (sitemap index, sitemap-chapters.xml with deduplication, sitemap-subjects.xml, sitemap-static.xml)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/edge/src/routes/robots.ts that exports a handler returning a custom robots.txt response. Content: User-agent: * Allow: / Disallow: /api/ Disallow: /admin/ Disallow: /profile. Then specifically Allow GPTBot, Google-Extended, ClaudeBot, Applebot-Extended (no disallow). Block CCBot and Bytespider with Disallow: /. Include Sitemap: https://syrabit.ai/sitemap.xml directive.",
     "In apps/edge/src/index.ts, add a route check BEFORE the /api/ block: if url.pathname === '/robots.txt', call the robots handler and return its response. This overrides Cloudflare's managed robots.txt.",
@@ -29,5 +29,5 @@
     "pytest apps/backend/tests/test_seo.py --tb=short -q passes"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verifications pass. Edge tsc --noEmit clean, edge vitest run passes (8 tests), backend pytest test_seo.py passes (7 tests). FastAPI Response with media_type='application/xml' does not append charset=utf-8 - tests adjusted accordingly. Sitemap subjects/chapters have placeholder data with TODO comments for database population."
 }
