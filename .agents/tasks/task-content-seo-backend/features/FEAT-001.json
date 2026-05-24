@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Layer 1 & 2: Content Hierarchy Models + CRUD Endpoints + Topic Management. Create Beanie Document models for boards, classes, streams, subjects, chapters (with topics embedded). Implement all CRUD endpoints for the hierarchy plus topic management and content editing endpoints. Register new models in Beanie init and update admin_content.py router.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Create apps/backend/app/models/content.py with Beanie Document models: Board (name, slug, status, created_at, updated_at), Class (name, board_id, status, created_at, updated_at), Stream (name, class_id, status, created_at, updated_at), Subject (name, stream_id, status, created_at, updated_at), Chapter (title, slug, subject_id, chapter_number, status, content_en, content_as, meta_description, keywords, word_count, published_topics as list of Topic embedded models). Topic embedded model: title, definition, topic_slug, definition_status. Use Settings.name for each collection. Follow pattern from models/user.py.",
+    "Step 2: Update apps/backend/app/db/mongo.py to import the new models (Board, Class, Stream, Subject, Chapter) and add them to the init_beanie document_models list. Also add indexes: boards(slug unique), chapters(subject_id, status), subjects(stream_id), streams(class_id), classes(board_id).",
+    "Step 3: Replace apps/backend/app/api/v1/admin_content.py entirely with full Layer 1 + Layer 2 endpoints. Keep existing imports pattern (_validate_admin_session, _csrf_check from admin.py). Implement: POST/GET/PATCH boards, POST/GET classes (filter board_id), POST/GET streams (filter class_id), POST/GET subjects (filter stream_id), POST/GET/GET-by-id/PATCH/DELETE chapters (filter subject_id). Also implement: POST/GET chapters/{id}/topics, PATCH/DELETE topics/{id}, PUT chapters/{id}/content/en, PUT chapters/{id}/content/as, GET chapters/{id}/content/{lang}, GET subjects/{id}/topic-index. Use Beanie Document.find(), .find_one(), .save(), .delete() methods. Use PydanticObjectId for ID params. Return proper 404s on not found.",
+    "Step 4: Ensure main.py already includes admin_content router (it does - prefix /api/v1/admin). Verify the router tags remain consistent."
+  ],
+  "acceptance_criteria": [
+    "Board, Class, Stream, Subject, Chapter Beanie models exist in app/models/content.py with proper Settings.name",
+    "All 5 new models are registered in init_beanie in db/mongo.py",
+    "admin_content.py has endpoints for full hierarchy CRUD (14 endpoints) plus topic management and content editing (9 more endpoints, 23 total for layers 1+2)",
+    "All endpoints use _validate_admin_session for auth",
+    "Mutating endpoints use _csrf_check",
+    "Python imports resolve correctly - app can be imported without errors"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.models.content import Board, Class, Stream, Subject, Chapter; print(\"Models OK\")'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.admin_content import router; print(f\"Routes: {len(router.routes)}\"); assert len(router.routes) >= 20'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.main import app; print(\"App OK\")'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

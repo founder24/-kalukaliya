@@ -6,6 +6,7 @@ from app.config import settings
 from app.models.user import User
 from app.models.chat import Chat
 from app.models.feedback import ChatFeedback
+from app.models.content import Board, Class, Stream, Subject, Chapter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ async def init_mongo() -> None:
         # Initialize Beanie with document models
         await init_beanie(
             database=_client[settings.MONGODB_DB_NAME],
-            document_models=[User, Chat, ChatFeedback],
+            document_models=[User, Chat, ChatFeedback, Board, Class, Stream, Subject, Chapter],
         )
 
         # Create indexes
@@ -76,6 +77,13 @@ async def create_indexes() -> None:
     await db.dead_letters.create_index(
         [("status", ASCENDING), ("timestamp", DESCENDING)]
     )
+
+    # Content hierarchy indexes
+    await db.boards.create_index([("slug", ASCENDING)], unique=True)
+    await db.classes.create_index([("board_id", ASCENDING)])
+    await db.streams.create_index([("class_id", ASCENDING)])
+    await db.subjects.create_index([("stream_id", ASCENDING)])
+    await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
 
     logger.info("MongoDB indexes created/verified")
 
