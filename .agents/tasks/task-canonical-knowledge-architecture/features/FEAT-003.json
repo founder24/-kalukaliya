@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Create public content API endpoints (rendering, JSON access, subject listing) and admin content API endpoints (CRUD, publish, bulk-publish) with sitemap generation and ISR support",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "Create apps/backend/app/api/v1/content.py with public endpoints: GET /api/v1/content/render/{board}/{class_level}/{subject}/{chapter} (returns rendered HTML notes page), GET /api/v1/content/render/{board}/{class_level}/{subject}/{chapter}/{page_type} (mcqs/summary/definitions/important-questions), GET /api/v1/content/{slug} (returns KnowledgeObject JSON for frontend hydration), GET /api/v1/content/subject/{board}/{class_level}/{subject} (list chapters for a subject). Use HTMLResponse for render endpoints. Include cache-control headers (public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600).",
     "Create apps/backend/app/api/v1/admin_knowledge.py with admin endpoints: POST /api/v1/admin/content/knowledge (create/update knowledge object - accepts full KnowledgeObject data), POST /api/v1/admin/content/knowledge/{slug}/publish (triggers full pipeline for a slug), POST /api/v1/admin/content/knowledge/bulk-publish (triggers pipeline for all or filtered knowledge objects as background task), GET /api/v1/admin/content/knowledge (list all with pagination: page, per_page, board filter, subject filter), GET /api/v1/admin/content/knowledge/{slug} (get single with all generated content). All admin endpoints use _validate_admin_session and _csrf_check from app.api.v1.admin.",
@@ -24,5 +24,5 @@
     "Run: cd apps/backend && pytest tests/ -x --timeout=30"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All three new endpoint files created and routers registered in main.py. Route verification confirms /api/v1/content/render/{board}/{class_level}/{subject}/{chapter}, /api/v1/seo/sitemap-index.xml, and /api/v1/admin/content/knowledge are all present. 52 tests pass (excluding pre-existing failures in test_auth.py, test_chat.py, test_webhook.py documented in FEAT-001). The /{slug} catch-all route is registered last on the content router to avoid path conflicts with /render/... and /subject/... routes."
 }
