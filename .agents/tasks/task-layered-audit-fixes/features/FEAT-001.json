@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Layer 1 - Quick wins: Delete debug workflow, remove continue-on-error from CI, fix await bug in rate limiting, fix deploy job dependencies",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Delete the file .github/workflows/_tmp-read-cw-diag.yml entirely - it reads production Lambda env vars and is a security risk",
     "In .github/workflows/ci-edge.yml: (a) Remove 'continue-on-error: true' from the Lint step in lint-and-typecheck job, (b) Remove 'continue-on-error: true' from the 'Run Tests' step in test job, (c) Change the deploy job 'needs' from [lint-and-typecheck] to [test] so deploy gates on tests passing",
@@ -23,5 +23,5 @@
     "Run: grep -c 'continue-on-error' .github/workflows/ci-edge.yml .github/workflows/ci-frontend.yml | grep -v ':0' && echo 'FAIL: continue-on-error still present' || echo 'OK: no continue-on-error'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes verified: Python AST parse OK, no continue-on-error remains in CI files, debug workflow deleted, deploy job now gates on test job."
 }
