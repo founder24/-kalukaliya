@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Layer 3: AI Generation + Publish to Cloudflare & Azure Search. Implement the core AI content generation endpoints (generate-notes EN+AS, generate AS only) and publish pipeline (push to Azure Search with chunking, Cloudflare cache invalidation, sitemap update). Also includes SEO page generation endpoint.",
+  "status": "completed",
+  "steps": [
+    "Step 1: Create apps/backend/app/services/content_generation.py - ContentGenerationService class with methods: generate_notes(chapter_id) that reads chapter topics, builds structured prompt, calls vertex_client.generate() for English content (1500+ words), calls sarvam_client.generate() for Assamese translation, extracts meta_description/keywords/word_count, updates chapter document with content_en, content_as, status='generated'. Also generate_assamese_only(chapter_id) that takes existing content_en and translates via Sarvam. Use the existing vertex_client and sarvam_client singletons.",
+    "Step 2: Create apps/backend/app/services/content_publisher.py - ContentPublisherService class with methods: publish_to_azure_search(chapter) that chunks content into ~512 token segments, uploads to Azure Search using admin key (settings.AZURE_SEARCH_ADMIN_KEY) with SearchClient.upload_documents(), sets fields: id, title, content, content_vector (vectorizable text), tier_access, language, source_url, last_updated. publish_to_cloudflare(chapter) that calls CF worker URL to invalidate/prerender page. publish_chapter(chapter_id) that orchestrates both, updates published_topics, sets status='published'. Also regenerate_sitemap() that rebuilds sitemap XML from published chapters.",
+    "Step 3: Create apps/backend/app/services/seo_generator.py - SEOGeneratorService class with methods: generate_seo_pages(topic) that generates notes page, definition page, MCQ page, important-questions page, examples page content per topic using Vertex AI. extract_topics_from_content(chapter_id) that uses AI to auto-extract topics from chapter content text.",
+    "Step 4: Add new endpoints to admin_content.py: POST /content/chapters/{id}/generate-notes (calls ContentGenerationService.generate_notes), POST /content/chapters/{id}/generate-notes/as (calls generate_assamese_only), POST /content/chapters/{id}/publish (calls publish_chapter), POST /content/chapters/{id}/publish/search-index (calls publish_to_azure_search only), POST /content/chapters/{id}/publish/pages (calls publish_to_cloudflare only).",
+    "Step 5: Update admin_seo.py with new endpoints: POST /seo/extract (calls extract_topics_from_content), POST /seo/generate (calls generate_seo_pages for selected topics), POST /seo/regenerate-sitemap (calls regenerate_sitemap)."
+  ],
+  "acceptance_criteria": [
+    "ContentGenerationService exists with generate_notes() and generate_assamese_only() methods",
+    "ContentPublisherService exists with publish_to_azure_search(), publish_to_cloudflare(), publish_chapter() methods",
+    "SEOGeneratorService exists with generate_seo_pages() and extract_topics_from_content() methods",
+    "admin_content.py has generate-notes, publish endpoints",
+    "admin_seo.py has extract, generate, regenerate-sitemap endpoints",
+    "All services handle missing config gracefully (raise RuntimeError with clear message)",
+    "Python imports resolve correctly"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.content_generation import ContentGenerationService; print(\"ContentGen OK\")'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.content_publisher import ContentPublisherService; print(\"Publisher OK\")'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.seo_generator import SEOGeneratorService; print(\"SEOGen OK\")'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.admin_content import router; from app.api.v1.admin_seo import router as seo_router; print(\"Routers OK\")'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.main import app; print(\"App OK\")'"
+  ],
+  "blocked_reason": null,
+  "findings": "All three services created and verified. 5 new endpoints in admin_content.py (27 routes total) and 3 new endpoints in admin_seo.py (6 routes total). Pre-existing test failures (8 tests in test_auth, test_chat, test_webhook) confirmed unrelated - same failures on base branch. JWT_SECRET env var required for imports to work in sandbox testing."
+}
