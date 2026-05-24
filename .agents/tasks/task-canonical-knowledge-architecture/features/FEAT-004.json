@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Add comprehensive tests for the knowledge model, content pipeline, public content API, admin knowledge API, and sitemap endpoints",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/tests/test_knowledge_model.py: Test KnowledgeObject model creation, field defaults, slug generation, metadata fields. Test ContentBlock, ContentMetadata, GeneratedContent sub-models with various inputs.",
     "Create apps/backend/tests/test_content_api.py: Test public content endpoints - render endpoint returns HTML with correct headers, JSON endpoint returns proper structure, subject listing. Test 404 for non-existent content. Use mocking for MongoDB (mock KnowledgeObject.find_one, etc). Follow the pattern in test_admin_endpoints.py using TestClient + mocks.",
@@ -22,5 +22,5 @@
     "Run: cd apps/backend && pytest tests/ -x --timeout=60"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 45 new tests pass. Required patching Beanie's get_motor_collection (via autouse fixture) since KnowledgeObject is a Beanie Document that cannot be instantiated without init_beanie. Pipeline tests also needed KnowledgeObject.save patched at the class level since Pydantic v2 prevents arbitrary attribute assignment on model instances. Pre-existing failures in test_auth.py, test_chat.py, test_webhook.py remain unchanged (documented in FEAT-001). pytest-timeout is not installed so --timeout flag cannot be used."
 }
