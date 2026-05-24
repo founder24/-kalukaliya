@@ -1,0 +1,7 @@
+{
+  "task_id": "task-observability",
+  "task_description": "Implement Priority 4 Observability items: structured JSON logging, request correlation, chat analytics events, Azure Monitor alerts, health check dashboard, and uptime check script.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

@@ -6,6 +6,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 from posthog import Posthog
 import logging
 import uuid
+import time
 import contextlib
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Factory function to create FastAPI application"""
-    
+    from app.core.logging_config import setup_logging
+    setup_logging()
+
     app = FastAPI(
         title="Syrabit API",
         description="Educational AI Assistant for Assamese Students",
@@ -125,12 +128,21 @@ def create_app() -> FastAPI:
     async def add_request_id(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = request_id
-        
-        # Add request_id to logging context
-        with contextlib.nullcontext():
-            response = await call_next(request)
-            response.headers["X-Request-ID"] = request_id
-            return response
+
+        start_time = time.time()
+        response = await call_next(request)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        logger.info("request_completed", extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "latency_ms": elapsed_ms,
+            "request_id": request_id,
+        })
+
+        response.headers["X-Request-ID"] = request_id
+        return response
 
     # Initialize OpenTelemetry (no-op if packages not installed)
     from app.core.telemetry import init_telemetry

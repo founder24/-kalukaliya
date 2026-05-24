@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement structured JSON logging, request correlation logging, and chat analytics events in the Python backend. Also create the uptime check script.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Create apps/backend/app/core/logging_config.py with a custom JSONFormatter that outputs structured JSON logs with fields: timestamp (ISO 8601), level, logger, message, request_id, user_id, lang, provider, latency_ms. Use Python standard logging module. Include a setup_logging() function that configures the root logger with this formatter.",
+    "Step 2 - Update apps/backend/app/main.py: import and call setup_logging() from logging_config at the top of the create_app() function (before any other initialization). This ensures all log output from the application uses structured JSON format.",
+    "Step 3 - Update apps/backend/app/main.py: In the existing add_request_id middleware, add structured logging of every request completion. After `response = await call_next(request)`, calculate latency (time.time() - start) and log: logger.info('request_completed', extra={'method': request.method, 'path': request.url.path, 'status': response.status_code, 'latency_ms': elapsed_ms, 'request_id': request_id}). Import time at the top if not already imported.",
+    "Step 4 - Update apps/backend/app/api/v1/chat.py: Add structured log events using logger.info() with extra={} dict. Add 'chat_started' at the beginning of the chat() function (after determining user_id, with fields: user_id, lang=detected_lang, model=target_model). Add 'chat_completed' after successful response (user_id, lang, provider based on model name, latency_ms, response_length=len(response_text)). In the streaming endpoint's fallback section, add 'chat_fallback' log (user_id, error=str(e), fallback_provider='vertex'). In the except Exception block of chat(), add 'chat_failed' log (user_id, error=str(e)).",
+    "Step 5 - Create scripts/uptime-check.sh: A bash script that checks multiple endpoints using curl. Define ENDPOINTS array with 'https://api.syrabit.ai/health', 'https://syrabit.ai', 'https://api.syrabit.ai/api/content/boards'. For each endpoint: curl with timeout, check HTTP status code, print result (UP/DOWN). Exit code 1 if any endpoint is down. Make it executable (chmod +x).",
+    "Step 6 - Commit each task separately: 1) 'feat: add structured JSON logging configuration' (logging_config.py + main.py import), 2) 'feat: add request correlation logging middleware' (main.py middleware update), 3) 'feat: add chat analytics structured log events' (chat.py changes), 4) 'feat: add uptime check script' (scripts/uptime-check.sh)"
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/core/logging_config.py exists with JSONFormatter class and setup_logging() function",
+    "apps/backend/app/main.py imports and calls setup_logging() in create_app()",
+    "The add_request_id middleware in main.py logs request_completed with method, path, status, latency_ms, request_id",
+    "apps/backend/app/api/v1/chat.py logs chat_started, chat_completed, chat_fallback, and chat_failed events with appropriate extra fields",
+    "scripts/uptime-check.sh exists, is executable, checks 3 endpoints, and exits 1 if any is down",
+    "All Python files pass py_compile syntax check",
+    "Each logical change is in a separate commit on feat/observability branch"
+  ],
+  "verification": [
+    "python3 -m py_compile apps/backend/app/core/logging_config.py",
+    "python3 -m py_compile apps/backend/app/main.py",
+    "python3 -m py_compile apps/backend/app/api/v1/chat.py",
+    "bash -n scripts/uptime-check.sh",
+    "test -x scripts/uptime-check.sh",
+    "git log --oneline feat/observability --not main | wc -l should show multiple commits"
+  ],
+  "blocked_reason": null,
+  "findings": "All 4 commits completed successfully on feat/observability branch. All Python files pass py_compile. Shell script passes bash -n and is executable. The contextlib import in main.py is no longer used after the middleware refactor but was left in place to avoid unnecessary changes."
+}
