@@ -8,7 +8,7 @@ import hashlib
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.config import settings
@@ -78,7 +78,7 @@ class ChatService:
             chat = await Chat.find_one({"session_id": session_id})
             if not chat or not chat.messages:
                 return ""
-            recent = chat.messages[-(max_turns * 2):]
+            recent = chat.messages[-(max_turns * 2) :]
             history_lines = []
             for msg in recent:
                 role = msg.get("role", "user")

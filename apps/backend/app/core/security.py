@@ -13,9 +13,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Zero-width characters to strip before pattern matching
-_ZERO_WIDTH_CHARS = re.compile(
-    "[\u200b\u200c\u200d\ufeff\u00ad]"
-)
+_ZERO_WIDTH_CHARS = re.compile("[\u200b\u200c\u200d\ufeff\u00ad]")
 
 # Prompt injection patterns (case-insensitive, whitespace-flexible)
 _INJECTION_PATTERNS = [

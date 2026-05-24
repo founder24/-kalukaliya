@@ -13,7 +13,9 @@ async def test_rate_limit_returns_503_when_redis_unavailable():
     mock_request = MagicMock()
     mock_request.client.host = "127.0.0.1"
 
-    with patch("app.db.redis.get_redis", side_effect=ConnectionError("Redis unavailable")):
+    with patch(
+        "app.db.redis.get_redis", side_effect=ConnectionError("Redis unavailable")
+    ):
         with pytest.raises(HTTPException) as exc_info:
             await _check_rate_limit(mock_request, "login", 10)
         assert exc_info.value.status_code == 503

@@ -26,7 +26,9 @@ class User(Document):
 
     # Usage
     monthly_message_count: int = 0
-    last_reset_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_reset_date: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     total_lifetime_messages: int = 0
 
     # Profile
