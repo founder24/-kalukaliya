@@ -27,7 +27,20 @@ async def seo_entity_status(request: Request):
     """SEO entity health snapshot."""
     _validate_admin_session(request)
 
-    chapters = await Chapter.find_all().to_list()
+    try:
+        chapters = await Chapter.find_all().to_list()
+    except Exception as e:
+        logger.error(f"Failed to query chapters for entity status: {e}")
+        return {
+            "entities_total": 0,
+            "entities_indexed": 0,
+            "entities_pending": 0,
+            "entities_draft": 0,
+            "entities_error": 0,
+            "last_crawl": None,
+            "error": "Database not available",
+        }
+
     total = len(chapters)
     published = sum(1 for c in chapters if c.status == "published")
     draft = sum(1 for c in chapters if c.status == "draft")

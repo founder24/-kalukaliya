@@ -12,6 +12,23 @@ from app.services.ai.sarvam_client import sarvam_client
 logger = logging.getLogger(__name__)
 
 
+def _truncate_at_word_boundary(text: str, max_length: int = 160) -> str:
+    """Truncate text at the last word boundary within max_length characters."""
+    if not text:
+        return ""
+    # Strip leading/trailing whitespace first
+    text = text.strip()
+    if len(text) <= max_length:
+        return text
+    # Find the last space within the limit
+    truncated = text[:max_length]
+    last_space = truncated.rfind(" ")
+    if last_space > 0:
+        return truncated[:last_space].rstrip()
+    # No space found (single long word), just truncate at max_length
+    return truncated
+
+
 class ContentGenerationService:
     """Handles AI content generation for chapters (English notes + Assamese translation)."""
 
@@ -81,7 +98,7 @@ class ContentGenerationService:
         )
 
         # Extract metadata
-        meta_description = content_en[:160].strip()
+        meta_description = _truncate_at_word_boundary(content_en, 160)
         keywords = ", ".join(topic_titles)
         word_count = len(content_en.split()) if content_en else 0
 

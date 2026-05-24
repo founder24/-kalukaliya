@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address critical review findings: (1) publish_chapter sets 'published' despite CF failure, (2) sync SearchClient blocks async event loop, (3) meta_description truncation cuts mid-word, (4) FAQ JSON-LD includes topics without definitions.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Fix publish_chapter in content_publisher.py to check CF result before setting status. If CF fails, still set status to published but include a warning in the response and log clearly. Response dict should indicate which services succeeded/failed.",
+    "Step 2: Wrap SearchClient.upload_documents in asyncio.to_thread() to avoid blocking the event loop.",
+    "Step 3: Fix meta_description truncation in content_generation.py to truncate at the last word boundary within 160 chars.",
+    "Step 4: Fix FAQ JSON-LD generation in admin_content.py to skip topics where definition is None or empty."
+  ],
+  "acceptance_criteria": [
+    "publish_chapter response clearly indicates CF success/failure status",
+    "SearchClient.upload_documents is wrapped in asyncio.to_thread()",
+    "meta_description does not cut mid-word",
+    "FAQ JSON-LD skips topics without definitions"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && JWT_SECRET='test-secret-at-least-32-characters-long' APP_ENV=development python -m pytest tests/test_content_generation.py tests/test_seo_pipeline.py -x -v --timeout=30"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

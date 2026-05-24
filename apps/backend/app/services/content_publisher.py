@@ -1,5 +1,6 @@
 """Content publishing service for Azure Search indexing and Cloudflare cache."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -103,7 +104,9 @@ class ContentPublisherService:
         )
 
         try:
-            result = search_client.upload_documents(documents=documents)
+            result = await asyncio.to_thread(
+                search_client.upload_documents, documents=documents
+            )
             succeeded = sum(1 for r in result if r.succeeded)
             failed = sum(1 for r in result if not r.succeeded)
 
@@ -178,6 +181,9 @@ class ContentPublisherService:
         Full publish pipeline: index to Azure Search + Cloudflare prerender.
 
         Sets chapter.status = 'published' on success.
+        If Azure Search succeeds but Cloudflare fails, status is still set to
+        'published' but the response includes a warning and clearly indicates
+        which services succeeded or failed.
         """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
@@ -189,25 +195,50 @@ class ContentPublisherService:
                 "Generate content before publishing."
             )
 
-        # Publish to Azure Search
+        # Publish to Azure Search (raises on failure - correct behavior)
         search_result = await self.publish_to_azure_search(chapter)
 
-        # Publish to Cloudflare
+        # Publish to Cloudflare (returns error dict on failure, does not raise)
         cf_result = await self.publish_to_cloudflare(chapter)
 
-        # Update chapter status
+        # Determine if Cloudflare succeeded or failed
+        cf_failed = cf_result.get("status") == "prerender_failed"
+
+        # Update chapter status - always set to published since Azure succeeded
         chapter.status = "published"
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
 
-        logger.info(f"Published chapter {chapter_id}")
+        # Build response with clear service status indicators
+        warnings = []
+        if cf_failed:
+            cf_error = cf_result.get("error", "unknown error")
+            logger.warning(
+                f"Chapter {chapter_id} published to Azure Search but "
+                f"Cloudflare prerender failed: {cf_error}"
+            )
+            warnings.append(
+                f"Cloudflare prerender failed: {cf_error}. "
+                "Content is indexed but not prerendered at the edge."
+            )
+        else:
+            logger.info(f"Published chapter {chapter_id} successfully")
 
-        return {
+        response = {
             "chapter_id": str(chapter.id),
             "status": "published",
+            "services": {
+                "azure_search": "success",
+                "cloudflare": "failed" if cf_failed else "success",
+            },
             "azure_search": search_result,
             "cloudflare": cf_result,
         }
+
+        if warnings:
+            response["warnings"] = warnings
+
+        return response
 
     async def regenerate_sitemap(self) -> dict:
         """

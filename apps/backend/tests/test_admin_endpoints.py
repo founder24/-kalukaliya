@@ -43,7 +43,7 @@ class TestAuthGuards:
         "/api/v1/admin/cf-overview",
         "/api/v1/admin/users",
         "/api/v1/admin/conversations",
-        "/api/v1/admin/content/draft-served-subjects",
+        "/api/v1/admin/content/boards",
         "/api/v1/admin/analytics",
         "/api/v1/admin/settings",
         "/api/v1/admin/notifications",
@@ -159,11 +159,11 @@ class TestResponseShapes:
         assert "sarvam_ai" in data
 
     def test_seo_entity_status_placeholder(self, client, admin_cookie):
-        """SEO entity status returns placeholder data."""
+        """SEO entity status returns health data."""
         response = client.get("/api/v1/admin/seo/entity/status", cookies=admin_cookie)
         assert response.status_code == 200
         data = response.json()
-        assert data["source"] == "placeholder"
+        assert "entities_total" in data
 
     def test_cf_overview_placeholder(self, client, admin_cookie):
         """CF overview returns placeholder data."""

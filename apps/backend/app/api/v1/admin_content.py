@@ -711,17 +711,25 @@ async def generate_faq_jsonld(request: Request, chapter_id: PydanticObjectId):
             detail="Chapter has no published topics to generate FAQ from",
         )
 
-    # Generate FAQ JSON-LD entries from topics
+    # Generate FAQ JSON-LD entries from topics (skip those without definitions)
     faq_entries = []
     for topic in chapter.published_topics:
+        if not topic.definition:
+            continue
         faq_entries.append({
             "@type": "Question",
             "name": topic.title,
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": topic.definition or "",
+                "text": topic.definition,
             },
         })
+
+    if not faq_entries:
+        raise HTTPException(
+            status_code=400,
+            detail="No topics with definitions found to generate FAQ from",
+        )
 
     # Store on chapter
     chapter.faq_jsonld = faq_entries
