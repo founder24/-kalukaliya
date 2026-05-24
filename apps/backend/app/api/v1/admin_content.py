@@ -580,3 +580,111 @@ async def get_topic_index(request: Request, subject_id: PydanticObjectId):
             })
 
     return {"subject_id": str(subject_id), "topics": all_topics, "total": len(all_topics)}
+
+
+# ==============================================================================
+# Layer 3: AI Generation + Publishing
+# ==============================================================================
+
+
+@router.post("/content/chapters/{chapter_id}/generate-notes")
+async def generate_notes(request: Request, chapter_id: PydanticObjectId):
+    """Generate English notes via Vertex AI and Assamese translation via Sarvam."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.services.content_generation import ContentGenerationService
+
+        service = ContentGenerationService()
+        result = await service.generate_notes(str(chapter_id))
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Generate notes failed for {chapter_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+
+@router.post("/content/chapters/{chapter_id}/generate-notes/as")
+async def generate_notes_assamese(request: Request, chapter_id: PydanticObjectId):
+    """Generate Assamese translation only from existing English content."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.services.content_generation import ContentGenerationService
+
+        service = ContentGenerationService()
+        result = await service.generate_assamese_only(str(chapter_id))
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Generate Assamese failed for {chapter_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
+
+
+@router.post("/content/chapters/{chapter_id}/publish")
+async def publish_chapter(request: Request, chapter_id: PydanticObjectId):
+    """Full publish pipeline: Azure Search indexing + Cloudflare prerender."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.services.content_publisher import ContentPublisherService
+
+        service = ContentPublisherService()
+        result = await service.publish_chapter(str(chapter_id))
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Publish failed for {chapter_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Publishing failed: {e}")
+
+
+@router.post("/content/chapters/{chapter_id}/publish/search-index")
+async def publish_search_index(request: Request, chapter_id: PydanticObjectId):
+    """Publish chapter to Azure Search index only."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.services.content_publisher import ContentPublisherService
+
+        chapter = await Chapter.get(chapter_id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
+        service = ContentPublisherService()
+        result = await service.publish_to_azure_search(chapter)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Search index publish failed for {chapter_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Search indexing failed: {e}")
+
+
+@router.post("/content/chapters/{chapter_id}/publish/pages")
+async def publish_pages(request: Request, chapter_id: PydanticObjectId):
+    """Trigger Cloudflare prerender/cache invalidation only."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.services.content_publisher import ContentPublisherService
+
+        chapter = await Chapter.get(chapter_id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
+        service = ContentPublisherService()
+        result = await service.publish_to_cloudflare(chapter)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Cloudflare publish failed for {chapter_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Page publishing failed: {e}")
