@@ -1,0 +1,96 @@
+name: Agent Issue Triage
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: Triage Issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse and label issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            if (!issue) {
+              core.info('No issue in payload (workflow_dispatch). Skipping.');
+              return;
+            }
+
+            const title = (issue.title || '').toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const text = `${title} ${body}`;
+
+            const labels = [];
+
+            // --- Priority assignment ---
+            let priority = null;
+            let sla = null;
+
+            if (/\b(critical|outage|security vulnerability)\b/.test(text)) {
+              priority = 'P0';
+              sla = '4 hours';
+            } else if (/\b(urgent|blocker)\b/.test(text)) {
+              priority = 'P1';
+              sla = '24 hours';
+            } else if (/\b(bug|broken|error)\b/.test(text)) {
+              priority = 'P2';
+              sla = '3 days';
+            } else if (/\b(feature|enhancement|nice to have)\b/.test(text)) {
+              priority = 'P3';
+              sla = '1 week';
+            }
+
+            if (priority) labels.push(priority);
+
+            // --- Category assignment ---
+            if (/\b(security|vulnerability|cve|exploit)\b/.test(text)) labels.push('security');
+            if (/\b(performance|slow|latency|memory|cpu)\b/.test(text)) labels.push('performance');
+            if (/\b(bug|broken|error|crash|fail)\b/.test(text)) labels.push('bug');
+            if (/\b(feature|enhancement|request|proposal)\b/.test(text)) labels.push('feature');
+            if (/\b(documentation|docs|readme|guide)\b/.test(text)) labels.push('documentation');
+
+            // --- Apply labels ---
+            const uniqueLabels = [...new Set(labels)];
+            if (uniqueLabels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: uniqueLabels
+              });
+            }
+
+            // --- Comment with SLA ---
+            if (priority && sla) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: [
+                  `> **Issue Triage Bot**`,
+                  ``,
+                  `This issue has been triaged with priority **${priority}**.`,
+                  ``,
+                  `| Priority | Expected Response SLA |`,
+                  `|----------|----------------------|`,
+                  `| P0 | 4 hours |`,
+                  `| P1 | 24 hours |`,
+                  `| P2 | 3 days |`,
+                  `| P3 | 1 week |`,
+                  ``,
+                  `Your issue is **${priority}** - expected response within **${sla}**.`
+                ].join('\n')
+              });
+            }

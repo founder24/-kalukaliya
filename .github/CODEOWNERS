@@ -1,0 +1,20 @@
+# Syrabit AI - Code Ownership
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner
+* @founder24
+
+# Backend
+apps/backend/ @founder24
+
+# Edge Worker
+apps/edge/ @founder24
+
+# Frontend
+apps/frontend/ @founder24
+
+# Infrastructure
+infra/ @founder24
+
+# CI/CD
+.github/ @founder24

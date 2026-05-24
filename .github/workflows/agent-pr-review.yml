@@ -1,0 +1,148 @@
+name: Agent PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  label-by-path:
+    name: Label by Path
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          configuration-path: .github/labeler.yml
+
+  pr-review:
+    name: PR Review & Labeling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Label by size, type, component & validate
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info('No pull_request in payload (workflow_dispatch). Skipping.');
+              return;
+            }
+
+            const labels = [];
+
+            // --- Size labeling ---
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100
+            });
+            const linesChanged = files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+
+            let sizeLabel;
+            if (linesChanged < 10) sizeLabel = 'size/XS';
+            else if (linesChanged < 50) sizeLabel = 'size/S';
+            else if (linesChanged < 200) sizeLabel = 'size/M';
+            else if (linesChanged < 500) sizeLabel = 'size/L';
+            else sizeLabel = 'size/XL';
+            labels.push(sizeLabel);
+
+            // Remove old size labels
+            const sizeLabels = ['size/XS', 'size/S', 'size/M', 'size/L', 'size/XL'];
+            const currentLabels = pr.labels.map(l => l.name);
+            for (const sl of sizeLabels) {
+              if (currentLabels.includes(sl) && sl !== sizeLabel) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    name: sl
+                  });
+                } catch (e) { /* label may not exist */ }
+              }
+            }
+
+            // --- Component labeling ---
+            const paths = files.map(f => f.filename);
+            if (paths.some(p => p.startsWith('apps/backend/'))) labels.push('backend');
+            if (paths.some(p => p.startsWith('apps/edge/'))) labels.push('edge');
+            if (paths.some(p => p.startsWith('apps/frontend/'))) labels.push('frontend');
+            if (paths.some(p => p.startsWith('infra/'))) labels.push('infra');
+
+            // --- Type labeling from branch name ---
+            const branch = pr.head.ref;
+            if (branch.startsWith('feat/') || branch.startsWith('feature/')) labels.push('feature');
+            else if (branch.startsWith('fix/') || branch.startsWith('bugfix/')) labels.push('bugfix');
+            else if (branch.startsWith('chore/')) labels.push('chore');
+
+            // --- Add needs-review label ---
+            labels.push('needs-review');
+
+            // --- Check for BREAKING CHANGE ---
+            const { data: commits } = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100
+            });
+            const hasBreaking = commits.some(c =>
+              c.commit.message.includes('BREAKING CHANGE')
+            ) || (pr.body && pr.body.includes('BREAKING CHANGE'));
+
+            if (hasBreaking) labels.push('breaking-change');
+
+            // --- Apply labels ---
+            const uniqueLabels = [...new Set(labels)];
+            if (uniqueLabels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: uniqueLabels
+              });
+            }
+
+            // --- Auto-assign reviewers from CODEOWNERS ---
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                reviewers: ['founder24']
+              });
+            } catch (e) {
+              core.warning(`Could not assign reviewer: ${e.message}`);
+            }
+
+            // --- Validate PR description ---
+            const body = pr.body || '';
+            const hasSummary = body.includes('## Summary');
+            const hasTesting = body.includes('## Testing');
+
+            if (!hasSummary || !hasTesting) {
+              const missing = [];
+              if (!hasSummary) missing.push('## Summary');
+              if (!hasTesting) missing.push('## Testing');
+              core.warning(`PR description is missing required sections: ${missing.join(', ')}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `> **PR Review Bot**: Your PR description is missing the following required sections: ${missing.join(', ')}.\n\nPlease update your PR description to include these sections.`
+              });
+            }

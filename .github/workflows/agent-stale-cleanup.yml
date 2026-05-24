@@ -1,0 +1,45 @@
+name: Agent Stale Cleanup
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: stale-cleanup-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    name: Mark and Close Stale Items
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: 14
+          days-before-close: 7
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: 'P0,P1,pinned,security'
+          exempt-pr-labels: 'P0,P1,pinned'
+          stale-issue-message: >
+            This issue has been automatically marked as stale because it has not
+            had recent activity. It will be closed in 7 days if no further
+            activity occurs. If this issue is still relevant, please comment or
+            remove the stale label.
+          stale-pr-message: >
+            This pull request has been automatically marked as stale because it
+            has not had recent activity. It will be closed in 7 days if no
+            further activity occurs. If this PR is still relevant, please push
+            an update or remove the stale label.
+          close-issue-message: >
+            This issue has been closed due to inactivity. Feel free to reopen if
+            the issue is still relevant.
+          close-pr-message: >
+            This pull request has been closed due to inactivity. Feel free to
+            reopen if the changes are still needed.
