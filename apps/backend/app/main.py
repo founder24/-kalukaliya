@@ -26,6 +26,7 @@ from app.api.v1 import (
     admin_revenue,
     admin_alerts,
     admin_knowledge,
+    admin_translate,
     seo,
     indexnow,
     content,
@@ -250,6 +251,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin_knowledge.router, prefix="/api/v1/admin", tags=["Admin Knowledge"]
+    )
+    app.include_router(
+        admin_translate.router,
+        prefix="/api/v1/admin",
+        tags=["Admin Translation"],
     )
 
     # Legacy health probe redirects for backward compatibility
