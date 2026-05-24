@@ -32,14 +32,20 @@ async def get_draft_served_subjects(request: Request):
 
         result = []
         for s in subjects:
-            result.append({
-                "id": str(s["_id"]),
-                "name": s.get("name"),
-                "status": s.get("status"),
-                "category": s.get("category"),
-                "created_at": s.get("created_at", "").isoformat() if s.get("created_at") else None,
-                "updated_at": s.get("updated_at", "").isoformat() if s.get("updated_at") else None,
-            })
+            result.append(
+                {
+                    "id": str(s["_id"]),
+                    "name": s.get("name"),
+                    "status": s.get("status"),
+                    "category": s.get("category"),
+                    "created_at": s.get("created_at", "").isoformat()
+                    if s.get("created_at")
+                    else None,
+                    "updated_at": s.get("updated_at", "").isoformat()
+                    if s.get("updated_at")
+                    else None,
+                }
+            )
 
         return {"subjects": result, "total": len(result)}
     except Exception as e:
@@ -78,7 +84,11 @@ async def update_subject(request: Request, subject_id: str):
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Subject not found")
 
-        return {"status": "ok", "subject_id": subject_id, "updated_fields": list(update_fields.keys())}
+        return {
+            "status": "ok",
+            "subject_id": subject_id,
+            "updated_fields": list(update_fields.keys()),
+        }
     except HTTPException:
         raise
     except Exception as e:

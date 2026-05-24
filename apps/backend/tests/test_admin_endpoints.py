@@ -101,17 +101,22 @@ class TestResponseShapes:
 
         # Mock count_documents
         mock_db.users.count_documents = AsyncMock(return_value=10)
-        mock_db.chats.aggregate = MagicMock(return_value=AsyncMock(
-            to_list=AsyncMock(return_value=[{"total": 100}])
-        ))
+        mock_db.chats.aggregate = MagicMock(
+            return_value=AsyncMock(to_list=AsyncMock(return_value=[{"total": 100}]))
+        )
 
         response = client.get("/api/v1/admin/dashboard", cookies=admin_cookie)
         assert response.status_code == 200
         data = response.json()
         expected_keys = [
-            "total_users", "active_today", "total_messages",
-            "messages_today", "pro_users", "free_users",
-            "system_health", "signups_today",
+            "total_users",
+            "active_today",
+            "total_messages",
+            "messages_today",
+            "pro_users",
+            "free_users",
+            "system_health",
+            "signups_today",
         ]
         for key in expected_keys:
             assert key in data

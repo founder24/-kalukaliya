@@ -12,7 +12,6 @@ import logging
 from app.api.v1.admin import _validate_admin_session, _csrf_check
 from app.config import settings
 from app.db.mongo import get_mongo_client
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +47,23 @@ async def list_users(
 
         users = []
         for u in users_raw:
-            users.append({
-                "id": str(u["_id"]),
-                "email": u.get("email"),
-                "name": u.get("name"),
-                "role": u.get("role"),
-                "subscription_tier": u.get("subscription_tier", "free"),
-                "subscription_status": u.get("subscription_status", "active"),
-                "monthly_message_count": u.get("monthly_message_count", 0),
-                "created_at": u.get("created_at", "").isoformat() if u.get("created_at") else None,
-                "updated_at": u.get("updated_at", "").isoformat() if u.get("updated_at") else None,
-            })
+            users.append(
+                {
+                    "id": str(u["_id"]),
+                    "email": u.get("email"),
+                    "name": u.get("name"),
+                    "role": u.get("role"),
+                    "subscription_tier": u.get("subscription_tier", "free"),
+                    "subscription_status": u.get("subscription_status", "active"),
+                    "monthly_message_count": u.get("monthly_message_count", 0),
+                    "created_at": u.get("created_at", "").isoformat()
+                    if u.get("created_at")
+                    else None,
+                    "updated_at": u.get("updated_at", "").isoformat()
+                    if u.get("updated_at")
+                    else None,
+                }
+            )
 
         return {"users": users, "total": total}
     except Exception as e:
@@ -75,7 +80,10 @@ async def update_user_status(request: Request, user_id: str):
     body = await request.json()
     status = body.get("status")
     if status not in ("active", "suspended", "banned"):
-        raise HTTPException(status_code=400, detail="Invalid status. Must be active, suspended, or banned.")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid status. Must be active, suspended, or banned.",
+        )
 
     try:
         client = get_mongo_client()
@@ -83,7 +91,12 @@ async def update_user_status(request: Request, user_id: str):
 
         result = await db.users.update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"subscription_status": status, "updated_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {
+                    "subscription_status": status,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
         )
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="User not found")
@@ -105,7 +118,9 @@ async def update_user_plan(request: Request, user_id: str):
     body = await request.json()
     plan = body.get("plan")
     if plan not in ("free", "pro"):
-        raise HTTPException(status_code=400, detail="Invalid plan. Must be free or pro.")
+        raise HTTPException(
+            status_code=400, detail="Invalid plan. Must be free or pro."
+        )
 
     try:
         client = get_mongo_client()
@@ -113,7 +128,12 @@ async def update_user_plan(request: Request, user_id: str):
 
         result = await db.users.update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"subscription_tier": plan, "updated_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {
+                    "subscription_tier": plan,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
         )
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="User not found")
@@ -135,7 +155,9 @@ async def update_user_role(request: Request, user_id: str):
     body = await request.json()
     role = body.get("role")
     if role not in ("student", "educator", "admin"):
-        raise HTTPException(status_code=400, detail="Invalid role. Must be student, educator, or admin.")
+        raise HTTPException(
+            status_code=400, detail="Invalid role. Must be student, educator, or admin."
+        )
 
     try:
         client = get_mongo_client()
@@ -167,14 +189,21 @@ async def adjust_user_credits(request: Request, user_id: str):
     amount = body.get("amount", 0)
 
     if action not in ("add", "deduct", "reset"):
-        raise HTTPException(status_code=400, detail="Invalid action. Must be add, deduct, or reset.")
+        raise HTTPException(
+            status_code=400, detail="Invalid action. Must be add, deduct, or reset."
+        )
 
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
 
         if action == "reset":
-            update = {"$set": {"monthly_message_count": 0, "updated_at": datetime.now(timezone.utc)}}
+            update = {
+                "$set": {
+                    "monthly_message_count": 0,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            }
         elif action == "add":
             update = {
                 "$inc": {"monthly_message_count": -abs(int(amount))},

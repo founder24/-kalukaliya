@@ -50,15 +50,23 @@ async def list_conversations(
 
         conversations = []
         for c in chats_raw:
-            conversations.append({
-                "id": str(c["_id"]),
-                "session_id": c.get("session_id"),
-                "user_id": c.get("user_id"),
-                "title": c.get("title"),
-                "message_count": len(c.get("messages", [])) if "messages" in c else 0,
-                "created_at": c.get("created_at", "").isoformat() if c.get("created_at") else None,
-                "updated_at": c.get("updated_at", "").isoformat() if c.get("updated_at") else None,
-            })
+            conversations.append(
+                {
+                    "id": str(c["_id"]),
+                    "session_id": c.get("session_id"),
+                    "user_id": c.get("user_id"),
+                    "title": c.get("title"),
+                    "message_count": len(c.get("messages", []))
+                    if "messages" in c
+                    else 0,
+                    "created_at": c.get("created_at", "").isoformat()
+                    if c.get("created_at")
+                    else None,
+                    "updated_at": c.get("updated_at", "").isoformat()
+                    if c.get("updated_at")
+                    else None,
+                }
+            )
 
         return {"conversations": conversations, "total": total}
     except Exception as e:
@@ -85,8 +93,12 @@ async def get_conversation(request: Request, session_id: str):
             "user_id": chat.get("user_id"),
             "title": chat.get("title"),
             "messages": chat.get("messages", []),
-            "created_at": chat.get("created_at", "").isoformat() if chat.get("created_at") else None,
-            "updated_at": chat.get("updated_at", "").isoformat() if chat.get("updated_at") else None,
+            "created_at": chat.get("created_at", "").isoformat()
+            if chat.get("created_at")
+            else None,
+            "updated_at": chat.get("updated_at", "").isoformat()
+            if chat.get("updated_at")
+            else None,
         }
     except HTTPException:
         raise

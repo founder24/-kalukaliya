@@ -57,34 +57,44 @@ async def list_subscriptions(request: Request):
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
 
-        cursor = db.users.find(
-            {"subscription_tier": "pro"},
-            {
-                "email": 1,
-                "name": 1,
-                "subscription_tier": 1,
-                "subscription_status": 1,
-                "razorpay_subscription_id": 1,
-                "current_period_start": 1,
-                "current_period_end": 1,
-                "created_at": 1,
-            },
-        ).sort("created_at", -1).limit(100)
+        cursor = (
+            db.users.find(
+                {"subscription_tier": "pro"},
+                {
+                    "email": 1,
+                    "name": 1,
+                    "subscription_tier": 1,
+                    "subscription_status": 1,
+                    "razorpay_subscription_id": 1,
+                    "current_period_start": 1,
+                    "current_period_end": 1,
+                    "created_at": 1,
+                },
+            )
+            .sort("created_at", -1)
+            .limit(100)
+        )
 
         users_raw = await cursor.to_list(length=100)
 
         subscriptions = []
         for u in users_raw:
-            subscriptions.append({
-                "user_id": str(u["_id"]),
-                "email": u.get("email"),
-                "name": u.get("name"),
-                "tier": u.get("subscription_tier"),
-                "status": u.get("subscription_status"),
-                "razorpay_id": u.get("razorpay_subscription_id"),
-                "period_start": u.get("current_period_start", "").isoformat() if u.get("current_period_start") else None,
-                "period_end": u.get("current_period_end", "").isoformat() if u.get("current_period_end") else None,
-            })
+            subscriptions.append(
+                {
+                    "user_id": str(u["_id"]),
+                    "email": u.get("email"),
+                    "name": u.get("name"),
+                    "tier": u.get("subscription_tier"),
+                    "status": u.get("subscription_status"),
+                    "razorpay_id": u.get("razorpay_subscription_id"),
+                    "period_start": u.get("current_period_start", "").isoformat()
+                    if u.get("current_period_start")
+                    else None,
+                    "period_end": u.get("current_period_end", "").isoformat()
+                    if u.get("current_period_end")
+                    else None,
+                }
+            )
 
         return {"subscriptions": subscriptions, "total": len(subscriptions)}
     except Exception as e:
