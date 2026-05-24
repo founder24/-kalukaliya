@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Create the KnowledgeObject Beanie model, add Jinja2 dependency, update config with Cloudflare KV settings, and register the new model in db/mongo.py",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Add 'jinja2' and 'markdown' to apps/backend/requirements.in (after the existing entries, alphabetically placed)",
     "Create apps/backend/app/models/knowledge.py with all sub-models: ContentBlock, ContentMetadata, DerivativeHashes, GeneratedContent, and the KnowledgeObject Document class with Settings (collection name 'knowledge_objects', compound indexes for URL resolution, unique slug index, text search index)",
@@ -22,5 +22,5 @@
     "Run: cd apps/backend && python -c 'from app.main import app; print(app.title)'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Pre-existing test failures in test_auth.py (CollectionWasNotInitialized), test_chat.py (TypeError), and test_webhook.py (assert 503 == 400) - all present on base branch without changes. JWT_SECRET env var required for app import verification."
 }
