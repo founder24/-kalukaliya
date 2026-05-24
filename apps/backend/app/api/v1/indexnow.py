@@ -42,7 +42,9 @@ async def submit_urls(
         raise HTTPException(status_code=500, detail="INDEXNOW_API_KEY not configured")
 
     if not settings.INDEXNOW_INTERNAL_SECRET:
-        raise HTTPException(status_code=500, detail="INDEXNOW_INTERNAL_SECRET not configured")
+        raise HTTPException(
+            status_code=500, detail="INDEXNOW_INTERNAL_SECRET not configured"
+        )
 
     if x_indexnow_secret != settings.INDEXNOW_INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Invalid IndexNow secret")

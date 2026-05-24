@@ -71,7 +71,9 @@ async def test_submit_with_valid_secret_returns_200(client: AsyncClient):
 
             resp = await client.post(
                 "/api/v1/indexnow/submit",
-                json={"urls": ["https://syrabit.ai/test", "https://syrabit.ai/library"]},
+                json={
+                    "urls": ["https://syrabit.ai/test", "https://syrabit.ai/library"]
+                },
                 headers={"X-IndexNow-Secret": "test-internal-secret-456"},
             )
             assert resp.status_code == 200
