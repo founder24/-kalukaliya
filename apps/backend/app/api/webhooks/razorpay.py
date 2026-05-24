@@ -54,6 +54,18 @@ async def handle_razorpay_webhook(request: Request):
     event = json.loads(body.decode())
     payload = event.get("payload", {})
 
+    # Idempotency check: skip duplicate events
+    event_id = event.get("id")
+    if event_id:
+        try:
+            from app.db.redis import get_redis
+            redis = get_redis()
+            exists = await redis.get(f"webhook_processed:{event_id}")
+            if exists:
+                return {"status": "duplicate", "event_id": event_id}
+        except Exception:
+            pass  # Redis unavailable - proceed without idempotency check
+
     # 2. Handle Event Types
     if event.get("event") == "subscription.charged":
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
@@ -98,5 +110,14 @@ async def handle_razorpay_webhook(request: Request):
         if user:
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
+
+    # Mark event as processed for idempotency
+    if event_id:
+        try:
+            from app.db.redis import get_redis
+            redis = get_redis()
+            await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
+        except Exception:
+            pass  # Redis unavailable - skip idempotency storage
 
     return {"status": "ok"}

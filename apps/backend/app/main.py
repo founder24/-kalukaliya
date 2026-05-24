@@ -53,8 +53,9 @@ async def lifespan(app: FastAPI):
         logger.info("Sentry initialized")
     
     # Initialize PostHog
+    app.state.posthog = None
     if settings.POSTHOG_API_KEY:
-        _posthog = Posthog(
+        app.state.posthog = Posthog(
             project_api_key=settings.POSTHOG_API_KEY,
             host=settings.POSTHOG_HOST
         )
@@ -65,8 +66,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     from app.services.ai.vertex_client import vertex_client
     from app.services.ai.sarvam_client import sarvam_client
+    from app.services.ai.embedder import close_http_client
     await vertex_client.close()
     await sarvam_client.close()
+    await close_http_client()
     await close_mongo()
     await close_redis()
     logger.info("Application shutdown complete")

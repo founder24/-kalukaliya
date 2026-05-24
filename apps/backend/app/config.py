@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     AZURE_SEARCH_QUERY_KEY: Optional[str] = None
     AZURE_SEARCH_INDEX_NAME: str = "syrabit-edu-index"
     AZURE_SEARCH_SEMANTIC_CONFIG: str = "default"
+    AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_EMBEDDING_MODEL: str = "text-embedding-3-large"
     AZURE_EMBEDDING_DIMENSIONS: int = 1536
 
@@ -119,7 +120,17 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def validate_production_secrets(self):
         """Validate critical secrets are properly configured in production."""
+        KNOWN_PLACEHOLDER_SECRETS = {
+            "super_secret_jwt_key_32_chars_min",
+            "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",
+            "test-secret-at-least-32-characters-long",
+        }
+
         if self.APP_ENV == "production":
+            if self.JWT_SECRET in KNOWN_PLACEHOLDER_SECRETS:
+                raise ValueError(
+                    "JWT_SECRET is a known placeholder value and must be changed in production"
+                )
             if len(self.JWT_SECRET) < 32:
                 raise ValueError(
                     "JWT_SECRET must be at least 32 characters long in production"

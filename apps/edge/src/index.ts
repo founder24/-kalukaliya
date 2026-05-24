@@ -48,6 +48,17 @@ export default {
     // ── 3. Turnstile Bot Protection (chat/auth endpoints) ──
     if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/auth')) {
       const turnstileToken = request.headers.get('CF-Turnstile-Response');
+
+      // Turnstile is MANDATORY for auth endpoints
+      const isAuthEndpoint =
+        url.pathname.startsWith('/api/v1/auth/signup') ||
+        url.pathname.startsWith('/api/v1/auth/login') ||
+        url.pathname.startsWith('/api/v1/auth/forgot-password');
+
+      if (isAuthEndpoint && !turnstileToken) {
+        return jsonResponse(403, { error: 'Bot verification required' });
+      }
+
       if (turnstileToken) {
         const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
         if (!isValid) {

@@ -139,7 +139,7 @@ async def chat(
         from app.services.ai.router import generate_response
         response_text = await generate_response(
             system_prompt=system_prompt,
-            user_message=request.message,
+            user_message=sanitized_message,
             model=target_model,
             stream=False
         )
@@ -327,7 +327,7 @@ async def chat_stream(
 
             async for chunk in stream_response(
                 system_prompt=system_prompt,
-                user_message=request.message,
+                user_message=sanitized_message,
                 model=target_model,
             ):
                 full_response += chunk
@@ -344,7 +344,7 @@ async def chat_stream(
                     from app.services.ai.vertex_client import vertex_client
 
                     actual_model = settings.VERTEX_GEMINI_MODEL
-                    async for chunk in vertex_client.stream_generate(system_prompt, request.message):
+                    async for chunk in vertex_client.stream_generate(system_prompt, sanitized_message):
                         full_response += chunk
                         yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:

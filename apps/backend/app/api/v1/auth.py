@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import logging
 import time
+import uuid
 
 from app.config import settings
 from app.models.user import User
@@ -81,7 +82,7 @@ def create_access_token(user_id: str, expires_delta: timedelta = None) -> str:
 def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
     """Create JWT refresh token"""
     expire = datetime.utcnow() + (expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS))
-    to_encode = {"sub": user_id, "exp": expire, "type": "refresh"}
+    to_encode = {"sub": user_id, "exp": expire, "type": "refresh", "jti": str(uuid.uuid4())}
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -299,7 +300,6 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
     if request:
         try:
             from app.db.redis import get_redis
-            import time
             redis = get_redis()
             client_ip = request.client.host if hasattr(request, "client") else "unknown"
             rate_key = f"refresh_limit:{client_ip}:{int(time.time() // 60)}"
@@ -310,7 +310,9 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
 
             if attempt_count > 10:
                 raise HTTPException(status_code=429, detail="Too many refresh attempts. Try again later.")
-        except ImportError:
+        except HTTPException:
+            raise
+        except Exception:
             pass  # Redis not available — skip rate limiting
 
     try:
@@ -319,6 +321,21 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
             raise HTTPException(status_code=401, detail="Invalid token type")
 
         user_id = payload.get("sub")
+        jti = payload.get("jti")
+
+        # Check if token has been revoked
+        if jti:
+            try:
+                from app.db.redis import get_redis
+                redis = get_redis()
+                revoked = await redis.get(f"revoked_refresh:{jti}")
+                if revoked:
+                    raise HTTPException(status_code=401, detail="Token has been revoked")
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # Redis unavailable - skip revocation check gracefully
+
         user = await User.get(user_id)
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -327,7 +344,18 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         new_access_token = create_access_token(str(user.id))
         new_refresh_token = create_refresh_token(str(user.id))
 
+        # Revoke old refresh token jti
+        if jti:
+            try:
+                from app.db.redis import get_redis
+                redis = get_redis()
+                await redis.set(f"revoked_refresh:{jti}", "1", ex=settings.REFRESH_TOKEN_EXPIRY_DAYS * 86400)
+            except Exception:
+                pass  # Redis unavailable - skip revocation storage gracefully
+
         return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token)
+    except HTTPException:
+        raise
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
