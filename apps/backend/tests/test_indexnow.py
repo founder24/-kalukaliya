@@ -33,7 +33,9 @@ async def test_submit_with_wrong_secret_returns_403(client: AsyncClient):
     from app.config import settings
 
     original_key = settings.INDEXNOW_API_KEY
+    original_secret = settings.INDEXNOW_INTERNAL_SECRET
     settings.INDEXNOW_API_KEY = "correct-key"
+    settings.INDEXNOW_INTERNAL_SECRET = "correct-internal-secret"
     try:
         resp = await client.post(
             "/api/v1/indexnow/submit",
@@ -43,15 +45,18 @@ async def test_submit_with_wrong_secret_returns_403(client: AsyncClient):
         assert resp.status_code == 403
     finally:
         settings.INDEXNOW_API_KEY = original_key
+        settings.INDEXNOW_INTERNAL_SECRET = original_secret
 
 
 @pytest.mark.anyio
 async def test_submit_with_valid_secret_returns_200(client: AsyncClient):
     from app.config import settings
 
-    # Temporarily set a known key for testing
+    # Temporarily set known keys for testing
     original_key = settings.INDEXNOW_API_KEY
+    original_secret = settings.INDEXNOW_INTERNAL_SECRET
     settings.INDEXNOW_API_KEY = "test-indexnow-key-123"
+    settings.INDEXNOW_INTERNAL_SECRET = "test-internal-secret-456"
 
     try:
         mock_response = AsyncMock()
@@ -67,7 +72,7 @@ async def test_submit_with_valid_secret_returns_200(client: AsyncClient):
             resp = await client.post(
                 "/api/v1/indexnow/submit",
                 json={"urls": ["https://syrabit.ai/test", "https://syrabit.ai/library"]},
-                headers={"X-IndexNow-Secret": "test-indexnow-key-123"},
+                headers={"X-IndexNow-Secret": "test-internal-secret-456"},
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -75,3 +80,4 @@ async def test_submit_with_valid_secret_returns_200(client: AsyncClient):
             assert data["failed"] == 0
     finally:
         settings.INDEXNOW_API_KEY = original_key
+        settings.INDEXNOW_INTERNAL_SECRET = original_secret

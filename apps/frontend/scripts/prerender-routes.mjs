@@ -102,7 +102,7 @@ const FETCH_CONCURRENCY = envInt("PRERENDER_FETCH_CONCURRENCY", 8, {
 // Global wall-clock budget for the entire prerender pass. If we exceed
 // it (e.g. backend hard-down), we soft-fail with whatever we managed to
 // produce so far — the SPA shell still serves the rest.
-const PRERENDER_BUDGET_MS = envInt("PRERENDER_BUDGET_MS", 12 * 60 * 1000, {
+const PRERENDER_BUDGET_MS = envInt("PRERENDER_BUDGET_MS", 20 * 60 * 1000, {
   min: 60_000, max: 30 * 60 * 1000,
 });
 

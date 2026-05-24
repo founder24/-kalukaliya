@@ -118,9 +118,12 @@ export default {
       return handleRobots(env);
     }
 
-    // Sitemap proxy → backend
+    // Sitemap proxy → backend (rewrite path to /api/v1/seo prefix)
     if (url.pathname.startsWith('/sitemap') && url.pathname.endsWith('.xml')) {
-      return proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const rewrittenUrl = new URL(request.url);
+      rewrittenUrl.pathname = `/api/v1/seo${url.pathname}`;
+      const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
+      return proxyRequest(rewrittenRequest, env.AZURE_BACKEND_URL, env);
     }
 
     // API routes → proxy to Azure backend
