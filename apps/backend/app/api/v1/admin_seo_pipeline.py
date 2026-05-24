@@ -4,12 +4,14 @@ Handles topic extraction, page generation, quality management, and publishing.
 """
 
 import asyncio
+import json as _json
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException, Request, Query
 
 from app.api.v1.admin import _validate_admin_session, _csrf_check
@@ -65,13 +67,12 @@ async def _run_pipeline_job(job_id: str, subject_id: str = None, force: bool = F
                 if not topics_list:
                     prompt = f"Extract key topics from the chapter titled: {title}"
                     try:
-                        import json as _json
                         result = await vertex_client.generate(
                             "You are an education expert. Return a JSON array of objects with title and definition fields.",
                             prompt,
                         )
-                        topics_list = _json.loads(result) if result.startswith("[") else []
-                    except Exception:
+                        topics_list = _json.loads(result) if result and result.startswith("[") else []
+                    except (_json.JSONDecodeError, Exception):
                         topics_list = []
 
                 for t in topics_list:
@@ -287,7 +288,11 @@ async def delete_seo_topic(request: Request, topic_id: str):
     _validate_admin_session(request)
     await _csrf_check(request)
     db = _get_db()
-    result = await db.seo_topics.delete_one({"_id": ObjectId(topic_id)})
+    try:
+        oid = ObjectId(topic_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    result = await db.seo_topics.delete_one({"_id": oid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Topic not found")
     return {"message": "Topic deleted"}
@@ -319,11 +324,15 @@ async def update_page_status(request: Request, page_id: str, status: str = Query
     _validate_admin_session(request)
     await _csrf_check(request)
     db = _get_db()
+    try:
+        oid = ObjectId(page_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
     update_fields = {"status": status, "updated_at": datetime.now(timezone.utc)}
     if status == "published":
         update_fields["published_at"] = datetime.now(timezone.utc)
     result = await db.seo_pages.update_one(
-        {"_id": ObjectId(page_id)}, {"$set": update_fields}
+        {"_id": oid}, {"$set": update_fields}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Page not found")
@@ -360,12 +369,15 @@ async def extract_topics(
             topics_list = ch.get("topics", [])
             if not topics_list:
                 try:
-                    import json as _json
                     result = await vertex_client.generate(
                         "You are an education expert. Return a JSON array of objects with title and definition fields.",
                         f"Extract key topics from the chapter titled: {title}",
                     )
-                    topics_list = _json.loads(result) if result.startswith("[") else []
+                    topics_list = _json.loads(result) if result and result.startswith("[") else []
+                except _json.JSONDecodeError:
+                    topics_list = []
+                    errors += 1
+                    continue
                 except Exception:
                     topics_list = []
                     errors += 1
@@ -412,7 +424,11 @@ async def generate_seo_pages(request: Request):
     total = len(topic_ids) * len(page_types)
 
     for tid in topic_ids:
-        topic = await db.seo_topics.find_one({"_id": ObjectId(tid)})
+        try:
+            tid_oid = ObjectId(tid)
+        except (InvalidId, Exception):
+            continue
+        topic = await db.seo_topics.find_one({"_id": tid_oid})
         if not topic:
             continue
         for pt in page_types:
@@ -487,7 +503,11 @@ async def get_job_status(request: Request, job_id: str):
     """Get pipeline job status."""
     _validate_admin_session(request)
     db = _get_db()
-    job = await db.seo_jobs.find_one({"_id": ObjectId(job_id)})
+    try:
+        oid = ObjectId(job_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    job = await db.seo_jobs.find_one({"_id": oid})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {
@@ -531,13 +551,12 @@ async def pilot_run(
         topics_list = ch.get("topics", [])
         if not topics_list:
             try:
-                import json as _json
                 result = await vertex_client.generate(
                     "You are an education expert. Return a JSON array of objects with title and definition fields.",
                     f"Extract key topics from the chapter titled: {title}",
                 )
-                topics_list = _json.loads(result) if result.startswith("[") else []
-            except Exception:
+                topics_list = _json.loads(result) if result and result.startswith("[") else []
+            except (_json.JSONDecodeError, Exception):
                 topics_list = []
 
         for t in topics_list[:3]:
@@ -985,9 +1004,13 @@ async def resolve_duplicate_pair(request: Request, pair_id: str):
     _validate_admin_session(request)
     await _csrf_check(request)
     db = _get_db()
+    try:
+        pair_oid = ObjectId(pair_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
     body = await request.json()
     action = body.get("action", "keep_both")
-    pair = await db.seo_duplicate_pairs.find_one({"_id": ObjectId(pair_id)})
+    pair = await db.seo_duplicate_pairs.find_one({"_id": pair_oid})
     if not pair:
         raise HTTPException(status_code=404, detail="Pair not found")
     now = datetime.now(timezone.utc)
@@ -996,7 +1019,7 @@ async def resolve_duplicate_pair(request: Request, pair_id: str):
     elif action == "delete_a":
         await db.seo_pages.delete_one({"_id": ObjectId(pair["page_a"])})
     await db.seo_duplicate_pairs.update_one(
-        {"_id": ObjectId(pair_id)},
+        {"_id": pair_oid},
         {"$set": {"status": "resolved", "action": action, "resolved_at": now}},
     )
     return {"message": "Pair resolved", "action": action}
@@ -1010,6 +1033,10 @@ async def related_by_chapter(
 ):
     """PUBLIC - Get related SEO content for a chapter. No auth required."""
     db = _get_db()
+    try:
+        ObjectId(chapter_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
     query = {"chapter_id": chapter_id, "status": "published"}
     if exclude_topic_id:
         query["topic_id"] = {"$ne": exclude_topic_id}

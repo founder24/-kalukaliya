@@ -42,6 +42,51 @@ def _get_db():
     return client[settings.MONGODB_DB_NAME]
 
 
+def _require_azure_search_key():
+    """Raise 503 if Azure Search admin key is not configured."""
+    if not settings.AZURE_SEARCH_ADMIN_KEY:
+        raise HTTPException(status_code=503, detail="Azure Search not configured")
+
+
+async def _index_chapter_to_search(chapter: dict, chapter_id: str):
+    """Shared helper: chunk chapter content and push to Azure Search."""
+    _require_azure_search_key()
+    content_en = chapter.get("content_en", "")
+    if not content_en:
+        raise HTTPException(status_code=400, detail="No English content to index")
+    chunks = chunk_text(content_en, max_tokens=512)
+    documents = []
+    chapter_slug = chapter.get("slug", chapter_id)
+    for i, chunk in enumerate(chunks):
+        documents.append({
+            "@search.action": "upload",
+            "id": f"{chapter_id}-{i}",
+            "title": chapter.get("title", ""),
+            "content": chunk,
+            "language": "en",
+            "tier_access": "free",
+            "source_url": f"/chapters/{chapter_slug}",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        })
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.AZURE_SEARCH_ENDPOINT}/indexes/{settings.AZURE_SEARCH_INDEX_NAME}/docs/index?api-version=2023-11-01",
+                headers={
+                    "Content-Type": "application/json",
+                    "api-key": settings.AZURE_SEARCH_ADMIN_KEY,
+                },
+                json={"value": documents},
+            )
+            response.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Azure Search indexing failed for chapter {chapter_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Search indexing failed: {str(e)}")
+    return documents
+
+
 # ============================================================
 # LAYER 1 - Hierarchy CRUD: Boards
 # ============================================================
@@ -51,6 +96,8 @@ async def create_board(request: Request):
     _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
+    if not body.get("name"):
+        raise HTTPException(status_code=400, detail="name is required")
     db = _get_db()
     doc = {
         "name": body.get("name"),
@@ -117,6 +164,8 @@ async def create_class(request: Request):
     _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
+    if not body.get("name"):
+        raise HTTPException(status_code=400, detail="name is required")
     db = _get_db()
     doc = {
         "board_id": body.get("board_id"),
@@ -187,6 +236,8 @@ async def create_stream(request: Request):
     _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
+    if not body.get("name"):
+        raise HTTPException(status_code=400, detail="name is required")
     db = _get_db()
     doc = {
         "class_id": body.get("class_id"),
@@ -238,6 +289,8 @@ async def create_subject(request: Request):
     _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
+    if not body.get("name"):
+        raise HTTPException(status_code=400, detail="name is required")
     db = _get_db()
 
     # Denormalize parent names
@@ -637,41 +690,7 @@ async def publish_chapter(request: Request, chapter_id: str):
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    content_en = chapter.get("content_en", "")
-    if not content_en:
-        raise HTTPException(status_code=400, detail="No English content to publish")
-
-    # Chunk content for Azure Search
-    chunks = chunk_text(content_en, max_tokens=512)
-    documents = []
-    chapter_slug = chapter.get("slug", chapter_id)
-    for i, chunk in enumerate(chunks):
-        documents.append({
-            "@search.action": "upload",
-            "id": f"{chapter_id}-{i}",
-            "title": chapter.get("title", ""),
-            "content": chunk,
-            "language": "en",
-            "tier_access": "free",
-            "source_url": f"/chapters/{chapter_slug}",
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-        })
-
-    # Push to Azure Search
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{settings.AZURE_SEARCH_ENDPOINT}/indexes/{settings.AZURE_SEARCH_INDEX_NAME}/docs/index?api-version=2023-11-01",
-                headers={
-                    "Content-Type": "application/json",
-                    "api-key": settings.AZURE_SEARCH_ADMIN_KEY or "",
-                },
-                json={"value": documents},
-            )
-            response.raise_for_status()
-    except Exception as e:
-        logger.error(f"Azure Search indexing failed for chapter {chapter_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Search indexing failed: {str(e)}")
+    documents = await _index_chapter_to_search(chapter, chapter_id)
 
     # Mark as published
     await db.chapters.update_one(
@@ -692,39 +711,7 @@ async def index_to_search(request: Request, chapter_id: str):
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    content_en = chapter.get("content_en", "")
-    if not content_en:
-        raise HTTPException(status_code=400, detail="No English content to index")
-
-    chunks = chunk_text(content_en, max_tokens=512)
-    documents = []
-    chapter_slug = chapter.get("slug", chapter_id)
-    for i, chunk in enumerate(chunks):
-        documents.append({
-            "@search.action": "upload",
-            "id": f"{chapter_id}-{i}",
-            "title": chapter.get("title", ""),
-            "content": chunk,
-            "language": "en",
-            "tier_access": "free",
-            "source_url": f"/chapters/{chapter_slug}",
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-        })
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{settings.AZURE_SEARCH_ENDPOINT}/indexes/{settings.AZURE_SEARCH_INDEX_NAME}/docs/index?api-version=2023-11-01",
-                headers={
-                    "Content-Type": "application/json",
-                    "api-key": settings.AZURE_SEARCH_ADMIN_KEY or "",
-                },
-                json={"value": documents},
-            )
-            response.raise_for_status()
-    except Exception as e:
-        logger.error(f"Azure Search indexing failed for chapter {chapter_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Search indexing failed: {str(e)}")
+    documents = await _index_chapter_to_search(chapter, chapter_id)
 
     return {"status": "indexed", "chunks_indexed": len(documents)}
 
@@ -825,7 +812,9 @@ async def translate_chapter(request: Request, chapter_id: str):
 
     # Update chapter with translation
     update_field = f"content_{target_lang}"
-    update_data = {update_field: translated, "has_assamese": True, "updated_at": datetime.now(timezone.utc)}
+    update_data = {update_field: translated, "updated_at": datetime.now(timezone.utc)}
+    if target_lang.startswith("as"):
+        update_data["has_assamese"] = True
     await db.chapters.update_one({"_id": ObjectId(chapter_id)}, {"$set": update_data})
 
     return {"status": "ok", "language": target_lang, "word_count": len(translated.split())}

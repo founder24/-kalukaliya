@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 
 from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException
 
 from app.config import settings
@@ -26,7 +27,11 @@ def _get_db():
 async def chapter_faq_jsonld(chapter_id: str):
     """Return FAQ JSON-LD schema from chapter faq_entries."""
     db = _get_db()
-    chapter = await db.chapters.find_one({"_id": ObjectId(chapter_id)})
+    try:
+        oid = ObjectId(chapter_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    chapter = await db.chapters.find_one({"_id": oid})
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
     faq_entries = chapter.get("faq_entries", [])
@@ -54,7 +59,11 @@ async def chapter_faq_jsonld(chapter_id: str):
 async def chapter_published_topics(chapter_id: str):
     """Return topics from the chapter that have definition_status=published."""
     db = _get_db()
-    chapter = await db.chapters.find_one({"_id": ObjectId(chapter_id)})
+    try:
+        oid = ObjectId(chapter_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    chapter = await db.chapters.find_one({"_id": oid})
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
     topics = chapter.get("topics", [])
@@ -66,6 +75,10 @@ async def chapter_published_topics(chapter_id: str):
 async def subject_topic_index(subject_id: str):
     """Return all topics organized by chapter for the subject."""
     db = _get_db()
+    try:
+        ObjectId(subject_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
     chapters = await db.chapters.find({"subject_id": subject_id}).sort("order", 1).to_list(length=200)
     if not chapters:
         raise HTTPException(status_code=404, detail="No chapters found for this subject")
