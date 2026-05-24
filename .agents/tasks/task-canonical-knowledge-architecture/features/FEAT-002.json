@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create the content services layer: renderer (Jinja2 HTML generation), search indexer (Azure Search document upsert), and content pipeline (orchestrates rendering, indexing, MCQ/summary generation, IndexNow, Cloudflare KV push)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create directory apps/backend/app/services/content/ with __init__.py",
     "Create apps/backend/app/services/content/renderer.py: A ContentRenderer class that uses Jinja2 templates to render KnowledgeObject into multiple HTML page variants (notes, mcqs, summary, definitions, important-questions). Each page type must include: proper <title> with SEO formula, meta description, canonical URL, JSON-LD (BreadcrumbList + page-type schemas: FAQPage, Quiz, Course, DefinedTermSet), hreflang for en/as, Open Graph / Twitter cards, internal navigation links, and minimum 300+ words visible content. Store templates as inline strings or in a templates/ subfolder.",
@@ -23,5 +23,5 @@
     "Run: cd apps/backend && python -c 'from app.main import app; print(app.title)'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All three service classes import cleanly. Renderer generates proper HTML with JSON-LD, OG/Twitter tags, hreflang, and canonical URLs for all 5 page types. SearchIndexer chunking works correctly. Pipeline gracefully handles missing credentials (logs warnings, returns skipped status). Beanie Documents cannot be instantiated without init_beanie so integration testing requires MongoDB or mocks. Pre-existing test failures from FEAT-001 still apply."
 }
