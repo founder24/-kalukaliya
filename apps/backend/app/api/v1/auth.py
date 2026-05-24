@@ -408,63 +408,6 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
 
-class GoogleAuthRequest(BaseModel):
-    supabase_token: str
-
-
-@router.post("/google", response_model=TokenResponse)
-async def google_auth(request: GoogleAuthRequest):
-    """
-    Exchange a Supabase OAuth token for a backend JWT.
-    Verifies the token with Supabase, then finds or creates the user.
-    """
-    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
-        raise HTTPException(status_code=503, detail="OAuth not configured")
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{settings.SUPABASE_URL}/auth/v1/user",
-                headers={
-                    "Authorization": f"Bearer {request.supabase_token}",
-                    "apikey": settings.SUPABASE_SERVICE_KEY,
-                }
-            )
-            if resp.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid OAuth token")
-
-            supabase_user = resp.json()
-    except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="OAuth verification failed")
-
-    # Verify email is confirmed by the OAuth provider
-    if not supabase_user.get("email_verified", False):
-        raise HTTPException(status_code=400, detail="Email not verified by OAuth provider")
-
-    email = supabase_user.get("email")
-    if not email:
-        raise HTTPException(status_code=400, detail="Email not available from OAuth provider")
-
-    # Find or create user
-    user = await User.find_one({"email": email})
-    if not user:
-        user = User(
-            email=email,
-            name=supabase_user.get("user_metadata", {}).get("full_name"),
-            auth_provider="google",
-        )
-        await user.insert()
-        logger.info(f"New OAuth user created: {email}")
-
-    # Generate backend tokens
-    access_token = create_access_token(str(user.id))
-    refresh_token = create_refresh_token(str(user.id))
-
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
-
-
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
     body: LogoutRequest,
