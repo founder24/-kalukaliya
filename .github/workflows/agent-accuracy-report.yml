@@ -1,9 +1,15 @@
 name: "Agent: Accuracy Report"
+# This workflow uses MongoDB for auth data. AWS/Supabase have been removed.
 
 on:
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
+    inputs:
+      mongodb_connection_secret:
+        description: 'MongoDB connection string (defaults to MONGODB_URI secret)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -30,7 +36,7 @@ jobs:
       - name: Run accuracy report
         id: report
         env:
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_URI: ${{ inputs.mongodb_connection_secret || secrets.MONGODB_URI }}
         run: |
           mongosh "$MONGODB_URI" --quiet scripts/accuracy-report.js > /tmp/accuracy-output.txt 2>&1
           cat /tmp/accuracy-output.txt

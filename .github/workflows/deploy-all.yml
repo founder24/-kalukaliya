@@ -70,9 +70,18 @@ jobs:
       - name: Test Frontend
         run: pnpm --filter @workspace/syrabit test
 
+  canary-deploy:
+    name: Canary Validation
+    needs: [ci-checks]
+    uses: ./.github/workflows/agent-canary-deploy.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+
   deploy-backend:
     name: Deploy Backend
-    needs: [ci-checks]
+    needs: [canary-deploy]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -86,6 +95,54 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch secrets from KeyVault
+        id: keyvault
+        run: |
+          echo "Fetching runtime secrets from Azure KeyVault..."
+          MONGODB_URI=$(az keyvault secret show --vault-name syrabit-kv --name MONGODB-URI --query value -o tsv)
+          JWT_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name JWT-SECRET --query value -o tsv)
+          RAZORPAY_WEBHOOK_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name RAZORPAY-WEBHOOK-SECRET --query value -o tsv)
+          RESEND_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name RESEND-API-KEY --query value -o tsv)
+          SARVAM_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name SARVAM-API-KEY --query value -o tsv)
+          POSTHOG_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name POSTHOG-API-KEY --query value -o tsv)
+          SENTRY_DSN=$(az keyvault secret show --vault-name syrabit-kv --name SENTRY-DSN --query value -o tsv)
+          UPSTASH_REDIS_REST_URL=$(az keyvault secret show --vault-name syrabit-kv --name UPSTASH-REDIS-REST-URL --query value -o tsv)
+          UPSTASH_REDIS_REST_TOKEN=$(az keyvault secret show --vault-name syrabit-kv --name UPSTASH-REDIS-REST-TOKEN --query value -o tsv)
+          GOOGLE_APPLICATION_CREDENTIALS_JSON=$(az keyvault secret show --vault-name syrabit-kv --name GOOGLE-APPLICATION-CREDENTIALS-JSON --query value -o tsv)
+          AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name syrabit-kv --name AZURE-OPENAI-ENDPOINT --query value -o tsv)
+          AZURE_SEARCH_ADMIN_KEY=$(az keyvault secret show --vault-name syrabit-kv --name AZURE-SEARCH-ADMIN-KEY --query value -o tsv)
+          AZURE_SEARCH_QUERY_KEY=$(az keyvault secret show --vault-name syrabit-kv --name AZURE-SEARCH-QUERY-KEY --query value -o tsv)
+          
+          # Mask secrets in logs
+          echo "::add-mask::$MONGODB_URI"
+          echo "::add-mask::$JWT_SECRET"
+          echo "::add-mask::$RAZORPAY_WEBHOOK_SECRET"
+          echo "::add-mask::$RESEND_API_KEY"
+          echo "::add-mask::$SARVAM_API_KEY"
+          echo "::add-mask::$POSTHOG_API_KEY"
+          echo "::add-mask::$SENTRY_DSN"
+          echo "::add-mask::$UPSTASH_REDIS_REST_URL"
+          echo "::add-mask::$UPSTASH_REDIS_REST_TOKEN"
+          echo "::add-mask::$GOOGLE_APPLICATION_CREDENTIALS_JSON"
+          echo "::add-mask::$AZURE_OPENAI_ENDPOINT"
+          echo "::add-mask::$AZURE_SEARCH_ADMIN_KEY"
+          echo "::add-mask::$AZURE_SEARCH_QUERY_KEY"
+          
+          # Export for subsequent steps
+          echo "MONGODB_URI=$MONGODB_URI" >> "$GITHUB_OUTPUT"
+          echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_OUTPUT"
+          echo "RAZORPAY_WEBHOOK_SECRET=$RAZORPAY_WEBHOOK_SECRET" >> "$GITHUB_OUTPUT"
+          echo "RESEND_API_KEY=$RESEND_API_KEY" >> "$GITHUB_OUTPUT"
+          echo "SARVAM_API_KEY=$SARVAM_API_KEY" >> "$GITHUB_OUTPUT"
+          echo "POSTHOG_API_KEY=$POSTHOG_API_KEY" >> "$GITHUB_OUTPUT"
+          echo "SENTRY_DSN=$SENTRY_DSN" >> "$GITHUB_OUTPUT"
+          echo "UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL" >> "$GITHUB_OUTPUT"
+          echo "UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN" >> "$GITHUB_OUTPUT"
+          echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$GOOGLE_APPLICATION_CREDENTIALS_JSON" >> "$GITHUB_OUTPUT"
+          echo "AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT" >> "$GITHUB_OUTPUT"
+          echo "AZURE_SEARCH_ADMIN_KEY=$AZURE_SEARCH_ADMIN_KEY" >> "$GITHUB_OUTPUT"
+          echo "AZURE_SEARCH_QUERY_KEY=$AZURE_SEARCH_QUERY_KEY" >> "$GITHUB_OUTPUT"
 
       - name: Build & Push to ACR
         run: |
@@ -102,7 +159,21 @@ jobs:
           az containerapp update \
             --name syrabit-backend \
             --resource-group syrabit-prod \
-            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }} \
+            --set-env-vars \
+              "MONGODB_URI=${{ steps.keyvault.outputs.MONGODB_URI }}" \
+              "JWT_SECRET=${{ steps.keyvault.outputs.JWT_SECRET }}" \
+              "RAZORPAY_WEBHOOK_SECRET=${{ steps.keyvault.outputs.RAZORPAY_WEBHOOK_SECRET }}" \
+              "RESEND_API_KEY=${{ steps.keyvault.outputs.RESEND_API_KEY }}" \
+              "SARVAM_API_KEY=${{ steps.keyvault.outputs.SARVAM_API_KEY }}" \
+              "POSTHOG_API_KEY=${{ steps.keyvault.outputs.POSTHOG_API_KEY }}" \
+              "SENTRY_DSN=${{ steps.keyvault.outputs.SENTRY_DSN }}" \
+              "UPSTASH_REDIS_REST_URL=${{ steps.keyvault.outputs.UPSTASH_REDIS_REST_URL }}" \
+              "UPSTASH_REDIS_REST_TOKEN=${{ steps.keyvault.outputs.UPSTASH_REDIS_REST_TOKEN }}" \
+              "GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ steps.keyvault.outputs.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" \
+              "AZURE_OPENAI_ENDPOINT=${{ steps.keyvault.outputs.AZURE_OPENAI_ENDPOINT }}" \
+              "AZURE_SEARCH_ADMIN_KEY=${{ steps.keyvault.outputs.AZURE_SEARCH_ADMIN_KEY }}" \
+              "AZURE_SEARCH_QUERY_KEY=${{ steps.keyvault.outputs.AZURE_SEARCH_QUERY_KEY }}"
 
       - name: Wait for healthy revision
         run: |
@@ -125,7 +196,7 @@ jobs:
 
   deploy-edge:
     name: Deploy Edge
-    needs: [ci-checks]
+    needs: [canary-deploy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -151,7 +222,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend
-    needs: [ci-checks]
+    needs: [canary-deploy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -173,8 +244,6 @@ jobs:
         run: pnpm --filter @workspace/syrabit run build
         env:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v4
