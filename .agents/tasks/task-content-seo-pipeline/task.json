@@ -1,0 +1,7 @@
+{
+  "task_id": "task-content-seo-pipeline",
+  "task_description": "Implement the complete content and SEO/GEO/AEO pipeline backend: 38+ endpoints across 4 layers (Content Hierarchy CRUD, Topic Management + Content Editing, AI Generation + Publish, SEO Pipeline Integration). Replace admin_content.py, create admin_seo_pipeline.py and content_public.py, update main.py to register routers.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

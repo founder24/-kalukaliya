@@ -1,0 +1,30 @@
+{
+  "project_type": "Python FastAPI monorepo with React frontend (pnpm workspace)",
+  "language": "Python (backend), JavaScript/React (frontend)",
+  "build_system": "pip with requirements.txt (hashed), pnpm workspace for frontend. No Makefile.",
+  "test_framework": "No existing test files found for backend. Frontend has no test runner configured.",
+  "build_command": "cd apps/backend && pip install -r requirements.txt (for dependency validation)",
+  "test_command": "python -c 'import app.main' (import validation since no pytest tests exist)",
+  "verification_instructions": "1. Verify Python syntax: python -m py_compile on all new files. 2. Verify imports resolve: python -c 'from app.api.v1 import admin_content, admin_seo_pipeline, content_public'. 3. Verify main.py registers all routers without error.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/-kalukaliya/apps/backend && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET mode - full network access. No Docker daemon needed for validation. Backend uses Motor (async MongoDB), httpx for AI calls, azure-search-documents for Azure Search.",
+  "contribution_requirements": "Do NOT modify any frontend files. Use _validate_admin_session and _csrf_check from app.api.v1.admin on every endpoint. Use get_mongo_client() + settings.MONGODB_DB_NAME for collection access. Wrap AI calls in try/except. Generate slugs from titles. Include created_at/updated_at timestamps.",
+  "key_patterns": "1. All admin routers are registered with prefix /api/v1/admin in main.py. 2. Auth via httponly cookie validated by _validate_admin_session(request). 3. CSRF check via _csrf_check(request) on POST/PUT/PATCH/DELETE. 4. MongoDB accessed via get_mongo_client()[settings.MONGODB_DB_NAME].collection_name. 5. AI generation via vertex_client.generate(system_prompt, user_message) and sarvam_client.generate(system_prompt, user_message). 6. Azure Search uses SearchClient from azure-search-documents. 7. Frontend API calls go to /api/v1/admin/content/... and /api/v1/admin/seo/... and /api/v1/content/... (public).",
+  "relevant_files": [
+    "apps/backend/app/api/v1/admin_content.py",
+    "apps/backend/app/api/v1/admin_seo.py",
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/db/mongo.py",
+    "apps/backend/app/services/ai/vertex_client.py",
+    "apps/backend/app/services/ai/sarvam_client.py",
+    "apps/backend/app/services/search/azure_search.py",
+    "apps/frontend/src/components/admin/AdminContentEditor.jsx",
+    "apps/frontend/src/components/admin/seo-manager/useSeoManager.jsx",
+    "apps/frontend/src/utils/api.jsx",
+    "apps/frontend/src/utils/adminHelpers.js"
+  ],
+  "directory_structure": "apps/backend/app/api/v1/ - all route modules. apps/backend/app/services/ai/ - AI clients (vertex, sarvam). apps/backend/app/services/search/ - Azure Search. apps/backend/app/db/ - MongoDB connection. apps/backend/app/config.py - settings. apps/frontend/src/ - React app."
+}

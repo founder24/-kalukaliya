@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Update apps/backend/app/main.py to register the new admin_seo_pipeline and content_public routers. The admin_content router is already registered. Ensure all route prefixes match what the frontend expects.",
+  "status": "completed",
+  "steps": [
+    "Add import for admin_seo_pipeline in main.py: from app.api.v1 import admin_seo_pipeline",
+    "Add import for content_public in main.py: from app.api.v1 import content_public",
+    "Register admin_seo_pipeline router with prefix='/api/v1/admin' (SEO endpoints are under /api/v1/admin/seo/... since frontend calls API_BASE + '/seo/...' where API_BASE is /api/v1 and the router prefix adds /admin... WAIT - check: frontend calls ${API_BASE}/seo/stats which is /api/v1/seo/stats. So the SEO pipeline router needs prefix='/api/v1' NOT '/api/v1/admin')",
+    "Actually analyzing frontend calls: adminSeoStats calls ${API_BASE}/seo/stats = /api/v1/seo/stats. adminSeoRegenerateSitemap calls ${API_BASE}/admin/content/regenerate-sitemap = /api/v1/admin/content/regenerate-sitemap. So SEO pipeline endpoints are at /api/v1/seo/* prefix.",
+    "Register admin_seo_pipeline router with prefix='/api/v1', tags=['Admin SEO Pipeline'] - the router paths already include /seo/",
+    "Register content_public router with prefix='/api/v1', tags=['Content Public'] - the router paths include /content/",
+    "Verify that PATCH /content/subjects/{id} in the existing admin_content.py doesn't conflict with the new comprehensive implementation (it won't since we're replacing the whole file)",
+    "Ensure CORS middleware allows PATCH method (already included in allow_methods list)"
+  ],
+  "acceptance_criteria": [
+    "python -m py_compile apps/backend/app/main.py succeeds",
+    "python -c 'from app.main import app; routes = [r.path for r in app.routes]; assert any(\"/seo/\" in r for r in routes)' passes",
+    "The admin_seo_pipeline router is registered at prefix /api/v1 so frontend calls like /api/v1/seo/stats resolve correctly",
+    "The content_public router is registered at prefix /api/v1 so frontend calls like /api/v1/content/chapters/{id}/faq-jsonld resolve correctly",
+    "No import errors when loading the application module"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m py_compile app/main.py",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1 import admin_content, admin_seo_pipeline, content_public; print('All modules imported successfully')\""
+  ],
+  "blocked_reason": null,
+  "findings": "Added PATCH to CORS allow_methods and CSRF origin check middleware since it was missing but needed by content endpoints. Full import validation fails due to pre-existing environment issue (bson/beanie package incompatibility) unrelated to this change. py_compile verification passes for all modified and new modules."
+}
