@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Layer 3 - Infrastructure: Add health probes to container-app.bicep, resolve duplicate deploy paths by removing per-app deploys from CI and consolidating on deploy-all.yml",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In infra/azure/container-app.bicep: Add liveness and readiness health probes to the container configuration. Add a 'probes' array to the container object with: (1) A liveness probe: type 'Liveness', httpGet on path '/health' port 8000, periodSeconds 30, failureThreshold 3, initialDelaySeconds 10. (2) A readiness probe: type 'Readiness', httpGet on path '/health' port 8000, periodSeconds 10, failureThreshold 3, initialDelaySeconds 5.",
     "In .github/workflows/ci-edge.yml: Remove the entire 'deploy' job. The edge deploy already happens via deploy-all.yml on push to main. Keep only the lint-and-typecheck and test jobs for PR validation.",
@@ -24,5 +24,5 @@
     "Run: python3 -c \"import yaml; d=yaml.safe_load(open('.github/workflows/deploy-all.yml')); print(d['jobs']['deploy-backend'].get('needs'))\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes verified via YAML parsing and grep. Health probes added to Bicep, deploy jobs removed from per-app CI, quality gates added to deploy-all.yml with proper needs dependencies."
 }
