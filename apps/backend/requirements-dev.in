@@ -1,0 +1,7 @@
+# Development/test dependencies for the backend.
+# These are NOT needed in production and should not be in the Docker image.
+# Run: pip-compile --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
+
+pytest
+pytest-asyncio
+pytest-cov

@@ -24,15 +24,13 @@ jobs:
         run: |
           sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
           pip install -r /tmp/requirements-nohash.txt
-          pip install ruff mypy
+          pip install ruff mypy bandit
 
       - name: Run Ruff linter
         run: ruff check apps/backend/app/
 
       - name: Run Bandit security scanner
-        run: |
-          pip install bandit
-          bandit -c .bandit -r apps/backend/app/ -ll
+        run: bandit -c .bandit -r apps/backend/app/ -ll
 
       - name: Run MyPy type checker
         run: mypy apps/backend/app/ --ignore-missing-imports
@@ -61,6 +59,7 @@ jobs:
         run: |
           sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
           pip install -r /tmp/requirements-nohash.txt
+          pip install pytest pytest-asyncio pytest-cov
 
       - name: Run tests
         working-directory: apps/backend

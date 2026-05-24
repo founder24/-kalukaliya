@@ -143,6 +143,16 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "JWT_SECRET must be at least 32 characters long in production"
                 )
+            if not self.ADMIN_JWT_SECRET:
+                logger.warning(
+                    "ADMIN_JWT_SECRET is not set — admin tokens use the shared JWT_SECRET. "
+                    "Set a separate ADMIN_JWT_SECRET for improved key isolation."
+                )
+            if not self.RESET_TOKEN_SECRET:
+                logger.warning(
+                    "RESET_TOKEN_SECRET is not set — reset tokens use the shared JWT_SECRET. "
+                    "Set a separate RESET_TOKEN_SECRET for improved key isolation."
+                )
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
             if not self.UPSTASH_REDIS_REST_URL:
