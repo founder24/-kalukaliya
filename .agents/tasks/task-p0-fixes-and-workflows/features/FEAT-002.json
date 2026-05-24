@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "chore",
   "description": "Update workflow files: wire canary deploy into deploy-all.yml as pre-step, update agent-accuracy-report.yml for MongoDB connection secret, and update deploy-all.yml to reference Azure KeyVault secrets for runtime secrets (replacing direct env var references where applicable for deployed services)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "STEP 1 - Wire canary deploy into deploy-all.yml: Add a new job 'canary-deploy' that uses workflow_call to invoke agent-canary-deploy.yml. This job should run AFTER ci-checks but BEFORE deploy-backend, deploy-edge, and deploy-frontend. The canary job needs id-token: write and contents: read permissions for Azure auth. Update the needs array of deploy-backend, deploy-edge, deploy-frontend to depend on [canary-deploy] instead of [ci-checks]. The canary job uses: ./.github/workflows/agent-canary-deploy.yml with secrets: inherit.",
     "STEP 2 - Update agent-accuracy-report.yml for MongoDB: The workflow already accepts MONGODB_URI from secrets and uses mongosh. Ensure it explicitly documents that AWS/Supabase secrets are removed and MongoDB is the auth backend. Add an input parameter 'mongodb_connection_secret' with a default of MONGODB_URI for workflow_dispatch. Update the env block to use the input if provided, otherwise fall back to secrets.MONGODB_URI. Remove any AWS/Supabase references if present.",
@@ -21,5 +21,5 @@
     "Grep deploy-all.yml to confirm canary-deploy job exists and is in the needs chain"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All three steps implemented cleanly. YAML validation passed for both workflow files. Canary-deploy job wired between ci-checks and deploy jobs. Supabase env vars removed from frontend build. KeyVault secrets fetch step added to deploy-backend with masked outputs."
 }
