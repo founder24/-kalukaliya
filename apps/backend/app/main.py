@@ -13,6 +13,19 @@ from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
 from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
+from app.api.v1 import (
+    admin_dashboard,
+    admin_users,
+    admin_conversations,
+    admin_content,
+    admin_analytics,
+    admin_settings,
+    admin_notifications,
+    admin_seo,
+    admin_ai,
+    admin_revenue,
+    admin_alerts,
+)
 from app.api.webhooks import razorpay
 
 logger = logging.getLogger(__name__)
@@ -195,6 +208,39 @@ def create_app() -> FastAPI:
     )
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+    app.include_router(
+        admin_dashboard.router, prefix="/api/v1/admin", tags=["Admin Dashboard"]
+    )
+    app.include_router(
+        admin_users.router, prefix="/api/v1/admin", tags=["Admin Users"]
+    )
+    app.include_router(
+        admin_conversations.router,
+        prefix="/api/v1/admin",
+        tags=["Admin Conversations"],
+    )
+    app.include_router(
+        admin_content.router, prefix="/api/v1/admin", tags=["Admin Content"]
+    )
+    app.include_router(
+        admin_analytics.router, prefix="/api/v1/admin", tags=["Admin Analytics"]
+    )
+    app.include_router(
+        admin_settings.router, prefix="/api/v1/admin", tags=["Admin Settings"]
+    )
+    app.include_router(
+        admin_notifications.router,
+        prefix="/api/v1/admin",
+        tags=["Admin Notifications"],
+    )
+    app.include_router(admin_seo.router, prefix="/api/v1/admin", tags=["Admin SEO"])
+    app.include_router(admin_ai.router, prefix="/api/v1/admin", tags=["Admin AI"])
+    app.include_router(
+        admin_revenue.router, prefix="/api/v1/admin", tags=["Admin Revenue"]
+    )
+    app.include_router(
+        admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"]
+    )
 
     # Legacy health probe redirects for backward compatibility
     @app.get("/api/health")
