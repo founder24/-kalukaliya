@@ -31,7 +31,7 @@ const STEP_BUDGET_MS = (() => {
   // errors before the outer guard nukes the process.
   return Number.isFinite(n) && n >= 30_000 && n <= 30 * 60_000
     ? n
-    : 8 * 60_000 - 5_000;
+    : 1_200_000;
 })();
 
 // Task #544: concurrency restored to 4 (run all scripts in parallel).

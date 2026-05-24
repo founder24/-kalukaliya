@@ -1,0 +1,7 @@
+{
+  "task_id": "task-seo-optimization-v2",
+  "task_description": "Re-implement SEO/GEO/AEO optimization work from PR #194 on top of current main (7e7a3ab) to resolve merge conflicts. Creates branch feat/seo-optimization-v2 with prerender expansion, ISR fallback, robots.txt/sitemap, structured data, internal linking, and IndexNow integration.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

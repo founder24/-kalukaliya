@@ -34,7 +34,7 @@ const BUDGET_MS = (() => {
   // 2 min, hard ceiling 30 min.
   return Number.isFinite(n) && n >= 120_000 && n <= 30 * 60_000
     ? n
-    : 12 * 60_000;
+    : 1_500_000;
 })();
 
 const overallStart = Date.now();

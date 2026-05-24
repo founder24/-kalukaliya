@@ -14,6 +14,8 @@ import { turnstileVerify } from './middleware/bot';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
+import { handleISR } from './routes/isr';
+import { handleRobots } from './routes/robots';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -111,6 +113,16 @@ export default {
 
     // ── 5. Routing ──
 
+    // Robots.txt
+    if (url.pathname === '/robots.txt') {
+      return handleRobots(env);
+    }
+
+    // Sitemap proxy → backend
+    if (url.pathname.startsWith('/sitemap') && url.pathname.endsWith('.xml')) {
+      return proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    }
+
     // API routes → proxy to Azure backend
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health')) {
       return proxyRequest(request, env.AZURE_BACKEND_URL, env);
@@ -131,6 +143,12 @@ export default {
       headers.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
 
       return new Response(object.body, { headers });
+    }
+
+    // ISR fallback for bot traffic (before 404)
+    const isrResponse = await handleISR(request, env, ctx);
+    if (isrResponse) {
+      return isrResponse;
     }
 
     // Fallback

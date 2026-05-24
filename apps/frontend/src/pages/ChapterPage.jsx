@@ -23,6 +23,7 @@ import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSect
 import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
 import { useLibraryBundle, useLibraryBundleSlim } from '@/hooks/useContent';
 import { findSiblingChapters, siblingsAsRelated } from '@/utils/siblingChapter';
+import RelatedTopicsNav from '@/components/chapter/RelatedTopicsNav';
 import { pushRecentChapter } from '@/utils/recentChapters';
 import { HighlightSavePopover } from '@/components/study/HighlightSavePopover';
 import { ReadAloudButton } from '@/components/study/ReadAloudButton';
@@ -1368,15 +1369,22 @@ export default function ChapterPage() {
                 return out.slice(0, 6);
               })();
               return (
-                <ContinueLearning
-                  prev={prevLink}
-                  next={nextLink}
-                  related={related}
-                  subjectName={subjectName}
-                  subjectPath={basePath}
-                  chatHref={`/chat?subject=${data?.subject_id || subjectSlug}&chapter=${data?.chapter_id || ''}`}
-                  contentLang={contentLang}
-                />
+                <>
+                  <RelatedTopicsNav
+                    prevChapter={prevLink ? { title: prevLink.title, href: prevLink.path } : null}
+                    nextChapter={nextLink ? { title: nextLink.title, href: nextLink.path } : null}
+                    parentSubject={{ title: subjectName, href: basePath }}
+                  />
+                  <ContinueLearning
+                    prev={prevLink}
+                    next={nextLink}
+                    related={related}
+                    subjectName={subjectName}
+                    subjectPath={basePath}
+                    chatHref={`/chat?subject=${data?.subject_id || subjectSlug}&chapter=${data?.chapter_id || ''}`}
+                    contentLang={contentLang}
+                  />
+                </>
               );
             })()}
           </article>
