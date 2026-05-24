@@ -1,0 +1,32 @@
+# Direct dependencies for the backend application.
+# Run: pip-compile --generate-hashes --output-file=requirements.txt --strip-extras requirements.in
+
+aiohttp
+azure-identity
+azure-keyvault-secrets
+azure-search-documents
+beanie
+fastapi
+google-auth
+google-cloud-aiplatform
+gunicorn
+httpx
+passlib
+posthog
+pydantic
+pydantic-settings
+pyjwt
+pymongo
+pytest
+pytest-asyncio
+pytest-cov
+python-dateutil
+python-dotenv
+python-jose
+python-multipart
+razorpay
+resend
+sentry-sdk
+tenacity
+upstash-redis
+uvicorn
