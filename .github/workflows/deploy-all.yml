@@ -13,6 +13,14 @@ jobs:
   ci-checks:
     name: Quality Gates
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: test
+          MONGO_INITDB_ROOT_PASSWORD: test
+        ports:
+          - 27017:27017
     steps:
       - uses: actions/checkout@v6
 
@@ -35,7 +43,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install -r apps/backend/requirements.txt
+          sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt
           pip install pytest pytest-asyncio
 
       - name: Lint Edge
@@ -54,6 +63,7 @@ jobs:
         env:
           APP_ENV: test
           JWT_SECRET: test-secret-at-least-32-characters-long-for-ci
+          MONGODB_URI: mongodb://test:test@localhost:27017
 
       - name: Test Edge
         run: pnpm --filter syrabit-edge test
