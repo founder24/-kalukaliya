@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add custom robots.txt route in edge worker that allows AI crawlers, and create sitemap generation endpoints in the backend (sitemap index, sitemap-chapters.xml with deduplication, sitemap-subjects.xml, sitemap-static.xml)",
+  "status": "pending",
+  "steps": [
+    "Create apps/edge/src/routes/robots.ts that exports a handler returning a custom robots.txt response. Content: User-agent: * Allow: / Disallow: /api/ Disallow: /admin/ Disallow: /profile. Then specifically Allow GPTBot, Google-Extended, ClaudeBot, Applebot-Extended (no disallow). Block CCBot and Bytespider with Disallow: /. Include Sitemap: https://syrabit.ai/sitemap.xml directive.",
+    "In apps/edge/src/index.ts, add a route check BEFORE the /api/ block: if url.pathname === '/robots.txt', call the robots handler and return its response. This overrides Cloudflare's managed robots.txt.",
+    "Create apps/backend/app/api/v1/seo.py as a new FastAPI router with these endpoints: (a) GET /api/seo/sitemap.xml - sitemap index pointing to sub-sitemaps, (b) GET /api/seo/sitemap-subjects.xml - all subject landing pages, (c) GET /api/seo/sitemap-chapters.xml - all chapter pages with URL deduplication (use a set to track seen URLs), (d) GET /api/seo/sitemap-static.xml - static pages like /home, /pricing, /about, /library, /login, /signup.",
+    "The sitemap endpoints should query the same library-bundle endpoint the prerender uses (or directly query MongoDB collections if available) to enumerate all boards/classes/subjects/chapters. Use XML response with proper Content-Type: application/xml header.",
+    "The sitemap-chapters endpoint MUST deduplicate URLs - use a Python set() to track emitted loc values and skip duplicates.",
+    "Register the SEO router in apps/backend/app/main.py: app.include_router(seo.router, prefix='/api/seo', tags=['SEO']). Import it alongside the other v1 routers.",
+    "In apps/edge/src/index.ts, add a route for /sitemap.xml (and /sitemap-*.xml) that proxies to the backend /api/seo/ endpoints. This ensures sitemap.xml is served at the root domain.",
+    "Add a test file apps/backend/tests/test_seo.py with basic tests: (a) test sitemap index returns valid XML with sub-sitemap references, (b) test sitemap-static returns expected static routes, (c) test sitemap-chapters deduplicates URLs."
+  ],
+  "acceptance_criteria": [
+    "GET /robots.txt returns custom robots.txt with AI crawler allowances",
+    "CCBot and Bytespider are blocked in robots.txt",
+    "Sitemap: https://syrabit.ai/sitemap.xml directive is present in robots.txt",
+    "GET /api/seo/sitemap.xml returns valid XML sitemap index",
+    "GET /api/seo/sitemap-chapters.xml returns deduplicated chapter URLs",
+    "Edge worker TypeScript compiles with the new routes",
+    "Backend seo.py router is registered in main.py",
+    "Backend tests for SEO endpoints pass"
+  ],
+  "verification": [
+    "pnpm --filter syrabit-edge exec tsc --noEmit passes",
+    "pnpm --filter syrabit-edge test passes",
+    "pytest apps/backend/tests/test_seo.py --tb=short -q passes"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

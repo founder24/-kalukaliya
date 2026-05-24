@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Add IndexNow integration - a backend endpoint that submits new/updated URLs to Bing/Yandex IndexNow API, plus a script to trigger it during deployment",
+  "status": "pending",
+  "steps": [
+    "Create apps/backend/app/api/v1/indexnow.py with: (a) POST /api/v1/indexnow/submit endpoint that accepts a list of URLs and submits them to IndexNow API (https://api.indexnow.org/indexnow) using the IndexNow protocol. Require an API key stored in settings (INDEXNOW_API_KEY env var). (b) GET /api/v1/indexnow/key endpoint that serves the IndexNow key verification file content (IndexNow requires a .txt file at root with the key).",
+    "Add INDEXNOW_API_KEY: Optional[str] = None to apps/backend/app/config.py Settings class",
+    "Register the indexnow router in apps/backend/app/main.py: app.include_router(indexnow.router, prefix='/api/v1/indexnow', tags=['IndexNow'])",
+    "In apps/edge/src/index.ts, add a route for /{key}.txt that proxies to /api/v1/indexnow/key (the IndexNow key verification file). This should match a pattern like /[a-f0-9]{32}.txt",
+    "Create a script apps/frontend/scripts/indexnow-submit.mjs that: (a) reads the prerender-manifest.json from dist/ to get all prerendered URLs, (b) POSTs them in batches of 100 to the backend's /api/v1/indexnow/submit endpoint, (c) is designed to be called after deployment. Include env var INDEXNOW_BACKEND_URL for the target.",
+    "Add a step to .github/workflows/deploy-all.yml in the deploy-frontend job, AFTER the Cloudflare Pages deploy step, that runs the indexnow-submit.mjs script. Conditionally run only if INDEXNOW_API_KEY secret is set.",
+    "Add a test in apps/backend/tests/test_seo.py (or a new test_indexnow.py) that verifies the IndexNow submit endpoint validates input and the key endpoint returns the expected key."
+  ],
+  "acceptance_criteria": [
+    "POST /api/v1/indexnow/submit accepts a JSON body with urls array and submits to IndexNow",
+    "GET /api/v1/indexnow/key returns the key text for verification",
+    "INDEXNOW_API_KEY is configurable via environment variable",
+    "indexnow-submit.mjs script reads prerender-manifest.json and posts URLs in batches",
+    "deploy-all.yml includes IndexNow submission step after frontend deploy",
+    "Backend tests pass for IndexNow endpoints"
+  ],
+  "verification": [
+    "pytest apps/backend/ --tb=short -q passes",
+    "pnpm --filter syrabit-edge exec tsc --noEmit passes"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

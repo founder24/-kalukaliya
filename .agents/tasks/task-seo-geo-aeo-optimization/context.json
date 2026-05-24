@@ -1,0 +1,32 @@
+{
+  "project_type": "Monorepo: React SPA (Vite) frontend + FastAPI backend + Cloudflare Workers edge",
+  "language": "TypeScript (edge), JavaScript/JSX (frontend), Python (backend)",
+  "build_system": "pnpm workspaces (pnpm@10.26.1), Vite for frontend, wrangler for edge, pip for backend",
+  "test_framework": "vitest (frontend + edge), pytest (backend)",
+  "build_command": "pnpm --filter @workspace/syrabit run build (frontend); pnpm --filter syrabit-edge exec tsc --noEmit (edge lint)",
+  "test_command": "pnpm --filter @workspace/syrabit test (frontend); pnpm --filter syrabit-edge test (edge); pytest apps/backend/ --tb=short -q (backend)",
+  "verification_instructions": "1. Run edge TypeScript lint: pnpm --filter syrabit-edge exec tsc --noEmit. 2. Run edge tests: pnpm --filter syrabit-edge test. 3. Run backend tests: pytest apps/backend/ --tb=short -q. 4. Run frontend tests: pnpm --filter @workspace/syrabit test.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. corepack enable && corepack prepare pnpm@10.26.1 --activate. 2. pnpm install --no-frozen-lockfile. 3. pip install -r apps/backend/requirements.txt (with hash stripping for local dev).",
+  "environment_constraints": "OPEN_INTERNET mode - full network access. Node 22+. Python 3.11+. No Docker daemon guaranteed. Frontend build requires VITE_BACKEND_URL env var for prerender to reach backend.",
+  "contribution_requirements": "Must not break existing prerender pipeline. Build must complete within Cloudflare Pages 20-min limit. Edge worker types in apps/edge/src/env.d.ts must stay in sync with wrangler.toml bindings.",
+  "key_patterns": "Prerender scripts in apps/frontend/scripts/ use fetchJson with retry+backoff from _prerender-data.mjs. Edge worker uses typed Env interface. Backend uses FastAPI router pattern (app.include_router). JSON-LD is centralized in apps/frontend/src/lib/jsonld.js with buildSchemaForPageType/dedupeGraphTypes. PageMeta component manages head tags via useEffect (no react-helmet). Prerender injects HTML directly via rewriteHead() and injectShell().",
+  "relevant_files": [
+    "apps/frontend/scripts/prerender-routes.mjs",
+    "apps/frontend/scripts/prerender-all.mjs",
+    "apps/frontend/scripts/_prerender-data.mjs",
+    "apps/frontend/scripts/prerender-static-routes.mjs",
+    "apps/frontend/scripts/prerender-library.mjs",
+    "apps/frontend/src/lib/jsonld.js",
+    "apps/frontend/src/components/seo/PageMeta.jsx",
+    "apps/frontend/src/components/chapter/ChapterTopicGraph.jsx",
+    "apps/frontend/src/pages/ChapterPage.jsx",
+    "apps/edge/src/index.ts",
+    "apps/edge/src/env.d.ts",
+    "apps/edge/wrangler.toml",
+    "apps/backend/app/main.py",
+    "apps/backend/app/config.py",
+    ".github/workflows/deploy-all.yml"
+  ],
+  "directory_structure": "Monorepo root with pnpm workspaces. apps/frontend/ = React SPA with Vite (scripts/ has prerender pipeline, src/ has pages/components/lib). apps/edge/ = Cloudflare Worker (src/index.ts entry, src/middleware/, src/routes/). apps/backend/ = FastAPI (app/api/v1/ routers, app/services/, app/core/, tests/). .github/workflows/ = CI/CD."
+}

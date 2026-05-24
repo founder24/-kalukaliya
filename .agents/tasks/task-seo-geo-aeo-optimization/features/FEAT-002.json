@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Expand prerender configuration to cover all 1000+ routes and add ISR fallback in the edge worker for cache-on-demand rendering of non-prerendered routes",
+  "status": "pending",
+  "steps": [
+    "In apps/frontend/scripts/prerender-routes.mjs, change the default for PRERENDER_SUBJECTS_LIMIT from '50' to '999' (line ~62, the parseInt fallback string)",
+    "In apps/frontend/scripts/prerender-routes.mjs, change the default for PRERENDER_CHAPTERS_PER_SUBJECT from '6' to '999' (line ~65, the parseInt fallback string)",
+    "In apps/frontend/scripts/prerender-routes.mjs, change the PRERENDER_BUDGET_MS default from 12 * 60 * 1000 to 30 * 60 * 1000 (1800000ms = 30 min) in the envInt call (line ~85)",
+    "Update the file header comments in prerender-routes.mjs to reflect the new defaults (was 50/6, now 999/999)",
+    "In apps/frontend/scripts/build.mjs, update BUILD_BUDGET_MS default from 12 * 60_000 to 25 * 60_000 (25 min) to accommodate expanded prerender. Keep the hard ceiling at 30 min.",
+    "In apps/frontend/scripts/prerender-all.mjs, update STEP_BUDGET_MS default from 8 * 60_000 - 5_000 to 20 * 60_000 (20 min) so the prerender-routes child has enough time for 1000+ routes",
+    "Add a new KV namespace binding in apps/edge/wrangler.toml: ISR_CACHE_KV for caching ISR-rendered HTML pages (add to both top-level and env.production with placeholder IDs and a TODO comment for the real IDs)",
+    "Add the ISR_CACHE_KV binding to apps/edge/src/env.d.ts interface Env",
+    "Create a new file apps/edge/src/routes/isr.ts that implements the ISR fallback logic: (a) detect bot user-agents (Googlebot, Bingbot, GPTBot, ClaudeBot, PerplexityBot, Applebot, facebookexternalhit, Twitterbot, LinkedInBot), (b) for GET requests to content routes (pattern: /{board}/{class}/{subject} or /{board}/{class}/{subject}/{chapter}), check ISR_CACHE_KV first, if cache hit serve it with appropriate headers, if cache miss proxy to the backend's SSR endpoint, cache the result in KV with 1-hour TTL, and serve it. Non-bot requests pass through to the existing SPA behavior.",
+    "In apps/edge/src/index.ts, import the ISR handler and add it BEFORE the static assets routing and AFTER the /api/ routing block. For non-API GET requests that match content route patterns and come from bots, call the ISR handler. Non-bot or non-matching requests continue to existing behavior."
+  ],
+  "acceptance_criteria": [
+    "PRERENDER_SUBJECTS_LIMIT defaults to 999 unless env overridden",
+    "PRERENDER_CHAPTERS_PER_SUBJECT defaults to 999 unless env overridden",
+    "PRERENDER_BUDGET_MS defaults to 1800000 (30 min)",
+    "BUILD_BUDGET_MS defaults to 25 min",
+    "STEP_BUDGET_MS defaults to 20 min for prerender child",
+    "Edge worker compiles with new ISR_CACHE_KV binding",
+    "ISR route handler exports a function that returns Response or null",
+    "Bot detection covers: Googlebot, Bingbot, GPTBot, ClaudeBot, PerplexityBot, Applebot",
+    "ISR cache uses KV with TTL of 3600 seconds"
+  ],
+  "verification": [
+    "pnpm --filter syrabit-edge exec tsc --noEmit passes (TypeScript compiles)",
+    "pnpm --filter syrabit-edge test passes"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Enhance SEO meta tags in prerender with optimized title/description formulas, add BreadcrumbList and Course JSON-LD injection during prerender, and add RelatedTopics internal linking component rendered in prerender HTML",
+  "status": "pending",
+  "steps": [
+    "In apps/frontend/scripts/prerender-routes.mjs, update the title formula for chapter pages (around the renderOne call for chapters, line ~880) from `${chapterTitle} - ${subjName} | ${bName} ${cName} Notes` to use content_type awareness: for MCQ chapters use `${chapterTitle} MCQs with Answers | ${subjName} ${bName} ${cName}`, for regular notes use `${chapterTitle} - ${subjName} Notes | ${bName} ${cName}`. Detect content_type from chapterPayload.content_type field.",
+    "In apps/frontend/scripts/prerender-routes.mjs, update the title formula for subject pages (around the renderOne call for subjects, line ~820) to: `${subjectName} Notes & Study Material | ${boardName} ${className} | Syrabit.ai`",
+    "In apps/frontend/scripts/prerender-routes.mjs, update the meta description formula for chapters to be more keyword-rich: `${chapterTitle} notes, MCQs, and important questions for ${subjName} ${bName} ${cName}. Free AI-powered study material with detailed explanations.`",
+    "In apps/frontend/scripts/prerender-routes.mjs, inject BreadcrumbList JSON-LD into the prerendered HTML for both subject and chapter pages. Add a new helper function `injectBreadcrumbJsonLd(html, breadcrumbItems)` that creates a <script type='application/ld+json'> with schema.org BreadcrumbList. For subjects: Home > Library > Subject. For chapters: Home > Library > Subject > Chapter. Inject this alongside the existing injectFaqJsonLdIntoHead call.",
+    "In apps/frontend/scripts/prerender-routes.mjs, inject Course JSON-LD for subject pages. Add a helper `injectCourseJsonLd(html, { subjectName, boardName, className, canonical, chaptersCount })` that creates a schema.org Course with provider=Syrabit.ai, educationalLevel, numberOfCredits (chapter count), hasCourseInstance with courseMode='online'.",
+    "Create a new React component apps/frontend/src/components/chapter/RelatedTopicsNav.jsx that renders navigation links for: (a) prev/next chapter from sibling data, (b) link to parent subject page, (c) link to related MCQ page if content_type indicates notes (and vice versa). Use semantic HTML (<nav> with aria-label='Related content'). Use plain <a> tags with full href paths so links are crawlable in prerendered HTML (not react-router Link which requires JS).",
+    "In apps/frontend/src/pages/ChapterPage.jsx, import and render RelatedTopicsNav below the ChapterTopicGraph component. Pass it the chapter's sibling data (from the existing findSiblingChapters utility), parent subject path, and content type.",
+    "In apps/frontend/scripts/prerender-routes.mjs, ensure the RelatedTopicsNav component's HTML output is included in the SSR render pass. Since it's part of the React component tree that renderRoute already handles, verify it appears in the SSR output by checking that the chapter preload includes sibling chapter data. Add `siblings` field from the chapters list to the chapter preload data (pick prev/next chapters by order)."
+  ],
+  "acceptance_criteria": [
+    "Chapter page titles follow the formula: notes get '{Topic} - {Subject} Notes | {Board} {Class}', MCQs get '{Topic} MCQs with Answers | {Subject} {Board} {Class}'",
+    "Subject page titles follow: '{Subject} Notes & Study Material | {Board} {Class} | Syrabit.ai'",
+    "BreadcrumbList JSON-LD is injected in prerendered HTML for both subjects and chapters",
+    "Course JSON-LD is injected in prerendered HTML for subject pages",
+    "RelatedTopicsNav component renders with prev/next/parent links using <a> tags",
+    "ChapterPage imports and renders RelatedTopicsNav",
+    "Edge worker still compiles, frontend tests still pass"
+  ],
+  "verification": [
+    "pnpm --filter @workspace/syrabit test passes",
+    "pnpm --filter syrabit-edge exec tsc --noEmit passes"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Create feature branch and set up environment - install all dependencies and verify existing builds pass",
+  "status": "in_progress",
+  "steps": [
+    "Create a new branch named 'feat/seo-geo-aeo-optimization' from the current branch (fix/p0-issues-and-workflow-updates-v2)",
+    "Run corepack enable && corepack prepare pnpm@10.26.1 --activate to set up pnpm",
+    "Run pnpm install --no-frozen-lockfile at the repo root to install all Node dependencies",
+    "Run pnpm --filter syrabit-edge exec tsc --noEmit to verify edge worker compiles",
+    "Install Python dependencies: pip install -r apps/backend/requirements.txt (strip hashes first with sed)",
+    "Run pytest apps/backend/ --tb=short -q to verify backend tests pass",
+    "Run pnpm --filter syrabit-edge test to verify edge tests pass"
+  ],
+  "acceptance_criteria": [
+    "New branch 'feat/seo-geo-aeo-optimization' exists and is checked out",
+    "pnpm install completes without errors",
+    "Edge worker TypeScript compiles without errors",
+    "Backend pytest passes",
+    "Edge vitest passes"
+  ],
+  "verification": [
+    "git branch --show-current outputs feat/seo-geo-aeo-optimization",
+    "pnpm --filter syrabit-edge exec tsc --noEmit exits with code 0",
+    "pytest apps/backend/ --tb=short -q exits with code 0",
+    "pnpm --filter syrabit-edge test exits with code 0"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
