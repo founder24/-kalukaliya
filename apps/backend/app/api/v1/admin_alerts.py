@@ -2,6 +2,7 @@
 Admin Alerts Endpoints
 Alert CRUD, acknowledgment, cooldowns, alert settings.
 """
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException, Query
@@ -37,7 +38,13 @@ async def list_alerts(
             query["acknowledged"] = {"$ne": True}
 
         total = await db.alerts.count_documents(query)
-        docs = await db.alerts.find(query).sort("created_at", -1).skip(offset).limit(limit).to_list(length=limit)
+        docs = (
+            await db.alerts.find(query)
+            .sort("created_at", -1)
+            .skip(offset)
+            .limit(limit)
+            .to_list(length=limit)
+        )
         for doc in docs:
             doc["_id"] = str(doc["_id"])
         return {"alerts": docs, "total": total}
@@ -76,7 +83,12 @@ async def acknowledge_alert(alert_id: str, request: Request):
         db = client[settings.MONGODB_DB_NAME]
         result = await db.alerts.update_one(
             {"_id": ObjectId(alert_id)},
-            {"$set": {"acknowledged": True, "acknowledged_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {
+                    "acknowledged": True,
+                    "acknowledged_at": datetime.now(timezone.utc),
+                }
+            },
         )
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Alert not found")
@@ -101,7 +113,12 @@ async def acknowledge_all_alerts(request: Request):
         db = client[settings.MONGODB_DB_NAME]
         result = await db.alerts.update_many(
             {"acknowledged": {"$ne": True}},
-            {"$set": {"acknowledged": True, "acknowledged_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {
+                    "acknowledged": True,
+                    "acknowledged_at": datetime.now(timezone.utc),
+                }
+            },
         )
         return {"status": "ok", "acknowledged_count": result.modified_count}
     except Exception as e:
@@ -164,8 +181,12 @@ async def update_alert_settings(request: Request):
 
         # Allow-list of permitted fields
         allowed_fields = {
-            "email_enabled", "slack_enabled", "cooldown_minutes",
-            "webhook_url", "severity_threshold", "notify_on_resolve",
+            "email_enabled",
+            "slack_enabled",
+            "cooldown_minutes",
+            "webhook_url",
+            "severity_threshold",
+            "notify_on_resolve",
         }
         body = {k: v for k, v in body.items() if k in allowed_fields}
         if not body:
@@ -173,9 +194,7 @@ async def update_alert_settings(request: Request):
 
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        await db.alert_settings.update_one(
-            {"_id": "main"}, {"$set": body}, upsert=True
-        )
+        await db.alert_settings.update_one({"_id": "main"}, {"$set": body}, upsert=True)
         return {"status": "ok"}
     except HTTPException:
         raise

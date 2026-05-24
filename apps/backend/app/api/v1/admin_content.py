@@ -2,6 +2,7 @@
 Admin Content Management Endpoints
 Manage subjects, chapters, sitemap, and version history.
 """
+
 from fastapi import APIRouter, Request, HTTPException
 import logging
 
@@ -45,8 +46,16 @@ async def update_subject(subject_id: str, request: Request):
 
         # Allow-list of permitted fields
         allowed_fields = {
-            "name", "status", "description", "slug", "order",
-            "icon", "color", "chapters", "visible", "category",
+            "name",
+            "status",
+            "description",
+            "slug",
+            "order",
+            "icon",
+            "color",
+            "chapters",
+            "visible",
+            "category",
         }
         body = {k: v for k, v in body.items() if k in allowed_fields}
         if not body:
@@ -73,7 +82,11 @@ async def regenerate_sitemap(request: Request):
     """Placeholder: regenerate sitemap."""
     _validate_admin_session(request)
     await _csrf_check(request)
-    return {"status": "ok", "message": "Sitemap regeneration triggered", "source": "placeholder"}
+    return {
+        "status": "ok",
+        "message": "Sitemap regeneration triggered",
+        "source": "placeholder",
+    }
 
 
 @router.post("/content/auto-heal")
@@ -94,7 +107,11 @@ async def version_history(chapter_id: str, request: Request):
 
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        docs = await db.version_history.find({"chapter_id": chapter_id}).sort("created_at", -1).to_list(length=50)
+        docs = (
+            await db.version_history.find({"chapter_id": chapter_id})
+            .sort("created_at", -1)
+            .to_list(length=50)
+        )
         for doc in docs:
             doc["_id"] = str(doc["_id"])
         return {"versions": docs}

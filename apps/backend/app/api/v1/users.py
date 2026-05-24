@@ -41,8 +41,8 @@ async def get_current_user_profile(user: User = Depends(get_current_user)):
         plan=user.subscription_tier,
         monthly_message_count=user.monthly_message_count,
         preferred_language=user.preferred_language,
-        onboarding_done=getattr(user, 'onboarding_done', False),
-        ads_opt_out=getattr(user, 'ads_opt_out', False),
+        onboarding_done=getattr(user, "onboarding_done", False),
+        ads_opt_out=getattr(user, "ads_opt_out", False),
     )
 
 
@@ -69,10 +69,12 @@ async def delete_account(user: User = Depends(get_current_user)):
     """Delete user account (GDPR/DPDP compliance)"""
     # Cascade delete chats
     from app.models.chat import Chat
+
     await Chat.find({"user_id": str(user.id)}).delete()
 
     # Cascade delete feedback
     from app.models.feedback import ChatFeedback
+
     await ChatFeedback.find({"user_id": str(user.id)}).delete()
 
     # Delete user

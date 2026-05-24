@@ -2,6 +2,7 @@
 Admin Syra AI Assistant Endpoints
 AI chat, actions, preferences, briefing, STT/TTS, CMS suggestions.
 """
+
 from fastapi import APIRouter, HTTPException, Request
 import logging
 
@@ -31,9 +32,21 @@ async def syra_actions(request: Request):
     _validate_admin_session(request)
     return {
         "actions": [
-            {"id": "summarize_feedback", "label": "Summarize Recent Feedback", "description": "Get a summary of user feedback"},
-            {"id": "check_health", "label": "Check System Health", "description": "Run health checks on all services"},
-            {"id": "generate_report", "label": "Generate Report", "description": "Generate admin analytics report"},
+            {
+                "id": "summarize_feedback",
+                "label": "Summarize Recent Feedback",
+                "description": "Get a summary of user feedback",
+            },
+            {
+                "id": "check_health",
+                "label": "Check System Health",
+                "description": "Run health checks on all services",
+            },
+            {
+                "id": "generate_report",
+                "label": "Generate Report",
+                "description": "Generate admin analytics report",
+            },
         ],
         "source": "placeholder",
     }
@@ -85,8 +98,12 @@ async def update_syra_prefs(request: Request):
 
         # Allow-list of permitted fields
         allowed_fields = {
-            "voice_enabled", "auto_briefing", "theme",
-            "language", "response_style", "notifications_enabled",
+            "voice_enabled",
+            "auto_briefing",
+            "theme",
+            "language",
+            "response_style",
+            "notifications_enabled",
         }
         body = {k: v for k, v in body.items() if k in allowed_fields}
         if not body:
@@ -94,9 +111,7 @@ async def update_syra_prefs(request: Request):
 
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        await db.syra_prefs.update_one(
-            {"_id": "admin"}, {"$set": body}, upsert=True
-        )
+        await db.syra_prefs.update_one({"_id": "admin"}, {"$set": body}, upsert=True)
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error updating Syra prefs: {e}")

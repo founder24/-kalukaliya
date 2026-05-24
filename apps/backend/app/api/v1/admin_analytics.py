@@ -2,6 +2,7 @@
 Admin Analytics Endpoints
 Overview aggregation, time-series, revenue, and placeholder analytics.
 """
+
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request, Query

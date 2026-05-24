@@ -2,6 +2,7 @@
 Admin Security Endpoints
 Spoofed bots, blocked IPs, block trends, TTL monitor.
 """
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException
@@ -65,7 +66,13 @@ async def block_ip(request: Request):
         db = client[settings.MONGODB_DB_NAME]
         await db.blocked_ips.update_one(
             {"ip": ip},
-            {"$set": {"ip": ip, "blocked_at": datetime.now(timezone.utc), "reason": body.get("reason", "")}},
+            {
+                "$set": {
+                    "ip": ip,
+                    "blocked_at": datetime.now(timezone.utc),
+                    "reason": body.get("reason", ""),
+                }
+            },
             upsert=True,
         )
         return {"status": "ok", "ip": ip}

@@ -7,7 +7,7 @@ import uuid
 
 class Message(BaseModel):
     """Chat Message Model"""
-    
+
     role: Literal["user", "assistant", "system"]
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -18,7 +18,7 @@ class Message(BaseModel):
 
 class RAGSource(BaseModel):
     """RAG Source Citation"""
-    
+
     doc_id: str
     title: str
     score: float
@@ -27,7 +27,7 @@ class RAGSource(BaseModel):
 
 class Chat(Document):
     """Chat Session Model - MongoDB Schema"""
-    
+
     user_id: Optional[str] = None  # References User._id
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: Optional[str] = None
@@ -43,8 +43,14 @@ class Chat(Document):
             [("updated_at", -1)],
         ]
 
-    def add_message(self, role: str, content: str, model_used: str = None, 
-                    latency_ms: int = None, rag_sources: List[dict] = None):
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        model_used: str = None,
+        latency_ms: int = None,
+        rag_sources: List[dict] = None,
+    ):
         """Add a message to the chat"""
         message = {
             "role": role,
@@ -53,7 +59,7 @@ class Chat(Document):
             "model_used": model_used,
             "latency_ms": latency_ms,
             "rag_sources": rag_sources or [],
-            "feedback": {"thumbs_up": None}
+            "feedback": {"thumbs_up": None},
         }
         self.messages.append(message)
         self.updated_at = datetime.utcnow()

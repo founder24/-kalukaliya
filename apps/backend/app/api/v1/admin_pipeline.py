@@ -2,6 +2,7 @@
 Admin Pipeline Endpoints
 Content generation pipeline, job status, D1 sync.
 """
+
 from fastapi import APIRouter, Request
 import logging
 

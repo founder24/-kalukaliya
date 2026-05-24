@@ -5,7 +5,7 @@ from pydantic import Field
 
 class AuditLog(Document):
     """Audit Log Model - Security and Compliance Tracking"""
-    
+
     user_id: str
     action: str  # login, logout, chat, subscription_change, etc.
     resource_type: str  # user, chat, subscription

@@ -13,10 +13,21 @@ from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
 from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
 from app.api.v1 import (
-    admin_dashboard, admin_content, admin_users, admin_conversations,
-    admin_seo, admin_analytics, admin_settings, admin_notifications,
-    admin_ai, admin_revenue, admin_security, admin_alerts,
-    admin_logs, admin_syra, admin_pipeline,
+    admin_dashboard,
+    admin_content,
+    admin_users,
+    admin_conversations,
+    admin_seo,
+    admin_analytics,
+    admin_settings,
+    admin_notifications,
+    admin_ai,
+    admin_revenue,
+    admin_security,
+    admin_alerts,
+    admin_logs,
+    admin_syra,
+    admin_pipeline,
 )
 from app.api.webhooks import razorpay
 
@@ -31,14 +42,18 @@ async def lifespan(app: FastAPI):
         await init_mongo()
         logger.info("MongoDB initialized successfully")
     except Exception as e:
-        logger.warning(f"MongoDB initialization failed (expected in local dev without DB): {e}")
-    
+        logger.warning(
+            f"MongoDB initialization failed (expected in local dev without DB): {e}"
+        )
+
     try:
         await init_redis()
         logger.info("Redis initialized successfully")
     except Exception as e:
-        logger.warning(f"Redis initialization failed (expected in local dev without DB): {e}")
-    
+        logger.warning(
+            f"Redis initialization failed (expected in local dev without DB): {e}"
+        )
+
     if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
         logger.warning(
             "WARNING: Using default JWT_SECRET. "
@@ -57,23 +72,23 @@ async def lifespan(app: FastAPI):
             ],
         )
         logger.info("Sentry initialized")
-    
+
     # Initialize PostHog
     app.state.posthog = None
     if settings.POSTHOG_API_KEY:
         app.state.posthog = Posthog(
-            project_api_key=settings.POSTHOG_API_KEY,
-            host=settings.POSTHOG_HOST
+            project_api_key=settings.POSTHOG_API_KEY, host=settings.POSTHOG_HOST
         )
         logger.info("PostHog initialized")
-    
+
     yield
-    
+
     # Shutdown
     from app.services.ai.vertex_client import vertex_client
     from app.services.ai.sarvam_client import sarvam_client
     from app.services.ai.embedder import close_http_client
     from app.services.payment.razorpay_client import razorpay_client
+
     await vertex_client.close()
     await sarvam_client.close()
     await razorpay_client.close()
@@ -86,6 +101,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Factory function to create FastAPI application"""
     from app.core.logging_config import setup_logging
+
     setup_logging()
 
     app = FastAPI(
@@ -101,7 +117,14 @@ def create_app() -> FastAPI:
         allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Razorpay-Signature", "Accept", "Origin"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Request-ID",
+            "X-Razorpay-Signature",
+            "Accept",
+            "Origin",
+        ],
     )
 
     # CSRF Origin Validation Middleware
@@ -111,13 +134,15 @@ def create_app() -> FastAPI:
         if request.method in ("POST", "PUT", "DELETE"):
             origin = request.headers.get("origin")
             # Skip for health checks
-            if request.url.path.startswith("/health") or request.url.path.startswith("/api/health"):
+            if request.url.path.startswith("/health") or request.url.path.startswith(
+                "/api/health"
+            ):
                 return await call_next(request)
             if origin and origin not in settings.allowed_origins_list:
                 from fastapi.responses import JSONResponse
+
                 return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Origin not allowed"}
+                    status_code=403, content={"detail": "Origin not allowed"}
                 )
         return await call_next(request)
 
@@ -128,7 +153,9 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
         response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
@@ -152,46 +179,76 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         elapsed_ms = int((time.time() - start_time) * 1000)
 
-        logger.info("request_completed", extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-            "latency_ms": elapsed_ms,
-            "request_id": request_id,
-        })
+        logger.info(
+            "request_completed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "latency_ms": elapsed_ms,
+                "request_id": request_id,
+            },
+        )
 
         response.headers["X-Request-ID"] = request_id
         return response
 
     # Initialize OpenTelemetry (no-op if packages not installed)
     from app.core.telemetry import init_telemetry
+
     init_telemetry(app)
 
     # Register Routes
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-    app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
+    app.include_router(
+        subscription.router, prefix="/api/v1/subscription", tags=["Subscription"]
+    )
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
-    app.include_router(health.router, prefix="/api/health", tags=["Health"])  # Legacy probe path
-    app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
+    app.include_router(
+        health.router, prefix="/api/health", tags=["Health"]
+    )  # Legacy probe path
+    app.include_router(
+        feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"]
+    )
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
-    app.include_router(admin_dashboard.router, prefix="/api/v1/admin", tags=["Admin Dashboard"])
-    app.include_router(admin_content.router, prefix="/api/v1/admin", tags=["Admin Content"])
+    app.include_router(
+        admin_dashboard.router, prefix="/api/v1/admin", tags=["Admin Dashboard"]
+    )
+    app.include_router(
+        admin_content.router, prefix="/api/v1/admin", tags=["Admin Content"]
+    )
     app.include_router(admin_users.router, prefix="/api/v1/admin", tags=["Admin Users"])
-    app.include_router(admin_conversations.router, prefix="/api/v1/admin", tags=["Admin Conversations"])
+    app.include_router(
+        admin_conversations.router, prefix="/api/v1/admin", tags=["Admin Conversations"]
+    )
     app.include_router(admin_seo.router, prefix="/api/v1/admin", tags=["Admin SEO"])
-    app.include_router(admin_analytics.router, prefix="/api/v1/admin", tags=["Admin Analytics"])
-    app.include_router(admin_settings.router, prefix="/api/v1/admin", tags=["Admin Settings"])
-    app.include_router(admin_notifications.router, prefix="/api/v1/admin", tags=["Admin Notifications"])
+    app.include_router(
+        admin_analytics.router, prefix="/api/v1/admin", tags=["Admin Analytics"]
+    )
+    app.include_router(
+        admin_settings.router, prefix="/api/v1/admin", tags=["Admin Settings"]
+    )
+    app.include_router(
+        admin_notifications.router, prefix="/api/v1/admin", tags=["Admin Notifications"]
+    )
     app.include_router(admin_ai.router, prefix="/api/v1/admin", tags=["Admin AI"])
-    app.include_router(admin_revenue.router, prefix="/api/v1/admin", tags=["Admin Revenue"])
-    app.include_router(admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"])
-    app.include_router(admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"])
+    app.include_router(
+        admin_revenue.router, prefix="/api/v1/admin", tags=["Admin Revenue"]
+    )
+    app.include_router(
+        admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
+    )
+    app.include_router(
+        admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"]
+    )
     app.include_router(admin_logs.router, prefix="/api/v1/admin", tags=["Admin Logs"])
     app.include_router(admin_syra.router, prefix="/api/v1/admin", tags=["Admin Syra"])
-    app.include_router(admin_pipeline.router, prefix="/api/v1/admin", tags=["Admin Pipeline"])
+    app.include_router(
+        admin_pipeline.router, prefix="/api/v1/admin", tags=["Admin Pipeline"]
+    )
 
     return app
 

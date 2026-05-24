@@ -2,10 +2,10 @@
 Admin Dashboard Endpoints
 Aggregated stats, health checks, and overview metrics.
 """
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 import logging
 
 from app.api.v1.admin import _validate_admin_session
@@ -57,6 +57,7 @@ async def admin_dashboard(request: Request):
         system_health = {"status": "ok", "checks": {}}
         try:
             from app.api.v1.health import mongo_ping, redis_ping
+
             system_health["checks"]["mongodb"] = await mongo_ping()
             system_health["checks"]["redis"] = await redis_ping()
         except Exception:
@@ -77,7 +78,12 @@ async def admin_dashboard(request: Request):
             "latency": {"daily": [], "source": "placeholder"},
             "token_spend": {"daily": [], "totals": {}, "source": "placeholder"},
             "top_queries": {"top_queries": [], "source": "placeholder"},
-            "chat_speedups": {"daily": [], "warm_runs": [], "totals": {}, "source": "placeholder"},
+            "chat_speedups": {
+                "daily": [],
+                "warm_runs": [],
+                "totals": {},
+                "source": "placeholder",
+            },
             "vector_stats": {"pages": {}, "chapters": {}, "source": "placeholder"},
         }
     except Exception as e:
@@ -97,7 +103,12 @@ async def admin_dashboard(request: Request):
             "latency": {"daily": [], "source": "placeholder"},
             "token_spend": {"daily": [], "totals": {}, "source": "placeholder"},
             "top_queries": {"top_queries": [], "source": "placeholder"},
-            "chat_speedups": {"daily": [], "warm_runs": [], "totals": {}, "source": "placeholder"},
+            "chat_speedups": {
+                "daily": [],
+                "warm_runs": [],
+                "totals": {},
+                "source": "placeholder",
+            },
             "vector_stats": {"pages": {}, "chapters": {}, "source": "placeholder"},
         }
 
@@ -109,6 +120,7 @@ async def admin_health(request: Request):
     checks = {}
     try:
         from app.api.v1.health import mongo_ping, redis_ping
+
         checks["mongodb"] = await mongo_ping()
         checks["redis"] = await redis_ping()
     except Exception as e:

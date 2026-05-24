@@ -17,7 +17,7 @@ class AzureSearchService:
     """
     Azure Cognitive Search Service - Hybrid Search with Semantic Reranking
     Provides BM25 + Vector search with neural reranking for optimal RAG quality
-    
+
     Features:
     - Native async client (no thread pool executor)
     - Graceful degradation to vector-only if semantic ranker fails
@@ -32,7 +32,14 @@ class AzureSearchService:
             credential=AzureKeyCredential(settings.AZURE_SEARCH_QUERY_KEY),
         )
 
-    async def _async_search(self, query: str, vector_query, user_tier: str | None, limit: int, semantic: bool):
+    async def _async_search(
+        self,
+        query: str,
+        vector_query,
+        user_tier: str | None,
+        limit: int,
+        semantic: bool,
+    ):
         """Async search using the native async client."""
         filter_expr = f"tier_access eq '{user_tier}'" if user_tier else None
         if semantic:
@@ -66,13 +73,13 @@ class AzureSearchService:
         """
         Executes Hybrid Search (Keyword + Vector) with Semantic Reranking.
         Falls back to vector-only search if semantic ranker is unavailable.
-        
+
         Args:
             query: User's search query text
             embedding: 1536-dimensional vector from embedding model
             user_tier: 'free' or 'pro' for content filtering
             limit: Number of results to return (default: 5)
-            
+
         Returns:
             List of context chunks with scores and metadata
         """
@@ -87,13 +94,17 @@ class AzureSearchService:
 
             # 2. Execute Hybrid Search with Semantic Reranking (native async)
             try:
-                results = await self._async_search(query, vector_query, user_tier, limit, True)
+                results = await self._async_search(
+                    query, vector_query, user_tier, limit, True
+                )
                 logger.info(f"Using SEMANTIC search for query '{query[:20]}...'")
             except AzureError as e:
                 logger.warning(
                     f"Semantic ranker failed ({str(e)}), falling back to VECTOR-ONLY search"
                 )
-                results = await self._async_search(query, vector_query, user_tier, limit, False)
+                results = await self._async_search(
+                    query, vector_query, user_tier, limit, False
+                )
 
             context_chunks = []
             for doc in results:
@@ -110,11 +121,17 @@ class AzureSearchService:
 
             # RAG-C2: Fallback for empty tier-filtered results
             if not context_chunks and user_tier:
-                logger.warning(f"No results with tier filter '{user_tier}', retrying without filter")
+                logger.warning(
+                    f"No results with tier filter '{user_tier}', retrying without filter"
+                )
                 try:
-                    fallback_results = await self._async_search(query, vector_query, None, limit, True)
+                    fallback_results = await self._async_search(
+                        query, vector_query, None, limit, True
+                    )
                 except AzureError:
-                    fallback_results = await self._async_search(query, vector_query, None, limit, False)
+                    fallback_results = await self._async_search(
+                        query, vector_query, None, limit, False
+                    )
 
                 for doc in fallback_results:
                     chunk = {
@@ -129,7 +146,9 @@ class AzureSearchService:
                     context_chunks.append(chunk)
 
                 if context_chunks:
-                    logger.info(f"Found {len(context_chunks)} results without tier filter")
+                    logger.info(
+                        f"Found {len(context_chunks)} results without tier filter"
+                    )
 
             logger.info(
                 f"Retrieved {len(context_chunks)} chunks for query '{query[:20]}...'"

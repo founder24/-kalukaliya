@@ -2,6 +2,7 @@
 Admin SEO Endpoints
 All endpoints return placeholder/mock data with source:placeholder field.
 """
+
 from fastapi import APIRouter, Request
 import logging
 

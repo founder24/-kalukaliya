@@ -2,6 +2,7 @@
 Admin Logs Endpoints
 Structured log viewing, trace, status, management.
 """
+
 from fastapi import APIRouter, Request, Query
 from typing import Optional
 import logging
@@ -36,7 +37,12 @@ async def log_trace(correlation_id: str, request: Request):
 async def logs_status(request: Request):
     """Return logging system status."""
     _validate_admin_session(request)
-    return {"active": True, "level": "INFO", "destination": "stdout", "source": "placeholder"}
+    return {
+        "active": True,
+        "level": "INFO",
+        "destination": "stdout",
+        "source": "placeholder",
+    }
 
 
 @router.post("/logs/pause")

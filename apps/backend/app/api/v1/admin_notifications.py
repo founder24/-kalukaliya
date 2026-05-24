@@ -2,6 +2,7 @@
 Admin Notifications Endpoints
 Notification CRUD, triggers, preferences, push stats, IndexNow.
 """
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException
@@ -106,8 +107,14 @@ async def update_trigger(trigger_id: str, request: Request):
 
         # Allow-list of permitted fields
         allowed_fields = {
-            "name", "event_type", "condition", "action", "enabled",
-            "cooldown_minutes", "description", "priority",
+            "name",
+            "event_type",
+            "condition",
+            "action",
+            "enabled",
+            "cooldown_minutes",
+            "description",
+            "priority",
         }
         body = {k: v for k, v in body.items() if k in allowed_fields}
         if not body:
@@ -140,7 +147,9 @@ async def delete_trigger(trigger_id: str, request: Request):
 
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        result = await db.notification_triggers.delete_one({"_id": ObjectId(trigger_id)})
+        result = await db.notification_triggers.delete_one(
+            {"_id": ObjectId(trigger_id)}
+        )
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Trigger not found")
         return {"status": "ok"}

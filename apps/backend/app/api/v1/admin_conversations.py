@@ -2,8 +2,8 @@
 Admin Conversations Endpoints
 View chat sessions, extract FAQs, sentiment analysis, flagging.
 """
+
 from fastapi import APIRouter, Request, HTTPException, Query
-from typing import Optional
 import logging
 
 from app.api.v1.admin import _validate_admin_session, _csrf_check
@@ -26,7 +26,13 @@ async def list_conversations(
         from app.models.user import User
         from bson import ObjectId
 
-        chats = await Chat.find_all().skip(offset).limit(limit).sort("-updated_at").to_list()
+        chats = (
+            await Chat.find_all()
+            .skip(offset)
+            .limit(limit)
+            .sort("-updated_at")
+            .to_list()
+        )
 
         # Batch user lookups: collect unique user_ids, query once with $in
         user_ids = set()
@@ -56,18 +62,24 @@ async def list_conversations(
                 user_plan = user.subscription_tier
                 is_anonymous = user.auth_provider == "anonymous"
 
-            conversations.append({
-                "id": str(chat.id),
-                "title": chat.title,
-                "user_name": user_name,
-                "user_email": user_email,
-                "user_plan": user_plan,
-                "is_anonymous": is_anonymous,
-                "messages": chat.messages,
-                "created_at": chat.created_at.isoformat() if chat.created_at else None,
-                "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
-                "subject_name": None,
-            })
+            conversations.append(
+                {
+                    "id": str(chat.id),
+                    "title": chat.title,
+                    "user_name": user_name,
+                    "user_email": user_email,
+                    "user_plan": user_plan,
+                    "is_anonymous": is_anonymous,
+                    "messages": chat.messages,
+                    "created_at": chat.created_at.isoformat()
+                    if chat.created_at
+                    else None,
+                    "updated_at": chat.updated_at.isoformat()
+                    if chat.updated_at
+                    else None,
+                    "subject_name": None,
+                }
+            )
 
         return conversations
     except Exception as e:

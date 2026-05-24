@@ -2,6 +2,7 @@
 Admin Settings Endpoints
 Site settings, diagnostics, roadmap, plan config, API config, activity log, cache.
 """
+
 from datetime import datetime, timezone
 import sys
 
@@ -58,9 +59,17 @@ async def update_settings(request: Request):
 
         # Allow-list of permitted fields
         allowed_fields = {
-            "registrations_open", "maintenance_mode", "app_name", "tagline",
-            "crawl_coverage_red", "crawl_coverage_yellow", "bot_missing_days",
-            "support_email", "analytics_enabled", "theme", "logo_url",
+            "registrations_open",
+            "maintenance_mode",
+            "app_name",
+            "tagline",
+            "crawl_coverage_red",
+            "crawl_coverage_yellow",
+            "bot_missing_days",
+            "support_email",
+            "analytics_enabled",
+            "theme",
+            "logo_url",
         }
         body = {k: v for k, v in body.items() if k in allowed_fields}
         if not body:
@@ -153,7 +162,14 @@ async def update_roadmap_item(item_id: str, request: Request):
         body = await request.json()
 
         # Allow-list of permitted fields
-        allowed_fields = {"title", "description", "status", "priority", "eta", "category"}
+        allowed_fields = {
+            "title",
+            "description",
+            "status",
+            "priority",
+            "eta",
+            "category",
+        }
         body = {k: v for k, v in body.items() if k in allowed_fields}
         if not body:
             raise HTTPException(status_code=400, detail="No valid fields provided")

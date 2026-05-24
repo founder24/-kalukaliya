@@ -5,14 +5,18 @@ import logging
 from typing import AsyncGenerator
 
 from app.config import settings
-from app.core.circuit_breaker import vertex_circuit_breaker, CircuitBreakerError, CircuitState
+from app.core.circuit_breaker import (
+    vertex_circuit_breaker,
+    CircuitBreakerError,
+    CircuitState,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class VertexAIClient:
     """Vertex AI Gemini Client for English content"""
-    
+
     def __init__(self):
         self.project_id = settings.VERTEX_PROJECT_ID
         self.location = settings.VERTEX_LOCATION
@@ -31,39 +35,35 @@ class VertexAIClient:
         await self._client.aclose()
 
     async def generate(
-        self,
-        system_prompt: str,
-        user_message: str,
-        stream: bool = False
+        self, system_prompt: str, user_message: str, stream: bool = False
     ) -> str:
         """Generate response using Gemini"""
         try:
+
             async def _do_generate():
                 # Build prompt
                 full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-                
+
                 response = await self._client.post(
                     f"{self.base_url}/{self.model}:generateContent",
                     headers={
                         "Authorization": f"Bearer {await self._get_access_token()}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
-                        "contents": [{
-                            "parts": [{"text": full_prompt}]
-                        }],
+                        "contents": [{"parts": [{"text": full_prompt}]}],
                         "generationConfig": {
                             "temperature": 0.7,
                             "maxOutputTokens": 1024,
-                        }
-                    }
+                        },
+                    },
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # Extract response text
-                if 'candidates' in data and len(data['candidates']) > 0:
-                    return data['candidates'][0]['content']['parts'][0]['text']
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
                 return "I couldn't generate a response. Please try again."
 
             result = await vertex_circuit_breaker.call(_do_generate)
@@ -92,7 +92,7 @@ class VertexAIClient:
 
             creds = service_account.Credentials.from_service_account_info(
                 settings.google_credentials,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
 
             # Refresh token (blocking call wrapped in executor)
@@ -136,7 +136,9 @@ class VertexAIClient:
         }
 
         try:
-            async with self._client.stream("POST", url, headers=headers, json=payload) as resp:
+            async with self._client.stream(
+                "POST", url, headers=headers, json=payload
+            ) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
@@ -164,7 +166,9 @@ class VertexAIClient:
             vertex_circuit_breaker._on_failure()
             if isinstance(e, httpx.HTTPStatusError):
                 logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
-                raise RuntimeError(f"Vertex AI stream failed: HTTP {e.response.status_code}")
+                raise RuntimeError(
+                    f"Vertex AI stream failed: HTTP {e.response.status_code}"
+                )
             logger.error(f"Vertex AI stream error: {str(e)}")
             raise RuntimeError(f"Vertex AI stream failed: {e}")
 
@@ -208,14 +212,9 @@ vertex_client = VertexAIClient()
 
 
 async def generate_with_vertex(
-    system_prompt: str,
-    user_message: str,
-    model: str = None,
-    stream: bool = False
+    system_prompt: str, user_message: str, model: str = None, stream: bool = False
 ) -> str:
     """Convenience function for Vertex AI generation"""
     return await vertex_client.generate(
-        system_prompt=system_prompt,
-        user_message=user_message,
-        stream=stream
+        system_prompt=system_prompt, user_message=user_message, stream=stream
     )

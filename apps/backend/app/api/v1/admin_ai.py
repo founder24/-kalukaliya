@@ -2,6 +2,7 @@
 Admin AI Endpoints
 Vertex AI health, intelligence overview, KV/R2/CI health, GA4.
 """
+
 from fastapi import APIRouter, Request
 import logging
 
@@ -19,7 +20,9 @@ async def vertex_health(request: Request):
     try:
         from app.config import settings
 
-        configured = bool(settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+        configured = bool(
+            settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
+        )
         return {
             "status": "healthy" if configured else "not_configured",
             "project_id": settings.VERTEX_PROJECT_ID,
@@ -45,7 +48,9 @@ async def intelligence_overview(request: Request):
     try:
         from app.config import settings
 
-        vertex_ok = bool(settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+        vertex_ok = bool(
+            settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
+        )
         sarvam_ok = bool(settings.SARVAM_API_KEY)
 
         return {
@@ -58,13 +63,19 @@ async def intelligence_overview(request: Request):
                 "model": settings.SARVAM_MODEL,
             },
             "embedder": {
-                "status": "configured" if settings.AZURE_SEARCH_ENDPOINT else "not_configured",
+                "status": "configured"
+                if settings.AZURE_SEARCH_ENDPOINT
+                else "not_configured",
                 "model": settings.AZURE_EMBEDDING_MODEL,
             },
         }
     except Exception as e:
         logger.error(f"Intelligence overview error: {e}")
-        return {"vertex_ai": {"status": "error"}, "sarvam_ai": {"status": "error"}, "embedder": {"status": "error"}}
+        return {
+            "vertex_ai": {"status": "error"},
+            "sarvam_ai": {"status": "error"},
+            "embedder": {"status": "error"},
+        }
 
 
 @router.get("/kv-health")

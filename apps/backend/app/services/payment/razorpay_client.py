@@ -9,14 +9,16 @@ logger = logging.getLogger(__name__)
 
 class RazorpayClient:
     """Razorpay Payment Gateway Client"""
-    
+
     def __init__(self):
         self.key_id = settings.RAZORPAY_KEY_ID
         self.key_secret = settings.RAZORPAY_KEY_SECRET
         self.base_url = "https://api.razorpay.com/v1"
         self._client = httpx.AsyncClient(
             timeout=30.0,
-            auth=(self.key_id, self.key_secret) if self.key_id and self.key_secret else None,
+            auth=(self.key_id, self.key_secret)
+            if self.key_id and self.key_secret
+            else None,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
 
@@ -39,19 +41,19 @@ class RazorpayClient:
                     },
                     "notes": {
                         "user_id": str(user.id),
-                    }
-                }
+                    },
+                },
             )
             response.raise_for_status()
             data = response.json()
-            
+
             return {
                 "order_id": data["id"],
                 "subscription_id": data["id"],
                 "amount": data["plan"]["amount"],
                 "currency": data["plan"]["currency"],
             }
-                
+
         except httpx.HTTPStatusError as e:
             logger.error(f"Razorpay API error: {e.response.status_code}")
             raise RuntimeError(f"Payment gateway error: {e.response.status_code}")
@@ -67,7 +69,7 @@ class RazorpayClient:
             )
             response.raise_for_status()
             return True
-                
+
         except Exception as e:
             logger.error(f"Failed to cancel subscription: {e}")
             raise RuntimeError(f"Cancellation failed: {e}")

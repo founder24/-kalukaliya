@@ -2,9 +2,9 @@
 Tests for admin panel endpoints.
 Validates auth guards, route registration, and response shapes.
 """
+
 import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, AsyncMock, MagicMock
 
 from httpx import AsyncClient
 from jose import jwt
@@ -94,9 +94,7 @@ async def test_seo_pipeline_status_requires_auth(client: AsyncClient):
 async def test_expired_cookie_returns_401(client: AsyncClient):
     """Expired admin cookie should return 401."""
     cookies = _make_expired_cookie()
-    response = await client.get(
-        "/api/v1/admin/dashboard", cookies=cookies
-    )
+    response = await client.get("/api/v1/admin/dashboard", cookies=cookies)
     assert response.status_code == 401
 
 
@@ -114,11 +112,22 @@ async def test_dashboard_response_shape(client: AsyncClient):
     data = response.json()
     # The endpoint gracefully handles DB errors and returns fallback values
     expected_keys = [
-        "total_users", "active_today", "total_messages",
-        "messages_today", "revenue_total", "revenue_month",
-        "pro_users", "free_users", "system_health",
-        "signups_today", "chat_fallbacks", "latency",
-        "token_spend", "top_queries", "chat_speedups", "vector_stats",
+        "total_users",
+        "active_today",
+        "total_messages",
+        "messages_today",
+        "revenue_total",
+        "revenue_month",
+        "pro_users",
+        "free_users",
+        "system_health",
+        "signups_today",
+        "chat_fallbacks",
+        "latency",
+        "token_spend",
+        "top_queries",
+        "chat_speedups",
+        "vector_stats",
     ]
     for key in expected_keys:
         assert key in data, f"Missing key: {key}"
@@ -167,8 +176,11 @@ async def test_analytics_response_shape(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     expected_keys = [
-        "total_users", "total_chats", "total_messages",
-        "avg_messages_per_chat", "feedback_stats",
+        "total_users",
+        "total_chats",
+        "total_messages",
+        "avg_messages_per_chat",
+        "feedback_stats",
     ]
     for key in expected_keys:
         assert key in data, f"Missing key: {key}"

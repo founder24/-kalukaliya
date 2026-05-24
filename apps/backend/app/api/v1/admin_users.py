@@ -2,6 +2,7 @@
 Admin User Management Endpoints
 Paginated user list, status/plan/role/credits management.
 """
+
 from fastapi import APIRouter, Request, HTTPException, Query
 from typing import Optional
 import logging
@@ -43,17 +44,19 @@ async def list_users(
         for u in users_docs:
             tier = u.subscription_tier or "free"
             credits_limit = 999999 if tier == "pro" else 30
-            users.append({
-                "id": str(u.id),
-                "name": u.name,
-                "email": u.email,
-                "plan": tier,
-                "status": getattr(u, "account_status", "active"),
-                "role": u.role or "student",
-                "credits_used": u.monthly_message_count,
-                "credits_limit": credits_limit,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            })
+            users.append(
+                {
+                    "id": str(u.id),
+                    "name": u.name,
+                    "email": u.email,
+                    "plan": tier,
+                    "status": getattr(u, "account_status", "active"),
+                    "role": u.role or "student",
+                    "credits_used": u.monthly_message_count,
+                    "credits_limit": credits_limit,
+                    "created_at": u.created_at.isoformat() if u.created_at else None,
+                }
+            )
 
         return {"users": users, "total": total}
     except Exception as e:
@@ -150,12 +153,14 @@ async def update_user_role(user_id: str, request: Request):
 
         # Audit log for admin role grants
         if role == "admin":
-            await db.audit_log.insert_one({
-                "action": "admin_role_granted",
-                "target_user_id": user_id,
-                "granted_by": payload.get("sub"),
-                "timestamp": datetime.now(timezone.utc),
-            })
+            await db.audit_log.insert_one(
+                {
+                    "action": "admin_role_granted",
+                    "target_user_id": user_id,
+                    "granted_by": payload.get("sub"),
+                    "timestamp": datetime.now(timezone.utc),
+                }
+            )
 
         return {"status": "ok", "new_role": role}
     except HTTPException:
@@ -190,7 +195,9 @@ async def update_user_credits(user_id: str, request: Request):
         elif action == "add":
             # "add" credits means reducing monthly_message_count (used count).
             # Guard against driving the counter negative.
-            user_doc = await db.users.find_one({"_id": ObjectId(user_id)}, {"monthly_message_count": 1})
+            user_doc = await db.users.find_one(
+                {"_id": ObjectId(user_id)}, {"monthly_message_count": 1}
+            )
             if user_doc is None:
                 raise HTTPException(status_code=404, detail="User not found")
             current_count = user_doc.get("monthly_message_count", 0)

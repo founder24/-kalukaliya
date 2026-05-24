@@ -2,6 +2,7 @@
 Admin Revenue/Monetization Endpoints
 Subscription overview, referral config, ads management.
 """
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException
