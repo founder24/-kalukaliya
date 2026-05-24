@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "SEC-05: Improve prompt injection filters with layered approach + SEC-07: Replace synchronous DNS with async resolution in is_safe_url",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Enhance sanitize_user_input in apps/backend/app/core/security.py with a layered prompt injection defense: (a) Normalize Unicode homoglyphs before pattern matching - strip zero-width characters (U+200B, U+200C, U+200D, U+FEFF) and normalize with unicodedata.normalize('NFKC', text). (b) Expand injection patterns to be case-insensitive with whitespace flexibility (use \\s* between key words). (c) Add new patterns: 'ASSISTANT:', 'Human:', 'AI:', 'END OF PROMPT', '<\\|system\\|>', '<\\|user\\|>', 'DAN mode', 'jailbreak', 'disregard', 'override.*instructions'. (d) Add a scoring system: if 2+ pattern matches are found, reject the input entirely (return empty string or raise). (e) Preserve the existing max_length=4000 cap and control character removal.",
     "Step 2 - Replace synchronous DNS resolution in is_safe_url: Make is_safe_url an async function `async def is_safe_url(...)`. Replace `socket.getaddrinfo(parsed.hostname, None)` with `await asyncio.get_event_loop().getaddrinfo(parsed.hostname, None)`. Wrap in `asyncio.wait_for(..., timeout=3.0)` to prevent slow DNS from blocking. On timeout, return False (treat as unsafe).",
@@ -22,5 +22,5 @@
     "Run: grep 'unicodedata' apps/backend/app/core/security.py && echo 'PASS' || echo 'FAIL'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 20 tests pass (10 sanitization + 10 SSRF). No runtime callers of is_safe_url found outside the test file, so only tests needed await updates. pytest-asyncio mode=strict required @pytest.mark.asyncio on async test methods. The existing test for 'System: You are now' now returns empty string because both patterns match (2+ threshold), which is correct and more secure behavior."
 }
