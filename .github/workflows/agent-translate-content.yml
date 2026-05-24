@@ -1,0 +1,64 @@
+name: Daily Content Translation
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      board:
+        description: 'Filter by board (e.g., AHSEC, SEBA)'
+        required: false
+        type: string
+      subject:
+        description: 'Filter by subject (e.g., physics, chemistry)'
+        required: false
+        type: string
+      limit:
+        description: 'Max objects to translate'
+        required: false
+        type: number
+        default: 100
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Trigger bulk translation
+        env:
+          BACKEND_URL: ${{ secrets.AZURE_BACKEND_URL }}
+          TRANSLATE_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          BODY='{}'
+          if [ -n "${{ inputs.board || '' }}" ]; then
+            BODY=$(echo "$BODY" | jq --arg b "${{ inputs.board }}" '. + {board: $b}')
+          fi
+          if [ -n "${{ inputs.subject || '' }}" ]; then
+            BODY=$(echo "$BODY" | jq --arg s "${{ inputs.subject }}" '. + {subject: $s}')
+          fi
+          LIMIT="${{ inputs.limit || '100' }}"
+          BODY=$(echo "$BODY" | jq --argjson l "$LIMIT" '. + {limit: $l}')
+
+          echo "Request body: $BODY"
+          echo "Calling: ${BACKEND_URL}/api/v1/admin/content/translate/cron"
+
+          RESPONSE=$(curl -sf --max-time 3600 \
+            -X POST "${BACKEND_URL}/api/v1/admin/content/translate/cron" \
+            -H "Authorization: Bearer ${TRANSLATE_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          echo "Response: $RESPONSE"
+
+          FAILED=$(echo "$RESPONSE" | jq -r '.failed // 0')
+          TRANSLATED=$(echo "$RESPONSE" | jq -r '.translated // 0')
+          SKIPPED=$(echo "$RESPONSE" | jq -r '.skipped // 0')
+
+          echo "::notice::Translated: $TRANSLATED | Skipped: $SKIPPED | Failed: $FAILED"
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::$FAILED translations failed"
+            echo "$RESPONSE" | jq -r '.errors[]' 2>/dev/null || true
+          fi
