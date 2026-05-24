@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-004",
+  "type": "refactor",
+  "description": "ARCH-08: Refactor AuthContext.jsx into smaller hooks + TEST-06: Add edge worker tests + CICD-05: Document KeyVault references",
+  "status": "pending",
+  "steps": [
+    "Step 1 - Create apps/frontend/src/hooks/useTokenManager.js: Extract token storage logic from AuthContext.jsx. Include _storeToken, _storeRefreshToken, getInMemoryToken, and the sessionStorage hydration logic. Export a hook that returns { token, refreshToken, storeToken, storeRefreshToken, clearTokens }.",
+    "Step 2 - Create apps/frontend/src/hooks/useAnonymousSync.js: Extract the anonymous data claiming logic (the useEffect that calls studyApi.claimAnonData) from AuthContext.jsx. This hook takes userId as a parameter and handles the entire claim flow including toast notifications.",
+    "Step 3 - Create apps/frontend/src/hooks/useAdsSync.js: Extract the ads configuration sync logic from AuthContext.jsx. This hook takes user (or user.plan and user.ads_opt_out) and handles hydrateAdsOptOutFromServer, setAdsUserPlan, and setAdsAuthChecked calls.",
+    "Step 4 - Refactor apps/frontend/src/context/AuthContext.jsx to use the three new hooks. The AuthContext should import and use useTokenManager, useAnonymousSync, and useAdsSync. The file should be significantly shorter (under 150 lines) while maintaining the same external API (useAuth returns the same shape).",
+    "Step 5 - TEST-06: Create apps/edge/tests/rate-limit.test.ts. Test the checkRateLimit and rateLimitHeaders functions from rate-limit.ts. Tests should cover: (a) allows request when under limit, (b) blocks request when at limit, (c) increments counter correctly, (d) returns correct remaining count, (e) rateLimitHeaders returns correct headers including Retry-After when blocked. Mock KV namespace with a simple in-memory Map.",
+    "Step 6 - TEST-06: Create apps/edge/tests/cors.test.ts. Test getCorsHeaders and applyCorsHeaders from cors.ts. Tests: (a) returns correct headers for allowed origin, (b) falls back to default origin for unknown origin, (c) applyCorsHeaders sets all required headers on a Headers object.",
+    "Step 7 - TEST-06: Create apps/edge/tests/bot.test.ts. Test turnstileVerify from bot.ts. Tests: (a) returns true for valid token (mock fetch to return success), (b) returns false for invalid token, (c) returns false when fetch throws. Use vitest mock for global fetch.",
+    "Step 8 - CICD-05: Add a comment block in .github/workflows/deploy-all.yml at the top of the 'Fetch secrets from Azure KeyVault' step documenting the recommendation to migrate to Azure Container Apps native secret references pointing to KeyVault, with a link to the docs (https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets). Note that this is a future improvement that would eliminate secrets from CLI arguments entirely."
+  ],
+  "acceptance_criteria": [
+    "Three new hook files exist: useTokenManager.js, useAnonymousSync.js, useAdsSync.js",
+    "AuthContext.jsx is under 180 lines and imports/uses the new hooks",
+    "AuthContext still exports useAuth with the same interface (user, token, login, signup, logout, refreshUser, updateUser, etc.)",
+    "apps/edge/tests/rate-limit.test.ts exists and tests checkRateLimit + rateLimitHeaders",
+    "apps/edge/tests/cors.test.ts exists and tests getCorsHeaders + applyCorsHeaders",
+    "apps/edge/tests/bot.test.ts exists and tests turnstileVerify",
+    "Edge tests pass: pnpm --filter syrabit-edge test",
+    "deploy-all.yml has documentation comment about KeyVault secret references"
+  ],
+  "verification": [
+    "Run: pnpm --filter syrabit-edge test",
+    "Run: test -f apps/frontend/src/hooks/useTokenManager.js && test -f apps/frontend/src/hooks/useAnonymousSync.js && test -f apps/frontend/src/hooks/useAdsSync.js && echo 'PASS' || echo 'FAIL'",
+    "Run: wc -l apps/frontend/src/context/AuthContext.jsx | awk '{if ($1 < 200) print \"PASS: \" $1 \" lines\"; else print \"WARN: still \" $1 \" lines\"}'",
+    "Run: test -f apps/edge/tests/rate-limit.test.ts && test -f apps/edge/tests/cors.test.ts && test -f apps/edge/tests/bot.test.ts && echo 'PASS' || echo 'FAIL'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

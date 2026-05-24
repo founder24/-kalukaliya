@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "DEP-01: Migrate from python-jose to PyJWT + CICD-02: Fix frozen lockfile in CI + CICD-04: Add trivy scan to deploy-all.yml + CFG-03: Document ISR_CACHE_KV placeholder",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Migrate python-jose to PyJWT in auth.py: Change `from jose import jwt, JWTError` to `import jwt` and `from jwt.exceptions import InvalidTokenError`. Replace all `JWTError` references with `InvalidTokenError`. The PyJWT API is: `jwt.encode(payload, key, algorithm='HS256')` (returns str) and `jwt.decode(token, key, algorithms=['HS256'])`. PyJWT uses `jwt.exceptions.ExpiredSignatureError` for expired tokens.",
+    "Step 2 - Migrate python-jose to PyJWT in admin.py: Same changes as auth.py. Change `from jose import jwt, JWTError` to `import jwt` and `from jwt.exceptions import InvalidTokenError`. Replace `JWTError` with `InvalidTokenError`.",
+    "Step 3 - Migrate test file test_admin_endpoints.py: Change `from jose import jwt` to `import jwt`.",
+    "Step 4 - Remove python-jose from requirements.in: Delete the `python-jose` line from apps/backend/requirements.in. PyJWT (listed as `pyjwt`) is already present.",
+    "Step 5 - Fix Dockerfile: Remove the fragile pytest-asyncio sed workaround. Since test deps are in requirements-dev.in now, they should not be in requirements.txt. But the Dockerfile uses requirements.txt which still has them. For now, simplify the RUN command to just `pip install --no-cache-dir --user -r requirements.txt && pip install --no-cache-dir --user email-validator>=2.0` (keep email-validator). Actually, check if python-jose hashes are in requirements.txt and note that requirements.txt is a lockfile - it will need regeneration but we cannot run pip-compile here. Just remove the python-jose entry from requirements.in and note it.",
+    "Step 6 - CICD-02: In .github/workflows/deploy-all.yml, replace all 3 occurrences of `pnpm install --no-frozen-lockfile` with `pnpm install --frozen-lockfile`.",
+    "Step 7 - CICD-02: In .github/workflows/ci-frontend.yml, replace both occurrences of `pnpm install --no-frozen-lockfile` with `pnpm install --frozen-lockfile`.",
+    "Step 8 - CICD-04: In .github/workflows/deploy-all.yml, add a trivy scan step in the deploy-backend job AFTER the 'Build & Push to ACR' step and BEFORE the 'Deploy to Container Apps' step. Use `aquasecurity/trivy-action@0.28.0` to scan `syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}` with severity CRITICAL,HIGH and exit-code 1.",
+    "Step 9 - CFG-03: Add a detailed comment block in apps/edge/wrangler.toml above the ISR_CACHE_KV binding explaining it is a placeholder that must be created before production deployment, with the commands to create it: `npx wrangler kv:namespace create ISR_CACHE_KV` and `npx wrangler kv:namespace create ISR_CACHE_KV --preview`. Note: The binding is functional only in env.production, so local dev is unaffected."
+  ],
+  "acceptance_criteria": [
+    "No `from jose` imports remain in any Python file under apps/backend/",
+    "requirements.in no longer contains python-jose",
+    "All CI workflow files use --frozen-lockfile instead of --no-frozen-lockfile",
+    "deploy-all.yml includes a trivy scan step before container deployment",
+    "wrangler.toml has clear documentation about the ISR_CACHE_KV placeholder",
+    "Python files parse without syntax errors: python -c 'import ast; ast.parse(open(f).read())' for all changed files"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/api/v1/auth.py').read()); ast.parse(open('apps/backend/app/api/v1/admin.py').read()); print('OK')\"",
+    "Run: grep -r 'from jose' apps/backend/ && echo 'FAIL: jose imports still present' || echo 'PASS: no jose imports'",
+    "Run: grep -r 'no-frozen-lockfile' .github/workflows/ && echo 'FAIL' || echo 'PASS'",
+    "Run: grep 'trivy' .github/workflows/deploy-all.yml && echo 'PASS' || echo 'FAIL'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

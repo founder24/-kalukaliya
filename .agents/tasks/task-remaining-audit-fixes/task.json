@@ -1,0 +1,7 @@
+{
+  "task_id": "task-remaining-audit-fixes",
+  "task_description": "Implement remaining fixes from the full-stack audit report (P0 through P3 items not already addressed in PR #204). Covers: DEP-01 python-jose migration, CICD-02 frozen lockfile, SEC-05 prompt injection, ARCH-06 chat.py refactor, SEC-07 async DNS, CICD-04 trivy in deploy pipeline, PERF-04 search caching, CFG-03 ISR_CACHE_KV docs, TEST-06 edge tests, ARCH-08 AuthContext refactor, PERF-05 conversation caching, CICD-05 KeyVault docs.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

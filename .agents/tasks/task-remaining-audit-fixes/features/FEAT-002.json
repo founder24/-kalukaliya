@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "SEC-05: Improve prompt injection filters with layered approach + SEC-07: Replace synchronous DNS with async resolution in is_safe_url",
+  "status": "pending",
+  "steps": [
+    "Step 1 - Enhance sanitize_user_input in apps/backend/app/core/security.py with a layered prompt injection defense: (a) Normalize Unicode homoglyphs before pattern matching - strip zero-width characters (U+200B, U+200C, U+200D, U+FEFF) and normalize with unicodedata.normalize('NFKC', text). (b) Expand injection patterns to be case-insensitive with whitespace flexibility (use \\s* between key words). (c) Add new patterns: 'ASSISTANT:', 'Human:', 'AI:', 'END OF PROMPT', '<\\|system\\|>', '<\\|user\\|>', 'DAN mode', 'jailbreak', 'disregard', 'override.*instructions'. (d) Add a scoring system: if 2+ pattern matches are found, reject the input entirely (return empty string or raise). (e) Preserve the existing max_length=4000 cap and control character removal.",
+    "Step 2 - Replace synchronous DNS resolution in is_safe_url: Make is_safe_url an async function `async def is_safe_url(...)`. Replace `socket.getaddrinfo(parsed.hostname, None)` with `await asyncio.get_event_loop().getaddrinfo(parsed.hostname, None)`. Wrap in `asyncio.wait_for(..., timeout=3.0)` to prevent slow DNS from blocking. On timeout, return False (treat as unsafe).",
+    "Step 3 - Update any callers of is_safe_url to use await since it is now async. Search the codebase for usages of is_safe_url and add await."
+  ],
+  "acceptance_criteria": [
+    "sanitize_user_input handles Unicode homoglyphs (normalizes NFKC before pattern matching)",
+    "sanitize_user_input strips zero-width characters",
+    "sanitize_user_input has expanded pattern list with whitespace-flexible matching",
+    "is_safe_url is now async with a 3-second timeout",
+    "is_safe_url uses asyncio.get_event_loop().getaddrinfo instead of socket.getaddrinfo",
+    "Python file parses without syntax errors"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/core/security.py').read()); print('OK')\"",
+    "Run: grep -c 'async def is_safe_url' apps/backend/app/core/security.py | grep 1 && echo 'PASS' || echo 'FAIL'",
+    "Run: grep 'unicodedata' apps/backend/app/core/security.py && echo 'PASS' || echo 'FAIL'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

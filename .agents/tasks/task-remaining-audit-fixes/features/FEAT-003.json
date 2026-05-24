@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-003",
+  "type": "refactor",
+  "description": "ARCH-06: Refactor chat.py (714 lines) into a ChatService class + PERF-04: Add Redis caching for Azure Search + PERF-05: Cache conversation history in Redis",
+  "status": "pending",
+  "steps": [
+    "Step 1 - Create apps/backend/app/services/chat_service.py with a ChatService class. Extract from chat.py: (a) _load_conversation_history -> ChatService.load_conversation_history (with Redis caching - check Redis first with key `conv_history:{session_id}`, TTL 30 min, fallback to MongoDB). (b) check_rate_limit -> ChatService.check_rate_limit. (c) _resolve_lang_and_model -> ChatService.resolve_lang_and_model. (d) _build_system_prompt -> ChatService.build_system_prompt. (e) _save_chat_async -> ChatService.save_chat. (f) Add a new method ChatService.search_with_cache that wraps search_service.search_context with Redis caching: key is `search_cache:{hashlib.md5(query + user_tier).hexdigest()}`, TTL 5 minutes, stores/retrieves JSON serialized chunks.",
+    "Step 2 - Refactor apps/backend/app/api/v1/chat.py to use ChatService. Keep the router thin - import ChatService, instantiate it, and delegate business logic to service methods. The router should only handle HTTP concerns (request parsing, response formatting, error mapping to HTTP status codes). Keep ChatRequest and ChatResponse models in chat.py.",
+    "Step 3 - PERF-04 implementation detail: In ChatService.search_with_cache, before calling search_service.search_context, check Redis for cached results. Key format: `search:{md5(query + user_tier + str(limit))}`. If cache hit, return deserialized JSON. If miss, call search_service.search_context, serialize result to JSON, store in Redis with TTL 300 (5 min), then return. Wrap Redis operations in try/except so cache failures don't break search.",
+    "Step 4 - PERF-05 implementation detail: In ChatService.load_conversation_history, check Redis first with key `conv:{session_id}`. If hit, return cached history string. If miss, load from MongoDB, cache in Redis with TTL 1800 (30 min), return. After saving a new chat message (in save_chat), invalidate the cache by deleting the key `conv:{session_id}`."
+  ],
+  "acceptance_criteria": [
+    "New file apps/backend/app/services/chat_service.py exists with ChatService class",
+    "chat.py is significantly shorter (router layer only, under 250 lines)",
+    "ChatService includes search_with_cache method with Redis TTL caching",
+    "ChatService includes load_conversation_history with Redis caching",
+    "All existing chat.py functionality is preserved (streaming, non-streaming, history, messages endpoints)",
+    "Python files parse without syntax errors"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/services/chat_service.py').read()); print('OK')\"",
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/api/v1/chat.py').read()); print('OK')\"",
+    "Run: wc -l apps/backend/app/api/v1/chat.py | awk '{if ($1 < 300) print \"PASS: \" $1 \" lines\"; else print \"WARN: still \" $1 \" lines\"}'",
+    "Run: grep 'search_with_cache\\|Redis.*cache\\|conv:' apps/backend/app/services/chat_service.py && echo 'PASS' || echo 'FAIL'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

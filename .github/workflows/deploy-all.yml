@@ -39,7 +39,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Node dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Install Python dependencies
         run: |
@@ -141,6 +141,14 @@ jobs:
             --file apps/backend/Dockerfile \
             apps/backend/
 
+      - name: Scan container image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
       - name: Deploy to Container Apps
         run: |
           az containerapp update \
@@ -197,7 +205,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
@@ -223,7 +231,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm --filter @workspace/syrabit run build
