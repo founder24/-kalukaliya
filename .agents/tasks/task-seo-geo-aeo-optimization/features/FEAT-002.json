@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Expand prerender configuration to cover all 1000+ routes and add ISR fallback in the edge worker for cache-on-demand rendering of non-prerendered routes",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/frontend/scripts/prerender-routes.mjs, change the default for PRERENDER_SUBJECTS_LIMIT from '50' to '999' (line ~62, the parseInt fallback string)",
     "In apps/frontend/scripts/prerender-routes.mjs, change the default for PRERENDER_CHAPTERS_PER_SUBJECT from '6' to '999' (line ~65, the parseInt fallback string)",
@@ -31,5 +31,5 @@
     "pnpm --filter syrabit-edge test passes"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes compile cleanly (tsc --noEmit passes). Edge tests (8 tests in jwt.test.ts) pass. vitest runs in watch mode by default - use 'vitest run' for non-interactive execution. ISR handler created with proper bot detection and KV caching with 3600s TTL."
 }
