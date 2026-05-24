@@ -1,6 +1,6 @@
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
-    VectorizedQuery,
+    VectorizableTextQuery,
     QueryType,
     QueryCaptionType,
     QueryAnswerType,
@@ -68,7 +68,7 @@ class AzureSearchService:
         return [doc async for doc in results]
 
     async def search_context(
-        self, query: str, embedding: list[float], user_tier: str, limit: int = 5
+        self, query: str, text: str, user_tier: str, limit: int = 5
     ):
         """
         Executes Hybrid Search (Keyword + Vector) with Semantic Reranking.
@@ -76,7 +76,7 @@ class AzureSearchService:
 
         Args:
             query: User's search query text
-            embedding: 1536-dimensional vector from embedding model
+            text: Text to vectorize (Azure Search handles embedding via VectorizableTextQuery)
             user_tier: 'free' or 'pro' for content filtering
             limit: Number of results to return (default: 5)
 
@@ -84,12 +84,11 @@ class AzureSearchService:
             List of context chunks with scores and metadata
         """
         try:
-            # 1. Define Vector Query
-            vector_query = VectorizedQuery(
-                vector=embedding,
-                k_nearest_neighbors=50,  # Retrieve larger candidate set for reranking
+            # 1. Define Vector Query using built-in vectorization
+            vector_query = VectorizableTextQuery(
+                text=text,
+                k_nearest_neighbors=50,
                 fields="content_vector",
-                exhaustive=True,  # Ensure accuracy over speed for small sets
             )
 
             # 2. Execute Hybrid Search with Semantic Reranking (native async)

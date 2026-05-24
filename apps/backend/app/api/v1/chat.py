@@ -6,6 +6,7 @@ import logging
 import time
 import json
 import asyncio
+import httpx
 from datetime import datetime, timedelta
 
 from app.config import settings
@@ -16,6 +17,7 @@ from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
 from app.core.token_budget import truncate_chunks_to_budget
+from app.utils.posthog import get_posthog
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +174,12 @@ async def chat(
             # 2. Generate embedding for RAG
             from app.services.ai.embedder import generate_embedding
 
-            embedding = await generate_embedding(sanitized_message)
+            query_text = await generate_embedding(sanitized_message)
 
             # 3. Hybrid search with semantic reranking
             context_chunks = await search_service.search_context(
                 query=sanitized_message,
-                embedding=embedding,
+                text=query_text,
                 user_tier=user_tier,
                 limit=settings.MAX_CONTEXT_DOCS,
             )
@@ -276,6 +278,20 @@ async def chat(
                 },
             )
 
+            # Track in PostHog
+            posthog = get_posthog(http_request)
+            if posthog:
+                posthog.capture(
+                    distinct_id=user_id,
+                    event="chat_completed",
+                    properties={
+                        "lang": detected_lang,
+                        "model": target_model,
+                        "latency_ms": latency_ms,
+                        "user_tier": user_tier,
+                    },
+                )
+
             return ChatResponse(
                 response=response_text,
                 model_used=target_model,
@@ -301,7 +317,7 @@ async def chat(
         logger.error(
             "chat_upstream_failure", extra={"user_id": user_id, "error": error_msg}
         )
-        if "embedding" in error_msg.lower() or "AZURE_OPENAI_ENDPOINT" in error_msg:
+        if "embedding" in error_msg.lower():
             raise HTTPException(status_code=502, detail="Embedding service unavailable")
         elif "search" in error_msg.lower():
             raise HTTPException(
@@ -318,6 +334,15 @@ async def chat(
         raise HTTPException(
             status_code=504, detail="Request timed out. Please try a shorter question."
         )
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "chat_upstream_http_error",
+            extra={"user_id": user_id, "status": e.response.status_code},
+        )
+        raise HTTPException(status_code=502, detail="Upstream service error")
+    except ValueError as e:
+        logger.warning("chat_value_error", extra={"user_id": user_id, "error": str(e)})
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(
             "chat_unexpected_error", extra={"user_id": user_id, "error": str(e)}
@@ -333,17 +358,19 @@ async def chat(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _resolve_lang_and_model(request: ChatRequest) -> tuple[str, str]:
-    """Resolve language and target model from request."""
-    if request.lang:
-        detected_lang = request.lang
+def _resolve_lang_and_model(
+    message: str, lang_override: Optional[str] = None
+) -> tuple[str, str]:
+    """Resolve language and target model from message and optional language override."""
+    if lang_override:
+        detected_lang = lang_override
         target_model = (
             settings.SARVAM_MODEL
-            if request.lang == "as"
+            if lang_override == "as"
             else settings.VERTEX_GEMINI_MODEL
         )
     else:
-        detected_lang, target_model = detect_language_and_route(request.message)
+        detected_lang, target_model = detect_language_and_route(message)
     return detected_lang, target_model
 
 
@@ -452,7 +479,9 @@ async def chat_stream(
     sanitized_message = sanitize_user_input(request.message)
 
     # -- Resolve language & model --
-    detected_lang, target_model = _resolve_lang_and_model(request)
+    detected_lang, target_model = _resolve_lang_and_model(
+        sanitized_message, request.lang
+    )
 
     # -- RAG retrieval (with OTel span) --
     from app.services.ai.embedder import generate_embedding
@@ -469,7 +498,7 @@ async def chat_stream(
         embedding = await generate_embedding(sanitized_message)
         context_chunks = await search_service.search_context(
             query=sanitized_message,
-            embedding=embedding,
+            text=embedding,
             user_tier=user_tier,
             limit=settings.MAX_CONTEXT_DOCS,
         )
@@ -564,6 +593,21 @@ async def chat_stream(
                 if "sarvam" in actual_model.lower()
                 or "openhathi" in actual_model.lower()
                 else "vertex",
+            )
+
+        # Track in PostHog
+        posthog = get_posthog(http_request)
+        if posthog:
+            posthog.capture(
+                distinct_id=user_id,
+                event="chat_completed",
+                properties={
+                    "lang": detected_lang,
+                    "model": actual_model,
+                    "latency_ms": latency_ms,
+                    "user_tier": user_tier,
+                    "streaming": True,
+                },
             )
 
         # -- Persist chat (fire-and-forget) --

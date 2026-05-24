@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
+    inputs:
+      mongodb_connection_secret:
+        description: 'Name of the repository secret containing the MongoDB connection string'
+        required: false
+        default: 'MONGODB_URI'
+        type: string
 
 permissions:
   contents: read
@@ -30,7 +36,7 @@ jobs:
       - name: Run accuracy report
         id: report
         env:
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_URI: ${{ secrets[inputs.mongodb_connection_secret || 'MONGODB_URI'] }}
         run: |
           mongosh "$MONGODB_URI" --quiet scripts/accuracy-report.js > /tmp/accuracy-output.txt 2>&1
           cat /tmp/accuracy-output.txt

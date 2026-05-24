@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
@@ -87,7 +87,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    refresh_token: str = Field(min_length=1)
 
 
 # ─── Token Helpers ───────────────────────────────────────────────────────────
@@ -157,7 +157,9 @@ async def get_current_user(
             raise
         except Exception as e:
             logger.error(f"Redis unavailable for token blacklist check: {e}")
-            pass  # Redis unavailable - skip blacklist check gracefully
+            raise HTTPException(
+                status_code=503, detail="Token validation service unavailable"
+            )
 
         user = await User.get(user_id)
         if not user:
@@ -432,6 +434,9 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                 raise
             except Exception as e:
                 logger.error(f"Redis unavailable for token revocation check: {e}")
+                raise HTTPException(
+                    status_code=503, detail="Token validation service unavailable"
+                )
 
         user = await User.get(user_id)
         if not user:
@@ -474,7 +479,8 @@ async def logout(
 ):
     """
     Logout user by blacklisting their access token in Redis.
-    Optionally revokes the refresh token as well.
+    Revokes the refresh token as well.
+    Raises 503 if Redis is unavailable (fail-closed).
     """
     token = credentials.credentials
 
@@ -494,25 +500,27 @@ async def logout(
         if ttl > 0:
             await redis.set(f"blacklisted_token:{token_hash}", "1", ex=ttl)
 
-        # Optionally revoke the refresh token
-        if body.refresh_token:
-            try:
-                refresh_payload = jwt.decode(
-                    body.refresh_token,
-                    settings.JWT_SECRET,
-                    algorithms=[settings.JWT_ALGORITHM],
-                )
-                jti = refresh_payload.get("jti")
-                if jti:
-                    refresh_exp = refresh_payload.get("exp", 0)
-                    refresh_ttl = max(refresh_exp - now, 0)
-                    if refresh_ttl > 0:
-                        await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
-            except JWTError:
-                pass  # Invalid refresh token - ignore
+        # Revoke the refresh token
+        try:
+            refresh_payload = jwt.decode(
+                body.refresh_token,
+                settings.JWT_SECRET,
+                algorithms=[settings.JWT_ALGORITHM],
+            )
+            jti = refresh_payload.get("jti")
+            if jti:
+                refresh_exp = refresh_payload.get("exp", 0)
+                refresh_ttl = max(refresh_exp - now, 0)
+                if refresh_ttl > 0:
+                    await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
+        except JWTError:
+            pass  # Invalid refresh token - ignore
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Redis unavailable for token blacklisting during logout: {e}")
+        raise HTTPException(
+            status_code=503, detail="Token revocation service unavailable"
+        )
 
     return MessageResponse(message="Logged out successfully")

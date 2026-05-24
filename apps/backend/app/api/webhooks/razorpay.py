@@ -60,16 +60,21 @@ async def handle_razorpay_webhook(request: Request):
 
     # Idempotency check: skip duplicate events
     event_id = event.get("id")
-    if event_id:
-        try:
-            from app.db.redis import get_redis
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Missing event_id")
 
-            redis = get_redis()
-            exists = await redis.get(f"webhook_processed:{event_id}")
-            if exists:
-                return {"status": "duplicate", "event_id": event_id}
-        except Exception as e:
-            logger.error(f"Redis unavailable for webhook idempotency check: {e}")
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        exists = await redis.get(f"webhook_processed:{event_id}")
+        if exists:
+            return {"status": "duplicate", "event_id": event_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Redis unavailable for webhook idempotency check: {e}")
+        raise HTTPException(status_code=503, detail="Webhook processing unavailable")
 
     # 2. Handle Event Types
     if event.get("event") == "subscription.charged":
@@ -120,13 +125,12 @@ async def handle_razorpay_webhook(request: Request):
         logger.info(f"Subscription cancelled: {sub_id}")
 
     # Mark event as processed for idempotency
-    if event_id:
-        try:
-            from app.db.redis import get_redis
+    try:
+        from app.db.redis import get_redis
 
-            redis = get_redis()
-            await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
-        except Exception as e:
-            logger.error(f"Redis unavailable for webhook idempotency storage: {e}")
+        redis = get_redis()
+        await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
+    except Exception as e:
+        logger.error(f"Redis unavailable for webhook idempotency storage: {e}")
 
     return {"status": "ok"}

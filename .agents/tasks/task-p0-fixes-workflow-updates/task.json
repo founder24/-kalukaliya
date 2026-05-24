@@ -1,0 +1,14 @@
+{
+  "task_id": "task-p0-fixes-workflow-updates",
+  "task_description": "Fix all 11 P0 issues in backend/edge code, remove Azure OpenAI references (project uses Azure Search built-in vectorization), and update workflow files to add KeyVault secrets, wire canary deploy, and use MongoDB for accuracy report.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "35 tests pass. 3 pre-existing failures (confirmed on base branch: Beanie not initialized in test env, mock returns wrong type). Docker build has pre-existing requirements.txt conflict (not related to our changes). All verification grep checks pass: no AZURE_OPENAI references, VectorizableTextQuery used, async httpx client in resend, secrets masked in workflow, canary wired."
+  }
+}

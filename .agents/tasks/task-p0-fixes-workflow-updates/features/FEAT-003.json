@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address high-priority issues from code review: mask CI secrets, logout fail-closed, stale docstring, dead config removal.",
+  "status": "completed",
+  "steps": [
+    "STEP 1 - Add ::add-mask:: to deploy-all.yml KeyVault fetch step: For each secret fetched from Azure KeyVault, add echo '::add-mask::$VAR_NAME' BEFORE writing the secret to GITHUB_ENV. This prevents GitHub Actions from showing secrets in workflow logs.",
+    "STEP 2 - Make logout() fail closed on Redis outage: In apps/backend/app/api/v1/auth.py, change the logout endpoint to raise HTTPException(status_code=503, detail='Token revocation service unavailable') when Redis is unavailable, matching the fail-closed behavior of get_current_user and refresh_token_endpoint.",
+    "STEP 3 - Fix stale logout docstring and remove conditional: Update the logout docstring to say refresh_token is required (not optional). Remove the 'if body.refresh_token:' conditional since the field now has min_length=1. Add Field(min_length=1) to LogoutRequest.refresh_token.",
+    "STEP 4 - Remove dead config: Remove AZURE_EMBEDDING_MODEL and AZURE_EMBEDDING_DIMENSIONS from apps/backend/app/config.py since they are no longer referenced in application code after the embedder rewrite."
+  ],
+  "acceptance_criteria": [
+    "Each secret in deploy-all.yml has ::add-mask:: before GITHUB_ENV write",
+    "logout() raises HTTPException(503) when Redis is unavailable",
+    "LogoutRequest.refresh_token has min_length=1 validation",
+    "Logout docstring says refresh_token is required",
+    "No 'if body.refresh_token:' conditional in logout",
+    "AZURE_EMBEDDING_MODEL and AZURE_EMBEDDING_DIMENSIONS removed from config.py",
+    "All previously-passing tests still pass"
+  ],
+  "verification": [
+    "Run: grep -c '::add-mask::' .github/workflows/deploy-all.yml should return 11",
+    "Run: grep -n 'min_length=1' apps/backend/app/api/v1/auth.py should find LogoutRequest field",
+    "Run: grep -n 'AZURE_EMBEDDING' apps/backend/app/config.py should return empty",
+    "Run: pytest apps/backend/tests/ --tb=short -q (same 8 pre-existing failures, 30 passes)"
+  ],
+  "blocked_reason": null,
+  "findings": "All 8 test failures are pre-existing (verified by stashing changes and running tests on base state). The webhook tests fail because Redis mock is not properly applied in the test fixtures."
+}

@@ -51,7 +51,13 @@ export default {
         url.pathname.startsWith('/api/v1/auth/login') ||
         url.pathname.startsWith('/api/v1/auth/forgot-password');
 
-      if (isAuthEndpoint && !turnstileToken) {
+      // Turnstile is MANDATORY for chat POST requests (except feedback)
+      const isChatPost =
+        url.pathname.startsWith('/api/v1/chat') &&
+        request.method === 'POST' &&
+        !url.pathname.startsWith('/api/v1/chat/feedback');
+
+      if ((isAuthEndpoint || isChatPost) && !turnstileToken) {
         return jsonResponse(403, { error: 'Bot verification required' });
       }
 
