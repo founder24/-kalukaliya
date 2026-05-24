@@ -1,10 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 import logging
 
 from app.models.user import User
-from app.config import settings
 from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)

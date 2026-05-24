@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, status
+from fastapi import APIRouter, Request, HTTPException
 from app.config import settings
 from app.models.user import User
 import hashlib
@@ -57,7 +57,6 @@ async def handle_razorpay_webhook(request: Request):
     # 2. Handle Event Types
     if event.get("event") == "subscription.charged":
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
-        customer_id = payload["customer"]["id"]
         amount = payload["payment"]["amount"]
 
         # Find User

@@ -1,4 +1,4 @@
-from beanie import Document, Indexed
+from beanie import Document
 from pydantic import EmailStr, Field
 from typing import Optional, Literal
 from datetime import datetime

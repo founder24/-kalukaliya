@@ -6,7 +6,7 @@ Endpoints:
   GET  /api/v1/chat/feedback/stats — Get aggregated accuracy by lang + model (admin)
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from typing import Literal, Optional, List
 from datetime import datetime, timedelta
