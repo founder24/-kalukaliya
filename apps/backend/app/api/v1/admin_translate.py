@@ -25,9 +25,7 @@ async def bulk_translate(request: Request, background_tasks: BackgroundTasks):
     # Check if already running
     status = getattr(request.app.state, "translation_status", None)
     if status and status.get("running"):
-        raise HTTPException(
-            status_code=409, detail="Translation job already running"
-        )
+        raise HTTPException(status_code=409, detail="Translation job already running")
 
     # Initialize status
     request.app.state.translation_status = {

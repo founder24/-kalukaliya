@@ -166,7 +166,9 @@ async def list_knowledge(
                 "title": obj.title,
                 "status": obj.status,
                 "metadata": obj.metadata.model_dump(),
-                "published_at": obj.published_at.isoformat() if obj.published_at else None,
+                "published_at": obj.published_at.isoformat()
+                if obj.published_at
+                else None,
                 "updated_at": obj.updated_at.isoformat(),
                 "page_views": obj.page_views,
             }

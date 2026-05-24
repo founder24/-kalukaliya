@@ -82,9 +82,7 @@ class ContentTranslator:
 
         return chunks
 
-    async def translate_knowledge_object(
-        self, ko: KnowledgeObject
-    ) -> KnowledgeObject:
+    async def translate_knowledge_object(self, ko: KnowledgeObject) -> KnowledgeObject:
         """
         Create an Assamese version of a KnowledgeObject.
         Returns a new KnowledgeObject (does NOT save it).

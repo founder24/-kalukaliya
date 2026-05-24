@@ -8,7 +8,6 @@ Each step is fail-soft with logging.
 import hashlib
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 
@@ -89,7 +88,9 @@ class ContentPipeline:
             kv_ok = await self._push_cloudflare_kv(knowledge_obj)
             results["cloudflare_kv"] = kv_ok
         except Exception as e:
-            logger.error(f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {e}")
+            logger.error(
+                f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {e}"
+            )
 
         # Step 6: Save to database
         try:
