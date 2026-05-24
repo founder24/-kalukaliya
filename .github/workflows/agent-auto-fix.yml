@@ -21,7 +21,9 @@ jobs:
   auto-fix:
     name: Auto-fix Lint Issues
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,7 +49,7 @@ jobs:
           corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Node dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --ignore-scripts --no-frozen-lockfile
 
       - name: Run ruff format on backend
         run: ruff format apps/backend/
@@ -66,7 +68,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add apps/backend/ apps/edge/ apps/frontend/
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else

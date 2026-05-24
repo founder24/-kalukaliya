@@ -16,6 +16,7 @@ jobs:
   canary-deploy:
     name: Deploy Canary Revision
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v6
 
@@ -112,6 +113,17 @@ jobs:
           echo "error_rate=$ERROR_RATE" >> "$GITHUB_OUTPUT"
           echo ""
           echo "Results: $SUCCESS_COUNT successes, $FAILURE_COUNT failures, error rate: ${ERROR_RATE}%"
+
+      - name: Validate error rate
+        id: validate
+        run: |
+          ERROR_RATE="${{ steps.monitor.outputs.error_rate }}"
+          if [ -z "$ERROR_RATE" ]; then
+            echo "ERROR: error_rate is empty - health monitor may have failed"
+            echo "Failing workflow to prevent unsafe promotion"
+            exit 1
+          fi
+          echo "Error rate validated: ${ERROR_RATE}%"
 
       - name: Rollback canary (unhealthy)
         if: steps.monitor.outputs.error_rate > 2

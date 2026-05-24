@@ -80,7 +80,7 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create issue for incompatible licenses
+      - name: Create or update issue for incompatible licenses
         if: steps.python-licenses.outputs.found == 'true' || steps.node-licenses.outputs.found == 'true'
         uses: actions/github-script@v7
         with:
@@ -117,10 +117,32 @@ jobs:
             body += '- Consult legal if the dependency is required\n\n';
             body += '---\n*Auto-created by weekly license audit*';
 
-            await github.rest.issues.create({
+            // Search for existing open compliance issue
+            const { data: existingIssues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[Compliance] Incompatible licenses detected - ${new Date().toISOString().split('T')[0]}`,
-              body: body,
-              labels: ['compliance', 'agent-created']
+              labels: 'compliance',
+              state: 'open',
             });
+
+            if (existingIssues.length > 0) {
+              // Update the existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssues[0].number,
+                title: `[Compliance] Incompatible licenses detected - ${new Date().toISOString().split('T')[0]}`,
+                body: body,
+              });
+              core.info(`Updated existing compliance issue #${existingIssues[0].number}`);
+            } else {
+              // Create a new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[Compliance] Incompatible licenses detected - ${new Date().toISOString().split('T')[0]}`,
+                body: body,
+                labels: ['compliance', 'agent-created']
+              });
+              core.info('Created new compliance issue');
+            }

@@ -86,7 +86,7 @@ jobs:
         id: parse-results
         run: |
           # Find the latest Lighthouse JSON result
-          RESULT_FILE=$(find .lighthouseci -name 'lhr-*.json' -type f | sort | tail -1)
+          RESULT_FILE=$(find .lighthouseci -name 'lhr-*.json' -type f 2>/dev/null | sort | tail -1)
 
           if [ -z "$RESULT_FILE" ]; then
             echo "No Lighthouse results found"
@@ -98,11 +98,13 @@ jobs:
             exit 0
           fi
 
+          export RESULT_FILE
           # Extract metrics using python
           python3 << 'PYEOF'
           import json, os
 
-          with open(os.environ.get('RESULT_FILE', ''), 'r') as f:
+          result_file = os.environ['RESULT_FILE']
+          with open(result_file, 'r') as f:
             lhr = json.load(f)
 
           with open('.github/scripts/performance-baseline.json', 'r') as f:
@@ -135,8 +137,6 @@ jobs:
             f.write(f"perf_score={perf_score}\n")
             f.write(f"regression={'true' if regression else 'false'}\n")
           PYEOF
-        env:
-          RESULT_FILE: ${{ steps.lhci-collect.outputs.result_file || '' }}
 
       - name: Comment performance summary on PR
         if: github.event_name == 'pull_request'

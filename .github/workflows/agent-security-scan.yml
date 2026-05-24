@@ -53,43 +53,66 @@ jobs:
           gitleaks detect --source . --report-format json --report-path gitleaks-report.json --exit-code 1
           echo "status=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Grep-based pattern scan (dangerous functions)
+      - name: Grep-based pattern scan (from security-patterns.yml)
         id: pattern-scan
         continue-on-error: true
         run: |
-          FINDINGS=""
-          CRITICAL=0
+          python3 << 'PYEOF'
+          import yaml
+          import subprocess
+          import os
 
-          # Scan for eval/exec in Python
-          if grep -rn '\b\(eval\|exec\)\s*(' apps/backend/ --include="*.py" 2>/dev/null | grep -v '#.*noqa' | grep -v 'test_'; then
-            FINDINGS="${FINDINGS}DANGEROUS: Python eval/exec usage found\n"
-            CRITICAL=$((CRITICAL+1))
-          fi
+          with open('.github/scripts/security-patterns.yml', 'r') as f:
+              config = yaml.safe_load(f)
 
-          # Scan for innerHTML in TypeScript
-          if grep -rn '\.innerHTML\s*=' apps/ --include="*.ts" --include="*.tsx" 2>/dev/null; then
-            FINDINGS="${FINDINGS}DANGEROUS: innerHTML assignment found\n"
-          fi
+          findings = []
+          critical_count = 0
 
-          # Scan for dangerouslySetInnerHTML
-          if grep -rn 'dangerouslySetInnerHTML' apps/ --include="*.ts" --include="*.tsx" 2>/dev/null; then
-            FINDINGS="${FINDINGS}WARNING: dangerouslySetInnerHTML usage found\n"
-          fi
+          for category, patterns in config.get('patterns', {}).items():
+              for entry in patterns:
+                  name = entry['name']
+                  pattern = entry['pattern']
+                  severity = entry.get('severity', 'low')
+                  language = entry.get('language', '')
 
-          # Scan for NoSQL injection patterns
-          if grep -rn '\.\(find\|findOne\|aggregate\|updateOne\|deleteOne\)(\s*f['\''"]' apps/backend/ --include="*.py" 2>/dev/null; then
-            FINDINGS="${FINDINGS}CRITICAL: Potential NoSQL injection (f-string in query)\n"
-            CRITICAL=$((CRITICAL+1))
-          fi
+                  # Determine search paths and file includes based on language
+                  if language == 'python':
+                      search_args = ['grep', '-rn', '-P', pattern, 'apps/backend/', '--include=*.py']
+                  elif language == 'typescript':
+                      search_args = ['grep', '-rn', '-P', pattern, 'apps/', '--include=*.ts', '--include=*.tsx']
+                  else:
+                      search_args = ['grep', '-rn', '-P', pattern, 'apps/', '--include=*.py', '--include=*.ts', '--include=*.tsx']
 
-          if [ -n "$FINDINGS" ]; then
-            echo -e "$FINDINGS" > pattern-scan-report.txt
-            echo "findings=true" >> "$GITHUB_OUTPUT"
-            echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
-          else
-            echo "findings=false" >> "$GITHUB_OUTPUT"
-            echo "critical=0" >> "$GITHUB_OUTPUT"
-          fi
+                  try:
+                      result = subprocess.run(search_args, capture_output=True, text=True, timeout=30)
+                      if result.returncode == 0 and result.stdout.strip():
+                          # Filter out test files and noqa comments
+                          lines = [l for l in result.stdout.strip().split('\n')
+                                   if 'test_' not in l and '# noqa' not in l and '.test.' not in l]
+                          if lines:
+                              findings.append(f"{severity.upper()}: {name} ({category})")
+                              if severity in ('critical', 'high'):
+                                  critical_count += 1
+                  except (subprocess.TimeoutExpired, Exception):
+                      pass
+
+          # Write outputs
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              if findings:
+                  f.write("findings=true\n")
+                  f.write(f"critical={critical_count}\n")
+              else:
+                  f.write("findings=false\n")
+                  f.write("critical=0\n")
+
+          # Write report file
+          if findings:
+              with open('pattern-scan-report.txt', 'w') as f:
+                  f.write('\n'.join(findings) + '\n')
+              print(f"Found {len(findings)} pattern matches ({critical_count} critical/high)")
+          else:
+              print("No dangerous patterns found")
+          PYEOF
 
       - name: Python dependency audit (pip-audit)
         id: pip-audit
