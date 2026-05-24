@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Add IndexNow integration - a backend endpoint that submits new/updated URLs to Bing/Yandex IndexNow API, plus a script to trigger it during deployment",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/app/api/v1/indexnow.py with: (a) POST /api/v1/indexnow/submit endpoint that accepts a list of URLs and submits them to IndexNow API (https://api.indexnow.org/indexnow) using the IndexNow protocol. Require an API key stored in settings (INDEXNOW_API_KEY env var). (b) GET /api/v1/indexnow/key endpoint that serves the IndexNow key verification file content (IndexNow requires a .txt file at root with the key).",
     "Add INDEXNOW_API_KEY: Optional[str] = None to apps/backend/app/config.py Settings class",
@@ -25,5 +25,5 @@
     "pnpm --filter syrabit-edge exec tsc --noEmit passes"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verifications pass. Edge tsc --noEmit clean. Backend tests pass (5 IndexNow tests + 7 SEO tests = 12 total) with JWT_SECRET and APP_ENV=test env vars. node --check on indexnow-submit.mjs passes. The test for empty urls returns 503 rather than 400 because key validation happens first (documented in test docstring)."
 }
