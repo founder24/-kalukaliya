@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -69,13 +70,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     from app.services.ai.vertex_client import vertex_client
     from app.services.ai.sarvam_client import sarvam_client
-    from app.services.ai.embedder import close_http_client
     from app.services.payment.razorpay_client import razorpay_client
+    from app.services.comms.resend_client import close_resend_client
 
     await vertex_client.close()
     await sarvam_client.close()
     await razorpay_client.close()
-    await close_http_client()
+    await close_resend_client()
     await close_mongo()
     await close_redis()
     logger.info("Application shutdown complete")
@@ -190,13 +191,19 @@ def create_app() -> FastAPI:
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
     app.include_router(
-        health.router, prefix="/api/health", tags=["Health"]
-    )  # Legacy probe path
-    app.include_router(
         feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"]
     )
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+
+    # Legacy health probe redirects for backward compatibility
+    @app.get("/api/health")
+    async def legacy_health_redirect():
+        return RedirectResponse(url="/health", status_code=301)
+
+    @app.get("/api/health/deep")
+    async def legacy_health_deep_redirect():
+        return RedirectResponse(url="/health/deep", status_code=301)
 
     return app
 

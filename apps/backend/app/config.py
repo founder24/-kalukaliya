@@ -45,7 +45,6 @@ class Settings(BaseSettings):
     AZURE_SEARCH_QUERY_KEY: Optional[str] = None
     AZURE_SEARCH_INDEX_NAME: str = "syrabit-edu-index"
     AZURE_SEARCH_SEMANTIC_CONFIG: str = "default"
-    AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_EMBEDDING_MODEL: str = "text-embedding-3-large"
     AZURE_EMBEDDING_DIMENSIONS: int = 1536
 

@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-002",
+  "type": "chore",
+  "description": "Update GitHub Actions workflow files: wire canary deploy into deploy-all.yml as a pre-step, add KeyVault secret fetching (11 secrets, no Azure OpenAI), and update agent-accuracy-report.yml to use MongoDB connection secret.",
+  "status": "pending",
+  "steps": [
+    "STEP 1 - Wire canary deploy into deploy-all.yml: Add a new job 'canary-deploy' that runs AFTER ci-checks but BEFORE the deploy-backend/deploy-edge/deploy-frontend jobs. This job should use 'uses: ./.github/workflows/agent-canary-deploy.yml' (reusable workflow call). The deploy-backend, deploy-edge, and deploy-frontend jobs should then have 'needs: [ci-checks, canary-deploy]' instead of just 'needs: [ci-checks]'.",
+    "STEP 2 - Add KeyVault secret fetching to deploy-all.yml: In the deploy-backend job, add a step AFTER 'Authenticate to Azure' and BEFORE 'Build & Push to ACR' named 'Fetch secrets from Azure KeyVault'. This step should: (a) Use 'set -euo pipefail' at the top. (b) Fetch exactly 11 secrets from Azure KeyVault (vault name: syrabit-kv): jwt-secret, mongodb-uri, upstash-redis-url, azure-search-key, azure-search-endpoint, vertex-ai-key, sarvam-api-key, razorpay-key-id, razorpay-key-secret, resend-api-key, posthog-api-key. (c) Export each as an environment variable using GITHUB_ENV. Map kebab-case secret names to UPPER_SNAKE_CASE env vars (e.g., jwt-secret -> JWT_SECRET, mongodb-uri -> MONGODB_URI, etc.). (d) Do NOT include azure-openai-endpoint or azure-openai-key. (e) After fetching, pass these as --set-env-vars in the 'Deploy to Container Apps' step.",
+    "STEP 3 - Update deploy-all.yml Container Apps deploy step: Modify the 'Deploy to Container Apps' step to include --set-env-vars that passes all 11 secrets fetched from KeyVault to the container environment. Format: --set-env-vars 'JWT_SECRET=${{ env.JWT_SECRET }},MONGODB_URI=${{ env.MONGODB_URI }},...'",
+    "STEP 4 - Update agent-accuracy-report.yml: The workflow already uses MONGODB_URI secret correctly. Ensure it has a 'secrets: inherit' or explicit secret reference. Add workflow_dispatch input for mongodb_connection_secret that defaults to the repo secret MONGODB_URI. Verify there are NO references to AWS, Supabase, or any non-MongoDB data sources. The current workflow looks correct already but add the workflow_dispatch input for the MongoDB secret name override."
+  ],
+  "acceptance_criteria": [
+    "deploy-all.yml has a canary-deploy job that calls agent-canary-deploy.yml as a reusable workflow",
+    "deploy-backend, deploy-edge, deploy-frontend jobs depend on canary-deploy succeeding",
+    "deploy-all.yml fetches exactly 11 secrets from KeyVault (no azure-openai-*)",
+    "KeyVault fetch step has 'set -euo pipefail' for fail-fast behavior",
+    "Container Apps deploy passes secrets as environment variables",
+    "agent-accuracy-report.yml accepts a MongoDB connection secret input",
+    "No references to Supabase, AWS, or Azure OpenAI in any workflow file"
+  ],
+  "verification": [
+    "Run: grep -n 'canary-deploy' .github/workflows/deploy-all.yml to confirm canary job exists",
+    "Run: grep -n 'set -euo pipefail' .github/workflows/deploy-all.yml to confirm fail-fast",
+    "Run: grep -c 'azure-openai' .github/workflows/deploy-all.yml should return 0",
+    "Run: grep -n 'MONGODB_URI\\|mongodb' .github/workflows/agent-accuracy-report.yml to confirm MongoDB usage",
+    "Run: grep -rn 'supabase\\|SUPABASE\\|aws\\|AWS' .github/workflows/ should return empty (no matches)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
