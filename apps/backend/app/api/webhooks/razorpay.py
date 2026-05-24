@@ -9,7 +9,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/webhooks", tags=["Payments"])
+router = APIRouter(tags=["Payments"])
 
 
 _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
@@ -17,8 +17,8 @@ _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
 
 def calculate_next_billing_date() -> str:
     """Calculate next billing date (1 month from now)"""
-    from datetime import datetime, timedelta
-    return (datetime.utcnow() + timedelta(days=30)).isoformat()
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
 
 
 def _validate_subscription_id(value) -> str:
@@ -33,6 +33,9 @@ async def handle_razorpay_webhook(request: Request):
     Handle Razorpay Payment Webhooks
     Verifies signature and updates subscription status
     """
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+
     body = await request.body()
     signature = request.headers.get("X-Razorpay-Signature")
 
@@ -53,6 +56,18 @@ async def handle_razorpay_webhook(request: Request):
 
     event = json.loads(body.decode())
     payload = event.get("payload", {})
+
+    # Idempotency check: skip duplicate events
+    event_id = event.get("id")
+    if event_id:
+        try:
+            from app.db.redis import get_redis
+            redis = get_redis()
+            exists = await redis.get(f"webhook_processed:{event_id}")
+            if exists:
+                return {"status": "duplicate", "event_id": event_id}
+        except Exception as e:
+            logger.error(f"Redis unavailable for webhook idempotency check: {e}")
 
     # 2. Handle Event Types
     if event.get("event") == "subscription.charged":
@@ -98,5 +113,14 @@ async def handle_razorpay_webhook(request: Request):
         if user:
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
+
+    # Mark event as processed for idempotency
+    if event_id:
+        try:
+            from app.db.redis import get_redis
+            redis = get_redis()
+            await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
+        except Exception as e:
+            logger.error(f"Redis unavailable for webhook idempotency storage: {e}")
 
     return {"status": "ok"}

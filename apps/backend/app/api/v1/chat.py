@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 import logging
 import time
@@ -15,17 +15,43 @@ from app.services.search.azure_search import search_service
 from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
+from app.core.token_budget import truncate_chunks_to_budget
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
 
 
+async def _load_conversation_history(session_id: Optional[str], max_turns: int = 5) -> str:
+    """Load recent conversation turns for multi-turn context."""
+    if not session_id:
+        return ""
+    try:
+        from app.models.chat import Chat
+        chat = await Chat.find_one({"session_id": session_id})
+        if not chat or not chat.messages:
+            return ""
+        # Get last N turns (user + assistant pairs)
+        recent = chat.messages[-(max_turns * 2):]
+        history_lines = []
+        for msg in recent:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")[:500]  # Truncate long messages
+            history_lines.append(f"{role.capitalize()}: {content}")
+        # Cap total history to ~2000 chars
+        history = "\n".join(history_lines)
+        if len(history) > 2000:
+            history = history[-2000:]
+        return history
+    except Exception:
+        return ""
+
+
 class ChatRequest(BaseModel):
     message: str
     lang: Optional[Literal["en", "as"]] = None  # Explicit language override
     session_id: Optional[str] = None
-    context_messages: List[dict] = []
+    context_messages: List[dict] = Field(default=[], max_length=10)
 
     @field_validator('message')
     @classmethod
@@ -44,8 +70,8 @@ class ChatResponse(BaseModel):
     sources: List[dict] = []
 
 
-async def check_rate_limit(user_id: str, user_tier: str, client_ip: str = None) -> bool:
-    """Check if user has exceeded rate limit"""
+async def check_rate_limit(user_id: str, user_tier: str, client_ip: str = None) -> tuple[bool, int, int]:
+    """Check if user has exceeded rate limit. Returns (allowed, current_count, limit)."""
     redis = get_redis()
     
     limit = settings.RATE_LIMIT_PRO_TIER if user_tier == "pro" else settings.RATE_LIMIT_FREE_TIER
@@ -64,7 +90,7 @@ async def check_rate_limit(user_id: str, user_tier: str, client_ip: str = None) 
         ttl = int(expire_at.timestamp() - time.time())
         await redis.expire(key, ttl)
     
-    return current_count <= limit
+    return current_count <= limit, current_count, limit
 
 
 @router.post("/", response_model=ChatResponse)
@@ -83,109 +109,146 @@ async def chat(
     # Get client IP for anonymous rate limiting
     client_ip = http_request.client.host if http_request and hasattr(http_request, 'client') else None
     
-    # User tier and ID — handle anonymous users gracefully
+    # User tier and ID - handle anonymous users gracefully
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
     user_id = str(user.id) if user else "anonymous"
     
     # Check rate limit
-    if not await check_rate_limit(user_id, user_tier, client_ip):
+    allowed, current_count, limit = await check_rate_limit(user_id, user_tier, client_ip)
+    if not allowed:
         raise HTTPException(
-            status_code=429, 
-            detail="Rate limit exceeded. Upgrade to Pro for unlimited messages."
+            status_code=429,
+            detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
+            headers={
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Remaining": "0",
+                "Retry-After": "3600",
+            }
         )
     
     try:
-        # Sanitize input to prevent prompt injection
-        sanitized_message = sanitize_user_input(request.message)
+        async def _process_chat():
+            # Sanitize input to prevent prompt injection
+            sanitized_message = sanitize_user_input(request.message)
 
-        # 1. Resolve language: explicit param > auto-detection
-        if request.lang:
-            detected_lang = request.lang
-            target_model = settings.SARVAM_MODEL if request.lang == "as" else settings.VERTEX_GEMINI_MODEL
-        else:
-            detected_lang, target_model = detect_language_and_route(sanitized_message)
+            # 1. Resolve language: explicit param > auto-detection
+            if request.lang:
+                detected_lang = request.lang
+                target_model = settings.SARVAM_MODEL if request.lang == "as" else settings.VERTEX_GEMINI_MODEL
+            else:
+                detected_lang, target_model = detect_language_and_route(sanitized_message)
 
-        logger.info("chat_started", extra={"user_id": user_id, "lang": detected_lang, "model": target_model})
-        
-        # 2. Generate embedding for RAG
-        from app.services.ai.embedder import generate_embedding
-        embedding = await generate_embedding(sanitized_message)
-        
-        # 3. Hybrid search with semantic reranking
-        context_chunks = await search_service.search_context(
-            query=sanitized_message,
-            embedding=embedding,
-            user_tier=user_tier,
-            limit=settings.MAX_CONTEXT_DOCS
-        )
-        
-        # 4. Build prompt with context (numbered [#] citation format)
-        lang_instruction = (
-            "You are Syrabit, an expert educational assistant for Assamese students.\n"
-            "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
-            "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
-            if detected_lang == "en" else
-            "আপুনি Syrabit, অসমীয়া ছাত্ৰ-ছাত্ৰীৰ বাবে এজন বিশেষজ্ঞ শিক্ষা সহায়ক।\n"
-            "নিম্নলিখিত নম্বৰযুক্ত প্ৰসংগ ব্যৱহাৰ কৰি উত্তৰ দিয়ক। প্ৰসংগত নাথাকিলে স্পষ্টকৈ কওক।\n"
-            "উদ্ধৃতিৰ বাবে [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])। অসমীয়াত উত্তৰ দিয়ক।"
-        )
-        context_text = "\n".join(
-            f"[{i+1}] {chunk['title']}: {chunk['content']}"
-            for i, chunk in enumerate(context_chunks)
-        )
-        system_prompt = f"{lang_instruction}\n\nContext:\n{context_text}"
-        
-        # 5. Call LLM
-        from app.services.ai.router import generate_response
-        response_text = await generate_response(
-            system_prompt=system_prompt,
-            user_message=request.message,
-            model=target_model,
-            stream=False
-        )
-        
-        # Calculate latency
-        latency_ms = int((time.time() - start_time) * 1000)
-        
-        # 6. Save chat to MongoDB (async background task)
-        from app.models.chat import Chat
-        chat_doc = Chat(
-            user_id=user_id if user else None,
-            session_id=request.session_id,
-        )
-        chat_doc.add_message(
-            role="user",
-            content=request.message,
-        )
-        chat_doc.add_message(
-            role="assistant",
-            content=response_text,
-            model_used=target_model,
-            latency_ms=latency_ms,
-            rag_sources=[{"doc_id": c["id"], "title": c["title"], "score": c["score"]} for c in context_chunks]
-        )
-        await chat_doc.save()
-        
-        # 7. Update usage counter
-        if user:
-            await user.update({
-                "$inc": {"monthly_message_count": 1, "total_lifetime_messages": 1},
-                "$set": {"updated_at": time.strftime('%Y-%m-%dT%H:%M:%SZ')}
-            })
-        
-        logger.info("chat_completed", extra={"user_id": user_id, "lang": detected_lang, "provider": "sarvam" if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else "vertex", "latency_ms": latency_ms, "response_length": len(response_text)})
-        
-        return ChatResponse(
-            response=response_text,
-            model_used=target_model,
-            latency_ms=latency_ms,
-            sources=[{"doc_id": c["id"], "title": c["title"], "score": c["score"], "url": c["url"]} for c in context_chunks]
-        )
-        
+            logger.info("chat_started", extra={"user_id": user_id, "lang": detected_lang, "model": target_model})
+            
+            # 2. Generate embedding for RAG
+            from app.services.ai.embedder import generate_embedding
+            embedding = await generate_embedding(sanitized_message)
+            
+            # 3. Hybrid search with semantic reranking
+            context_chunks = await search_service.search_context(
+                query=sanitized_message,
+                embedding=embedding,
+                user_tier=user_tier,
+                limit=settings.MAX_CONTEXT_DOCS
+            )
+            
+            # Apply token budget to context chunks
+            context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+            
+            # 4. Build prompt with context (numbered [#] citation format)
+            lang_instruction = (
+                "You are Syrabit, an expert educational assistant for Assamese students.\n"
+                "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
+                "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
+                if detected_lang == "en" else
+                "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09ac\u09bf\u09b6\u09c7\u09b7\u099c\u09cd\u099e \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964\n"
+                "\u09a8\u09bf\u09ae\u09cd\u09a8\u09b2\u09bf\u0996\u09bf\u09a4 \u09a8\u09ae\u09cd\u09ac\u09f0\u09af\u09c1\u0995\u09cd\u09a4 \u09aa\u09cd\u09f0\u09b8\u0982\u0997 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u09bf \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 \u09aa\u09cd\u09f0\u09b8\u0982\u0997\u09a4 \u09a8\u09be\u09a5\u09be\u0995\u09bf\u09b2\u09c7 \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964\n"
+                "\u0989\u09a6\u09cd\u09a7\u09c3\u09a4\u09bf\u09f0 \u09ac\u09be\u09ac\u09c7 [#] \u09ac\u09bf\u09a8\u09cd\u09af\u09be\u09b8 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u0995 (\u09af\u09c7\u09a8\u09c7 [1], [2])\u0964 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be\u09a4 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964"
+            )
+
+            if not context_chunks:
+                logger.warning("rag_empty_context", extra={"user_id": user_id, "query": sanitized_message[:50]})
+                system_prompt = f"{lang_instruction}\n\nNote: Knowledge base results are currently unavailable. Answer based on your general knowledge and clearly state that you cannot verify the answer against the course material."
+            else:
+                context_text = "\n".join(
+                    f"[{i+1}] {chunk['title']}: {chunk['content']}"
+                    for i, chunk in enumerate(context_chunks)
+                )
+                system_prompt = f"{lang_instruction}\n\nContext:\n{context_text}"
+
+            # Include multi-turn conversation history
+            history = await _load_conversation_history(request.session_id)
+            if history:
+                system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
+            
+            # 5. Call LLM
+            from app.services.ai.router import generate_response
+            response_text = await generate_response(
+                system_prompt=system_prompt,
+                user_message=sanitized_message,
+                model=target_model,
+                stream=False
+            )
+            
+            # Calculate latency
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            # 6. Save chat to MongoDB (async background task)
+            from app.models.chat import Chat
+            chat_doc = Chat(
+                user_id=user_id if user else None,
+                session_id=request.session_id,
+            )
+            chat_doc.add_message(
+                role="user",
+                content=sanitized_message,
+            )
+            chat_doc.add_message(
+                role="assistant",
+                content=response_text,
+                model_used=target_model,
+                latency_ms=latency_ms,
+                rag_sources=[{"doc_id": c["id"], "title": c["title"], "score": c["score"]} for c in context_chunks]
+            )
+            await chat_doc.save()
+            
+            # 7. Update usage counter
+            if user:
+                await user.update({
+                    "$inc": {"monthly_message_count": 1, "total_lifetime_messages": 1},
+                    "$set": {"updated_at": time.strftime('%Y-%m-%dT%H:%M:%SZ')}
+                })
+            
+            logger.info("chat_completed", extra={"user_id": user_id, "lang": detected_lang, "provider": "sarvam" if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else "vertex", "latency_ms": latency_ms, "response_length": len(response_text)})
+            
+            return ChatResponse(
+                response=response_text,
+                model_used=target_model,
+                latency_ms=latency_ms,
+                sources=[{"doc_id": c["id"], "title": c["title"], "score": c["score"], "url": c["url"]} for c in context_chunks]
+            )
+
+        result = await asyncio.wait_for(_process_chat(), timeout=30.0)
+        return result
+
     except HTTPException:
         raise
+    except RuntimeError as e:
+        error_msg = str(e)
+        logger.error("chat_upstream_failure", extra={"user_id": user_id, "error": error_msg})
+        if "embedding" in error_msg.lower() or "AZURE_OPENAI_ENDPOINT" in error_msg:
+            raise HTTPException(status_code=502, detail="Embedding service unavailable")
+        elif "search" in error_msg.lower():
+            raise HTTPException(status_code=503, detail="Knowledge base temporarily unavailable")
+        elif "timeout" in error_msg.lower():
+            raise HTTPException(status_code=504, detail="Request timed out")
+        else:
+            raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
+    except asyncio.TimeoutError:
+        logger.error("chat_timeout", extra={"user_id": user_id})
+        raise HTTPException(status_code=504, detail="Request timed out. Please try a shorter question.")
     except Exception as e:
-        logger.info("chat_failed", extra={"user_id": user_id, "error": str(e)})
+        logger.error("chat_unexpected_error", extra={"user_id": user_id, "error": str(e)})
         raise HTTPException(status_code=500, detail="An internal error occurred. Please try again later.")
 
 
@@ -212,10 +275,14 @@ def _build_system_prompt(detected_lang: str, context_chunks: list[dict]) -> str:
         "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
         "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
         if detected_lang == "en" else
-        "আপুনি Syrabit, অসমীয়া ছাত্ৰ-ছাত্ৰীৰ বাবে এজন বিশেষজ্ঞ শিক্ষা সহায়ক।\n"
-        "নিম্নলিখিত নম্বৰযুক্ত প্ৰসংগ ব্যৱহাৰ কৰি উত্তৰ দিয়ক। প্ৰসংগত নাথাকিলে স্পষ্টকৈ কওক।\n"
-        "উদ্ধৃতিৰ বাবে [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])। অসমীয়াত উত্তৰ দিয়ক।"
+        "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09ac\u09bf\u09b6\u09c7\u09b7\u099c\u09cd\u099e \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964\n"
+        "\u09a8\u09bf\u09ae\u09cd\u09a8\u09b2\u09bf\u0996\u09bf\u09a4 \u09a8\u09ae\u09cd\u09ac\u09f0\u09af\u09c1\u0995\u09cd\u09a4 \u09aa\u09cd\u09f0\u09b8\u0982\u0997 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u09bf \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 \u09aa\u09cd\u09f0\u09b8\u0982\u0997\u09a4 \u09a8\u09be\u09a5\u09be\u0995\u09bf\u09b2\u09c7 \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964\n"
+        "\u0989\u09a6\u09cd\u09a7\u09c3\u09a4\u09bf\u09f0 \u09ac\u09be\u09ac\u09c7 [#] \u09ac\u09bf\u09a8\u09cd\u09af\u09be\u09b8 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u0995 (\u09af\u09c7\u09a8\u09c7 [1], [2])\u0964 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be\u09a4 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964"
     )
+
+    if not context_chunks:
+        return f"{lang_instruction}\n\nNote: Knowledge base results are currently unavailable. Answer based on your general knowledge and clearly state that you cannot verify the answer against the course material."
+
     context_text = "\n".join(
         f"[{i+1}] {chunk['title']}: {chunk['content']}"
         for i, chunk in enumerate(context_chunks)
@@ -262,7 +329,7 @@ async def chat_stream(
     http_request: Request = None,
 ):
     """
-    Streaming chat endpoint — Server-Sent Events (SSE).
+    Streaming chat endpoint - Server-Sent Events (SSE).
 
     Supports both authenticated and anonymous users:
     - Authenticated: rate limited by user_id (monthly quota)
@@ -273,26 +340,35 @@ async def chat_stream(
 
     Features:
     - Explicit lang param (en/as) or auto-detection fallback
-    - Sarvam → Vertex fallback on failure for Assamese
+    - Sarvam -> Vertex fallback on failure for Assamese
     - Fire-and-forget MongoDB persistence after stream completes
     """
     start_time = time.time()
 
-    # ── Auth & rate limit ──
+    # -- Auth & rate limit --
     client_ip = http_request.client.host if http_request and hasattr(http_request, "client") else None
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
     user_id = str(user.id) if user else "anonymous"
 
-    if not await check_rate_limit(user_id, user_tier, client_ip):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.")
+    allowed, current_count, limit = await check_rate_limit(user_id, user_tier, client_ip)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
+            headers={
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Remaining": "0",
+                "Retry-After": "3600",
+            }
+        )
 
     # Sanitize input to prevent prompt injection
     sanitized_message = sanitize_user_input(request.message)
 
-    # ── Resolve language & model ──
+    # -- Resolve language & model --
     detected_lang, target_model = _resolve_lang_and_model(request)
 
-    # ── RAG retrieval (with OTel span) ──
+    # -- RAG retrieval (with OTel span) --
     from app.services.ai.embedder import generate_embedding
     from app.core.telemetry import get_tracer
 
@@ -314,10 +390,21 @@ async def chat_stream(
         rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
         rag_span.set_attribute("rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0)
 
-    # ── Build system prompt ──
+    # Apply token budget to context chunks
+    context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+
+    if not context_chunks:
+        logger.warning("rag_empty_context", extra={"user_id": user_id, "query": sanitized_message[:50]})
+
+    # -- Build system prompt --
     system_prompt = _build_system_prompt(detected_lang, context_chunks)
 
-    # ── Stream generator with Sarvam→Vertex fallback ──
+    # Include multi-turn conversation history
+    history = await _load_conversation_history(request.session_id)
+    if history:
+        system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
+
+    # -- Stream generator with Sarvam->Vertex fallback --
     async def event_stream():
         full_response = ""
         actual_model = target_model
@@ -327,7 +414,7 @@ async def chat_stream(
 
             async for chunk in stream_response(
                 system_prompt=system_prompt,
-                user_message=request.message,
+                user_message=sanitized_message,
                 model=target_model,
             ):
                 full_response += chunk
@@ -344,21 +431,21 @@ async def chat_stream(
                     from app.services.ai.vertex_client import vertex_client
 
                     actual_model = settings.VERTEX_GEMINI_MODEL
-                    async for chunk in vertex_client.stream_generate(system_prompt, request.message):
+                    async for chunk in vertex_client.stream_generate(system_prompt, sanitized_message):
                         full_response += chunk
                         yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:
                     logger.error(f"Vertex fallback also failed: {fallback_err}")
                     from app.services.dead_letter import store_dead_letter
                     await store_dead_letter(user_id, request.message, detected_lang, str(fallback_err))
-                    yield f"data: {json.dumps({'error': f'Both providers failed: {fallback_err}'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
                     return
             else:
                 logger.error(f"Vertex stream failed: {e}")
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
                 return
 
-        # ── Final event ──
+        # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)
         yield f"data: {json.dumps({'text': '', 'done': True, 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam' if ('sarvam' in target_model.lower() or 'openhathi' in target_model.lower()) else 'vertex', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
 
@@ -370,12 +457,12 @@ async def chat_stream(
             final_span.set_attribute("chat.model", actual_model)
             final_span.set_attribute("chat.provider", "sarvam" if "sarvam" in actual_model.lower() or "openhathi" in actual_model.lower() else "vertex")
 
-        # ── Persist chat (fire-and-forget) ──
+        # -- Persist chat (fire-and-forget) --
         asyncio.create_task(
             _save_chat_async(
                 user_id=user_id,
                 session_id=request.session_id,
-                user_message=request.message,
+                user_message=sanitized_message,
                 assistant_response=full_response,
                 target_model=actual_model,
                 latency_ms=latency_ms,

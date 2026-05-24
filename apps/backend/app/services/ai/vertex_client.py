@@ -5,6 +5,7 @@ import logging
 from typing import AsyncGenerator
 
 from app.config import settings
+from app.core.circuit_breaker import vertex_circuit_breaker, CircuitBreakerError, CircuitState
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,9 @@ class VertexAIClient:
             timeout=httpx.Timeout(60.0, connect=10.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
+        self._token_lock = asyncio.Lock()
+        self._cached_token: str | None = None
+        self._token_expiry: float = 0
 
     async def close(self):
         """Close the HTTP client (call on app shutdown)"""
@@ -34,53 +38,73 @@ class VertexAIClient:
     ) -> str:
         """Generate response using Gemini"""
         try:
-            # Build prompt
-            full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-            
-            response = await self._client.post(
-                f"{self.base_url}/{self.model}:generateContent",
-                headers={
-                    "Authorization": f"Bearer {await self._get_access_token()}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "contents": [{
-                        "parts": [{"text": full_prompt}]
-                    }],
-                    "generationConfig": {
-                        "temperature": 0.7,
-                        "maxOutputTokens": 1024,
-                    }
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Extract response text
-            if 'candidates' in data and len(data['candidates']) > 0:
-                return data['candidates'][0]['content']['parts'][0]['text']
-            return "I couldn't generate a response. Please try again."
+            async def _do_generate():
+                # Build prompt
+                full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
                 
+                response = await self._client.post(
+                    f"{self.base_url}/{self.model}:generateContent",
+                    headers={
+                        "Authorization": f"Bearer {await self._get_access_token()}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "contents": [{
+                            "parts": [{"text": full_prompt}]
+                        }],
+                        "generationConfig": {
+                            "temperature": 0.7,
+                            "maxOutputTokens": 1024,
+                        }
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract response text
+                if 'candidates' in data and len(data['candidates']) > 0:
+                    return data['candidates'][0]['content']['parts'][0]['text']
+                return "I couldn't generate a response. Please try again."
+
+            result = await vertex_circuit_breaker.call(_do_generate)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Vertex AI unavailable: {e}")
         except Exception as e:
             logger.error(f"Vertex AI error: {str(e)}")
             raise RuntimeError(f"Vertex AI service failed: {e}")
 
     async def _get_access_token(self) -> str:
-        """Get OAuth2 access token for Vertex AI"""
-        from google.oauth2 import service_account
+        """Get OAuth2 access token for Vertex AI with caching and lock."""
+        import time as _time
 
-        creds = service_account.Credentials.from_service_account_info(
-            settings.google_credentials,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-        
-        # Refresh token if needed (blocking call wrapped in executor)
-        import google.auth.transport.requests
-        request = google.auth.transport.requests.Request()
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, creds.refresh, request)
-        
-        return creds.token
+        # Return cached token if still valid (with 60s buffer)
+        if self._cached_token and _time.time() < self._token_expiry - 60:
+            return self._cached_token
+
+        async with self._token_lock:
+            # Double-check after acquiring lock
+            if self._cached_token and _time.time() < self._token_expiry - 60:
+                return self._cached_token
+
+            from google.oauth2 import service_account
+            import google.auth.transport.requests
+
+            creds = service_account.Credentials.from_service_account_info(
+                settings.google_credentials,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+
+            # Refresh token (blocking call wrapped in executor)
+            request = google.auth.transport.requests.Request()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, creds.refresh, request)
+
+            self._cached_token = creds.token
+            # Token typically valid for 1 hour
+            self._token_expiry = _time.time() + 3600
+
+            return self._cached_token
 
     async def stream_generate(
         self,
@@ -93,6 +117,9 @@ class VertexAIClient:
         Yields text chunks as they arrive via SSE.
         Uses ?alt=sse to get Server-Sent Events format from Vertex AI.
         """
+        if vertex_circuit_breaker.state == CircuitState.OPEN:
+            raise RuntimeError("Vertex AI unavailable (circuit open)")
+
         full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
 
         url = f"{self.base_url}/{self.model}:streamGenerateContent?alt=sse"
@@ -132,10 +159,12 @@ class VertexAIClient:
                         text = part.get("text", "")
                         if text:
                             yield text
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
-            raise RuntimeError(f"Vertex AI stream failed: HTTP {e.response.status_code}")
+            vertex_circuit_breaker._on_success()
         except Exception as e:
+            vertex_circuit_breaker._on_failure()
+            if isinstance(e, httpx.HTTPStatusError):
+                logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
+                raise RuntimeError(f"Vertex AI stream failed: HTTP {e.response.status_code}")
             logger.error(f"Vertex AI stream error: {str(e)}")
             raise RuntimeError(f"Vertex AI stream failed: {e}")
 

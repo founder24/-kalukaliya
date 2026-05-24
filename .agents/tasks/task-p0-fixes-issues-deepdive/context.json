@@ -1,0 +1,33 @@
+{
+  "project_type": "EdTech platform - Cloudflare Workers edge + FastAPI Python backend + React frontend",
+  "language": "Python (backend), TypeScript (edge worker)",
+  "build_system": "pnpm monorepo with pip for backend. Backend uses pip-compile with hash verification. Edge uses wrangler for CF Workers.",
+  "test_framework": "pytest with anyio for backend (tests/conftest.py provides AsyncClient fixture), vitest for edge worker",
+  "build_command": "For backend: pip install -r requirements.txt && python -c 'from app.main import app'. For edge: pnpm --filter syrabit-edge run build",
+  "test_command": "For backend: pytest apps/backend/tests/ (requires JWT_SECRET and APP_ENV=test). For edge: pnpm --filter syrabit-edge run test",
+  "verification_instructions": "1. Run pytest from apps/backend with APP_ENV=test and JWT_SECRET set. 2. Run vitest from apps/edge. 3. Verify syntax with python -c 'import ast; ast.parse(open(f).read())' for Python files. 4. Run tsc --noEmit for TypeScript.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. pip install (stripped hashes) from apps/backend/requirements.txt. 2. pnpm install from root for edge/frontend.",
+  "environment_constraints": "OPEN_INTERNET mode - full network access. Python 3.11, Node.js 22, Docker available. Backend uses Upstash Redis (HTTP-based), MongoDB Atlas, Azure Search, Vertex AI, Sarvam AI, Razorpay, Resend. Tests mock external services.",
+  "contribution_requirements": "CI runs ruff linter and mypy type checker on backend. Tests require MongoDB service container in CI. JWT_SECRET must be 32+ chars in production mode.",
+  "key_patterns": "Backend: FastAPI routers in app/api/v1/, services in app/services/, models use Beanie ODM. Edge: Cloudflare Workers with middleware pipeline (CORS -> JWT -> Turnstile -> Rate Limit -> Proxy). Redis via Upstash HTTP REST API (not TCP). Tests use httpx.AsyncClient with ASGITransport.",
+  "relevant_files": [
+    "apps/backend/app/config.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/api/v1/auth.py",
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/api/v1/health.py",
+    "apps/backend/app/api/webhooks/razorpay.py",
+    "apps/backend/app/services/comms/resend_client.py",
+    "apps/backend/app/services/ai/embedder.py",
+    "apps/backend/app/core/security.py",
+    "apps/backend/app/db/redis.py",
+    "apps/edge/src/index.ts",
+    "apps/edge/src/middleware/bot.ts",
+    "apps/backend/tests/conftest.py",
+    "apps/backend/tests/test_webhook.py",
+    "apps/backend/tests/test_auth.py",
+    "COMPREHENSIVE_CODE_AUDIT.md"
+  ],
+  "directory_structure": "Monorepo: apps/edge (Cloudflare Worker TS), apps/backend (FastAPI Python with app/api/v1, app/services, app/core, app/db, app/models), frontend/ (React), infra/ (Azure Bicep), .github/workflows/ (CI/CD)"
+}

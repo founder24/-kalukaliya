@@ -9,6 +9,7 @@
  *   5. Route to backend proxy or R2 assets
  */
 
+import { getCorsHeaders } from './middleware/cors';
 import { turnstileVerify } from './middleware/bot';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
@@ -21,12 +22,7 @@ export default {
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
       return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || 'https://syrabit.ai',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, CF-Turnstile-Response',
-          'Access-Control-Max-Age': '86400',
-        },
+        headers: getCorsHeaders(env.ALLOWED_ORIGIN || 'https://syrabit.ai'),
       });
     }
 
@@ -48,6 +44,17 @@ export default {
     // ── 3. Turnstile Bot Protection (chat/auth endpoints) ──
     if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/auth')) {
       const turnstileToken = request.headers.get('CF-Turnstile-Response');
+
+      // Turnstile is MANDATORY for auth endpoints
+      const isAuthEndpoint =
+        url.pathname.startsWith('/api/v1/auth/signup') ||
+        url.pathname.startsWith('/api/v1/auth/login') ||
+        url.pathname.startsWith('/api/v1/auth/forgot-password');
+
+      if (isAuthEndpoint && !turnstileToken) {
+        return jsonResponse(403, { error: 'Bot verification required' });
+      }
+
       if (turnstileToken) {
         const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
         if (!isValid) {

@@ -53,8 +53,9 @@ async def lifespan(app: FastAPI):
         logger.info("Sentry initialized")
     
     # Initialize PostHog
+    app.state.posthog = None
     if settings.POSTHOG_API_KEY:
-        _posthog = Posthog(
+        app.state.posthog = Posthog(
             project_api_key=settings.POSTHOG_API_KEY,
             host=settings.POSTHOG_HOST
         )
@@ -65,8 +66,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     from app.services.ai.vertex_client import vertex_client
     from app.services.ai.sarvam_client import sarvam_client
+    from app.services.ai.embedder import close_http_client
+    from app.services.payment.razorpay_client import razorpay_client
     await vertex_client.close()
     await sarvam_client.close()
+    await razorpay_client.close()
+    await close_http_client()
     await close_mongo()
     await close_redis()
     logger.info("Application shutdown complete")
@@ -120,6 +125,15 @@ def create_app() -> FastAPI:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "connect-src 'self' https://*.syrabit.ai https://app.posthog.com; "
+            "frame-ancestors 'none'"
+        )
         return response
 
     # Request ID Middleware for structured logging

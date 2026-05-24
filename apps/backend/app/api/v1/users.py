@@ -61,6 +61,10 @@ async def delete_account(user: User = Depends(get_current_user)):
     from app.models.chat import Chat
     await Chat.find({"user_id": str(user.id)}).delete()
 
+    # Cascade delete feedback
+    from app.models.feedback import ChatFeedback
+    await ChatFeedback.find({"user_id": str(user.id)}).delete()
+
     # Delete user
     await user.delete()
 

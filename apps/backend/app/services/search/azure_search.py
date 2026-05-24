@@ -1,6 +1,4 @@
-import asyncio
-from functools import partial
-from azure.search.documents import SearchClient
+from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
     VectorizedQuery,
     QueryType,
@@ -21,6 +19,7 @@ class AzureSearchService:
     Provides BM25 + Vector search with neural reranking for optimal RAG quality
     
     Features:
+    - Native async client (no thread pool executor)
     - Graceful degradation to vector-only if semantic ranker fails
     - Circuit breaker integration
     - Detailed error logging
@@ -33,27 +32,33 @@ class AzureSearchService:
             credential=AzureKeyCredential(settings.AZURE_SEARCH_QUERY_KEY),
         )
 
-    def _sync_search(self, query: str, vector_query, user_tier: str, limit: int, semantic: bool):
-        """Synchronous search - runs in thread pool executor."""
+    async def _async_search(self, query: str, vector_query, user_tier: str | None, limit: int, semantic: bool):
+        """Async search using the native async client."""
+        filter_expr = f"tier_access eq '{user_tier}'" if user_tier else None
         if semantic:
-            return list(self.client.search(
-                search_text=query,
-                vector_queries=[vector_query],
-                filter=f"tier_access eq '{user_tier}'",
-                query_type=QueryType.SEMANTIC,
-                semantic_configuration_name=settings.AZURE_SEARCH_SEMANTIC_CONFIG,
-                query_caption=QueryCaptionType.EXTRACTIVE,
-                query_answer=QueryAnswerType.EXTRACTIVE,
-                top=limit,
-            ))
+            kwargs = {
+                "search_text": query,
+                "vector_queries": [vector_query],
+                "query_type": QueryType.SEMANTIC,
+                "semantic_configuration_name": settings.AZURE_SEARCH_SEMANTIC_CONFIG,
+                "query_caption": QueryCaptionType.EXTRACTIVE,
+                "query_answer": QueryAnswerType.EXTRACTIVE,
+                "top": limit,
+            }
+            if filter_expr:
+                kwargs["filter"] = filter_expr
+            results = self.client.search(**kwargs)
         else:
-            return list(self.client.search(
-                search_text=query,
-                vector_queries=[vector_query],
-                filter=f"tier_access eq '{user_tier}'",
-                query_type=QueryType.VECTOR,
-                top=limit,
-            ))
+            kwargs = {
+                "search_text": query,
+                "vector_queries": [vector_query],
+                "query_type": QueryType.VECTOR,
+                "top": limit,
+            }
+            if filter_expr:
+                kwargs["filter"] = filter_expr
+            results = self.client.search(**kwargs)
+        return [doc async for doc in results]
 
     async def search_context(
         self, query: str, embedding: list[float], user_tier: str, limit: int = 5
@@ -80,22 +85,15 @@ class AzureSearchService:
                 exhaustive=True,  # Ensure accuracy over speed for small sets
             )
 
-            # 2. Execute Hybrid Search with Semantic Reranking via thread pool
-            loop = asyncio.get_running_loop()
+            # 2. Execute Hybrid Search with Semantic Reranking (native async)
             try:
-                results = await loop.run_in_executor(
-                    None,
-                    partial(self._sync_search, query, vector_query, user_tier, limit, True)
-                )
+                results = await self._async_search(query, vector_query, user_tier, limit, True)
                 logger.info(f"Using SEMANTIC search for query '{query[:20]}...'")
             except AzureError as e:
                 logger.warning(
                     f"Semantic ranker failed ({str(e)}), falling back to VECTOR-ONLY search"
                 )
-                results = await loop.run_in_executor(
-                    None,
-                    partial(self._sync_search, query, vector_query, user_tier, limit, False)
-                )
+                results = await self._async_search(query, vector_query, user_tier, limit, False)
 
             context_chunks = []
             for doc in results:
@@ -110,6 +108,29 @@ class AzureSearchService:
                 }
                 context_chunks.append(chunk)
 
+            # RAG-C2: Fallback for empty tier-filtered results
+            if not context_chunks and user_tier:
+                logger.warning(f"No results with tier filter '{user_tier}', retrying without filter")
+                try:
+                    fallback_results = await self._async_search(query, vector_query, None, limit, True)
+                except AzureError:
+                    fallback_results = await self._async_search(query, vector_query, None, limit, False)
+
+                for doc in fallback_results:
+                    chunk = {
+                        "id": doc["id"],
+                        "title": doc["title"],
+                        "content": doc["content"],
+                        "score": doc["@search.score"],
+                        "reranker_score": doc.get("@search.reranker_score", 0),
+                        "url": doc.get("source_url", ""),
+                        "unfiltered": True,
+                    }
+                    context_chunks.append(chunk)
+
+                if context_chunks:
+                    logger.info(f"Found {len(context_chunks)} results without tier filter")
+
             logger.info(
                 f"Retrieved {len(context_chunks)} chunks for query '{query[:20]}...'"
             )
@@ -117,6 +138,7 @@ class AzureSearchService:
 
         except Exception as e:
             logger.error(f"Azure Search failed completely: {str(e)}")
+            logger.warning("search_context returned empty due to error")
             # Return empty list instead of raising to allow graceful degradation
             return []
 

@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Layer 3 (Advanced) deep-dive fixes: Multi-turn chat context, token management, deployment automation, and advanced security hardening.",
+  "status": "completed",
+  "steps": [
+    "CHAT-C2: Implement multi-turn conversation context in apps/backend/app/api/v1/chat.py. In both streaming and non-streaming endpoints, after getting the session_id, load the last N messages from MongoDB (e.g., last 5 turns). Include them in the LLM prompt between the system prompt and the current user message. Use a format like 'Previous conversation:\\nUser: ...\\nAssistant: ...' Add a token budget of ~2000 chars for history.",
+    "CHAT-C3: Implement token/context window management. Create a new utility module apps/backend/app/core/token_budget.py with a function estimate_tokens(text: str) -> int that uses character-based estimation (1 token ~ 4 chars for English, ~2 chars for Assamese). Add a function truncate_to_budget(chunks: list[dict], max_tokens: int) -> list[dict] that truncates context chunks to fit. Use this in chat.py when building system_prompt.",
+    "SEC-C3: Add CSRF double-submit pattern for admin endpoints. In apps/backend/app/api/v1/admin.py, generate a CSRF token on admin login and require it as a header (X-CSRF-Token) on all mutating admin requests. Alternatively, set the admin session cookie with SameSite=Strict attribute.",
+    "SEC-C4: Implement one-time-use enforcement for password reset tokens. In apps/backend/app/api/v1/auth.py reset_password endpoint, after decoding the token, compute its hash and check Redis for key 'used_reset:{hash}'. If found, reject. After successful reset, store the hash with 1-hour TTL.",
+    "AUTH-W3: Fix the refresh endpoint rate limiting to use the shared _check_rate_limit() helper instead of the inline implementation that catches ImportError. Replace the entire try-except block at lines 200-215 with a single call to await _check_rate_limit(request, 'refresh', 10).",
+    "AUTH-W4: In apps/backend/app/api/v1/auth.py reset_password endpoint, add a check for user.auth_provider. If auth_provider is not 'local', return HTTP 400 'Password reset is not available for OAuth accounts. Please sign in with your OAuth provider.'",
+    "DEPLOY-C3: In .github/workflows/deploy-all.yml, replace the 'sleep 90' with a polling loop that checks health every 5 seconds for up to 150 seconds (30 attempts). Use: for i in $(seq 1 30); do curl -sf $URL/health && exit 0; sleep 5; done; exit 1",
+    "DEPLOY-C4: In .github/workflows/deploy-all.yml, add a rollback job that triggers when the smoke-test job fails. The rollback job should deactivate the current revision and reactivate the previous one using 'az containerapp revision list' and 'az containerapp update'.",
+    "PERF-W4: In apps/backend/app/services/ai/vertex_client.py, add a lock around token refresh to prevent thundering herd. Use asyncio.Lock() to ensure only one coroutine refreshes the token at a time. Cache the access token with its expiry timestamp.",
+    "RAG-C2: In apps/backend/app/services/search/azure_search.py, add a fallback for empty tier-filtered results. If the first search returns 0 results, retry without the tier filter and log a warning. Include a flag in the response indicating unfiltered results were used."
+  ],
+  "acceptance_criteria": [
+    "Multi-turn chat includes last 5 conversation turns in the LLM prompt",
+    "Token budget management truncates context to prevent context window overflow",
+    "Admin endpoints have CSRF protection via SameSite=Strict cookies",
+    "Password reset tokens are single-use (checked against Redis)",
+    "Refresh endpoint uses shared _check_rate_limit helper",
+    "OAuth accounts cannot use password reset flow",
+    "Deployment uses health polling instead of fixed sleep",
+    "Deployment has automated rollback on smoke test failure",
+    "Vertex AI token refresh is protected by asyncio.Lock",
+    "Azure Search falls back to unfiltered search when tier filter returns no results"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; [ast.parse(open(f).read()) for f in ['apps/backend/app/api/v1/chat.py', 'apps/backend/app/api/v1/auth.py', 'apps/backend/app/api/v1/admin.py', 'apps/backend/app/services/ai/vertex_client.py', 'apps/backend/app/services/search/azure_search.py', 'apps/backend/app/core/token_budget.py']]; print('OK')\"",
+    "Run: APP_ENV=test JWT_SECRET=test_secret_that_is_at_least_32_characters_long pytest apps/backend/tests/ -v",
+    "Verify .github/workflows/deploy-all.yml YAML is valid: python -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-all.yml')); print('YAML valid')\""
+  ],
+  "blocked_reason": null,
+  "findings": "All 10 acceptance criteria implemented. Tests pass (23 passed, 14 pre-existing errors from missing AZURE_SEARCH_QUERY_KEY in test env - confirmed pre-existing). AST parse and YAML validation both pass."
+}

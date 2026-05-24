@@ -1,0 +1,7 @@
+{
+  "task_id": "task-comprehensive-audit",
+  "task_description": "Perform a comprehensive full-stack code audit of the Syrabit AI codebase covering Security, Performance, Deployment Readiness, API Correctness, Chat Pipeline, Content Generation, Auth, Workflows, Analytics, and SEO/GEO/AEO. Output a single detailed markdown report.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
