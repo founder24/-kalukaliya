@@ -1,19 +1,16 @@
-from typing import Optional
+"""PostHog utility - safe accessor for the PostHog client from app state."""
 from fastapi import Request
-
-try:
-    from posthog import Posthog
-except ImportError:
-    Posthog = None
+from typing import Optional
 
 
-def get_posthog(request: Request) -> Optional["Posthog"]:
+def get_posthog(request: Optional[Request] = None):
     """
-    Retrieve the PostHog client from the application state.
-
-    Returns None if PostHog is not configured or the request has no app state.
+    Get PostHog client from app state.
+    Returns None if PostHog is not configured or request is unavailable.
     """
+    if not request:
+        return None
     try:
-        return request.app.state.posthog
-    except AttributeError:
+        return getattr(request.app.state, 'posthog', None)
+    except Exception:
         return None

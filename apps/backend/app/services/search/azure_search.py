@@ -26,11 +26,15 @@ class AzureSearchService:
     """
 
     def __init__(self):
-        self.client = SearchClient(
-            endpoint=settings.AZURE_SEARCH_ENDPOINT,
-            index_name=settings.AZURE_SEARCH_INDEX_NAME,
-            credential=AzureKeyCredential(settings.AZURE_SEARCH_QUERY_KEY),
-        )
+        self.client = None
+        if settings.AZURE_SEARCH_ENDPOINT and settings.AZURE_SEARCH_QUERY_KEY:
+            self.client = SearchClient(
+                endpoint=settings.AZURE_SEARCH_ENDPOINT,
+                index_name=settings.AZURE_SEARCH_INDEX_NAME,
+                credential=AzureKeyCredential(settings.AZURE_SEARCH_QUERY_KEY),
+            )
+        else:
+            logger.warning("Azure Search not configured - RAG search will return empty results")
 
     async def _async_search(
         self,
@@ -83,6 +87,10 @@ class AzureSearchService:
         Returns:
             List of context chunks with scores and metadata
         """
+        if not self.client:
+            logger.warning("Azure Search client not initialized - returning empty context")
+            return []
+
         try:
             # 1. Define Vector Query using built-in vectorization
             vector_query = VectorizableTextQuery(
