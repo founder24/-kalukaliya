@@ -31,15 +31,19 @@ async def list_notifications(request: Request):
 
         notifications = []
         for n in notifications_raw:
-            notifications.append({
-                "id": str(n["_id"]),
-                "title": n.get("title"),
-                "message": n.get("message"),
-                "type": n.get("type", "info"),
-                "target": n.get("target", "all"),
-                "read": n.get("read", False),
-                "created_at": n.get("created_at", "").isoformat() if n.get("created_at") else None,
-            })
+            notifications.append(
+                {
+                    "id": str(n["_id"]),
+                    "title": n.get("title"),
+                    "message": n.get("message"),
+                    "type": n.get("type", "info"),
+                    "target": n.get("target", "all"),
+                    "read": n.get("read", False),
+                    "created_at": n.get("created_at", "").isoformat()
+                    if n.get("created_at")
+                    else None,
+                }
+            )
 
         return {"notifications": notifications}
     except Exception as e:

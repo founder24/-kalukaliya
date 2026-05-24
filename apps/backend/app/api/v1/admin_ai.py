@@ -22,22 +22,26 @@ async def ai_providers(request: Request):
     providers = []
 
     # Vertex AI (Google)
-    providers.append({
-        "name": "vertex_ai",
-        "model": settings.VERTEX_GEMINI_MODEL,
-        "location": settings.VERTEX_LOCATION,
-        "configured": bool(settings.VERTEX_PROJECT_ID),
-        "status": "configured" if settings.VERTEX_PROJECT_ID else "not_configured",
-    })
+    providers.append(
+        {
+            "name": "vertex_ai",
+            "model": settings.VERTEX_GEMINI_MODEL,
+            "location": settings.VERTEX_LOCATION,
+            "configured": bool(settings.VERTEX_PROJECT_ID),
+            "status": "configured" if settings.VERTEX_PROJECT_ID else "not_configured",
+        }
+    )
 
     # Sarvam AI (Indic)
-    providers.append({
-        "name": "sarvam_ai",
-        "model": settings.SARVAM_MODEL,
-        "base_url": settings.SARVAM_BASE_URL,
-        "configured": bool(settings.SARVAM_API_KEY),
-        "status": "configured" if settings.SARVAM_API_KEY else "not_configured",
-    })
+    providers.append(
+        {
+            "name": "sarvam_ai",
+            "model": settings.SARVAM_MODEL,
+            "base_url": settings.SARVAM_BASE_URL,
+            "configured": bool(settings.SARVAM_API_KEY),
+            "status": "configured" if settings.SARVAM_API_KEY else "not_configured",
+        }
+    )
 
     return {"providers": providers}
 

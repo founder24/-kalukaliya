@@ -34,6 +34,9 @@ class SarvamAIClient:
         self, system_prompt: str, user_message: str, stream: bool = False
     ) -> str:
         """Generate response using Sarvam OpenHathi"""
+        if not self.api_key:
+            raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
+
         try:
 
             async def _do_generate():
@@ -87,6 +90,9 @@ class SarvamAIClient:
 
         Yields text content deltas as they arrive.
         """
+        if not self.api_key:
+            raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
+
         if sarvam_circuit_breaker.state == CircuitState.OPEN:
             raise RuntimeError("Sarvam AI unavailable (circuit open)")
 

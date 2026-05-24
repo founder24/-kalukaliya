@@ -78,6 +78,11 @@ class VertexAIClient:
         """Get OAuth2 access token for Vertex AI with caching and lock."""
         import time as _time
 
+        if not settings.google_credentials:
+            raise RuntimeError(
+                "Vertex AI credentials not configured (GOOGLE_APPLICATION_CREDENTIALS_JSON is empty)"
+            )
+
         # Return cached token if still valid (with 60s buffer)
         if self._cached_token and _time.time() < self._token_expiry - 60:
             return self._cached_token

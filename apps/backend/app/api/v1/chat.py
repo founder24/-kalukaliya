@@ -7,7 +7,7 @@ import time
 import json
 import asyncio
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.models.user import User
@@ -88,10 +88,11 @@ async def check_rate_limit(
     )
 
     # Use IP-based tracking for anonymous users to prevent quota collision
+    month_key = time.strftime("%Y-%m", time.gmtime())
     if user_id == "anonymous" and client_ip:
-        key = f"rate_anon:{client_ip}:{time.strftime('%Y-%m')}"
+        key = f"rate_anon:{client_ip}:{month_key}"
     else:
-        key = f"rate:{user_id}:{time.strftime('%Y-%m')}"
+        key = f"rate:{user_id}:{month_key}"
 
     current_count = await redis.incr(key)
     if current_count == 1:
@@ -260,7 +261,7 @@ async def chat(
                             "monthly_message_count": 1,
                             "total_lifetime_messages": 1,
                         },
-                        "$set": {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")},
+                        "$set": {"updated_at": datetime.now(timezone.utc)},
                     }
                 )
 
