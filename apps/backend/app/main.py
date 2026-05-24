@@ -6,6 +6,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 from posthog import Posthog
 import logging
 import uuid
+import time
 import contextlib
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Factory function to create FastAPI application"""
-    
+    from app.core.logging_config import setup_logging
+    setup_logging()
+
     app = FastAPI(
         title="Syrabit API",
         description="Educational AI Assistant for Assamese Students",
@@ -91,17 +94,55 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Razorpay-Signature", "Accept", "Origin"],
     )
 
+    # CSRF Origin Validation Middleware
+    @app.middleware("http")
+    async def csrf_origin_check(request: Request, call_next):
+        """Validate Origin header on mutating requests to prevent CSRF."""
+        if request.method in ("POST", "PUT", "DELETE"):
+            origin = request.headers.get("origin")
+            # Skip for health checks
+            if request.url.path.startswith("/health") or request.url.path.startswith("/api/health"):
+                return await call_next(request)
+            if origin and origin not in settings.allowed_origins_list:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Origin not allowed"}
+                )
+        return await call_next(request)
+
+    # Security Headers Middleware
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        """Add security response headers to all responses."""
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-XSS-Protection"] = "0"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
     # Request ID Middleware for structured logging
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = request_id
-        
-        # Add request_id to logging context
-        with contextlib.nullcontext():
-            response = await call_next(request)
-            response.headers["X-Request-ID"] = request_id
-            return response
+
+        start_time = time.time()
+        response = await call_next(request)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        logger.info("request_completed", extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "latency_ms": elapsed_ms,
+            "request_id": request_id,
+        })
+
+        response.headers["X-Request-ID"] = request_id
+        return response
 
     # Initialize OpenTelemetry (no-op if packages not installed)
     from app.core.telemetry import init_telemetry

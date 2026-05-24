@@ -104,6 +104,8 @@ async def chat(
             target_model = settings.SARVAM_MODEL if request.lang == "as" else settings.VERTEX_GEMINI_MODEL
         else:
             detected_lang, target_model = detect_language_and_route(sanitized_message)
+
+        logger.info("chat_started", extra={"user_id": user_id, "lang": detected_lang, "model": target_model})
         
         # 2. Generate embedding for RAG
         from app.services.ai.embedder import generate_embedding
@@ -171,7 +173,7 @@ async def chat(
                 "$set": {"updated_at": time.strftime('%Y-%m-%dT%H:%M:%SZ')}
             })
         
-        logger.info(f"Chat completed for user {user_id} in {latency_ms}ms")
+        logger.info("chat_completed", extra={"user_id": user_id, "lang": detected_lang, "provider": "sarvam" if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else "vertex", "latency_ms": latency_ms, "response_length": len(response_text)})
         
         return ChatResponse(
             response=response_text,
@@ -183,7 +185,7 @@ async def chat(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
+        logger.info("chat_failed", extra={"user_id": user_id, "error": str(e)})
         raise HTTPException(status_code=500, detail="An internal error occurred. Please try again later.")
 
 
@@ -335,6 +337,7 @@ async def chat_stream(
             # FALLBACK: If Assamese (Sarvam) fails, fall back to Vertex
             if detected_lang == "as":
                 logger.warning(f"Sarvam stream failed ({e}), falling back to Vertex AI")
+                logger.info("chat_fallback", extra={"user_id": user_id, "error": str(e), "fallback_provider": "vertex"})
                 yield f"data: {json.dumps({'fallback': True, 'provider': 'vertex', 'reason': str(e)})}\n\n"
 
                 try:
@@ -346,6 +349,8 @@ async def chat_stream(
                         yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:
                     logger.error(f"Vertex fallback also failed: {fallback_err}")
+                    from app.services.dead_letter import store_dead_letter
+                    await store_dead_letter(user_id, request.message, detected_lang, str(fallback_err))
                     yield f"data: {json.dumps({'error': f'Both providers failed: {fallback_err}'})}\n\n"
                     return
             else:
@@ -355,7 +360,7 @@ async def chat_stream(
 
         # ── Final event ──
         latency_ms = int((time.time() - start_time) * 1000)
-        yield f"data: {json.dumps({'text': '', 'done': True, 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang})}\n\n"
+        yield f"data: {json.dumps({'text': '', 'done': True, 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam' if ('sarvam' in target_model.lower() or 'openhathi' in target_model.lower()) else 'vertex', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:

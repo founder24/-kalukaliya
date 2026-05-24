@@ -13,6 +13,10 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  # Opt into Node.js 24 early to avoid deprecation warnings (Node 20 EOL: Sep 2026)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   refresh-and-build:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

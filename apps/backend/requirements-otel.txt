@@ -4,7 +4,7 @@
 # These are OPTIONAL — the app runs fine without them.
 # When not installed, telemetry.py gracefully falls back to no-op.
 
-opentelemetry-api>=1.25.0
+opentelemetry-api>=1.42.1
 opentelemetry-sdk>=1.25.0
 opentelemetry-exporter-otlp>=1.25.0
 opentelemetry-instrumentation-fastapi>=0.46b0
