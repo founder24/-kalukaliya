@@ -1,7 +1,7 @@
 {
   "task_id": "task-canonical-knowledge-architecture",
   "task_description": "Implement Option B: Canonical Structured Knowledge architecture for the Syrabit.ai educational platform. This includes a KnowledgeObject Beanie model, content pipeline service (HTML rendering, Azure Search indexing, MCQ/summary generation, IndexNow, Cloudflare KV), public content API, admin CRUD/publish API, sitemap generation, and ISR support.",
-  "status": "in_progress",
+  "status": "completed",
   "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
   "blocked_reason": null,
   "verification": {
@@ -9,6 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "skipped",
-    "summary": "47 tests all pass after review fixes. Addressed: Jinja2 autoescape double-escaping, public endpoint security (is_published filter + field exclusion), sitemap projection optimization, admin input validation (ValidationError -> 422)."
+    "summary": "47 new tests all pass. Full suite: 104+ pass, 8 pre-existing failures unrelated to this change. All review issues from v1 addressed. v2 review APPROVED."
   }
 }
