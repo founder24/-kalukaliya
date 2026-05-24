@@ -247,6 +247,56 @@ function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
 // .forEach(remove)`) replaces this static script with the React-built
 // equivalent on hydration — no duplicate FAQPage scripts, no SEO
 // penalty for "double markup".
+function injectBreadcrumbJsonLd(html, items) {
+  if (!Array.isArray(items) || items.length < 2) return html;
+  const ld = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": items.map((item, i) => ({
+      "@type": "ListItem",
+      "position": i + 1,
+      "name": item.name,
+      "item": item.url,
+    })),
+  };
+  const json = JSON.stringify(ld).replace(/<\//g, "<\\/");
+  const tag = `    <script type="application/ld+json" data-pm="1">${json}</script>\n  `;
+  if (html.includes("</head>")) {
+    return html.replace("</head>", `${tag}</head>`);
+  }
+  return html;
+}
+
+function injectCourseJsonLd(html, { subjectName, boardName, className, canonical, chaptersCount }) {
+  const ld = {
+    "@context": "https://schema.org",
+    "@type": "Course",
+    "name": `${subjectName} - ${boardName} ${className}`,
+    "description": `Complete ${subjectName} study material for ${boardName} ${className} students. ${chaptersCount} chapters with notes, MCQs, and AI-powered learning.`,
+    "provider": {
+      "@type": "Organization",
+      "name": "Syrabit.ai",
+      "url": "https://syrabit.ai",
+    },
+    "url": canonical,
+    "educationalLevel": `${className} ${boardName}`.trim(),
+    "numberOfCredits": chaptersCount,
+    "hasCourseInstance": {
+      "@type": "CourseInstance",
+      "courseMode": "online",
+      "courseWorkload": `${chaptersCount} chapters`,
+    },
+    "inLanguage": "en-IN",
+    "isAccessibleForFree": true,
+  };
+  const json = JSON.stringify(ld).replace(/<\//g, "<\\/");
+  const tag = `    <script type="application/ld+json" data-pm="1">${json}</script>\n  `;
+  if (html.includes("</head>")) {
+    return html.replace("</head>", `${tag}</head>`);
+  }
+  return html;
+}
+
 function injectFaqJsonLdIntoHead(html, faqEntries) {
   if (!Array.isArray(faqEntries) || faqEntries.length < 2) return html;
   const mainEntity = faqEntries.slice(0, 10).map((e) => ({
@@ -821,7 +871,7 @@ async function main() {
         inlineScripts,
         head: {
           title:
-            `${subjectName} — ${boardName} ${className} Notes & Study Material | Syrabit.ai`,
+            `${subjectName} Notes & Study Material | ${boardName} ${className}`,
           description:
             resolved.description ||
             `Complete ${subjectName} study material for ${boardName} ${className}. ` +
@@ -830,7 +880,20 @@ async function main() {
           ogImageAlt: `${subjectName} — ${boardName} ${className} | Syrabit.ai`,
         },
       });
-      const out = writeRoute(url, html);
+      let subjectHtml = html;
+      subjectHtml = injectBreadcrumbJsonLd(subjectHtml, [
+        { name: "Home", url: "https://syrabit.ai/" },
+        { name: "Library", url: "https://syrabit.ai/library" },
+        { name: subjectName, url: canonical },
+      ]);
+      subjectHtml = injectCourseJsonLd(subjectHtml, {
+        subjectName,
+        boardName,
+        className,
+        canonical,
+        chaptersCount: chaptersClean.length,
+      });
+      const out = writeRoute(url, subjectHtml);
       subjectsWritten++;
       console.log(
         `[prerender-routes] subject ${url} → ${path.relative(distDir, out)} ` +
@@ -923,6 +986,15 @@ async function main() {
         data: chapterData,
       };
 
+      const chapterIdx = candidateChapters.findIndex(c => c.slug === chapterSlug);
+      const prevCh = chapterIdx > 0 ? candidateChapters[chapterIdx - 1] : null;
+      const nextCh = chapterIdx < candidateChapters.length - 1 ? candidateChapters[chapterIdx + 1] : null;
+      preload.siblings_nav = {
+        prev: prevCh ? { slug: prevCh.slug, title: prevCh.title } : null,
+        next: nextCh ? { slug: nextCh.slug, title: nextCh.title } : null,
+        subject: { slug: subjectSlug, name: subjectName, path: url },
+      };
+
       const chapterTitle =
         chapterPayload.topic_title ||
         chapterPayload.chapter_title ||
@@ -943,10 +1015,12 @@ async function main() {
           hydrateKind: "chapter",
           inlineScripts: inlineChapterScripts,
           head: {
-            title: `${chapterTitle} — ${subjName} | ${bName} ${cName} Notes`,
+            title: chapterPayload.content_type === 'mcq'
+              ? `${chapterTitle} MCQs with Answers | ${subjName} ${bName} ${cName}`
+              : `${chapterTitle} - ${subjName} Notes | ${bName} ${cName}`,
             description:
               chapterPayload.meta_description ||
-              `${chapterTitle} notes for ${subjName}. Complete study material for ${bName} ${cName} students.`,
+              `${chapterTitle} - Complete ${subjName} notes for ${bName} ${cName}. Includes explanations, MCQs, important questions & AI-powered study material.`,
             canonical: chapterCanonical,
             ogImageAlt: `${chapterTitle} — ${subjName} | Syrabit.ai`,
           },
@@ -956,6 +1030,12 @@ async function main() {
         if (faqEntries) {
           html = injectFaqJsonLdIntoHead(html, faqEntries);
         }
+        html = injectBreadcrumbJsonLd(html, [
+          { name: "Home", url: "https://syrabit.ai/" },
+          { name: "Library", url: "https://syrabit.ai/library" },
+          { name: subjName, url: `https://syrabit.ai${url}` },
+          { name: chapterTitle, url: chapterCanonical },
+        ]);
         const out = writeRoute(chapterUrl, html);
         chaptersWritten++;
         console.log(

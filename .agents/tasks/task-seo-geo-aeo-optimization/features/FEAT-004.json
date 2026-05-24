@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Enhance SEO meta tags in prerender with optimized title/description formulas, add BreadcrumbList and Course JSON-LD injection during prerender, and add RelatedTopics internal linking component rendered in prerender HTML",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "In apps/frontend/scripts/prerender-routes.mjs, update the title formula for chapter pages (around the renderOne call for chapters, line ~880) from `${chapterTitle} - ${subjName} | ${bName} ${cName} Notes` to use content_type awareness: for MCQ chapters use `${chapterTitle} MCQs with Answers | ${subjName} ${bName} ${cName}`, for regular notes use `${chapterTitle} - ${subjName} Notes | ${bName} ${cName}`. Detect content_type from chapterPayload.content_type field.",
     "In apps/frontend/scripts/prerender-routes.mjs, update the title formula for subject pages (around the renderOne call for subjects, line ~820) to: `${subjectName} Notes & Study Material | ${boardName} ${className} | Syrabit.ai`",

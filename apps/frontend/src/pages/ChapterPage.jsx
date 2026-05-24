@@ -5,6 +5,7 @@ import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import TopicAnswerCard from '@/components/chapter/TopicAnswerCard';
 import ChapterTopicGraph from '@/components/chapter/ChapterTopicGraph';
+import RelatedTopicsNav from '@/components/chapter/RelatedTopicsNav';
 import { slugifyHeading } from '@/utils/slugifyHeading';
 import { useHashScroll } from '@/hooks/useHashScroll';
 import {
@@ -1328,6 +1329,41 @@ export default function ChapterPage() {
                 siblings={topicGraph.siblings}
                 crossChapter={topicGraph.cross_chapter}
               />
+              {/* SEO internal linking — prev/next chapter + parent subject.
+                  Uses plain <a> tags so prerendered HTML is crawlable
+                  without JS. Data sourced from preload.siblings_nav (SSR)
+                  or from _bundle siblings (client SPA). */}
+              {(() => {
+                const nav = (() => {
+                  // Try preload siblings_nav first (available in SSR/prerender)
+                  const preloadNav = typeof window !== 'undefined'
+                    ? window.__CHAPTER_PRELOAD__?.siblings_nav
+                    : typeof globalThis !== 'undefined'
+                      ? globalThis.__SSR_CHAPTER_PRELOAD__?.siblings_nav
+                      : null;
+                  if (preloadNav) return preloadNav;
+                  // Fallback: compute from library bundle (client SPA)
+                  const subjChs = (_bundle?.chapters || []).filter(
+                    (ch) => ch.subject_id && data?.subject_id && ch.subject_id === data.subject_id
+                  );
+                  const { prev: p, next: n } = findSiblingChapters(subjChs, data?.chapter_id, chapterSlug);
+                  return {
+                    prev: p ? { slug: p.slug, title: p.title || p.slug } : null,
+                    next: n ? { slug: n.slug, title: n.title || n.slug } : null,
+                    subject: { slug: subjectSlug, name: data?.subject_name || subjectSlug, path: basePath },
+                  };
+                })();
+                const prevChapter = nav?.prev ? { title: nav.prev.title, path: `${basePath}/${nav.prev.slug}` } : null;
+                const nextChapter = nav?.next ? { title: nav.next.title, path: `${basePath}/${nav.next.slug}` } : null;
+                const parentSubject = nav?.subject ? { name: nav.subject.name, path: nav.subject.path } : null;
+                return (
+                  <RelatedTopicsNav
+                    prevChapter={prevChapter}
+                    nextChapter={nextChapter}
+                    parentSubject={parentSubject}
+                  />
+                );
+              })()}
               <Suspense fallback={
                 <div className="space-y-3">
                   {[...Array(6)].map((_, i) => (
