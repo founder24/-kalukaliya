@@ -23,7 +23,12 @@ jobs:
       - name: Install dependencies
         run: |
           sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
-          pip install -r /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt || {
+            echo "::warning::pip strict install failed — retrying without version constraints for test packages"
+            grep -v -E '^\s*(pytest|pytest-asyncio|pytest-cov)==' /tmp/requirements-nohash.txt > /tmp/requirements-relaxed.txt
+            pip install -r /tmp/requirements-relaxed.txt
+            pip install pytest "pytest-asyncio>=0.21" pytest-cov
+          }
           pip install ruff mypy
 
       - name: Run Ruff linter
@@ -55,7 +60,12 @@ jobs:
       - name: Install dependencies
         run: |
           sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
-          pip install -r /tmp/requirements-nohash.txt
+          pip install -r /tmp/requirements-nohash.txt || {
+            echo "::warning::pip strict install failed — retrying without version constraints for test packages"
+            grep -v -E '^\s*(pytest|pytest-asyncio|pytest-cov)==' /tmp/requirements-nohash.txt > /tmp/requirements-relaxed.txt
+            pip install -r /tmp/requirements-relaxed.txt
+            pip install pytest "pytest-asyncio>=0.21" pytest-cov
+          }
 
       - name: Run tests
         working-directory: apps/backend
