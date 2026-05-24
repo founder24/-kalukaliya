@@ -213,7 +213,7 @@ async def get_current_user_optional(
 async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
     """
     IP-based rate limiting using Upstash Redis.
-    Raises HTTP 429 if limit exceeded. Silently skips if Redis unavailable.
+    Raises HTTP 429 if limit exceeded. Raises HTTP 503 if Redis unavailable (fail-closed).
     """
     try:
         from app.db.redis import get_redis
