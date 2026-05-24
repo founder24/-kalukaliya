@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Layer 1 (Basic) deep-dive fixes: Security fundamentals, remaining config issues, and basic correctness fixes for P1 warnings that are simple to implement.",
+  "status": "in_progress",
+  "steps": [
+    "SEC-W1: In apps/backend/app/core/security.py, fix the is_safe_url() function to use async DNS resolution. Replace socket.getaddrinfo() with asyncio-compatible resolution. Since the function is called synchronously, wrap it in run_in_executor or change the function signature to async and update callers.",
+    "SEC-W3: In apps/edge/src/middleware/cors.ts, fix the hardcoded origin. Make the corsHeaders export accept an origin parameter or remove the hardcoded export entirely, using env.ALLOWED_ORIGIN dynamically wherever cors headers are needed.",
+    "SEC-W4: In apps/backend/app/api/v1/auth.py, strengthen password validation. Add checks for at least one uppercase, one lowercase, one digit. Update both the SignupRequest and ResetPasswordRequest validators.",
+    "SEC-W5: Add a /logout endpoint in apps/backend/app/api/v1/auth.py that accepts the current access token and refresh token, stores their jti (or hash) in Redis with TTL matching their remaining expiry, effectively blacklisting them.",
+    "SEC-W6: In apps/backend/app/main.py, add a Content-Security-Policy header in the security headers middleware. Use a policy appropriate for an SPA: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai;",
+    "SEC-W7: In apps/backend/app/api/v1/auth.py google_auth endpoint, check supabase_user.get('email_verified') before accepting the identity. If not verified, return HTTP 400 'Email not verified by OAuth provider'.",
+    "SEC-R3: In apps/backend/app/api/webhooks/razorpay.py, add an early guard at the start of handle_razorpay_webhook: if not settings.RAZORPAY_WEBHOOK_SECRET: raise HTTPException(503, 'Webhook not configured'). Place this before the HMAC calculation.",
+    "API-W3: In apps/backend/app/api/v1/users.py, add cascade deletion of ChatFeedback when deleting account. After the Chat deletion, add: from app.models.feedback import ChatFeedback; await ChatFeedback.find({'user_id': str(user.id)}).delete().",
+    "AUTH-C1: Replace all datetime.utcnow() usages with datetime.now(timezone.utc) in: apps/backend/app/api/v1/auth.py (lines 68, 73, 78, and in reset_password handler), apps/backend/app/api/webhooks/razorpay.py (calculate_next_billing_date). Add 'from datetime import timezone' import where missing.",
+    "DEPLOY-W3: In apps/backend/app/config.py validate_production_secrets method, add warnings for missing AI provider credentials (VERTEX_PROJECT_ID, SARVAM_API_KEY), payment credentials (RAZORPAY_KEY_ID), and email credentials (RESEND_API_KEY) in production."
+  ],
+  "acceptance_criteria": [
+    "Password validation requires mixed character types (uppercase, lowercase, digit)",
+    "A /logout endpoint exists that blacklists tokens in Redis",
+    "Content-Security-Policy header is present in all responses",
+    "Google OAuth rejects unverified emails",
+    "Razorpay webhook returns 503 if secret is not configured",
+    "Account deletion cascades to ChatFeedback",
+    "datetime.utcnow() replaced with datetime.now(timezone.utc) in all auth and webhook files",
+    "Production config validation warns about missing AI/payment/email credentials"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; [ast.parse(open(f).read()) for f in ['apps/backend/app/config.py', 'apps/backend/app/main.py', 'apps/backend/app/api/v1/auth.py', 'apps/backend/app/api/v1/users.py', 'apps/backend/app/api/webhooks/razorpay.py', 'apps/backend/app/core/security.py']]; print('OK')\"",
+    "Run: APP_ENV=test JWT_SECRET=test_secret_that_is_at_least_32_characters_long pytest apps/backend/tests/ -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -17,8 +17,8 @@ _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
 
 def calculate_next_billing_date() -> str:
     """Calculate next billing date (1 month from now)"""
-    from datetime import datetime, timedelta
-    return (datetime.utcnow() + timedelta(days=30)).isoformat()
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
 
 
 def _validate_subscription_id(value) -> str:
@@ -33,6 +33,9 @@ async def handle_razorpay_webhook(request: Request):
     Handle Razorpay Payment Webhooks
     Verifies signature and updates subscription status
     """
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+
     body = await request.body()
     signature = request.headers.get("X-Razorpay-Signature")
 

@@ -141,6 +141,17 @@ class Settings(BaseSettings):
                 logger.warning("UPSTASH_REDIS_REST_URL is not set in production")
             if not self.AZURE_SEARCH_ENDPOINT:
                 logger.warning("AZURE_SEARCH_ENDPOINT is not set in production")
+            # Warn about missing service credentials
+            if not self.VERTEX_PROJECT_ID or not self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+                logger.warning("Vertex AI credentials not configured in production")
+            if not self.SARVAM_API_KEY:
+                logger.warning("Sarvam AI API key not configured in production")
+            if not self.RAZORPAY_KEY_ID or not self.RAZORPAY_KEY_SECRET:
+                logger.warning("Razorpay payment credentials not configured in production")
+            if not self.RESEND_API_KEY:
+                logger.warning("Resend email API key not configured in production")
+            if not self.SENTRY_DSN:
+                logger.warning("Sentry DSN not configured in production - error tracking disabled")
         return self
 
     @property
