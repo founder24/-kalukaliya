@@ -94,6 +94,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # NOTE: Secrets are currently fetched from KeyVault and passed as CLI env vars.
+      # RECOMMENDED IMPROVEMENT (CICD-05): Migrate to Azure Container Apps native
+      # secret references that point directly to KeyVault. This eliminates secrets
+      # from CLI arguments and prevents potential exposure in error logs/activity logs.
+      # See: https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets
+      # Implementation: Use `az containerapp secret set --name syrabit-backend \
+      #   --resource-group syrabit-prod --secrets "jwt-secret=keyvaultref:..."` 
+      # then reference them in env vars as secretref:<secret-name>.
       - name: Fetch secrets from Azure KeyVault
         run: |
           set -euo pipefail
