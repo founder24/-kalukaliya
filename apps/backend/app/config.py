@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
+    CLOUDFLARE_KV_API_TOKEN: Optional[str] = None
+    CLOUDFLARE_ACCOUNT_ID: Optional[str] = None
+    CLOUDFLARE_KV_NAMESPACE_ID: Optional[str] = None
+    INDEXNOW_KEY: Optional[str] = None
 
     # --- P2: Azure Compute (Backend) — metadata only ---
     AZURE_SUBSCRIPTION_ID: Optional[str] = None

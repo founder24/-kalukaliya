@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the KnowledgeObject Beanie model, add Jinja2 dependency, update config with Cloudflare KV settings, and register the new model in db/mongo.py",
+  "status": "in_progress",
+  "steps": [
+    "Add 'jinja2' and 'markdown' to apps/backend/requirements.in (after the existing entries, alphabetically placed)",
+    "Create apps/backend/app/models/knowledge.py with all sub-models: ContentBlock, ContentMetadata, DerivativeHashes, GeneratedContent, and the KnowledgeObject Document class with Settings (collection name 'knowledge_objects', compound indexes for URL resolution, unique slug index, text search index)",
+    "Update apps/backend/app/db/mongo.py: import KnowledgeObject from app.models.knowledge and add it to the document_models list in init_beanie()",
+    "Update apps/backend/app/config.py: add CLOUDFLARE_KV_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_KV_NAMESPACE_ID, and INDEXNOW_KEY as Optional[str] = None fields in the Settings class",
+    "pip install jinja2 markdown in the working environment to make them available for subsequent features"
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/models/knowledge.py exists with KnowledgeObject Document class containing all specified fields and sub-models",
+    "KnowledgeObject is registered in init_beanie document_models list in db/mongo.py",
+    "config.py has CLOUDFLARE_KV_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_KV_NAMESPACE_ID, INDEXNOW_KEY",
+    "requirements.in includes jinja2 and markdown",
+    "The app can be imported without errors: python -c 'from app.main import app'"
+  ],
+  "verification": [
+    "Run: cd apps/backend && pip install jinja2 markdown && python -c 'from app.models.knowledge import KnowledgeObject; print(KnowledgeObject.Settings.name)'",
+    "Run: cd apps/backend && python -c 'from app.main import app; print(app.title)'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

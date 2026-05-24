@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Create public content API endpoints (rendering, JSON access, subject listing) and admin content API endpoints (CRUD, publish, bulk-publish) with sitemap generation and ISR support",
+  "status": "pending",
+  "steps": [
+    "Create apps/backend/app/api/v1/content.py with public endpoints: GET /api/v1/content/render/{board}/{class_level}/{subject}/{chapter} (returns rendered HTML notes page), GET /api/v1/content/render/{board}/{class_level}/{subject}/{chapter}/{page_type} (mcqs/summary/definitions/important-questions), GET /api/v1/content/{slug} (returns KnowledgeObject JSON for frontend hydration), GET /api/v1/content/subject/{board}/{class_level}/{subject} (list chapters for a subject). Use HTMLResponse for render endpoints. Include cache-control headers (public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600).",
+    "Create apps/backend/app/api/v1/admin_knowledge.py with admin endpoints: POST /api/v1/admin/content/knowledge (create/update knowledge object - accepts full KnowledgeObject data), POST /api/v1/admin/content/knowledge/{slug}/publish (triggers full pipeline for a slug), POST /api/v1/admin/content/knowledge/bulk-publish (triggers pipeline for all or filtered knowledge objects as background task), GET /api/v1/admin/content/knowledge (list all with pagination: page, per_page, board filter, subject filter), GET /api/v1/admin/content/knowledge/{slug} (get single with all generated content). All admin endpoints use _validate_admin_session and _csrf_check from app.api.v1.admin.",
+    "Create apps/backend/app/api/v1/seo.py with sitemap endpoints: GET /api/v1/seo/sitemap-subjects.xml (distinct board/class_level/subject from knowledge_objects), GET /api/v1/seo/sitemap-chapters.xml (all published knowledge objects), GET /api/v1/seo/sitemap-mcqs.xml (same objects with /mcqs suffix), GET /api/v1/seo/sitemap-notes.xml (notes variant). All return XML responses with proper Content-Type. Include sitemap-index.xml that links to all sub-sitemaps.",
+    "Register all new routers in apps/backend/app/main.py: content.router at /api/v1/content, admin_knowledge.router at /api/v1/admin (Admin Knowledge tag), seo.router at /api/v1/seo. Add imports at the top of main.py alongside existing imports.",
+    "The ISR endpoint is the content render endpoint itself - it serves pre-rendered HTML and the edge worker proxies to it. Ensure the render endpoints check for a cached version in the KnowledgeObject.generated field and render on-the-fly if needed."
+  ],
+  "acceptance_criteria": [
+    "Public content render endpoints return HTML with proper Content-Type and cache headers",
+    "Public content JSON endpoint returns KnowledgeObject data for frontend hydration",
+    "Admin endpoints enforce auth via _validate_admin_session",
+    "Sitemap endpoints return valid XML with proper content-type header",
+    "All new routers are registered in main.py",
+    "Bulk publish runs as a FastAPI BackgroundTask",
+    "The app starts without errors after all routers are registered"
+  ],
+  "verification": [
+    "Run: cd apps/backend && python -c 'from app.main import app; routes = [r.path for r in app.routes]; assert any(\"/api/v1/content\" in r for r in routes); print(\"Content routes registered\")'",
+    "Run: cd apps/backend && pytest tests/ -x --timeout=30"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

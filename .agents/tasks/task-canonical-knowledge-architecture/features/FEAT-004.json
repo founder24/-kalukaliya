@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Add comprehensive tests for the knowledge model, content pipeline, public content API, admin knowledge API, and sitemap endpoints",
+  "status": "pending",
+  "steps": [
+    "Create apps/backend/tests/test_knowledge_model.py: Test KnowledgeObject model creation, field defaults, slug generation, metadata fields. Test ContentBlock, ContentMetadata, GeneratedContent sub-models with various inputs.",
+    "Create apps/backend/tests/test_content_api.py: Test public content endpoints - render endpoint returns HTML with correct headers, JSON endpoint returns proper structure, subject listing. Test 404 for non-existent content. Use mocking for MongoDB (mock KnowledgeObject.find_one, etc). Follow the pattern in test_admin_endpoints.py using TestClient + mocks.",
+    "Create apps/backend/tests/test_admin_knowledge.py: Test admin knowledge endpoints - auth guard (401 without cookie), create/update endpoint, publish endpoint triggers pipeline, list with pagination. Follow admin_cookie fixture pattern from test_admin_endpoints.py.",
+    "Create apps/backend/tests/test_content_pipeline.py: Test ContentPipeline.publish() with mocked dependencies (renderer, search indexer, HTTP calls). Verify it orchestrates steps correctly and handles partial failures gracefully.",
+    "Create apps/backend/tests/test_seo_sitemaps.py: Test sitemap endpoints return valid XML with proper content-type. Mock MongoDB queries to return sample knowledge objects.",
+    "Create apps/backend/tests/test_content_renderer.py: Test ContentRenderer generates valid HTML with required SEO elements (JSON-LD, meta tags, canonical URL, hreflang) for each page type."
+  ],
+  "acceptance_criteria": [
+    "All new test files pass: pytest tests/test_knowledge_model.py tests/test_content_api.py tests/test_admin_knowledge.py tests/test_content_pipeline.py tests/test_seo_sitemaps.py tests/test_content_renderer.py",
+    "Tests cover auth guards, happy paths, error cases (404, validation), and pipeline orchestration",
+    "Tests use proper mocking for MongoDB and external services (no real DB/network calls)",
+    "Each test exercises actual new code paths and would fail if that code were reverted"
+  ],
+  "verification": [
+    "Run: cd apps/backend && pytest tests/test_knowledge_model.py tests/test_content_api.py tests/test_admin_knowledge.py tests/test_content_pipeline.py tests/test_seo_sitemaps.py tests/test_content_renderer.py -v --timeout=60",
+    "Run: cd apps/backend && pytest tests/ -x --timeout=60"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

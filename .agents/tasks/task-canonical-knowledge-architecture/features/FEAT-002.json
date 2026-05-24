@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create the content services layer: renderer (Jinja2 HTML generation), search indexer (Azure Search document upsert), and content pipeline (orchestrates rendering, indexing, MCQ/summary generation, IndexNow, Cloudflare KV push)",
+  "status": "pending",
+  "steps": [
+    "Create directory apps/backend/app/services/content/ with __init__.py",
+    "Create apps/backend/app/services/content/renderer.py: A ContentRenderer class that uses Jinja2 templates to render KnowledgeObject into multiple HTML page variants (notes, mcqs, summary, definitions, important-questions). Each page type must include: proper <title> with SEO formula, meta description, canonical URL, JSON-LD (BreadcrumbList + page-type schemas: FAQPage, Quiz, Course, DefinedTermSet), hreflang for en/as, Open Graph / Twitter cards, internal navigation links, and minimum 300+ words visible content. Store templates as inline strings or in a templates/ subfolder.",
+    "Create apps/backend/app/services/content/search_indexer.py: A SearchIndexer class that takes a KnowledgeObject, chunks body_markdown into ~500 token segments, adds metadata (board, class_level, subject, chapter, difficulty, language, tier_access='free'), and upserts documents to Azure Search using the admin key client. Use the existing azure-search-documents SDK (SearchClient with admin key for writes). The index documents should have fields matching what the existing AzureSearchService reads: id, title, content, content_vector (built-in vectorization), source_url, tier_access.",
+    "Create apps/backend/app/services/content/pipeline.py: A ContentPipeline class with a publish(slug) method that: (1) fetches the KnowledgeObject by slug, (2) calls ContentRenderer to generate HTML for all page types, (3) calls SearchIndexer to upsert search documents, (4) generates MCQs/summary/important_questions if not already present (placeholder AI generation that creates reasonable defaults from content), (5) computes derivative hashes, (6) submits URL to IndexNow via HTTP POST, (7) pushes rendered HTML to Cloudflare KV via their API. Each step should be try/except with logging so partial failures don't crash the pipeline.",
+    "Create apps/backend/app/templates/ directory with base.html Jinja2 template for the rendered content pages"
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/services/content/renderer.py exists with ContentRenderer class that has render(knowledge_object, page_type) method returning HTML string",
+    "apps/backend/app/services/content/search_indexer.py exists with SearchIndexer class that has index(knowledge_object) method",
+    "apps/backend/app/services/content/pipeline.py exists with ContentPipeline class that has publish(slug) method orchestrating the full pipeline",
+    "Rendered HTML includes JSON-LD, Open Graph tags, canonical URLs, hreflang tags for every page type",
+    "Search indexer chunks content into ~500 token segments with proper metadata",
+    "Pipeline handles missing config gracefully (logs warning, continues)"
+  ],
+  "verification": [
+    "Run: cd apps/backend && python -c 'from app.services.content.pipeline import ContentPipeline; from app.services.content.renderer import ContentRenderer; from app.services.content.search_indexer import SearchIndexer; print(\"OK\")'",
+    "Run: cd apps/backend && python -c 'from app.main import app; print(app.title)'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,28 @@
+{
+  "project_type": "Python FastAPI monorepo with Cloudflare Workers edge and React frontend (Vite)",
+  "language": "Python 3.11+",
+  "build_system": "pip-compile with requirements.in/requirements.txt, Docker for deployment",
+  "test_framework": "pytest with conftest.py fixtures, TestClient (sync) and httpx AsyncClient, unittest.mock for MongoDB/service mocks",
+  "build_command": "pip install -r requirements.txt (in apps/backend/)",
+  "test_command": "pytest tests/ (in apps/backend/)",
+  "verification_instructions": "1. Install deps: pip install -r requirements.txt in apps/backend. 2. Run pytest tests/ from apps/backend. 3. Optionally docker build apps/backend to validate container.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. pip install -r apps/backend/requirements.txt. 2. Set JWT_SECRET env var (min 32 chars). 3. Optionally run docker-compose up for MongoDB/Redis.",
+  "environment_constraints": "OPEN_INTERNET - full network access. Can install packages, pull images. Jinja2 needs to be added to requirements.in.",
+  "contribution_requirements": "Register new routers in main.py. Use existing admin auth pattern (_validate_admin_session). Follow Beanie ODM patterns from user.py. Use existing AzureSearchService client pattern.",
+  "key_patterns": "Models use Beanie Document with Settings class for collection/indexes. Services are singletons. API routes use APIRouter. Admin endpoints use cookie-based auth with _validate_admin_session. Config via pydantic_settings with Optional fields. init_beanie called in db/mongo.py with document_models list.",
+  "relevant_files": [
+    "apps/backend/app/models/user.py",
+    "apps/backend/app/db/mongo.py",
+    "apps/backend/app/services/search/azure_search.py",
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/api/v1/admin_content.py",
+    "apps/backend/app/api/v1/admin_seo.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/main.py",
+    "apps/backend/requirements.in",
+    "apps/backend/tests/conftest.py",
+    "apps/backend/tests/test_admin_endpoints.py"
+  ],
+  "directory_structure": "apps/backend/app/ has: api/v1/ (routers), core/ (security, rate-limiting), db/ (mongo.py, redis.py), models/ (Beanie docs), services/ (ai/, comms/, payment/, search/). Tests in apps/backend/tests/. Docker in apps/backend/Dockerfile."
+}
