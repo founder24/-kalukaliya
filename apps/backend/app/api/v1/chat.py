@@ -358,7 +358,9 @@ async def chat(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _resolve_lang_and_model(message: str, lang_override: Optional[str] = None) -> tuple[str, str]:
+def _resolve_lang_and_model(
+    message: str, lang_override: Optional[str] = None
+) -> tuple[str, str]:
     """Resolve language and target model from message and optional language override."""
     if lang_override:
         detected_lang = lang_override
@@ -477,7 +479,9 @@ async def chat_stream(
     sanitized_message = sanitize_user_input(request.message)
 
     # -- Resolve language & model --
-    detected_lang, target_model = _resolve_lang_and_model(sanitized_message, request.lang)
+    detected_lang, target_model = _resolve_lang_and_model(
+        sanitized_message, request.lang
+    )
 
     # -- RAG retrieval (with OTel span) --
     from app.services.ai.embedder import generate_embedding

@@ -48,7 +48,11 @@ async def test_webhook_valid_signature_payment_failed(client: AsyncClient, mock_
 
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
     body = json.dumps(
-        {"id": "evt_test_123", "event": "payment.failed", "payload": {"customer": {"id": "cust_1"}}}
+        {
+            "id": "evt_test_123",
+            "event": "payment.failed",
+            "payload": {"customer": {"id": "cust_1"}},
+        }
     ).encode()
     sig = sign_payload(body, secret)
 

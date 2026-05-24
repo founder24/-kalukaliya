@@ -157,7 +157,9 @@ async def get_current_user(
             raise
         except Exception as e:
             logger.error(f"Redis unavailable for token blacklist check: {e}")
-            raise HTTPException(status_code=503, detail="Token validation service unavailable")
+            raise HTTPException(
+                status_code=503, detail="Token validation service unavailable"
+            )
 
         user = await User.get(user_id)
         if not user:
@@ -430,7 +432,9 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                 raise
             except Exception as e:
                 logger.error(f"Redis unavailable for token revocation check: {e}")
-                raise HTTPException(status_code=503, detail="Token validation service unavailable")
+                raise HTTPException(
+                    status_code=503, detail="Token validation service unavailable"
+                )
 
         user = await User.get(user_id)
         if not user:
@@ -513,6 +517,8 @@ async def logout(
         raise
     except Exception as e:
         logger.error(f"Redis unavailable for token blacklisting during logout: {e}")
-        raise HTTPException(status_code=503, detail="Token revocation service unavailable")
+        raise HTTPException(
+            status_code=503, detail="Token revocation service unavailable"
+        )
 
     return MessageResponse(message="Logged out successfully")
