@@ -54,6 +54,28 @@ resource containerApp 'Microsoft.App/containerApps@2023-11-02-preview' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/health'
+                port: 8000
+              }
+              periodSeconds: 30
+              failureThreshold: 3
+              initialDelaySeconds: 10
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/health'
+                port: 8000
+              }
+              periodSeconds: 10
+              failureThreshold: 3
+              initialDelaySeconds: 5
+            }
+          ]
         }
       ]
       scale: {

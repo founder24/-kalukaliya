@@ -1,4 +1,4 @@
-name: CI Frontend — Lint, Test & Deploy
+name: CI Frontend — Lint & Test
 
 on:
   push:
@@ -61,38 +61,3 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter @workspace/syrabit test
-
-  deploy:
-    name: Deploy to Cloudflare Pages
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup PNPM
-        run: corepack prepare pnpm@10.26.1 --activate
-
-      - name: Install Dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Build Frontend
-        run: pnpm --filter @workspace/syrabit run build
-        env:
-          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
