@@ -176,3 +176,14 @@ class TestContentRenderer:
                 "\n<!DOCTYPE html>"
             )
             assert "</html>" in html
+
+    def test_render_notes_contains_unescaped_html_tags(self, renderer, sample_knowledge_object):
+        html = renderer.render(sample_knowledge_object, "notes")
+        # Verify HTML tags are NOT escaped (no &lt; or &gt;)
+        assert "&lt;section" not in html
+        assert "<section" in html
+
+    def test_render_json_ld_not_escaped(self, renderer, sample_knowledge_object):
+        html = renderer.render(sample_knowledge_object, "notes")
+        # JSON-LD should contain actual JSON, not escaped entities
+        assert "&quot;" not in html.split("application/ld+json")[1].split("</script>")[0]

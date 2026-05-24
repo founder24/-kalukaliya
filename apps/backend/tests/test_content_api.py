@@ -110,6 +110,9 @@ class TestContentJsonEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["slug"] == "ahsec-hs1-physics-laws-of-motion"
+        # Internal fields should be excluded
+        assert "derivatives" not in data
+        assert "page_views" not in data
 
     @patch("app.api.v1.content.KnowledgeObject")
     def test_get_content_json_404(self, mock_model, client):

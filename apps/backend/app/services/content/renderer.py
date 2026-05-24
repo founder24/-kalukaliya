@@ -1,6 +1,7 @@
 import json
 import markdown
 from jinja2 import Environment
+from markupsafe import Markup
 from app.models.knowledge import KnowledgeObject
 import logging
 
@@ -91,6 +92,10 @@ class ContentRenderer:
         body_html = self._render_body(ko, page_type)
         heading = self._build_heading(ko, page_type)
 
+        # Mark pre-rendered HTML and JSON-LD as safe to prevent double-escaping
+        body_html_safe = Markup(body_html)
+        json_ld_safe = [Markup(json.dumps(s, ensure_ascii=False)) for s in json_ld_schemas]
+
         html = self.template.render(
             language=ko.metadata.language,
             title=title,
@@ -105,8 +110,8 @@ class ContentRenderer:
             chapter=ko.chapter,
             topic=ko.topic,
             heading=heading,
-            body_html=body_html,
-            json_ld_schemas=[json.dumps(s, ensure_ascii=False) for s in json_ld_schemas],
+            body_html=body_html_safe,
+            json_ld_schemas=json_ld_safe,
             page_types=self.page_types,
         )
         return html

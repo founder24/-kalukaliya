@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import Response
+from pydantic import BaseModel
 from app.models.knowledge import KnowledgeObject
 from datetime import datetime
 import logging
@@ -7,6 +8,17 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["SEO"])
 BASE_URL = "https://syrabit.ai"
+
+
+class SitemapProjection(BaseModel):
+    """Projection model for sitemap queries - only URL-relevant fields."""
+    board: str
+    class_level: str
+    subject: str
+    chapter: str
+
+    class Settings:
+        projection = {"board": 1, "class_level": 1, "subject": 1, "chapter": 1}
 
 
 @router.get("/sitemap-index.xml")
@@ -28,7 +40,7 @@ async def sitemap_subjects():
     """Sitemap for distinct subjects."""
     objects = await KnowledgeObject.find(
         KnowledgeObject.is_published == True
-    ).to_list()
+    ).project(SitemapProjection).to_list()
     seen = set()
     urls = []
     for ko in objects:
@@ -46,7 +58,7 @@ async def sitemap_chapters():
     """Sitemap for all published chapters."""
     objects = await KnowledgeObject.find(
         KnowledgeObject.is_published == True
-    ).to_list()
+    ).project(SitemapProjection).to_list()
     urls = [
         f"{BASE_URL}/{ko.board}/{ko.class_level}/{ko.subject}/{ko.chapter}"
         for ko in objects
@@ -60,7 +72,7 @@ async def sitemap_mcqs():
     """Sitemap for MCQ pages."""
     objects = await KnowledgeObject.find(
         KnowledgeObject.is_published == True
-    ).to_list()
+    ).project(SitemapProjection).to_list()
     urls = [
         f"{BASE_URL}/{ko.board}/{ko.class_level}/{ko.subject}/{ko.chapter}/mcqs"
         for ko in objects
@@ -74,7 +86,7 @@ async def sitemap_notes():
     """Sitemap for notes pages (same as chapters, explicit)."""
     objects = await KnowledgeObject.find(
         KnowledgeObject.is_published == True
-    ).to_list()
+    ).project(SitemapProjection).to_list()
     urls = [
         f"{BASE_URL}/{ko.board}/{ko.class_level}/{ko.subject}/{ko.chapter}"
         for ko in objects

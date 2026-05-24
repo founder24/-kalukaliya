@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from pydantic import ValidationError
 from app.api.v1.admin import _validate_admin_session, _csrf_check
 from app.models.knowledge import KnowledgeObject, ContentBlock, ContentMetadata
 from app.services.content.pipeline import ContentPipeline
@@ -37,14 +38,25 @@ async def create_or_update_knowledge(request: Request):
             if field in body:
                 setattr(existing, field, body[field])
         if "content" in body:
-            existing.content = ContentBlock(**body["content"])
+            try:
+                existing.content = ContentBlock(**body["content"])
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=str(e))
         if "metadata" in body:
-            existing.metadata = ContentMetadata(**body["metadata"])
+            try:
+                existing.metadata = ContentMetadata(**body["metadata"])
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=str(e))
         existing.metadata.last_updated = datetime.now(timezone.utc)
         await existing.save()
         return {"status": "updated", "slug": slug}
     else:
         # Create new
+        try:
+            content = ContentBlock(**(body.get("content", {"body_markdown": ""})))
+            metadata = ContentMetadata(**(body.get("metadata", {})))
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         ko_data = {
             "slug": slug,
             "board": body.get("board", ""),
@@ -52,8 +64,8 @@ async def create_or_update_knowledge(request: Request):
             "subject": body.get("subject", ""),
             "chapter": body.get("chapter", ""),
             "topic": body.get("topic", ""),
-            "content": ContentBlock(**(body.get("content", {"body_markdown": ""}))),
-            "metadata": ContentMetadata(**(body.get("metadata", {}))),
+            "content": content,
+            "metadata": metadata,
             "is_published": body.get("is_published", False),
         }
         ko = KnowledgeObject(**ko_data)

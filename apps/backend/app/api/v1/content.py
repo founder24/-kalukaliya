@@ -99,8 +99,11 @@ async def list_chapters(board: str, class_level: str, subject: str):
 @router.get("/{slug}")
 async def get_content_json(slug: str):
     """Returns KnowledgeObject JSON for frontend hydration."""
-    ko = await KnowledgeObject.find_one(KnowledgeObject.slug == slug)
+    ko = await KnowledgeObject.find_one(
+        KnowledgeObject.slug == slug,
+        KnowledgeObject.is_published == True,
+    )
     if not ko:
         raise HTTPException(status_code=404, detail="Content not found")
 
-    return ko.model_dump(by_alias=True)
+    return ko.model_dump(by_alias=True, exclude={"derivatives", "page_views"})

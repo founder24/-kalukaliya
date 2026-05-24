@@ -61,6 +61,7 @@ class TestSitemapEndpoints:
     @patch("app.api.v1.seo.KnowledgeObject")
     def test_sitemap_subjects(self, mock_model, client, mock_ko_list):
         mock_query = MagicMock()
+        mock_query.project = MagicMock(return_value=mock_query)
         mock_query.to_list = AsyncMock(return_value=mock_ko_list)
         mock_model.find = MagicMock(return_value=mock_query)
 
@@ -72,6 +73,7 @@ class TestSitemapEndpoints:
     @patch("app.api.v1.seo.KnowledgeObject")
     def test_sitemap_chapters(self, mock_model, client, mock_ko_list):
         mock_query = MagicMock()
+        mock_query.project = MagicMock(return_value=mock_query)
         mock_query.to_list = AsyncMock(return_value=mock_ko_list)
         mock_model.find = MagicMock(return_value=mock_query)
 
@@ -84,6 +86,7 @@ class TestSitemapEndpoints:
     @patch("app.api.v1.seo.KnowledgeObject")
     def test_sitemap_mcqs(self, mock_model, client, mock_ko_list):
         mock_query = MagicMock()
+        mock_query.project = MagicMock(return_value=mock_query)
         mock_query.to_list = AsyncMock(return_value=mock_ko_list)
         mock_model.find = MagicMock(return_value=mock_query)
 
