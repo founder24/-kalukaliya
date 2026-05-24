@@ -300,6 +300,7 @@ async def reset_password(request: ResetPasswordRequest):
     """
     Reset password using the token from the email link.
     Token is a JWT with type=reset, 1 hour expiry.
+    Tokens are single-use (enforced via Redis).
     """
     try:
         payload = jwt.decode(request.token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
@@ -312,14 +313,42 @@ async def reset_password(request: ResetPasswordRequest):
     except JWTError:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
+    # SEC-C4: Check if reset token has already been used
+    token_hash = hashlib.sha256(request.token.encode()).hexdigest()
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        used = await redis.get(f"used_reset:{token_hash}")
+        if used:
+            raise HTTPException(status_code=400, detail="Reset token has already been used")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis unavailable - allow reset (defense in depth, token still has 1h expiry)
+
     user = await User.get(user_id)
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    # AUTH-W4: Reject password reset for OAuth accounts
+    if hasattr(user, 'auth_provider') and user.auth_provider and user.auth_provider != "local":
+        raise HTTPException(
+            status_code=400,
+            detail="Password reset is not available for OAuth accounts. Please sign in with your OAuth provider."
+        )
 
     # Update password
     user.hashed_password = User.hash_password(request.new_password)
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
+
+    # Mark token as used in Redis
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        await redis.set(f"used_reset:{token_hash}", "1", ex=3600)  # 1 hour TTL
+    except Exception:
+        pass  # Non-critical
 
     logger.info(f"Password reset successful for user {user.email}")
     return MessageResponse(message="Password reset successful. You can now log in with your new password.")
@@ -330,22 +359,7 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
     """Refresh access token using refresh token"""
     # Rate limit refresh endpoint (10 attempts per minute per IP)
     if request:
-        try:
-            from app.db.redis import get_redis
-            redis = get_redis()
-            client_ip = request.client.host if hasattr(request, "client") else "unknown"
-            rate_key = f"refresh_limit:{client_ip}:{int(time.time() // 60)}"
-
-            attempt_count = await redis.incr(rate_key)
-            if attempt_count == 1:
-                await redis.expire(rate_key, 60)
-
-            if attempt_count > 10:
-                raise HTTPException(status_code=429, detail="Too many refresh attempts. Try again later.")
-        except HTTPException:
-            raise
-        except Exception:
-            pass  # Redis not available — skip rate limiting
+        await _check_rate_limit(request, "refresh", 10)
 
     try:
         payload = jwt.decode(body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

@@ -106,13 +106,22 @@ jobs:
 
       - name: Wait for healthy revision
         run: |
-          echo "Waiting 90s for new revision to stabilize..."
-          sleep 90
           FQDN=$(az containerapp show \
             --name syrabit-backend \
             --resource-group syrabit-prod \
             --query 'properties.configuration.ingress.fqdn' -o tsv)
-          curl -sf "https://${FQDN}/health" && echo "Backend healthy" || echo "Backend health check failed"
+          echo "Polling https://${FQDN}/health for up to 150 seconds..."
+          for i in $(seq 1 30); do
+            if curl -sf "https://${FQDN}/health" --max-time 5; then
+              echo ""
+              echo "Backend healthy after $((i * 5)) seconds"
+              exit 0
+            fi
+            echo "Attempt $i/30 failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "Backend failed to become healthy within 150 seconds"
+          exit 1
 
   deploy-edge:
     name: Deploy Edge
@@ -213,3 +222,46 @@ jobs:
 
       - name: Summary
         run: echo "All smoke tests passed - deployment complete!"
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [smoke-test]
+    if: failure()
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rollback to previous revision
+        run: |
+          echo "Smoke tests failed - initiating rollback..."
+          # Get the previous revision name
+          REVISIONS=$(az containerapp revision list \
+            --name syrabit-backend \
+            --resource-group syrabit-prod \
+            --query "[].name" -o tsv | tail -2)
+          PREVIOUS=$(echo "$REVISIONS" | head -1)
+          CURRENT=$(echo "$REVISIONS" | tail -1)
+
+          if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$CURRENT" ]; then
+            echo "Rolling back: deactivating $CURRENT, activating $PREVIOUS"
+            az containerapp revision deactivate \
+              --name syrabit-backend \
+              --resource-group syrabit-prod \
+              --revision "$CURRENT" || true
+            az containerapp ingress traffic set \
+              --name syrabit-backend \
+              --resource-group syrabit-prod \
+              --revision-weight "$PREVIOUS=100"
+            echo "Rollback complete"
+          else
+            echo "WARNING: Could not determine previous revision for rollback"
+            exit 1
+          fi

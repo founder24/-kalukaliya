@@ -15,10 +15,36 @@ from app.services.search.azure_search import search_service
 from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
+from app.core.token_budget import truncate_chunks_to_budget
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
+
+
+async def _load_conversation_history(session_id: Optional[str], max_turns: int = 5) -> str:
+    """Load recent conversation turns for multi-turn context."""
+    if not session_id:
+        return ""
+    try:
+        from app.models.chat import Chat
+        chat = await Chat.find_one({"session_id": session_id})
+        if not chat or not chat.messages:
+            return ""
+        # Get last N turns (user + assistant pairs)
+        recent = chat.messages[-(max_turns * 2):]
+        history_lines = []
+        for msg in recent:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")[:500]  # Truncate long messages
+            history_lines.append(f"{role.capitalize()}: {content}")
+        # Cap total history to ~2000 chars
+        history = "\n".join(history_lines)
+        if len(history) > 2000:
+            history = history[-2000:]
+        return history
+    except Exception:
+        return ""
 
 
 class ChatRequest(BaseModel):
@@ -126,6 +152,9 @@ async def chat(
                 limit=settings.MAX_CONTEXT_DOCS
             )
             
+            # Apply token budget to context chunks
+            context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+            
             # 4. Build prompt with context (numbered [#] citation format)
             lang_instruction = (
                 "You are Syrabit, an expert educational assistant for Assamese students.\n"
@@ -146,6 +175,11 @@ async def chat(
                     for i, chunk in enumerate(context_chunks)
                 )
                 system_prompt = f"{lang_instruction}\n\nContext:\n{context_text}"
+
+            # Include multi-turn conversation history
+            history = await _load_conversation_history(request.session_id)
+            if history:
+                system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
             
             # 5. Call LLM
             from app.services.ai.router import generate_response
@@ -356,11 +390,19 @@ async def chat_stream(
         rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
         rag_span.set_attribute("rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0)
 
+    # Apply token budget to context chunks
+    context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+
     if not context_chunks:
         logger.warning("rag_empty_context", extra={"user_id": user_id, "query": sanitized_message[:50]})
 
     # -- Build system prompt --
     system_prompt = _build_system_prompt(detected_lang, context_chunks)
+
+    # Include multi-turn conversation history
+    history = await _load_conversation_history(request.session_id)
+    if history:
+        system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
     # -- Stream generator with Sarvam->Vertex fallback --
     async def event_stream():

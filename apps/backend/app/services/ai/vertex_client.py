@@ -22,6 +22,9 @@ class VertexAIClient:
             timeout=httpx.Timeout(60.0, connect=10.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
+        self._token_lock = asyncio.Lock()
+        self._cached_token: str | None = None
+        self._token_expiry: float = 0
 
     async def close(self):
         """Close the HTTP client (call on app shutdown)"""
@@ -72,21 +75,36 @@ class VertexAIClient:
             raise RuntimeError(f"Vertex AI service failed: {e}")
 
     async def _get_access_token(self) -> str:
-        """Get OAuth2 access token for Vertex AI"""
-        from google.oauth2 import service_account
+        """Get OAuth2 access token for Vertex AI with caching and lock."""
+        import time as _time
 
-        creds = service_account.Credentials.from_service_account_info(
-            settings.google_credentials,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-        
-        # Refresh token if needed (blocking call wrapped in executor)
-        import google.auth.transport.requests
-        request = google.auth.transport.requests.Request()
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, creds.refresh, request)
-        
-        return creds.token
+        # Return cached token if still valid (with 60s buffer)
+        if self._cached_token and _time.time() < self._token_expiry - 60:
+            return self._cached_token
+
+        async with self._token_lock:
+            # Double-check after acquiring lock
+            if self._cached_token and _time.time() < self._token_expiry - 60:
+                return self._cached_token
+
+            from google.oauth2 import service_account
+            import google.auth.transport.requests
+
+            creds = service_account.Credentials.from_service_account_info(
+                settings.google_credentials,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+
+            # Refresh token (blocking call wrapped in executor)
+            request = google.auth.transport.requests.Request()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, creds.refresh, request)
+
+            self._cached_token = creds.token
+            # Token typically valid for 1 hour
+            self._token_expiry = _time.time() + 3600
+
+            return self._cached_token
 
     async def stream_generate(
         self,
