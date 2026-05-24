@@ -263,7 +263,7 @@ async def chat(
     except RuntimeError as e:
         error_msg = str(e)
         logger.error("chat_upstream_failure", extra={"user_id": user_id, "error": error_msg})
-        if "embedding" in error_msg.lower() or "AZURE_OPENAI_ENDPOINT" in error_msg:
+        if "embedding" in error_msg.lower() or "vectoriz" in error_msg.lower():
             raise HTTPException(status_code=502, detail="Embedding service unavailable")
         elif "search" in error_msg.lower():
             raise HTTPException(status_code=503, detail="Knowledge base temporarily unavailable")

@@ -1,6 +1,6 @@
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
-    VectorizedQuery,
+    VectorizableTextQuery,
     QueryType,
     QueryCaptionType,
     QueryAnswerType,
@@ -61,15 +61,19 @@ class AzureSearchService:
         return [doc async for doc in results]
 
     async def search_context(
-        self, query: str, embedding: list[float], user_tier: str, limit: int = 5
+        self, query: str, embedding: str, user_tier: str, limit: int = 5
     ):
         """
         Executes Hybrid Search (Keyword + Vector) with Semantic Reranking.
         Falls back to vector-only search if semantic ranker is unavailable.
         
+        Azure AI Search handles vectorization internally via integrated
+        vectorization (skillset-based). The embedding parameter is the raw
+        text query that gets vectorized by the search service.
+        
         Args:
             query: User's search query text
-            embedding: 1536-dimensional vector from embedding model
+            embedding: Raw text for Azure Search to vectorize internally
             user_tier: 'free' or 'pro' for content filtering
             limit: Number of results to return (default: 5)
             
@@ -77,9 +81,9 @@ class AzureSearchService:
             List of context chunks with scores and metadata
         """
         try:
-            # 1. Define Vector Query
-            vector_query = VectorizedQuery(
-                vector=embedding,
+            # 1. Define Vector Query using integrated vectorization
+            vector_query = VectorizableTextQuery(
+                text=embedding,
                 k_nearest_neighbors=50,  # Retrieve larger candidate set for reranking
                 fields="content_vector",
                 exhaustive=True,  # Ensure accuracy over speed for small sets

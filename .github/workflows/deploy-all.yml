@@ -111,7 +111,6 @@ jobs:
           UPSTASH_REDIS_REST_URL=$(az keyvault secret show --vault-name syrabit-kv --name UPSTASH-REDIS-REST-URL --query value -o tsv)
           UPSTASH_REDIS_REST_TOKEN=$(az keyvault secret show --vault-name syrabit-kv --name UPSTASH-REDIS-REST-TOKEN --query value -o tsv)
           GOOGLE_APPLICATION_CREDENTIALS_JSON=$(az keyvault secret show --vault-name syrabit-kv --name GOOGLE-APPLICATION-CREDENTIALS-JSON --query value -o tsv)
-          AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name syrabit-kv --name AZURE-OPENAI-ENDPOINT --query value -o tsv)
           AZURE_SEARCH_ADMIN_KEY=$(az keyvault secret show --vault-name syrabit-kv --name AZURE-SEARCH-ADMIN-KEY --query value -o tsv)
           AZURE_SEARCH_QUERY_KEY=$(az keyvault secret show --vault-name syrabit-kv --name AZURE-SEARCH-QUERY-KEY --query value -o tsv)
           
@@ -126,7 +125,6 @@ jobs:
           echo "::add-mask::$UPSTASH_REDIS_REST_URL"
           echo "::add-mask::$UPSTASH_REDIS_REST_TOKEN"
           echo "::add-mask::$GOOGLE_APPLICATION_CREDENTIALS_JSON"
-          echo "::add-mask::$AZURE_OPENAI_ENDPOINT"
           echo "::add-mask::$AZURE_SEARCH_ADMIN_KEY"
           echo "::add-mask::$AZURE_SEARCH_QUERY_KEY"
           
@@ -141,7 +139,6 @@ jobs:
           echo "UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL" >> "$GITHUB_OUTPUT"
           echo "UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN" >> "$GITHUB_OUTPUT"
           echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$GOOGLE_APPLICATION_CREDENTIALS_JSON" >> "$GITHUB_OUTPUT"
-          echo "AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT" >> "$GITHUB_OUTPUT"
           echo "AZURE_SEARCH_ADMIN_KEY=$AZURE_SEARCH_ADMIN_KEY" >> "$GITHUB_OUTPUT"
           echo "AZURE_SEARCH_QUERY_KEY=$AZURE_SEARCH_QUERY_KEY" >> "$GITHUB_OUTPUT"
 
@@ -172,7 +169,6 @@ jobs:
               "UPSTASH_REDIS_REST_URL=${{ steps.keyvault.outputs.UPSTASH_REDIS_REST_URL }}" \
               "UPSTASH_REDIS_REST_TOKEN=${{ steps.keyvault.outputs.UPSTASH_REDIS_REST_TOKEN }}" \
               "GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ steps.keyvault.outputs.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" \
-              "AZURE_OPENAI_ENDPOINT=${{ steps.keyvault.outputs.AZURE_OPENAI_ENDPOINT }}" \
               "AZURE_SEARCH_ADMIN_KEY=${{ steps.keyvault.outputs.AZURE_SEARCH_ADMIN_KEY }}" \
               "AZURE_SEARCH_QUERY_KEY=${{ steps.keyvault.outputs.AZURE_SEARCH_QUERY_KEY }}"
 

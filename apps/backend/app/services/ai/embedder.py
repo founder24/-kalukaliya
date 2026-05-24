@@ -1,114 +1,38 @@
-import hashlib
-import json as json_module
-import httpx
-import logging
-import time
+"""
+Embedder module - Azure AI Search Built-in Vectorization
 
-from app.config import settings
+Azure AI Search handles embeddings internally via integrated vectorization
+(skillset-based). The backend sends raw text queries to the search service,
+which vectorizes them using its configured vectorizer profile.
+
+This module exists to maintain backward compatibility with callers that
+previously relied on generate_embedding(). It now returns the raw text
+for use with Azure Search's VectorizableTextQuery.
+"""
+
+import logging
 
 logger = logging.getLogger(__name__)
 
 
-_http_client: httpx.AsyncClient | None = None
-_azure_credential = None
-_token_provider = None
-_cached_token: str | None = None
-_token_expiry: float = 0
+async def generate_embedding(text: str) -> str:
+    """
+    Returns the input text for Azure Search integrated vectorization.
 
+    Azure AI Search vectorizes queries internally using its configured
+    vectorizer (skillset-based embedding). No external API call is needed.
 
-def _get_token_provider():
-    global _azure_credential, _token_provider
-    if _token_provider is None:
-        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-        _azure_credential = DefaultAzureCredential()
-        _token_provider = get_bearer_token_provider(
-            _azure_credential,
-            "https://cognitiveservices.azure.com/.default"
-        )
-    return _token_provider
+    Args:
+        text: Input text to be vectorized by the search service
 
-
-def _get_cached_token() -> str:
-    """Get a cached bearer token, refreshing only when expired."""
-    global _cached_token, _token_expiry
-    if _cached_token and time.time() < _token_expiry:
-        return _cached_token
-    token_provider = _get_token_provider()
-    _cached_token = token_provider()
-    _token_expiry = time.time() + 3000  # 50 min cache for 60 min token life
-    return _cached_token
-
-
-def get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None:
-        _http_client = httpx.AsyncClient(timeout=30.0)
-    return _http_client
+    Returns:
+        The input text (Azure Search handles vectorization internally)
+    """
+    if not text or not text.strip():
+        raise ValueError("Cannot generate embedding for empty text")
+    return text
 
 
 async def close_http_client():
-    global _http_client
-    if _http_client:
-        await _http_client.aclose()
-        _http_client = None
-
-
-async def generate_embedding(text: str) -> list[float]:
-    """
-    Generate embedding using Azure OpenAI text-embedding-3-large
-    
-    Args:
-        text: Input text to embed
-        
-    Returns:
-        List of 1536 floats representing the embedding vector
-    """
-    if not settings.AZURE_OPENAI_ENDPOINT:
-        raise RuntimeError("AZURE_OPENAI_ENDPOINT not configured - cannot generate embeddings")
-
-    # Check cache first
-    cache_key = f"embed_cache:{hashlib.sha256(text.encode()).hexdigest()}"
-    try:
-        from app.db.redis import get_redis
-        redis = get_redis()
-        cached = await redis.get(cache_key)
-        if cached:
-            return json_module.loads(cached)
-    except Exception:
-        pass  # Cache miss or Redis unavailable - proceed with API call
-
-    try:
-        # Use Azure OpenAI embedding endpoint with cached credential
-        client = get_http_client()
-        response = await client.post(
-            f"{settings.AZURE_OPENAI_ENDPOINT}/openai/deployments/{settings.AZURE_EMBEDDING_MODEL}/embeddings?api-version=2024-02-15-preview",
-            headers={
-                "Authorization": f"Bearer {_get_cached_token()}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "input": text,
-                "model": settings.AZURE_EMBEDDING_MODEL,
-                "dimensions": settings.AZURE_EMBEDDING_DIMENSIONS
-            }
-        )
-        response.raise_for_status()
-        data = response.json()
-        
-        embedding = data["data"][0]["embedding"]
-
-        # Store in cache
-        try:
-            from app.db.redis import get_redis
-            redis = get_redis()
-            await redis.set(cache_key, json_module.dumps(embedding), ex=86400)  # 24h TTL
-        except Exception:
-            pass  # Cache write failure is non-critical
-
-        return embedding
-            
-    except RuntimeError:
-        raise
-    except Exception as e:
-        logger.error(f"Embedding generation failed: {str(e)}")
-        raise RuntimeError(f"Embedding service unavailable: {e}")
+    """No-op kept for backward compatibility with app shutdown hooks."""
+    pass
