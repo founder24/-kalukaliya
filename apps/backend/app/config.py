@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     RESEND_FROM_ADDRESS: str = "noreply@syrabit.ai"
     RESEND_FROM_NAME: str = "Syrabit Education"
 
+    # --- SEO / IndexNow ---
+    INDEXNOW_API_KEY: Optional[str] = None
+    INDEXNOW_INTERNAL_SECRET: Optional[str] = None
+
     # --- Observability ---
     SENTRY_DSN: Optional[str] = None
     SENTRY_ENVIRONMENT: str = "production"

@@ -236,6 +236,11 @@ jobs:
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
 
+      - name: Submit URLs to IndexNow
+        run: node apps/frontend/scripts/indexnow-submit.mjs
+        env:
+          INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
+
   smoke-test:
     name: Smoke Tests
     runs-on: ubuntu-latest

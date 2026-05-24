@@ -58,11 +58,11 @@ const ssrEntry = path.join(distSsrDir, "entry-server.js");
 
 const BACKEND = SHARED_BACKEND;
 const SUBJECTS_LIMIT = parseInt(
-  process.env.PRERENDER_SUBJECTS_LIMIT || "50",
+  process.env.PRERENDER_SUBJECTS_LIMIT || "999",
   10,
 );
 const CHAPTERS_PER_SUBJECT = parseInt(
-  process.env.PRERENDER_CHAPTERS_PER_SUBJECT || "6",
+  process.env.PRERENDER_CHAPTERS_PER_SUBJECT || "999",
   10,
 );
 const TRAFFIC_DAYS = parseInt(
@@ -102,7 +102,7 @@ const FETCH_CONCURRENCY = envInt("PRERENDER_FETCH_CONCURRENCY", 8, {
 // Global wall-clock budget for the entire prerender pass. If we exceed
 // it (e.g. backend hard-down), we soft-fail with whatever we managed to
 // produce so far — the SPA shell still serves the rest.
-const PRERENDER_BUDGET_MS = envInt("PRERENDER_BUDGET_MS", 12 * 60 * 1000, {
+const PRERENDER_BUDGET_MS = envInt("PRERENDER_BUDGET_MS", 20 * 60 * 1000, {
   min: 60_000, max: 30 * 60 * 1000,
 });
 
@@ -811,6 +811,33 @@ async function main() {
     }
 
     try {
+      // Inject BreadcrumbList and Course JSON-LD for subject pages
+      const breadcrumbLd = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: "https://syrabit.ai/" },
+          { "@type": "ListItem", position: 2, name: "Library", item: "https://syrabit.ai/library" },
+          { "@type": "ListItem", position: 3, name: subjectName, item: canonical },
+        ],
+      };
+      const courseLd = {
+        "@context": "https://schema.org",
+        "@type": "Course",
+        name: subjectName,
+        description: resolved.description || `Complete ${subjectName} study material for ${boardName} ${className}.`,
+        provider: { "@type": "Organization", name: "Syrabit.ai", url: "https://syrabit.ai" },
+        educationalLevel: `${className} ${boardName}`.trim(),
+        inLanguage: "en-IN",
+        url: canonical,
+      };
+      inlineScripts.push(
+        `<script type="application/ld+json">${JSON.stringify(breadcrumbLd).replace(/</g, "\\u003c")}</script>`,
+      );
+      inlineScripts.push(
+        `<script type="application/ld+json">${JSON.stringify(courseLd).replace(/</g, "\\u003c")}</script>`,
+      );
+
       const html = await renderOne(renderRoute, htmlTemplate, {
         url,
         seed: { queries, subjectPreload },
@@ -929,6 +956,16 @@ async function main() {
       const bName = chapterPayload.board_name || boardName;
       const cName = chapterPayload.class_name || className;
 
+      // Content-type-aware title suffix for SEO
+      const contentType = chapterPayload.content_type || ch.content_type || "";
+      const titleSuffix = contentType === "mcq"
+        ? "MCQ & Practice Questions"
+        : contentType === "notes"
+          ? "Complete Notes"
+          : contentType === "pyq"
+            ? "Previous Year Questions"
+            : "Notes";
+
       const inlineChapterScripts = [
         `<script>window.__CHAPTER_PRELOAD__=${JSON.stringify(preload).replace(/</g, "\\u003c")};</script>`,
       ];
@@ -940,7 +977,7 @@ async function main() {
           hydrateKind: "chapter",
           inlineScripts: inlineChapterScripts,
           head: {
-            title: `${chapterTitle} — ${subjName} | ${bName} ${cName} Notes`,
+            title: `${chapterTitle} — ${subjName} | ${bName} ${cName} ${titleSuffix}`,
             description:
               chapterPayload.meta_description ||
               `${chapterTitle} notes for ${subjName}. Complete study material for ${bName} ${cName} students.`,

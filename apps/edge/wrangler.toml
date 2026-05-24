@@ -30,6 +30,11 @@ binding = "RATE_LIMIT_KV"
 id = "2983094e249d4094b66e4b9dacc38719"
 preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 
+[[env.production.kv_namespaces]]
+binding = "ISR_CACHE_KV"
+id = "placeholder-isr-cache-kv-id"
+preview_id = "placeholder-isr-cache-kv-preview-id"
+
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET
 # - CF_TURNSTILE_SECRET
