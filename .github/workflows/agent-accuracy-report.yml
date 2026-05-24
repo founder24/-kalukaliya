@@ -1,0 +1,162 @@
+name: "Agent: Accuracy Report"
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: accuracy-report
+  cancel-in-progress: false
+
+jobs:
+  accuracy-report:
+    name: Generate Accuracy Report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install mongosh
+        run: |
+          wget -qO- https://www.mongodb.org/static/pgp/server-7.0.asc | sudo tee /etc/apt/trusted.gpg.d/server-7.0.asc
+          echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+          sudo apt-get update
+          sudo apt-get install -y mongodb-mongosh
+
+      - name: Run accuracy report
+        id: report
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          mongosh "$MONGODB_URI" --quiet scripts/accuracy-report.js > /tmp/accuracy-output.txt 2>&1
+          cat /tmp/accuracy-output.txt
+
+          # Parse overall satisfaction percentage
+          SATISFACTION=$(grep -oP 'Overall satisfaction:\s*\K[\d.]+' /tmp/accuracy-output.txt || echo "0")
+          echo "satisfaction=$SATISFACTION" >> "$GITHUB_OUTPUT"
+
+          # Save full output for issue body
+          echo "report<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/accuracy-output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create accuracy alert if below threshold
+        if: steps.report.outputs.satisfaction != '' && steps.report.outputs.satisfaction < 85
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const satisfaction = '${{ steps.report.outputs.satisfaction }}';
+            const timestamp = new Date().toISOString();
+
+            // Check for existing accuracy alert issue
+            const { data: alertIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'accuracy-alert',
+              state: 'open',
+            });
+
+            const alertBody = [
+              '## Accuracy Alert',
+              '',
+              `**Overall Satisfaction:** ${satisfaction}% (threshold: 85%)`,
+              `**Reported at:** ${timestamp}`,
+              '',
+              '### Details',
+              '```',
+              `${{ steps.report.outputs.report }}`,
+              '```',
+              '',
+              '### Recommended Actions',
+              '- Review recent model/prompt changes',
+              '- Check language-specific performance',
+              '- Verify data pipeline integrity',
+              '',
+              '---',
+              '*Auto-created by agent-accuracy-report workflow*',
+            ].join('\n');
+
+            if (alertIssues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Accuracy Alert: Satisfaction at ${satisfaction}% (below 85% threshold)`,
+                body: alertBody,
+                labels: ['accuracy-alert', 'agent-created'],
+              });
+            } else {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alertIssues[0].number,
+                body: alertBody,
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: alertIssues[0].number,
+                body: `Updated at ${timestamp}: Satisfaction still at ${satisfaction}%`,
+              });
+            }
+
+      - name: Update daily accuracy report issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const satisfaction = '${{ steps.report.outputs.satisfaction }}' || 'N/A';
+            const timestamp = new Date().toISOString();
+            const date = timestamp.split('T')[0];
+
+            const reportBody = [
+              '## Daily Accuracy Report',
+              '',
+              `**Last Updated:** ${timestamp}`,
+              `**Overall Satisfaction:** ${satisfaction}%`,
+              '',
+              '### Full Report',
+              '```',
+              `${{ steps.report.outputs.report }}`,
+              '```',
+              '',
+              '---',
+              '*Auto-updated by agent-accuracy-report workflow*',
+            ].join('\n');
+
+            // Search for existing daily report issue
+            const { data: reportIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'accuracy-report',
+              state: 'open',
+            });
+
+            const existingReport = reportIssues.find(i =>
+              i.title === 'Daily Accuracy Report'
+            );
+
+            if (existingReport) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingReport.number,
+                body: reportBody,
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingReport.number,
+                body: `**${date}** - Overall satisfaction: ${satisfaction}%`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Daily Accuracy Report',
+                body: reportBody,
+                labels: ['accuracy-report', 'agent-created'],
+              });
+            }

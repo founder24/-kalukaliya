@@ -1,0 +1,24 @@
+{
+  "lighthouse": {
+    "lcp_max_ms": 2500,
+    "tbt_max_ms": 200,
+    "cls_max": 0.1,
+    "performance_min_score": 80,
+    "lcp_regression_threshold_ms": 500,
+    "tbt_regression_threshold_ms": 100
+  },
+  "bundle": {
+    "max_increase_bytes": 524288,
+    "max_increase_percent": 10,
+    "max_total_kb": 2048
+  },
+  "backend": {
+    "p95_latency_ms": 400,
+    "error_rate_max_pct": 1.0,
+    "coverage_min_pct": 60
+  },
+  "complexity": {
+    "cyclomatic_max": 10,
+    "max_function_length_lines": 50
+  }
+}
