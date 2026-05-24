@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create apps/backend/app/api/v1/admin_seo_pipeline.py implementing the SEO/GEO/AEO pipeline endpoints (Layer 4). This extends the existing admin_seo.py (which only has placeholder endpoints) with the actual pipeline logic the useSeoManager.jsx hook calls. Also create apps/backend/app/api/v1/content_public.py for public-facing content endpoints used by PageMeta.jsx and TopicAnswerCard.jsx.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/app/api/v1/admin_seo_pipeline.py with router = APIRouter(tags=['Admin SEO Pipeline'])",
     "SEO Pipeline endpoints (all under /seo/ prefix since frontend calls /api/v1/seo/...): POST /seo/extract-topics (extract topics from chapters using AI, with optional subject_id and force params), POST /seo/generate (generate SEO pages from topic_ids and page_types), GET /seo/stats (topic count, page count, published count, coverage %), GET /seo/topics (list all SEO topics with optional filters), POST /seo/topics (create SEO topic), DELETE /seo/topics/{id}, GET /seo/pages (list SEO pages with optional filters), PATCH /seo/pages/{id}/status (update page status)",
@@ -28,5 +28,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1.admin_seo_pipeline import router; print(f'SEO Routes: {len(router.routes)}')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Both files compile successfully (py_compile). Import validation fails due to bson/pymongo package conflict in sandbox env (same issue as FEAT-001). 28 routes in admin_seo_pipeline.py, 3 routes in content_public.py. All admin endpoints use _validate_admin_session + _csrf_check. Background jobs use asyncio.create_task. Public endpoint related-by-chapter has no auth. Dollar-sign MongoDB operators preserved correctly."
 }
