@@ -7,15 +7,14 @@ from posthog import Posthog
 import logging
 import uuid
 import time
-import contextlib
-
-logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
 from app.api.v1 import chat, auth, subscription, users, health, feedback, admin
 from app.api.webhooks import razorpay
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -55,7 +54,7 @@ async def lifespan(app: FastAPI):
     
     # Initialize PostHog
     if settings.POSTHOG_API_KEY:
-        posthog = Posthog(
+        _posthog = Posthog(
             project_api_key=settings.POSTHOG_API_KEY,
             host=settings.POSTHOG_HOST
         )

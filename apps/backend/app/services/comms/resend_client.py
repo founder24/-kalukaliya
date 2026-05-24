@@ -68,7 +68,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
             """,
         }
         
-        email_result = resend.Emails.send(params)
+        resend.Emails.send(params)
         logger.info(f"Receipt email sent to {email}")
         return True
         
@@ -96,7 +96,7 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
             """,
         }
         
-        email_result = resend.Emails.send(params)
+        resend.Emails.send(params)
         logger.info(f"Password reset email sent to {email}")
         return True
         
