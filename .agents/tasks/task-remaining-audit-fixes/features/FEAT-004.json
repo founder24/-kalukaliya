@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "refactor",
   "description": "ARCH-08: Refactor AuthContext.jsx into smaller hooks + TEST-06: Add edge worker tests + CICD-05: Document KeyVault references",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Create apps/frontend/src/hooks/useTokenManager.js: Extract token storage logic from AuthContext.jsx. Include _storeToken, _storeRefreshToken, getInMemoryToken, and the sessionStorage hydration logic. Export a hook that returns { token, refreshToken, storeToken, storeRefreshToken, clearTokens }.",
     "Step 2 - Create apps/frontend/src/hooks/useAnonymousSync.js: Extract the anonymous data claiming logic (the useEffect that calls studyApi.claimAnonData) from AuthContext.jsx. This hook takes userId as a parameter and handles the entire claim flow including toast notifications.",
@@ -30,5 +30,5 @@
     "Run: test -f apps/edge/tests/rate-limit.test.ts && test -f apps/edge/tests/cors.test.ts && test -f apps/edge/tests/bot.test.ts && echo 'PASS' || echo 'FAIL'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 24 edge tests pass (4 test files: jwt, rate-limit, cors, bot). AuthContext refactored to 161 lines using 3 extracted hooks. The stderr output from bot.test.ts is expected (console.error from the source code when fetch throws). deploy-all.yml has CICD-05 comment block above the KeyVault step."
 }
