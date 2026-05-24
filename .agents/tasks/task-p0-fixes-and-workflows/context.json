@@ -1,0 +1,32 @@
+{
+  "project_type": "FastAPI backend (Python 3.11) + Cloudflare Workers edge (TypeScript) + React frontend",
+  "language": "Python, TypeScript",
+  "build_system": "pnpm monorepo with pip for Python backend. No Makefile. pnpm workspace with apps/edge, apps/frontend, apps/backend.",
+  "test_framework": "pytest with httpx AsyncClient for backend (apps/backend/tests/conftest.py), vitest for frontend/edge",
+  "build_command": "pnpm install --no-frozen-lockfile && pip install -r apps/backend/requirements.txt (hash-stripped)",
+  "test_command": "pytest apps/backend/ --tb=short -q (with APP_ENV=test, JWT_SECRET=test-secret-at-least-32-characters-long-for-ci, MONGODB_URI=mongodb://test:test@localhost:27017)",
+  "verification_instructions": "1. Run ruff check apps/backend/app/ to verify no lint errors. 2. Run pytest apps/backend/ with test env vars. 3. Run pnpm --filter syrabit-edge exec tsc --noEmit for edge type checking.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. pip install ruff pytest httpx. 2. Strip hashes from requirements.txt and pip install. 3. pnpm install for edge/frontend.",
+  "environment_constraints": "OPEN_INTERNET - full network access. Can install packages and run builds. No Docker daemon available for full container builds.",
+  "contribution_requirements": "Standard GitHub flow. Conventional commits. Lint with ruff, tests with pytest.",
+  "key_patterns": "Singleton pattern for service clients (module-level instances). Beanie ODM for MongoDB models. Pydantic settings for config. AsyncClient from httpx for HTTP calls. FastAPI routers for API endpoints. Redis used for rate limiting, token blacklisting, caching.",
+  "relevant_files": [
+    "apps/backend/app/config.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/api/v1/auth.py",
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/api/v1/health.py",
+    "apps/backend/app/api/webhooks/razorpay.py",
+    "apps/backend/app/services/ai/embedder.py",
+    "apps/backend/app/services/comms/resend_client.py",
+    "apps/backend/app/core/security.py",
+    "apps/edge/src/index.ts",
+    "apps/edge/src/middleware/bot.ts",
+    ".env.shared",
+    ".github/workflows/deploy-all.yml",
+    ".github/workflows/agent-canary-deploy.yml",
+    ".github/workflows/agent-accuracy-report.yml"
+  ],
+  "directory_structure": "Monorepo: apps/backend (FastAPI), apps/edge (CF Workers), apps/frontend (React). .github/workflows/ for CI/CD. infra/ for IaC. scripts/ for tooling."
+}

@@ -45,13 +45,16 @@ export default {
     if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/auth')) {
       const turnstileToken = request.headers.get('CF-Turnstile-Response');
 
-      // Turnstile is MANDATORY for auth endpoints
+      // Turnstile is MANDATORY for auth endpoints and chat POST
       const isAuthEndpoint =
         url.pathname.startsWith('/api/v1/auth/signup') ||
         url.pathname.startsWith('/api/v1/auth/login') ||
         url.pathname.startsWith('/api/v1/auth/forgot-password');
 
-      if (isAuthEndpoint && !turnstileToken) {
+      const requiresTurnstile = isAuthEndpoint ||
+        (url.pathname.startsWith('/api/v1/chat') && request.method === 'POST');
+
+      if (requiresTurnstile && !turnstileToken) {
         return jsonResponse(403, { error: 'Bot verification required' });
       }
 

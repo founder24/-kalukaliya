@@ -167,10 +167,20 @@ def create_app() -> FastAPI:
     app.include_router(subscription.router, prefix="/api/v1/subscription", tags=["Subscription"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
-    app.include_router(health.router, prefix="/api/health", tags=["Health"])  # Legacy probe path
     app.include_router(feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"])
     app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+
+    # Legacy health paths - redirect to primary /health endpoints
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/api/health", include_in_schema=False)
+    async def legacy_health_redirect():
+        return RedirectResponse(url="/health", status_code=307)
+
+    @app.get("/api/health/deep", include_in_schema=False)
+    async def legacy_deep_health_redirect():
+        return RedirectResponse(url="/health/deep", status_code=307)
 
     return app
 

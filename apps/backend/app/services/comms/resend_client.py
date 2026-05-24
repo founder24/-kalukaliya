@@ -1,16 +1,26 @@
-import asyncio
-import resend
+import httpx
 import logging
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize Resend client (graceful no-op if API key is not set)
-if settings.RESEND_API_KEY:
-    resend.api_key = settings.RESEND_API_KEY
-else:
-    logger.warning("RESEND_API_KEY not set — email sending will be disabled")
+_resend_client: httpx.AsyncClient | None = None
+
+
+def _get_resend_client() -> httpx.AsyncClient:
+    """Lazily create a singleton async HTTP client for Resend API."""
+    global _resend_client
+    if _resend_client is None:
+        _resend_client = httpx.AsyncClient(
+            base_url="https://api.resend.com",
+            headers={
+                "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=10.0,
+        )
+    return _resend_client
 
 
 async def send_welcome_email(email: str, name: str = None) -> bool:
@@ -28,11 +38,13 @@ async def send_welcome_email(email: str, name: str = None) -> bool:
             <p>Best regards,<br>The Syrabit Team</p>
             """,
         }
-        
-        await asyncio.to_thread(resend.Emails.send, params)
+
+        client = _get_resend_client()
+        response = await client.post("/emails", json=params)
+        response.raise_for_status()
         logger.info(f"Welcome email sent to {email}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to send welcome email: {e}")
         return False
@@ -42,7 +54,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
     """Send payment receipt email"""
     try:
         amount_inr = amount / 100  # Convert paise to rupees
-        
+
         params = {
             "from": f"{settings.RESEND_FROM_NAME} <{settings.RESEND_FROM_ADDRESS}>",
             "to": email,
@@ -68,11 +80,13 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
             <p>Best regards,<br>The Syrabit Team</p>
             """,
         }
-        
-        await asyncio.to_thread(resend.Emails.send, params)
+
+        client = _get_resend_client()
+        response = await client.post("/emails", json=params)
+        response.raise_for_status()
         logger.info(f"Receipt email sent to {email}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to send receipt email: {e}")
         return False
@@ -82,7 +96,7 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
     """Send password reset email"""
     try:
         reset_link = f"https://syrabit.ai/reset-password?token={reset_token}"
-        
+
         params = {
             "from": f"{settings.RESEND_FROM_NAME} <{settings.RESEND_FROM_ADDRESS}>",
             "to": email,
@@ -96,11 +110,13 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
             <p>Best regards,<br>The Syrabit Team</p>
             """,
         }
-        
-        await asyncio.to_thread(resend.Emails.send, params)
+
+        client = _get_resend_client()
+        response = await client.post("/emails", json=params)
+        response.raise_for_status()
         logger.info(f"Password reset email sent to {email}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to send password reset email: {e}")
         return False

@@ -150,3 +150,8 @@ class _NoOpTracer:
 
     def start_span(self, name: str, **kwargs):
         return _NoOpSpan()
+
+
+def get_posthog(request) -> object | None:
+    """Get PostHog client from app state. Returns None if not configured."""
+    return getattr(request.app.state, "posthog", None)

@@ -83,7 +83,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    refresh_token: str
 
 
 # ─── Token Helpers ───────────────────────────────────────────────────────────
@@ -383,6 +383,7 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                 raise
             except Exception as e:
                 logger.error(f"Redis unavailable for token revocation check: {e}")
+                raise HTTPException(status_code=503, detail="Token revocation service unavailable. Please retry.")
 
         user = await User.get(user_id)
         if not user:

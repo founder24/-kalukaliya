@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
+import httpx
 import logging
 import time
 import json
@@ -229,10 +230,36 @@ async def chat(
             )
 
         result = await asyncio.wait_for(_process_chat(), timeout=30.0)
+
+        # Capture analytics event
+        from app.core.telemetry import get_posthog
+        posthog_client = get_posthog(http_request)
+        if posthog_client and user_id != "anonymous":
+            try:
+                posthog_client.capture(
+                    distinct_id=user_id,
+                    event="chat_completed",
+                    properties={
+                        "language": result.model_used,
+                        "latency_ms": result.latency_ms,
+                        "sources_count": len(result.sources),
+                    }
+                )
+            except Exception:
+                pass  # PostHog failure is non-critical
+
         return result
 
     except HTTPException:
         raise
+    except httpx.TimeoutException:
+        logger.error("chat_timeout_httpx", extra={"user_id": user_id})
+        raise HTTPException(status_code=504, detail="Request timed out")
+    except httpx.HTTPStatusError as e:
+        logger.error("chat_upstream_http_error", extra={"user_id": user_id, "status": e.response.status_code})
+        raise HTTPException(status_code=502, detail=f"Upstream service returned {e.response.status_code}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         error_msg = str(e)
         logger.error("chat_upstream_failure", extra={"user_id": user_id, "error": error_msg})
@@ -248,7 +275,7 @@ async def chat(
         logger.error("chat_timeout", extra={"user_id": user_id})
         raise HTTPException(status_code=504, detail="Request timed out. Please try a shorter question.")
     except Exception as e:
-        logger.error("chat_unexpected_error", extra={"user_id": user_id, "error": str(e)})
+        logger.error("chat_unexpected_error", extra={"user_id": user_id, "error": str(e), "error_type": type(e).__name__})
         raise HTTPException(status_code=500, detail="An internal error occurred. Please try again later.")
 
 
@@ -258,13 +285,13 @@ async def chat(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _resolve_lang_and_model(request: ChatRequest) -> tuple[str, str]:
-    """Resolve language and target model from request."""
-    if request.lang:
-        detected_lang = request.lang
-        target_model = settings.SARVAM_MODEL if request.lang == "as" else settings.VERTEX_GEMINI_MODEL
+def _resolve_lang_and_model(message: str, lang: str | None = None) -> tuple[str, str]:
+    """Resolve language and target model from message content."""
+    if lang:
+        detected_lang = lang
+        target_model = settings.SARVAM_MODEL if lang == "as" else settings.VERTEX_GEMINI_MODEL
     else:
-        detected_lang, target_model = detect_language_and_route(request.message)
+        detected_lang, target_model = detect_language_and_route(message)
     return detected_lang, target_model
 
 
@@ -366,7 +393,7 @@ async def chat_stream(
     sanitized_message = sanitize_user_input(request.message)
 
     # -- Resolve language & model --
-    detected_lang, target_model = _resolve_lang_and_model(request)
+    detected_lang, target_model = _resolve_lang_and_model(sanitized_message, request.lang)
 
     # -- RAG retrieval (with OTel span) --
     from app.services.ai.embedder import generate_embedding
@@ -456,6 +483,23 @@ async def chat_stream(
             final_span.set_attribute("chat.lang", detected_lang)
             final_span.set_attribute("chat.model", actual_model)
             final_span.set_attribute("chat.provider", "sarvam" if "sarvam" in actual_model.lower() or "openhathi" in actual_model.lower() else "vertex")
+
+        # Capture PostHog analytics event
+        posthog_client = getattr(http_request.app.state, "posthog", None) if http_request else None
+        if posthog_client and user_id != "anonymous":
+            try:
+                posthog_client.capture(
+                    distinct_id=user_id,
+                    event="chat_stream_completed",
+                    properties={
+                        "language": detected_lang,
+                        "model": actual_model,
+                        "latency_ms": latency_ms,
+                        "response_length": len(full_response),
+                    }
+                )
+            except Exception:
+                pass
 
         # -- Persist chat (fire-and-forget) --
         asyncio.create_task(

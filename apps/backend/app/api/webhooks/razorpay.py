@@ -55,10 +55,16 @@ async def handle_razorpay_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid Signature")
 
     event = json.loads(body.decode())
+
+    # Validate event ID exists
+    event_id = event.get("id")
+    if not event_id:
+        logger.warning("Webhook payload missing event ID")
+        raise HTTPException(status_code=400, detail="Missing event identifier")
+
     payload = event.get("payload", {})
 
     # Idempotency check: skip duplicate events
-    event_id = event.get("id")
     if event_id:
         try:
             from app.db.redis import get_redis

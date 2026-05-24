@@ -36,6 +36,7 @@ async def test_webhook_valid_signature_payment_failed(client: AsyncClient):
     from app.config import settings
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
     body = json.dumps({
+        "id": "evt_test_payment_failed_001",
         "event": "payment.failed",
         "payload": {"customer": {"id": "cust_1"}}
     }).encode()
@@ -55,6 +56,7 @@ async def test_webhook_invalid_subscription_id(client: AsyncClient):
     from app.config import settings
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
     body = json.dumps({
+        "id": "evt_test_invalid_sub_001",
         "event": "subscription.charged",
         "payload": {
             "subscription": {"id": "INVALID; DROP TABLE"},

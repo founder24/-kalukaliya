@@ -1,0 +1,39 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix all 11 P0 security, performance, API, chat, RAG, payment, and observability bugs in the backend and edge code",
+  "status": "in_progress",
+  "steps": [
+    "STEP 1 - #90 [SEC-C1] Dangerous Default JWT Secret: In .env.shared, replace JWT_SECRET=super_secret_jwt_key_32_chars_min with a clear placeholder like JWT_SECRET=GENERATE_A_SECURE_RANDOM_SECRET_HERE_MIN_32_CHARS that cannot be mistaken for a real secret. Add a comment warning that this MUST be replaced. Also ensure config.py validate_production_secrets includes this new placeholder in KNOWN_PLACEHOLDER_SECRETS.",
+    "STEP 2 - #91 [SEC-C2] Turnstile Bot Protection Optional for Chat: In apps/edge/src/index.ts, make Turnstile mandatory for BOTH auth AND chat POST endpoints. Currently only auth endpoints reject missing tokens. For chat POST endpoints (method POST on /api/v1/chat), require CF-Turnstile-Response header and reject with 403 if missing, matching the auth endpoint behavior.",
+    "STEP 3 - #94 [SEC-C5] Refresh Tokens Cannot Be Revoked Reliably: In apps/backend/app/api/v1/auth.py, the /refresh endpoint does revoke old tokens via Redis jti, but has a gap: if Redis is unavailable, revocation checks are silently skipped. Fix: when Redis is unavailable for revocation CHECK (not storage), the endpoint should REJECT the refresh attempt with 503 rather than silently proceeding. Also ensure logout ALWAYS revokes refresh token by making refresh_token field required (not Optional) in LogoutRequest. Update LogoutRequest model to make refresh_token a required str field.",
+    "STEP 4 - #105 [PERF-C1] Embedding Client Per-Request Connection: The embedder already uses a module-level singleton httpx.AsyncClient via get_http_client(). However, the token_provider is called on every request (token_provider()) which re-acquires a token each time. Cache the token with a short TTL. Add token caching in _get_token_provider() - store the token and its expiry, and only refresh when expired (tokens typically last 3600s, cache for 3000s).",
+    "STEP 5 - #126 [API-C1] Chat Endpoint Catches All Exceptions: In apps/backend/app/api/v1/chat.py, the non-streaming POST / endpoint catches broad Exception and returns generic 500. Improve error handling: add specific exception handlers for httpx.TimeoutException (504), httpx.HTTPStatusError (502), ValueError (400), and only use the generic Exception handler as a last resort. Add the specific exception type and a truncated message in the error response (without leaking internals).",
+    "STEP 6 - #127 [API-C2] Health Check Router Dual Registration: In apps/backend/app/main.py, health.router is registered at both /health and /api/health. This causes the deep health endpoint to be accessible at /health/deep AND /api/health/deep (path doubling). Fix: keep /health as the primary path for Container Apps probes. For /api/health legacy path, create a simple redirect or a separate minimal router that just has the basic check, rather than duplicating the full router.",
+    "STEP 7 - #134 [CHAT-C1] Streaming Endpoint Sends Unsanitized Message to LLM: In apps/backend/app/api/v1/chat.py, the _resolve_lang_and_model(request) function uses request.message (raw Pydantic model field) for language detection. While sanitize_user_input is called afterward, the language detection function operates on unsanitized input. Fix: move the sanitize_user_input call BEFORE _resolve_lang_and_model in the stream endpoint, and pass sanitized_message to _resolve_lang_and_model instead of the request object. Refactor _resolve_lang_and_model to accept a message string rather than the full request.",
+    "STEP 8 - #143 [RAG-C1] Embedding Endpoint URL Missing from Template: The .env.shared template is missing AZURE_OPENAI_ENDPOINT which is required for the embedder service. Add AZURE_OPENAI_ENDPOINT=https://syrabit-openai.openai.azure.com to the P3: AZURE SEARCH section of .env.shared. The code in embedder.py already correctly uses settings.AZURE_OPENAI_ENDPOINT.",
+    "STEP 9 - #159 [PAY-C1] Razorpay Webhook Idempotency Gap: The webhook already has an idempotency check, but it silently continues processing if Redis is unavailable (line: logger.error then continues). Fix: if Redis is unavailable for the idempotency CHECK, log a warning but still proceed (since not checking is better than rejecting valid webhooks). However, if the event_id is missing from the payload entirely, return 400 (currently it skips the check). Add validation that event_id exists in all webhook payloads.",
+    "STEP 10 - #161 [PAY-C3] Resend Email Uses Synchronous API: In apps/backend/app/services/comms/resend_client.py, the code uses asyncio.to_thread(resend.Emails.send, params) which blocks a thread pool thread. Replace with httpx-based async HTTP call directly to the Resend API (POST https://api.resend.com/emails with Authorization: Bearer <key>). This avoids thread pool exhaustion under load.",
+    "STEP 11 - #168 [OBS-C1] PostHog Instance Never Accessible: In apps/backend/app/main.py, PostHog is initialized on app.state.posthog but never used anywhere. Create a utility function get_posthog(request: Request) -> Optional[Posthog] that extracts it from request.app.state, and wire it into the chat endpoints to capture chat_completed events with user_id, language, model, and latency_ms properties."
+  ],
+  "acceptance_criteria": [
+    ".env.shared JWT_SECRET placeholder is clearly not a usable secret and is documented",
+    "Edge worker rejects chat POST requests without CF-Turnstile-Response header with 403",
+    "Refresh endpoint returns 503 if Redis is unavailable for revocation check; LogoutRequest.refresh_token is required",
+    "Embedding token provider caches bearer tokens to avoid re-acquisition on every request",
+    "Chat POST / endpoint has specific exception handlers for timeout, HTTP errors, and validation",
+    "Health router is registered once at /health; /api/health has a separate lightweight handler",
+    "Stream endpoint sanitizes message BEFORE language detection",
+    "AZURE_OPENAI_ENDPOINT is present in .env.shared template",
+    "Webhook rejects payloads with missing event_id with 400",
+    "Resend client uses async httpx instead of thread-blocking sync calls",
+    "PostHog captures chat events via a reusable utility function"
+  ],
+  "verification": [
+    "Run: APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long-for-ci MONGODB_URI=mongodb://test:test@localhost:27017 pytest apps/backend/ --tb=short -q",
+    "Run: ruff check apps/backend/app/",
+    "Run: pnpm --filter syrabit-edge exec tsc --noEmit (verifies TypeScript compiles)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

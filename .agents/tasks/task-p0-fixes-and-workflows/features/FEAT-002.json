@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "chore",
+  "description": "Update workflow files: wire canary deploy into deploy-all.yml as pre-step, update agent-accuracy-report.yml for MongoDB connection secret, and update deploy-all.yml to reference Azure KeyVault secrets for runtime secrets (replacing direct env var references where applicable for deployed services)",
+  "status": "pending",
+  "steps": [
+    "STEP 1 - Wire canary deploy into deploy-all.yml: Add a new job 'canary-deploy' that uses workflow_call to invoke agent-canary-deploy.yml. This job should run AFTER ci-checks but BEFORE deploy-backend, deploy-edge, and deploy-frontend. The canary job needs id-token: write and contents: read permissions for Azure auth. Update the needs array of deploy-backend, deploy-edge, deploy-frontend to depend on [canary-deploy] instead of [ci-checks]. The canary job uses: ./.github/workflows/agent-canary-deploy.yml with secrets: inherit.",
+    "STEP 2 - Update agent-accuracy-report.yml for MongoDB: The workflow already accepts MONGODB_URI from secrets and uses mongosh. Ensure it explicitly documents that AWS/Supabase secrets are removed and MongoDB is the auth backend. Add an input parameter 'mongodb_connection_secret' with a default of MONGODB_URI for workflow_dispatch. Update the env block to use the input if provided, otherwise fall back to secrets.MONGODB_URI. Remove any AWS/Supabase references if present.",
+    "STEP 3 - Update deploy-all.yml to reference KeyVault: For the deploy-backend job, after Azure login, add a step that fetches runtime secrets from Azure KeyVault (using az keyvault secret show) and exports them as environment variables for the container app update. The secrets to fetch: MONGODB_URI, JWT_SECRET, RAZORPAY_WEBHOOK_SECRET, RESEND_API_KEY, SARVAM_API_KEY, POSTHOG_API_KEY, SENTRY_DSN, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, GOOGLE_APPLICATION_CREDENTIALS_JSON, AZURE_OPENAI_ENDPOINT, AZURE_SEARCH_ADMIN_KEY, AZURE_SEARCH_QUERY_KEY. Use 'az containerapp update --set-env-vars' to inject these from KeyVault at deploy time. The KEYVAULT_URL is 'https://syrabit-kv.vault.azure.net/'. Also update deploy-frontend job: remove VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY references (Supabase is removed), keep VITE_BACKEND_URL."
+  ],
+  "acceptance_criteria": [
+    "deploy-all.yml has a canary-deploy job that calls agent-canary-deploy.yml and runs between ci-checks and the deploy jobs",
+    "deploy-backend job fetches secrets from KeyVault and passes them to containerapp update",
+    "agent-accuracy-report.yml accepts a mongodb_connection_secret input and uses MongoDB (no AWS/Supabase references)",
+    "deploy-frontend job no longer references VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY",
+    "All YAML files are valid (no syntax errors)"
+  ],
+  "verification": [
+    "Run: python -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-all.yml'))\" to validate YAML syntax",
+    "Run: python -c \"import yaml; yaml.safe_load(open('.github/workflows/agent-accuracy-report.yml'))\" to validate YAML syntax",
+    "Grep deploy-all.yml to confirm canary-deploy job exists and is in the needs chain"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

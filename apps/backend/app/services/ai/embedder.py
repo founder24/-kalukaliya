@@ -2,6 +2,7 @@ import hashlib
 import json as json_module
 import httpx
 import logging
+import time
 
 from app.config import settings
 
@@ -11,6 +12,8 @@ logger = logging.getLogger(__name__)
 _http_client: httpx.AsyncClient | None = None
 _azure_credential = None
 _token_provider = None
+_cached_token: str | None = None
+_token_expiry: float = 0
 
 
 def _get_token_provider():
@@ -23,6 +26,17 @@ def _get_token_provider():
             "https://cognitiveservices.azure.com/.default"
         )
     return _token_provider
+
+
+def _get_cached_token() -> str:
+    """Get a cached bearer token, refreshing only when expired."""
+    global _cached_token, _token_expiry
+    if _cached_token and time.time() < _token_expiry:
+        return _cached_token
+    token_provider = _get_token_provider()
+    _cached_token = token_provider()
+    _token_expiry = time.time() + 3000  # 50 min cache for 60 min token life
+    return _cached_token
 
 
 def get_http_client() -> httpx.AsyncClient:
@@ -65,13 +79,11 @@ async def generate_embedding(text: str) -> list[float]:
 
     try:
         # Use Azure OpenAI embedding endpoint with cached credential
-        token_provider = _get_token_provider()
-        
         client = get_http_client()
         response = await client.post(
             f"{settings.AZURE_OPENAI_ENDPOINT}/openai/deployments/{settings.AZURE_EMBEDDING_MODEL}/embeddings?api-version=2024-02-15-preview",
             headers={
-                "Authorization": f"Bearer {token_provider()}",
+                "Authorization": f"Bearer {_get_cached_token()}",
                 "Content-Type": "application/json"
             },
             json={

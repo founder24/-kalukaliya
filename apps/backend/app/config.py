@@ -124,6 +124,7 @@ class Settings(BaseSettings):
             "super_secret_jwt_key_32_chars_min",
             "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",
             "test-secret-at-least-32-characters-long",
+            "GENERATE_A_SECURE_RANDOM_SECRET_HERE_MIN_32_CHARS",
         }
 
         if self.APP_ENV == "production":
