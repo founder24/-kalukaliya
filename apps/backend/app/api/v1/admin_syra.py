@@ -2,7 +2,7 @@
 Admin Syra AI Assistant Endpoints
 AI chat, actions, preferences, briefing, STT/TTS, CMS suggestions.
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 import logging
 
 from app.api.v1.admin import _validate_admin_session, _csrf_check
@@ -82,6 +82,16 @@ async def update_syra_prefs(request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {
+            "voice_enabled", "auto_briefing", "theme",
+            "language", "response_style", "notifications_enabled",
+        }
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         await db.syra_prefs.update_one(
@@ -90,7 +100,7 @@ async def update_syra_prefs(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error updating Syra prefs: {e}")
-        return {"status": "error", "detail": str(e)}
+        return {"status": "error", "detail": "Internal server error"}
 
 
 @router.get("/syra/briefing")

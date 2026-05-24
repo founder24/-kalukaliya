@@ -126,10 +126,11 @@ async def update_user_plan(user_id: str, request: Request):
 @router.patch("/users/{user_id}/role")
 async def update_user_role(user_id: str, request: Request):
     """Update user role."""
-    _validate_admin_session(request)
+    payload = _validate_admin_session(request)
     await _csrf_check(request)
     try:
         from bson import ObjectId
+        from datetime import datetime, timezone
         from app.db.mongo import get_mongo_client
         from app.config import settings
 
@@ -146,6 +147,16 @@ async def update_user_role(user_id: str, request: Request):
         )
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Audit log for admin role grants
+        if role == "admin":
+            await db.audit_log.insert_one({
+                "action": "admin_role_granted",
+                "target_user_id": user_id,
+                "granted_by": payload.get("sub"),
+                "timestamp": datetime.now(timezone.utc),
+            })
+
         return {"status": "ok", "new_role": role}
     except HTTPException:
         raise
@@ -177,7 +188,14 @@ async def update_user_credits(user_id: str, request: Request):
         if action == "reset":
             update = {"$set": {"monthly_message_count": 0}}
         elif action == "add":
-            update = {"$inc": {"monthly_message_count": -abs(amount)}}
+            # "add" credits means reducing monthly_message_count (used count).
+            # Guard against driving the counter negative.
+            user_doc = await db.users.find_one({"_id": ObjectId(user_id)}, {"monthly_message_count": 1})
+            if user_doc is None:
+                raise HTTPException(status_code=404, detail="User not found")
+            current_count = user_doc.get("monthly_message_count", 0)
+            decrement = min(abs(amount), current_count)
+            update = {"$inc": {"monthly_message_count": -decrement}}
         else:  # deduct
             update = {"$inc": {"monthly_message_count": abs(amount)}}
 

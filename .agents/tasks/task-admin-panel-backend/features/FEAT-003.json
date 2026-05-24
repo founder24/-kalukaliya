@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address review findings: unbounded chat loads, unvalidated $set payloads, N+1 user lookups, duplicate route, credits counter floor, and admin role escalation audit logging.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Replace Chat.find_all().to_list() in admin_dashboard.py and admin_analytics.py with MongoDB aggregation pipelines that sum message array lengths server-side.",
+    "Step 2: Add field allow-lists to settings, alerts, notifications, content, and syra endpoints that use raw $set.",
+    "Step 3: Batch user lookups in admin_conversations.py into a single $in query instead of N+1.",
+    "Step 4: Remove duplicate /alerts/unacknowledged-count route from admin_dashboard.py (keep in admin_alerts.py).",
+    "Step 5: Add a guard in admin_users.py credits endpoint to prevent monthly_message_count from going negative.",
+    "Step 6: Add audit logging when granting admin role in admin_users.py."
+  ],
+  "acceptance_criteria": [
+    "No Chat.find_all().to_list() calls remain in dashboard or analytics",
+    "All $set update endpoints have field allow-lists",
+    "Conversations endpoint uses batch $in query for user lookups",
+    "Only one /alerts/unacknowledged-count route exists (in admin_alerts.py)",
+    "Credits 'add' action cannot drive monthly_message_count below zero",
+    "Admin role grants write to audit_log collection",
+    "App boots and existing tests pass"
+  ],
+  "verification": [
+    "Run: cd apps/backend && python -c 'from app.main import app; print(len(app.routes))'",
+    "Run: cd apps/backend && python -m pytest tests/test_admin_endpoints.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

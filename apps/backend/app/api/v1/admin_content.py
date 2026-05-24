@@ -42,6 +42,16 @@ async def update_subject(subject_id: str, request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {
+            "name", "status", "description", "slug", "order",
+            "icon", "color", "chapters", "visible", "category",
+        }
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         result = await db.subjects.update_one(
@@ -55,7 +65,7 @@ async def update_subject(subject_id: str, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error updating subject: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/content/regenerate-sitemap")

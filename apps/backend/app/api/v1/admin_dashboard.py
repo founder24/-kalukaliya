@@ -21,7 +21,8 @@ async def admin_dashboard(request: Request):
     _validate_admin_session(request)
     try:
         from app.models.user import User
-        from app.models.chat import Chat
+        from app.db.mongo import get_mongo_client
+        from app.config import settings
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -32,13 +33,25 @@ async def admin_dashboard(request: Request):
         pro_users = await User.find({"subscription_tier": "pro"}).count()
         free_users = await User.find({"subscription_tier": "free"}).count()
 
-        # Total messages: sum message arrays across all chats
-        all_chats = await Chat.find_all().to_list()
-        total_messages = sum(len(c.messages) for c in all_chats)
+        # Total messages: use aggregation pipeline to sum message array lengths server-side
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
 
-        # Messages today
-        today_chats = await Chat.find({"updated_at": {"$gte": today_start}}).to_list()
-        messages_today = sum(len(c.messages) for c in today_chats)
+        pipeline_total = [
+            {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+            {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
+        ]
+        agg_result = await db.chats.aggregate(pipeline_total).to_list(length=1)
+        total_messages = agg_result[0]["total"] if agg_result else 0
+
+        # Messages today: aggregate only today's chats
+        pipeline_today = [
+            {"$match": {"updated_at": {"$gte": today_start}}},
+            {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+            {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
+        ]
+        agg_today = await db.chats.aggregate(pipeline_today).to_list(length=1)
+        messages_today = agg_today[0]["total"] if agg_today else 0
 
         # System health
         system_health = {"status": "ok", "checks": {}}
@@ -108,22 +121,6 @@ async def admin_health(request: Request):
         "status": "healthy" if all_healthy else "degraded",
         "checks": checks,
     }
-
-
-@router.get("/alerts/unacknowledged-count")
-async def alerts_unacknowledged_count(request: Request):
-    """Return count of unacknowledged alerts."""
-    _validate_admin_session(request)
-    try:
-        from app.db.mongo import get_mongo_client
-        from app.config import settings
-
-        client = get_mongo_client()
-        db = client[settings.MONGODB_DB_NAME]
-        count = await db.alerts.count_documents({"acknowledged": {"$ne": True}})
-        return {"count": count}
-    except Exception:
-        return {"count": 0}
 
 
 @router.get("/cf-overview")

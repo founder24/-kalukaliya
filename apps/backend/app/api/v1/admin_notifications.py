@@ -103,6 +103,16 @@ async def update_trigger(trigger_id: str, request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {
+            "name", "event_type", "condition", "action", "enabled",
+            "cooldown_minutes", "description", "priority",
+        }
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         result = await db.notification_triggers.update_one(
@@ -115,7 +125,7 @@ async def update_trigger(trigger_id: str, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error updating trigger: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/notifications/triggers/{trigger_id}")
@@ -170,15 +180,24 @@ async def update_notification_prefs(request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {"email", "push", "slack", "sms", "digest_frequency"}
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         await db.notification_prefs.update_one(
             {"_id": "admin"}, {"$set": body}, upsert=True
         )
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating notification prefs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/push/delivery-stats")

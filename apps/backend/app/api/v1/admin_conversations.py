@@ -24,25 +24,37 @@ async def list_conversations(
     try:
         from app.models.chat import Chat
         from app.models.user import User
+        from bson import ObjectId
 
         chats = await Chat.find_all().skip(offset).limit(limit).sort("-updated_at").to_list()
+
+        # Batch user lookups: collect unique user_ids, query once with $in
+        user_ids = set()
+        for chat in chats:
+            if chat.user_id:
+                try:
+                    user_ids.add(ObjectId(chat.user_id))
+                except Exception:
+                    pass
+
+        user_map = {}
+        if user_ids:
+            users = await User.find({"_id": {"$in": list(user_ids)}}).to_list()
+            for u in users:
+                user_map[str(u.id)] = u
+
         conversations = []
         for chat in chats:
             user_name = None
             user_email = None
             user_plan = None
             is_anonymous = True
-            if chat.user_id:
-                try:
-                    from bson import ObjectId
-                    user = await User.find_one({"_id": ObjectId(chat.user_id)})
-                    if user:
-                        user_name = user.name
-                        user_email = user.email
-                        user_plan = user.subscription_tier
-                        is_anonymous = user.auth_provider == "anonymous"
-                except Exception:
-                    pass
+            if chat.user_id and chat.user_id in user_map:
+                user = user_map[chat.user_id]
+                user_name = user.name
+                user_email = user.email
+                user_plan = user.subscription_tier
+                is_anonymous = user.auth_provider == "anonymous"
 
             conversations.append({
                 "id": str(chat.id),

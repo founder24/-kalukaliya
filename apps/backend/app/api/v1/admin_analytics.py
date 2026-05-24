@@ -23,11 +23,21 @@ async def analytics_overview(request: Request):
         from app.models.user import User
         from app.models.chat import Chat
         from app.models.feedback import ChatFeedback
+        from app.db.mongo import get_mongo_client
+        from app.config import settings
 
         total_users = await User.count()
         total_chats = await Chat.count()
-        all_chats = await Chat.find_all().to_list()
-        total_messages = sum(len(c.messages) for c in all_chats)
+
+        # Use aggregation pipeline to sum message array lengths server-side
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        pipeline = [
+            {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+            {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
+        ]
+        agg_result = await db.chats.aggregate(pipeline).to_list(length=1)
+        total_messages = agg_result[0]["total"] if agg_result else 0
         avg_messages = round(total_messages / total_chats, 1) if total_chats > 0 else 0
 
         positive_fb = await ChatFeedback.find({"rating": 1}).count()

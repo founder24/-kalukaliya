@@ -55,6 +55,17 @@ async def update_settings(request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {
+            "registrations_open", "maintenance_mode", "app_name", "tagline",
+            "crawl_coverage_red", "crawl_coverage_yellow", "bot_missing_days",
+            "support_email", "analytics_enabled", "theme", "logo_url",
+        }
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         await db.site_settings.update_one(
@@ -63,9 +74,11 @@ async def update_settings(request: Request):
             upsert=True,
         )
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/diagnostics")
@@ -138,6 +151,13 @@ async def update_roadmap_item(item_id: str, request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {"title", "description", "status", "priority", "eta", "category"}
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         result = await db.roadmap.update_one(
@@ -151,7 +171,7 @@ async def update_roadmap_item(item_id: str, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error updating roadmap item: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/roadmap/{item_id}")
@@ -212,6 +232,13 @@ async def update_plan_config(request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {"free", "pro", "starter"}
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         await db.plan_config.update_one(
@@ -220,9 +247,11 @@ async def update_plan_config(request: Request):
             upsert=True,
         )
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating plan config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/api-config")

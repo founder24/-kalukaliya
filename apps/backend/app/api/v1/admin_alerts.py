@@ -161,15 +161,27 @@ async def update_alert_settings(request: Request):
         from app.config import settings
 
         body = await request.json()
+
+        # Allow-list of permitted fields
+        allowed_fields = {
+            "email_enabled", "slack_enabled", "cooldown_minutes",
+            "webhook_url", "severity_threshold", "notify_on_resolve",
+        }
+        body = {k: v for k, v in body.items() if k in allowed_fields}
+        if not body:
+            raise HTTPException(status_code=400, detail="No valid fields provided")
+
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
         await db.alert_settings.update_one(
             {"_id": "main"}, {"$set": body}, upsert=True
         )
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating alert settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/alert-settings/test-delivery")
