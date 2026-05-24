@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Add comprehensive tests for the knowledge model, content pipeline, public content API, admin knowledge API, and sitemap endpoints",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create apps/backend/tests/test_knowledge_model.py: Test KnowledgeObject model creation, field defaults, slug generation, metadata fields. Test ContentBlock, ContentMetadata, GeneratedContent sub-models with various inputs.",
     "Create apps/backend/tests/test_content_api.py: Test public content endpoints - render endpoint returns HTML with correct headers, JSON endpoint returns proper structure, subject listing. Test 404 for non-existent content. Use mocking for MongoDB (mock KnowledgeObject.find_one, etc). Follow the pattern in test_admin_endpoints.py using TestClient + mocks.",
