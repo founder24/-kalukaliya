@@ -23,6 +23,14 @@ def _get_resend_client() -> httpx.AsyncClient:
     return _resend_client
 
 
+async def close_resend_client():
+    """Close the Resend HTTP client on app shutdown."""
+    global _resend_client
+    if _resend_client:
+        await _resend_client.aclose()
+        _resend_client = None
+
+
 async def send_welcome_email(email: str, name: str = None) -> bool:
     """Send welcome email to new user"""
     try:

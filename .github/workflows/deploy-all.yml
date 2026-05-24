@@ -99,6 +99,7 @@ jobs:
       - name: Fetch secrets from KeyVault
         id: keyvault
         run: |
+          set -euo pipefail
           echo "Fetching runtime secrets from Azure KeyVault..."
           MONGODB_URI=$(az keyvault secret show --vault-name syrabit-kv --name MONGODB-URI --query value -o tsv)
           JWT_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name JWT-SECRET --query value -o tsv)

@@ -245,8 +245,8 @@ async def chat(
                         "sources_count": len(result.sources),
                     }
                 )
-            except Exception:
-                pass  # PostHog failure is non-critical
+            except Exception as e:
+                logger.debug(f"PostHog capture failed: {e}")  # PostHog failure is non-critical
 
         return result
 
@@ -498,8 +498,8 @@ async def chat_stream(
                         "response_length": len(full_response),
                     }
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"PostHog capture failed: {e}")
 
         # -- Persist chat (fire-and-forget) --
         asyncio.create_task(

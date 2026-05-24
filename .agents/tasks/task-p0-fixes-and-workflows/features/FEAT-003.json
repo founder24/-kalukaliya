@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address review findings: KeyVault set -euo pipefail, Resend client close on shutdown, Turnstile over-match fix, PostHog debug logging",
+  "status": "in_progress",
+  "steps": [
+    "STEP 1 - Add set -euo pipefail to the Fetch secrets from KeyVault step in deploy-all.yml",
+    "STEP 2 - Add close_resend_client() to resend_client.py and wire it into main.py lifespan shutdown",
+    "STEP 3 - Narrow Turnstile check in edge index.ts to exclude /api/v1/chat/feedback",
+    "STEP 4 - Replace bare except Exception: pass with logger.debug in chat.py PostHog captures"
+  ],
+  "acceptance_criteria": [
+    "deploy-all.yml KeyVault step has set -euo pipefail at the beginning of the run block",
+    "resend_client.py exports close_resend_client() and main.py calls it on shutdown",
+    "Edge worker Turnstile check only matches /api/v1/chat/ and /api/v1/chat/stream POST, not /api/v1/chat/feedback",
+    "PostHog capture exceptions are logged at debug level instead of silently swallowed"
+  ],
+  "verification": [
+    "Run: python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-all.yml'))\"",
+    "Run: ruff check apps/backend/app/",
+    "Run: pnpm --filter syrabit-edge exec tsc --noEmit"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

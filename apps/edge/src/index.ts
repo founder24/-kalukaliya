@@ -52,7 +52,8 @@ export default {
         url.pathname.startsWith('/api/v1/auth/forgot-password');
 
       const requiresTurnstile = isAuthEndpoint ||
-        (url.pathname.startsWith('/api/v1/chat') && request.method === 'POST');
+        ((url.pathname === '/api/v1/chat/' || url.pathname === '/api/v1/chat' ||
+          url.pathname === '/api/v1/chat/stream') && request.method === 'POST');
 
       if (requiresTurnstile && !turnstileToken) {
         return jsonResponse(403, { error: 'Bot verification required' });
