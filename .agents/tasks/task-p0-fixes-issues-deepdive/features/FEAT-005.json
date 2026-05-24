@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Layer 3 (Advanced) deep-dive fixes: Multi-turn chat context, token management, deployment automation, and advanced security hardening.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "CHAT-C2: Implement multi-turn conversation context in apps/backend/app/api/v1/chat.py. In both streaming and non-streaming endpoints, after getting the session_id, load the last N messages from MongoDB (e.g., last 5 turns). Include them in the LLM prompt between the system prompt and the current user message. Use a format like 'Previous conversation:\\nUser: ...\\nAssistant: ...' Add a token budget of ~2000 chars for history.",
     "CHAT-C3: Implement token/context window management. Create a new utility module apps/backend/app/core/token_budget.py with a function estimate_tokens(text: str) -> int that uses character-based estimation (1 token ~ 4 chars for English, ~2 chars for Assamese). Add a function truncate_to_budget(chunks: list[dict], max_tokens: int) -> list[dict] that truncates context chunks to fit. Use this in chat.py when building system_prompt.",
@@ -33,5 +33,5 @@
     "Verify .github/workflows/deploy-all.yml YAML is valid: python -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-all.yml')); print('YAML valid')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 10 acceptance criteria implemented. Tests pass (23 passed, 14 pre-existing errors from missing AZURE_SEARCH_QUERY_KEY in test env - confirmed pre-existing). AST parse and YAML validation both pass."
 }
