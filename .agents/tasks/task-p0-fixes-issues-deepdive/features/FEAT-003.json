@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Layer 1 (Basic) deep-dive fixes: Security fundamentals, remaining config issues, and basic correctness fixes for P1 warnings that are simple to implement.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "SEC-W1: In apps/backend/app/core/security.py, fix the is_safe_url() function to use async DNS resolution. Replace socket.getaddrinfo() with asyncio-compatible resolution. Since the function is called synchronously, wrap it in run_in_executor or change the function signature to async and update callers.",
     "SEC-W3: In apps/edge/src/middleware/cors.ts, fix the hardcoded origin. Make the corsHeaders export accept an origin parameter or remove the hardcoded export entirely, using env.ALLOWED_ORIGIN dynamically wherever cors headers are needed.",
@@ -30,5 +30,5 @@
     "Run: APP_ENV=test JWT_SECRET=test_secret_that_is_at_least_32_characters_long pytest apps/backend/tests/ -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 9 security/correctness fixes implemented successfully. 5 pre-existing test failures confirmed (test_login_invalid_credentials fails due to Beanie CollectionWasNotInitialized, 4 webhook tests fail with 404 due to router prefix double-nesting /api/webhooks/webhooks/razorpay). These are not caused by FEAT-003 changes. The pre-existing bot.ts TypeScript error (TS18046) in edge worker is also unrelated to our cors.ts changes."
 }
