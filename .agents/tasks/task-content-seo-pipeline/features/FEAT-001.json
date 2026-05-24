@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Replace apps/backend/app/api/v1/admin_content.py with the complete content management system: Layer 1 (hierarchy CRUD for boards/classes/streams/subjects/chapters), Layer 2 (topic management + bilingual content editing), Layer 3 (AI generation with Vertex + Sarvam + publish to Azure Search). This single file implements ~30 endpoints that the AdminContentEditor.jsx frontend already calls.",
+  "status": "in_progress",
+  "steps": [
+    "Replace apps/backend/app/api/v1/admin_content.py entirely. Keep the existing router = APIRouter(tags=['Admin Content']) pattern.",
+    "Implement auto_slug(text) helper: re.sub(r'[^a-z0-9]+', text.lower()).strip('-')",
+    "Implement chunk_text(text, max_tokens=512) helper for Azure Search indexing",
+    "LAYER 1 - Hierarchy CRUD endpoints: POST /content/boards, GET /content/boards, PATCH /content/boards/{id}, DELETE /content/boards/{id}, POST /content/classes, GET /content/classes (with optional board_id param), PATCH /content/classes/{id}, DELETE /content/classes/{id}, POST /content/streams, GET /content/streams (with optional class_id param), DELETE /content/streams/{id}, POST /content/subjects, GET /content/subjects (with optional stream_id param), PATCH /content/subjects/{id}, DELETE /content/subjects/{id}",
+    "LAYER 1 - Chapter CRUD: POST /content/chapters, GET /content/chapters/{subject_id} (list by subject), GET /content/chapters/{id} (single), PATCH /content/chapters/{id}, DELETE /content/chapters/{id}",
+    "LAYER 2 - Topic management: POST /content/chapters/{id}/topics (add topics array to chapter), GET /content/chapters/{id}/topics, PATCH /content/topics/{id}, DELETE /content/topics/{id}",
+    "LAYER 2 - Bilingual content editing: PUT /content/chapters/{id}/content/en, PUT /content/chapters/{id}/content/as, GET /content/chapters/{id}/content/{lang}",
+    "LAYER 3 - AI generation: POST /content/chapters/{id}/generate-notes - build prompt from topics, call vertex_client.generate for English, call sarvam_client.generate for Assamese translation, extract meta_description, update chapter with content_en/content_as/word_count/has_assamese/generated_at/status",
+    "LAYER 3 - Publishing: POST /content/chapters/{id}/publish - chunk content, push to Azure Search REST API, mark as published. POST /content/chapters/{id}/publish/search-index - index to Azure Search only.",
+    "Additional supporting endpoints from AdminContentEditor.jsx: POST /content/bulk-status (batch status update), GET /content/subject/{id}/chapter-cards (card stats), GET /content/chapters/{id}/stats, POST /content/chapters/{id}/translate, POST /content/chapters/{id}/attach-file, POST /content/upload-image, POST /content/subject/{id}/format-notes, GET /content/chapters/{id}/coverage, POST /content/regenerate-sitemap",
+    "All endpoints must: use _validate_admin_session(request), use _csrf_check(request) on mutations, use ObjectId from bson, include created_at/updated_at timestamps, return the created/updated document, wrap AI calls in try/except with graceful error messages"
+  ],
+  "acceptance_criteria": [
+    "python -m py_compile apps/backend/app/api/v1/admin_content.py succeeds without errors",
+    "All 30+ endpoints from the frontend's AdminContentEditor.jsx API calls are implemented",
+    "Every POST/PUT/PATCH/DELETE endpoint calls both _validate_admin_session and _csrf_check",
+    "AI generation endpoint calls vertex_client.generate for English and sarvam_client.generate for Assamese",
+    "Publish endpoint chunks text and builds Azure Search documents with correct schema fields (id, title, content, language, tier_access, source_url, last_updated)",
+    "All MongoDB operations use get_mongo_client()[settings.MONGODB_DB_NAME] pattern",
+    "auto_slug function generates URL-safe slugs from titles"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m py_compile app/api/v1/admin_content.py",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1.admin_content import router; print(f'Routes: {len(router.routes)}')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
