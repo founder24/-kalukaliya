@@ -120,7 +120,11 @@ def create_reset_token(user_id: str) -> str:
     """Create a password-reset JWT token (1 hour expiry)"""
     expire = datetime.now(timezone.utc) + timedelta(hours=1)
     to_encode = {"sub": user_id, "exp": expire, "type": "reset"}
-    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(
+        to_encode,
+        settings.RESET_TOKEN_SECRET or settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
 
 
 # ─── Auth Dependencies ───────────────────────────────────────────────────────
@@ -213,7 +217,7 @@ async def get_current_user_optional(
 async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
     """
     IP-based rate limiting using Upstash Redis.
-    Raises HTTP 429 if limit exceeded. Silently skips if Redis unavailable.
+    Raises HTTP 429 if limit exceeded. Raises HTTP 503 if Redis unavailable (fail-closed).
     """
     try:
         from app.db.redis import get_redis
@@ -234,8 +238,11 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
             )
     except HTTPException:
         raise  # Re-raise 429
-    except Exception:
-        pass  # Redis unavailable - skip rate limiting gracefully
+    except Exception as e:
+        # Fail-closed: if Redis is unavailable, reject the request rather than
+        # allowing unlimited unauthenticated attempts.
+        logger.warning(f"Rate limiting unavailable ({endpoint}): {e}")
+        raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
@@ -337,7 +344,9 @@ async def reset_password(request: ResetPasswordRequest):
     """
     try:
         payload = jwt.decode(
-            request.token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+            request.token,
+            settings.RESET_TOKEN_SECRET or settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
         )
         token_type = payload.get("type")
         user_id = payload.get("sub")
