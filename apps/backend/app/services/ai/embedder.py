@@ -1,3 +1,5 @@
+import hashlib
+import json as json_module
 import httpx
 import logging
 
@@ -36,6 +38,17 @@ async def generate_embedding(text: str) -> list[float]:
     if not settings.AZURE_OPENAI_ENDPOINT:
         raise RuntimeError("AZURE_OPENAI_ENDPOINT not configured - cannot generate embeddings")
 
+    # Check cache first
+    cache_key = f"embed_cache:{hashlib.sha256(text.encode()).hexdigest()}"
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json_module.loads(cached)
+    except Exception:
+        pass  # Cache miss or Redis unavailable - proceed with API call
+
     try:
         # Use Azure OpenAI embedding endpoint
         # Note: This requires Azure OpenAI service configured
@@ -62,7 +75,17 @@ async def generate_embedding(text: str) -> list[float]:
         response.raise_for_status()
         data = response.json()
         
-        return data["data"][0]["embedding"]
+        embedding = data["data"][0]["embedding"]
+
+        # Store in cache
+        try:
+            from app.db.redis import get_redis
+            redis = get_redis()
+            await redis.set(cache_key, json_module.dumps(embedding), ex=86400)  # 24h TTL
+        except Exception:
+            pass  # Cache write failure is non-critical
+
+        return embedding
             
     except RuntimeError:
         raise

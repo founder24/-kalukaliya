@@ -5,6 +5,7 @@ import logging
 from typing import AsyncGenerator
 
 from app.config import settings
+from app.core.circuit_breaker import sarvam_circuit_breaker, CircuitBreakerError, CircuitState
 
 logger = logging.getLogger(__name__)
 
@@ -33,31 +34,36 @@ class SarvamAIClient:
     ) -> str:
         """Generate response using Sarvam OpenHathi"""
         try:
-            response = await self._client.post(
-                f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 1024,
-                    "stream": stream
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Extract response text
-            if 'choices' in data and len(data['choices']) > 0:
-                return data['choices'][0]['message']['content']
-            return "মই কোনো উত্তৰ সৃষ্টি কৰিব পৰা নাইলো। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।"
+            async def _do_generate():
+                response = await self._client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message}
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 1024,
+                        "stream": stream
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
                 
+                # Extract response text
+                if 'choices' in data and len(data['choices']) > 0:
+                    return data['choices'][0]['message']['content']
+                return "\u09ae\u0987 \u0995\u09cb\u09a8\u09cb \u0989\u09a4\u09cd\u09a4\u09f0 \u09b8\u09c3\u09b7\u09cd\u099f\u09bf \u0995\u09f0\u09bf\u09ac \u09aa\u09f0\u09be \u09a8\u09be\u0987\u09b2\u09cb\u0964 \u0985\u09a8\u09c1\u0997\u09cd\u09f0\u09b9 \u0995\u09f0\u09bf \u09aa\u09c1\u09a8\u09f0 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09f0\u0995\u0964"
+
+            result = await sarvam_circuit_breaker.call(_do_generate)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Sarvam AI unavailable: {e}")
         except httpx.HTTPStatusError as e:
             logger.error(f"Sarvam API HTTP error: {e.response.status_code}")
             raise RuntimeError(f"Sarvam API error: {e.response.status_code}")
@@ -79,6 +85,9 @@ class SarvamAIClient:
 
         Yields text content deltas as they arrive.
         """
+        if sarvam_circuit_breaker.state == CircuitState.OPEN:
+            raise RuntimeError("Sarvam AI unavailable (circuit open)")
+
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -103,7 +112,7 @@ class SarvamAIClient:
                         continue
                     raw = line[6:].strip()
                     if raw == "[DONE]":
-                        return
+                        break
                     if not raw:
                         continue
                     try:
@@ -119,10 +128,12 @@ class SarvamAIClient:
                     content = delta.get("content", "")
                     if content:
                         yield content
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Sarvam stream HTTP error: {e.response.status_code}")
-            raise RuntimeError(f"Sarvam stream failed: HTTP {e.response.status_code}")
+            sarvam_circuit_breaker._on_success()
         except Exception as e:
+            sarvam_circuit_breaker._on_failure()
+            if isinstance(e, httpx.HTTPStatusError):
+                logger.error(f"Sarvam stream HTTP error: {e.response.status_code}")
+                raise RuntimeError(f"Sarvam stream failed: HTTP {e.response.status_code}")
             logger.error(f"Sarvam stream error: {str(e)}")
             raise RuntimeError(f"Sarvam stream failed: {e}")
 
@@ -145,7 +156,7 @@ class SarvamAIClient:
             try:
                 async for chunk in self.stream_generate(system_prompt, user_message):
                     yield chunk
-                return  # Success — exit after full stream
+                return  # Success - exit after full stream
             except RuntimeError as e:
                 last_error = e
                 if attempt < max_retries:

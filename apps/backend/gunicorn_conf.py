@@ -1,7 +1,7 @@
-import multiprocessing
+import os
 
 bind = "0.0.0.0:8000"
-workers = multiprocessing.cpu_count() * 2 + 1
+workers = int(os.environ.get("WEB_CONCURRENCY", 2))
 worker_class = "uvicorn.workers.UvicornWorker"
 threads = 2
 timeout = 30

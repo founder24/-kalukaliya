@@ -5,6 +5,7 @@ import logging
 from typing import AsyncGenerator
 
 from app.config import settings
+from app.core.circuit_breaker import vertex_circuit_breaker, CircuitBreakerError, CircuitState
 
 logger = logging.getLogger(__name__)
 
@@ -34,33 +35,38 @@ class VertexAIClient:
     ) -> str:
         """Generate response using Gemini"""
         try:
-            # Build prompt
-            full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-            
-            response = await self._client.post(
-                f"{self.base_url}/{self.model}:generateContent",
-                headers={
-                    "Authorization": f"Bearer {await self._get_access_token()}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "contents": [{
-                        "parts": [{"text": full_prompt}]
-                    }],
-                    "generationConfig": {
-                        "temperature": 0.7,
-                        "maxOutputTokens": 1024,
-                    }
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Extract response text
-            if 'candidates' in data and len(data['candidates']) > 0:
-                return data['candidates'][0]['content']['parts'][0]['text']
-            return "I couldn't generate a response. Please try again."
+            async def _do_generate():
+                # Build prompt
+                full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
                 
+                response = await self._client.post(
+                    f"{self.base_url}/{self.model}:generateContent",
+                    headers={
+                        "Authorization": f"Bearer {await self._get_access_token()}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "contents": [{
+                            "parts": [{"text": full_prompt}]
+                        }],
+                        "generationConfig": {
+                            "temperature": 0.7,
+                            "maxOutputTokens": 1024,
+                        }
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract response text
+                if 'candidates' in data and len(data['candidates']) > 0:
+                    return data['candidates'][0]['content']['parts'][0]['text']
+                return "I couldn't generate a response. Please try again."
+
+            result = await vertex_circuit_breaker.call(_do_generate)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Vertex AI unavailable: {e}")
         except Exception as e:
             logger.error(f"Vertex AI error: {str(e)}")
             raise RuntimeError(f"Vertex AI service failed: {e}")
@@ -93,6 +99,9 @@ class VertexAIClient:
         Yields text chunks as they arrive via SSE.
         Uses ?alt=sse to get Server-Sent Events format from Vertex AI.
         """
+        if vertex_circuit_breaker.state == CircuitState.OPEN:
+            raise RuntimeError("Vertex AI unavailable (circuit open)")
+
         full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
 
         url = f"{self.base_url}/{self.model}:streamGenerateContent?alt=sse"
@@ -132,10 +141,12 @@ class VertexAIClient:
                         text = part.get("text", "")
                         if text:
                             yield text
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
-            raise RuntimeError(f"Vertex AI stream failed: HTTP {e.response.status_code}")
+            vertex_circuit_breaker._on_success()
         except Exception as e:
+            vertex_circuit_breaker._on_failure()
+            if isinstance(e, httpx.HTTPStatusError):
+                logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
+                raise RuntimeError(f"Vertex AI stream failed: HTTP {e.response.status_code}")
             logger.error(f"Vertex AI stream error: {str(e)}")
             raise RuntimeError(f"Vertex AI stream failed: {e}")
 

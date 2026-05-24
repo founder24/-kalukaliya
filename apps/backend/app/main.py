@@ -67,8 +67,10 @@ async def lifespan(app: FastAPI):
     from app.services.ai.vertex_client import vertex_client
     from app.services.ai.sarvam_client import sarvam_client
     from app.services.ai.embedder import close_http_client
+    from app.services.payment.razorpay_client import razorpay_client
     await vertex_client.close()
     await sarvam_client.close()
+    await razorpay_client.close()
     await close_http_client()
     await close_mongo()
     await close_redis()
