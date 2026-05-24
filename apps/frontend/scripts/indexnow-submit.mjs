@@ -34,6 +34,14 @@ async function main() {
   }
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  const subjectsWritten = manifest?.counts?.subjects_written ?? 0;
+  const chaptersWritten = manifest?.counts?.chapters_written ?? 0;
+  console.log(`[indexnow-submit] Manifest: ${subjectsWritten} subjects, ${chaptersWritten} chapters prerendered`);
+
+  if (subjectsWritten + chaptersWritten === 0) {
+    console.log('[indexnow-submit] No subjects or chapters were prerendered, skipping submission');
+    return;
+  }
 
   // Collect all prerendered URLs by walking the dist directory for index.html files
   const urls = [];
@@ -66,7 +74,10 @@ async function main() {
     try {
       const resp = await fetch(`${BACKEND_URL}/api/v1/indexnow/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-IndexNow-Secret': process.env.INDEXNOW_API_KEY,
+        },
         body: JSON.stringify({ urls: batch }),
       });
 

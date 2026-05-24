@@ -3,6 +3,8 @@ Tests for IndexNow API endpoints.
 Uses isolated FastAPI app with just the IndexNow router to avoid credential issues.
 """
 
+import os
+from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -21,6 +23,31 @@ def test_submit_returns_503_when_key_not_configured():
     )
     assert response.status_code == 503
     assert "INDEXNOW_API_KEY" in response.json()["detail"]
+
+
+def test_submit_returns_403_when_secret_header_missing():
+    """POST /api/v1/indexnow/submit returns 403 when X-IndexNow-Secret is missing."""
+    with patch("app.api.v1.indexnow.settings") as mock_settings:
+        mock_settings.INDEXNOW_API_KEY = "test-key-123"
+        response = client.post(
+            "/api/v1/indexnow/submit",
+            json={"urls": ["https://syrabit.ai/home"]},
+        )
+    assert response.status_code == 403
+    assert "Forbidden" in response.json()["detail"]
+
+
+def test_submit_returns_403_when_secret_header_wrong():
+    """POST /api/v1/indexnow/submit returns 403 when X-IndexNow-Secret is incorrect."""
+    with patch("app.api.v1.indexnow.settings") as mock_settings:
+        mock_settings.INDEXNOW_API_KEY = "test-key-123"
+        response = client.post(
+            "/api/v1/indexnow/submit",
+            json={"urls": ["https://syrabit.ai/home"]},
+            headers={"X-IndexNow-Secret": "wrong-key"},
+        )
+    assert response.status_code == 403
+    assert "Forbidden" in response.json()["detail"]
 
 
 def test_submit_returns_400_when_urls_empty():

@@ -1,6 +1,6 @@
 """IndexNow API integration for instant URL submission to Bing/Yandex."""
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from typing import List
 import httpx
@@ -26,12 +26,20 @@ class IndexNowSubmitResponse(BaseModel):
 
 
 @router.post("/submit", response_model=IndexNowSubmitResponse)
-async def submit_urls(body: IndexNowSubmitRequest):
+async def submit_urls(body: IndexNowSubmitRequest, request: Request):
     """Submit URLs to IndexNow for instant indexing by Bing, Yandex, etc."""
     if not settings.INDEXNOW_API_KEY:
         raise HTTPException(
             status_code=503,
             detail="IndexNow not configured: INDEXNOW_API_KEY is not set",
+        )
+
+    # Authenticate: only callers with the correct secret can submit URLs
+    secret = request.headers.get("X-IndexNow-Secret", "")
+    if secret != settings.INDEXNOW_API_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: invalid or missing X-IndexNow-Secret header",
         )
 
     if not body.urls:

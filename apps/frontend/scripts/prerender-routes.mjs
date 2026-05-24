@@ -280,7 +280,7 @@ function injectCourseJsonLd(html, { subjectName, boardName, className, canonical
     },
     "url": canonical,
     "educationalLevel": `${className} ${boardName}`.trim(),
-    "numberOfCredits": chaptersCount,
+    "courseWorkload": `${chaptersCount} chapters of study material`,
     "hasCourseInstance": {
       "@type": "CourseInstance",
       "courseMode": "online",

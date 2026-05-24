@@ -237,7 +237,6 @@ jobs:
           command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
 
       - name: Submit URLs to IndexNow
-        if: ${{ secrets.INDEXNOW_API_KEY != '' }}
         run: node apps/frontend/scripts/indexnow-submit.mjs
         env:
           INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
