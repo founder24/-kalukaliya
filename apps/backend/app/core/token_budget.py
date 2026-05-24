@@ -45,7 +45,9 @@ def truncate_chunks_to_budget(
                 # Truncate content to fit
                 available_chars = remaining_budget * 4  # Rough reverse estimation
                 truncated_chunk = chunk.copy()
-                truncated_chunk[content_key] = chunk.get(content_key, "")[:available_chars] + "..."
+                truncated_chunk[content_key] = (
+                    chunk.get(content_key, "")[:available_chars] + "..."
+                )
                 result.append(truncated_chunk)
             break
 

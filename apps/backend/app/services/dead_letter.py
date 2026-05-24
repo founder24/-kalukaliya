@@ -1,4 +1,5 @@
 """Dead Letter Storage: Persists failed chat attempts for later analysis."""
+
 import logging
 from datetime import datetime, timezone
 

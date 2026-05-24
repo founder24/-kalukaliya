@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     """
     Application Configuration
-    
+
     All fields are Optional so the backend can START even with missing env vars.
     Features that require specific vars will fail at call-time with clear errors,
     rather than crashing the entire container on startup.
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra='ignore',
+        extra="ignore",
     )
 
     # --- P1: Cloudflare (Edge) — not used by backend at runtime ---
@@ -103,17 +103,17 @@ class Settings(BaseSettings):
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def empty_strings_to_none(cls, values):
         """Convert empty strings to None so Optional fields work correctly."""
         if isinstance(values, dict):
             for key, val in values.items():
-                if val == '':
+                if val == "":
                     values[key] = None
         return values
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_production_secrets(self):
         """Validate critical secrets are properly configured in production."""
         KNOWN_PLACEHOLDER_SECRETS = {
@@ -138,16 +138,23 @@ class Settings(BaseSettings):
             if not self.AZURE_SEARCH_ENDPOINT:
                 logger.warning("AZURE_SEARCH_ENDPOINT is not set in production")
             # Warn about missing service credentials
-            if not self.VERTEX_PROJECT_ID or not self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            if (
+                not self.VERTEX_PROJECT_ID
+                or not self.GOOGLE_APPLICATION_CREDENTIALS_JSON
+            ):
                 logger.warning("Vertex AI credentials not configured in production")
             if not self.SARVAM_API_KEY:
                 logger.warning("Sarvam AI API key not configured in production")
             if not self.RAZORPAY_KEY_ID or not self.RAZORPAY_KEY_SECRET:
-                logger.warning("Razorpay payment credentials not configured in production")
+                logger.warning(
+                    "Razorpay payment credentials not configured in production"
+                )
             if not self.RESEND_API_KEY:
                 logger.warning("Resend email API key not configured in production")
             if not self.SENTRY_DSN:
-                logger.warning("Sentry DSN not configured in production - error tracking disabled")
+                logger.warning(
+                    "Sentry DSN not configured in production - error tracking disabled"
+                )
         return self
 
     @property
@@ -155,8 +162,7 @@ class Settings(BaseSettings):
         origins = [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
         if self.APP_ENV == "production":
             origins = [
-                o for o in origins
-                if "localhost" not in o and "127.0.0.1" not in o
+                o for o in origins if "localhost" not in o and "127.0.0.1" not in o
             ]
         return origins
 

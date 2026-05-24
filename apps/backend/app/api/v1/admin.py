@@ -4,6 +4,7 @@ Validates the httponly syrabit_admin_session cookie for admin panel access.
 CSRF Protection: Admin cookies MUST use SameSite=Strict.
 Origin validation is enforced on all mutating (non-GET) requests.
 """
+
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,7 +27,9 @@ async def _csrf_check(request: Request):
         origin = request.headers.get("origin") or request.headers.get("referer", "")
         allowed = settings.allowed_origins_list
         if not any(origin.startswith(o) for o in allowed):
-            raise HTTPException(status_code=403, detail="CSRF validation failed: origin not allowed")
+            raise HTTPException(
+                status_code=403, detail="CSRF validation failed: origin not allowed"
+            )
 
 
 def _validate_admin_session(request: Request) -> dict:
@@ -35,7 +38,9 @@ def _validate_admin_session(request: Request) -> dict:
     if not session_cookie:
         raise HTTPException(status_code=401, detail="No admin session")
     try:
-        payload = jwt.decode(session_cookie, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            session_cookie, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
         if payload.get("type") != "admin" or payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return payload
@@ -76,7 +81,7 @@ async def admin_login(request: Request):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Check admin role
-    if user.role != 'admin':
+    if user.role != "admin":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     # Mint admin JWT (8-hour session)
@@ -87,9 +92,13 @@ async def admin_login(request: Request):
         "role": "admin",
         "exp": expire,
     }
-    admin_token = jwt.encode(token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    admin_token = jwt.encode(
+        token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
 
-    response = JSONResponse({"status": "ok", "name": user.name or "", "user_id": str(user.id)})
+    response = JSONResponse(
+        {"status": "ok", "name": user.name or "", "user_id": str(user.id)}
+    )
     response.set_cookie(
         key="syrabit_admin_session",
         value=admin_token,

@@ -16,11 +16,11 @@ _client: AsyncIOMotorClient | None = None
 async def init_mongo() -> None:
     """Initialize MongoDB connection pool with Beanie ODM"""
     global _client
-    
+
     if not settings.MONGODB_URI:
         logger.warning("MONGODB_URI not set — MongoDB disabled")
         return
-    
+
     try:
         _client = AsyncIOMotorClient(
             settings.MONGODB_URI,
@@ -30,16 +30,16 @@ async def init_mongo() -> None:
             connectTimeoutMS=10000,
             socketTimeoutMS=45000,
         )
-        
+
         # Initialize Beanie with document models
         await init_beanie(
             database=_client[settings.MONGODB_DB_NAME],
             document_models=[User, Chat, ChatFeedback],
         )
-        
+
         # Create indexes
         await create_indexes()
-        
+
         logger.info("MongoDB connection initialized successfully")
     except ConnectionFailure as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
@@ -49,25 +49,33 @@ async def init_mongo() -> None:
 async def create_indexes() -> None:
     """Create necessary database indexes"""
     db = _client[settings.MONGODB_DB_NAME] if _client else None
-    
+
     if not db:
         return
-    
+
     # Users collection indexes
     await db.users.create_index([("email", ASCENDING)], unique=True)
-    await db.users.create_index([("subscription.razorpay_subscription_id", ASCENDING)], sparse=True)
+    await db.users.create_index(
+        [("subscription.razorpay_subscription_id", ASCENDING)], sparse=True
+    )
     await db.users.create_index([("profile.preferences.language", ASCENDING)])
     await db.users.create_index([("created_at", DESCENDING)])
-    
+
     # Chats collection indexes
     await db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
     await db.chats.create_index([("session_id", ASCENDING)])
     await db.chats.create_index([("updated_at", DESCENDING)])
 
     # Dead letters collection indexes
-    await db.dead_letters.create_index([("timestamp", DESCENDING)], expireAfterSeconds=30*24*60*60)  # 30 day TTL
-    await db.dead_letters.create_index([("user_id", ASCENDING), ("timestamp", DESCENDING)])
-    await db.dead_letters.create_index([("status", ASCENDING), ("timestamp", DESCENDING)])
+    await db.dead_letters.create_index(
+        [("timestamp", DESCENDING)], expireAfterSeconds=30 * 24 * 60 * 60
+    )  # 30 day TTL
+    await db.dead_letters.create_index(
+        [("user_id", ASCENDING), ("timestamp", DESCENDING)]
+    )
+    await db.dead_letters.create_index(
+        [("status", ASCENDING), ("timestamp", DESCENDING)]
+    )
 
     logger.info("MongoDB indexes created/verified")
 
