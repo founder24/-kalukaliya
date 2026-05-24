@@ -163,4 +163,4 @@ async def get_knowledge(request: Request, slug: str):
     if not ko:
         raise HTTPException(status_code=404, detail="Knowledge object not found")
 
-    return ko.dict(by_alias=True)
+    return ko.model_dump(by_alias=True)

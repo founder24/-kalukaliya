@@ -103,4 +103,4 @@ async def get_content_json(slug: str):
     if not ko:
         raise HTTPException(status_code=404, detail="Content not found")
 
-    return ko.dict(by_alias=True)
+    return ko.model_dump(by_alias=True)
