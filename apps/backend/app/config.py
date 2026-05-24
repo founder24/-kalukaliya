@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     CLOUDFLARE_KV_NAMESPACE_ID: str = ""
     INDEXNOW_KEY: str = ""
 
+    # --- Cron/CI Translation ---
+    TRANSLATE_CRON_SECRET: str = ""
+
     # --- Observability ---
     SENTRY_DSN: Optional[str] = None
     SENTRY_ENVIRONMENT: str = "production"

@@ -356,3 +356,16 @@ class TestAdminTranslateEndpoints:
                 headers={"origin": "http://test"},
             )
             assert response.status_code == 409
+
+    async def test_cron_translate_unauthorized(self, client):
+        """Test cron endpoint rejects missing token."""
+        response = await client.post("/api/v1/admin/content/translate/cron")
+        assert response.status_code == 401
+
+    async def test_cron_translate_invalid_token(self, client):
+        """Test cron endpoint rejects wrong token."""
+        response = await client.post(
+            "/api/v1/admin/content/translate/cron",
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        assert response.status_code == 403

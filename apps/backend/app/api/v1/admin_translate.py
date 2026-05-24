@@ -14,6 +14,44 @@ router = APIRouter(tags=["Admin Translation"])
 translator = ContentTranslator()
 
 
+@router.post("/content/translate/cron")
+async def cron_translate(request: Request):
+    """Cron/CI-triggered translation. Auth via Bearer token (TRANSLATE_CRON_SECRET)."""
+    from app.config import settings
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+
+    token = auth_header[7:]
+    expected = settings.TRANSLATE_CRON_SECRET
+    if not expected or token != expected:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    body = await request.json() if await request.body() else {}
+
+    # Initialize status on app state
+    request.app.state.translation_status = {
+        "running": True,
+        "total": 0,
+        "completed": 0,
+        "failed": 0,
+        "current_slug": "",
+        "errors": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Run synchronously (not background task) since this is a CI job
+    result = await translator.bulk_translate(
+        request.app.state,
+        board=body.get("board"),
+        subject=body.get("subject"),
+        limit=body.get("limit", 100),
+        skip_existing=True,
+    )
+    return result
+
+
 @router.post("/content/translate/bulk")
 async def bulk_translate(request: Request, background_tasks: BackgroundTasks):
     """Trigger bulk translation. Body: {board?, subject?, limit?, skip_existing?}"""
