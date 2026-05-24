@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # --- Application Logic ---
     APP_ENV: str = "production"
     DEBUG: bool = False
-    JWT_SECRET: str = "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"
+    JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
@@ -120,10 +120,6 @@ class Settings(BaseSettings):
     def validate_production_secrets(self):
         """Validate critical secrets are properly configured in production."""
         if self.APP_ENV == "production":
-            if self.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
-                raise ValueError(
-                    "JWT_SECRET must be changed from the default value in production"
-                )
             if len(self.JWT_SECRET) < 32:
                 raise ValueError(
                     "JWT_SECRET must be at least 32 characters long in production"

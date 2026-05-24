@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Layer 2 - Security: Remove JWT_SECRET default value (force explicit configuration), fix KeyVault access policies to use Azure RBAC",
+  "status": "in_progress",
+  "steps": [
+    "In apps/backend/app/config.py: Change JWT_SECRET from having a default value of 'CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG' to having NO default (make it a required field). Change the line to: JWT_SECRET: str (no default). This forces ALL environments to explicitly set JWT_SECRET - no more insecure fallback for staging/dev. Also update the validate_production_secrets validator: keep the length check but remove the check for the specific default string since there's no default anymore.",
+    "In infra/azure/shared-resources.bicep: Replace the empty accessPolicies array with Azure RBAC authorization. Add 'enableRbacAuthorization: true' to the KeyVault properties and remove the 'accessPolicies: []' line. This allows Azure role assignments (like 'Key Vault Secrets User') to control access instead of the legacy access policy model."
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/config.py no longer has a default value for JWT_SECRET",
+    "The validate_production_secrets method no longer checks for the old default string",
+    "infra/azure/shared-resources.bicep KeyVault has enableRbacAuthorization: true",
+    "infra/azure/shared-resources.bicep KeyVault no longer has accessPolicies: []",
+    "Python config file parses without syntax errors"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/config.py').read()); print('OK')\"",
+    "Run: grep -n 'CHANGE_ME' apps/backend/app/config.py && echo 'FAIL' || echo 'OK: no default JWT secret'",
+    "Run: grep 'enableRbacAuthorization' infra/azure/shared-resources.bicep && echo 'OK'",
+    "Run: grep 'accessPolicies' infra/azure/shared-resources.bicep && echo 'FAIL: accessPolicies still present' || echo 'OK'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

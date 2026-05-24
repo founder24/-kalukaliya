@@ -18,7 +18,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   location: location
   properties: {
     tenantId: tenant().tenantId
-    accessPolicies: []
+    enableRbacAuthorization: true
     sku: {
       family: 'A'
       name: 'standard'
