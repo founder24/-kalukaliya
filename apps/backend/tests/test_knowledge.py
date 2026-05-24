@@ -8,7 +8,6 @@ Tests for the canonical knowledge architecture:
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from httpx import AsyncClient, ASGITransport
 
 
 @pytest.fixture

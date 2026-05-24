@@ -4,7 +4,7 @@ Queries KnowledgeObject collection for dynamic sitemap generation.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter
 from fastapi.responses import Response
@@ -130,17 +130,19 @@ async def sitemap_chapters():
     """Generate chapters sitemap from published knowledge objects with deduplication."""
     try:
         # Fetch published objects with only the fields we need
-        objects = await KnowledgeObject.find(
-            {"status": "published"}
-        ).project(
-            {
-                "metadata.board": 1,
-                "metadata.class_level": 1,
-                "metadata.subject": 1,
-                "metadata.chapter": 1,
-                "updated_at": 1,
-            }
-        ).to_list()
+        objects = (
+            await KnowledgeObject.find({"status": "published"})
+            .project(
+                {
+                    "metadata.board": 1,
+                    "metadata.class_level": 1,
+                    "metadata.subject": 1,
+                    "metadata.chapter": 1,
+                    "updated_at": 1,
+                }
+            )
+            .to_list()
+        )
 
         seen = set()
         urls = []
