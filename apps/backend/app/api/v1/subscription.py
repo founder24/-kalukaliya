@@ -25,9 +25,13 @@ async def get_subscription_status(user: User = Depends(get_current_user)):
     return SubscriptionStatus(
         tier=user.subscription_tier,
         status=user.subscription_status,
-        current_period_end=user.current_period_end.isoformat() if user.current_period_end else "",
+        current_period_end=user.current_period_end.isoformat()
+        if user.current_period_end
+        else "",
         monthly_message_count=user.monthly_message_count,
-        monthly_limit=settings.RATE_LIMIT_PRO_TIER if user.is_pro() else settings.RATE_LIMIT_FREE_TIER,
+        monthly_limit=settings.RATE_LIMIT_PRO_TIER
+        if user.is_pro()
+        else settings.RATE_LIMIT_FREE_TIER,
     )
 
 

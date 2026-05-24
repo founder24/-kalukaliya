@@ -17,10 +17,10 @@ def _get_token_provider():
     global _azure_credential, _token_provider
     if _token_provider is None:
         from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+
         _azure_credential = DefaultAzureCredential()
         _token_provider = get_bearer_token_provider(
-            _azure_credential,
-            "https://cognitiveservices.azure.com/.default"
+            _azure_credential, "https://cognitiveservices.azure.com/.default"
         )
     return _token_provider
 
@@ -42,20 +42,23 @@ async def close_http_client():
 async def generate_embedding(text: str) -> list[float]:
     """
     Generate embedding using Azure OpenAI text-embedding-3-large
-    
+
     Args:
         text: Input text to embed
-        
+
     Returns:
         List of 1536 floats representing the embedding vector
     """
     if not settings.AZURE_OPENAI_ENDPOINT:
-        raise RuntimeError("AZURE_OPENAI_ENDPOINT not configured - cannot generate embeddings")
+        raise RuntimeError(
+            "AZURE_OPENAI_ENDPOINT not configured - cannot generate embeddings"
+        )
 
     # Check cache first
     cache_key = f"embed_cache:{hashlib.sha256(text.encode()).hexdigest()}"
     try:
         from app.db.redis import get_redis
+
         redis = get_redis()
         cached = await redis.get(cache_key)
         if cached:
@@ -66,35 +69,38 @@ async def generate_embedding(text: str) -> list[float]:
     try:
         # Use Azure OpenAI embedding endpoint with cached credential
         token_provider = _get_token_provider()
-        
+
         client = get_http_client()
         response = await client.post(
             f"{settings.AZURE_OPENAI_ENDPOINT}/openai/deployments/{settings.AZURE_EMBEDDING_MODEL}/embeddings?api-version=2024-02-15-preview",
             headers={
                 "Authorization": f"Bearer {token_provider()}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             },
             json={
                 "input": text,
                 "model": settings.AZURE_EMBEDDING_MODEL,
-                "dimensions": settings.AZURE_EMBEDDING_DIMENSIONS
-            }
+                "dimensions": settings.AZURE_EMBEDDING_DIMENSIONS,
+            },
         )
         response.raise_for_status()
         data = response.json()
-        
+
         embedding = data["data"][0]["embedding"]
 
         # Store in cache
         try:
             from app.db.redis import get_redis
+
             redis = get_redis()
-            await redis.set(cache_key, json_module.dumps(embedding), ex=86400)  # 24h TTL
+            await redis.set(
+                cache_key, json_module.dumps(embedding), ex=86400
+            )  # 24h TTL
         except Exception:
             pass  # Cache write failure is non-critical
 
         return embedding
-            
+
     except RuntimeError:
         raise
     except Exception as e:

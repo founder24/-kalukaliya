@@ -49,7 +49,9 @@ def init_telemetry(app) -> None:
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
         from opentelemetry.sdk.resources import Resource, SERVICE_NAME
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -65,11 +67,13 @@ def init_telemetry(app) -> None:
 
     try:
         # Build resource with service metadata
-        resource = Resource.create({
-            SERVICE_NAME: "syrabit-backend",
-            "deployment.environment": settings.APP_ENV,
-            "service.version": "3.0.0",
-        })
+        resource = Resource.create(
+            {
+                SERVICE_NAME: "syrabit-backend",
+                "deployment.environment": settings.APP_ENV,
+                "service.version": "3.0.0",
+            }
+        )
 
         # Create tracer provider with OTLP exporter
         provider = TracerProvider(resource=resource)
@@ -86,6 +90,7 @@ def init_telemetry(app) -> None:
         # Try to instrument pymongo if available
         try:
             from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
+
             PymongoInstrumentor().instrument()
         except ImportError:
             pass  # Optional — pymongo instrumentation not installed
@@ -115,6 +120,7 @@ def get_tracer():
 
     try:
         from opentelemetry import trace
+
         _tracer = trace.get_tracer("syrabit.backend", "3.0.0")
     except ImportError:
         # Return a no-op tracer
