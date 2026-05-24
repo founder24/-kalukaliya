@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create apps/backend/app/api/v1/admin_seo_pipeline.py implementing the SEO/GEO/AEO pipeline endpoints (Layer 4). This extends the existing admin_seo.py (which only has placeholder endpoints) with the actual pipeline logic the useSeoManager.jsx hook calls. Also create apps/backend/app/api/v1/content_public.py for public-facing content endpoints used by PageMeta.jsx and TopicAnswerCard.jsx.",
+  "status": "in_progress",
+  "steps": [
+    "Create apps/backend/app/api/v1/admin_seo_pipeline.py with router = APIRouter(tags=['Admin SEO Pipeline'])",
+    "SEO Pipeline endpoints (all under /seo/ prefix since frontend calls /api/v1/seo/...): POST /seo/extract-topics (extract topics from chapters using AI, with optional subject_id and force params), POST /seo/generate (generate SEO pages from topic_ids and page_types), GET /seo/stats (topic count, page count, published count, coverage %), GET /seo/topics (list all SEO topics with optional filters), POST /seo/topics (create SEO topic), DELETE /seo/topics/{id}, GET /seo/pages (list SEO pages with optional filters), PATCH /seo/pages/{id}/status (update page status)",
+    "Pipeline management endpoints: POST /seo/auto-run (full pipeline: extract + generate + publish), GET /seo/jobs/{id} (job status polling), POST /seo/pilot (pilot run with board/class/subject params), GET /seo/subject-coverage (per-subject topic/page counts), POST /seo/run-subject (run pipeline for single subject), POST /seo/bulk-publish (publish all draft SEO pages), GET /seo/insights (coverage gaps, suggestions)",
+    "Quality and review endpoints: GET /seo/review-queue (pages needing review), POST /seo/review-queue/bulk-action (approve/reject multiple), GET /seo/diagnose-topics (find blocked/incomplete topics), POST /seo/backfill-notes (generate notes for topics missing them), POST /seo/refresh-meta (refresh meta descriptions), GET /seo/auto-publish/schedule (auto-publish config and history)",
+    "Create apps/backend/app/api/v1/content_public.py with router = APIRouter(tags=['Content Public'])",
+    "Public endpoints (no admin auth required): GET /content/chapters/{id}/faq-jsonld (return FAQ schema.org JSON-LD from chapter.faq_entries), GET /content/chapters/{id}/published-topics (return topics with definition_status='published'), GET /content/subjects/{id}/topic-index (return subject topic hierarchy for pillar pages)",
+    "Use background tasks (asyncio.create_task) for long-running pipeline jobs, store job status in MongoDB 'seo_jobs' collection with fields: _id, status (queued/running/done/error), total, done, errors, skipped, current (description), kind, created_at, updated_at",
+    "All admin endpoints use _validate_admin_session and _csrf_check. Public endpoints have no auth check.",
+    "SEO page generation should use vertex_client.generate with appropriate prompts for different page_types (notes, important-questions, mcqs, summary, revision)"
+  ],
+  "acceptance_criteria": [
+    "python -m py_compile apps/backend/app/api/v1/admin_seo_pipeline.py succeeds",
+    "python -m py_compile apps/backend/app/api/v1/content_public.py succeeds",
+    "admin_seo_pipeline.py implements all endpoints called by useSeoManager.jsx and api.jsx SEO functions",
+    "content_public.py implements faq-jsonld, published-topics, and topic-index public endpoints",
+    "Pipeline jobs use background tasks and store progress in MongoDB seo_jobs collection",
+    "All admin endpoints validate session; public endpoints do not require auth"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m py_compile app/api/v1/admin_seo_pipeline.py",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m py_compile app/api/v1/content_public.py",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1.admin_seo_pipeline import router; print(f'SEO Routes: {len(router.routes)}')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
