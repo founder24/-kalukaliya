@@ -43,6 +43,13 @@ export default {
       });
     }
 
+    // ── 1d. IndexNow key verification file ──
+    if (/^\/[a-f0-9]{32}\.txt$/.test(url.pathname) && request.method === 'GET') {
+      const keyUrl = `${env.AZURE_BACKEND_URL}/api/v1/indexnow/key`;
+      const resp = await fetch(keyUrl);
+      return new Response(resp.body, { status: resp.status, headers: { 'Content-Type': 'text/plain' } });
+    }
+
     // ── 2. JWT Verification (all /api/ routes except public) ──
     if (url.pathname.startsWith('/api/')) {
       const jwtResult = await verifyJWT(request, env.JWT_SECRET);
