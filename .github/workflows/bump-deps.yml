@@ -1,0 +1,44 @@
+name: Bump Safe Dependencies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Enable Corepack
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Bump Python deps
+        working-directory: apps/backend
+        run: |
+          pip install pip-tools
+          sed -i 's/fastapi==0.136.1/fastapi==0.136.3/' requirements.txt
+          sed -i 's/pyjwt==2.12.1/pyjwt==2.13.0/' requirements.txt
+          sed -i 's/pytest-cov==6.3.0/pytest-cov==7.1.0/' requirements.txt
+
+      - name: Bump Node deps
+        run: |
+          pnpm --filter @workspace/syrabit add -D postcss@8.5.15
+          pnpm install --no-frozen-lockfile
+
+      - name: Commit and push
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add -A
+          git diff --cached --quiet || git commit -m "chore: bump safe dependencies (postcss, fastapi, pyjwt, pytest-cov)"
+          git push
