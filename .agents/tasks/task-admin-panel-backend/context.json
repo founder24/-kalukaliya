@@ -1,0 +1,29 @@
+{
+  "project_type": "Python FastAPI backend with React frontend, Cloudflare Edge, MongoDB Atlas, Upstash Redis",
+  "language": "Python 3.11",
+  "build_system": "pip with requirements.in -> requirements.txt (pip-compile), Docker for deployment",
+  "test_framework": "pytest with pytest-asyncio, httpx AsyncClient via ASGITransport in tests/conftest.py",
+  "build_command": "cd apps/backend && pip install -r requirements.in && python -c 'from app.main import app; print(\"OK\")'",
+  "test_command": "cd apps/backend && python -m pytest tests/ -x --timeout=30",
+  "verification_instructions": "1. Run pytest to confirm no import errors or test regressions. 2. Validate all new router modules can be imported. 3. Check that main.py registers all new routers without error.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd apps/backend && pip install -r requirements.in (or use Docker: docker build -t syrabit-backend .)",
+  "environment_constraints": "OPEN_INTERNET mode - can install packages and pull images. No live MongoDB/Redis available in sandbox so tests must mock DB calls. The conftest.py uses ASGITransport with the real FastAPI app object.",
+  "contribution_requirements": "Do NOT modify the content generation workflow (RAG pipeline, chat endpoint, embedder, search service). Only create admin endpoints to VIEW and MANAGE content metadata.",
+  "key_patterns": "FastAPI routers in app/api/v1/. Models use Beanie ODM (Document subclasses). Auth via _validate_admin_session(request) reading httpOnly cookie. CSRF check via _csrf_check(request) on mutating endpoints. Settings via app.config.settings singleton. Redis via app.db.redis.get_redis(). MongoDB client via app.db.mongo.get_mongo_client(). Each router file exports a `router = APIRouter()`. Registration in main.py via app.include_router().",
+  "relevant_files": [
+    "apps/backend/app/main.py",
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/api/v1/health.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/models/user.py",
+    "apps/backend/app/models/chat.py",
+    "apps/backend/app/models/feedback.py",
+    "apps/backend/app/db/mongo.py",
+    "apps/backend/app/db/redis.py",
+    "apps/backend/app/services/payment/razorpay_client.py",
+    "apps/backend/tests/conftest.py",
+    "apps/frontend/src/utils/api.jsx"
+  ],
+  "directory_structure": "apps/backend/app/api/v1/ - API routers. apps/backend/app/models/ - Beanie ODM models (User, Chat, ChatFeedback). apps/backend/app/db/ - Database connections (mongo.py, redis.py). apps/backend/app/services/ - AI, search, payment, comms services. apps/backend/app/config.py - Pydantic Settings. apps/backend/tests/ - pytest tests with conftest.py fixtures."
+}

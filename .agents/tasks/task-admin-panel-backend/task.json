@@ -1,0 +1,7 @@
+{
+  "task_id": "task-admin-panel-backend",
+  "task_description": "Create 50+ backend admin endpoints across 15 router modules to make the fully-built React admin panel functional. The frontend has 100+ components that call admin API endpoints which currently return 404. Create router files for dashboard, content, users, conversations, SEO, analytics, settings, notifications, AI config, revenue, security, alerts, logs, Syra assistant, and pipeline management.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}
