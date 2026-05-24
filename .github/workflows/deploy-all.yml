@@ -34,7 +34,9 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Install Python dependencies
-        run: pip install -r apps/backend/requirements.txt
+        run: |
+          pip install -r apps/backend/requirements.txt
+          pip install pytest pytest-asyncio
 
       - name: Lint Edge
         run: pnpm --filter syrabit-edge exec tsc --noEmit
