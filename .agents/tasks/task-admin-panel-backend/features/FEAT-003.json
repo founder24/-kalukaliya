@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Address review findings: unbounded chat loads, unvalidated $set payloads, N+1 user lookups, duplicate route, credits counter floor, and admin role escalation audit logging.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Replace Chat.find_all().to_list() in admin_dashboard.py and admin_analytics.py with MongoDB aggregation pipelines that sum message array lengths server-side.",
     "Step 2: Add field allow-lists to settings, alerts, notifications, content, and syra endpoints that use raw $set.",
@@ -25,5 +25,5 @@
     "Run: cd apps/backend && python -m pytest tests/test_admin_endpoints.py -v"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 6 review issues fixed. Route count dropped from 187 to 186 (duplicate route removed). All 15 existing tests pass. The aggregation pipeline approach uses $ifNull to safely handle chats without messages arrays."
 }
