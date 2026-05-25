@@ -18,7 +18,7 @@ jobs:
     name: Check Production Endpoints
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Make uptime script executable
         run: chmod +x scripts/uptime-check.sh

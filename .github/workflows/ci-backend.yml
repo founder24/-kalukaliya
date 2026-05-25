@@ -13,9 +13,9 @@ jobs:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -48,9 +48,9 @@ jobs:
         ports:
           - 27017:27017
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -67,4 +67,4 @@ jobs:
           MONGODB_URI: mongodb://test:test@localhost:27017
           APP_ENV: test
           JWT_SECRET: test-secret-at-least-32-characters-long
-        run: pytest --tb=short -q --cov=apps/backend/app --cov-report=term-missing --cov-fail-under=40
+        run: pytest --tb=short -q --cov=app --cov-report=term-missing --cov-fail-under=40

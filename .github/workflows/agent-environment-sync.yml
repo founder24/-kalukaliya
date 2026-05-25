@@ -22,7 +22,7 @@ jobs:
     name: Validate Environment Variables
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Run environment sync check
         id: sync_check
