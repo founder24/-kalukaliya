@@ -261,7 +261,9 @@ def create_app() -> FastAPI:
         tags=["Admin Translation"],
     )
 
-    # Legacy health probe redirects for backward compatibility
+    # Legacy health probe redirects for backward compatibility.
+    # The canonical health endpoint is /health (registered via health.router).
+    # These /api/health redirects exist for older monitoring tools and load balancers.
     @app.get("/api/health")
     async def legacy_health_redirect():
         return RedirectResponse(url="/health", status_code=301)

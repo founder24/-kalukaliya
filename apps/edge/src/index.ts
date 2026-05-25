@@ -44,6 +44,8 @@ export default {
     }
 
     // ── 3. Turnstile Bot Protection (chat/auth endpoints) ──
+    // SEC: Turnstile verification is MANDATORY (not optional) for auth and chat POST.
+    // Requests without a valid token are rejected with 403.
     if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/auth')) {
       const turnstileToken = request.headers.get('x-turnstile-token') || request.headers.get('CF-Turnstile-Response');
 
