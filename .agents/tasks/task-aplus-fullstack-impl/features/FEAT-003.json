@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Layer 3 - Medium fixes: Redis caching for Azure Search, payment integration tests, edge worker tests, AuthContext refactor, chat.py refactor, prompt injection logging",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/services/search/azure_search.py, add a Redis cache layer to search_context(). Before calling Azure Search: compute a cache key as SHA-256 of (query + user_tier), attempt to get from Redis (key pattern: 'search_cache:{hash}'). On cache hit, return the cached result (JSON deserialized). On cache miss, proceed with Azure Search, then store result in Redis with 5-minute TTL. Wrap all Redis operations in try/except for graceful degradation. Import get_redis from app.db.redis and hashlib, json.",
     "Create apps/backend/tests/test_payment_lifecycle.py with mocked tests for Razorpay webhook events. Follow the pattern in tests/test_webhook.py and conftest.py. Tests should cover: (a) subscription.created -> user upgraded to pro, (b) subscription.charged -> monthly renewal resets message count, (c) payment.failed -> user sees grace period warning (log-based assertion), (d) subscription.cancelled -> user marked cancel_at_period_end, (e) duplicate event handling returns {status: 'duplicate'}. Mock Redis and User.find_one as needed. Use the sign_payload helper from test_webhook.py.",
@@ -32,5 +32,5 @@
     "grep '_log_injection_attempt' apps/backend/app/core/security.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Edge tests all pass (20/20 including new rate-limit, cors, bot tests). Backend payment lifecycle tests pass with RAZORPAY_WEBHOOK_SECRET env var set. chat.py reduced from ~570 to ~513 lines (rate limit function and PostHog blocks extracted). Python 3.11.15 via pyenv required for running tests. pnpm install --no-frozen-lockfile needed due to typescript version mismatch in lockfile."
 }
