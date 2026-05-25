@@ -21,9 +21,13 @@ jobs:
     name: Configuration Drift Detection
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Run four-cloud delegation drift check
         id: cloud-drift

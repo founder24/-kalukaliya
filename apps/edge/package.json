@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run --env production",
+    "build": "tsc --noEmit",
     "deploy": "wrangler deploy --prod",
     "test": "vitest"
   },

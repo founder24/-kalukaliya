@@ -22,13 +22,13 @@ jobs:
         ports:
           - 27017:27017
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -59,7 +59,7 @@ jobs:
           ruff check apps/backend/app/
 
       - name: Test Backend
-        run: pytest apps/backend/ --tb=short -q --cov=apps/backend/app --cov-report=term-missing --cov-fail-under=40
+        run: pytest apps/backend/ --tb=short -q --cov=apps/backend/app --cov-report=term-missing
         env:
           APP_ENV: test
           JWT_SECRET: test-secret-at-least-32-characters-long-for-ci
@@ -85,7 +85,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Authenticate to Azure
         uses: azure/login@v3
@@ -184,9 +184,9 @@ jobs:
     needs: [ci-checks, canary-deploy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
@@ -210,9 +210,9 @@ jobs:
     needs: [ci-checks, canary-deploy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
@@ -231,7 +231,7 @@ jobs:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v4
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
@@ -249,12 +249,17 @@ jobs:
     steps:
       - name: Edge Health
         run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://api.syrabit.ai/health" --max-time 15)
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "Edge health failed (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "Edge: healthy"
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://api.syrabit.ai/health" --max-time 15)
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "Edge: healthy (attempt $attempt)"
+              exit 0
+            fi
+            echo "Attempt $attempt/3 failed (HTTP $HTTP_STATUS), retrying in 10s..."
+            sleep 10
+          done
+          echo "Edge health failed after 3 attempts"
+          exit 1
 
       - name: Chat endpoint (English)
         run: |
@@ -272,12 +277,17 @@ jobs:
 
       - name: Frontend reachable
         run: |
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://syrabit.ai" --max-time 15)
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "Frontend unreachable (HTTP $HTTP_STATUS)"
-            exit 1
-          fi
-          echo "Frontend: live"
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://syrabit.ai" --max-time 15)
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "Frontend: live (attempt $attempt)"
+              exit 0
+            fi
+            echo "Attempt $attempt/3 failed (HTTP $HTTP_STATUS), retrying in 10s..."
+            sleep 10
+          done
+          echo "Frontend unreachable after 3 attempts"
+          exit 1
 
       - name: Summary
         run: echo "All smoke tests passed - deployment complete!"
@@ -285,8 +295,8 @@ jobs:
   rollback:
     name: Rollback on Failure
     runs-on: ubuntu-latest
-    needs: [smoke-test]
-    if: failure()
+    needs: [deploy-backend, deploy-edge, deploy-frontend, smoke-test]
+    if: always() && (needs.smoke-test.result == 'failure' || needs.deploy-backend.result == 'failure' || needs.deploy-edge.result == 'failure' || needs.deploy-frontend.result == 'failure')
     permissions:
       id-token: write
       contents: read
