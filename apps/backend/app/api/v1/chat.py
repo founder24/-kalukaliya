@@ -79,7 +79,7 @@ async def chat(
     user_id = str(user.id) if user else "anonymous"
 
     # Check rate limit
-    allowed, current_count, limit = await check_rate_limit(
+    allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip
     )
     if not allowed:
@@ -296,7 +296,7 @@ async def chat_stream(
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
     user_id = str(user.id) if user else "anonymous"
 
-    allowed, current_count, limit = await check_rate_limit(
+    allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip
     )
     if not allowed:

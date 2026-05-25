@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Callable, Awaitable, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ async def apply_migration(
         })
         logger.info(f"Migration {version} applied successfully")
         return True
+    except DuplicateKeyError:
+        logger.info(f"Migration {version} was applied by another instance, skipping")
+        return False
     except Exception as e:
         logger.error(f"Migration {version} failed: {e}")
         raise

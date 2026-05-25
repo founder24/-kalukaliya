@@ -16,8 +16,8 @@ BURST_LIMIT_PRO = 30
 
 async def check_rate_limit(
     user_id: str, user_tier: str, client_ip: str = None
-) -> tuple[bool, int, int]:
-    """Check if user has exceeded rate limit. Returns (allowed, current_count, limit)."""
+) -> tuple[bool, int, int, str]:
+    """Check if user has exceeded rate limit. Returns (allowed, current_count, limit, limit_type)."""
     limit = (
         settings.RATE_LIMIT_PRO_TIER
         if user_tier == "pro"
@@ -28,7 +28,7 @@ async def check_rate_limit(
         redis = get_redis()
     except RuntimeError:
         logger.warning("Redis unavailable - rate limiting disabled")
-        return True, 0, limit
+        return True, 0, limit, "monthly"
 
     try:
         # Monthly quota check
@@ -46,7 +46,7 @@ async def check_rate_limit(
             await redis.expire(key, ttl)
 
         if current_count > limit:
-            return False, current_count, limit
+            return False, current_count, limit, "monthly"
 
         # Burst rate limit (per-minute)
         burst_limit = BURST_LIMIT_PRO if user_tier == "pro" else BURST_LIMIT_FREE
@@ -56,9 +56,9 @@ async def check_rate_limit(
         if burst_count == 1:
             await redis.expire(burst_key, 60)
         if burst_count > burst_limit:
-            return False, burst_count, burst_limit
+            return False, burst_count, burst_limit, "burst"
 
-        return current_count <= limit, current_count, limit
+        return current_count <= limit, current_count, limit, "monthly"
     except Exception as e:
         logger.warning(f"Rate limit check failed: {e} - allowing request")
-        return True, 0, limit
+        return True, 0, limit, "monthly"
