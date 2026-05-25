@@ -6,6 +6,7 @@ aiohttp
 azure-identity
 azure-keyvault-secrets
 azure-search-documents
+bcrypt
 beanie
 fastapi
 google-auth
@@ -14,7 +15,6 @@ gunicorn
 httpx
 jinja2
 markdown
-passlib
 posthog
 pydantic
 pydantic-settings

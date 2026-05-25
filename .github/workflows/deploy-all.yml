@@ -106,6 +106,9 @@ jobs:
           UPSTASH_REDIS_URL=$(az keyvault secret show --vault-name syrabit-kv --name upstash-redis-url --query value -o tsv)
           echo "::add-mask::$UPSTASH_REDIS_URL"
           echo "UPSTASH_REDIS_URL=$UPSTASH_REDIS_URL" >> "$GITHUB_ENV"
+          UPSTASH_REDIS_TOKEN=$(az keyvault secret show --vault-name syrabit-kv --name upstash-redis-token --query value -o tsv)
+          echo "::add-mask::$UPSTASH_REDIS_TOKEN"
+          echo "UPSTASH_REDIS_TOKEN=$UPSTASH_REDIS_TOKEN" >> "$GITHUB_ENV"
           AZURE_SEARCH_KEY=$(az keyvault secret show --vault-name syrabit-kv --name azure-search-key --query value -o tsv)
           echo "::add-mask::$AZURE_SEARCH_KEY"
           echo "AZURE_SEARCH_KEY=$AZURE_SEARCH_KEY" >> "$GITHUB_ENV"
@@ -155,10 +158,11 @@ jobs:
             --set-env-vars \
               "JWT_SECRET=${{ env.JWT_SECRET }}" \
               "MONGODB_URI=${{ env.MONGODB_URI }}" \
-              "UPSTASH_REDIS_URL=${{ env.UPSTASH_REDIS_URL }}" \
-              "AZURE_SEARCH_KEY=${{ env.AZURE_SEARCH_KEY }}" \
+              "UPSTASH_REDIS_REST_URL=${{ env.UPSTASH_REDIS_URL }}" \
+              "UPSTASH_REDIS_REST_TOKEN=${{ env.UPSTASH_REDIS_TOKEN }}" \
+              "AZURE_SEARCH_QUERY_KEY=${{ env.AZURE_SEARCH_KEY }}" \
               "AZURE_SEARCH_ENDPOINT=${{ env.AZURE_SEARCH_ENDPOINT }}" \
-              "VERTEX_AI_KEY=${{ env.VERTEX_AI_KEY }}" \
+              "GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ env.VERTEX_AI_KEY }}" \
               "SARVAM_API_KEY=${{ env.SARVAM_API_KEY }}" \
               "RAZORPAY_KEY_ID=${{ env.RAZORPAY_KEY_ID }}" \
               "RAZORPAY_KEY_SECRET=${{ env.RAZORPAY_KEY_SECRET }}" \
@@ -204,11 +208,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: "Guard: check for KV placeholder IDs"
+      - name: "Guard: check for KV sentinel IDs"
         run: |
-          if grep -qi 'placeholder' apps/edge/wrangler.toml; then
-            echo "ERROR: wrangler.toml still contains placeholder KV namespace IDs."
-            echo "You MUST replace ISR_CACHE_KV placeholder IDs before deploying."
+          if grep -v '^\s*#' apps/edge/wrangler.toml | grep -qi 'REPLACE_ME'; then
+            echo "ERROR: wrangler.toml still contains sentinel KV namespace IDs."
+            echo "You MUST replace ISR_CACHE_KV REPLACE_ME IDs before deploying."
             echo "Run: npx wrangler kv:namespace create ISR_CACHE_KV"
             exit 1
           fi

@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Remove stray Python __init__.py files from the TypeScript edge worker directories and remove passlib from requirements",
+  "status": "completed",
+  "steps": [
+    "1. Delete apps/edge/src/middleware/__init__.py - this is a Python file that does not belong in a TypeScript project",
+    "2. Delete apps/edge/src/routes/__init__.py - same reason",
+    "3. Delete apps/edge/src/utils/__init__.py - same reason (if it exists)",
+    "4. Verify edge TypeScript still compiles: pnpm --filter syrabit-edge exec tsc --noEmit"
+  ],
+  "acceptance_criteria": [
+    "No __init__.py files exist under apps/edge/",
+    "Edge worker TypeScript compilation succeeds"
+  ],
+  "verification": [
+    "find apps/edge -name '__init__.py' (should return nothing)",
+    "pnpm --filter syrabit-edge exec tsc --noEmit (should pass)"
+  ],
+  "blocked_reason": null,
+  "findings": "All three __init__.py files existed and were empty (0 bytes). Removal had no impact on TypeScript compilation."
+}

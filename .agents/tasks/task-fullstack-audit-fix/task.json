@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fullstack-audit-fix",
+  "task_description": "Fix critical broken dependencies, deploy pipeline env var mismatches, and dead code that prevent the application from starting in production. Addresses: missing bcrypt dep causing ImportError on app startup, deploy-all.yml passing wrong env var names so Redis/Search never connect, ISR_CACHE_KV placeholder blocking all edge deploys, and stray Python files in TypeScript project.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}
