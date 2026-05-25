@@ -19,6 +19,10 @@ from app.utils.posthog import get_posthog
 
 logger = logging.getLogger(__name__)
 
+# Burst rate limits (per minute)
+BURST_LIMIT_FREE = 5
+BURST_LIMIT_PRO = 30
+
 router = APIRouter(tags=["Chat"])
 
 
@@ -88,7 +92,20 @@ async def check_rate_limit(
             ttl = int(expire_at.timestamp() - time.time())
             await redis.expire(key, ttl)
 
-        return current_count <= limit, current_count, limit
+        if current_count > limit:
+            return False, current_count, limit
+
+        # Burst rate limit (per-minute)
+        burst_limit = BURST_LIMIT_PRO if user_tier == "pro" else BURST_LIMIT_FREE
+        minute_key = int(time.time() // 60)
+        burst_key = f"burst:{user_id}:{minute_key}"
+        burst_count = await redis.incr(burst_key)
+        if burst_count == 1:
+            await redis.expire(burst_key, 60)
+        if burst_count > burst_limit:
+            return False, burst_count, burst_limit
+
+        return True, current_count, limit
     except Exception as e:
         logger.warning(f"Rate limit check failed: {e} - allowing request")
         return True, 0, limit

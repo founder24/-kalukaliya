@@ -286,9 +286,12 @@ class ChatService:
             # Aggregate across all Chat documents for this session_id
             chats = (
                 await Chat.find({"session_id": session_id})
-                .sort("+created_at")
+                .sort("-created_at")
+                .limit(5)
                 .to_list()
             )
+            # Reverse to chronological order for prompt building
+            chats.reverse()
             if not chats:
                 return ""
 

@@ -107,6 +107,14 @@ jobs:
               },
             });
 
+      - name: Alert via webhook
+        if: steps.uptime.outputs.exit_code != '0'
+        continue-on-error: true
+        run: |
+          curl -sf -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"ALERT: Syrabit production endpoints are DOWN\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"status\": \"down\"}"
+
       - name: Handle recovery
         if: steps.uptime.outputs.exit_code == '0'
         uses: actions/github-script@v7

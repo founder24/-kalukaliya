@@ -141,6 +141,11 @@ jobs:
             --file apps/backend/Dockerfile \
             apps/backend/
 
+      - name: Trivy vulnerability scan
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy image --severity CRITICAL --exit-code 1 --no-progress syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+
       - name: Deploy to Container Apps
         run: |
           az containerapp update \
