@@ -30,7 +30,7 @@ jobs:
         run: docker build -t syrabit-backend:scan apps/backend/
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a4 # v0.29.0
         with:
           image-ref: 'syrabit-backend:scan'
           format: 'table'
@@ -40,7 +40,7 @@ jobs:
 
       - name: Run Trivy (SARIF output)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a4 # v0.29.0
         with:
           image-ref: 'syrabit-backend:scan'
           format: 'sarif'
