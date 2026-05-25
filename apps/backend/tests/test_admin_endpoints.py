@@ -6,7 +6,7 @@ Validates auth guards (401 without cookie) and response shapes.
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 from datetime import datetime, timezone, timedelta
 
 from app.config import settings

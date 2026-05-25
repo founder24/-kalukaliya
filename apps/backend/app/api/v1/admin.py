@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from jose import jwt, JWTError
+import jwt
+from jwt.exceptions import InvalidTokenError
 import logging
 
 from app.config import settings
@@ -46,7 +47,7 @@ def _validate_admin_session(request: Request) -> dict:
         if payload.get("type") != "admin" or payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return payload
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
 

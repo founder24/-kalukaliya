@@ -39,7 +39,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Node dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Install Python dependencies
         run: |
@@ -197,7 +197,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
@@ -223,7 +223,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm --filter @workspace/syrabit run build
