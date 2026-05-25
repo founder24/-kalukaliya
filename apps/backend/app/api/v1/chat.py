@@ -511,3 +511,18 @@ async def get_chat_messages(
             "has_more": skip + limit < len(chat.messages),
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# LEGACY ALIASES
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/conversations", include_in_schema=False)
+async def conversations_alias(
+    skip: int = 0,
+    limit: int = 20,
+    user: User = Depends(get_current_user),
+):
+    """Alias for /history - supports frontend legacy route."""
+    return await get_chat_history(skip=skip, limit=limit, user=user)
