@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-004",
+  "type": "fix",
+  "description": "Fix P0 performance and infrastructure issues: HTTP connection pooling for embedding client (#105), embedding endpoint URL configuration (#143), Razorpay webhook idempotency (#159), and Resend async email client (#161).",
+  "status": "pending",
+  "steps": [
+    "Issue #105 - Embedding Client Creates New HTTP Connection Per Request: The embedder.py currently just returns sanitized text (Azure Search handles vectorization internally). The cloudflare_client.py already uses a singleton httpx.AsyncClient with connection pooling (max_connections=20, max_keepalive_connections=10). The sarvam_client.py should also use a pooled singleton. Check apps/backend/app/services/ai/sarvam_client.py for connection pooling. Fix if missing.",
+    "Issue #143 - Embedding Endpoint URL: The embedder.py returns plain text for Azure Search's VectorizableTextQuery to handle internally. There is no direct embedding API call to OpenAI. If the issue refers to a search service URL misconfiguration, check apps/backend/app/services/search/azure_search.py - it uses settings.AZURE_SEARCH_ENDPOINT which is correct. Mark as already addressed.",
+    "Issue #159 - Razorpay Webhook Idempotency: The razorpay.py webhook handler ALREADY implements idempotency via Redis (checks webhook_processed:{event_id} before processing, sets it after). This is ALREADY FIXED. Verify the implementation handles Redis unavailability correctly (it raises 503).",
+    "Issue #161 - Resend Email Client Uses Synchronous API: The resend_client.py ALREADY uses httpx.AsyncClient (async) for sending emails via the Resend REST API. It uses a singleton client with _get_client() and proper cleanup via close_resend_client(). This is ALREADY FIXED.",
+    "Check apps/backend/app/services/ai/sarvam_client.py for proper httpx.AsyncClient singleton usage with connection pooling. If it creates a new client per request, fix it to use a singleton pattern like cloudflare_client.py."
+  ],
+  "acceptance_criteria": [
+    "sarvam_client.py uses a singleton httpx.AsyncClient with connection pooling",
+    "All HTTP clients in the services directory use pooled connections (no per-request client creation)",
+    "Backend tests still pass after changes"
+  ],
+  "verification": [
+    "grep -n 'AsyncClient' apps/backend/app/services/ai/sarvam_client.py shows a module-level or class-level client (not created inside a function)",
+    "Run: APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long pytest apps/backend/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
