@@ -79,30 +79,39 @@ async def check_rate_limit(
     user_id: str, user_tier: str, client_ip: str = None
 ) -> tuple[bool, int, int]:
     """Check if user has exceeded rate limit. Returns (allowed, current_count, limit)."""
-    redis = get_redis()
-
     limit = (
         settings.RATE_LIMIT_PRO_TIER
         if user_tier == "pro"
         else settings.RATE_LIMIT_FREE_TIER
     )
 
-    # Use IP-based tracking for anonymous users to prevent quota collision
-    month_key = time.strftime("%Y-%m", time.gmtime())
-    if user_id == "anonymous" and client_ip:
-        key = f"rate_anon:{client_ip}:{month_key}"
-    else:
-        key = f"rate:{user_id}:{month_key}"
+    try:
+        redis = get_redis()
+    except RuntimeError:
+        # Redis unavailable - allow request through (graceful degradation)
+        logger.warning("Redis unavailable - rate limiting disabled")
+        return True, 0, limit
 
-    current_count = await redis.incr(key)
-    if current_count == 1:
-        # Set expiry to end of month
-        next_month = datetime.now().replace(day=28) + timedelta(days=4)
-        expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
-        ttl = int(expire_at.timestamp() - time.time())
-        await redis.expire(key, ttl)
+    try:
+        # Use IP-based tracking for anonymous users to prevent quota collision
+        month_key = time.strftime("%Y-%m", time.gmtime())
+        if user_id == "anonymous" and client_ip:
+            key = f"rate_anon:{client_ip}:{month_key}"
+        else:
+            key = f"rate:{user_id}:{month_key}"
 
-    return current_count <= limit, current_count, limit
+        current_count = await redis.incr(key)
+        if current_count == 1:
+            # Set expiry to end of month
+            next_month = datetime.now().replace(day=28) + timedelta(days=4)
+            expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
+            ttl = int(expire_at.timestamp() - time.time())
+            await redis.expire(key, ttl)
+
+        return current_count <= limit, current_count, limit
+    except Exception as e:
+        logger.warning(f"Rate limit check failed: {e} - allowing request")
+        return True, 0, limit
 
 
 @router.post("/", response_model=ChatResponse)
@@ -220,12 +229,25 @@ async def chat(
             # 5. Call LLM
             from app.services.ai.router import generate_response
 
-            response_text = await generate_response(
-                system_prompt=system_prompt,
-                user_message=sanitized_message,
-                model=target_model,
-                stream=False,
-            )
+            try:
+                response_text = await generate_response(
+                    system_prompt=system_prompt,
+                    user_message=sanitized_message,
+                    model=target_model,
+                    stream=False,
+                )
+            except (RuntimeError, Exception) as e:
+                if detected_lang == "as":
+                    logger.warning(f"Sarvam failed ({e}), falling back to Vertex AI")
+                    from app.services.ai.vertex_client import vertex_client
+
+                    target_model = settings.VERTEX_GEMINI_MODEL
+                    response_text = await vertex_client.generate(
+                        system_prompt=system_prompt,
+                        user_message=sanitized_message,
+                    )
+                else:
+                    raise
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
@@ -251,19 +273,25 @@ async def chat(
                     for c in context_chunks
                 ],
             )
-            await chat_doc.save()
+            try:
+                await chat_doc.save()
+            except Exception as e:
+                logger.error(f"Failed to save chat to MongoDB: {e}")
 
             # 7. Update usage counter
             if user:
-                await user.update(
-                    {
-                        "$inc": {
-                            "monthly_message_count": 1,
-                            "total_lifetime_messages": 1,
-                        },
-                        "$set": {"updated_at": datetime.now(timezone.utc)},
-                    }
-                )
+                try:
+                    await user.update(
+                        {
+                            "$inc": {
+                                "monthly_message_count": 1,
+                                "total_lifetime_messages": 1,
+                            },
+                            "$set": {"updated_at": datetime.now(timezone.utc)},
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update user usage counter: {e}")
 
             logger.info(
                 "chat_completed",
@@ -490,23 +518,27 @@ async def chat_stream(
 
     tracer = get_tracer()
 
-    with tracer.start_as_current_span("chat.stream.rag_retrieval") as rag_span:
-        rag_span.set_attribute("chat.lang", detected_lang)
-        rag_span.set_attribute("chat.model", target_model)
-        rag_span.set_attribute("user.tier", user_tier)
-        rag_span.set_attribute("user.id", user_id)
+    try:
+        with tracer.start_as_current_span("chat.stream.rag_retrieval") as rag_span:
+            rag_span.set_attribute("chat.lang", detected_lang)
+            rag_span.set_attribute("chat.model", target_model)
+            rag_span.set_attribute("user.tier", user_tier)
+            rag_span.set_attribute("user.id", user_id)
 
-        embedding = await generate_embedding(sanitized_message)
-        context_chunks = await search_service.search_context(
-            query=sanitized_message,
-            text=embedding,
-            user_tier=user_tier,
-            limit=settings.MAX_CONTEXT_DOCS,
-        )
-        rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
-        rag_span.set_attribute(
-            "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0
-        )
+            embedding = await generate_embedding(sanitized_message)
+            context_chunks = await search_service.search_context(
+                query=sanitized_message,
+                text=embedding,
+                user_tier=user_tier,
+                limit=settings.MAX_CONTEXT_DOCS,
+            )
+            rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
+            rag_span.set_attribute(
+                "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0
+            )
+    except Exception as e:
+        logger.error(f"RAG retrieval failed in stream: {e}")
+        context_chunks = []
 
     # Apply token budget to context chunks
     context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
