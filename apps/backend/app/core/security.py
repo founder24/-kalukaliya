@@ -3,6 +3,7 @@ Security Utilities: Input Sanitization, URL Validation, SSRF Protection
 """
 
 import re
+import unicodedata
 from urllib.parse import urlparse
 import ipaddress
 from typing import Optional
@@ -12,14 +13,20 @@ def sanitize_user_input(text: str) -> str:
     """
     Sanitize user input to prevent prompt injection and DoS attacks.
 
-    - Strips potential prompt injection markers
+    - Rejects messages containing prompt injection markers
     - Limits length to prevent buffer overflow/DoS
     - Removes control characters
     """
     if not text:
         return ""
 
-    # Strip potential prompt injection markers
+    # NFKC Unicode normalization
+    text = unicodedata.normalize("NFKC", text)
+
+    # Strip zero-width characters
+    text = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", text)
+
+    # Reject potential prompt injection markers
     injection_patterns = [
         r"Ignore previous instructions",
         r"System:",
@@ -28,10 +35,18 @@ def sanitize_user_input(text: str) -> str:
         r"BEGINNING OF CONVERSATION",
         r"<\|im_end\|>",
         r"### Instruction:",
+        r"\[INST\]",
+        r"<\|system\|>",
+        r"<\|user\|>",
+        r"<\|assistant\|>",
+        r"Human:",
+        r"Assistant:",
+        r"<<SYS>>",
     ]
 
     for pattern in injection_patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            raise ValueError("Message contains disallowed content")
 
     # Remove control characters except newlines and tabs
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
@@ -44,7 +59,7 @@ def sanitize_user_input(text: str) -> str:
     return text.strip()
 
 
-def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
+async def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
     """
     Validate URL to prevent SSRF attacks.
 
@@ -80,11 +95,14 @@ def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
             return False
 
         # Resolve hostname to IP and check if it's private
-        # Note: In production, use async DNS resolution with timeout
-        import socket
+        import asyncio
 
         try:
-            ip_addresses = socket.getaddrinfo(parsed.hostname, None)
+            loop = asyncio.get_event_loop()
+            ip_addresses = await asyncio.wait_for(
+                loop.getaddrinfo(parsed.hostname, None),
+                timeout=3.0,
+            )
             for family, socktype, proto, canonname, sockaddr in ip_addresses:
                 ip_str = sockaddr[0]
                 try:
@@ -102,7 +120,9 @@ def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
                         return False
                 except ValueError:
                     continue
-        except socket.gaierror:
+        except asyncio.TimeoutError:
+            return False
+        except OSError:
             # DNS resolution failed - treat as unsafe
             return False
 

@@ -22,7 +22,6 @@ pyjwt
 pymongo
 python-dateutil
 python-dotenv
-python-jose
 python-multipart
 razorpay
 resend
