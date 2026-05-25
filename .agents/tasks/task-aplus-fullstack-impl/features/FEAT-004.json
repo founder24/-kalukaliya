@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Layer 4 - Advanced fixes: Database migration tracking system and Playwright E2E test scaffold",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/app/db/migrations/ directory with __init__.py.",
     "Create apps/backend/app/db/migrations/runner.py: A migration runner that (a) connects to a 'schema_versions' collection in MongoDB, (b) has a function check_schema_version() that reads the current version from schema_versions, (c) has a function apply_migration(version, description, up_fn) that runs the migration function and records it, (d) has a function get_applied_migrations() that returns all applied versions. Use Motor directly (not Beanie) since this runs at startup before Beanie init.",
@@ -28,5 +28,5 @@
     "test -f apps/frontend/e2e/login.spec.ts && test -f apps/frontend/e2e/chat.spec.ts && test -f apps/frontend/e2e/navigation.spec.ts"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verification steps pass. Python AST parsing confirms runner.py, mongo.py, and v001_initial_indexes.py are valid. Migration registry imports correctly and finds 1 migration. TypeScript type-check passes for frontend (including playwright.config.ts). Backend pytest results: 114 passed, 14 failed - identical to baseline (pre-existing test failures unrelated to changes)."
 }
