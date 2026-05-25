@@ -238,7 +238,9 @@ async def chat(
                 )
             except (RuntimeError, Exception) as e:
                 if detected_lang == "as":
-                    logger.warning(f"Sarvam failed ({e}), falling back to Cloudflare AI")
+                    logger.warning(
+                        f"Sarvam failed ({e}), falling back to Cloudflare AI"
+                    )
                     from app.services.ai.cloudflare_client import cloudflare_client
 
                     target_model = settings.CF_AI_MODEL

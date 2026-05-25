@@ -21,7 +21,9 @@ class CloudflareAIClient:
         self.account_id = settings.CF_ACCOUNT_ID
         self.api_token = settings.CF_API_TOKEN
         self.model = settings.CF_AI_MODEL
-        self.base_url = f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run"
+        self.base_url = (
+            f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run"
+        )
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, connect=10.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
