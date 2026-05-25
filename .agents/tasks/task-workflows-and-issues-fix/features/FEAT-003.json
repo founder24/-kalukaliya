@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Fix P0 security and reliability issues from GitHub issues: JWT secret validation (#90), Turnstile enforcement (#91), refresh token revocation (#94), chat endpoint exception handling (#126), health check duplicate prefix (#127), streaming input sanitization (#134), and PostHog singleton (#168).",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "Issue #90 - Dangerous Default JWT Secret: The config.py already has validate_production_secrets() that rejects known placeholders in production and main.py logs a warning. However, the .env.shared still has the dangerous default. Update .env.shared to have a comment-only placeholder (no actual value) for JWT_SECRET, making it clear it MUST be set. Also ensure APP_ENV=development default makes the dev experience smooth. ALREADY FIXED in code - just needs .env.shared update.",
     "Issue #91 - Turnstile Bot Protection: The edge worker (apps/edge/src/index.ts) already enforces Turnstile as MANDATORY for auth and chat POST endpoints (lines 45-68). This issue is ALREADY FIXED. Add a brief comment in the edge worker noting that Turnstile is mandatory (not optional) per security policy.",
@@ -24,5 +24,5 @@
     "Run: APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long pytest apps/backend/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 4 changes implemented successfully. 3 pre-existing test failures confirmed (test_chat_rate_limit_returns_429, test_chat_error_does_not_leak_details, test_login_invalid_credentials) - they fail on base state due to mock mismatch in check_rate_limit (returns 3 values, code expects 4) and beanie CollectionWasNotInitialized. 31 tests pass."
 }
