@@ -1,0 +1,25 @@
+{
+  "project_type": "Full-stack monorepo: Python FastAPI backend, React (Vite) frontend, Cloudflare Worker edge proxy",
+  "language": "Python 3.11 (backend), TypeScript (edge), JavaScript/JSX (frontend)",
+  "build_system": "pnpm workspace monorepo, pip-compile for Python, Docker for backend deployment",
+  "test_framework": "pytest for backend, vitest for frontend and edge",
+  "build_command": "docker build -t syrabit-backend-test -f apps/backend/Dockerfile apps/backend/",
+  "test_command": "JWT_SECRET='test-secret-at-least-32-characters-long' APP_ENV=test python -m pytest apps/backend/ --tb=short -q (backend); pnpm --filter syrabit-edge exec tsc --noEmit (edge); pnpm --filter @workspace/syrabit exec tsc --noEmit (frontend)",
+  "verification_instructions": "1. Backend: verify Docker image starts and can import main module; 2. Edge: verify tsc --noEmit passes; 3. Frontend: verify tsc --noEmit passes; 4. CI: verify workflow YAML is valid",
+  "snapshot_or_generated_files": "requirements.txt is generated from requirements.in via pip-compile",
+  "setup_instructions": "pyenv global 3.11.15; pip install deps from requirements.txt; pnpm install --frozen-lockfile",
+  "environment_constraints": "OPEN_INTERNET - full access available. Docker available for build verification.",
+  "contribution_requirements": "No specific CONTRIBUTING.md found. Changes should maintain consistency with existing patterns.",
+  "key_patterns": "Backend uses Beanie ODM for MongoDB, Upstash REST Redis, pydantic-settings for config. Edge is Cloudflare Worker with KV/R2 bindings. Frontend uses Vite + React with @/ path aliases.",
+  "relevant_files": [
+    "apps/backend/requirements.in",
+    "apps/backend/requirements.txt",
+    "apps/backend/Dockerfile",
+    "apps/backend/app/models/user.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/main.py",
+    ".github/workflows/deploy-all.yml",
+    "apps/edge/wrangler.toml"
+  ],
+  "directory_structure": "apps/backend/ - Python FastAPI; apps/frontend/ - React SPA; apps/edge/ - Cloudflare Worker; .github/workflows/ - CI/CD; infra/ - infrastructure configs"
+}
