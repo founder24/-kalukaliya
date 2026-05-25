@@ -11,6 +11,14 @@ COPY requirements.txt .
 
 # Strip hashes from requirements.txt (consistent with CI approach) and remove
 # test/dev dependencies not needed in production (pytest, coverage, etc.).
+#
+# MAINTENANCE NOTE: The grep -v -E pattern below excludes test-only packages
+# from the production image. If you add a new test dependency to
+# requirements.txt, you MUST also add it to the exclusion pattern here.
+# Current exclusions: pytest, pytest-asyncio, pytest-cov, coverage, iniconfig, pluggy
+# Example: adding pytest-xdist would require changing the pattern to:
+#   '^(pytest|pytest-asyncio|pytest-cov|pytest-xdist|coverage|iniconfig|pluggy)=='
+# A separate requirements-prod.txt would be a cleaner long-term solution.
 RUN sed 's/ *\\$//' requirements.txt | grep -v '^\s*--hash' > requirements-nohash.txt \
     && grep -v -E '^(pytest|pytest-asyncio|pytest-cov|coverage|iniconfig|pluggy)==' requirements-nohash.txt > requirements-prod.txt \
     && pip install --no-cache-dir --user -r requirements-prod.txt \

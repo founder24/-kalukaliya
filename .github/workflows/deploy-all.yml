@@ -296,7 +296,7 @@ jobs:
     name: Rollback on Failure
     runs-on: ubuntu-latest
     needs: [deploy-backend, deploy-edge, deploy-frontend, smoke-test]
-    if: always() && (needs.smoke-test.result == 'failure' || needs.deploy-backend.result == 'failure')
+    if: always() && (needs.smoke-test.result == 'failure' || needs.deploy-backend.result == 'failure' || needs.deploy-edge.result == 'failure' || needs.deploy-frontend.result == 'failure')
     permissions:
       id-token: write
       contents: read
