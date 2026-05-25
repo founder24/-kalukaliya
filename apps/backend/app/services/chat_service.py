@@ -10,15 +10,11 @@ Responsibilities:
 - Conversation history loading with Redis caching
 """
 
-import asyncio
 import json
 import logging
-import time
-from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
 
 from app.config import settings
-from app.core.security import sanitize_user_input
 from app.core.token_budget import truncate_chunks_to_budget
 from app.db.redis import get_redis
 from app.services.ai.router import detect_language_and_route
@@ -58,9 +54,7 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def retrieve_context(
-        sanitized_message: str, user_tier: str
-    ) -> list[dict]:
+    async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
         from app.services.ai.embedder import generate_embedding
 
@@ -132,9 +126,7 @@ class ChatService:
             return response_text, target_model
         except (RuntimeError, Exception) as e:
             if detected_lang == "as":
-                logger.warning(
-                    f"Sarvam failed ({e}), falling back to Cloudflare AI"
-                )
+                logger.warning(f"Sarvam failed ({e}), falling back to Cloudflare AI")
                 from app.services.ai.cloudflare_client import cloudflare_client
 
                 actual_model = settings.CF_AI_MODEL
@@ -200,9 +192,7 @@ class ChatService:
                         full_response += chunk
                         yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:
-                    logger.error(
-                        f"Cloudflare fallback also failed: {fallback_err}"
-                    )
+                    logger.error(f"Cloudflare fallback also failed: {fallback_err}")
                     from app.services.dead_letter import store_dead_letter
 
                     await store_dead_letter(
@@ -217,7 +207,11 @@ class ChatService:
 
         # Emit the sentinel value so the router knows the model/response
         yield json.dumps(
-            {"__internal_complete": True, "full_response": full_response, "actual_model": actual_model}
+            {
+                "__internal_complete": True,
+                "full_response": full_response,
+                "actual_model": actual_model,
+            }
         )
 
     # ------------------------------------------------------------------
@@ -308,7 +302,7 @@ class ChatService:
                 return ""
 
             # Take last N turns (user + assistant pairs)
-            recent = all_messages[-(max_turns * 2):]
+            recent = all_messages[-(max_turns * 2) :]
             history_lines = []
             for msg in recent:
                 role = msg.get("role", "user")
@@ -328,9 +322,7 @@ class ChatService:
             return ""
 
     @staticmethod
-    async def _get_history_from_cache(
-        session_id: str, max_turns: int
-    ) -> Optional[str]:
+    async def _get_history_from_cache(session_id: str, max_turns: int) -> Optional[str]:
         """Attempt to retrieve conversation history from Redis cache."""
         try:
             redis = get_redis()
@@ -344,9 +336,7 @@ class ChatService:
         return None
 
     @staticmethod
-    async def _set_history_cache(
-        session_id: str, max_turns: int, history: str
-    ) -> None:
+    async def _set_history_cache(session_id: str, max_turns: int, history: str) -> None:
         """Store conversation history in Redis cache with TTL."""
         try:
             redis = get_redis()
