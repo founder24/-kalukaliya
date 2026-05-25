@@ -1,5 +1,8 @@
 import { setAuthToken } from '@/utils/api';
 
+// NOTE: Module-level state is intentional. Token changes always coincide with
+// setUser() in AuthContext, which triggers re-render. If future code stores
+// tokens without updating user state, wrap these in useState.
 let _inMemoryToken = null;
 let _inMemoryRefreshToken = null;
 

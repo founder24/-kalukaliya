@@ -75,11 +75,27 @@ class ChatService:
         try:
             from app.models.chat import Chat
 
-            chat = await Chat.find_one({"session_id": session_id})
-            if not chat or not chat.messages:
+            # Load ALL documents for this session sorted by creation time,
+            # then aggregate messages across them for full multi-turn context.
+            chat_docs = (
+                await Chat.find({"session_id": session_id})
+                .sort("+created_at")
+                .to_list()
+            )
+            if not chat_docs:
                 return ""
+
+            # Flatten messages from all documents in chronological order
+            all_messages = []
+            for doc in chat_docs:
+                if doc.messages:
+                    all_messages.extend(doc.messages)
+
+            if not all_messages:
+                return ""
+
             # Get last N turns (user + assistant pairs)
-            recent = chat.messages[-(max_turns * 2):]
+            recent = all_messages[-(max_turns * 2):]
             history_lines = []
             for msg in recent:
                 role = msg.get("role", "user")
