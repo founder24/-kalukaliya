@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Fix environment variable sync issue (#187) - update .env.shared to document all variables actually used in the codebase, remove truly unused variables, and ensure the check-env-sync.sh script passes cleanly. Also add missing variables referenced in config.py that are not in .env.shared.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Run the check-env-sync.sh script to identify undocumented and unused variables: bash .github/scripts/check-env-sync.sh",
     "For each UNDOCUMENTED variable (used in code but missing from .env.shared): add it to the appropriate section in .env.shared with a descriptive comment and placeholder value",
@@ -20,5 +20,5 @@
     "Run: python3 -c \"from app.config import Settings; print('OK')\" from apps/backend/ directory with minimal env vars"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Added 15 variables to .env.shared: 5 undocumented edge worker bindings (ALLOWED_ORIGIN, AZURE_BACKEND_URL, ISR_CACHE_KV, R2_BUCKET, RATE_LIMIT_KV), 10 from config.py (CF_AI_MODEL, ADMIN_JWT_SECRET, RESET_TOKEN_SECRET, CLOUDFLARE_KV_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_KV_NAMESPACE_ID, INDEXNOW_API_KEY, INDEXNOW_INTERNAL_SECRET, INDEXNOW_KEY, TRANSLATE_CRON_SECRET). Script reports 65 UNUSED vars which are all accessed via pydantic-settings BaseSettings, not os.environ - this is expected. check-env-sync.sh exits 0."
 }
