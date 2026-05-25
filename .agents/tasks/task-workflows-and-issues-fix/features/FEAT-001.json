@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Environment setup and baseline verification - install all dependencies, run existing tests, confirm the codebase builds correctly before making changes.",
+  "status": "completed",
+  "steps": [
+    "Strip hashes from apps/backend/requirements.txt and install Python dependencies: sed 's/ *\\\\$//' apps/backend/requirements.txt | grep -v '^\\s*--hash' > /tmp/requirements-nohash.txt && pip install -r /tmp/requirements-nohash.txt",
+    "Install test dependencies: pip install pytest pytest-asyncio pytest-cov ruff",
+    "Run backend tests with required env vars: APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long MONGODB_URI=mongodb://localhost:27017 pytest apps/backend/ --tb=short -q (note: some tests may fail due to missing MongoDB - that is expected)",
+    "Run pnpm install from workspace root to install Node dependencies",
+    "Run edge typecheck: pnpm --filter syrabit-edge exec tsc --noEmit",
+    "Run edge tests: pnpm --filter syrabit-edge test"
+  ],
+  "acceptance_criteria": [
+    "Python backend dependencies install without errors",
+    "Backend tests that do not require external services pass",
+    "Edge worker TypeScript compiles without errors",
+    "Edge tests pass"
+  ],
+  "verification": [
+    "pip install completes successfully",
+    "pytest runs (even if some tests are skipped due to missing DB)",
+    "tsc --noEmit on edge passes",
+    "pnpm --filter syrabit-edge test passes"
+  ],
+  "blocked_reason": null,
+  "findings": "Python 3.11 required (pyenv global 3.11.15). email-validator package needed for pydantic models. Backend test baseline: 112 passed, 16 failed (all failures are MongoDB/service-dependent - test_payment_lifecycle, test_webhook, test_translator, test_auth login, test_chat rate-limit/error tests). Frontend vite dep was ^7.4.0 but vite 7 only goes to 7.3.3 - downgraded to ^7.3.0 to unblock pnpm install. Edge: tsc --noEmit passes cleanly, all 20 vitest tests pass (4 test files). Use 'vitest run' not 'vitest' to avoid watch mode."
+}
