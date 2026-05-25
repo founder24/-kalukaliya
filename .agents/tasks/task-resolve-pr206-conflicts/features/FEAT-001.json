@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Create a new branch from main and set up the environment for re-implementing PR #206 audit fixes. Install Python and Node dependencies, run existing tests to confirm baseline is green.",
+  "status": "completed",
+  "steps": [
+    "Create branch 'audit/implement-remaining-fixes-v2' from main",
+    "Install Python dependencies: pip install from requirements.in (stripped hashes)",
+    "Install Node dependencies: corepack enable && pnpm install",
+    "Run backend linting: ruff check apps/backend/app/ (install ruff if needed)",
+    "Run edge typecheck: pnpm --filter syrabit-edge exec tsc --noEmit",
+    "Confirm baseline is green before any changes"
+  ],
+  "acceptance_criteria": [
+    "New branch 'audit/implement-remaining-fixes-v2' exists and is checked out",
+    "Backend lint passes (ruff check)",
+    "Edge typecheck passes (tsc --noEmit)"
+  ],
+  "verification": [
+    "git branch --show-current shows 'audit/implement-remaining-fixes-v2'",
+    "ruff check apps/backend/app/ exits 0",
+    "pnpm --filter syrabit-edge exec tsc --noEmit exits 0"
+  ],
+  "blocked_reason": null,
+  "findings": "Pre-existing issues on main: (1) TypeScript error in apps/edge/src/middleware/bot.ts line 20 - 'data' is of type 'unknown' (TS18046). (2) Ruff F841 warnings in admin_content.py:632, admin_dashboard.py:31, content_publisher.py:73 - unused variables. Both are NOT caused by this branch and will be fixed in FEAT-002. Python 3.11.15 via pyenv, Node v22.22.3, pnpm 10.26.1 all confirmed working."
+}

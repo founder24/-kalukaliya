@@ -1,0 +1,7 @@
+{
+  "task_id": "task-resolve-pr206-conflicts",
+  "task_description": "Re-implement all 13 audit fixes from PR #206 on a new branch from main (which now includes PR #205 chat-resilience). The key conflict is in chat.py where the ChatService refactoring must incorporate PR #205's asyncio.wait_for, granular error handling, graceful Redis degradation, and OTel tracing patterns.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

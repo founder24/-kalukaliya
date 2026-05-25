@@ -1,0 +1,51 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Implement all 13 audit fixes from the original PR #206, re-based on the current main which includes PR #205 chat-resilience patterns. The chat.py refactoring into ChatService MUST preserve all asyncio.wait_for timeout wrapping, granular error handling, graceful Redis degradation, and OTel tracing from the current version.",
+  "status": "pending",
+  "steps": [
+    "DEP-01: Migrate python-jose to PyJWT. In apps/backend/app/api/v1/auth.py: change 'from jose import jwt, JWTError' to 'import jwt; from jwt.exceptions import PyJWTError' (use PyJWTError instead of JWTError). Update all jwt.encode() calls to use jwt.encode(payload, secret, algorithm=alg) and jwt.decode() to use jwt.decode(token, secret, algorithms=[alg]). Same change in apps/backend/app/api/v1/admin.py. In apps/backend/tests/test_admin_endpoints.py: update 'from jose import jwt' to 'import jwt'. Remove 'python-jose' from apps/backend/requirements.in (keep 'pyjwt'). NOTE: PyJWT's jwt.encode returns a string directly (no .decode() needed). PyJWT raises jwt.ExpiredSignatureError and jwt.InvalidTokenError instead of JWTError.",
+    "CICD-02: In .github/workflows/deploy-all.yml, .github/workflows/ci-frontend.yml, and .github/workflows/ci-edge.yml: replace all '--no-frozen-lockfile' with '--frozen-lockfile'.",
+    "SEC-05: In apps/backend/app/core/security.py sanitize_user_input(): (a) Add unicodedata import and apply NFKC normalization as first step: text = unicodedata.normalize('NFKC', text). (b) Strip zero-width characters: text = re.sub(r'[\\u200b-\\u200f\\u2028-\\u202f\\u2060\\ufeff]', '', text). (c) Expand injection_patterns to also include: r'\\[INST\\]', r'<\\|system\\|>', r'<\\|user\\|>', r'<\\|assistant\\|>', r'END OF PROMPT', r'IGNORE ABOVE'.",
+    "ARCH-06: Refactor apps/backend/app/api/v1/chat.py into a ChatService class. Extract business logic into class ChatService with methods: __init__(self), async check_rate_limit(...), async process_chat(...), async process_stream(...). Keep the router thin (router functions just parse request, call ChatService methods, return response). CRITICAL: preserve ALL existing patterns from the current file: asyncio.wait_for timeout wrapping in the POST / endpoint, granular error handling (RuntimeError with embedding/search/timeout classification, httpx.HTTPStatusError, asyncio.TimeoutError, ValueError, generic Exception), graceful Redis degradation in rate limiting, helper functions _resolve_lang_and_model, _build_system_prompt, _save_chat_async, OTel tracing spans in the stream endpoint, Sarvam->Vertex fallback, fire-and-forget persistence, PostHog tracking. The ChatService class should be instantiated as a module-level singleton.",
+    "SEC-07: In apps/backend/app/core/security.py: make is_safe_url async. Replace synchronous socket.getaddrinfo with asyncio.getaddrinfo (asyncio.get_event_loop().getaddrinfo or asyncio.getaddrinfo). Wrap DNS resolution in asyncio.wait_for with a 3-second timeout. On timeout, return False (treat as unsafe).",
+    "CICD-04: In .github/workflows/deploy-all.yml: add a new job 'trivy-scan' after 'ci-checks' and before the deploy jobs. Use aquasecurity/trivy-action@master to scan the built Docker image. It should run after the 'Build & Push to ACR' step in deploy-backend, or as a separate job that builds locally. Simplest approach: add a step in deploy-backend after the ACR build that runs trivy with exit-code 1 on CRITICAL severity.",
+    "PERF-04: In apps/backend/app/services/search/azure_search.py: add Redis caching for search results. Before executing the Azure search, check Redis for a cached result using a hash of (query + user_tier + limit) as key. Cache results with a 5-minute TTL. Use the get_redis() pattern from app.db.redis. Handle Redis failures gracefully (log warning, proceed without cache).",
+    "CFG-03: In apps/edge/wrangler.toml: add a comment block above the ISR_CACHE_KV binding explaining the placeholder IDs and setup instructions: 'Before production deploy: 1. npx wrangler kv:namespace create ISR_CACHE_KV, 2. npx wrangler kv:namespace create ISR_CACHE_KV --preview, 3. Replace placeholder-isr-cache-kv-id and placeholder-isr-cache-kv-preview-id with actual IDs.'",
+    "PERF-05: Add Redis caching for conversation history in the _load_conversation_history function in chat.py (or ChatService). Cache the last 5 turns per session_id with a 30-minute TTL in Redis. On cache hit, return cached history. On cache miss, load from MongoDB and store in cache. Handle Redis failures gracefully (fall back to direct MongoDB read).",
+    "TEST-06: Add edge worker tests for rate-limit.ts, cors.ts, and bot.ts in apps/edge/tests/. Follow the pattern from apps/edge/tests/jwt.test.ts (vitest, describe/it/expect). For rate-limit.ts: test checkRateLimit allows/blocks at limit, test rateLimitHeaders output. For cors.ts: test getCorsHeaders with valid/invalid origins, test applyCorsHeaders. For bot.ts: test turnstileVerify with mocked fetch (success/failure).",
+    "ARCH-08: Refactor apps/frontend/src/context/AuthContext.jsx by extracting reusable hooks into separate files: (a) Create apps/frontend/src/hooks/useTokenManager.js - extract _storeToken, _storeRefreshToken, getInMemoryToken logic. (b) Create apps/frontend/src/hooks/useAuthRefresh.js - extract the silent refresh logic from fetchMe. (c) Create apps/frontend/src/hooks/useAnonSync.js - extract the anonymous data claim effect. The AuthContext.jsx should import and use these hooks, keeping the context provider lean.",
+    "DEP-05: The .github/dependabot.yml already exists with correct configuration. Verify it covers pip (backend), npm (root, frontend, edge), and github-actions ecosystems. If already complete, no changes needed.",
+    "CICD-05: In .github/workflows/deploy-all.yml: add comments documenting each KeyVault secret reference in the 'Fetch secrets from Azure KeyVault' step. For each secret, add a comment explaining what it's used for (e.g., '# JWT signing key for access/refresh tokens', '# MongoDB Atlas connection string', etc.)."
+  ],
+  "acceptance_criteria": [
+    "No imports of 'jose' remain in backend Python files (replaced with PyJWT)",
+    "All CI workflows use --frozen-lockfile instead of --no-frozen-lockfile",
+    "security.py sanitize_user_input uses NFKC normalization, strips zero-width chars, has expanded patterns",
+    "security.py is_safe_url is async with asyncio-based DNS resolution and 3s timeout",
+    "chat.py has a ChatService class encapsulating business logic while preserving ALL PR #205 resilience patterns (asyncio.wait_for, granular error handling, Redis graceful degradation, OTel tracing)",
+    "deploy-all.yml includes trivy container scanning",
+    "azure_search.py has Redis caching with 5-min TTL",
+    "wrangler.toml has ISR_CACHE_KV documentation comment",
+    "Conversation history has Redis caching with 30-min TTL",
+    "Edge tests exist for rate-limit.ts, cors.ts, bot.ts",
+    "AuthContext.jsx is refactored with extracted hooks",
+    "deploy-all.yml has KeyVault secret documentation comments",
+    "Backend lint passes (ruff check)",
+    "Edge tests pass (pnpm --filter syrabit-edge test)"
+  ],
+  "verification": [
+    "grep -r 'from jose' apps/backend/ returns no results",
+    "grep -r 'no-frozen-lockfile' .github/workflows/ returns no results",
+    "grep 'NFKC' apps/backend/app/core/security.py returns a match",
+    "grep 'async def is_safe_url' apps/backend/app/core/security.py returns a match",
+    "grep 'class ChatService' apps/backend/app/api/v1/chat.py returns a match",
+    "grep 'wait_for' apps/backend/app/api/v1/chat.py returns a match (resilience preserved)",
+    "grep 'trivy' .github/workflows/deploy-all.yml returns a match",
+    "grep 'redis' apps/backend/app/services/search/azure_search.py returns a match (case insensitive)",
+    "pnpm --filter syrabit-edge test passes",
+    "ruff check apps/backend/app/ passes"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
