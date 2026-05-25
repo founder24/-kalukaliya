@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
 
+    # --- Cloudflare Workers AI (LLM) ---
+    CF_AI_MODEL: str = "@cf/meta/llama-3.1-70b-instruct"
+
     # --- P2: Azure Compute (Backend) — metadata only ---
     AZURE_SUBSCRIPTION_ID: Optional[str] = None
     AZURE_RESOURCE_GROUP: str = "rg-syrabit-prod"

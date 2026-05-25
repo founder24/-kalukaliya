@@ -238,11 +238,11 @@ async def chat(
                 )
             except (RuntimeError, Exception) as e:
                 if detected_lang == "as":
-                    logger.warning(f"Sarvam failed ({e}), falling back to Vertex AI")
-                    from app.services.ai.vertex_client import vertex_client
+                    logger.warning(f"Sarvam failed ({e}), falling back to Cloudflare AI")
+                    from app.services.ai.cloudflare_client import cloudflare_client
 
-                    target_model = settings.VERTEX_GEMINI_MODEL
-                    response_text = await vertex_client.generate(
+                    target_model = settings.CF_AI_MODEL
+                    response_text = await cloudflare_client.generate(
                         system_prompt=system_prompt,
                         user_message=sanitized_message,
                     )
@@ -588,10 +588,10 @@ async def chat_stream(
                 yield f"data: {json.dumps({'fallback': True, 'provider': 'vertex', 'reason': str(e)})}\n\n"
 
                 try:
-                    from app.services.ai.vertex_client import vertex_client
+                    from app.services.ai.cloudflare_client import cloudflare_client
 
-                    actual_model = settings.VERTEX_GEMINI_MODEL
-                    async for chunk in vertex_client.stream_generate(
+                    actual_model = settings.CF_AI_MODEL
+                    async for chunk in cloudflare_client.stream_generate(
                         system_prompt, sanitized_message
                     ):
                         full_response += chunk
