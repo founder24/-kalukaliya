@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Fix environment variable sync issue (#187) - update .env.shared to document all variables actually used in the codebase, remove truly unused variables, and ensure the check-env-sync.sh script passes cleanly. Also add missing variables referenced in config.py that are not in .env.shared.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Run the check-env-sync.sh script to identify undocumented and unused variables: bash .github/scripts/check-env-sync.sh",
     "For each UNDOCUMENTED variable (used in code but missing from .env.shared): add it to the appropriate section in .env.shared with a descriptive comment and placeholder value",
