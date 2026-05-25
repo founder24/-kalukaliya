@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.env
+.env.*
+tests/
+.git
+.gitignore
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.md
+requirements-dev.in
+requirements-otel.txt

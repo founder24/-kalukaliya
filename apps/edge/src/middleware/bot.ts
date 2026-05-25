@@ -16,7 +16,7 @@ export async function turnstileVerify(token: string, secret: string): Promise<bo
       }),
     });
 
-    const data = await response.json();
+    const data = (await response.json()) as { success: boolean };
     return data.success === true;
   } catch (error) {
     console.error('Turnstile verification failed:', error);
