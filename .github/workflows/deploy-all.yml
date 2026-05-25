@@ -141,6 +141,11 @@ jobs:
             --file apps/backend/Dockerfile \
             apps/backend/
 
+      - name: Trivy vulnerability scan
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy image --severity CRITICAL --exit-code 1 --no-progress syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+
       - name: Deploy to Container Apps
         run: |
           az containerapp update \
@@ -198,6 +203,16 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: "Guard: check for KV placeholder IDs"
+        run: |
+          if grep -qi 'placeholder' apps/edge/wrangler.toml; then
+            echo "ERROR: wrangler.toml still contains placeholder KV namespace IDs."
+            echo "You MUST replace ISR_CACHE_KV placeholder IDs before deploying."
+            echo "Run: npx wrangler kv:namespace create ISR_CACHE_KV"
+            exit 1
+          fi
+          echo "All KV namespace IDs are properly configured."
 
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production

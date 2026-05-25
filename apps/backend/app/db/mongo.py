@@ -8,6 +8,7 @@ from app.models.chat import Chat
 from app.models.feedback import ChatFeedback
 from app.models.knowledge import KnowledgeObject
 from app.models.content import Board, Class, Stream, Subject, Chapter
+from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,10 @@ async def init_mongo() -> None:
 
         # Create indexes
         await create_indexes()
+
+        # Run pending database migrations
+        db = _client[settings.MONGODB_DB_NAME]
+        await check_and_apply_migrations(db)
 
         logger.info("MongoDB connection initialized successfully")
     except ConnectionFailure as e:

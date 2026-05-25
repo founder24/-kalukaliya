@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Layer 2 - Small fixes: Slack/webhook alerting in uptime monitor, conversation history bounded query, burst rate limiting, Trivy scan in deploy, Dockerfile pytest hack removal",
+  "status": "completed",
+  "steps": [
+    "In .github/workflows/agent-uptime-monitor.yml, add a new step AFTER the 'Dispatch endpoint-down event' step (in the failure path, i.e. if: steps.uptime.outputs.exit_code != '0'). Name it 'Alert via webhook'. It should: use curl to POST a JSON payload to ${{ secrets.ALERT_WEBHOOK_URL }} with fields: text (human-readable alert message), timestamp, status (down). The step should have continue-on-error: true so a missing webhook secret does not block the workflow.",
+    "In apps/backend/app/services/chat_service.py, in load_conversation_history(), change the MongoDB query from '.sort(\"+created_at\").to_list()' (which loads ALL documents for the session) to '.sort(\"-created_at\").limit(5).to_list()'. Then reverse the result in Python so messages are in chronological order. This bounds memory usage.",
+    "In apps/backend/app/api/v1/chat.py, add a burst rate limit check inside check_rate_limit(). After the monthly quota check passes, add a per-minute burst check using a Redis key pattern 'burst:{user_id}:{current_minute}' with 60s TTL. Limits: free tier 5/min, pro tier 30/min. If burst limit exceeded, return (False, current_count, limit) just like the monthly check. Use settings for the monthly limits that already exist, and define BURST_LIMIT_FREE=5, BURST_LIMIT_PRO=30 as constants at module level.",
+    "In .github/workflows/deploy-all.yml, in the deploy-backend job, add a new step AFTER 'Build & Push to ACR' but BEFORE 'Deploy to Container Apps'. Name it 'Trivy vulnerability scan'. It should: (a) install Trivy via curl piped to sh from the official install script (https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh), (b) run trivy image --severity CRITICAL --exit-code 1 syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}.",
+    "In apps/backend/Dockerfile, simplify the builder stage RUN command. Remove the grep -v -E line that filters out pytest/coverage packages. The production image should only strip hashes and install directly from requirements-nohash.txt (since test deps should not be in requirements.txt anymore per the requirements-dev.in split). Keep the email-validator install. Remove the long MAINTENANCE NOTE comment block."
+  ],
+  "acceptance_criteria": [
+    "agent-uptime-monitor.yml has a webhook alerting step that curls ALERT_WEBHOOK_URL",
+    "chat_service.py load_conversation_history uses .sort('-created_at').limit(5) instead of loading all",
+    "chat.py check_rate_limit includes a per-minute burst rate limit check with Redis",
+    "deploy-all.yml deploy-backend job has a Trivy scan step between ACR build and deploy",
+    "Dockerfile builder stage no longer greps out pytest packages - just strips hashes and installs"
+  ],
+  "verification": [
+    "grep -A5 'Alert via webhook' .github/workflows/agent-uptime-monitor.yml",
+    "grep 'limit(5)' apps/backend/app/services/chat_service.py",
+    "grep 'burst' apps/backend/app/api/v1/chat.py",
+    "grep -i 'trivy' .github/workflows/deploy-all.yml",
+    "grep -c 'pytest' apps/backend/Dockerfile should return 0"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 sub-changes implemented. YAML parses correctly, Python AST valid, ruff lint passes. Backend test suite could not run due to Python 3.9 in sandbox (project requires 3.10+), same pre-existing constraint as FEAT-001."
+}
