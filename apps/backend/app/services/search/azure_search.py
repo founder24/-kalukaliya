@@ -8,6 +8,8 @@ from azure.search.documents.models import (
 from azure.core.exceptions import AzureError
 from azure.core.credentials import AzureKeyCredential
 from app.config import settings
+import hashlib
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,7 @@ class AzureSearchService:
         """
         Executes Hybrid Search (Keyword + Vector) with Semantic Reranking.
         Falls back to vector-only search if semantic ranker is unavailable.
+        Results are cached in Redis with a 5-minute TTL.
 
         Args:
             query: User's search query text
@@ -94,6 +97,20 @@ class AzureSearchService:
                 "Azure Search client not initialized - returning empty context"
             )
             return []
+
+        # Check Redis cache
+        cache_key_data = f"{query}:{user_tier}:{str(limit)}"
+        cache_key = f"search_cache:{hashlib.sha256(cache_key_data.encode()).hexdigest()}"
+        try:
+            from app.db.redis import get_redis
+
+            redis = get_redis()
+            cached = await redis.get(cache_key)
+            if cached:
+                logger.info(f"Search cache hit for query '{query[:20]}...'")
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Redis cache check failed: {e}")
 
         try:
             # 1. Define Vector Query using built-in vectorization
@@ -164,6 +181,17 @@ class AzureSearchService:
             logger.info(
                 f"Retrieved {len(context_chunks)} chunks for query '{query[:20]}...'"
             )
+
+            # Cache results in Redis with 5-minute TTL
+            if context_chunks:
+                try:
+                    from app.db.redis import get_redis
+
+                    redis = get_redis()
+                    await redis.set(cache_key, json.dumps(context_chunks), ex=300)
+                except Exception as e:
+                    logger.warning(f"Redis cache write failed: {e}")
+
             return context_chunks
 
         except Exception as e:

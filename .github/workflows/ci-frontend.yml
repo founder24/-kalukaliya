@@ -26,7 +26,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Type Check
         run: pnpm --filter @workspace/syrabit exec tsc --noEmit
@@ -49,7 +49,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Run Tests
         run: pnpm --filter @workspace/syrabit test

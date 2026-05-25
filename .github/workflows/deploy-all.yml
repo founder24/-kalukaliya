@@ -39,7 +39,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install Node dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Install Python dependencies
         run: |
@@ -97,36 +97,47 @@ jobs:
       - name: Fetch secrets from Azure KeyVault
         run: |
           set -euo pipefail
+          # jwt-secret: JWT signing key for access/refresh/admin tokens
           JWT_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name jwt-secret --query value -o tsv)
           echo "::add-mask::$JWT_SECRET"
           echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
+          # mongodb-uri: MongoDB Atlas connection string
           MONGODB_URI=$(az keyvault secret show --vault-name syrabit-kv --name mongodb-uri --query value -o tsv)
           echo "::add-mask::$MONGODB_URI"
           echo "MONGODB_URI=$MONGODB_URI" >> "$GITHUB_ENV"
+          # upstash-redis-url: Upstash Redis REST URL for rate limiting and caching
           UPSTASH_REDIS_URL=$(az keyvault secret show --vault-name syrabit-kv --name upstash-redis-url --query value -o tsv)
           echo "::add-mask::$UPSTASH_REDIS_URL"
           echo "UPSTASH_REDIS_URL=$UPSTASH_REDIS_URL" >> "$GITHUB_ENV"
+          # azure-search-key: Azure Cognitive Search query key
           AZURE_SEARCH_KEY=$(az keyvault secret show --vault-name syrabit-kv --name azure-search-key --query value -o tsv)
           echo "::add-mask::$AZURE_SEARCH_KEY"
           echo "AZURE_SEARCH_KEY=$AZURE_SEARCH_KEY" >> "$GITHUB_ENV"
+          # azure-search-endpoint: Azure Search service endpoint
           AZURE_SEARCH_ENDPOINT=$(az keyvault secret show --vault-name syrabit-kv --name azure-search-endpoint --query value -o tsv)
           echo "::add-mask::$AZURE_SEARCH_ENDPOINT"
           echo "AZURE_SEARCH_ENDPOINT=$AZURE_SEARCH_ENDPOINT" >> "$GITHUB_ENV"
+          # vertex-ai-key: Google Vertex AI API key for Gemini LLM
           VERTEX_AI_KEY=$(az keyvault secret show --vault-name syrabit-kv --name vertex-ai-key --query value -o tsv)
           echo "::add-mask::$VERTEX_AI_KEY"
           echo "VERTEX_AI_KEY=$VERTEX_AI_KEY" >> "$GITHUB_ENV"
+          # sarvam-api-key: Sarvam AI API key for Assamese LLM
           SARVAM_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name sarvam-api-key --query value -o tsv)
           echo "::add-mask::$SARVAM_API_KEY"
           echo "SARVAM_API_KEY=$SARVAM_API_KEY" >> "$GITHUB_ENV"
+          # razorpay-key-id: Razorpay payment gateway key ID
           RAZORPAY_KEY_ID=$(az keyvault secret show --vault-name syrabit-kv --name razorpay-key-id --query value -o tsv)
           echo "::add-mask::$RAZORPAY_KEY_ID"
           echo "RAZORPAY_KEY_ID=$RAZORPAY_KEY_ID" >> "$GITHUB_ENV"
+          # razorpay-key-secret: Razorpay payment gateway secret
           RAZORPAY_KEY_SECRET=$(az keyvault secret show --vault-name syrabit-kv --name razorpay-key-secret --query value -o tsv)
           echo "::add-mask::$RAZORPAY_KEY_SECRET"
           echo "RAZORPAY_KEY_SECRET=$RAZORPAY_KEY_SECRET" >> "$GITHUB_ENV"
+          # resend-api-key: Resend email service API key
           RESEND_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name resend-api-key --query value -o tsv)
           echo "::add-mask::$RESEND_API_KEY"
           echo "RESEND_API_KEY=$RESEND_API_KEY" >> "$GITHUB_ENV"
+          # posthog-api-key: PostHog analytics API key
           POSTHOG_API_KEY=$(az keyvault secret show --vault-name syrabit-kv --name posthog-api-key --query value -o tsv)
           echo "::add-mask::$POSTHOG_API_KEY"
           echo "POSTHOG_API_KEY=$POSTHOG_API_KEY" >> "$GITHUB_ENV"
@@ -140,6 +151,16 @@ jobs:
             --image syrabit/backend:latest \
             --file apps/backend/Dockerfile \
             apps/backend/
+
+      - name: Trivy Container Scan
+        run: |
+          az acr login --name syrabitacr
+          docker pull syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}'
+          severity: 'CRITICAL'
+          exit-code: '1'
 
       - name: Deploy to Container Apps
         run: |
@@ -197,7 +218,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
@@ -223,7 +244,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm --filter @workspace/syrabit run build

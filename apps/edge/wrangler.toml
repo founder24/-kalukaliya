@@ -30,6 +30,12 @@ binding = "RATE_LIMIT_KV"
 id = "2983094e249d4094b66e4b9dacc38719"
 preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 
+# ISR_CACHE_KV: Incremental Static Regeneration cache namespace.
+# This uses placeholder IDs that must be replaced before production deploy:
+#   1. npx wrangler kv:namespace create ISR_CACHE_KV
+#   2. npx wrangler kv:namespace create ISR_CACHE_KV --preview
+#   3. Replace placeholder-isr-cache-kv-id and placeholder-isr-cache-kv-preview-id
+#      below with the actual namespace IDs printed by the commands above.
 [[env.production.kv_namespaces]]
 binding = "ISR_CACHE_KV"
 id = "placeholder-isr-cache-kv-id"

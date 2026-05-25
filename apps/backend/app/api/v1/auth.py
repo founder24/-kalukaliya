@@ -3,7 +3,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
+import jwt
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 import hashlib
 import logging
 import time
@@ -171,7 +172,7 @@ async def get_current_user(
         return user
     except HTTPException:
         raise
-    except JWTError as e:
+    except (InvalidTokenError, ExpiredSignatureError) as e:
         if "expired" in str(e).lower():
             raise HTTPException(status_code=401, detail="token_expired")
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -207,7 +208,7 @@ async def get_current_user_optional(
 
         user = await User.get(user_id)
         return user
-    except JWTError:
+    except InvalidTokenError:
         return None
 
 
@@ -356,7 +357,7 @@ async def reset_password(request: ResetPasswordRequest):
                 status_code=400, detail="Invalid or expired reset token"
             )
 
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
     # SEC-C4: Check if reset token has already been used
@@ -476,7 +477,7 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         )
     except HTTPException:
         raise
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
 
@@ -522,7 +523,7 @@ async def logout(
                 refresh_ttl = max(refresh_exp - now, 0)
                 if refresh_ttl > 0:
                     await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
-        except JWTError:
+        except InvalidTokenError:
             pass  # Invalid refresh token - ignore
     except HTTPException:
         raise

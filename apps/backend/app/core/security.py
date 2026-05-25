@@ -2,7 +2,9 @@
 Security Utilities: Input Sanitization, URL Validation, SSRF Protection
 """
 
+import asyncio
 import re
+import unicodedata
 from urllib.parse import urlparse
 import ipaddress
 from typing import Optional
@@ -19,6 +21,12 @@ def sanitize_user_input(text: str) -> str:
     if not text:
         return ""
 
+    # NFKC normalization to prevent Unicode obfuscation
+    text = unicodedata.normalize("NFKC", text)
+
+    # Strip zero-width characters that can hide injection payloads
+    text = re.sub(r"[\u200b-\u200f\u2028-\u202f\u2060\ufeff]", "", text)
+
     # Strip potential prompt injection markers
     injection_patterns = [
         r"Ignore previous instructions",
@@ -28,6 +36,12 @@ def sanitize_user_input(text: str) -> str:
         r"BEGINNING OF CONVERSATION",
         r"<\|im_end\|>",
         r"### Instruction:",
+        r"\[INST\]",
+        r"<\|system\|>",
+        r"<\|user\|>",
+        r"<\|assistant\|>",
+        r"END OF PROMPT",
+        r"IGNORE ABOVE",
     ]
 
     for pattern in injection_patterns:
@@ -44,7 +58,7 @@ def sanitize_user_input(text: str) -> str:
     return text.strip()
 
 
-def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
+async def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
     """
     Validate URL to prevent SSRF attacks.
 
@@ -79,12 +93,12 @@ def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
         if not parsed.hostname:
             return False
 
-        # Resolve hostname to IP and check if it's private
-        # Note: In production, use async DNS resolution with timeout
-        import socket
-
+        # Resolve hostname to IP and check if it's private (async DNS)
         try:
-            ip_addresses = socket.getaddrinfo(parsed.hostname, None)
+            loop = asyncio.get_event_loop()
+            ip_addresses = await asyncio.wait_for(
+                loop.getaddrinfo(parsed.hostname, None), timeout=3.0
+            )
             for family, socktype, proto, canonname, sockaddr in ip_addresses:
                 ip_str = sockaddr[0]
                 try:
@@ -102,7 +116,10 @@ def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
                         return False
                 except ValueError:
                     continue
-        except socket.gaierror:
+        except asyncio.TimeoutError:
+            # DNS resolution timed out - treat as unsafe
+            return False
+        except OSError:
             # DNS resolution failed - treat as unsafe
             return False
 
