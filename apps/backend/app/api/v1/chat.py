@@ -366,7 +366,7 @@ async def chat_stream(
             target_model=target_model,
             detected_lang=detected_lang,
             user_id=user_id,
-            request_message=request.message,
+            request_message=sanitized_message,
         ):
             # Internal sentinel carries the full response and actual model
             if event.startswith("{") and '"__internal_complete"' in event:
