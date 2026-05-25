@@ -205,6 +205,14 @@ class ChatService:
                 ],
             )
             await chat_doc.save()
+
+            # Invalidate conversation history cache so next turn sees fresh data
+            if session_id:
+                try:
+                    redis = get_redis()
+                    await redis.delete(f"conv_history:{session_id}")
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Failed to save streamed chat: {e}")
 
@@ -346,6 +354,13 @@ class ChatService:
                 )
                 try:
                     await chat_doc.save()
+                    # Invalidate conversation history cache so next turn sees fresh data
+                    if request.session_id:
+                        try:
+                            redis = get_redis()
+                            await redis.delete(f"conv_history:{request.session_id}")
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.error(f"Failed to save chat to MongoDB: {e}")
 

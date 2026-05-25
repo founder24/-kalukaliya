@@ -172,9 +172,9 @@ async def get_current_user(
         return user
     except HTTPException:
         raise
-    except (InvalidTokenError, ExpiredSignatureError) as e:
-        if "expired" in str(e).lower():
-            raise HTTPException(status_code=401, detail="token_expired")
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="token_expired")
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 

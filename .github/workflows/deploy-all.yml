@@ -152,11 +152,15 @@ jobs:
             --file apps/backend/Dockerfile \
             apps/backend/
 
+      # NOTE: Trivy scans post-push because az acr build executes remotely.
+      # A CRITICAL finding will block deploy but the image remains in the registry.
+      # To fully prevent vulnerable images from reaching ACR, switch to local
+      # docker build + trivy scan + az acr login + docker push.
       - name: Trivy Container Scan
         run: |
           az acr login --name syrabitacr
           docker pull syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
-      - uses: aquasecurity/trivy-action@master
+      - uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: 'syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}'
           severity: 'CRITICAL'

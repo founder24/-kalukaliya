@@ -2,6 +2,8 @@
 Security Tests: Input Sanitization, SSRF Protection, Rate Limiting
 """
 
+import pytest
+
 from app.core.security import sanitize_user_input, is_safe_url
 
 
@@ -51,48 +53,49 @@ class TestInputSanitization:
         assert "\x01" not in sanitized
 
 
+@pytest.mark.asyncio
 class TestSSRFProtection:
     """Test URL validation for SSRF prevention"""
 
-    def test_allows_https_urls(self):
+    async def test_allows_https_urls(self):
         """Test that HTTPS URLs are allowed"""
-        assert is_safe_url("https://example.com") is True
+        assert await is_safe_url("https://example.com") is True
 
-    def test_allows_http_urls(self):
+    async def test_allows_http_urls(self):
         """Test that HTTP URLs are allowed"""
-        assert is_safe_url("http://example.com") is True
+        assert await is_safe_url("http://example.com") is True
 
-    def test_blocks_file_scheme(self):
+    async def test_blocks_file_scheme(self):
         """Test that file:// scheme is blocked"""
-        assert is_safe_url("file:///etc/passwd") is False
+        assert await is_safe_url("file:///etc/passwd") is False
 
-    def test_blocks_gopher_scheme(self):
+    async def test_blocks_gopher_scheme(self):
         """Test that gopher:// scheme is blocked"""
-        assert is_safe_url("gopher://internal-service") is False
+        assert await is_safe_url("gopher://internal-service") is False
 
-    def test_blocks_userinfo(self):
+    async def test_blocks_userinfo(self):
         """Test that URLs with userinfo are blocked"""
-        assert is_safe_url("http://user:pass@example.com") is False
+        assert await is_safe_url("http://user:pass@example.com") is False
 
-    def test_blocks_localhost(self):
+    async def test_blocks_localhost(self):
         """Test that localhost URLs are blocked"""
-        assert is_safe_url("http://localhost:8080") is False
+        assert await is_safe_url("http://localhost:8080") is False
 
-    def test_blocks_private_ips(self):
+    async def test_blocks_private_ips(self):
         """Test that private IP addresses are blocked"""
-        assert is_safe_url("http://192.168.1.1") is False
-        assert is_safe_url("http://10.0.0.1") is False
-        assert is_safe_url("http://172.16.0.1") is False
+        assert await is_safe_url("http://192.168.1.1") is False
+        assert await is_safe_url("http://10.0.0.1") is False
+        assert await is_safe_url("http://172.16.0.1") is False
 
-    def test_blocks_aws_metadata(self):
+    async def test_blocks_aws_metadata(self):
         """Test that AWS metadata endpoint is blocked"""
-        assert is_safe_url("http://169.254.169.254/latest/meta-data/") is False
+        assert await is_safe_url("http://169.254.169.254/latest/meta-data/") is False
 
-    def test_requires_hostname(self):
+    async def test_requires_hostname(self):
         """Test that URLs without hostname are blocked"""
-        assert is_safe_url("http://") is False
+        assert await is_safe_url("http://") is False
 
-    def test_blocks_invalid_urls(self):
+    async def test_blocks_invalid_urls(self):
         """Test that invalid URLs are blocked"""
-        assert is_safe_url("not-a-url") is False
-        assert is_safe_url("") is False
+        assert await is_safe_url("not-a-url") is False
+        assert await is_safe_url("") is False
