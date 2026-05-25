@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Implement all 13 audit fixes from the original PR #206, re-based on the current main which includes PR #205 chat-resilience patterns. The chat.py refactoring into ChatService MUST preserve all asyncio.wait_for timeout wrapping, granular error handling, graceful Redis degradation, and OTel tracing from the current version.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "DEP-01: Migrate python-jose to PyJWT. In apps/backend/app/api/v1/auth.py: change 'from jose import jwt, JWTError' to 'import jwt; from jwt.exceptions import PyJWTError' (use PyJWTError instead of JWTError). Update all jwt.encode() calls to use jwt.encode(payload, secret, algorithm=alg) and jwt.decode() to use jwt.decode(token, secret, algorithms=[alg]). Same change in apps/backend/app/api/v1/admin.py. In apps/backend/tests/test_admin_endpoints.py: update 'from jose import jwt' to 'import jwt'. Remove 'python-jose' from apps/backend/requirements.in (keep 'pyjwt'). NOTE: PyJWT's jwt.encode returns a string directly (no .decode() needed). PyJWT raises jwt.ExpiredSignatureError and jwt.InvalidTokenError instead of JWTError.",
     "CICD-02: In .github/workflows/deploy-all.yml, .github/workflows/ci-frontend.yml, and .github/workflows/ci-edge.yml: replace all '--no-frozen-lockfile' with '--frozen-lockfile'.",
@@ -47,5 +47,5 @@
     "ruff check apps/backend/app/ passes"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 13 audit fixes implemented successfully. Pre-existing F841 warnings in admin_content.py, admin_dashboard.py, content_publisher.py remain (not addressed by this PR). Edge vitest runs in watch mode by default but all 22 tests pass (4 test files). The bot.ts TS error was fixed with a type assertion. The chat.py refactoring preserves all PR #205 patterns: asyncio.wait_for, granular error handling, Redis graceful degradation, OTel tracing, fire-and-forget persistence."
 }
