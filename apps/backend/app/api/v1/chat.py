@@ -11,12 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.models.user import User
-from app.services.ai.router import detect_language_and_route
-from app.services.search.azure_search import search_service
 from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
-from app.core.token_budget import truncate_chunks_to_budget
+from app.services.chat_service import ChatService
 from app.utils.posthog import get_posthog
 
 logger = logging.getLogger(__name__)
@@ -24,32 +22,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Chat"])
 
 
-async def _load_conversation_history(
-    session_id: Optional[str], max_turns: int = 5
-) -> str:
-    """Load recent conversation turns for multi-turn context."""
-    if not session_id:
-        return ""
-    try:
-        from app.models.chat import Chat
-
-        chat = await Chat.find_one({"session_id": session_id})
-        if not chat or not chat.messages:
-            return ""
-        # Get last N turns (user + assistant pairs)
-        recent = chat.messages[-(max_turns * 2) :]
-        history_lines = []
-        for msg in recent:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")[:500]  # Truncate long messages
-            history_lines.append(f"{role.capitalize()}: {content}")
-        # Cap total history to ~2000 chars
-        history = "\n".join(history_lines)
-        if len(history) > 2000:
-            history = history[-2000:]
-        return history
-    except Exception:
-        return ""
+# ═══════════════════════════════════════════════════════════════
+# Request / Response Models
+# ═══════════════════════════════════════════════════════════════
 
 
 class ChatRequest(BaseModel):
@@ -73,6 +48,11 @@ class ChatResponse(BaseModel):
     model_used: str
     latency_ms: int
     sources: List[dict] = []
+
+
+# ═══════════════════════════════════════════════════════════════
+# Rate Limiting
+# ═══════════════════════════════════════════════════════════════
 
 
 async def check_rate_limit(
@@ -112,6 +92,11 @@ async def check_rate_limit(
     except Exception as e:
         logger.warning(f"Rate limit check failed: {e} - allowing request")
         return True, 0, limit
+
+
+# ═══════════════════════════════════════════════════════════════
+# CHAT ENDPOINT (non-streaming)
+# ═══════════════════════════════════════════════════════════════
 
 
 @router.post("/", response_model=ChatResponse)
@@ -159,18 +144,10 @@ async def chat(
             # Sanitize input to prevent prompt injection
             sanitized_message = sanitize_user_input(request.message)
 
-            # 1. Resolve language: explicit param > auto-detection
-            if request.lang:
-                detected_lang = request.lang
-                target_model = (
-                    settings.SARVAM_MODEL
-                    if request.lang == "as"
-                    else settings.VERTEX_GEMINI_MODEL
-                )
-            else:
-                detected_lang, target_model = detect_language_and_route(
-                    sanitized_message
-                )
+            # 1. Resolve language and model
+            detected_lang, target_model = ChatService.resolve_language_and_model(
+                sanitized_message, request.lang
+            )
 
             logger.info(
                 "chat_started",
@@ -181,31 +158,9 @@ async def chat(
                 },
             )
 
-            # 2. Generate embedding for RAG
-            from app.services.ai.embedder import generate_embedding
-
-            query_text = await generate_embedding(sanitized_message)
-
-            # 3. Hybrid search with semantic reranking
-            context_chunks = await search_service.search_context(
-                query=sanitized_message,
-                text=query_text,
-                user_tier=user_tier,
-                limit=settings.MAX_CONTEXT_DOCS,
-            )
-
-            # Apply token budget to context chunks
-            context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
-
-            # 4. Build prompt with context (numbered [#] citation format)
-            lang_instruction = (
-                "You are Syrabit, an expert educational assistant for Assamese students.\n"
-                "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
-                "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
-                if detected_lang == "en"
-                else "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09ac\u09bf\u09b6\u09c7\u09b7\u099c\u09cd\u099e \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964\n"
-                "\u09a8\u09bf\u09ae\u09cd\u09a8\u09b2\u09bf\u0996\u09bf\u09a4 \u09a8\u09ae\u09cd\u09ac\u09f0\u09af\u09c1\u0995\u09cd\u09a4 \u09aa\u09cd\u09f0\u09b8\u0982\u0997 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u09bf \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 \u09aa\u09cd\u09f0\u09b8\u0982\u0997\u09a4 \u09a8\u09be\u09a5\u09be\u0995\u09bf\u09b2\u09c7 \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964\n"
-                "\u0989\u09a6\u09cd\u09a7\u09c3\u09a4\u09bf\u09f0 \u09ac\u09be\u09ac\u09c7 [#] \u09ac\u09bf\u09a8\u09cd\u09af\u09be\u09b8 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u0995 (\u09af\u09c7\u09a8\u09c7 [1], [2])\u0964 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be\u09a4 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964"
+            # 2. RAG retrieval (embedding + hybrid search)
+            context_chunks = await ChatService.retrieve_context(
+                sanitized_message, user_tier
             )
 
             if not context_chunks:
@@ -213,74 +168,43 @@ async def chat(
                     "rag_empty_context",
                     extra={"user_id": user_id, "query": sanitized_message[:50]},
                 )
-                system_prompt = f"{lang_instruction}\n\nNote: Knowledge base results are currently unavailable. Answer based on your general knowledge and clearly state that you cannot verify the answer against the course material."
-            else:
-                context_text = "\n".join(
-                    f"[{i + 1}] {chunk['title']}: {chunk['content']}"
-                    for i, chunk in enumerate(context_chunks)
-                )
-                system_prompt = f"{lang_instruction}\n\nContext:\n{context_text}"
+
+            # 3. Build system prompt
+            system_prompt = ChatService.build_system_prompt(
+                detected_lang, context_chunks
+            )
 
             # Include multi-turn conversation history
-            history = await _load_conversation_history(request.session_id)
+            history = await ChatService.load_conversation_history(request.session_id)
             if history:
                 system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
-            # 5. Call LLM
-            from app.services.ai.router import generate_response
-
-            try:
-                response_text = await generate_response(
-                    system_prompt=system_prompt,
-                    user_message=sanitized_message,
-                    model=target_model,
-                    stream=False,
-                )
-            except (RuntimeError, Exception) as e:
-                if detected_lang == "as":
-                    logger.warning(
-                        f"Sarvam failed ({e}), falling back to Cloudflare AI"
-                    )
-                    from app.services.ai.cloudflare_client import cloudflare_client
-
-                    target_model = settings.CF_AI_MODEL
-                    response_text = await cloudflare_client.generate(
-                        system_prompt=system_prompt,
-                        user_message=sanitized_message,
-                    )
-                else:
-                    raise
+            # 4. Call LLM (with Sarvam -> Cloudflare AI fallback)
+            response_text, actual_model = await ChatService.call_llm(
+                system_prompt=system_prompt,
+                sanitized_message=sanitized_message,
+                target_model=target_model,
+                detected_lang=detected_lang,
+                user_id=user_id,
+            )
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
 
-            # 6. Save chat to MongoDB (async background task)
-            from app.models.chat import Chat
+            # 5. Save chat to MongoDB (fire-and-forget)
+            asyncio.create_task(
+                ChatService.save_chat(
+                    user_id=user_id if user else None,
+                    session_id=request.session_id,
+                    user_message=sanitized_message,
+                    assistant_response=response_text,
+                    target_model=actual_model,
+                    latency_ms=latency_ms,
+                    context_chunks=context_chunks,
+                )
+            )
 
-            chat_doc = Chat(
-                user_id=user_id if user else None,
-                session_id=request.session_id,
-            )
-            chat_doc.add_message(
-                role="user",
-                content=sanitized_message,
-            )
-            chat_doc.add_message(
-                role="assistant",
-                content=response_text,
-                model_used=target_model,
-                latency_ms=latency_ms,
-                rag_sources=[
-                    {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
-                    for c in context_chunks
-                ],
-            )
-            try:
-                await chat_doc.save()
-            except Exception as e:
-                logger.error(f"Failed to save chat to MongoDB: {e}")
-
-            # 7. Update usage counter
+            # 6. Update usage counter
             if user:
                 try:
                     await user.update(
@@ -301,9 +225,9 @@ async def chat(
                     "user_id": user_id,
                     "lang": detected_lang,
                     "provider": "sarvam"
-                    if "sarvam" in target_model.lower()
-                    or "openhathi" in target_model.lower()
-                    else "vertex",
+                    if "sarvam" in actual_model.lower()
+                    or "openhathi" in actual_model.lower()
+                    else "cloudflare",
                     "latency_ms": latency_ms,
                     "response_length": len(response_text),
                 },
@@ -317,7 +241,7 @@ async def chat(
                     event="chat_completed",
                     properties={
                         "lang": detected_lang,
-                        "model": target_model,
+                        "model": actual_model,
                         "latency_ms": latency_ms,
                         "user_tier": user_tier,
                     },
@@ -325,7 +249,7 @@ async def chat(
 
             return ChatResponse(
                 response=response_text,
-                model_used=target_model,
+                model_used=actual_model,
                 latency_ms=latency_ms,
                 sources=[
                     {
@@ -389,77 +313,6 @@ async def chat(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _resolve_lang_and_model(
-    message: str, lang_override: Optional[str] = None
-) -> tuple[str, str]:
-    """Resolve language and target model from message and optional language override."""
-    if lang_override:
-        detected_lang = lang_override
-        target_model = (
-            settings.SARVAM_MODEL
-            if lang_override == "as"
-            else settings.VERTEX_GEMINI_MODEL
-        )
-    else:
-        detected_lang, target_model = detect_language_and_route(message)
-    return detected_lang, target_model
-
-
-def _build_system_prompt(detected_lang: str, context_chunks: list[dict]) -> str:
-    """Build system prompt with numbered [#] citation format."""
-    lang_instruction = (
-        "You are Syrabit, an expert educational assistant for Assamese students.\n"
-        "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
-        "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
-        if detected_lang == "en"
-        else "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09ac\u09bf\u09b6\u09c7\u09b7\u099c\u09cd\u099e \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964\n"
-        "\u09a8\u09bf\u09ae\u09cd\u09a8\u09b2\u09bf\u0996\u09bf\u09a4 \u09a8\u09ae\u09cd\u09ac\u09f0\u09af\u09c1\u0995\u09cd\u09a4 \u09aa\u09cd\u09f0\u09b8\u0982\u0997 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u09bf \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 \u09aa\u09cd\u09f0\u09b8\u0982\u0997\u09a4 \u09a8\u09be\u09a5\u09be\u0995\u09bf\u09b2\u09c7 \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964\n"
-        "\u0989\u09a6\u09cd\u09a7\u09c3\u09a4\u09bf\u09f0 \u09ac\u09be\u09ac\u09c7 [#] \u09ac\u09bf\u09a8\u09cd\u09af\u09be\u09b8 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u0995 (\u09af\u09c7\u09a8\u09c7 [1], [2])\u0964 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be\u09a4 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964"
-    )
-
-    if not context_chunks:
-        return f"{lang_instruction}\n\nNote: Knowledge base results are currently unavailable. Answer based on your general knowledge and clearly state that you cannot verify the answer against the course material."
-
-    context_text = "\n".join(
-        f"[{i + 1}] {chunk['title']}: {chunk['content']}"
-        for i, chunk in enumerate(context_chunks)
-    )
-    return f"{lang_instruction}\n\nContext:\n{context_text}"
-
-
-async def _save_chat_async(
-    user_id: str,
-    session_id: Optional[str],
-    user_message: str,
-    assistant_response: str,
-    target_model: str,
-    latency_ms: int,
-    context_chunks: list[dict],
-):
-    """Fire-and-forget chat persistence to MongoDB."""
-    try:
-        from app.models.chat import Chat
-
-        chat_doc = Chat(
-            user_id=user_id,
-            session_id=session_id,
-        )
-        chat_doc.add_message(role="user", content=user_message)
-        chat_doc.add_message(
-            role="assistant",
-            content=assistant_response,
-            model_used=target_model,
-            latency_ms=latency_ms,
-            rag_sources=[
-                {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
-                for c in context_chunks
-            ],
-        )
-        await chat_doc.save()
-    except Exception as e:
-        logger.error(f"Failed to save streamed chat: {e}")
-
-
 @router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
@@ -478,7 +331,7 @@ async def chat_stream(
 
     Features:
     - Explicit lang param (en/as) or auto-detection fallback
-    - Sarvam -> Vertex fallback on failure for Assamese
+    - Sarvam -> Cloudflare AI fallback on failure for Assamese
     - Fire-and-forget MongoDB persistence after stream completes
     """
     start_time = time.time()
@@ -510,12 +363,11 @@ async def chat_stream(
     sanitized_message = sanitize_user_input(request.message)
 
     # -- Resolve language & model --
-    detected_lang, target_model = _resolve_lang_and_model(
+    detected_lang, target_model = ChatService.resolve_language_and_model(
         sanitized_message, request.lang
     )
 
     # -- RAG retrieval (with OTel span) --
-    from app.services.ai.embedder import generate_embedding
     from app.core.telemetry import get_tracer
 
     tracer = get_tracer()
@@ -527,12 +379,8 @@ async def chat_stream(
             rag_span.set_attribute("user.tier", user_tier)
             rag_span.set_attribute("user.id", user_id)
 
-            embedding = await generate_embedding(sanitized_message)
-            context_chunks = await search_service.search_context(
-                query=sanitized_message,
-                text=embedding,
-                user_tier=user_tier,
-                limit=settings.MAX_CONTEXT_DOCS,
+            context_chunks = await ChatService.retrieve_context(
+                sanitized_message, user_tier
             )
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
@@ -542,9 +390,6 @@ async def chat_stream(
         logger.error(f"RAG retrieval failed in stream: {e}")
         context_chunks = []
 
-    # Apply token budget to context chunks
-    context_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=3000)
-
     if not context_chunks:
         logger.warning(
             "rag_empty_context",
@@ -552,65 +397,33 @@ async def chat_stream(
         )
 
     # -- Build system prompt --
-    system_prompt = _build_system_prompt(detected_lang, context_chunks)
+    system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
 
     # Include multi-turn conversation history
-    history = await _load_conversation_history(request.session_id)
+    history = await ChatService.load_conversation_history(request.session_id)
     if history:
         system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
-    # -- Stream generator with Sarvam->Vertex fallback --
+    # -- Stream generator with Sarvam->Cloudflare fallback --
     async def event_stream():
         full_response = ""
         actual_model = target_model
 
-        try:
-            from app.services.ai.router import stream_response
-
-            async for chunk in stream_response(
-                system_prompt=system_prompt,
-                user_message=sanitized_message,
-                model=target_model,
-            ):
-                full_response += chunk
-                yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
-
-        except Exception as e:
-            # FALLBACK: If Assamese (Sarvam) fails, fall back to Vertex
-            if detected_lang == "as":
-                logger.warning(f"Sarvam stream failed ({e}), falling back to Vertex AI")
-                logger.info(
-                    "chat_fallback",
-                    extra={
-                        "user_id": user_id,
-                        "error": str(e),
-                        "fallback_provider": "vertex",
-                    },
-                )
-                yield f"data: {json.dumps({'fallback': True, 'provider': 'vertex', 'reason': str(e)})}\n\n"
-
-                try:
-                    from app.services.ai.cloudflare_client import cloudflare_client
-
-                    actual_model = settings.CF_AI_MODEL
-                    async for chunk in cloudflare_client.stream_generate(
-                        system_prompt, sanitized_message
-                    ):
-                        full_response += chunk
-                        yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
-                except Exception as fallback_err:
-                    logger.error(f"Vertex fallback also failed: {fallback_err}")
-                    from app.services.dead_letter import store_dead_letter
-
-                    await store_dead_letter(
-                        user_id, request.message, detected_lang, str(fallback_err)
-                    )
-                    yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-                    return
-            else:
-                logger.error(f"Vertex stream failed: {e}")
-                yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-                return
+        async for event in ChatService.stream_llm(
+            system_prompt=system_prompt,
+            sanitized_message=sanitized_message,
+            target_model=target_model,
+            detected_lang=detected_lang,
+            user_id=user_id,
+            request_message=request.message,
+        ):
+            # Internal sentinel carries the full response and actual model
+            if event.startswith("{") and '"__internal_complete"' in event:
+                data = json.loads(event)
+                full_response = data["full_response"]
+                actual_model = data["actual_model"]
+                continue
+            yield event
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)
@@ -627,7 +440,7 @@ async def chat_stream(
                 "sarvam"
                 if "sarvam" in actual_model.lower()
                 or "openhathi" in actual_model.lower()
-                else "vertex",
+                else "cloudflare",
             )
 
         # Track in PostHog
@@ -647,7 +460,7 @@ async def chat_stream(
 
         # -- Persist chat (fire-and-forget) --
         asyncio.create_task(
-            _save_chat_async(
+            ChatService.save_chat(
                 user_id=user_id,
                 session_id=request.session_id,
                 user_message=sanitized_message,
@@ -668,6 +481,11 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# HISTORY ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
 
 
 @router.get("/history")
