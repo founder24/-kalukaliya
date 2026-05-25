@@ -44,9 +44,9 @@ def detect_language_and_route(text: str) -> tuple[str, str]:
         logger.info("Routing to Sarvam AI for Assamese content")
         return "as", settings.SARVAM_MODEL
     else:
-        # Route to Vertex AI for English
-        logger.info("Routing to Vertex AI for English content")
-        return "en", settings.VERTEX_GEMINI_MODEL
+        # Route to Cloudflare Workers AI for English
+        logger.info("Routing to Cloudflare Workers AI for English content")
+        return "en", settings.CF_AI_MODEL
 
 
 async def generate_response(
@@ -62,9 +62,9 @@ async def generate_response(
             system_prompt=system_prompt, user_message=user_message, stream=stream
         )
     else:
-        from app.services.ai.vertex_client import generate_with_vertex
+        from app.services.ai.cloudflare_client import generate_with_cloudflare
 
-        return await generate_with_vertex(
+        return await generate_with_cloudflare(
             system_prompt=system_prompt,
             user_message=user_message,
             model=model,
@@ -82,7 +82,7 @@ async def stream_response(
 
     Routes to:
     - Sarvam AI (with retry) for Assamese models (sarvam, openhathi, saaras)
-    - Vertex AI for English/Gemini models
+    - Cloudflare Workers AI for English models
 
     Yields text chunks as they arrive from the provider.
     Raises RuntimeError on failure (caller handles fallback).
@@ -101,10 +101,10 @@ async def stream_response(
         ):
             yield chunk
     else:
-        from app.services.ai.vertex_client import vertex_client
+        from app.services.ai.cloudflare_client import cloudflare_client
 
-        logger.info(f"Streaming from Vertex AI (model={model})")
-        async for chunk in vertex_client.stream_generate(
+        logger.info(f"Streaming from Cloudflare Workers AI (model={model})")
+        async for chunk in cloudflare_client.stream_generate(
             system_prompt=system_prompt,
             user_message=user_message,
         ):

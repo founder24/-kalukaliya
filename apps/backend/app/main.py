@@ -87,12 +87,12 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    from app.services.ai.vertex_client import vertex_client
+    from app.services.ai.cloudflare_client import cloudflare_client
     from app.services.ai.sarvam_client import sarvam_client
     from app.services.payment.razorpay_client import razorpay_client
     from app.services.comms.resend_client import close_resend_client
 
-    await vertex_client.close()
+    await cloudflare_client.close()
     await sarvam_client.close()
     await razorpay_client.close()
     await close_resend_client()
