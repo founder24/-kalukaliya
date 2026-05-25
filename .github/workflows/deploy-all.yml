@@ -97,42 +97,42 @@ jobs:
       - name: Fetch secrets from Azure KeyVault
         run: |
           set -euo pipefail
-          JWT_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name jwt-secret --query value -o tsv)
+          JWT_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name JWT-SECRET --query value -o tsv)
           echo "::add-mask::$JWT_SECRET"
           echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
-          MONGODB_URI=$(az keyvault secret show --vault-name syrabit-prod-kv --name mongodb-uri --query value -o tsv)
+          MONGODB_URI=$(az keyvault secret show --vault-name syrabit-prod-kv --name MONGO-URI --query value -o tsv)
           echo "::add-mask::$MONGODB_URI"
           echo "MONGODB_URI=$MONGODB_URI" >> "$GITHUB_ENV"
-          UPSTASH_REDIS_URL=$(az keyvault secret show --vault-name syrabit-prod-kv --name upstash-redis-url --query value -o tsv)
-          echo "::add-mask::$UPSTASH_REDIS_URL"
-          echo "UPSTASH_REDIS_URL=$UPSTASH_REDIS_URL" >> "$GITHUB_ENV"
-          UPSTASH_REDIS_TOKEN=$(az keyvault secret show --vault-name syrabit-prod-kv --name upstash-redis-token --query value -o tsv)
-          echo "::add-mask::$UPSTASH_REDIS_TOKEN"
-          echo "UPSTASH_REDIS_TOKEN=$UPSTASH_REDIS_TOKEN" >> "$GITHUB_ENV"
-          AZURE_SEARCH_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name azure-search-key --query value -o tsv)
-          echo "::add-mask::$AZURE_SEARCH_KEY"
-          echo "AZURE_SEARCH_KEY=$AZURE_SEARCH_KEY" >> "$GITHUB_ENV"
-          AZURE_SEARCH_ENDPOINT=$(az keyvault secret show --vault-name syrabit-prod-kv --name azure-search-endpoint --query value -o tsv)
-          echo "::add-mask::$AZURE_SEARCH_ENDPOINT"
-          echo "AZURE_SEARCH_ENDPOINT=$AZURE_SEARCH_ENDPOINT" >> "$GITHUB_ENV"
-          VERTEX_AI_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name vertex-ai-key --query value -o tsv)
-          echo "::add-mask::$VERTEX_AI_KEY"
-          echo "VERTEX_AI_KEY=$VERTEX_AI_KEY" >> "$GITHUB_ENV"
-          SARVAM_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name sarvam-api-key --query value -o tsv)
+          UPSTASH_REDIS_REST_URL=$(az keyvault secret show --vault-name syrabit-prod-kv --name UPSTASH-REDIS-REST-URL --query value -o tsv)
+          echo "::add-mask::$UPSTASH_REDIS_REST_URL"
+          echo "UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL" >> "$GITHUB_ENV"
+          UPSTASH_REDIS_REST_TOKEN=$(az keyvault secret show --vault-name syrabit-prod-kv --name UPSTASH-REDIS-REST-TOKEN --query value -o tsv)
+          echo "::add-mask::$UPSTASH_REDIS_REST_TOKEN"
+          echo "UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN" >> "$GITHUB_ENV"
+          GOOGLE_APPLICATION_CREDENTIALS_JSON=$(az keyvault secret show --vault-name syrabit-prod-kv --name GOOGLE-APPLICATION-CREDENTIALS-JSON --query value -o tsv)
+          echo "::add-mask::$GOOGLE_APPLICATION_CREDENTIALS_JSON"
+          echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$GOOGLE_APPLICATION_CREDENTIALS_JSON" >> "$GITHUB_ENV"
+          SARVAM_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name SARVAM-API-KEY --query value -o tsv)
           echo "::add-mask::$SARVAM_API_KEY"
           echo "SARVAM_API_KEY=$SARVAM_API_KEY" >> "$GITHUB_ENV"
-          RAZORPAY_KEY_ID=$(az keyvault secret show --vault-name syrabit-prod-kv --name razorpay-key-id --query value -o tsv)
+          RAZORPAY_KEY_ID=$(az keyvault secret show --vault-name syrabit-prod-kv --name RAZORPAY-KEY-ID --query value -o tsv)
           echo "::add-mask::$RAZORPAY_KEY_ID"
           echo "RAZORPAY_KEY_ID=$RAZORPAY_KEY_ID" >> "$GITHUB_ENV"
-          RAZORPAY_KEY_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name razorpay-key-secret --query value -o tsv)
+          RAZORPAY_KEY_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name RAZORPAY-KEY-SECRET --query value -o tsv)
           echo "::add-mask::$RAZORPAY_KEY_SECRET"
           echo "RAZORPAY_KEY_SECRET=$RAZORPAY_KEY_SECRET" >> "$GITHUB_ENV"
-          RESEND_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name resend-api-key --query value -o tsv)
-          echo "::add-mask::$RESEND_API_KEY"
-          echo "RESEND_API_KEY=$RESEND_API_KEY" >> "$GITHUB_ENV"
-          POSTHOG_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name posthog-api-key --query value -o tsv)
+          RAZORPAY_WEBHOOK_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name RAZORPAY-WEBHOOK-SECRET --query value -o tsv)
+          echo "::add-mask::$RAZORPAY_WEBHOOK_SECRET"
+          echo "RAZORPAY_WEBHOOK_SECRET=$RAZORPAY_WEBHOOK_SECRET" >> "$GITHUB_ENV"
+          POSTHOG_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name POSTHOG-API-KEY --query value -o tsv)
           echo "::add-mask::$POSTHOG_API_KEY"
           echo "POSTHOG_API_KEY=$POSTHOG_API_KEY" >> "$GITHUB_ENV"
+          SENTRY_DSN=$(az keyvault secret show --vault-name syrabit-prod-kv --name SENTRY-DSN --query value -o tsv)
+          echo "::add-mask::$SENTRY_DSN"
+          echo "SENTRY_DSN=$SENTRY_DSN" >> "$GITHUB_ENV"
+          ADMIN_JWT_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name ADMIN-JWT-SECRET --query value -o tsv)
+          echo "::add-mask::$ADMIN_JWT_SECRET"
+          echo "ADMIN_JWT_SECRET=$ADMIN_JWT_SECRET" >> "$GITHUB_ENV"
 
       - name: Build & Push to ACR
         run: |
@@ -158,18 +158,16 @@ jobs:
             --set-env-vars \
               "JWT_SECRET=${{ env.JWT_SECRET }}" \
               "MONGODB_URI=${{ env.MONGODB_URI }}" \
-              "UPSTASH_REDIS_REST_URL=${{ env.UPSTASH_REDIS_URL }}" \
-              "UPSTASH_REDIS_REST_TOKEN=${{ env.UPSTASH_REDIS_TOKEN }}" \
-              "AZURE_SEARCH_QUERY_KEY=${{ env.AZURE_SEARCH_KEY }}" \
-              "AZURE_SEARCH_ENDPOINT=${{ env.AZURE_SEARCH_ENDPOINT }}" \
-              "GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ env.VERTEX_AI_KEY }}" \
+              "UPSTASH_REDIS_REST_URL=${{ env.UPSTASH_REDIS_REST_URL }}" \
+              "UPSTASH_REDIS_REST_TOKEN=${{ env.UPSTASH_REDIS_REST_TOKEN }}" \
+              "GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ env.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" \
               "SARVAM_API_KEY=${{ env.SARVAM_API_KEY }}" \
               "RAZORPAY_KEY_ID=${{ env.RAZORPAY_KEY_ID }}" \
               "RAZORPAY_KEY_SECRET=${{ env.RAZORPAY_KEY_SECRET }}" \
-              "RESEND_API_KEY=${{ env.RESEND_API_KEY }}" \
+              "RAZORPAY_WEBHOOK_SECRET=${{ env.RAZORPAY_WEBHOOK_SECRET }}" \
               "POSTHOG_API_KEY=${{ env.POSTHOG_API_KEY }}" \
-              "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" \
-              "ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}" \
+              "SENTRY_DSN=${{ env.SENTRY_DSN }}" \
+              "ADMIN_JWT_SECRET=${{ env.ADMIN_JWT_SECRET }}" \
               "RESET_TOKEN_SECRET=${{ secrets.RESET_TOKEN_SECRET }}" \
               "TRANSLATE_CRON_SECRET=${{ secrets.TRANSLATE_CRON_SECRET }}" \
               "APP_ENV=production"
