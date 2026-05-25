@@ -210,7 +210,7 @@ jobs:
 
       - name: "Guard: check for KV sentinel IDs"
         run: |
-          if grep -qi 'REPLACE_ME' apps/edge/wrangler.toml; then
+          if grep -v '^\s*#' apps/edge/wrangler.toml | grep -qi 'REPLACE_ME'; then
             echo "ERROR: wrangler.toml still contains sentinel KV namespace IDs."
             echo "You MUST replace ISR_CACHE_KV REPLACE_ME IDs before deploying."
             echo "Run: npx wrangler kv:namespace create ISR_CACHE_KV"
