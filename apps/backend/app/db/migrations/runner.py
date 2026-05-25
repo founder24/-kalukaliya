@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 async def get_current_version(db: AsyncIOMotorDatabase) -> Optional[str]:
     """Get the latest applied migration version."""
-    doc = await db.schema_versions.find_one(
-        sort=[("applied_at", -1)]
-    )
+    doc = await db.schema_versions.find_one(sort=[("applied_at", -1)])
     return doc["version"] if doc else None
 
 
@@ -50,11 +48,13 @@ async def apply_migration(
     logger.info(f"Applying migration {version}: {description}")
     try:
         await up_fn(db)
-        await db.schema_versions.insert_one({
-            "version": version,
-            "description": description,
-            "applied_at": datetime.now(timezone.utc),
-        })
+        await db.schema_versions.insert_one(
+            {
+                "version": version,
+                "description": description,
+                "applied_at": datetime.now(timezone.utc),
+            }
+        )
         logger.info(f"Migration {version} applied successfully")
         return True
     except DuplicateKeyError:

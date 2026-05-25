@@ -1,8 +1,8 @@
 """Rate limiting dependency for FastAPI endpoints."""
+
 import time
 import logging
 from datetime import datetime, timedelta
-from fastapi import Request, HTTPException
 
 from app.config import settings
 from app.db.redis import get_redis

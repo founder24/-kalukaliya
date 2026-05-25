@@ -1,4 +1,5 @@
 """PostHog event tracking helpers."""
+
 import logging
 from typing import Optional
 from fastapi import Request

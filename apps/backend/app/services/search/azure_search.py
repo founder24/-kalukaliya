@@ -103,7 +103,9 @@ class AzureSearchService:
             from app.db.redis import get_redis
 
             cache_input = f"{query}:{text}:{user_tier}"
-            cache_key = f"search_cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
+            cache_key = (
+                f"search_cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
+            )
             redis = get_redis()
             cached = await redis.get(cache_key)
             if cached:

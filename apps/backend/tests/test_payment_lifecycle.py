@@ -34,23 +34,31 @@ def mock_user_pro():
 
 
 @pytest.mark.anyio
-async def test_subscription_charged_upgrades_user(client: AsyncClient, mock_redis, mock_user_pro):
+async def test_subscription_charged_upgrades_user(
+    client: AsyncClient, mock_redis, mock_user_pro
+):
     """subscription.charged -> resets monthly message count, sets active"""
     from app.config import settings
+
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
 
     with patch("app.api.webhooks.razorpay.User") as MockUser:
         MockUser.find_one = AsyncMock(return_value=mock_user_pro)
-        with patch("app.services.comms.resend_client.send_receipt_email", new_callable=AsyncMock):
-            body = json.dumps({
-                "id": "evt_charged_001",
-                "event": "subscription.charged",
-                "payload": {
-                    "subscription": {"id": "sub_TestSub123"},
-                    "customer": {"id": "cust_1"},
-                    "payment": {"amount": 29900},
-                },
-            }).encode()
+        with patch(
+            "app.services.comms.resend_client.send_receipt_email",
+            new_callable=AsyncMock,
+        ):
+            body = json.dumps(
+                {
+                    "id": "evt_charged_001",
+                    "event": "subscription.charged",
+                    "payload": {
+                        "subscription": {"id": "sub_TestSub123"},
+                        "customer": {"id": "cust_1"},
+                        "payment": {"amount": 29900},
+                    },
+                }
+            ).encode()
             sig = sign_payload(body, secret)
             response = await client.post(
                 "/api/webhooks/razorpay",
@@ -69,15 +77,18 @@ async def test_payment_failed_logs_warning(client: AsyncClient, mock_redis, capl
     """payment.failed -> logs warning about failed payment"""
     from app.config import settings
     import logging
+
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
 
-    body = json.dumps({
-        "id": "evt_failed_001",
-        "event": "payment.failed",
-        "payload": {
-            "customer": {"id": "cust_failed_1"},
-        },
-    }).encode()
+    body = json.dumps(
+        {
+            "id": "evt_failed_001",
+            "event": "payment.failed",
+            "payload": {
+                "customer": {"id": "cust_failed_1"},
+            },
+        }
+    ).encode()
     sig = sign_payload(body, secret)
 
     with caplog.at_level(logging.INFO):
@@ -91,21 +102,26 @@ async def test_payment_failed_logs_warning(client: AsyncClient, mock_redis, capl
 
 
 @pytest.mark.anyio
-async def test_subscription_cancelled_marks_user(client: AsyncClient, mock_redis, mock_user_pro):
+async def test_subscription_cancelled_marks_user(
+    client: AsyncClient, mock_redis, mock_user_pro
+):
     """subscription.cancelled -> sets cancel_at_period_end"""
     from app.config import settings
+
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
 
     with patch("app.api.webhooks.razorpay.User") as MockUser:
         MockUser.find_one = AsyncMock(return_value=mock_user_pro)
-        body = json.dumps({
-            "id": "evt_cancel_001",
-            "event": "subscription.cancelled",
-            "payload": {
-                "subscription": {"id": "sub_TestSub123"},
-                "customer": {"id": "cust_1"},
-            },
-        }).encode()
+        body = json.dumps(
+            {
+                "id": "evt_cancel_001",
+                "event": "subscription.cancelled",
+                "payload": {
+                    "subscription": {"id": "sub_TestSub123"},
+                    "customer": {"id": "cust_1"},
+                },
+            }
+        ).encode()
         sig = sign_payload(body, secret)
         response = await client.post(
             "/api/webhooks/razorpay",
@@ -122,6 +138,7 @@ async def test_subscription_cancelled_marks_user(client: AsyncClient, mock_redis
 async def test_duplicate_event_returns_duplicate(client: AsyncClient):
     """Duplicate event ID -> returns {status: 'duplicate'}"""
     from app.config import settings
+
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
 
     mock_redis = AsyncMock()
@@ -129,15 +146,17 @@ async def test_duplicate_event_returns_duplicate(client: AsyncClient):
     mock_redis.set = AsyncMock(return_value=True)
 
     with patch("app.db.redis.get_redis", return_value=mock_redis):
-        body = json.dumps({
-            "id": "evt_duplicate_001",
-            "event": "subscription.charged",
-            "payload": {
-                "subscription": {"id": "sub_TestSub123"},
-                "customer": {"id": "cust_1"},
-                "payment": {"amount": 29900},
-            },
-        }).encode()
+        body = json.dumps(
+            {
+                "id": "evt_duplicate_001",
+                "event": "subscription.charged",
+                "payload": {
+                    "subscription": {"id": "sub_TestSub123"},
+                    "customer": {"id": "cust_1"},
+                    "payment": {"amount": 29900},
+                },
+            }
+        ).encode()
         sig = sign_payload(body, secret)
         response = await client.post(
             "/api/webhooks/razorpay",
@@ -150,19 +169,24 @@ async def test_duplicate_event_returns_duplicate(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_subscription_created_upgrades_to_pro(client: AsyncClient, mock_redis, mock_user_pro):
+async def test_subscription_created_upgrades_to_pro(
+    client: AsyncClient, mock_redis, mock_user_pro
+):
     """subscription.created -> (currently unhandled, returns ok)"""
     from app.config import settings
+
     secret = settings.RAZORPAY_WEBHOOK_SECRET or "test_webhook_secret"
 
-    body = json.dumps({
-        "id": "evt_created_001",
-        "event": "subscription.created",
-        "payload": {
-            "subscription": {"id": "sub_TestSub123"},
-            "customer": {"id": "cust_1"},
-        },
-    }).encode()
+    body = json.dumps(
+        {
+            "id": "evt_created_001",
+            "event": "subscription.created",
+            "payload": {
+                "subscription": {"id": "sub_TestSub123"},
+                "customer": {"id": "cust_1"},
+            },
+        }
+    ).encode()
     sig = sign_payload(body, secret)
     response = await client.post(
         "/api/webhooks/razorpay",

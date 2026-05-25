@@ -13,6 +13,7 @@ from typing import Optional
 def _log_injection_attempt(text: str, pattern: str) -> None:
     """Log prompt injection attempt with structured fields. Never logs full message."""
     import logging
+
     logger = logging.getLogger(__name__)
     logger.warning(
         "prompt_injection_detected",

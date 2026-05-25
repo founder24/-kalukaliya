@@ -8,7 +8,7 @@ from app.models.chat import Chat
 from app.models.feedback import ChatFeedback
 from app.models.knowledge import KnowledgeObject
 from app.models.content import Board, Class, Stream, Subject, Chapter
-from app.db.migrations.runner import check_and_apply_migrations, check_schema_version
+from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
 logger = logging.getLogger(__name__)
