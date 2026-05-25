@@ -31,17 +31,17 @@ id = "2983094e249d4094b66e4b9dacc38719"
 preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 
 # ┌─────────────────────────────────────────────────────────────────────────────┐
-# │ WARNING: ISR_CACHE_KV uses sentinel IDs that WILL FAIL in production.      │
+# │ WARNING: ISR_CACHE_KV uses placeholder IDs that WILL FAIL in production.   │
 # │ Before deploying to production, you MUST:                                  │
 # │   1. Run: npx wrangler kv:namespace create ISR_CACHE_KV                    │
 # │   2. Run: npx wrangler kv:namespace create ISR_CACHE_KV --preview          │
-# │   3. Replace the REPLACE_ME values below with the real IDs from step 1-2   │
+# │   3. Replace the placeholder IDs below with the real IDs from step 1-2     │
 # │ Failure to do so will cause deploy failures or runtime errors.             │
 # └─────────────────────────────────────────────────────────────────────────────┘
 [[env.production.kv_namespaces]]
 binding = "ISR_CACHE_KV"
-id = "REPLACE_ME_WITH_REAL_KV_NAMESPACE_ID"
-preview_id = "REPLACE_ME_WITH_REAL_KV_PREVIEW_ID"
+id = "0000000000000000000000000000000a"
+preview_id = "0000000000000000000000000000000b"
 
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET
