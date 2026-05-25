@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Layer 3 - Medium fixes: Redis caching for Azure Search, payment integration tests, edge worker tests, AuthContext refactor, chat.py refactor, prompt injection logging",
+  "status": "in_progress",
+  "steps": [
+    "In apps/backend/app/services/search/azure_search.py, add a Redis cache layer to search_context(). Before calling Azure Search: compute a cache key as SHA-256 of (query + user_tier), attempt to get from Redis (key pattern: 'search_cache:{hash}'). On cache hit, return the cached result (JSON deserialized). On cache miss, proceed with Azure Search, then store result in Redis with 5-minute TTL. Wrap all Redis operations in try/except for graceful degradation. Import get_redis from app.db.redis and hashlib, json.",
+    "Create apps/backend/tests/test_payment_lifecycle.py with mocked tests for Razorpay webhook events. Follow the pattern in tests/test_webhook.py and conftest.py. Tests should cover: (a) subscription.created -> user upgraded to pro, (b) subscription.charged -> monthly renewal resets message count, (c) payment.failed -> user sees grace period warning (log-based assertion), (d) subscription.cancelled -> user marked cancel_at_period_end, (e) duplicate event handling returns {status: 'duplicate'}. Mock Redis and User.find_one as needed. Use the sign_payload helper from test_webhook.py.",
+    "Create apps/edge/tests/rate-limit.test.ts - test checkRateLimit function from ../src/middleware/rate-limit.ts. Test cases: (a) allows request under limit, (b) blocks request at limit, (c) increments counter on each call, (d) returns correct remaining count. Mock a KV namespace object with get/put methods. Follow the vitest pattern from jwt.test.ts.",
+    "Create apps/edge/tests/cors.test.ts - test getCorsHeaders and applyCorsHeaders from ../src/middleware/cors.ts. Test cases: (a) allowed origin returns that origin, (b) disallowed origin returns default (first allowed), (c) applyCorsHeaders sets all expected headers on a Headers object.",
+    "Create apps/edge/tests/bot.test.ts - test turnstileVerify from ../src/middleware/bot.ts. Test cases: (a) returns true when Cloudflare returns success:true, (b) returns false when success:false, (c) returns false when fetch throws. Mock global fetch.",
+    "Refactor apps/frontend/src/context/AuthContext.jsx: (a) Create apps/frontend/src/hooks/useTokenManager.js exporting { storeToken, storeRefreshToken, getToken, getRefreshToken, clearTokens } that manages _inMemoryToken/_inMemoryRefreshToken and sessionStorage. (b) Create apps/frontend/src/hooks/useAuthRefresh.js exporting a hook that encapsulates the token refresh logic (the try-catch around axios.post to /auth/refresh). (c) Create apps/frontend/src/hooks/useAnonSync.js exporting a hook that encapsulates the anonymous data claiming effect (the useEffect with studyApi.claimAnonData). (d) Refactor AuthContext.jsx to import and use these hooks, reducing it to a thin composition layer. Keep all exports (AuthProvider, useAuth) unchanged.",
+    "Refactor apps/backend/app/api/v1/chat.py: (a) Extract check_rate_limit into a new file apps/backend/app/api/deps/rate_limit.py as a FastAPI dependency (a function that takes Request and returns rate limit info or raises HTTPException). (b) Create apps/backend/app/api/deps/__init__.py. (c) Move PostHog tracking into an async helper function in a new file apps/backend/app/utils/tracking.py that accepts the tracking params and handles get_posthog + capture. (d) Update chat.py to import from these new modules. Target: reduce chat.py to ~350 lines.",
+    "In apps/backend/app/core/security.py, add prompt injection logging. When sanitize_user_input raises ValueError (i.e., when a pattern matches): before raising, log the attempt using the existing logger with structured fields: timestamp (ISO 8601), sanitized_snippet (first 100 chars of the input), matched_pattern (which pattern triggered), severity='warning'. Do NOT log the full message. Add a new helper function _log_injection_attempt(text, pattern) that handles this."
+  ],
+  "acceptance_criteria": [
+    "azure_search.py has Redis caching with SHA-256 key and 5min TTL with graceful degradation",
+    "test_payment_lifecycle.py exists and covers 5 Razorpay webhook event scenarios",
+    "apps/edge/tests/rate-limit.test.ts exists with 4+ test cases for KV rate limiting",
+    "apps/edge/tests/cors.test.ts exists with 3+ test cases for CORS headers",
+    "apps/edge/tests/bot.test.ts exists with 3+ test cases for Turnstile verification",
+    "AuthContext.jsx imports from useTokenManager, useAuthRefresh, and useAnonSync hooks",
+    "chat.py is reduced to ~350 lines by extracting rate limit dep and PostHog tracking",
+    "security.py logs injection attempts with structured fields before raising ValueError"
+  ],
+  "verification": [
+    "grep 'search_cache' apps/backend/app/services/search/azure_search.py",
+    "python -m pytest apps/backend/tests/test_payment_lifecycle.py --tb=short -q (with APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long-for-ci)",
+    "cd apps/edge && npx vitest run",
+    "test -f apps/frontend/src/hooks/useTokenManager.js && test -f apps/frontend/src/hooks/useAuthRefresh.js && test -f apps/frontend/src/hooks/useAnonSync.js",
+    "wc -l apps/backend/app/api/v1/chat.py should be ~350 or less",
+    "grep '_log_injection_attempt' apps/backend/app/core/security.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

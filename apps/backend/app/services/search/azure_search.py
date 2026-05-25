@@ -8,6 +8,8 @@ from azure.search.documents.models import (
 from azure.core.exceptions import AzureError
 from azure.core.credentials import AzureKeyCredential
 from app.config import settings
+import hashlib
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -95,6 +97,21 @@ class AzureSearchService:
             )
             return []
 
+        # Redis cache - try cache first
+        cache_key = None
+        try:
+            from app.db.redis import get_redis
+
+            cache_input = f"{query}:{user_tier}"
+            cache_key = f"search_cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
+            redis = get_redis()
+            cached = await redis.get(cache_key)
+            if cached:
+                logger.info(f"Search cache HIT for query '{query[:20]}...'")
+                return json.loads(cached)
+        except (RuntimeError, Exception) as e:
+            logger.debug(f"Search cache unavailable: {e}")
+
         try:
             # 1. Define Vector Query using built-in vectorization
             vector_query = VectorizableTextQuery(
@@ -164,6 +181,17 @@ class AzureSearchService:
             logger.info(
                 f"Retrieved {len(context_chunks)} chunks for query '{query[:20]}...'"
             )
+
+            # Cache the result
+            if cache_key and context_chunks:
+                try:
+                    from app.db.redis import get_redis
+
+                    redis = get_redis()
+                    await redis.set(cache_key, json.dumps(context_chunks), ex=300)
+                except (RuntimeError, Exception) as e:
+                    logger.debug(f"Failed to cache search results: {e}")
+
             return context_chunks
 
         except Exception as e:

@@ -7,21 +7,16 @@ import time
 import json
 import asyncio
 import httpx
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from app.config import settings
 from app.models.user import User
-from app.db.redis import get_redis
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
 from app.services.chat_service import ChatService
-from app.utils.posthog import get_posthog
+from app.api.deps.rate_limit import check_rate_limit
+from app.utils.tracking import track_chat_completed
 
 logger = logging.getLogger(__name__)
-
-# Burst rate limits (per minute)
-BURST_LIMIT_FREE = 5
-BURST_LIMIT_PRO = 30
 
 router = APIRouter(tags=["Chat"])
 
@@ -52,63 +47,6 @@ class ChatResponse(BaseModel):
     model_used: str
     latency_ms: int
     sources: List[dict] = []
-
-
-# ═══════════════════════════════════════════════════════════════
-# Rate Limiting
-# ═══════════════════════════════════════════════════════════════
-
-
-async def check_rate_limit(
-    user_id: str, user_tier: str, client_ip: str = None
-) -> tuple[bool, int, int]:
-    """Check if user has exceeded rate limit. Returns (allowed, current_count, limit)."""
-    limit = (
-        settings.RATE_LIMIT_PRO_TIER
-        if user_tier == "pro"
-        else settings.RATE_LIMIT_FREE_TIER
-    )
-
-    try:
-        redis = get_redis()
-    except RuntimeError:
-        # Redis unavailable - allow request through (graceful degradation)
-        logger.warning("Redis unavailable - rate limiting disabled")
-        return True, 0, limit
-
-    try:
-        # Use IP-based tracking for anonymous users to prevent quota collision
-        month_key = time.strftime("%Y-%m", time.gmtime())
-        if user_id == "anonymous" and client_ip:
-            key = f"rate_anon:{client_ip}:{month_key}"
-        else:
-            key = f"rate:{user_id}:{month_key}"
-
-        current_count = await redis.incr(key)
-        if current_count == 1:
-            # Set expiry to end of month
-            next_month = datetime.now().replace(day=28) + timedelta(days=4)
-            expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
-            ttl = int(expire_at.timestamp() - time.time())
-            await redis.expire(key, ttl)
-
-        if current_count > limit:
-            return False, current_count, limit
-
-        # Burst rate limit (per-minute)
-        burst_limit = BURST_LIMIT_PRO if user_tier == "pro" else BURST_LIMIT_FREE
-        minute_key = int(time.time() // 60)
-        burst_key = f"burst:{user_id}:{minute_key}"
-        burst_count = await redis.incr(burst_key)
-        if burst_count == 1:
-            await redis.expire(burst_key, 60)
-        if burst_count > burst_limit:
-            return False, burst_count, burst_limit
-
-        return True, current_count, limit
-    except Exception as e:
-        logger.warning(f"Rate limit check failed: {e} - allowing request")
-        return True, 0, limit
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -251,21 +189,14 @@ async def chat(
             )
 
             # Track in PostHog
-            posthog = get_posthog(http_request)
-            if posthog:
-                # SECURITY/PII: Never send message content, user queries, or assistant
-                # responses to PostHog. Only send metadata (lang, model, latency, tier).
-                # Sending content violates our privacy policy and DPDP Act compliance.
-                posthog.capture(
-                    distinct_id=user_id,
-                    event="chat_completed",
-                    properties={
-                        "lang": detected_lang,
-                        "model": actual_model,
-                        "latency_ms": latency_ms,
-                        "user_tier": user_tier,
-                    },
-                )
+            await track_chat_completed(
+                request=http_request,
+                user_id=user_id,
+                lang=detected_lang,
+                model=actual_model,
+                latency_ms=latency_ms,
+                user_tier=user_tier,
+            )
 
             return ChatResponse(
                 response=response_text,
@@ -464,22 +395,15 @@ async def chat_stream(
             )
 
         # Track in PostHog
-        posthog = get_posthog(http_request)
-        if posthog:
-            # SECURITY/PII: Never send message content, user queries, or assistant
-            # responses to PostHog. Only send metadata (lang, model, latency, tier).
-            # Sending content violates our privacy policy and DPDP Act compliance.
-            posthog.capture(
-                distinct_id=user_id,
-                event="chat_completed",
-                properties={
-                    "lang": detected_lang,
-                    "model": actual_model,
-                    "latency_ms": latency_ms,
-                    "user_tier": user_tier,
-                    "streaming": True,
-                },
-            )
+        await track_chat_completed(
+            request=http_request,
+            user_id=user_id,
+            lang=detected_lang,
+            model=actual_model,
+            latency_ms=latency_ms,
+            user_tier=user_tier,
+            streaming=True,
+        )
 
         # -- Persist chat (fire-and-forget) --
         asyncio.create_task(

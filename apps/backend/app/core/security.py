@@ -4,9 +4,25 @@ Security Utilities: Input Sanitization, URL Validation, SSRF Protection
 
 import re
 import unicodedata
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 import ipaddress
 from typing import Optional
+
+
+def _log_injection_attempt(text: str, pattern: str) -> None:
+    """Log prompt injection attempt with structured fields. Never logs full message."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "prompt_injection_detected",
+        extra={
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "sanitized_snippet": text[:100],
+            "matched_pattern": pattern,
+            "severity": "warning",
+        },
+    )
 
 
 def sanitize_user_input(text: str) -> str:
@@ -46,6 +62,7 @@ def sanitize_user_input(text: str) -> str:
 
     for pattern in injection_patterns:
         if re.search(pattern, text, flags=re.IGNORECASE):
+            _log_injection_attempt(text, pattern)
             raise ValueError("Message contains disallowed content")
 
     # Remove control characters except newlines and tabs
