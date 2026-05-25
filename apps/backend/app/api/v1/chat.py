@@ -236,6 +236,9 @@ async def chat(
             # Track in PostHog
             posthog = get_posthog(http_request)
             if posthog:
+                # SECURITY/PII: Never send message content, user queries, or assistant
+                # responses to PostHog. Only send metadata (lang, model, latency, tier).
+                # Sending content violates our privacy policy and DPDP Act compliance.
                 posthog.capture(
                     distinct_id=user_id,
                     event="chat_completed",
@@ -446,6 +449,9 @@ async def chat_stream(
         # Track in PostHog
         posthog = get_posthog(http_request)
         if posthog:
+            # SECURITY/PII: Never send message content, user queries, or assistant
+            # responses to PostHog. Only send metadata (lang, model, latency, tier).
+            # Sending content violates our privacy policy and DPDP Act compliance.
             posthog.capture(
                 distinct_id=user_id,
                 event="chat_completed",
