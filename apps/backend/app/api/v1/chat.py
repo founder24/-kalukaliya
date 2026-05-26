@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
+import hashlib
 import logging
 import time
 import json
@@ -313,6 +314,13 @@ async def chat_stream(
     # Sanitize input to prevent prompt injection
     sanitized_message = sanitize_user_input(request.message)
 
+    if sanitized_message != request.message:
+        raw_hash = hashlib.sha256(request.message.encode()).hexdigest()[:16]
+        logger.info(
+            "input_sanitized",
+            extra={"user_id": user_id, "raw_hash": raw_hash},
+        )
+
     # -- Resolve language & model --
     detected_lang, target_model = ChatService.resolve_language_and_model(
         sanitized_message, request.lang
@@ -366,7 +374,7 @@ async def chat_stream(
             target_model=target_model,
             detected_lang=detected_lang,
             user_id=user_id,
-            request_message=request.message,
+            request_message=sanitized_message,
         ):
             # Internal sentinel carries the full response and actual model
             if event.startswith("{") and '"__internal_complete"' in event:
