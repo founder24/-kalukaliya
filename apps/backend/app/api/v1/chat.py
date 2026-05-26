@@ -81,7 +81,7 @@ async def chat(
 
     # Check rate limit
     allowed, current_count, limit, limit_type = await check_rate_limit(
-        user_id, user_tier, client_ip
+        user_id, user_tier, client_ip, request=http_request
     )
     if not allowed:
         raise HTTPException(
@@ -114,10 +114,16 @@ async def chat(
                 },
             )
 
-            # 2. RAG retrieval (embedding + hybrid search)
-            context_chunks = await ChatService.retrieve_context(
-                sanitized_message, user_tier
-            )
+            # 2. RAG retrieval + history load in parallel (independent I/O)
+            try:
+                context_chunks, history = await asyncio.gather(
+                    ChatService.retrieve_context(sanitized_message, user_tier),
+                    ChatService.load_conversation_history(request.session_id),
+                )
+            except Exception as e:
+                logger.error(f"RAG/history retrieval failed: {e}")
+                context_chunks = []
+                history = ""
 
             if not context_chunks:
                 logger.warning(
@@ -131,7 +137,6 @@ async def chat(
             )
 
             # Include multi-turn conversation history
-            history = await ChatService.load_conversation_history(request.session_id)
             if history:
                 system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
@@ -298,7 +303,7 @@ async def chat_stream(
     user_id = str(user.id) if user else "anonymous"
 
     allowed, current_count, limit, limit_type = await check_rate_limit(
-        user_id, user_tier, client_ip
+        user_id, user_tier, client_ip, request=http_request
     )
     if not allowed:
         raise HTTPException(
@@ -338,8 +343,9 @@ async def chat_stream(
             rag_span.set_attribute("user.tier", user_tier)
             rag_span.set_attribute("user.id", user_id)
 
-            context_chunks = await ChatService.retrieve_context(
-                sanitized_message, user_tier
+            context_chunks, history = await asyncio.gather(
+                ChatService.retrieve_context(sanitized_message, user_tier),
+                ChatService.load_conversation_history(request.session_id),
             )
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
@@ -348,6 +354,7 @@ async def chat_stream(
     except Exception as e:
         logger.error(f"RAG retrieval failed in stream: {e}")
         context_chunks = []
+        history = ""
 
     if not context_chunks:
         logger.warning(
@@ -359,7 +366,6 @@ async def chat_stream(
     system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
 
     # Include multi-turn conversation history
-    history = await ChatService.load_conversation_history(request.session_id)
     if history:
         system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 

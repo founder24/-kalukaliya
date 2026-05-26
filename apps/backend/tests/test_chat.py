@@ -22,7 +22,7 @@ async def test_chat_rate_limit_returns_429(client: AsyncClient):
     """Test rate limiting returns 429"""
     with patch(
         "app.api.v1.chat.check_rate_limit",
-        return_value=(False, 101, 100),
+        return_value=(False, 101, 100, "monthly"),
     ):
         response = await client.post("/api/v1/chat/", json={"message": "hello world"})
         assert response.status_code == 429
@@ -34,7 +34,7 @@ async def test_chat_error_does_not_leak_details(client: AsyncClient):
     with (
         patch(
             "app.api.v1.chat.check_rate_limit",
-            return_value=(True, 1, 100),
+            return_value=(True, 1, 100, "monthly"),
         ),
         patch(
             "app.services.ai.router.detect_language_and_route",

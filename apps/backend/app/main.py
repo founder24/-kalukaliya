@@ -57,6 +57,15 @@ async def lifespan(app: FastAPI):
             f"Redis initialization failed (expected in local dev without DB): {e}"
         )
 
+    # Warm up Azure Search connection (DNS/TLS handshake)
+    try:
+        from app.services.search.azure_search import search_service
+
+        await search_service.warm_up()
+        logger.info("Azure Search warmed up successfully")
+    except Exception as e:
+        logger.warning(f"Azure Search warm-up failed: {e}")
+
     if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
         logger.warning(
             "WARNING: Using default JWT_SECRET. "
@@ -130,30 +139,34 @@ def create_app() -> FastAPI:
         ],
     )
 
-    # CSRF Origin Validation Middleware
+    # Unified Middleware - combines CSRF, security headers, and request ID
+    # into a single middleware to reduce per-request overhead from 3 call_next chains to 1
     @app.middleware("http")
-    async def csrf_origin_check(request: Request, call_next):
-        """Validate Origin header on mutating requests to prevent CSRF."""
+    async def unified_middleware(request: Request, call_next):
+        """Combined middleware: CSRF origin check, security headers, and request ID tracking."""
+        # CSRF Origin Validation on mutating requests
         if request.method in ("POST", "PUT", "DELETE"):
             origin = request.headers.get("origin")
-            # Skip for health checks
-            if request.url.path.startswith("/health") or request.url.path.startswith(
-                "/api/health"
+            if not (
+                request.url.path.startswith("/health")
+                or request.url.path.startswith("/api/health")
             ):
-                return await call_next(request)
-            if origin and origin not in settings.allowed_origins_list:
-                from fastapi.responses import JSONResponse
+                if origin and origin not in settings.allowed_origins_list:
+                    from fastapi.responses import JSONResponse
 
-                return JSONResponse(
-                    status_code=403, content={"detail": "Origin not allowed"}
-                )
-        return await call_next(request)
+                    return JSONResponse(
+                        status_code=403, content={"detail": "Origin not allowed"}
+                    )
 
-    # Security Headers Middleware
-    @app.middleware("http")
-    async def add_security_headers(request: Request, call_next):
-        """Add security response headers to all responses."""
+        # Request ID
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+
+        start_time = time.time()
         response = await call_next(request)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Strict-Transport-Security"] = (
@@ -170,18 +183,9 @@ def create_app() -> FastAPI:
             "connect-src 'self' https://*.syrabit.ai https://app.posthog.com; "
             "frame-ancestors 'none'"
         )
-        return response
 
-    # Request ID Middleware for structured logging
-    @app.middleware("http")
-    async def add_request_id(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-        request.state.request_id = request_id
-
-        start_time = time.time()
-        response = await call_next(request)
-        elapsed_ms = int((time.time() - start_time) * 1000)
-
+        # Request ID header + logging
+        response.headers["X-Request-ID"] = request_id
         logger.info(
             "request_completed",
             extra={
@@ -193,7 +197,6 @@ def create_app() -> FastAPI:
             },
         )
 
-        response.headers["X-Request-ID"] = request_id
         return response
 
     # Initialize OpenTelemetry (no-op if packages not installed)
