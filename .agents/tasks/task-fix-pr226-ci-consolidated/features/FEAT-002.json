@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix the Tailwind CSS v4 PostCSS configuration. The project has tailwindcss@4.3.0 installed but the postcss.config.cjs still references `tailwindcss` directly as a PostCSS plugin, which broke in v4. Need to install @tailwindcss/postcss and update the postcss config. Also need to ensure the CSS directives and tailwind.config.js work with the v4 PostCSS plugin.",
+  "status": "in_progress",
+  "steps": [
+    "Install @tailwindcss/postcss as a dev dependency: pnpm --filter @workspace/syrabit add -D @tailwindcss/postcss",
+    "Update apps/frontend/postcss.config.cjs to use @tailwindcss/postcss instead of tailwindcss directly",
+    "Verify the frontend build passes: VITE_BACKEND_URL=https://api.syrabit.ai pnpm --filter @workspace/syrabit run build",
+    "If the build still fails due to @tailwind directives being incompatible with v4, update apps/frontend/src/index.css to use the v4 @import syntax instead of @tailwind directives",
+    "Commit changes with message 'fix: update PostCSS config for Tailwind CSS v4 compatibility'"
+  ],
+  "acceptance_criteria": [
+    "VITE_BACKEND_URL=https://api.syrabit.ai pnpm --filter @workspace/syrabit run build succeeds",
+    "pnpm --filter @workspace/syrabit test still passes (602 tests)",
+    "postcss.config.cjs uses @tailwindcss/postcss"
+  ],
+  "verification": [
+    "VITE_BACKEND_URL=https://api.syrabit.ai pnpm --filter @workspace/syrabit run build",
+    "pnpm --filter @workspace/syrabit test"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
