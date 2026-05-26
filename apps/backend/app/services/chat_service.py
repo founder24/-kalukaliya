@@ -169,9 +169,7 @@ class ChatService:
 
         except Exception as e:
             if detected_lang == "as":
-                logger.warning(
-                    f"Sarvam stream failed ({e}), falling back to Vertex AI"
-                )
+                logger.warning(f"Sarvam stream failed ({e}), falling back to Vertex AI")
                 logger.info(
                     "chat_fallback",
                     extra={
