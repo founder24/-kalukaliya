@@ -28,12 +28,15 @@ async def test_razorpay_503_when_not_configured(client: AsyncClient):
 
     app.dependency_overrides[get_current_user] = override_get_current_user
     try:
-        with patch(
-            "app.services.payment.razorpay_client.razorpay_client.key_id",
-            None,
-        ), patch(
-            "app.services.payment.razorpay_client.razorpay_client.key_secret",
-            None,
+        with (
+            patch(
+                "app.services.payment.razorpay_client.razorpay_client.key_id",
+                None,
+            ),
+            patch(
+                "app.services.payment.razorpay_client.razorpay_client.key_secret",
+                None,
+            ),
         ):
             response = await client.post(
                 "/api/v1/subscription/create-order",
@@ -75,7 +78,9 @@ async def test_redis_unavailable_returns_503():
     from app.main import app
     from httpx import AsyncClient, ASGITransport
 
-    with patch("app.db.redis.get_redis", side_effect=RuntimeError("Redis not initialized")):
+    with patch(
+        "app.db.redis.get_redis", side_effect=RuntimeError("Redis not initialized")
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             response = await ac.post(

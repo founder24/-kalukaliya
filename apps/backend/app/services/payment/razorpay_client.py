@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 class PaymentNotConfiguredError(RuntimeError):
     """Raised when Razorpay credentials are missing."""
+
     pass
 
 

@@ -16,9 +16,13 @@ async def client():
     async def _noop_rate_limit(*args, **kwargs):
         pass
 
-    with patch("app.api.v1.auth._check_rate_limit", _noop_rate_limit), \
-         patch("app.models.user.User.find_one", new_callable=AsyncMock, return_value=None), \
-         patch("app.models.user.User.get", new_callable=AsyncMock, return_value=None):
+    with (
+        patch("app.api.v1.auth._check_rate_limit", _noop_rate_limit),
+        patch(
+            "app.models.user.User.find_one", new_callable=AsyncMock, return_value=None
+        ),
+        patch("app.models.user.User.get", new_callable=AsyncMock, return_value=None),
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac

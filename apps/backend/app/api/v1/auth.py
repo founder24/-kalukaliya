@@ -183,11 +183,11 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
-            raise HTTPException(
-                status_code=503, detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Unexpected database error: {e}")
         raise
+
+
 security_optional = HTTPBearer(auto_error=False)
 
 
@@ -268,9 +268,7 @@ async def signup(request_body: SignupRequest, request: Request):
         existing_user = await User.find_one({"email": request_body.email})
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
-            raise HTTPException(
-                status_code=503, detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Unexpected database error: {e}")
         raise
     if existing_user:
@@ -310,9 +308,7 @@ async def login(request_body: LoginRequest, request: Request):
         user = await User.find_one({"email": request_body.email})
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
-            raise HTTPException(
-                status_code=503, detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Unexpected database error: {e}")
         raise
 
@@ -340,9 +336,7 @@ async def forgot_password(request: ForgotPasswordRequest):
         user = await User.find_one({"email": request.email})
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
-            raise HTTPException(
-                status_code=503, detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Unexpected database error: {e}")
         raise
 

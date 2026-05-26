@@ -90,9 +90,7 @@ async def admin_login(request: Request):
         user = await User.find_one({"email": email})
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
-            raise HTTPException(
-                status_code=503, detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Unexpected database error: {e}")
         raise
     if not user or not user.hashed_password:

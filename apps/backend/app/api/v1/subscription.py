@@ -46,9 +46,7 @@ async def create_subscription_order(user: User = Depends(get_current_user)):
         return order
     except PaymentNotConfiguredError as e:
         logger.error(f"Failed to create subscription order: {e}")
-        raise HTTPException(
-            status_code=503, detail="Payment service not configured"
-        )
+        raise HTTPException(status_code=503, detail="Payment service not configured")
     except RuntimeError as e:
         error_msg = str(e)
         logger.error(f"Failed to create subscription order: {error_msg}")
@@ -73,9 +71,7 @@ async def cancel_subscription(user: User = Depends(get_current_user)):
         return {"status": "success", "message": "Subscription will end at period end"}
     except PaymentNotConfiguredError as e:
         logger.error(f"Failed to cancel subscription: {e}")
-        raise HTTPException(
-            status_code=503, detail="Payment service not configured"
-        )
+        raise HTTPException(status_code=503, detail="Payment service not configured")
     except RuntimeError as e:
         error_msg = str(e)
         logger.error(f"Failed to cancel subscription: {error_msg}")
