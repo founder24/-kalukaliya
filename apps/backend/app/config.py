@@ -196,6 +196,7 @@ class Settings(BaseSettings):
     def is_origin_allowed(self, origin: str) -> bool:
         """Check if an origin is allowed, including Cloudflare Pages preview domains."""
         import re
+
         if origin in self.allowed_origins_list:
             return True
         # Allow Cloudflare Pages preview URLs
