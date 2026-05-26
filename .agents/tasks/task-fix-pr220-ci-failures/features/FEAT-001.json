@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix 3 ruff lint errors (F841 unused variables) in backend Python files, fix frontend test setup for Vitest 4.x jest-dom matcher compatibility, and exclude 3 broken edge/worker test files from the vitest test suite.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/api/v1/admin_content.py line 632: change `chapter = await content_generation_service.generate_assamese_only(chapter_id)` to `await content_generation_service.generate_assamese_only(chapter_id)` (remove unused assignment)",
     "In apps/backend/app/api/v1/admin_dashboard.py line 31: prefix with underscore `_month_start = ...` OR remove the line entirely. Since it is never used, remove the line.",
@@ -20,5 +20,5 @@
     "Run `pnpm --filter @workspace/syrabit test` from repo root and confirm all tests pass"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 3 ruff F841 errors fixed (unused variables removed). Vitest 4.x setup.js rewritten to use explicit expect.extend(matchers). 3 broken edge/worker test files excluded. Verification: ruff check passes with 0 errors, all 65 test files (602 tests) pass."
 }
