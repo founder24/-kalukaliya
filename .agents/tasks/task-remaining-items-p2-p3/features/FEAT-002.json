@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Fix degraded CI/CD pipeline: update cloudflare/wrangler-action from v3 to v4 in deploy-all.yml, and ensure CI workflow consistency (frozen-lockfile usage, proper edge build command for Cloudflare Git integration).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In .github/workflows/deploy-all.yml, update the cloudflare/wrangler-action from @v3 to @v4 in the deploy-frontend job (line 272). This aligns with PR #231 which recommends this bump.",
     "In .github/workflows/ci-frontend.yml, change '--no-frozen-lockfile' to '--frozen-lockfile' in both the lint-and-typecheck and test jobs. The comment says PRs may update dependencies before lockfile is refreshed but this is incorrect practice for CI - the lockfile should always be committed first. This matches how ci-edge.yml and deploy-all.yml work.",
@@ -23,5 +23,5 @@
     "Run: grep 'frozen-lockfile' .github/workflows/ci-frontend.yml | grep -v 'no-frozen'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes applied successfully. YAML validation passed. wrangler-action bumped v3->v4, both ci-frontend.yml jobs now use --frozen-lockfile (comments removed), and deploy-edge has documentation comment for Cloudflare Git integration build command. ci-backend.yml left unchanged as planned (bandit -c .bandit works fine from repo root)."
 }
