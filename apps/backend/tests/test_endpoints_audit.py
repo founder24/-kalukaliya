@@ -80,9 +80,7 @@ def test_get_endpoints_no_500(sync_client, app_instance):
         if response.status_code == 500:
             failures.append(f"{path} returned 500: {response.text[:200]}")
 
-    assert not failures, "The following endpoints returned 500:\n" + "\n".join(
-        failures
-    )
+    assert not failures, "The following endpoints returned 500:\n" + "\n".join(failures)
 
 
 def test_chat_post_endpoint_exists(sync_client):
