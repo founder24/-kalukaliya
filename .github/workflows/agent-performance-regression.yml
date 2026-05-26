@@ -17,6 +17,8 @@ jobs:
   lighthouse-audit:
     name: Lighthouse Performance Audit
     runs-on: ubuntu-latest
+    env:
+      VITE_BACKEND_URL: https://api.syrabit.ai
     steps:
       - uses: actions/checkout@v4
 
