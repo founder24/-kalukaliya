@@ -41,7 +41,7 @@ jobs:
           pip install -r /tmp/requirements-nohash.txt
 
       - name: Install quality tools
-        run: pip install pytest pytest-cov radon vulture ruff
+        run: pip install pytest pytest-cov radon vulture ruff email-validator
 
       - name: Run pytest with coverage
         id: coverage
