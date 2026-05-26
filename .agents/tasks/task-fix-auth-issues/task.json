@@ -9,6 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "skipped",
-    "summary": "Edge worker: tsc --noEmit passes, 60 vitest tests pass. Backend: 9 auth tests pass (including 3 new tests for CORS, rate limit IP). Pre-existing failures in unrelated test files confirmed on base branch."
+    "summary": "Edge worker: tsc --noEmit passes, 64 vitest tests pass (4 new integration tests for CORS origin reflection). Backend: 9 auth tests pass. Fixed review issue where isAllowedOrigin was dead code because preflight and proxy hardcoded env.ALLOWED_ORIGIN."
   }
 }
