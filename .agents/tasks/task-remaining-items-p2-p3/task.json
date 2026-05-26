@@ -1,0 +1,7 @@
+{
+  "task_id": "task-remaining-items-p2-p3",
+  "task_description": "Address remaining P2 and P3 items: add R2 bucket to production env in wrangler.toml, fix MyPy type annotations in models/chat.py and db/redis.py, fix Worker build config for Cloudflare Git integration, and fix degraded CI/CD pipeline issues.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

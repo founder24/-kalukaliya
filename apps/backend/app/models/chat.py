@@ -47,9 +47,9 @@ class Chat(Document):
         self,
         role: str,
         content: str,
-        model_used: str = None,
-        latency_ms: int = None,
-        rag_sources: List[dict] = None,
+        model_used: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        rag_sources: Optional[List[dict]] = None,
     ):
         """Add a message to the chat"""
         message = {

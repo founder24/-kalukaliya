@@ -37,6 +37,10 @@ binding = "ISR_CACHE_KV"
 id = "093eae4cf7e949ddb9f856cf1ef79a29"
 preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
 
+[[env.production.r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets"
+
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET
 # - CF_TURNSTILE_SECRET

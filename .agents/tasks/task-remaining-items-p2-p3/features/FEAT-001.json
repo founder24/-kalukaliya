@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Add R2 bucket binding to production environment in wrangler.toml and fix MyPy type annotation errors in backend models/chat.py and db/redis.py",
+  "status": "in_progress",
+  "steps": [
+    "In apps/edge/wrangler.toml, add [[env.production.r2_buckets]] section after the existing [[env.production.kv_namespaces]] blocks. Use the same binding name 'R2_BUCKET' and bucket_name 'syrabit-assets' as the top-level [[r2_buckets]] definition.",
+    "In apps/backend/app/models/chat.py, fix the add_message method signature: change 'model_used: str = None' to 'model_used: Optional[str] = None', change 'latency_ms: int = None' to 'latency_ms: Optional[int] = None', change 'rag_sources: List[dict] = None' to 'Optional[List[dict]] = None'. Import Optional from typing if not already imported (it is already imported).",
+    "In apps/backend/app/db/redis.py, add proper return type annotation for close_redis (it already returns None) and ensure the module-level _redis variable uses Optional[Redis] syntax for Python 3.11 compatibility. The current 'Redis | None' syntax is valid in 3.10+ but mypy may flag it depending on config. Also check if there are any other type issues.",
+    "In apps/edge/package.json, fix the deploy script from 'wrangler deploy --prod' to 'wrangler deploy --env production' to match what deploy-all.yml uses (--env production is the correct flag for the [env.production] section in wrangler.toml)."
+  ],
+  "acceptance_criteria": [
+    "wrangler.toml contains [[env.production.r2_buckets]] with binding = 'R2_BUCKET' and bucket_name = 'syrabit-assets'",
+    "models/chat.py add_message method has all Optional type annotations for parameters that default to None",
+    "db/redis.py passes mypy type checking (uses Optional[Redis] or has proper annotations)",
+    "apps/edge/package.json deploy script uses '--env production' instead of '--prod'"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/models/chat.py').read()); print('chat.py: valid')\"",
+    "Run: python3 -c \"import ast; ast.parse(open('apps/backend/app/db/redis.py').read()); print('redis.py: valid')\"",
+    "Run: grep -A2 'env.production.r2_buckets' apps/edge/wrangler.toml to confirm the R2 binding exists",
+    "Run: grep 'deploy.*--env production' apps/edge/package.json to confirm the deploy script is correct"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

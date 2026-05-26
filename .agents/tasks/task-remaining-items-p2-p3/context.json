@@ -1,0 +1,25 @@
+{
+  "project_type": "Monorepo: Cloudflare Worker (Edge), Python FastAPI (Backend), React Vite (Frontend)",
+  "language": "TypeScript (edge/frontend), Python 3.11 (backend)",
+  "build_system": "pnpm workspaces for Node apps, pip for Python backend",
+  "test_framework": "vitest for edge/frontend, pytest for backend",
+  "build_command": "pnpm install --frozen-lockfile && pnpm --filter syrabit-edge exec tsc --noEmit",
+  "test_command": "pnpm --filter syrabit-edge test && pytest apps/backend/ --tb=short -q",
+  "verification_instructions": "1. For edge: run tsc --noEmit on edge worker. 2. For backend: run mypy apps/backend/app/ --ignore-missing-imports. 3. For CI: validate YAML syntax of workflow files.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. corepack enable && corepack prepare pnpm@10.26.1 --activate. 2. pnpm install --frozen-lockfile. 3. pip install requirements from apps/backend/requirements.txt (hash-stripped).",
+  "environment_constraints": "INTEGRATIONS_ONLY network - cannot install packages from registries. Use AST/syntax validation only.",
+  "contribution_requirements": "No specific CONTRIBUTING.md found. Follow existing patterns in the codebase.",
+  "key_patterns": "Python backend uses pydantic-settings for config, beanie ODM for MongoDB, upstash-redis for caching. CI uses GitHub Actions with pnpm for Node, pip for Python. Edge deploy uses 'wrangler deploy --env production' in deploy-all.yml.",
+  "relevant_files": [
+    "apps/edge/wrangler.toml",
+    "apps/backend/app/models/chat.py",
+    "apps/backend/app/db/redis.py",
+    ".github/workflows/deploy-all.yml",
+    ".github/workflows/ci-backend.yml",
+    ".github/workflows/ci-edge.yml",
+    ".github/workflows/ci-frontend.yml",
+    "apps/edge/package.json"
+  ],
+  "directory_structure": "/ - monorepo root with pnpm-workspace. apps/edge/ - Cloudflare Worker. apps/backend/ - FastAPI app with app/ (source) and tests/. apps/frontend/ - React Vite app. .github/workflows/ - CI/CD pipelines."
+}

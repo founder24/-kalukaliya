@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix degraded CI/CD pipeline: update cloudflare/wrangler-action from v3 to v4 in deploy-all.yml, and ensure CI workflow consistency (frozen-lockfile usage, proper edge build command for Cloudflare Git integration).",
+  "status": "pending",
+  "steps": [
+    "In .github/workflows/deploy-all.yml, update the cloudflare/wrangler-action from @v3 to @v4 in the deploy-frontend job (line 272). This aligns with PR #231 which recommends this bump.",
+    "In .github/workflows/ci-frontend.yml, change '--no-frozen-lockfile' to '--frozen-lockfile' in both the lint-and-typecheck and test jobs. The comment says PRs may update dependencies before lockfile is refreshed but this is incorrect practice for CI - the lockfile should always be committed first. This matches how ci-edge.yml and deploy-all.yml work.",
+    "In .github/workflows/deploy-all.yml, in the deploy-edge job, add a comment documenting that '--env production' is the correct flag for Cloudflare Git integration (the Cloudflare dashboard build command should be 'pnpm --filter syrabit-edge exec wrangler deploy --env production'). This ensures clarity for anyone configuring the Cloudflare Git integration.",
+    "In .github/workflows/ci-backend.yml, add '--config-file .bandit' as an alternative syntax if the -c flag causes issues (verify: the current -c .bandit should work fine, but ensure the path is relative to the repo root since the working directory is the repo root)."
+  ],
+  "acceptance_criteria": [
+    "deploy-all.yml uses cloudflare/wrangler-action@v4 instead of @v3",
+    "ci-frontend.yml uses --frozen-lockfile in both jobs",
+    "deploy-all.yml deploy-edge job has clear documentation about --env production being the correct flag for Cloudflare Git integration",
+    "All YAML workflow files remain valid YAML syntax"
+  ],
+  "verification": [
+    "Run: python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-all.yml')); print('deploy-all.yml: valid YAML')\"",
+    "Run: python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci-frontend.yml')); print('ci-frontend.yml: valid YAML')\"",
+    "Run: python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci-backend.yml')); print('ci-backend.yml: valid YAML')\"",
+    "Run: grep 'wrangler-action@v4' .github/workflows/deploy-all.yml",
+    "Run: grep 'frozen-lockfile' .github/workflows/ci-frontend.yml | grep -v 'no-frozen'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
