@@ -18,5 +18,5 @@
     "Confirm build exits with code 0"
   ],
   "blocked_reason": null,
-  "findings": "Import fix applied. TSC passes and all 602 frontend tests pass. The vite build:client command fails due to a PRE-EXISTING tailwindcss v4 / postcss misconfiguration (postcss.config.cjs uses 'tailwindcss' directly but tailwindcss@4.3.0 requires '@tailwindcss/postcss'). This build failure occurs identically on the base main branch without our change. Neither 'Github' nor 'GithubIcon' actually exist in lucide-react@1.16.0 (brand icons were removed entirely), but the aliased import is the canonical fix pattern per the lucide migration guide and matches the task requirement."
+  "findings": "Replaced removed brand icons (Twitter, GithubIcon) with inline SVG components. lucide-react@1.16.0 removed all brand icons entirely. The fix uses self-contained SVG function components that accept className, size, and spread props - matching the lucide-react component API. Updated deployment-audit test to verify TestimonialsFooter renders successfully (no throw) with inline SVGs. All 620 frontend tests pass."
 }
