@@ -9,6 +9,9 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -82,7 +85,7 @@ jobs:
           MONGODB_URI: mongodb://test:test@localhost:27017
 
       - name: Test Edge
-        run: pnpm --filter syrabit-edge test
+        run: pnpm --filter syrabit-edge exec vitest run
 
       - name: Test Frontend
         run: pnpm --filter @workspace/syrabit test
