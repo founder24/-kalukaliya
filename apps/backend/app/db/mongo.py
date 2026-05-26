@@ -1,3 +1,4 @@
+from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure
@@ -13,7 +14,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_client: AsyncIOMotorClient | None = None
+_client: Optional[AsyncIOMotorClient] = None
 
 
 async def init_mongo() -> None:

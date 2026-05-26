@@ -1,10 +1,11 @@
+from typing import Optional
 from upstash_redis.asyncio import Redis
 from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-_redis: Redis | None = None
+_redis: Optional[Redis] = None
 
 
 async def init_redis() -> None:
