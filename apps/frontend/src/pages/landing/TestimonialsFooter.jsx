@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, ChevronRight, Twitter, Github, Mail, Globe } from 'lucide-react';
+import { Sparkles, ChevronRight, Twitter, GithubIcon as Github, Mail, Globe } from 'lucide-react';
 import { LogoMark, LogoFull } from '@/components/Logo';
 import Reveal from './Reveal';
 import GlowOrb from './GlowOrb';
