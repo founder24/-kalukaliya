@@ -1,0 +1,28 @@
+{
+  "project_type": "Monorepo: FastAPI Python backend, Cloudflare Worker edge proxy (TypeScript), Vite React frontend",
+  "language": "Python (backend), TypeScript (edge), JavaScript/JSX (frontend)",
+  "build_system": "pnpm workspaces for Node, pip for Python. Root: pnpm install --frozen-lockfile",
+  "test_framework": "pytest (backend), vitest (edge + frontend)",
+  "build_command": "pnpm install --frozen-lockfile && pnpm --filter syrabit-edge run build && pnpm --filter @workspace/syrabit run build:client",
+  "test_command": "cd apps/backend && APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long-for-ci python -m pytest tests/test_latency_comparison.py -v && cd ../../apps/edge && pnpm test -- tests/latency-comparison.test.ts",
+  "verification_instructions": "1. Run pytest for the new backend benchmark test. 2. Run vitest for the new edge benchmark test. 3. Verify output shows concrete old-vs-new timing comparisons.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/-kalukaliya && pnpm install --frozen-lockfile && cd apps/backend && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET. No Azure/Cloudflare credentials available - benchmarks use mocked I/O with controlled delays to simulate real latency. Python 3.11, Node 22, pnpm available.",
+  "contribution_requirements": "Tests must be deterministic and pass in CI. Use asyncio for backend timing, performance.now() for edge timing.",
+  "key_patterns": "Backend: pytest with AsyncMock, patch decorators. Chat uses asyncio.gather for parallel RAG+history. Rate limit uses pipeline+edge trust header. Edge: vitest with vi.fn() mocks. Single unified middleware replaces 3 separate ones. Azure Search warm_up on startup.",
+  "relevant_files": [
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/api/deps/rate_limit.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/services/chat_service.py",
+    "apps/backend/app/services/search/azure_search.py",
+    "apps/backend/tests/test_latency_audit.py",
+    "apps/backend/tests/conftest.py",
+    "apps/edge/src/index.ts",
+    "apps/edge/src/middleware/rate-limit.ts",
+    "apps/edge/src/routes/api-proxy.ts",
+    "apps/edge/tests/latency-audit.test.ts"
+  ],
+  "directory_structure": "apps/backend/tests/ for pytest tests. apps/edge/tests/ for vitest tests. apps/frontend/src/__tests__/ for frontend vitest tests."
+}
