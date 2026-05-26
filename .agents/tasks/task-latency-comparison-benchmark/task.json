@@ -9,6 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "skipped",
-    "summary": "All 16 benchmark tests pass (6 backend pytest + 5 edge vitest + 5 frontend vitest). Chat endpoint: OLD ~351ms vs NEW ~176ms (50% improvement). Page load: OLD ~246ms vs NEW ~15ms (94% improvement). Edge rate limit: OLD ~45ms vs NEW ~10ms (77% improvement). Frontend fetches: OLD ~241ms vs NEW ~100ms (58% improvement). All tests use controlled delays and are deterministic."
+    "summary": "All 20 benchmark tests pass (8 backend pytest + 7 edge vitest + 5 frontend vitest). Added regression-detection tests importing production code. Fixed edge OLD baseline to clarify it is a hypothetical unoptimized flow. Renamed frontend test from .jsx to .js."
   }
 }
