@@ -20,5 +20,5 @@
     "Run: cd apps/backend && python -m pytest tests/ -x -q to confirm no regressions"
   ],
   "blocked_reason": null,
-  "findings": "All 5 new routing tests pass. Pre-existing test failures in test_chat.py and test_admin_endpoints.py are due to missing sentry_sdk package in the environment, confirmed unrelated to this change. JWT_SECRET env var required for tests (min 32 chars)."
+  "findings": "All 5 new routing tests pass. Pre-existing test failures in test_chat.py and test_admin_endpoints.py are due to missing sentry_sdk package in the environment, confirmed unrelated to this change. Added os.environ.setdefault for JWT_SECRET and APP_ENV at the top of test_ai_router.py so tests pass without requiring external env vars."
 }
