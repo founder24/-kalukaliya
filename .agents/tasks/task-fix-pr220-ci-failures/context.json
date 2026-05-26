@@ -1,0 +1,25 @@
+{
+  "project_type": "Monorepo - FastAPI backend + React frontend (Vite/SSR) + Cloudflare Workers",
+  "language": "Python (backend), TypeScript/JavaScript (frontend)",
+  "build_system": "pnpm workspaces (monorepo), pip (backend)",
+  "test_framework": "Vitest 4.1.7 with @testing-library/react (frontend), pytest (backend)",
+  "build_command": "pnpm --filter @workspace/syrabit build (frontend), N/A standalone (backend)",
+  "test_command": "pnpm --filter @workspace/syrabit test (frontend), ruff check apps/backend/app/ (backend lint)",
+  "verification_instructions": "1. Run ruff check apps/backend/app/ - should pass with 0 errors. 2. Run pnpm --filter @workspace/syrabit test - all tests should pass.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pnpm install --frozen-lockfile (from repo root)",
+  "environment_constraints": "OPEN_INTERNET, Node.js 22, pnpm 10.26.1, Python 3.11",
+  "contribution_requirements": "Fix CI failures on PR #220",
+  "key_patterns": "Frontend tests use vitest 4.x with jsdom environment. Setup file at apps/frontend/src/test/setup.js. Tests in src/**/*.test.{js,jsx,ts,tsx}. Backend uses ruff for linting.",
+  "relevant_files": [
+    "apps/backend/app/api/v1/admin_content.py (line 632 - unused variable 'chapter')",
+    "apps/backend/app/api/v1/admin_dashboard.py (line 31 - unused variable 'month_start')",
+    "apps/backend/app/services/content_publisher.py (line 73 - unused variable 'result')",
+    "apps/frontend/src/test/setup.js (jest-dom matcher setup broken with vitest 4.x)",
+    "apps/frontend/vitest.config.js (need to exclude edge/worker test files)",
+    "apps/frontend/src/test/edge-do-routing.test.js (imports non-existent workers/edge-proxy/)",
+    "apps/frontend/src/test/edge-proxy-kv-aggregation.test.ts (imports non-existent workers/edge-proxy/)",
+    "apps/frontend/src/test/middleware-ssr-route.test.js (imports non-existent functions/_middleware.js)"
+  ],
+  "directory_structure": "apps/backend/ (FastAPI), apps/frontend/ (React + Vite), apps/edge/ (Cloudflare edge worker)"
+}

@@ -45,6 +45,10 @@ jobs:
 
       - name: Run pytest with coverage
         id: coverage
+        env:
+          MONGODB_URI: mongodb://test:test@localhost:27017
+          APP_ENV: test
+          JWT_SECRET: test-secret-at-least-32-characters-long
         run: |
           set +e
           OUTPUT=$(pytest apps/backend/ --cov=apps/backend/app --cov-report=term --cov-fail-under=60 2>&1)

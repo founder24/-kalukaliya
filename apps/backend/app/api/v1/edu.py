@@ -3,6 +3,7 @@ Educational content endpoints - Coming Soon.
 These stubs return 501 so the frontend gets a clear signal these features
 are not yet available rather than confusing 404s.
 """
+
 from fastapi import APIRouter, HTTPException
 
 router = APIRouter(tags=["Education"], prefix="/edu")
