@@ -61,6 +61,15 @@ async def generate_response(
         return await generate_with_sarvam(
             system_prompt=system_prompt, user_message=user_message, stream=stream
         )
+    elif "gemini" in model.lower() or "vertex" in model.lower():
+        from app.services.ai.vertex_client import generate_with_vertex
+
+        return await generate_with_vertex(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            model=model,
+            stream=stream,
+        )
     else:
         from app.services.ai.cloudflare_client import generate_with_cloudflare
 
@@ -96,6 +105,15 @@ async def stream_response(
 
         logger.info(f"Streaming from Sarvam AI (model={model})")
         async for chunk in sarvam_client.stream_generate_with_retry(
+            system_prompt=system_prompt,
+            user_message=user_message,
+        ):
+            yield chunk
+    elif "gemini" in model.lower() or "vertex" in model.lower():
+        from app.services.ai.vertex_client import vertex_client
+
+        logger.info(f"Streaming from Vertex AI (model={model})")
+        async for chunk in vertex_client.stream_generate_with_retry(
             system_prompt=system_prompt,
             user_message=user_message,
         ):
