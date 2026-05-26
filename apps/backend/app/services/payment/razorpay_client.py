@@ -7,6 +7,11 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 
+class PaymentNotConfiguredError(RuntimeError):
+    """Raised when Razorpay credentials are missing."""
+    pass
+
+
 class RazorpayClient:
     """Razorpay Payment Gateway Client"""
 
@@ -29,7 +34,7 @@ class RazorpayClient:
     async def create_subscription_order(self, user: User) -> dict:
         """Create Razorpay subscription order"""
         if not self.key_id or not self.key_secret:
-            raise RuntimeError(
+            raise PaymentNotConfiguredError(
                 "Payment service not configured - Razorpay credentials missing"
             )
         try:
@@ -68,7 +73,7 @@ class RazorpayClient:
     async def cancel_subscription(self, subscription_id: str) -> bool:
         """Cancel Razorpay subscription"""
         if not self.key_id or not self.key_secret:
-            raise RuntimeError(
+            raise PaymentNotConfiguredError(
                 "Payment service not configured - Razorpay credentials missing"
             )
         try:

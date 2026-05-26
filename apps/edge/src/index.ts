@@ -88,6 +88,9 @@ export default {
     }
 
     // ── 4. Per-Language Rate Limiting (chat POST only) ──
+    if (!env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+      console.warn('RATE_LIMIT_KV binding not available - rate limiting disabled');
+    }
     if (env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
       const userId = request.headers.get('X-User-ID') || 'anonymous';
 

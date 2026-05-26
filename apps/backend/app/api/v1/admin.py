@@ -36,9 +36,6 @@ async def _csrf_check(request: Request):
         # request. API clients and test runners do not send Origin headers.
         if not origin:
             return
-        # Skip CSRF validation in test environment
-        if settings.APP_ENV == "test":
-            return
         allowed = settings.allowed_origins_list
         if not any(origin.startswith(o) for o in allowed):
             raise HTTPException(
@@ -96,6 +93,7 @@ async def admin_login(request: Request):
             raise HTTPException(
                 status_code=503, detail="Database service unavailable"
             )
+        logger.error(f"Unexpected database error: {e}")
         raise
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="Invalid credentials")

@@ -186,6 +186,7 @@ async def get_current_user(
             raise HTTPException(
                 status_code=503, detail="Database service unavailable"
             )
+        logger.error(f"Unexpected database error: {e}")
         raise
 security_optional = HTTPBearer(auto_error=False)
 
@@ -270,6 +271,7 @@ async def signup(request_body: SignupRequest, request: Request):
             raise HTTPException(
                 status_code=503, detail="Database service unavailable"
             )
+        logger.error(f"Unexpected database error: {e}")
         raise
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -311,6 +313,7 @@ async def login(request_body: LoginRequest, request: Request):
             raise HTTPException(
                 status_code=503, detail="Database service unavailable"
             )
+        logger.error(f"Unexpected database error: {e}")
         raise
 
     if not user or not user.hashed_password:
@@ -340,6 +343,7 @@ async def forgot_password(request: ForgotPasswordRequest):
             raise HTTPException(
                 status_code=503, detail="Database service unavailable"
             )
+        logger.error(f"Unexpected database error: {e}")
         raise
 
     if user and user.auth_provider == "local":

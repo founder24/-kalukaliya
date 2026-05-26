@@ -5,6 +5,7 @@ import logging
 from app.models.user import User
 from app.config import settings
 from app.api.v1.auth import get_current_user
+from app.services.payment.razorpay_client import PaymentNotConfiguredError
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,14 @@ async def create_subscription_order(user: User = Depends(get_current_user)):
     try:
         order = await create_subscription_order(user)
         return order
+    except PaymentNotConfiguredError as e:
+        logger.error(f"Failed to create subscription order: {e}")
+        raise HTTPException(
+            status_code=503, detail="Payment service not configured"
+        )
     except RuntimeError as e:
         error_msg = str(e)
         logger.error(f"Failed to create subscription order: {error_msg}")
-        if "not configured" in error_msg:
-            raise HTTPException(
-                status_code=503, detail="Payment service not configured"
-            )
         raise HTTPException(status_code=502, detail="Payment gateway error")
     except Exception as e:
         logger.error(f"Failed to create subscription order: {e}")
@@ -69,13 +71,14 @@ async def cancel_subscription(user: User = Depends(get_current_user)):
         await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled for user {user.email}")
         return {"status": "success", "message": "Subscription will end at period end"}
+    except PaymentNotConfiguredError as e:
+        logger.error(f"Failed to cancel subscription: {e}")
+        raise HTTPException(
+            status_code=503, detail="Payment service not configured"
+        )
     except RuntimeError as e:
         error_msg = str(e)
         logger.error(f"Failed to cancel subscription: {error_msg}")
-        if "not configured" in error_msg:
-            raise HTTPException(
-                status_code=503, detail="Payment service not configured"
-            )
         raise HTTPException(status_code=502, detail="Payment gateway error")
     except Exception as e:
         logger.error(f"Failed to cancel subscription: {e}")
