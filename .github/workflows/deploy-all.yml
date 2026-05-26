@@ -87,15 +87,9 @@ jobs:
       - name: Test Frontend
         run: pnpm --filter @workspace/syrabit test
 
-  canary-deploy:
-    name: Canary Deploy
-    needs: [ci-checks]
-    uses: ./.github/workflows/agent-canary-deploy.yml
-    secrets: inherit
-
   deploy-backend:
     name: Deploy Backend
-    needs: [ci-checks, canary-deploy]
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -209,7 +203,7 @@ jobs:
 
   deploy-edge:
     name: Deploy Edge
-    needs: [ci-checks, canary-deploy]
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -245,7 +239,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend
-    needs: [ci-checks, canary-deploy]
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
