@@ -70,7 +70,7 @@ class ContentPublisherService:
                 documents.append(doc)
 
             if documents:
-                result = await asyncio.to_thread(
+                await asyncio.to_thread(
                     client.upload_documents, documents=documents
                 )
                 return {"status": "uploaded", "chunks": len(documents)}

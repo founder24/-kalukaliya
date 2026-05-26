@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix 3 ruff lint errors (F841 unused variables) in backend Python files, fix frontend test setup for Vitest 4.x jest-dom matcher compatibility, and exclude 3 broken edge/worker test files from the vitest test suite.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/backend/app/api/v1/admin_content.py line 632: change `chapter = await content_generation_service.generate_assamese_only(chapter_id)` to `await content_generation_service.generate_assamese_only(chapter_id)` (remove unused assignment)",
+    "In apps/backend/app/api/v1/admin_dashboard.py line 31: prefix with underscore `_month_start = ...` OR remove the line entirely. Since it is never used, remove the line.",
+    "In apps/backend/app/services/content_publisher.py line 73: change `result = await asyncio.to_thread(...)` to `await asyncio.to_thread(...)` (remove unused assignment)",
+    "In apps/frontend/src/test/setup.js: Replace `import '@testing-library/jest-dom/vitest';` with explicit matcher extension: `import { expect, afterEach } from 'vitest'; import * as matchers from '@testing-library/jest-dom/matchers'; expect.extend(matchers);`. The issue is that in Vitest 4.x, `@testing-library/jest-dom/vitest` imports its own copy of vitest's expect which is a different instance than the one used in tests. The manual expect.extend approach works correctly.",
+    "In apps/frontend/vitest.config.js: Add an `exclude` pattern to the test config to skip the 3 test files that import non-existent worker/functions modules: `src/test/edge-do-routing.test.js`, `src/test/edge-proxy-kv-aggregation.test.ts`, and `src/test/middleware-ssr-route.test.js`. Use the vitest exclude option: `exclude: ['src/test/edge-do-routing.test.js', 'src/test/edge-proxy-kv-aggregation.test.ts', 'src/test/middleware-ssr-route.test.js']`"
+  ],
+  "acceptance_criteria": [
+    "ruff check apps/backend/app/ passes with 0 errors",
+    "pnpm --filter @workspace/syrabit test passes (all test files pass, 0 failures)",
+    "The 3 excluded test files are documented as depending on non-existent workers/edge-proxy and functions/_middleware modules"
+  ],
+  "verification": [
+    "Run `ruff check apps/backend/app/` from repo root and confirm exit code 0",
+    "Run `pnpm --filter @workspace/syrabit test` from repo root and confirm all tests pass"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
