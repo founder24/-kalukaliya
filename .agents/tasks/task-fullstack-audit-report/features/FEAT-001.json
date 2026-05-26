@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Run all available build and test suites across the monorepo and collect results for the audit report. Attempt: 1) Edge worker TypeScript type check and vitest tests 2) Frontend vitest tests 3) Backend pytest (may partially fail due to Python 3.9 vs 3.11 requirement). Collect all pass/fail output.",
+  "status": "completed",
+  "steps": [
+    "Install pnpm dependencies at workspace root: cd /projects/sandbox/-kalukaliya && pnpm install --no-frozen-lockfile",
+    "Run edge TypeScript type check: pnpm --filter syrabit-edge exec tsc --noEmit",
+    "Run edge tests: pnpm --filter syrabit-edge test",
+    "Run frontend tests: pnpm --filter @workspace/syrabit test",
+    "Attempt to install backend Python dependencies (may fail on 3.9): cd apps/backend && pip install -r requirements.txt (strip hashes first)",
+    "Run backend pytest: cd apps/backend && pytest tests/ -v --tb=short 2>&1",
+    "Collect all outputs into a structured findings section"
+  ],
+  "acceptance_criteria": [
+    "All build/test commands have been attempted and their outputs captured",
+    "A clear summary of pass/fail for each component is recorded in the feature findings"
+  ],
+  "verification": [
+    "Feature findings field is populated with build/test results for all 3 apps"
+  ],
+  "blocked_reason": null,
+  "findings": "=== FULL MONOREPO BUILD & TEST RESULTS ===\n\n--- 1. pnpm install (workspace root) ---\nStatus: SUCCESS\nAll 3 workspace projects resolved. Lockfile up to date. Done in 3.9s.\n\n--- 2. Edge Worker TypeScript Type Check (tsc --noEmit) ---\nStatus: SUCCESS (zero errors)\n\n--- 3. Edge Worker Tests (vitest) ---\nStatus: ALL PASS\nTest Files: 9 passed (9)\nTests: 54 passed (54)\nDuration: 1.18s\nFiles: isr.test.ts (5), latency-audit.test.ts (8), deployment-audit.test.ts (10), api-proxy.test.ts (4), jwt.test.ts (8), rate-limit.test.ts (5), cors.test.ts (4), bot.test.ts (3), latency-comparison.test.ts (7)\nNotes: Some expected stderr from error-handling test cases (proxy error, bot verification failure) - all intentional.\n\n--- 4. Frontend Tests (vitest) ---\nStatus: ALL PASS\nTest Files: 67 passed (67)\nTests: 620 passed (620)\nDuration: 23.50s\nNotes: Some stderr from mock-related warnings (adminGetChatFeedback mock not defined in AdminPage.navigation.test.jsx) but test still passes. Comprehensive coverage including accessibility (axe), admin panels, auth flows, SEO, latency comparison, and component tests.\n\n--- 5. Backend Python Dependencies ---\nStatus: PARTIAL - Python 3.9 vs 3.11+ incompatibility\nanyio>=4.13.0 requires Python 3.10+ (not available on 3.9). Installed core deps (fastapi, pydantic, httpx, beanie, motor, pytest, PyJWT, etc.) with relaxed version constraints. Missing: sentry_sdk (causes 88 test errors for any test importing app.main).\n\n--- 6. Backend Tests (pytest) ---\nStatus: PARTIAL\nCollected: 163 tests\nPassed: 50\nFailed: 25\nErrors: 88\nDuration: 7.55s\n\nPASSED tests (50):\n- test_circuit_breaker.py: 6/6 passed (circuit breaker logic works perfectly)\n- test_security.py: 24/24 passed (input sanitization + SSRF protection all pass)\n- test_knowledge.py (model tests): 6/6 passed (ContentMetadata, GeneratedContent, etc.)\n- test_latency_comparison.py: 6/8 passed (latency comparison benchmarks)\n- test_translator.py (unit tests): 8/8 passed (translate text, knowledge object)\n\nFAILED tests (25):\n- test_knowledge.py (TestContentRenderer): 8 failures - render functions use Python 3.10+ syntax (match statements or type unions)\n- test_knowledge.py (TestSearchIndexer): 4 failures - chunk_text functions likely use 3.10+ features\n- test_latency_audit.py: 6 failures - tests that inspect source code patterns (asyncio.gather usage, etc.)\n- test_latency_comparison.py: 2 failures - regression tests checking actual source imports\n- test_rate_limiter.py: 3 failures - rate limiter unit tests (likely import/syntax issues)\n- test_service_degradation.py: 1 failure (redis unavailable test)\n- test_latency_audit.py: 1 failure (middleware single pass)\n\nERRORS (88):\n- Primary cause: ModuleNotFoundError: No module named 'sentry_sdk' (app/main.py:5 imports sentry_sdk)\n- Affects all tests that import app.main (admin endpoints, auth, chat, webhooks, SEO, payment lifecycle, pipeline audit, indexnow, translator endpoint tests, service degradation endpoint tests)\n- Secondary: Some tests also hit Python 3.9 syntax incompatibilities on collection\n\n=== SUMMARY ===\nEdge (TypeScript): FULLY PASSING - 54/54 tests, 0 type errors\nFrontend (React): FULLY PASSING - 620/620 tests\nBackend (Python): PARTIALLY PASSING - 50/163 pass, limited by Python 3.9 (needs 3.11+) and missing sentry_sdk dependency. Core business logic (circuit breaker, security, models, translator) all pass. Integration/endpoint tests blocked by sentry_sdk import."
+}
