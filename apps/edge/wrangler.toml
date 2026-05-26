@@ -3,27 +3,36 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Build configuration for Cloudflare Git integration (Workers Builds)
+# Dashboard deploy command should be: wrangler deploy --env production
+[build]
+command = "npx tsc --noEmit"
+
 [vars]
 # Local dev only. In production, set as a Wrangler secret:
 #   npx wrangler secret put AZURE_BACKEND_URL --env production
 AZURE_BACKEND_URL = "http://localhost:8000"
 ALLOWED_ORIGIN = "https://syrabit.ai"
 
+# Top-level bindings (used by default env / Cloudflare Git integration)
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "2983094e249d4094b66e4b9dacc38719"
+preview_id = "fd70db2acf7045d6a8d6ba4334316297"
+
+[[kv_namespaces]]
+binding = "ISR_CACHE_KV"
+id = "093eae4cf7e949ddb9f856cf1ef79a29"
+preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
+
 [[r2_buckets]]
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
 
-# KV bindings are scoped to the production env so that local builds and
-# `wrangler deploy --dry-run` don't require a real namespace ID. Before the
-# first real production deploy you MUST:
-#   1. npx wrangler kv:namespace create RATE_LIMIT_KV
-#   2. npx wrangler kv:namespace create RATE_LIMIT_KV --preview
-#   3. Replace the IDs in [env.production] below with the values
-#      that the two commands above print.
-
 [triggers]
 crons = []
 
+# Production environment (used with: wrangler deploy --env production)
 [env.production]
 name = "syrabitworker-prod"
 
@@ -37,10 +46,14 @@ binding = "ISR_CACHE_KV"
 id = "093eae4cf7e949ddb9f856cf1ef79a29"
 preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
 
-# Secrets (set via: npx wrangler secret put <NAME>):
+[[env.production.r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets"
+
+# Secrets (set via: npx wrangler secret put <NAME> --env production):
 # - JWT_SECRET
 # - CF_TURNSTILE_SECRET
+# - AZURE_BACKEND_URL
 
 [env.production.vars]
-# AZURE_BACKEND_URL set as Wrangler secret: npx wrangler secret put AZURE_BACKEND_URL --env production
 ALLOWED_ORIGIN = "https://syrabit.ai"
