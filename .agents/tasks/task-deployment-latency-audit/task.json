@@ -2,7 +2,7 @@
   "task_id": "task-deployment-latency-audit",
   "task_description": "Fix deployment issues (lucide-react Github icon import failure) and audit/fix production latency bottlenecks causing 5x slowdown (ms in tests vs seconds in production). Implement parallelization, Redis pipeline optimization, middleware consolidation, and comprehensive test coverage for all endpoints, routes, pipelines, and workflows.",
   "status": "completed",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
   "blocked_reason": null,
   "verification": {
     "build": "pass",

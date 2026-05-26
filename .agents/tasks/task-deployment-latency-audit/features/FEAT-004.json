@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "fix",
   "description": "Address review findings from 2025-05-26-111000-review.md: strip spoofed X-Rate-Limited-By header in edge worker, add try/except around asyncio.gather in non-streaming chat path, optimize expire calls with asyncio.gather, and remove ineffective Connection: keep-alive header from Workers proxy.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "STEP 1 - In apps/edge/src/index.ts, after the CORS preflight early return, strip X-Rate-Limited-By header from client requests to prevent spoofing.",
     "STEP 2 - In apps/backend/app/api/v1/chat.py, wrap the asyncio.gather call in the non-streaming _process_chat() function with try/except and set defaults for context_chunks and history.",
@@ -22,5 +22,5 @@
     "APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long-for-ci python -m pytest tests/test_latency_audit.py tests/test_endpoints_audit.py tests/test_pipeline_audit.py tests/test_chat.py -v"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 4 review fixes implemented and verified. Edge typecheck passes. 28/28 edge tests pass. 24/24 backend tests pass (test_latency_audit, test_endpoints_audit, test_pipeline_audit, test_chat). The test_chat.py file had a pre-existing issue from the FEAT-002 changes where check_rate_limit mock returned a 3-tuple instead of the updated 4-tuple - this was already fixed in the working tree before this feature."
 }
