@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix Edge Worker Turnstile verification to gracefully degrade when CF_TURNSTILE_SECRET is not configured, and update CORS headers to include x-turnstile-token in allowed headers.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/edge/src/index.ts, modify the Turnstile verification section (around line 62-73). When turnstileToken is present but env.CF_TURNSTILE_SECRET is not set/empty, log a warning and allow the request through instead of calling turnstileVerify (which would fail). Keep the existing behavior when the secret IS available.",
     "In apps/edge/src/middleware/cors.ts, add 'x-turnstile-token' to the Access-Control-Allow-Headers list in getCorsHeaders(). Currently it only has 'Content-Type, Authorization, CF-Turnstile-Response'. Add 'x-turnstile-token' as the frontend sends this header.",
@@ -22,5 +22,5 @@
     "cd apps/edge && npx vitest run"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 60 tests pass. TypeScript compiles without errors. The isAllowedOrigin helper function was extracted in cors.ts to avoid duplication between getCorsHeaders and applyCorsHeaders."
 }

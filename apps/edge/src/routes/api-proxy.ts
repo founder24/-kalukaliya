@@ -4,10 +4,12 @@
  * Features:
  * - Stream-aware: detects /stream paths and passes response.body directly (chunked)
  * - Injects Cloudflare metadata headers (X-Real-IP, CF-Ray-ID)
- * - Sets CORS origin from env
+ * - Sets CORS origin dynamically via getCorsHeaders validation
  * - Removes hop-by-hop headers
  * - Returns 503 on backend failure
  */
+
+import { getCorsHeaders } from '../middleware/cors';
 
 export async function proxyRequest(
   request: Request,
@@ -36,7 +38,9 @@ export async function proxyRequest(
     });
 
     const responseHeaders = new Headers(response.headers);
-    responseHeaders.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
+    const requestOrigin = request.headers.get('Origin') || env.ALLOWED_ORIGIN || 'https://syrabit.ai';
+    const corsOrigin = getCorsHeaders(requestOrigin)['Access-Control-Allow-Origin'];
+    responseHeaders.set('Access-Control-Allow-Origin', corsOrigin);
 
     if (isStreamRequest) {
       // ── Stream-specific handling ──

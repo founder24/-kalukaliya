@@ -23,8 +23,9 @@ export default {
 
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
+      const requestOrigin = request.headers.get('Origin') || env.ALLOWED_ORIGIN || 'https://syrabit.ai';
       return new Response(null, {
-        headers: getCorsHeaders(env.ALLOWED_ORIGIN || 'https://syrabit.ai'),
+        headers: getCorsHeaders(requestOrigin),
       });
     }
 
