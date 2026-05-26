@@ -9,6 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "skipped",
-    "summary": "Edge typecheck passes. 28/28 edge tests pass. 134/148 backend tests pass (14 pre-existing failures from missing MongoDB/Razorpay in CI, zero new failures). 13/13 frontend deployment audit tests pass. All 20 new backend audit tests pass. Chat tests fixed to match updated rate_limit signature."
+    "summary": "Edge typecheck passes. 28/28 edge tests pass. 134/148 backend tests pass (14 pre-existing failures from missing MongoDB/Razorpay in test env, zero new failures introduced). 13/13 frontend deployment audit tests pass. All new tests exercise real code paths and would fail if optimizations were reverted. Review issues addressed: spoofed header bypass fixed, NameError fixed, expire calls parallelized, dead Connection header removed."
   }
 }
