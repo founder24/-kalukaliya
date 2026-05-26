@@ -133,3 +133,28 @@ async def test_stream_response_routes_sarvam_to_sarvam():
             chunks.append(chunk)
 
     assert chunks == ["Hello", " from", " Sarvam"]
+
+
+@pytest.mark.anyio
+async def test_stream_response_routes_cloudflare_as_default():
+    """Test that streaming with unrecognized model routes to Cloudflare as fallback"""
+
+    async def mock_stream(*args, **kwargs):
+        for chunk in ["Hello", " from", " Cloudflare"]:
+            yield chunk
+
+    mock_client = MagicMock()
+    mock_client.stream_generate = mock_stream
+
+    with patch("app.services.ai.cloudflare_client.cloudflare_client", mock_client):
+        from app.services.ai.router import stream_response
+
+        chunks = []
+        async for chunk in stream_response(
+            system_prompt="You are helpful.",
+            user_message="Hello",
+            model="@cf/meta/llama-3.1-70b-instruct",
+        ):
+            chunks.append(chunk)
+
+    assert chunks == ["Hello", " from", " Cloudflare"]

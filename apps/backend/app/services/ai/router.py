@@ -64,6 +64,7 @@ async def generate_response(
     elif "gemini" in model.lower() or "vertex" in model.lower():
         from app.services.ai.vertex_client import generate_with_vertex
 
+        # Note: vertex_client currently uses settings.VERTEX_GEMINI_MODEL regardless of model param
         return await generate_with_vertex(
             system_prompt=system_prompt,
             user_message=user_message,
