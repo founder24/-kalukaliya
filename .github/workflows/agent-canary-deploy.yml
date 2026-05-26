@@ -103,9 +103,9 @@ jobs:
 
           TOTAL=$((SUCCESS_COUNT + FAILURE_COUNT))
           if [ "$TOTAL" -gt 0 ]; then
-            ERROR_RATE=$(echo "scale=2; ($FAILURE_COUNT * 100) / $TOTAL" | bc)
+            ERROR_RATE=$(printf "%.2f" "$(echo "scale=4; ($FAILURE_COUNT * 100) / $TOTAL" | bc)")
           else
-            ERROR_RATE="100"
+            ERROR_RATE="100.00"
           fi
 
           echo "success_count=$SUCCESS_COUNT" >> "$GITHUB_OUTPUT"
