@@ -76,7 +76,7 @@ jobs:
 
       - name: Comment findings on PR
         if: github.event_name == 'pull_request' && (steps.cloud-drift.outcome == 'failure' || steps.env-sync.outcome == 'failure' || steps.wrangler-check.outcome == 'failure')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -115,7 +115,7 @@ jobs:
 
       - name: Create issue on scheduled run
         if: github.event_name == 'schedule' && (steps.cloud-drift.outcome == 'failure' || steps.env-sync.outcome == 'failure' || steps.wrangler-check.outcome == 'failure')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             let body = '## Daily Drift Detection Report\n\n';

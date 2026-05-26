@@ -40,7 +40,7 @@ jobs:
 
       - name: Handle missing variables
         if: steps.sync_check.outputs.exit_code != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const timestamp = new Date().toISOString();
@@ -95,7 +95,7 @@ jobs:
 
       - name: Handle all synced
         if: steps.sync_check.outputs.exit_code == '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // Search for existing open env-sync issue

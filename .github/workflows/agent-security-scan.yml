@@ -142,7 +142,7 @@ jobs:
 
       - name: Comment findings on PR
         if: github.event_name == 'pull_request' && (steps.gitleaks.outcome == 'failure' || steps.pattern-scan.outputs.findings == 'true' || steps.pip-audit.outputs.vulnerabilities == 'true' || steps.pnpm-audit.outputs.vulnerabilities == 'true')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -199,7 +199,7 @@ jobs:
 
       - name: Create issue on scheduled run
         if: github.event_name == 'schedule' && (steps.gitleaks.outcome == 'failure' || steps.pattern-scan.outputs.findings == 'true' || steps.pip-audit.outputs.vulnerabilities == 'true' || steps.pnpm-audit.outputs.vulnerabilities == 'true')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
