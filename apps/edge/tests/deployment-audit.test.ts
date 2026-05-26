@@ -57,14 +57,9 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
   });
 
-  it('Health endpoint proxies to backend', async () => {
+  it('Health endpoint returns edge health (not proxied)', async () => {
     const env = createMockEnv();
     const ctx = createMockCtx();
-
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'ok' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })));
 
     const request = new Request('https://syrabit.ai/health', {
       method: 'GET',
@@ -73,12 +68,10 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     const response = await worker.fetch(request, env, ctx);
 
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body).toEqual({ status: 'ok' });
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('http://localhost:8000/health'),
-      expect.anything(),
-    );
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.status).toBe('healthy');
+    expect(body.service).toBe('syrabit-edge');
+    expect(body).toHaveProperty('timestamp');
   });
 
   it('/robots.txt returns robots content', async () => {
