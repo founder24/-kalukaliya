@@ -23,8 +23,9 @@ export default {
 
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
+      const origin = request.headers.get('Origin') || '';
       return new Response(null, {
-        headers: getCorsHeaders(env.ALLOWED_ORIGIN || 'https://syrabit.ai'),
+        headers: getCorsHeaders(origin),
       });
     }
 
@@ -157,6 +158,8 @@ export default {
     }
 
     // API routes → proxy to Azure backend
+    // Note: Only /health/ sub-paths (e.g. /health/deep) are proxied; /health is handled at edge above.
+    // Other paths like /healthz are intentionally not routed.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
       return proxyRequest(request, env.AZURE_BACKEND_URL, env);
     }
