@@ -3,6 +3,8 @@ name: Regenerate Lockfile
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   regen:
     runs-on: ubuntu-latest
