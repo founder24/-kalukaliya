@@ -21,6 +21,11 @@ export async function handleISR(
       return null;
     }
 
+    // Guard: KV binding may not be available in dev/preview environments
+    if (!env.ISR_CACHE_KV) {
+      return null;
+    }
+
     const url = new URL(request.url);
     const cacheKey = url.pathname;
 

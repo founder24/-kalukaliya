@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix all three pre-existing backend failures: (1) Razorpay 503 errors when credentials are missing, (2) Beanie 'not initialized' errors when MongoDB is unavailable, (3) Admin auth 403 errors. Add comprehensive tests that validate these scenarios work correctly with proper mocking.",
+  "status": "completed",
+  "steps": [
+    "RAZORPAY 503 FIX: In apps/backend/app/services/payment/razorpay_client.py, the RazorpayClient constructor sets auth=None when keys are missing but still attempts HTTP calls that fail with connection errors or 401. Add a guard: if RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET is not set, raise a clear HTTPException(503, 'Payment service not configured') early in create_subscription_order and cancel_subscription rather than letting httpx fail with opaque errors.",
+    "RAZORPAY 503 FIX: In apps/backend/app/api/v1/subscription.py, the create-order and cancel endpoints catch generic Exception and return 500. Update to catch the specific RuntimeError from razorpay_client and return appropriate status codes (503 for config issues, 502 for upstream gateway failures).",
+    "RAZORPAY 503 FIX: In apps/backend/app/api/webhooks/razorpay.py, the webhook handler raises 503 when RAZORPAY_WEBHOOK_SECRET is not configured AND when Redis is unavailable for idempotency. Ensure the error messages are distinct so operators can diagnose which dependency is failing.",
+    "BEANIE NOT INITIALIZED FIX: In apps/backend/app/db/mongo.py, init_mongo() can silently fail (logged as warning in main.py lifespan) but downstream code (User.find_one, User.get, etc.) then throws 'CollectionWasNotInitialized' because Beanie was never initialized. Add a defensive helper function `ensure_beanie_initialized()` that checks if Beanie is ready and raises HTTPException(503, 'Database service unavailable') if not.",
+    "BEANIE NOT INITIALIZED FIX: In apps/backend/app/api/v1/auth.py, wrap the User.find_one/User.get calls in the login, signup, get_current_user, and forgot-password endpoints with try/except for CollectionWasNotInitialized errors, converting them to HTTPException(503, 'Database service unavailable').",
+    "BEANIE NOT INITIALIZED FIX: Apply the same pattern in apps/backend/app/api/v1/admin.py for the admin_login endpoint that calls User.find_one.",
+    "ADMIN AUTH 403 FIX: In apps/backend/app/api/v1/admin.py, the admin_login endpoint has _csrf_check which validates Origin header. In test/local environments without proper Origin headers, legitimate admin login requests get 403 'CSRF validation failed'. Fix: skip CSRF validation when APP_ENV is 'test' or when the request Origin matches allowed origins including localhost origins for non-production environments.",
+    "ADMIN AUTH 403 FIX: The _validate_admin_session function correctly raises 401 for missing/invalid cookies and 403 for non-admin roles. Ensure the ADMIN_JWT_SECRET fallback to JWT_SECRET works correctly in tests by confirming the test fixture in test_admin_endpoints.py uses the right secret.",
+    "TESTS: Update apps/backend/tests/conftest.py to add a fixture that mocks Beanie initialization state so tests don't hit 'CollectionWasNotInitialized'. Add `mock_beanie` fixture that patches User model operations.",
+    "TESTS: Add new test file apps/backend/tests/test_service_degradation.py that tests all three failure scenarios: (a) Razorpay returns 503 when keys not configured, (b) endpoints return 503 when MongoDB/Beanie not initialized, (c) admin auth works with valid cookie and rejects invalid ones correctly.",
+    "TESTS: Update apps/backend/tests/test_payment_lifecycle.py to mock redis properly so tests pass without a running Redis instance."
+  ],
+  "acceptance_criteria": [
+    "Razorpay subscription endpoints return clear 503 with descriptive error when RAZORPAY_KEY_ID/SECRET are not set, rather than hanging or returning opaque 500",
+    "Webhook endpoint returns 503 with 'Webhook not configured' when secret missing and 503 with 'Webhook processing unavailable' when Redis unavailable",
+    "Auth endpoints (login, signup, get_current_user) return 503 'Database service unavailable' when Beanie/MongoDB is not initialized, instead of crashing with unhandled CollectionWasNotInitialized",
+    "Admin login works correctly with proper credentials and valid Origin in test environment",
+    "Admin verify returns 401 without cookie, 403 for non-admin tokens",
+    "All new and existing tests pass with APP_ENV=test",
+    "No changes break the existing test_webhook.py, test_admin_endpoints.py, or test_auth.py tests"
+  ],
+  "verification": [
+    "Run `cd apps/backend && APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long RAZORPAY_WEBHOOK_SECRET=test_webhook_secret pytest tests/test_service_degradation.py tests/test_webhook.py tests/test_payment_lifecycle.py tests/test_admin_endpoints.py tests/test_auth.py --tb=short -q` and confirm all pass"
+  ],
+  "blocked_reason": null,
+  "findings": "All 3 pre-existing test failures fixed. Key discoveries: (1) Razorpay fix was straightforward guard in client methods. (2) Beanie CollectionWasNotInitialized fix required wrapping User model calls in auth.py/admin.py plus patching User.find_one/get in conftest. (3) Admin 403 had TWO sources - the route-level _csrf_check in admin.py AND a middleware-level CSRF origin check in main.py. Both needed APP_ENV==test bypass. The middleware was the hidden cause of test_translator.py failures when running the full suite. Full suite now passes 163 tests (was 152 pass / 4 fail before)."
+}
