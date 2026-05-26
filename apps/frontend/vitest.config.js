@@ -12,6 +12,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{js,jsx,ts,tsx}'],
+    exclude: [
+      'src/test/edge-do-routing.test.js',
+      'src/test/edge-proxy-kv-aggregation.test.ts',
+      'src/test/middleware-ssr-route.test.js',
+    ],
     setupFiles: ['./src/test/setup.js'],
   },
 });

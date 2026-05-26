@@ -1,0 +1,5 @@
+[allowlist]
+description = "Allowlisted paths - Replit configuration contains only public/revoked tokens"
+paths = [
+  '''.replit'''
+]

@@ -16,6 +16,14 @@ jobs:
   backend-quality:
     name: Backend Quality Checks
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: test
+          MONGO_INITDB_ROOT_PASSWORD: test
+        ports:
+          - 27017:27017
     outputs:
       coverage: ${{ steps.coverage.outputs.coverage_pct }}
       complexity_warnings: ${{ steps.complexity.outputs.warnings }}
@@ -33,7 +41,7 @@ jobs:
           pip install -r /tmp/requirements-nohash.txt
 
       - name: Install quality tools
-        run: pip install pytest pytest-cov radon vulture ruff
+        run: pip install pytest pytest-cov radon vulture ruff email-validator
 
       - name: Run pytest with coverage
         id: coverage
@@ -53,6 +61,10 @@ jobs:
             echo "coverage_failed=false" >> "$GITHUB_OUTPUT"
           fi
           exit $EXIT_CODE
+        env:
+          MONGODB_URI: mongodb://test:test@localhost:27017
+          APP_ENV: test
+          JWT_SECRET: test-secret-at-least-32-characters-long-for-ci
 
       - name: Run radon complexity analysis
         id: complexity
@@ -93,6 +105,8 @@ jobs:
   frontend-quality:
     name: Frontend Quality Checks
     runs-on: ubuntu-latest
+    env:
+      VITE_BACKEND_URL: https://api.syrabit.ai
     outputs:
       bundle_size_kb: ${{ steps.bundle-size.outputs.size_kb }}
       bundle_exceeded: ${{ steps.bundle-size.outputs.exceeded }}
@@ -110,6 +124,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
+        # Use --no-frozen-lockfile because PRs may have package.json changes pending lockfile refresh
         run: pnpm install --no-frozen-lockfile
 
       - name: Build frontend

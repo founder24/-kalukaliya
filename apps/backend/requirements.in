@@ -16,7 +16,7 @@ httpx
 jinja2
 markdown
 posthog
-pydantic
+pydantic[email]
 pydantic-settings
 pyjwt[crypto]
 pymongo

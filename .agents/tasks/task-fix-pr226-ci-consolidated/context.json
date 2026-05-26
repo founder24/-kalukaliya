@@ -1,0 +1,30 @@
+{
+  "project_type": "Full-stack monorepo: Python FastAPI backend, React Vite frontend, Cloudflare Workers edge layer",
+  "language": "TypeScript/JavaScript (frontend, edge), Python (backend)",
+  "build_system": "pnpm workspaces with corepack, pip for backend",
+  "test_framework": "vitest for frontend/edge, pytest for backend",
+  "build_command": "pnpm install --frozen-lockfile && pnpm --filter @workspace/syrabit run build && pnpm --filter syrabit-edge exec tsc --noEmit",
+  "test_command": "pnpm --filter @workspace/syrabit test && pnpm --filter syrabit-edge test",
+  "verification_instructions": "1. pnpm install --frozen-lockfile 2. VITE_BACKEND_URL=https://api.syrabit.ai pnpm --filter @workspace/syrabit run build 3. pnpm --filter syrabit-edge exec tsc --noEmit 4. pnpm --filter @workspace/syrabit test 5. ruff check apps/backend/app/",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "corepack enable && corepack prepare pnpm@10.26.1 --activate && pnpm install --frozen-lockfile",
+  "environment_constraints": "OPEN_INTERNET - full access. Node 22, Python 3.11, pnpm 10.26.1 available. No MongoDB available locally for backend tests. No Cloudflare credentials for deploy tests.",
+  "contribution_requirements": "CI workflows must pass. Cloudflare Pages and Workers Builds are external integrations that cannot be fixed from code alone.",
+  "key_patterns": "Monorepo: apps/frontend (@workspace/syrabit), apps/edge (syrabit-edge), apps/backend. Workflows in .github/workflows/. Frontend needs VITE_BACKEND_URL env var for build. Backend needs MONGODB_URI, APP_ENV, JWT_SECRET for tests. vitest 4.x requires explicit expect.extend(matchers) pattern.",
+  "relevant_files": [
+    ".github/workflows/deploy-all.yml",
+    ".github/workflows/agent-quality-gate.yml",
+    ".github/workflows/agent-performance-regression.yml",
+    ".github/workflows/agent-security-scan.yml",
+    ".gitleaks.toml",
+    ".gitignore",
+    "apps/frontend/src/test/setup.js",
+    "apps/frontend/vitest.config.js",
+    "apps/edge/wrangler.toml",
+    "apps/backend/requirements.in",
+    "apps/backend/app/api/v1/admin_content.py",
+    "apps/backend/app/api/v1/admin_dashboard.py",
+    "apps/backend/app/services/content_publisher.py"
+  ],
+  "directory_structure": "Root: pnpm-workspace.yaml, package.json. apps/frontend: React Vite app. apps/edge: Cloudflare Workers. apps/backend: FastAPI Python app. .github/workflows: CI/CD workflows."
+}
