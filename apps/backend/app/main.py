@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
     # Warm up Azure Search connection (DNS/TLS handshake)
     try:
         from app.services.search.azure_search import search_service
+
         await search_service.warm_up()
         logger.info("Azure Search warmed up successfully")
     except Exception as e:

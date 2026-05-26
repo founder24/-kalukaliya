@@ -19,7 +19,10 @@ BURST_LIMIT_PRO = 30
 
 
 async def check_rate_limit(
-    user_id: str, user_tier: str, client_ip: str = None, request: Optional[Request] = None
+    user_id: str,
+    user_tier: str,
+    client_ip: str = None,
+    request: Optional[Request] = None,
 ) -> tuple[bool, int, int, str]:
     """Check if user has exceeded rate limit. Returns (allowed, current_count, limit, limit_type)."""
     limit = (

@@ -81,9 +81,16 @@ def mocked_pipeline_client():
         ),
     }
 
-    with patches["rate_limit"], patches["redis_cache"], patches["embedding"], \
-         patches["search"], patches["llm_generate"], patches["token_budget"], \
-         patches["posthog"], patches["auth_optional"]:
+    with (
+        patches["rate_limit"],
+        patches["redis_cache"],
+        patches["embedding"],
+        patches["search"],
+        patches["llm_generate"],
+        patches["token_budget"],
+        patches["posthog"],
+        patches["auth_optional"],
+    ):
         with TestClient(app, raise_server_exceptions=False) as client:
             yield client
 
@@ -104,9 +111,7 @@ def test_chat_pipeline_completes_under_500ms(mocked_pipeline_client):
 
     # The response may be 200 (success) or 4xx (auth/validation)
     # but should NOT be 500 (internal error) and should be fast
-    assert response.status_code != 500, (
-        f"Pipeline returned 500: {response.text[:500]}"
-    )
+    assert response.status_code != 500, f"Pipeline returned 500: {response.text[:500]}"
 
     # With all mocks, should complete very quickly
     assert elapsed_ms < 500, (

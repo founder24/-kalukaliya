@@ -60,10 +60,13 @@ async def test_retrieve_context_and_history_run_in_parallel():
         call_log.append(("load_history_end", time.time()))
         return "User: hello\nAssistant: hi"
 
-    with patch.object(
-        ChatService, "retrieve_context", side_effect=slow_retrieve_context
-    ), patch.object(
-        ChatService, "load_conversation_history", side_effect=slow_load_history
+    with (
+        patch.object(
+            ChatService, "retrieve_context", side_effect=slow_retrieve_context
+        ),
+        patch.object(
+            ChatService, "load_conversation_history", side_effect=slow_load_history
+        ),
     ):
         start = time.time()
         context_chunks, history = await asyncio.gather(

@@ -33,9 +33,7 @@ def app_instance():
 def test_all_routes_registered(app_instance):
     """Verify the app has routes registered (not empty)."""
     routes = [r for r in app_instance.routes if isinstance(r, APIRoute)]
-    assert len(routes) > 10, (
-        f"Expected many routes to be registered, got {len(routes)}"
-    )
+    assert len(routes) > 10, f"Expected many routes to be registered, got {len(routes)}"
 
 
 def test_health_endpoint_returns_200(sync_client):
@@ -82,8 +80,8 @@ def test_get_endpoints_no_500(sync_client, app_instance):
         if response.status_code == 500:
             failures.append(f"{path} returned 500: {response.text[:200]}")
 
-    assert not failures, (
-        f"The following endpoints returned 500:\n" + "\n".join(failures)
+    assert not failures, "The following endpoints returned 500:\n" + "\n".join(
+        failures
     )
 
 
@@ -121,6 +119,4 @@ def test_no_duplicate_routes(app_instance):
 
     # Some duplication is acceptable (e.g., include_in_schema=False aliases)
     # but warn if many
-    assert len(duplicates) < 5, (
-        f"Found many duplicate routes: {duplicates}"
-    )
+    assert len(duplicates) < 5, f"Found many duplicate routes: {duplicates}"

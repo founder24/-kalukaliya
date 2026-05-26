@@ -154,11 +154,11 @@ async def test_chat_latency_improvement():
     new_ms = new_elapsed * 1000
     improvement = ((old_ms - new_ms) / old_ms) * 100
 
-    print(f"\n  === LATENCY COMPARISON: Chat Endpoint ===")
+    print("\n  === LATENCY COMPARISON: Chat Endpoint ===")
     print(f"  OLD (sequential):  {old_ms:.1f}ms")
     print(f"  NEW (parallel):    {new_ms:.1f}ms")
     print(f"  Improvement:       {improvement:.1f}%")
-    print(f"  =========================================")
+    print("  =========================================")
 
     assert improvement >= 40, (
         f"Expected at least 40% improvement, got {improvement:.1f}%"
@@ -198,9 +198,7 @@ async def test_page_load_old_middleware_overhead():
     # OLD: 3 separate middleware chains each wrapping call_next
     async def chain():
         return await middleware_pass(
-            lambda: middleware_pass(
-                lambda: middleware_pass(handler)
-            )
+            lambda: middleware_pass(lambda: middleware_pass(handler))
         )
 
     await chain()
@@ -275,9 +273,7 @@ async def test_page_load_improvement():
     # OLD path: 3 middlewares + cold start
     start_old = time.perf_counter()
     await middleware_pass(
-        lambda: middleware_pass(
-            lambda: middleware_pass(handler_cold)
-        )
+        lambda: middleware_pass(lambda: middleware_pass(handler_cold))
     )
     old_elapsed = time.perf_counter() - start_old
 
@@ -290,11 +286,11 @@ async def test_page_load_improvement():
     new_ms = new_elapsed * 1000
     improvement = ((old_ms - new_ms) / old_ms) * 100
 
-    print(f"\n  === LATENCY COMPARISON: Page Load ===")
+    print("\n  === LATENCY COMPARISON: Page Load ===")
     print(f"  OLD (3 middlewares + cold start):  {old_ms:.1f}ms")
     print(f"  NEW (1 middleware + warm):         {new_ms:.1f}ms")
     print(f"  Improvement:                       {improvement:.1f}%")
-    print(f"  =====================================")
+    print("  =====================================")
 
     assert improvement >= 50, (
         f"Expected at least 50% improvement, got {improvement:.1f}%"
@@ -323,7 +319,9 @@ async def test_regression_chat_service_uses_gather_for_parallel_execution():
         call_log.append(("retrieve_start", time.perf_counter()))
         await asyncio.sleep(0.1)
         call_log.append(("retrieve_end", time.perf_counter()))
-        return [{"id": "1", "title": "T", "content": "c", "score": 0.9, "url": "http://x"}]
+        return [
+            {"id": "1", "title": "T", "content": "c", "score": 0.9, "url": "http://x"}
+        ]
 
     async def mock_load_history(session_id, max_turns=5):
         call_log.append(("history_start", time.perf_counter()))
@@ -331,10 +329,13 @@ async def test_regression_chat_service_uses_gather_for_parallel_execution():
         call_log.append(("history_end", time.perf_counter()))
         return "User: hi\nAssistant: hello"
 
-    with patch.object(
-        ChatService, "retrieve_context", side_effect=mock_retrieve_context
-    ), patch.object(
-        ChatService, "load_conversation_history", side_effect=mock_load_history
+    with (
+        patch.object(
+            ChatService, "retrieve_context", side_effect=mock_retrieve_context
+        ),
+        patch.object(
+            ChatService, "load_conversation_history", side_effect=mock_load_history
+        ),
     ):
         start = time.perf_counter()
         context_chunks, history = await asyncio.gather(
