@@ -30,18 +30,10 @@ binding = "RATE_LIMIT_KV"
 id = "2983094e249d4094b66e4b9dacc38719"
 preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 
-# ┌─────────────────────────────────────────────────────────────────────────────┐
-# │ WARNING: ISR_CACHE_KV uses placeholder IDs that WILL FAIL in production.   │
-# │ Before deploying to production, you MUST:                                  │
-# │   1. Run: npx wrangler kv:namespace create ISR_CACHE_KV                    │
-# │   2. Run: npx wrangler kv:namespace create ISR_CACHE_KV --preview          │
-# │   3. Replace the placeholder IDs below with the real IDs from step 1-2     │
-# │ Failure to do so will cause deploy failures or runtime errors.             │
-# └─────────────────────────────────────────────────────────────────────────────┘
 [[env.production.kv_namespaces]]
 binding = "ISR_CACHE_KV"
-id = "0000000000000000000000000000000a"
-preview_id = "0000000000000000000000000000000b"
+id = "093eae4cf7e949ddb9f856cf1ef79a29"
+preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
 
 # Secrets (set via: npx wrangler secret put <NAME>):
 # - JWT_SECRET
