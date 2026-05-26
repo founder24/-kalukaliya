@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix production latency bottlenecks causing 5x latency inflation (ms in tests vs seconds in production). The core issue is sequential await chains in the chat pipeline, Upstash Redis HTTP overhead on every request (multiple round-trips for rate limiting), and lack of parallelism in the critical path. This feature implements parallelization, connection optimization, and removes redundant operations.",
+  "status": "pending",
+  "steps": [
+    "STEP 1 - Parallelize rate limit + RAG retrieval in chat.py: In apps/backend/app/api/v1/chat.py, the non-streaming endpoint currently does: rate_limit -> sanitize -> resolve_lang -> retrieve_context (embedding+search) -> load_history -> call_llm sequentially. Refactor _process_chat() to run retrieve_context and load_conversation_history in parallel using asyncio.gather() since they are independent. This saves one full round-trip (history fetch ~50-200ms).",
+    "STEP 2 - Parallelize in streaming endpoint: In the streaming endpoint in chat.py, retrieve_context and load_conversation_history are also sequential. Parallelize them with asyncio.gather() as well.",
+    "STEP 3 - Fix duplicate rate limiting: The edge worker (apps/edge/src/index.ts) does KV-based rate limiting for chat POST requests, AND the backend (apps/backend/app/api/deps/rate_limit.py) does Redis-based rate limiting. This means every chat request makes 2 separate rate limit checks across 2 different services. In the backend rate_limit.py, add a header check: if the request already has X-Rate-Limited-By: edge header (set by edge), skip the burst rate limit check (keep monthly quota only). In the edge worker, after successful rate limit check, add X-Rate-Limited-By: edge header to the proxied request.",
+    "STEP 4 - Optimize Upstash Redis calls in rate_limit.py: The current check_rate_limit function makes up to 5 sequential Redis HTTP calls (incr + expire for monthly, incr + expire for burst). Upstash REST Redis supports pipelining. Refactor to use a single pipeline call that executes all commands atomically, reducing from 4-5 HTTP round-trips to 1. Use the Upstash Redis pipeline() method.",
+    "STEP 5 - Add connection warm-up for Azure Search: In apps/backend/app/services/search/azure_search.py, the SearchClient is initialized but the first request after cold start pays TLS handshake + DNS resolution cost. Add an explicit warm-up ping in the mongo init_mongo lifespan (since search is always needed). Add a method warm_up() to AzureSearchService that makes a minimal search call during startup.",
+    "STEP 6 - Reduce middleware overhead: In apps/backend/app/main.py, there are 3 separate middleware layers (csrf_origin_check, add_security_headers, add_request_id) that each independently process every request. Combine csrf_origin_check and add_security_headers into add_request_id middleware (a single middleware that does all three jobs) to reduce the per-request overhead from 3 call_next chains to 1.",
+    "STEP 7 - Optimize conversation history caching: In apps/backend/app/services/chat_service.py load_conversation_history(), when cache misses, it fetches up to 5 Chat documents from MongoDB, processes them, then caches. The MongoDB query does .sort('-created_at').limit(5) but does NOT use the (session_id, updated_at) index. Ensure the query uses the correct field and index. Also reduce the default cache TTL comment is 30 minutes which is fine, but add cache-ahead: on save_chat, proactively cache the updated history so the next request always hits cache.",
+    "STEP 8 - Add request-scoped connection reuse header: In apps/edge/src/routes/api-proxy.ts, add 'Connection: keep-alive' to the outbound request headers so the Cloudflare Worker reuses TCP connections to the Azure backend instead of establishing new ones per request."
+  ],
+  "acceptance_criteria": [
+    "The chat endpoint's non-streaming path runs retrieve_context and load_conversation_history in parallel (asyncio.gather)",
+    "The streaming endpoint runs retrieve_context and load_conversation_history in parallel",
+    "Rate limit dependency makes at most 1 Redis pipeline call instead of 4-5 sequential calls",
+    "Edge worker sets X-Rate-Limited-By header on proxied requests after its own rate limit passes",
+    "Middleware is consolidated from 3 separate middleware functions into 1",
+    "Azure Search has a warm_up method called during app startup",
+    "Conversation history is proactively cached after save_chat",
+    "All existing backend tests continue to pass"
+  ],
+  "verification": [
+    "Run pytest tests/ in apps/backend/ with APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long-for-ci to confirm existing tests pass",
+    "Run pnpm --filter syrabit-edge run build to confirm edge TypeScript compiles",
+    "Verify the chat.py file uses asyncio.gather for parallel operations by grepping"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
