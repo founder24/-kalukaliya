@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Environment setup - Install all dependencies and verify baseline builds and tests pass for both edge and backend",
+  "status": "completed",
+  "steps": [
+    "Run `corepack enable && corepack prepare pnpm@10.26.1 --activate` at repo root",
+    "Run `pnpm install` at repo root to install edge dependencies",
+    "Run `pnpm --filter syrabit-edge exec tsc --noEmit` to verify edge TypeScript compiles",
+    "Run `pnpm --filter syrabit-edge test` to verify edge tests pass",
+    "Install backend deps: `cd apps/backend && pip install -r requirements.txt` (strip hashes: `sed 's/ *\\\\$//' requirements.txt | grep -v '^\\s*--hash' > /tmp/req.txt && pip install -r /tmp/req.txt`)",
+    "Install test deps: `pip install pytest pytest-asyncio pytest-cov email-validator`",
+    "Run backend tests: `cd apps/backend && APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long RAZORPAY_WEBHOOK_SECRET=test_webhook_secret pytest tests/ --tb=short -q` and record which tests pass/fail",
+    "Document baseline state: which edge tests pass, which backend tests pass, which fail and why"
+  ],
+  "acceptance_criteria": [
+    "Edge TypeScript compiles without errors (tsc --noEmit passes)",
+    "Edge vitest suite passes (all 5+ test files green)",
+    "Backend dependencies install successfully",
+    "Backend test baseline is documented (pass/fail counts recorded)"
+  ],
+  "verification": [
+    "Run `pnpm --filter syrabit-edge exec tsc --noEmit` exits 0",
+    "Run `pnpm --filter syrabit-edge test` shows all tests passing",
+    "Run backend pytest and confirm output is captured"
+  ],
+  "blocked_reason": null,
+  "findings": "Environment setup complete. Python 3.11.15 (pyenv) required - system default was 3.9 which cannot install anyio>=4.13.0. Edge: pnpm install succeeded (790 packages), tsc --noEmit clean, vitest 6 files / 35 tests ALL PASSING. Backend: pip install from hash-stripped requirements.txt succeeded, pytest 152 passed / 4 failed. Pre-existing failures: (1) test_auth.py::test_login_invalid_credentials - beanie.exceptions.CollectionWasNotInitialized (Beanie ODM not initialized for User model in test fixture), (2-4) test_translator.py::TestAdminTranslateEndpoints (3 tests) - all get 403 Forbidden instead of expected status codes, likely admin cookie auth not properly set in test fixtures. These failures are NOT caused by our changes - they are pre-existing test issues."
+}
