@@ -146,22 +146,18 @@ describe('Critical page component imports', () => {
     expect(mod.default).toBeDefined();
   });
 
-  it('TestimonialsFooter render fails gracefully due to missing brand icons', async () => {
-    // TestimonialsFooter uses `GithubIcon as Github` from lucide-react,
-    // but brand icons were removed in v1.16.0. The component imports fine
-    // but fails at render time when it tries to use the undefined icon.
-    // This test documents the known limitation and verifies it fails
-    // with a predictable React error (not a random crash).
+  it('TestimonialsFooter renders successfully with inline SVG brand icons', async () => {
+    // TestimonialsFooter now uses inline SVG components for Twitter and GitHub
+    // since brand icons were removed in lucide-react@1.16.0.
+    // Verify the component renders without throwing.
     const { renderToStaticMarkup } = await import('react-dom/server');
     const React = await import('react');
     const { default: TestimonialsFooter } = await import(
       '@/pages/landing/TestimonialsFooter'
     );
 
-    // The render should throw a React "Element type is invalid" error
-    // because GithubIcon is undefined in lucide-react@1.16.0
-    expect(() => {
-      renderToStaticMarkup(React.createElement(TestimonialsFooter));
-    }).toThrow('Element type is invalid');
+    const html = renderToStaticMarkup(React.createElement(TestimonialsFooter));
+    expect(html).toContain('Twitter');
+    expect(html).toContain('GitHub');
   });
 });
