@@ -22,6 +22,15 @@
     "overrides": {
       "esbuild@<0.25.0": ">=0.25.10",
       "ws@<8.18.3": ">=8.18.3"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd",
+      "sharp",
+      "@esbuild/linux-x64",
+      "@esbuild/darwin-arm64",
+      "@esbuild/darwin-x64",
+      "@esbuild/win32-x64"
+    ]
   }
 }

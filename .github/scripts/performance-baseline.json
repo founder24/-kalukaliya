@@ -10,7 +10,7 @@
   "bundle": {
     "max_increase_bytes": 524288,
     "max_increase_percent": 10,
-    "max_total_kb": 2048
+    "max_total_kb": 9216
   },
   "backend": {
     "p95_latency_ms": 400,
