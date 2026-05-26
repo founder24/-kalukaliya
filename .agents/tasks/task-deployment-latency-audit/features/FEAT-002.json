@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Fix production latency bottlenecks causing 5x latency inflation (ms in tests vs seconds in production). The core issue is sequential await chains in the chat pipeline, Upstash Redis HTTP overhead on every request (multiple round-trips for rate limiting), and lack of parallelism in the critical path. This feature implements parallelization, connection optimization, and removes redundant operations.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "STEP 1 - Parallelize rate limit + RAG retrieval in chat.py: In apps/backend/app/api/v1/chat.py, the non-streaming endpoint currently does: rate_limit -> sanitize -> resolve_lang -> retrieve_context (embedding+search) -> load_history -> call_llm sequentially. Refactor _process_chat() to run retrieve_context and load_conversation_history in parallel using asyncio.gather() since they are independent. This saves one full round-trip (history fetch ~50-200ms).",
     "STEP 2 - Parallelize in streaming endpoint: In the streaming endpoint in chat.py, retrieve_context and load_conversation_history are also sequential. Parallelize them with asyncio.gather() as well.",

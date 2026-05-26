@@ -40,6 +40,17 @@ class AzureSearchService:
                 "Azure Search not configured - RAG search will return empty results"
             )
 
+    async def warm_up(self) -> None:
+        """Warm up the search client connection during startup."""
+        if not self.client:
+            return
+        try:
+            # Minimal query to establish connection and warm DNS/TLS
+            async for _ in self.client.search(search_text="*", top=1):
+                break
+        except Exception as e:
+            logger.warning(f"Search warm-up failed (non-fatal): {e}")
+
     async def _async_search(
         self,
         query: str,

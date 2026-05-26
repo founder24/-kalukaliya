@@ -111,6 +111,11 @@ export default {
           }
         );
       }
+
+      // Signal to backend that edge already performed rate limiting
+      const rlHeaders = new Headers(request.headers);
+      rlHeaders.set('X-Rate-Limited-By', 'edge');
+      request = new Request(request, { headers: rlHeaders });
     }
 
     // ── 5. Routing ──

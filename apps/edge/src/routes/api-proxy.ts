@@ -28,6 +28,9 @@ export async function proxyRequest(
   headers.delete('Host');
   headers.delete('Content-Length');
 
+  // Ensure connection reuse to Azure backend
+  headers.set('Connection', 'keep-alive');
+
   try {
     const response = await fetch(targetUrl, {
       method: request.method,

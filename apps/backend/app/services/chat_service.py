@@ -249,9 +249,20 @@ class ChatService:
             )
             await chat_doc.save()
 
-            # Invalidate conversation history cache for this session
+            # Proactively update history cache so next request hits warm cache
             if session_id:
-                await ChatService._invalidate_history_cache(session_id)
+                try:
+                    recent_history = f"User: {user_message[:500]}\nAssistant: {assistant_response[:500]}"
+                    existing = await ChatService._get_history_from_cache(session_id, 5)
+                    if existing:
+                        updated = f"{existing}\n{recent_history}"
+                        if len(updated) > 2000:
+                            updated = updated[-2000:]
+                    else:
+                        updated = recent_history
+                    await ChatService._set_history_cache(session_id, 5, updated)
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error(f"Failed to save chat: {e}")
