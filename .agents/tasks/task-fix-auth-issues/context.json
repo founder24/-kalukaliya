@@ -1,0 +1,27 @@
+{
+  "project_type": "Full-stack web app: Cloudflare Workers edge proxy (TypeScript) + FastAPI backend (Python) + React frontend",
+  "language": "TypeScript (edge), Python (backend)",
+  "build_system": "npm/vitest for edge worker, pip/pytest for backend",
+  "test_framework": "vitest for apps/edge/tests/*.test.ts, pytest with httpx AsyncClient for apps/backend/tests/",
+  "build_command": "cd apps/edge && npx tsc --noEmit",
+  "test_command": "cd apps/edge && npx vitest run && cd ../../apps/backend && python -m pytest tests/ -x",
+  "verification_instructions": "1. Run tsc --noEmit in apps/edge to check TypeScript compilation. 2. Run vitest in apps/edge for unit tests. 3. Run pytest in apps/backend for Python tests.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. cd apps/edge && npm install. 2. cd apps/backend && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET - full network access. No Docker daemon needed for testing; tests use vitest (edge) and pytest with mocks (backend).",
+  "contribution_requirements": "Branch from main; TypeScript strict mode; Python type hints encouraged; tests required for new logic.",
+  "key_patterns": "Edge worker: middleware files in apps/edge/src/middleware/, tests in apps/edge/tests/. Backend: FastAPI app with middleware in main.py, config in config.py, routes in app/api/v1/, tests in apps/backend/tests/ with conftest.py providing async fixtures.",
+  "relevant_files": [
+    "apps/edge/src/index.ts",
+    "apps/edge/src/middleware/bot.ts",
+    "apps/edge/src/middleware/cors.ts",
+    "apps/edge/tests/cors.test.ts",
+    "apps/edge/tests/bot.test.ts",
+    "apps/backend/app/main.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/api/v1/auth.py",
+    "apps/backend/tests/conftest.py",
+    "apps/backend/tests/test_auth.py"
+  ],
+  "directory_structure": "apps/edge/ - Cloudflare Workers edge proxy with bot protection, JWT, CORS, rate limiting. apps/backend/ - FastAPI application with MongoDB (Beanie ODM), Redis rate limiting, admin panel. apps/frontend/ - React SPA (not modified in this task)."
+}

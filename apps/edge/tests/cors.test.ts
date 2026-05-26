@@ -27,4 +27,25 @@ describe('CORS Middleware', () => {
     expect(headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
     expect(headers.get('Access-Control-Max-Age')).toBe('86400');
   });
+
+  it('includes x-turnstile-token in Access-Control-Allow-Headers', () => {
+    const headers = getCorsHeaders('https://syrabit.ai');
+    expect(headers['Access-Control-Allow-Headers']).toContain('x-turnstile-token');
+    expect(headers['Access-Control-Allow-Headers']).toContain('CF-Turnstile-Response');
+  });
+
+  it('accepts Pages preview URL as valid CORS origin', () => {
+    const headers = getCorsHeaders('https://abc123.syrabitfrontend.pages.dev');
+    expect(headers['Access-Control-Allow-Origin']).toBe('https://abc123.syrabitfrontend.pages.dev');
+  });
+
+  it('accepts Pages preview URL with dashes as valid CORS origin', () => {
+    const headers = getCorsHeaders('https://my-branch-preview.syrabitfrontend.pages.dev');
+    expect(headers['Access-Control-Allow-Origin']).toBe('https://my-branch-preview.syrabitfrontend.pages.dev');
+  });
+
+  it('rejects invalid Pages-like URLs that do not match the pattern', () => {
+    const headers = getCorsHeaders('https://evil.syrabitfrontend.pages.dev.attacker.com');
+    expect(headers['Access-Control-Allow-Origin']).toBe('https://syrabit.ai');
+  });
 });

@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix backend CORS headers, CSRF origin validation, and rate limiting to properly work behind the Cloudflare edge worker for auth endpoints.",
+  "status": "pending",
+  "steps": [
+    "In apps/backend/app/main.py, add 'x-turnstile-token' and 'CF-Turnstile-Response' to the allow_headers list in the CORSMiddleware configuration (line 135). This ensures browser preflight requests succeed when these headers are sent.",
+    "In apps/backend/app/config.py, modify the allowed_origins_list property to also include pattern matching for Cloudflare Pages preview domains. Add logic that, in addition to the comma-separated ALLOWED_ORIGINS, also matches any origin of the form https://<hash>.syrabitfrontend.pages.dev. This can be done by adding a helper method or modifying the property to append dynamically.",
+    "In apps/backend/app/main.py unified_middleware, update the CSRF origin check to also allow origins that match the *.syrabitfrontend.pages.dev pattern. Alternatively, leverage the updated allowed_origins_list property from config.py since the CSRF check already uses settings.allowed_origins_list.",
+    "In apps/backend/app/api/v1/auth.py, modify the _check_rate_limit function to prefer the X-Real-IP or X-Forwarded-For header over request.client.host. The edge worker sets X-Real-IP with the actual user IP. Fallback to request.client.host if header is not present.",
+    "Add or update tests in apps/backend/tests/test_auth.py to verify: (a) CORS response includes x-turnstile-token in allowed headers (can test via OPTIONS request), (b) rate limiting uses X-Real-IP when available."
+  ],
+  "acceptance_criteria": [
+    "CORS preflight response includes 'x-turnstile-token' and 'CF-Turnstile-Response' in Access-Control-Allow-Headers",
+    "Origins like https://d2136f37.syrabitfrontend.pages.dev are accepted by CSRF validation and CORS",
+    "Rate limiting in auth.py uses X-Real-IP header value when present instead of request.client.host",
+    "All existing backend tests pass plus new tests for the above",
+    "Python code has no import errors or syntax issues"
+  ],
+  "verification": [
+    "cd apps/backend && python -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

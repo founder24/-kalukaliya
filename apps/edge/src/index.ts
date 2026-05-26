@@ -71,9 +71,13 @@ export default {
       }
 
       if (turnstileToken) {
-        const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
-        if (!isValid) {
-          return jsonResponse(403, { error: 'Bot verification failed' });
+        if (!env.CF_TURNSTILE_SECRET) {
+          console.warn('CF_TURNSTILE_SECRET is not configured — skipping Turnstile verification');
+        } else {
+          const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
+          if (!isValid) {
+            return jsonResponse(403, { error: 'Bot verification failed' });
+          }
         }
       }
 
