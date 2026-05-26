@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Wire Vertex AI as a chat provider in router.py's generate_response() and stream_response() functions, and add a unit test to verify routing logic.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/services/ai/router.py, modify generate_response() to add a Vertex model detection branch BEFORE the Cloudflare fallback. Match on 'gemini' or 'vertex' in model.lower(). When matched, lazily import generate_with_vertex from app.services.ai.vertex_client and call it with system_prompt, user_message, model, and stream parameters.",
     "In apps/backend/app/services/ai/router.py, modify stream_response() to add a Vertex model detection branch BEFORE the Cloudflare fallback else clause. Match on 'gemini' or 'vertex' in model.lower(). When matched, lazily import vertex_client from app.services.ai.vertex_client and use vertex_client.stream_generate_with_retry(system_prompt, user_message) for streaming with retry, following the same pattern as the Sarvam branch. Log routing with logger.info.",
@@ -20,5 +20,5 @@
     "Run: cd apps/backend && python -m pytest tests/ -x -q to confirm no regressions"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 5 new routing tests pass. Pre-existing test failures in test_chat.py and test_admin_endpoints.py are due to missing sentry_sdk package in the environment, confirmed unrelated to this change. JWT_SECRET env var required for tests (min 32 chars)."
 }
