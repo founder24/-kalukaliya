@@ -13,9 +13,7 @@ async def test_generate_response_routes_gemini_to_vertex():
     """Test that model containing 'gemini' routes to Vertex AI"""
     mock_generate = AsyncMock(return_value="vertex response")
 
-    with patch(
-        "app.services.ai.vertex_client.generate_with_vertex", mock_generate
-    ):
+    with patch("app.services.ai.vertex_client.generate_with_vertex", mock_generate):
         from app.services.ai.router import generate_response
 
         result = await generate_response(
@@ -39,9 +37,7 @@ async def test_generate_response_routes_sarvam_to_sarvam():
     """Test that model containing 'openhathi' routes to Sarvam AI"""
     mock_generate = AsyncMock(return_value="sarvam response")
 
-    with patch(
-        "app.services.ai.sarvam_client.generate_with_sarvam", mock_generate
-    ):
+    with patch("app.services.ai.sarvam_client.generate_with_sarvam", mock_generate):
         from app.services.ai.router import generate_response
 
         result = await generate_response(
