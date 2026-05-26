@@ -1,3 +1,9 @@
+import os
+
+# Set required env vars before any app module imports trigger Settings()
+os.environ.setdefault("JWT_SECRET", "test-secret-at-least-32-characters-long")
+os.environ.setdefault("APP_ENV", "development")
+
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
