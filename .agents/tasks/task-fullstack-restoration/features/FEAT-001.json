@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Edge Worker improvements: proxy timeout with AbortController, CORS www subdomain + turnstile header, dedicated /health endpoint, env.d.ts PROXY_TIMEOUT_MS, and wrangler.toml comment",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Proxy Timeout (apps/edge/src/routes/api-proxy.ts): Add an AbortController with configurable timeout (default 30s, read from env.PROXY_TIMEOUT_MS if available). Before the fetch call, create `const controller = new AbortController(); const timeoutMs = parseInt(env.PROXY_TIMEOUT_MS || '30000', 10); const timeout = setTimeout(() => controller.abort(), timeoutMs);`. Pass `signal: controller.signal` to the fetch call. After the fetch resolves, call `clearTimeout(timeout)`. In the catch block, detect AbortError (error.name === 'AbortError') and return 504 Gateway Timeout with JSON body {error: 'Backend request timed out'} instead of 503. Keep the existing 503 for other errors. The function signature already has `env: Env` so use it.",
     "Step 2 - CORS improvements (apps/edge/src/middleware/cors.ts): Add 'https://www.syrabit.ai' to the ALLOWED_ORIGINS array. Add 'x-turnstile-token' to the Access-Control-Allow-Headers string (comma-separated list currently has 'Content-Type, Authorization, CF-Turnstile-Response').",
@@ -22,5 +22,5 @@
     "Run `npx tsc --noEmit` in apps/edge/ directory to confirm TypeScript compiles without errors"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 5 steps implemented successfully. TypeScript compilation (tsc --noEmit) passes with zero errors after npm install in apps/edge/. The package-lock.json was generated during install but not committed as it is not part of the feature scope."
 }
