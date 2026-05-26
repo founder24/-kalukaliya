@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix the Performance Regression workflow, Quality Gate workflow, and ensure Cloudflare Pages build can succeed by adding VITE_BACKEND_URL env var where frontend builds happen, and adding MongoDB service to the quality gate backend job",
+  "status": "completed",
+  "steps": [
+    "In .github/workflows/agent-performance-regression.yml: Add an env block to the 'Build frontend' step (or job-level env) with VITE_BACKEND_URL: https://api.syrabit.ai. This is needed because the build script (scripts/build.mjs) calls check-build-env.mjs which hard-fails without VITE_BACKEND_URL.",
+    "In .github/workflows/agent-quality-gate.yml: Add an env block to the frontend-quality job's 'Build frontend' step with VITE_BACKEND_URL: https://api.syrabit.ai for the same reason.",
+    "In .github/workflows/agent-quality-gate.yml: The backend-quality job runs pytest which needs MongoDB. Add a services section with a MongoDB container (similar to ci-backend.yml which has: services: mongodb: image: mongo:7, env: MONGO_INITDB_ROOT_USERNAME: test, MONGO_INITDB_ROOT_PASSWORD: test, ports: - 27017:27017). Also add MONGODB_URI, APP_ENV, and JWT_SECRET environment variables to the pytest step (MONGODB_URI: mongodb://test:test@localhost:27017, APP_ENV: test, JWT_SECRET: test-secret-at-least-32-characters-long).",
+    "In .github/workflows/agent-performance-regression.yml: Also add VITE_BACKEND_URL to the 'Install dependencies' step environment (or set it at job level) to ensure the entire build pipeline has the variable available.",
+    "Verify that the agent-security-scan.yml gitleaks step uses --source . which will benefit from .gitleaks.toml (done in FEAT-001)."
+  ],
+  "acceptance_criteria": [
+    "agent-performance-regression.yml has VITE_BACKEND_URL set for the frontend build step",
+    "agent-quality-gate.yml frontend-quality job has VITE_BACKEND_URL set for the build step",
+    "agent-quality-gate.yml backend-quality job has a MongoDB service container and the pytest step has MONGODB_URI, APP_ENV, JWT_SECRET environment variables",
+    "All workflow YAML files are syntactically valid"
+  ],
+  "verification": [
+    "Run: python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/agent-performance-regression.yml'))\" (no error)",
+    "Run: python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/agent-quality-gate.yml'))\" (no error)",
+    "Grep for VITE_BACKEND_URL in both workflow files to confirm it is present"
+  ],
+  "blocked_reason": null,
+  "findings": "All changes applied cleanly. Both YAML files validated with python3 yaml.safe_load. VITE_BACKEND_URL added as job-level env in both performance-regression (lighthouse-audit job) and quality-gate (frontend-quality job). MongoDB service and env vars (MONGODB_URI, APP_ENV, JWT_SECRET) added to quality-gate backend-quality job."
+}
