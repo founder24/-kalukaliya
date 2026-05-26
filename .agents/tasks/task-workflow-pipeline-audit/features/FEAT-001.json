@@ -26,5 +26,5 @@
     "Run: grep -n 'fromJSON' .github/workflows/agent-canary-deploy.yml (should show the fixed comparisons)"
   ],
   "blocked_reason": null,
-  "findings": "All 24 workflow YAML files validated successfully. azure/login downgraded in 3 places (agent-canary-deploy.yml x1, deploy-all.yml x2). Permissions blocks added to 7 files. fromJSON() fixes applied in 4 if-conditions across 3 files. All CI workflows already had workflow_dispatch triggers."
+  "findings": "All 24 workflow YAML files validated successfully. azure/login downgraded in 3 places (agent-canary-deploy.yml x1, deploy-all.yml x2). Permissions blocks added to 7 files. fromJSON() fixes applied in 4 if-conditions across 3 files. All CI workflows already had workflow_dispatch triggers. Post-review fix: normalized bc output with printf to prevent leading-dot decimals (e.g. .05) that break fromJSON(). Changed scale=2 to scale=4 for bc precision and wrapped with printf %.2f for consistent output format."
 }
