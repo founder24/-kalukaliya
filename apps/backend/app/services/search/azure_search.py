@@ -1,3 +1,4 @@
+from typing import Optional
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
     VectorizableTextQuery,
@@ -55,7 +56,7 @@ class AzureSearchService:
         self,
         query: str,
         vector_query,
-        user_tier: str | None,
+        user_tier: Optional[str],
         limit: int,
         semantic: bool,
     ):

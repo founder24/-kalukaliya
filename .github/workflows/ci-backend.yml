@@ -36,7 +36,7 @@ jobs:
         run: bandit -c .bandit -r apps/backend/app/ -ll
 
       - name: Run MyPy type checker
-        run: mypy apps/backend/app/ --ignore-missing-imports
+        run: mypy apps/backend/app/ --config-file apps/backend/mypy.ini
 
   test:
     name: Run Tests

@@ -47,9 +47,9 @@ class Chat(Document):
         self,
         role: str,
         content: str,
-        model_used: str = None,
-        latency_ms: int = None,
-        rag_sources: List[dict] = None,
+        model_used: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        rag_sources: Optional[List[dict]] = None,
     ):
         """Add a message to the chat"""
         message = {
@@ -64,7 +64,7 @@ class Chat(Document):
         self.messages.append(message)
         self.updated_at = datetime.utcnow()
 
-    async def generate_title(self, llm_client) -> str:
+    async def generate_title(self, llm_client) -> Optional[str]:
         """Auto-generate chat title from first message"""
         if not self.title and len(self.messages) > 0:
             first_msg = self.messages[0]["content"][:50]
