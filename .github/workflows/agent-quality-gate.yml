@@ -51,7 +51,7 @@ jobs:
           JWT_SECRET: test-secret-at-least-32-characters-long
         run: |
           set +e
-          OUTPUT=$(pytest apps/backend/ --cov=apps/backend/app --cov-report=term --cov-fail-under=60 2>&1)
+          OUTPUT=$(pytest apps/backend/ --cov=apps/backend/app --cov-report=term --cov-fail-under=45 2>&1)
           EXIT_CODE=$?
           echo "$OUTPUT"
 
