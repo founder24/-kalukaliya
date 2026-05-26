@@ -17,6 +17,7 @@ jinja2
 markdown
 posthog
 pydantic[email]
+email-validator
 pydantic-settings
 pyjwt[crypto]
 pymongo

@@ -5,7 +5,7 @@ Responsibilities:
 - Language resolution & model routing
 - RAG retrieval (embedding + hybrid search)
 - Prompt building with citation format
-- LLM calling with Sarvam-to-Cloudflare fallback
+- LLM calling with Sarvam-to-Vertex fallback
 - Chat persistence (fire-and-forget) with dead letter on double failure
 - Conversation history loading with Redis caching
 """
@@ -99,7 +99,7 @@ class ChatService:
         return f"{lang_instruction}\n\nContext:\n{context_text}"
 
     # ------------------------------------------------------------------
-    # LLM calling (with Sarvam -> Cloudflare AI fallback)
+    # LLM calling (with Sarvam -> Vertex AI fallback)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -111,7 +111,7 @@ class ChatService:
         user_id: str,
     ) -> tuple[str, str]:
         """
-        Call the LLM. On Sarvam failure for Assamese, falls back to Cloudflare AI.
+        Call the LLM. On Sarvam failure for Assamese, falls back to Vertex AI.
         Returns (response_text, actual_model_used).
         """
         from app.services.ai.router import generate_response
@@ -126,11 +126,11 @@ class ChatService:
             return response_text, target_model
         except (RuntimeError, Exception) as e:
             if detected_lang == "as":
-                logger.warning(f"Sarvam failed ({e}), falling back to Cloudflare AI")
-                from app.services.ai.cloudflare_client import cloudflare_client
+                logger.warning(f"Sarvam failed ({e}), falling back to Vertex AI")
+                from app.services.ai.vertex_client import vertex_client
 
-                actual_model = settings.CF_AI_MODEL
-                response_text = await cloudflare_client.generate(
+                actual_model = settings.VERTEX_GEMINI_MODEL
+                response_text = await vertex_client.generate(
                     system_prompt=system_prompt,
                     user_message=sanitized_message,
                 )
@@ -149,7 +149,7 @@ class ChatService:
     ) -> AsyncGenerator[str, None]:
         """
         Stream LLM response as SSE events. On Sarvam failure for Assamese,
-        falls back to Cloudflare AI. On double failure, stores a dead letter.
+        falls back to Vertex AI. On double failure, stores a dead letter.
 
         Yields SSE-formatted data lines.
         """
@@ -170,29 +170,29 @@ class ChatService:
         except Exception as e:
             if detected_lang == "as":
                 logger.warning(
-                    f"Sarvam stream failed ({e}), falling back to Cloudflare AI"
+                    f"Sarvam stream failed ({e}), falling back to Vertex AI"
                 )
                 logger.info(
                     "chat_fallback",
                     extra={
                         "user_id": user_id,
                         "error": str(e),
-                        "fallback_provider": "cloudflare",
+                        "fallback_provider": "vertex",
                     },
                 )
-                yield f"data: {json.dumps({'fallback': True, 'provider': 'cloudflare', 'reason': str(e)})}\n\n"
+                yield f"data: {json.dumps({'fallback': True, 'provider': 'vertex', 'reason': str(e)})}\n\n"
 
                 try:
-                    from app.services.ai.cloudflare_client import cloudflare_client
+                    from app.services.ai.vertex_client import vertex_client
 
-                    actual_model = settings.CF_AI_MODEL
-                    async for chunk in cloudflare_client.stream_generate(
+                    actual_model = settings.VERTEX_GEMINI_MODEL
+                    async for chunk in vertex_client.stream_generate_with_retry(
                         system_prompt, sanitized_message
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:
-                    logger.error(f"Cloudflare fallback also failed: {fallback_err}")
+                    logger.error(f"Vertex fallback also failed: {fallback_err}")
                     from app.services.dead_letter import store_dead_letter
 
                     await store_dead_letter(
