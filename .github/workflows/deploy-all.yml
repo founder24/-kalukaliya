@@ -237,6 +237,8 @@ jobs:
           fi
           echo "All KV namespace IDs are properly configured."
 
+      # NOTE: For Cloudflare Git integration (dashboard), set the build command to:
+      #   pnpm --filter syrabit-edge exec wrangler deploy --env production
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
         env:
@@ -269,7 +271,7 @@ jobs:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
