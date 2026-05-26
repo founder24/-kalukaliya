@@ -136,6 +136,8 @@ def create_app() -> FastAPI:
             "X-Razorpay-Signature",
             "Accept",
             "Origin",
+            "x-turnstile-token",
+            "CF-Turnstile-Response",
         ],
     )
 
@@ -156,7 +158,7 @@ def create_app() -> FastAPI:
                 if (
                     origin
                     and settings.APP_ENV != "test"
-                    and origin not in settings.allowed_origins_list
+                    and not settings.is_origin_allowed(origin)
                 ):
                     from fastapi.responses import JSONResponse
 

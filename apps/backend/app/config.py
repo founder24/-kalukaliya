@@ -3,6 +3,7 @@ from pydantic import model_validator
 from typing import Optional
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,15 @@ class Settings(BaseSettings):
                 o for o in origins if "localhost" not in o and "127.0.0.1" not in o
             ]
         return origins
+
+    def is_origin_allowed(self, origin: str) -> bool:
+        """Check if an origin is allowed, including Cloudflare Pages preview domains."""
+        if origin in self.allowed_origins_list:
+            return True
+        # Allow Cloudflare Pages preview URLs
+        if re.match(r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$", origin):
+            return True
+        return False
 
     @property
     def google_credentials(self) -> dict:

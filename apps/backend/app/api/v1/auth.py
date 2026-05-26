@@ -233,7 +233,11 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
         from app.db.redis import get_redis
 
         redis = get_redis()
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = (
+            request.headers.get("X-Real-IP")
+            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or (request.client.host if request.client else "unknown")
+        )
         minute_bucket = int(time.time() // 60)
         rate_key = f"auth_limit:{endpoint}:{client_ip}:{minute_bucket}"
 
