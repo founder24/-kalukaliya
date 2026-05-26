@@ -28,6 +28,10 @@ class RazorpayClient:
 
     async def create_subscription_order(self, user: User) -> dict:
         """Create Razorpay subscription order"""
+        if not self.key_id or not self.key_secret:
+            raise RuntimeError(
+                "Payment service not configured - Razorpay credentials missing"
+            )
         try:
             response = await self._client.post(
                 f"{self.base_url}/subscriptions",
@@ -63,6 +67,10 @@ class RazorpayClient:
 
     async def cancel_subscription(self, subscription_id: str) -> bool:
         """Cancel Razorpay subscription"""
+        if not self.key_id or not self.key_secret:
+            raise RuntimeError(
+                "Payment service not configured - Razorpay credentials missing"
+            )
         try:
             response = await self._client.delete(
                 f"{self.base_url}/subscriptions/{subscription_id}"

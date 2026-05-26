@@ -17,6 +17,11 @@ from app.services.comms.resend_client import (
     send_password_reset_email,
 )
 
+try:
+    from beanie.exceptions import CollectionWasNotInitialized
+except ImportError:  # pragma: no cover
+    CollectionWasNotInitialized = None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Authentication"])
@@ -176,9 +181,12 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="token_expired")
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-
-
-# Optional security scheme — does NOT raise if header is missing
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(
+                status_code=503, detail="Database service unavailable"
+            )
+        raise
 security_optional = HTTPBearer(auto_error=False)
 
 
@@ -255,7 +263,14 @@ async def signup(request_body: SignupRequest, request: Request):
     await _check_rate_limit(request, "signup", 5)
 
     # Check if user exists
-    existing_user = await User.find_one({"email": request_body.email})
+    try:
+        existing_user = await User.find_one({"email": request_body.email})
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(
+                status_code=503, detail="Database service unavailable"
+            )
+        raise
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -289,7 +304,14 @@ async def login(request_body: LoginRequest, request: Request):
     """Authenticate user with email + password and return tokens"""
     await _check_rate_limit(request, "login", 10)
 
-    user = await User.find_one({"email": request_body.email})
+    try:
+        user = await User.find_one({"email": request_body.email})
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(
+                status_code=503, detail="Database service unavailable"
+            )
+        raise
 
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -311,7 +333,14 @@ async def forgot_password(request: ForgotPasswordRequest):
     Request a password reset email.
     Always returns success (don't reveal whether email exists).
     """
-    user = await User.find_one({"email": request.email})
+    try:
+        user = await User.find_one({"email": request.email})
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(
+                status_code=503, detail="Database service unavailable"
+            )
+        raise
 
     if user and user.auth_provider == "local":
         # Generate a signed reset token (1 hour expiry)
