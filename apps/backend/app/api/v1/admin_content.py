@@ -629,7 +629,7 @@ async def generate_notes_assamese(request: Request, chapter_id: str):
     await _csrf_check(request)
 
     try:
-        chapter = await content_generation_service.generate_assamese_only(chapter_id)
+        await content_generation_service.generate_assamese_only(chapter_id)
         return {"status": "translated", "chapter_id": chapter_id}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

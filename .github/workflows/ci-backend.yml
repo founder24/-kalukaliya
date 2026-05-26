@@ -8,6 +8,9 @@ on:
       - '.github/workflows/ci-backend.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint & Type Check

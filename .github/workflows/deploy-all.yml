@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -88,7 +92,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Authenticate to Azure
-        uses: azure/login@v3
+        uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -324,7 +328,7 @@ jobs:
       contents: read
     steps:
       - name: Authenticate to Azure
-        uses: azure/login@v3
+        uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}

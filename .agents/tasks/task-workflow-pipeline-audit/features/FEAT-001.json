@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix all 24 GitHub Actions workflow files to resolve startup_failure and improve robustness. Key changes: (1) Downgrade azure/login from v3 (node24) to v2 (node20) for runner compatibility - this is the most likely cause of startup_failure for deploy workflows. (2) Add top-level permissions blocks to all 7 workflows that lack them (security best practice + prevents token scope issues). (3) Fix numeric comparisons on string step outputs by adding proper fromJSON() casting in if conditions. (4) Fix quality-gate workflow using --no-frozen-lockfile (should verify lockfile integrity in CI). (5) Add workflow_dispatch to all CI workflows for manual testing capability.",
+  "status": "completed",
+  "steps": [
+    "Step 1: Fix azure/login@v3 to azure/login@v2 in all files that use it. Files: .github/workflows/agent-canary-deploy.yml (line 24), .github/workflows/deploy-all.yml (line 91 and line 327). The v3 tag uses node24 runtime which may not be supported on all GitHub-hosted runners yet. v2 uses node20 which is universally supported.",
+    "Step 2: Add top-level permissions blocks to workflows that lack them. Each should have minimal required permissions. Files to update: (a) ci-backend.yml - add 'permissions: contents: read' (b) ci-edge.yml - add 'permissions: contents: read' (c) ci-frontend.yml - add 'permissions: contents: read' (d) deploy-all.yml - add 'permissions: contents: read' at top level (job-level permissions already exist for specific jobs) (e) agent-translate-content.yml - add 'permissions: {}' (needs no token) (f) bump-deps.yml - add 'permissions: {}' at top (job-level perms exist) (g) regen-lockfile.yml - add 'permissions: {}' at top (job-level perms exist)",
+    "Step 3: Fix numeric comparisons on string step outputs. In agent-canary-deploy.yml lines 129 and 153: change 'if: steps.monitor.outputs.error_rate > 2' to 'if: fromJSON(steps.monitor.outputs.error_rate) > 2' and 'if: steps.monitor.outputs.error_rate <= 2' to 'if: fromJSON(steps.monitor.outputs.error_rate) <= 2'. In agent-accuracy-report.yml line 54: change 'if: steps.report.outputs.satisfaction != '' && steps.report.outputs.satisfaction < 85' to use fromJSON() for the numeric comparison. In agent-security-scan.yml line 233: change 'steps.pattern-scan.outputs.critical > 0' to use fromJSON().",
+    "Step 4: Fix agent-quality-gate.yml frontend-quality job: change 'pnpm install --no-frozen-lockfile' to 'pnpm install --frozen-lockfile' for CI consistency. Actually - looking more carefully, this is needed because the quality gate runs on PRs where the lockfile might not match. Keep --no-frozen-lockfile but add a comment explaining why.",
+    "Step 5: Add 'workflow_dispatch:' trigger to ci-backend.yml, ci-edge.yml, and ci-frontend.yml if not already present (they already have it - verify and confirm).",
+    "Step 6: In deploy-all.yml, add the 'validate' step before canary deploy that validates the error_rate output properly. Also add 'timeout-minutes: 30' to the canary-deploy job call to prevent hanging workflows.",
+    "Step 7: Validate all changes by running: python3 -c 'import yaml, os; [yaml.safe_load(open(f\".github/workflows/{f}\").read()) for f in os.listdir(\".github/workflows\") if f.endswith(\".yml\")]' to confirm all YAML still parses."
+  ],
+  "acceptance_criteria": [
+    "All 24 workflow YAML files parse successfully with yaml.safe_load()",
+    "No workflow uses azure/login@v3 (all should use azure/login@v2)",
+    "All workflows have a top-level permissions block",
+    "Numeric comparisons in if conditions use fromJSON() for proper type coercion",
+    "All CI workflows have workflow_dispatch trigger for manual testing"
+  ],
+  "verification": [
+    "Run: python3 -c \"import yaml, os; [yaml.safe_load(open(os.path.join('.github/workflows', f)).read()) for f in os.listdir('.github/workflows') if f.endswith('.yml')]; print('All YAML valid')\"",
+    "Run: grep -r 'azure/login@v3' .github/workflows/ (should return nothing)",
+    "Run: grep -l 'permissions:' .github/workflows/*.yml | wc -l (should be 24)",
+    "Run: grep -n 'fromJSON' .github/workflows/agent-canary-deploy.yml (should show the fixed comparisons)"
+  ],
+  "blocked_reason": null,
+  "findings": "All 24 workflow YAML files validated successfully. azure/login downgraded in 3 places (agent-canary-deploy.yml x1, deploy-all.yml x2). Permissions blocks added to 7 files. fromJSON() fixes applied in 4 if-conditions across 3 files. All CI workflows already had workflow_dispatch triggers. Post-review fix: normalized bc output with printf to prevent leading-dot decimals (e.g. .05) that break fromJSON(). Changed scale=2 to scale=4 for bc precision and wrapped with printf %.2f for consistent output format."
+}

@@ -19,6 +19,8 @@ on:
         type: number
         default: 100
 
+permissions: {}
+
 jobs:
   translate:
     runs-on: ubuntu-latest

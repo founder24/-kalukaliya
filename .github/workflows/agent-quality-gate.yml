@@ -110,6 +110,7 @@ jobs:
         run: corepack prepare pnpm@10.26.1 --activate
 
       - name: Install dependencies
+        # Use --no-frozen-lockfile because PRs may have package.json changes pending lockfile refresh
         run: pnpm install --no-frozen-lockfile
 
       - name: Build frontend

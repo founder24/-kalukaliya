@@ -28,7 +28,6 @@ async def admin_dashboard(request: Request):
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         total_users = await db.users.count_documents({})
         active_today = await db.users.count_documents(
