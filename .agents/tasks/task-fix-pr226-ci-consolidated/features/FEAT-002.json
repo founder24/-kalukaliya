@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Fix the Tailwind CSS v4 PostCSS configuration. The project has tailwindcss@4.3.0 installed but the postcss.config.cjs still references `tailwindcss` directly as a PostCSS plugin, which broke in v4. Need to install @tailwindcss/postcss and update the postcss config. Also need to ensure the CSS directives and tailwind.config.js work with the v4 PostCSS plugin.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Install @tailwindcss/postcss as a dev dependency: pnpm --filter @workspace/syrabit add -D @tailwindcss/postcss",
     "Update apps/frontend/postcss.config.cjs to use @tailwindcss/postcss instead of tailwindcss directly",
@@ -20,5 +20,5 @@
     "pnpm --filter @workspace/syrabit test"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Installed @tailwindcss/postcss@4.1.10 as devDependency. Updated postcss.config.cjs to use @tailwindcss/postcss instead of tailwindcss directly. No changes needed to index.css - the v4 PostCSS plugin is backward-compatible with @tailwind directives and the existing tailwind.config.js. Frontend build passes with VITE_BACKEND_URL set. All 602 tests pass."
 }
