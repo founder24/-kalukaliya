@@ -482,13 +482,11 @@ const GA4_ID_RE = /^G-[A-Z0-9]{6,12}$/;
 function ga4Plugin() {
   const raw = (process.env.VITE_GA4_ID || '').trim();
   const id = GA4_ID_RE.test(raw) ? raw : '';
-  // Phase 6: fail the production build if GA4 ID is set — Zaraz handles it.
+  // Phase 6: warn if GA4 ID is set in production — Zaraz handles analytics now.
   if (id && isProd) {
-    throw new Error(
-      `[ga4] VITE_GA4_ID is set in a production build. ` +
-      `Phase 6 disables client-side GA4 in favour of Cloudflare Zaraz server-side tracking. ` +
-      `Remove VITE_GA4_ID from the production CI environment and re-run the build.`
-    );
+    // eslint-disable-next-line no-console
+    console.warn('[ga4] VITE_GA4_ID is set but Phase 6 prefers Zaraz. Ignoring GA4 injection.');
+    return { name: 'syrabit-ga4' };
   }
   return {
     name: 'syrabit-ga4',

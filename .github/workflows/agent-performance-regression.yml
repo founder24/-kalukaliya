@@ -39,7 +39,7 @@ jobs:
         run: pnpm --filter @workspace/syrabit run build
 
       - name: Install Lighthouse CI
-        run: pnpm add -g @lhci/cli
+        run: npm install -g @lhci/cli
 
       - name: Create Lighthouse CI config
         run: |
