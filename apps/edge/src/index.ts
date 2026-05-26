@@ -23,7 +23,7 @@ export default {
 
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
-      const origin = request.headers.get('Origin') || '';
+      const origin = request.headers.get('Origin') || 'https://syrabit.ai';
       return new Response(null, {
         headers: getCorsHeaders(origin),
       });
@@ -72,9 +72,13 @@ export default {
       }
 
       if (turnstileToken) {
-        const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
-        if (!isValid) {
-          return jsonResponse(403, { error: 'Bot verification failed' });
+        if (!env.CF_TURNSTILE_SECRET) {
+          console.warn('CF_TURNSTILE_SECRET is not configured — skipping Turnstile verification');
+        } else {
+          const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
+          if (!isValid) {
+            return jsonResponse(403, { error: 'Bot verification failed' });
+          }
         }
       }
 

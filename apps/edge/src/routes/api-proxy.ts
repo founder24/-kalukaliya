@@ -20,9 +20,7 @@ export async function proxyRequest(
   const targetUrl = `${backendUrl}${url.pathname}${url.search}`;
   const isStreamRequest = url.pathname.includes('/stream');
 
-  // Validate request origin against allow-list for CORS
-  const origin = request.headers.get('Origin') || '';
-  const cors = getCorsHeaders(origin);
+  // Origin used for error-response CORS (main response builds its own)
 
   // Clone headers and inject Cloudflare-specific metadata
   const headers = new Headers(request.headers);
@@ -49,7 +47,10 @@ export async function proxyRequest(
     clearTimeout(timeout);
 
     const responseHeaders = new Headers(response.headers);
+    const requestOrigin = request.headers.get('Origin') || 'https://syrabit.ai';
+    const cors = getCorsHeaders(requestOrigin);
     responseHeaders.set('Access-Control-Allow-Origin', cors['Access-Control-Allow-Origin']);
+    responseHeaders.set('Access-Control-Allow-Credentials', 'true');
 
     if (isStreamRequest) {
       // ── Stream-specific handling ──
@@ -83,12 +84,15 @@ export async function proxyRequest(
     clearTimeout(timeout);
     console.error('Proxy error:', error);
 
+    const errorOrigin = request.headers.get('Origin') || 'https://syrabit.ai';
+    const errorCors = getCorsHeaders(errorOrigin);
+
     if (error instanceof Error && error.name === 'AbortError') {
       return new Response(
         JSON.stringify({ error: 'Backend request timed out' }),
         {
           status: 504,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': cors['Access-Control-Allow-Origin'] },
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': errorCors['Access-Control-Allow-Origin'], 'Access-Control-Allow-Credentials': 'true' },
         }
       );
     }
@@ -100,7 +104,7 @@ export async function proxyRequest(
       }),
       {
         status: 503,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': cors['Access-Control-Allow-Origin'] },
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': errorCors['Access-Control-Allow-Origin'], 'Access-Control-Allow-Credentials': 'true' },
       }
     );
   }

@@ -193,6 +193,16 @@ class Settings(BaseSettings):
             ]
         return origins
 
+    def is_origin_allowed(self, origin: str) -> bool:
+        """Check if an origin is allowed, including Cloudflare Pages preview domains."""
+        import re
+        if origin in self.allowed_origins_list:
+            return True
+        # Allow Cloudflare Pages preview URLs
+        if re.match(r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$", origin):
+            return True
+        return False
+
     @property
     def google_credentials(self) -> dict:
         if not self.GOOGLE_APPLICATION_CREDENTIALS_JSON:

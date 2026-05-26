@@ -1,24 +1,28 @@
 /**
- * CORS Middleware - Strict Cross-Origin Resource Sharing Policy
+ * CORS Middleware - Cross-Origin Resource Sharing Policy
+ * Supports production domains and Cloudflare Pages preview deployments.
  */
 
-const ALLOWED_ORIGINS = ['https://syrabit.ai', 'https://app.syrabit.ai', 'https://www.syrabit.ai'];
+const ALLOWED_ORIGINS = ['https://syrabit.ai', 'https://www.syrabit.ai', 'https://app.syrabit.ai'];
+const PAGES_PREVIEW_REGEX = /^https:\/\/[a-z0-9-]+\.syrabitfrontend\.pages\.dev$/;
+
+function isAllowedOrigin(origin: string): boolean {
+  return ALLOWED_ORIGINS.includes(origin) || PAGES_PREVIEW_REGEX.test(origin);
+}
 
 export function getCorsHeaders(origin: string): Record<string, string> {
-  const validOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  const validOrigin = isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     'Access-Control-Allow-Origin': validOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, CF-Turnstile-Response, x-turnstile-token',
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
   };
 }
 
-/** @deprecated Use getCorsHeaders(origin) for dynamic origin support */
-export const corsHeaders = getCorsHeaders('https://syrabit.ai');
-
 export function applyCorsHeaders(headers: Headers, origin?: string): void {
-  const validOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  const validOrigin = origin && isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0];
   const cors = getCorsHeaders(validOrigin);
   Object.entries(cors).forEach(([key, value]) => {
     headers.set(key, value);
