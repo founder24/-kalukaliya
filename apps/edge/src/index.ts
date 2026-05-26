@@ -88,7 +88,7 @@ export default {
     }
 
     // ── 4. Per-Language Rate Limiting (chat POST only) ──
-    if (url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+    if (env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
       const userId = request.headers.get('X-User-ID') || 'anonymous';
 
       // Best-effort lang extraction from request body
