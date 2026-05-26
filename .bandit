@@ -1,29 +1,3 @@
 [bandit]
-# Syrabit.ai — Bandit security configuration
-# HIGH issues (B324) are fixed in source; these skips cover accepted-risk MEDIUM patterns.
-exclude_dirs = [
-    '/tests',
-    '/test',
-    '.git',
-    '.venv',
-    'venv',
-    'node_modules',
-    '.pythonlibs'
-]
-skips = [
-    # B104: Binding to all interfaces — intentional for FastAPI/gunicorn servers
-    # that run behind Cloudflare/ACA reverse proxy; never exposed directly.
-    "B104",
-    # B108: Probable insecure temp file — gunicorn PID file in /tmp is standard.
-    "B108",
-    # B310: URL open schemes — all urllib calls are to vetted HTTPS endpoints;
-    # user-supplied URLs go through url_safety.py allowlist first.
-    "B310",
-    # B314: XML ElementTree — feeds are parsed from known RSS/sitemap publishers,
-    # not from user input. defusedxml upgrade tracked in security backlog.
-    "B314",
-    # B608: SQL string construction — all asyncpg queries use $1/$2 positional
-    # placeholders; the string patterns that Bandit flags are format strings
-    # that produce the parameterised query template, not raw user data.
-    "B608"
-]
+exclude_dirs = tests,test,.git,.venv,venv,node_modules,.pythonlibs
+skips = B104,B108,B310,B314,B608
