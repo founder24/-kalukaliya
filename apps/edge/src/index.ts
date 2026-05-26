@@ -141,8 +141,23 @@ export default {
       return proxyRequest(rewrittenRequest, env.AZURE_BACKEND_URL, env);
     }
 
+    // Edge-level health check (no backend proxy)
+    if (url.pathname === '/health') {
+      return new Response(
+        JSON.stringify({
+          status: 'healthy',
+          service: 'syrabit-edge',
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     // API routes → proxy to Azure backend
-    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health')) {
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
       return proxyRequest(request, env.AZURE_BACKEND_URL, env);
     }
 

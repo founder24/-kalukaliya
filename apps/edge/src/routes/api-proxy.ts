@@ -28,12 +28,19 @@ export async function proxyRequest(
   headers.delete('Host');
   headers.delete('Content-Length');
 
+  const controller = new AbortController();
+  const timeoutMs = parseInt(env.PROXY_TIMEOUT_MS || '30000', 10);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(targetUrl, {
       method: request.method,
       headers: headers,
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
@@ -67,7 +74,19 @@ export async function proxyRequest(
       headers: responseHeaders,
     });
   } catch (error) {
+    clearTimeout(timeout);
     console.error('Proxy error:', error);
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      return new Response(
+        JSON.stringify({ error: 'Backend request timed out' }),
+        {
+          status: 504,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     return new Response(
       JSON.stringify({
         error: 'Backend service unavailable',
