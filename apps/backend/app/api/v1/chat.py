@@ -115,10 +115,15 @@ async def chat(
             )
 
             # 2. RAG retrieval + history load in parallel (independent I/O)
-            context_chunks, history = await asyncio.gather(
-                ChatService.retrieve_context(sanitized_message, user_tier),
-                ChatService.load_conversation_history(request.session_id),
-            )
+            try:
+                context_chunks, history = await asyncio.gather(
+                    ChatService.retrieve_context(sanitized_message, user_tier),
+                    ChatService.load_conversation_history(request.session_id),
+                )
+            except Exception as e:
+                logger.error(f"RAG/history retrieval failed: {e}")
+                context_chunks = []
+                history = ""
 
             if not context_chunks:
                 logger.warning(

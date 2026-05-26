@@ -28,6 +28,11 @@ export default {
       });
     }
 
+    // Strip trust headers that only the edge itself should set
+    const sanitizedHeaders = new Headers(request.headers);
+    sanitizedHeaders.delete('X-Rate-Limited-By');
+    request = new Request(request, { headers: sanitizedHeaders });
+
     // ── 2. JWT Verification (all /api/ routes except public) ──
     if (url.pathname.startsWith('/api/')) {
       const jwtResult = await verifyJWT(request, env.JWT_SECRET);

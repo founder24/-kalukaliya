@@ -1,5 +1,6 @@
 """Rate limiting dependency for FastAPI endpoints."""
 
+import asyncio
 import time
 import logging
 from datetime import datetime, timedelta
@@ -73,13 +74,21 @@ async def check_rate_limit(
             current_count = results[0] if results and len(results) > 0 else 1
             burst_count = results[1] if results and len(results) > 1 else 1
 
-            # Set expiry on first increment
-            if current_count == 1:
+            # Set expiry on first increment (concurrently if both need it)
+            if current_count == 1 and burst_count == 1:
+                next_month = datetime.now().replace(day=28) + timedelta(days=4)
+                expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
+                ttl = int(expire_at.timestamp() - time.time())
+                await asyncio.gather(
+                    redis.expire(key, ttl),
+                    redis.expire(burst_key, 60),
+                )
+            elif current_count == 1:
                 next_month = datetime.now().replace(day=28) + timedelta(days=4)
                 expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
                 ttl = int(expire_at.timestamp() - time.time())
                 await redis.expire(key, ttl)
-            if burst_count == 1:
+            elif burst_count == 1:
                 await redis.expire(burst_key, 60)
 
             if current_count > limit:

@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-004",
+  "type": "fix",
+  "description": "Address review findings from 2025-05-26-111000-review.md: strip spoofed X-Rate-Limited-By header in edge worker, add try/except around asyncio.gather in non-streaming chat path, optimize expire calls with asyncio.gather, and remove ineffective Connection: keep-alive header from Workers proxy.",
+  "status": "in_progress",
+  "steps": [
+    "STEP 1 - In apps/edge/src/index.ts, after the CORS preflight early return, strip X-Rate-Limited-By header from client requests to prevent spoofing.",
+    "STEP 2 - In apps/backend/app/api/v1/chat.py, wrap the asyncio.gather call in the non-streaming _process_chat() function with try/except and set defaults for context_chunks and history.",
+    "STEP 3 - In apps/backend/app/api/deps/rate_limit.py, fire the two expire calls concurrently with asyncio.gather when both need to run. Add import asyncio at top if needed.",
+    "STEP 4 - In apps/edge/src/routes/api-proxy.ts, remove the Connection: keep-alive header line since it has no effect in Workers runtime."
+  ],
+  "acceptance_criteria": [
+    "Edge worker strips X-Rate-Limited-By from incoming requests before any logic uses it",
+    "Non-streaming chat path handles asyncio.gather exceptions gracefully with defaults for context_chunks and history",
+    "Redis expire calls run concurrently when both are needed",
+    "No Connection: keep-alive on outbound proxy requests",
+    "Edge typecheck passes (pnpm --filter syrabit-edge run build)",
+    "Backend tests pass"
+  ],
+  "verification": [
+    "pnpm --filter syrabit-edge run build",
+    "APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long-for-ci python -m pytest tests/test_latency_audit.py tests/test_endpoints_audit.py tests/test_pipeline_audit.py tests/test_chat.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

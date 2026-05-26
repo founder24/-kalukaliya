@@ -56,10 +56,10 @@ describe('Edge Rate Limit - X-Rate-Limited-By header', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// (b) Proxy request includes Connection: keep-alive
+// (b) Proxy request does NOT set Connection: keep-alive (hop-by-hop, no effect in Workers)
 // ═══════════════════════════════════════════════════════════════
 
-describe('Edge Proxy - Connection keep-alive', () => {
+describe('Edge Proxy - Connection header', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -70,7 +70,7 @@ describe('Edge Proxy - Connection keep-alive', () => {
     vi.stubGlobal('fetch', fetchMock);
   });
 
-  it('proxy sets Connection: keep-alive on outbound request', async () => {
+  it('proxy does NOT set Connection: keep-alive on outbound request (Workers manage their own pooling)', async () => {
     const request = new Request('https://edge.syrabit.ai/api/v1/chat/', {
       method: 'POST',
       headers: {
@@ -90,7 +90,7 @@ describe('Edge Proxy - Connection keep-alive', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [targetUrl, fetchOptions] = fetchMock.mock.calls[0];
     const sentHeaders = fetchOptions.headers as Headers;
-    expect(sentHeaders.get('Connection')).toBe('keep-alive');
+    expect(sentHeaders.get('Connection')).toBeNull();
   });
 
   it('proxy forwards request to correct backend URL', async () => {
@@ -111,11 +111,12 @@ describe('Edge Proxy - Connection keep-alive', () => {
     expect(targetUrl).toBe('https://backend.azurecontainerapps.io/api/v1/health');
   });
 
-  it('proxy source code contains Connection keep-alive', async () => {
+  it('proxy source code does not set Connection: keep-alive on outbound', async () => {
     const fs = await import('node:fs');
     const source = fs.readFileSync('./src/routes/api-proxy.ts', 'utf-8');
-    expect(source).toContain("'Connection'");
-    expect(source).toContain("'keep-alive'");
+    // Connection: keep-alive should NOT be set on outbound requests (hop-by-hop, no effect)
+    // But it's still set on streaming responses (which is fine for SSE)
+    expect(source).not.toContain("headers.set('Connection', 'keep-alive')");
   });
 });
 
