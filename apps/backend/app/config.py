@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
-    ALLOWED_ORIGINS: str = "https://syrabit.ai,https://app.syrabit.ai"
+    ALLOWED_ORIGINS: str = "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai"
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
