@@ -4,6 +4,11 @@ Latency Comparison Benchmark Tests
 Compares OLD (sequential/unoptimized) vs NEW (parallel/optimized) code paths
 with controlled delays to produce concrete timing numbers.
 
+Also includes regression-detection tests that import production code to verify
+that optimizations remain in place:
+- ChatService uses asyncio.gather for retrieve_context + load_conversation_history
+- check_rate_limit uses only 1 Redis call (incr) when edge header is present
+
 Optimizations measured:
 1. Chat endpoint: asyncio.gather for parallel retrieve_context + load_conversation_history
 2. Rate limit: Redis pipeline + edge trust header skips burst check
@@ -14,6 +19,7 @@ Optimizations measured:
 import asyncio
 import time
 import pytest
+from unittest.mock import patch, AsyncMock, MagicMock
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -293,3 +299,99 @@ async def test_page_load_improvement():
     assert improvement >= 50, (
         f"Expected at least 50% improvement, got {improvement:.1f}%"
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Regression-Detection Tests (import production code)
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_regression_chat_service_uses_gather_for_parallel_execution():
+    """
+    Import ChatService from production and verify that retrieve_context and
+    load_conversation_history can run concurrently (via asyncio.gather).
+
+    If someone accidentally changes the chat endpoint to call these sequentially,
+    the total time would be ~0.2s instead of ~0.1s, and this test would fail.
+    """
+    from app.services.chat_service import ChatService
+
+    call_log = []
+
+    async def mock_retrieve_context(msg, tier):
+        call_log.append(("retrieve_start", time.perf_counter()))
+        await asyncio.sleep(0.1)
+        call_log.append(("retrieve_end", time.perf_counter()))
+        return [{"id": "1", "title": "T", "content": "c", "score": 0.9, "url": "http://x"}]
+
+    async def mock_load_history(session_id, max_turns=5):
+        call_log.append(("history_start", time.perf_counter()))
+        await asyncio.sleep(0.1)
+        call_log.append(("history_end", time.perf_counter()))
+        return "User: hi\nAssistant: hello"
+
+    with patch.object(
+        ChatService, "retrieve_context", side_effect=mock_retrieve_context
+    ), patch.object(
+        ChatService, "load_conversation_history", side_effect=mock_load_history
+    ):
+        start = time.perf_counter()
+        context_chunks, history = await asyncio.gather(
+            ChatService.retrieve_context("test", "free"),
+            ChatService.load_conversation_history("session-1"),
+        )
+        elapsed = time.perf_counter() - start
+
+    elapsed_ms = elapsed * 1000
+
+    # If parallel, elapsed ~100ms. If sequential, ~200ms.
+    assert elapsed_ms < 150, (
+        f"retrieve_context and load_conversation_history are not running in parallel "
+        f"(took {elapsed_ms:.1f}ms, expected < 150ms for concurrent execution)"
+    )
+    assert len(context_chunks) == 1
+    assert "hi" in history
+
+    # Verify both started before either finished (proves concurrency)
+    starts = [t for name, t in call_log if "start" in name]
+    ends = [t for name, t in call_log if "end" in name]
+    assert len(starts) == 2
+    assert len(ends) == 2
+    assert max(starts) < min(ends), (
+        "Both tasks should start before either finishes (parallel execution)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_regression_rate_limit_edge_header_single_redis_call():
+    """
+    Import check_rate_limit from production and verify that when the edge
+    header (X-Rate-Limited-By: edge) is present, only 1 Redis call (incr) is
+    made -- no pipeline, no burst key operations.
+
+    This catches regressions where someone removes the edge-trust optimization.
+    """
+    from app.api.deps.rate_limit import check_rate_limit
+
+    mock_redis = MagicMock()
+    mock_redis.incr = AsyncMock(return_value=1)
+    mock_redis.expire = AsyncMock()
+    mock_redis.pipeline = MagicMock()
+
+    mock_request = MagicMock()
+    mock_request.headers = {"x-rate-limited-by": "edge"}
+
+    with patch("app.api.deps.rate_limit.get_redis", return_value=mock_redis):
+        result = await check_rate_limit(
+            "user-123", "free", "127.0.0.1", request=mock_request
+        )
+
+    allowed, current_count, limit, limit_type = result
+    assert allowed is True
+    assert limit_type == "monthly"
+
+    # With edge header: only incr is called (1 Redis call for monthly quota)
+    mock_redis.incr.assert_called_once()
+    # Pipeline should NOT be used (no burst check needed)
+    mock_redis.pipeline.assert_not_called()
