@@ -49,9 +49,8 @@ async def azure_search_ping() -> Dict[str, Any]:
         if not search_service.client:
             return {"status": "unhealthy", "error": "Search client not configured"}
 
-        # Use async iteration for the async search client
-        async for _ in search_service.client.search(search_text="*", top=1):
-            break
+        # Use the warm_up pattern that works in azure_search.py
+        await search_service.warm_up()
         return {"status": "healthy"}
     except Exception as e:
         logger.error(f"Azure Search ping failed: {str(e)}")
