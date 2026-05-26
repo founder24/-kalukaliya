@@ -3,7 +3,7 @@
 // The PropellerAds push integration was removed 2026-04-19; this is the
 // final sweep of associated commentary. First-party Web Push handlers
 // (`push`, `notificationclick`) below are unaffected.
-const CACHE_VERSION = '15';
+const CACHE_VERSION = '16';
 const STATIC_CACHE = 'syrabit-static-v' + CACHE_VERSION;
 const RUNTIME_CACHE = 'syrabit-runtime-v' + CACHE_VERSION;
 const API_CACHE = 'syrabit-api-v' + CACHE_VERSION;

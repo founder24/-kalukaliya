@@ -4,10 +4,12 @@
  * Features:
  * - Stream-aware: detects /stream paths and passes response.body directly (chunked)
  * - Injects Cloudflare metadata headers (X-Real-IP, CF-Ray-ID)
- * - Sets CORS origin from env
+ * - Sets CORS origin from validated allow-list
  * - Removes hop-by-hop headers
  * - Returns 503 on backend failure
  */
+
+import { getCorsHeaders } from '../middleware/cors';
 
 export async function proxyRequest(
   request: Request,
@@ -17,6 +19,10 @@ export async function proxyRequest(
   const url = new URL(request.url);
   const targetUrl = `${backendUrl}${url.pathname}${url.search}`;
   const isStreamRequest = url.pathname.includes('/stream');
+
+  // Validate request origin against allow-list for CORS
+  const origin = request.headers.get('Origin') || '';
+  const cors = getCorsHeaders(origin);
 
   // Clone headers and inject Cloudflare-specific metadata
   const headers = new Headers(request.headers);
@@ -28,15 +34,22 @@ export async function proxyRequest(
   headers.delete('Host');
   headers.delete('Content-Length');
 
+  const controller = new AbortController();
+  const timeoutMs = parseInt(env.PROXY_TIMEOUT_MS || '30000', 10) || 30000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(targetUrl, {
       method: request.method,
       headers: headers,
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      signal: controller.signal,
     });
 
+    clearTimeout(timeout);
+
     const responseHeaders = new Headers(response.headers);
-    responseHeaders.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
+    responseHeaders.set('Access-Control-Allow-Origin', cors['Access-Control-Allow-Origin']);
 
     if (isStreamRequest) {
       // ── Stream-specific handling ──
@@ -67,7 +80,19 @@ export async function proxyRequest(
       headers: responseHeaders,
     });
   } catch (error) {
+    clearTimeout(timeout);
     console.error('Proxy error:', error);
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      return new Response(
+        JSON.stringify({ error: 'Backend request timed out' }),
+        {
+          status: 504,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': cors['Access-Control-Allow-Origin'] },
+        }
+      );
+    }
+
     return new Response(
       JSON.stringify({
         error: 'Backend service unavailable',
@@ -75,7 +100,7 @@ export async function proxyRequest(
       }),
       {
         status: 503,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': cors['Access-Control-Allow-Origin'] },
       }
     );
   }

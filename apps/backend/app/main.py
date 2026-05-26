@@ -219,6 +219,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
+    app.include_router(health.router, prefix="/api/v1/health", tags=["Health"])
     app.include_router(
         feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"]
     )

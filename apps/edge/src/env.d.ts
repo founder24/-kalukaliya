@@ -37,6 +37,9 @@ interface Env {
   AZURE_BACKEND_URL: string;
   ALLOWED_ORIGIN: string;
 
+  // Optional: override default 30s proxy timeout (milliseconds)
+  PROXY_TIMEOUT_MS?: string;
+
   // ── Bindings ──
   R2_BUCKET: R2Bucket;
   RATE_LIMIT_KV: KVNamespace;
