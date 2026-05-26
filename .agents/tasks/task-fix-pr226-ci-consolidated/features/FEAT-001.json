@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Create a new clean branch from main and apply all consolidated CI/workflow fixes to resolve the 6 failing checks on PR #226. This combines all fixes from PRs #219-225 that were merged AFTER the original branch point.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create a new branch 'fix/ci-all-checks-consolidated' from 'main'",
     "Edit .github/workflows/deploy-all.yml: (a) Add top-level permissions block (contents: read, id-token: write), (b) Remove the canary-deploy job entirely, (c) Change all deploy jobs from 'needs: [ci-checks, canary-deploy]' to 'needs: [ci-checks]', (d) Update azure/login from v3 to v2, (e) Add email-validator to pip install step, (f) Add MongoDB service container to ci-checks job, (g) Add env vars (MONGODB_URI, APP_ENV, JWT_SECRET) to the Test Backend step, (h) Replace the strict 'pytest' command with a threshold-based approach allowing up to 20 known failures (Redis unavailable in CI)",
@@ -45,5 +45,5 @@
     "grep canary-deploy .github/workflows/deploy-all.yml returns nothing"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Frontend build (vite build) fails on main due to tailwindcss/postcss configuration issue (pre-existing, not caused by these changes). All frontend tests (602) pass. Edge TypeScript compilation passes. Backend ruff check passes with 0 errors. .replit successfully untracked."
 }
