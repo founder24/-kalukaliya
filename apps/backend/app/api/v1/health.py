@@ -46,10 +46,12 @@ async def azure_search_ping() -> Dict[str, Any]:
     try:
         from app.services.search.azure_search import search_service
 
-        # Try a minimal search operation
-        results = search_service.client.search(search_text="*", top=1)
-        # Consume the iterator to actually execute the query
-        list(results)[:1]
+        if not search_service.client:
+            return {"status": "unhealthy", "error": "Search client not configured"}
+
+        # Use async iteration for the async search client
+        async for _ in search_service.client.search(search_text="*", top=1):
+            break
         return {"status": "healthy"}
     except Exception as e:
         logger.error(f"Azure Search ping failed: {str(e)}")
