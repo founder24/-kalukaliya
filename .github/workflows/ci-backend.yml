@@ -62,7 +62,7 @@ jobs:
         run: |
           sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
           pip install -r /tmp/requirements-nohash.txt
-          pip install pytest pytest-asyncio pytest-cov
+          pip install pytest pytest-asyncio pytest-cov email-validator
 
       - name: Run tests
         working-directory: apps/backend
