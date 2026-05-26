@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Fix backend CORS headers, CSRF origin validation, and rate limiting to properly work behind the Cloudflare edge worker for auth endpoints.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/main.py, add 'x-turnstile-token' and 'CF-Turnstile-Response' to the allow_headers list in the CORSMiddleware configuration (line 135). This ensures browser preflight requests succeed when these headers are sent.",
     "In apps/backend/app/config.py, modify the allowed_origins_list property to also include pattern matching for Cloudflare Pages preview domains. Add logic that, in addition to the comma-separated ALLOWED_ORIGINS, also matches any origin of the form https://<hash>.syrabitfrontend.pages.dev. This can be done by adding a helper method or modifying the property to append dynamically.",
@@ -21,5 +21,5 @@
     "cd apps/backend && python -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 9 auth tests pass. 20 pre-existing failures in test_payment_lifecycle, test_security (SSRF), and test_webhook are unrelated (confirmed by running on base commit). The test_circuit_breaker tests also fail pre-existing due to missing pytest-asyncio. Installed dependencies manually since requirements.txt hash mode failed on Python 3.12."
 }
