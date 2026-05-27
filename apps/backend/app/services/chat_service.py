@@ -46,9 +46,7 @@ class ChatService:
         if lang_override:
             detected_lang = lang_override
             target_model = (
-                settings.SARVAM_MODEL
-                if lang_override == "as"
-                else settings.VERTEX_GEMINI_MODEL
+                settings.SARVAM_MODEL if lang_override == "as" else settings.CF_AI_MODEL
             )
         else:
             detected_lang, target_model = detect_language_and_route(message)
