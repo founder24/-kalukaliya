@@ -1,5 +1,4 @@
 import base64
-import asyncio
 import httpx
 import logging
 from typing import AsyncGenerator
@@ -15,16 +14,22 @@ class CloudflareAIClient:
     def __init__(self):
         self.account_id = settings.CF_ACCOUNT_ID
         self.api_token = settings.CF_API_TOKEN
-        self.base_url = f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run"
+        self.base_url = (
+            f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run"
+        )
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
-    async def generate(self, system_prompt: str, user_message: str, stream: bool = False) -> str:
+    async def generate(
+        self, system_prompt: str, user_message: str, stream: bool = False
+    ) -> str:
         """Generate text response using Workers AI LLM."""
         if not self.account_id or not self.api_token:
-            raise RuntimeError("Cloudflare Workers AI not configured (CF_ACCOUNT_ID or CF_API_TOKEN missing)")
+            raise RuntimeError(
+                "Cloudflare Workers AI not configured (CF_ACCOUNT_ID or CF_API_TOKEN missing)"
+            )
 
         response = await self._client.post(
             f"{self.base_url}/{settings.CF_AI_MODEL}",
@@ -46,7 +51,9 @@ class CloudflareAIClient:
         result = data.get("result", {})
         return result.get("response", "")
 
-    async def stream_generate(self, system_prompt: str, user_message: str) -> AsyncGenerator[str, None]:
+    async def stream_generate(
+        self, system_prompt: str, user_message: str
+    ) -> AsyncGenerator[str, None]:
         """Stream text response from Workers AI."""
         if not self.account_id or not self.api_token:
             raise RuntimeError("Cloudflare Workers AI not configured")
@@ -76,6 +83,7 @@ class CloudflareAIClient:
                         break
                     try:
                         import json
+
                         parsed = json.loads(chunk_data)
                         token = parsed.get("response", "")
                         if token:
@@ -83,7 +91,9 @@ class CloudflareAIClient:
                     except (json.JSONDecodeError, KeyError):
                         continue
 
-    async def vision_analyze(self, image_bytes: bytes, prompt: str = "Extract all text from this image") -> str:
+    async def vision_analyze(
+        self, image_bytes: bytes, prompt: str = "Extract all text from this image"
+    ) -> str:
         """Analyze an image using Workers AI vision model."""
         if not self.account_id or not self.api_token:
             raise RuntimeError("Cloudflare Workers AI not configured")
@@ -132,6 +142,10 @@ class CloudflareAIClient:
 cloudflare_client = CloudflareAIClient()
 
 
-async def generate_with_cloudflare(system_prompt: str, user_message: str, model: str = None, stream: bool = False) -> str:
+async def generate_with_cloudflare(
+    system_prompt: str, user_message: str, model: str = None, stream: bool = False
+) -> str:
     """Convenience function for Cloudflare AI generation."""
-    return await cloudflare_client.generate(system_prompt=system_prompt, user_message=user_message, stream=stream)
+    return await cloudflare_client.generate(
+        system_prompt=system_prompt, user_message=user_message, stream=stream
+    )

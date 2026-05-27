@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 import hashlib
 import io
-import base64
 import logging
 import re
 import time
@@ -619,6 +618,7 @@ async def conversations_alias(
 # OCR / IMAGE ANALYSIS ENDPOINT
 # ═══════════════════════════════════════════════════════════════
 
+
 class ImageAnalysisResponse(BaseModel):
     text: str
     model: str
@@ -634,7 +634,9 @@ async def analyze_image(
     """Analyze an image using Cloudflare Workers AI vision model (OCR)."""
     user_id = str(user.id)
     user_tier = getattr(user, "subscription_tier", "free")
-    client_ip = http_request.client.host if http_request and http_request.client else None
+    client_ip = (
+        http_request.client.host if http_request and http_request.client else None
+    )
 
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
@@ -656,12 +658,15 @@ async def analyze_image(
         return ImageAnalysisResponse(text=result, model=settings.CF_AI_VISION_MODEL)
     except RuntimeError as e:
         logger.error(f"Vision analysis failed: {e}")
-        raise HTTPException(status_code=502, detail="AI vision service temporarily unavailable")
+        raise HTTPException(
+            status_code=502, detail="AI vision service temporarily unavailable"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
 # TEXT-TO-SPEECH ENDPOINT
 # ═══════════════════════════════════════════════════════════════
+
 
 class TTSRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)
@@ -677,7 +682,9 @@ async def text_to_speech(
     """Convert text to speech using Cloudflare Workers AI TTS model."""
     user_id = str(user.id)
     user_tier = getattr(user, "subscription_tier", "free")
-    client_ip = http_request.client.host if http_request and http_request.client else None
+    client_ip = (
+        http_request.client.host if http_request and http_request.client else None
+    )
 
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
@@ -694,4 +701,6 @@ async def text_to_speech(
         )
     except RuntimeError as e:
         logger.error(f"TTS failed: {e}")
-        raise HTTPException(status_code=502, detail="AI TTS service temporarily unavailable")
+        raise HTTPException(
+            status_code=502, detail="AI TTS service temporarily unavailable"
+        )
