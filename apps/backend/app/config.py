@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     AZURE_SEARCH_QUERY_KEY: Optional[str] = None
     AZURE_SEARCH_INDEX_NAME: str = "syrabit-edu-index"
     AZURE_SEARCH_SEMANTIC_CONFIG: str = "default"
+    SEARCH_CACHE_ENABLED: bool = False
 
     # --- P4: MongoDB (Data) ---
     MONGODB_URI: Optional[str] = None
@@ -118,6 +119,8 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY: Optional[str] = None  # PEM-encoded RSA public key for RS256
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
+    EDGE_SHARED_SECRET: Optional[str] = None
+    TRUST_EDGE_AUTH: bool = True
     ALLOWED_ORIGINS: str = (
         "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai"
     )

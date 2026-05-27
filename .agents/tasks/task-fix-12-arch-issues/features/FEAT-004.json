@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-004",
+  "type": "fix",
+  "description": "Layer 3 & 4 - Observability & Health: Remove latency_ms from PostHog, fix ambiguous health endpoints with backend_reachable and /health/full aggregation",
+  "status": "completed",
+  "steps": [
+    "1. In apps/backend/app/utils/tracking.py, REMOVE 'latency_ms' from the PostHog event properties dict. The function signature still accepts latency_ms parameter (for backward compatibility with callers) but does NOT include it in the PostHog capture call. Add a comment: '# latency_ms tracked via OpenTelemetry spans only - not sent to PostHog'. Keep lang, model, user_tier, and streaming in PostHog properties.",
+    "2. In apps/edge/src/index.ts, modify the /health endpoint handler to add a 'backend_reachable' field. After returning edge status, make a lightweight fetch to env.AZURE_BACKEND_URL + '/health' with a 2-second timeout. Return the combined response: { status: 'healthy', service: 'syrabit-edge', timestamp: ..., backend_reachable: true/false }. Use try-catch so backend failure does not break edge health.",
+    "3. In apps/edge/src/index.ts, add a NEW route handler for '/health/full' (BEFORE the '/health/' prefix proxy check). This endpoint calls the backend's /health/deep endpoint, and returns an aggregated response: { status: 'healthy'|'degraded', edge: { status: 'healthy' }, backend: <response from /health/deep or error> }. If backend is unreachable, return status: 'degraded' with backend: { status: 'unreachable', error: 'timeout or connection refused' }.",
+    "4. Add inline JSDoc comments on the edge health endpoints documenting what each checks: /health = edge own status + backend reachability ping; /health/full = edge + full backend dependency health (MongoDB, Redis, Azure Search, Vertex AI)."
+  ],
+  "acceptance_criteria": [
+    "PostHog chat_completed event no longer includes latency_ms property",
+    "Edge /health returns backend_reachable boolean field",
+    "Edge /health/full exists and aggregates backend /health/deep response",
+    "Edge health endpoints have clear documentation comments",
+    "All files pass syntax validation"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/utils/tracking.py').read()); print('tracking.py valid')\"",
+    "Verify edge index.ts has valid syntax by checking no obvious JS errors"
+  ],
+  "blocked_reason": null,
+  "findings": "Implemented all 4 steps. Python AST validation passed. TypeScript validated via balanced-delimiter check (no tsc available in INTEGRATIONS_ONLY env). The /health/full route is placed before the /health/ prefix proxy check so it gets matched first."
+}

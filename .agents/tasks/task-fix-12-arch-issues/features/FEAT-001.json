@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Layer 1 - Edge Fixes: Remove duplicate CORS from backend, clean bot.ts blocking logic, consolidate rate limiting to edge-only burst enforcement",
+  "status": "completed",
+  "steps": [
+    "1. In apps/backend/app/main.py, REMOVE the CORSMiddleware import and the entire app.add_middleware(CORSMiddleware, ...) block (lines that add CORSMiddleware with allow_origins, allow_credentials, allow_methods, allow_headers). The edge worker (apps/edge/src/middleware/cors.ts) already handles CORS for all traffic. Keep the import of FastAPI, Request, etc.",
+    "2. In apps/edge/src/index.ts, locate the bot detection section (around line 60-70) where it checks User-Agent with regex /bot|crawl|spider|scrape|curl|wget|python-requests|httpie/i. Currently it sets X-Bot-Detected header. REMOVE ANY blocking logic for bots in this section. The code currently only tags (sets X-Bot-Detected: true) which is correct for ISR routing. Verify there is NO return statement or 403 response for bot-detected requests in this section.",
+    "3. In apps/backend/app/api/deps/rate_limit.py, REMOVE the burst rate limiting logic. The function should ONLY perform monthly quota tracking. Specifically: remove BURST_LIMIT_FREE and BURST_LIMIT_PRO constants, remove the burst_key logic, remove the burst_count check. When edge_rate_limited is True (X-Rate-Limited-By: edge header present), skip ALL per-request enforcement and only track monthly quota. When edge_rate_limited is False (direct backend access, e.g., in tests), keep the monthly quota check only.",
+    "4. In apps/backend/app/core/rate_limiter.py, add a comment at the top noting this module is DEPRECATED for per-request enforcement (edge handles burst limits). It is retained only for the monthly quota Lua script pattern used by apps/backend/app/api/deps/rate_limit.py. Alternatively, if rate_limiter.py is not imported anywhere except as a standalone utility, mark it clearly as legacy.",
+    "5. In apps/edge/src/index.ts, verify that the X-Rate-Limited-By header is set to 'edge' after rate limit check passes (already done around line 107-109). This signals to the backend that edge already enforced burst limits."
+  ],
+  "acceptance_criteria": [
+    "Backend main.py no longer imports or adds CORSMiddleware",
+    "Edge bot detection only tags requests (X-Bot-Detected header) without blocking/returning 403",
+    "Backend rate_limit.py (deps) only tracks monthly quota, no burst limit enforcement",
+    "Backend still trusts X-Rate-Limited-By: edge header and skips enforcement when present",
+    "All existing tests pass with updated logic (mocks may need adjustment)"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/main.py').read()); print('main.py valid')\"",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/deps/rate_limit.py').read()); print('rate_limit.py valid')\"",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit src/index.ts 2>/dev/null || echo 'TS check skipped (no tsconfig)'"
+  ],
+  "blocked_reason": null,
+  "findings": "Used pyenv global 3.11.15 to activate Python. All AST validation passed. No tests reference removed CORS or burst constants. Edge bot detection was already tag-only (no blocking). X-Rate-Limited-By header was already set at edge line ~107."
+}

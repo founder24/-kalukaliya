@@ -9,7 +9,7 @@
  *   5. Route to backend proxy or R2 assets
  */
 
-import { getCorsHeaders } from './middleware/cors';
+import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { turnstileVerify } from './middleware/bot';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
@@ -32,6 +32,7 @@ export default {
     // Strip trust headers that only the edge itself should set
     const sanitizedHeaders = new Headers(request.headers);
     sanitizedHeaders.delete('X-Rate-Limited-By');
+    sanitizedHeaders.delete('X-Edge-Secret');
     request = new Request(request, { headers: sanitizedHeaders });
 
     // ── 2. JWT Verification (all /api/ routes except public) ──
@@ -46,6 +47,9 @@ export default {
       // Inject authenticated user ID (or 'anonymous') for downstream backend
       const headers = new Headers(request.headers);
       headers.set('X-User-ID', jwtResult.userId || 'anonymous');
+      if (env.EDGE_SHARED_SECRET) {
+        headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
+      }
       request = new Request(request, { headers });
     }
 
@@ -82,10 +86,11 @@ export default {
         }
       }
 
-      // Basic bot heuristic: reject requests with no User-Agent or known bot patterns
+      // Basic bot heuristic: tag requests with bot User-Agent for analytics filtering.
+      // NOTE: Bots are NOT blocked here - they are tagged only (X-Bot-Detected header)
+      // for ISR routing and analytics. Edge never returns 403 for bot-detected requests.
       const ua = request.headers.get('User-Agent') || '';
       if (!ua || /bot|crawl|spider|scrape|curl|wget|python-requests|httpie/i.test(ua)) {
-        // Still allow through but tag as bot for analytics filtering
         const headers = new Headers(request.headers);
         headers.set('X-Bot-Detected', 'true');
         request = new Request(request, { headers });
@@ -146,26 +151,92 @@ export default {
       return proxyRequest(rewrittenRequest, env.AZURE_BACKEND_URL, env);
     }
 
-    // Edge-level health check (no backend proxy)
+    /**
+     * Edge-level health check with backend reachability ping.
+     * Checks: Edge own status + lightweight backend reachability (2s timeout).
+     * Returns backend_reachable: true/false without failing the edge health.
+     */
     if (url.pathname === '/health') {
-      return new Response(
+      let backendReachable = false;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${env.AZURE_BACKEND_URL}/health`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        backendReachable = res.ok;
+      } catch {
+        backendReachable = false;
+      }
+
+      const healthResponse = new Response(
         JSON.stringify({
           status: 'healthy',
           service: 'syrabit-edge',
           timestamp: new Date().toISOString(),
+          backend_reachable: backendReachable,
         }),
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }
       );
+      return addSecurityHeaders(healthResponse);
+    }
+
+    /**
+     * Full health check: Edge + full backend dependency health.
+     * Calls backend /health/deep which checks MongoDB, Redis, Azure Search, Vertex AI.
+     * Returns aggregated status: "healthy" if all pass, "degraded" if backend unreachable.
+     */
+    if (url.pathname === '/health/full') {
+      const edgeStatus = { status: 'healthy', timestamp: new Date().toISOString() };
+      let backendStatus: Record<string, unknown>;
+      let overallStatus: 'healthy' | 'degraded' = 'healthy';
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`${env.AZURE_BACKEND_URL}/health/deep`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        backendStatus = await res.json() as Record<string, unknown>;
+        if (!res.ok) {
+          overallStatus = 'degraded';
+        }
+      } catch (err) {
+        overallStatus = 'degraded';
+        backendStatus = {
+          status: 'unreachable',
+          error: err instanceof Error ? err.message : 'timeout or connection refused',
+        };
+      }
+
+      const fullHealthResponse = new Response(
+        JSON.stringify({
+          status: overallStatus,
+          edge: edgeStatus,
+          backend: backendStatus,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      return addSecurityHeaders(fullHealthResponse);
     }
 
     // API routes → proxy to Azure backend
-    // Note: Only /health/ sub-paths (e.g. /health/deep) are proxied; /health is handled at edge above.
-    // Other paths like /healthz are intentionally not routed.
+    // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
+    // are proxied to backend. /health is handled at edge above.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
-      return proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const secured = addSecurityHeaders(response);
+      const origin = request.headers.get('Origin') || '';
+      applyCorsHeaders(secured.headers, origin);
+      return secured;
     }
 
     // Static assets → serve from R2
@@ -206,6 +277,18 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 };
+
+/** Add security headers to proxied responses. These are set at the edge to avoid duplication with Cloudflare's built-in headers. */
+function addSecurityHeaders(response: Response): Response {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.set('X-Content-Type-Options', 'nosniff');
+  newResponse.headers.set('X-Frame-Options', 'DENY');
+  newResponse.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  newResponse.headers.set('X-XSS-Protection', '0');
+  newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com; frame-ancestors 'none'");
+  return newResponse;
+}
 
 /** Helper to create JSON error responses */
 function jsonResponse(status: number, body: Record<string, string>): Response {

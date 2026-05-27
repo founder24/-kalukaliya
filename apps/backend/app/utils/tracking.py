@@ -29,10 +29,10 @@ async def track_chat_completed(
     if not posthog:
         return
     try:
+        # NOTE: latency_ms tracked via OpenTelemetry spans only - not sent to PostHog
         properties = {
             "lang": lang,
             "model": model,
-            "latency_ms": latency_ms,
             "user_tier": user_tier,
         }
         if streaming:

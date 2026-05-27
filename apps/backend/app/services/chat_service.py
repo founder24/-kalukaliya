@@ -306,20 +306,9 @@ class ChatService:
             )
             await chat_doc.save()
 
-            # Proactively update history cache so next request hits warm cache
+            # Invalidate history cache so next read refills from MongoDB
             if session_id:
-                try:
-                    recent_history = f"User: {user_message[:500]}\nAssistant: {assistant_response[:500]}"
-                    existing = await ChatService._get_history_from_cache(session_id, 5)
-                    if existing:
-                        updated = f"{existing}\n{recent_history}"
-                        if len(updated) > 2000:
-                            updated = updated[-2000:]
-                    else:
-                        updated = recent_history
-                    await ChatService._set_history_cache(session_id, 5, updated)
-                except Exception:
-                    pass
+                await ChatService._invalidate_history_cache(session_id)
 
         except Exception as e:
             logger.error(f"Failed to save chat: {e}")
@@ -422,8 +411,8 @@ class ChatService:
         """Invalidate all cached history entries for a session on new message save."""
         try:
             redis = get_redis()
-            # Invalidate common max_turns values
-            for max_turns in (5, 10):
+            # Invalidate all known max_turns values used by callers
+            for max_turns in (3, 5, 10, 15, 20):
                 cache_key = f"chat_history:{session_id}:{max_turns}"
                 await redis.delete(cache_key)
         except (RuntimeError, Exception):

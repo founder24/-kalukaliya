@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-006",
+  "type": "fix",
+  "description": "Address 3 critical review findings: add max retry cap to dead letter replay, fix cache invalidation for all max_turns values, remove dead edge_rate_limited code",
+  "status": "completed",
+  "steps": [
+    "1. In dead_letter.py replay_dead_letter(): add retry_count >= 3 check before incrementing, raise ValueError if exceeded. Use find_one_and_update with status precondition to prevent concurrent replays.",
+    "2. In chat_service.py _invalidate_history_cache(): expand max_turns tuple to (3, 5, 10, 15, 20) with explanatory comment.",
+    "3. In rate_limit.py: remove the edge_rate_limited variable assignment and associated comment about checking edge header."
+  ],
+  "acceptance_criteria": [
+    "Dead letter replay refuses if retry_count >= 3",
+    "Dead letter replay uses atomic find_one_and_update with status precondition",
+    "Cache invalidation covers max_turns values 3, 5, 10, 15, 20",
+    "rate_limit.py no longer has edge_rate_limited variable or related dead code",
+    "All files pass AST validation"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/services/dead_letter.py').read()); print('dead_letter valid')\"",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/services/chat_service.py').read()); print('chat_service valid')\"",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/deps/rate_limit.py').read()); print('rate_limit valid')\""
+  ],
+  "blocked_reason": null,
+  "findings": "All 3 review fixes implemented and pass AST validation. Updated test_latency_audit.py test that expected pipeline usage (now removed) to verify simple incr behavior. Dead letter replay now properly guards against runaway retries (cap at 3) and concurrent access (atomic find_one_and_update with status precondition)."
+}

@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 import sentry_sdk
@@ -27,6 +26,7 @@ from app.api.v1 import (
     admin_alerts,
     admin_knowledge,
     admin_translate,
+    admin_dead_letters,
     seo,
     indexnow,
     content,
@@ -133,24 +133,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS Middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.allowed_origins_list,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=[
-            "Authorization",
-            "Content-Type",
-            "X-Request-ID",
-            "X-Razorpay-Signature",
-            "Accept",
-            "Origin",
-            "x-turnstile-token",
-            "CF-Turnstile-Response",
-        ],
-    )
-
     # Unified Middleware - combines CSRF, security headers, and request ID
     # into a single middleware to reduce per-request overhead from 3 call_next chains to 1
     @app.middleware("http")
@@ -183,24 +165,6 @@ def create_app() -> FastAPI:
         start_time = time.time()
         response = await call_next(request)
         elapsed_ms = int((time.time() - start_time) * 1000)
-
-        # Security headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
-        )
-        response.headers["X-XSS-Protection"] = "0"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "connect-src 'self' https://*.syrabit.ai https://app.posthog.com; "
-            "frame-ancestors 'none'"
-        )
 
         # Request ID header + logging
         response.headers["X-Request-ID"] = request_id
@@ -282,6 +246,11 @@ def create_app() -> FastAPI:
         admin_translate.router,
         prefix="/api/v1/admin",
         tags=["Admin Translation"],
+    )
+    app.include_router(
+        admin_dead_letters.router,
+        prefix="/api/v1/admin",
+        tags=["Admin Dead Letters"],
     )
     app.include_router(changelog.router, prefix="/api/v1", tags=["Changelog"])
 
