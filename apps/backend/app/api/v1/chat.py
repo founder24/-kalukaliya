@@ -104,9 +104,7 @@ async def chat(
             results = await asyncio.gather(
                 ChatService.retrieve_context(sanitized_message, user_tier),
                 ChatService.load_conversation_history(request.session_id),
-                check_rate_limit(
-                    user_id, user_tier, client_ip, request=http_request
-                ),
+                check_rate_limit(user_id, user_tier, client_ip, request=http_request),
                 return_exceptions=True,
             )
 

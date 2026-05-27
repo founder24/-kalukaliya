@@ -78,9 +78,7 @@ class ChatService:
         return None
 
     @staticmethod
-    async def set_cached_response(
-        message_hash: str, response: str, model: str
-    ) -> None:
+    async def set_cached_response(message_hash: str, response: str, model: str) -> None:
         """Store a chat response in Redis with TTL."""
         try:
             redis = get_redis()
