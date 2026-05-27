@@ -118,17 +118,17 @@ export default function LandingPage() {
       {/* Reserve vertical space for each lazy section so Suspense fall-in does
           not cause CLS (was 0.18 — mostly from these four collapsing to 0px). */}
       <Suspense fallback={<div style={{ minHeight: '720px' }} aria-hidden />}>
-        <div style={{ minHeight: '720px' }}>
+        <div style={{ minHeight: '720px', contentVisibility: 'auto', containIntrinsicSize: '0 720px' }}>
           <FeaturesGrid contentLang={contentLang} />
         </div>
       </Suspense>
       <Suspense fallback={<div style={{ minHeight: '640px' }} aria-hidden />}>
-        <div style={{ minHeight: '640px' }}>
+        <div style={{ minHeight: '640px', contentVisibility: 'auto', containIntrinsicSize: '0 640px' }}>
           <PlatformSection contentLang={contentLang} />
         </div>
       </Suspense>
       <Suspense fallback={<div style={{ minHeight: '720px' }} aria-hidden />}>
-        <div style={{ minHeight: '720px' }}>
+        <div style={{ minHeight: '720px', contentVisibility: 'auto', containIntrinsicSize: '0 720px' }}>
           <PricingSection contentLang={contentLang} />
         </div>
       </Suspense>
@@ -136,7 +136,7 @@ export default function LandingPage() {
         subheading="Enjoying Syrabit.ai? Help other students across Assam discover it — leave us a quick review."
       />
       <Suspense fallback={<div style={{ minHeight: '480px' }} aria-hidden />}>
-        <div style={{ minHeight: '480px' }}>
+        <div style={{ minHeight: '480px', contentVisibility: 'auto', containIntrinsicSize: '0 480px' }}>
           <TestimonialsFooter year={year} contentLang={contentLang} />
         </div>
       </Suspense>

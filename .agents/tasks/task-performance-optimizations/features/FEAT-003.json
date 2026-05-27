@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Phase 2-4: Add content-visibility to below-fold sections on LandingPage, add loading=lazy to below-fold images, and add fetchpriority=high to the LCP element on the hero section. Also ensure the pre-hydration shell does not compete with React hydration.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/frontend/src/pages/landing/HeroSection.jsx: The h1 element is the LCP candidate (large text). Add a wrapping element or attribute that hints the browser. Since there is no image LCP, the hero section itself is fine. Actually, look at the PageFallbackContent in App.jsx - it already has fetchPriority='high' on the logo. The real LCP on the landing page is the h1 text. No fetchpriority needed for text elements. Instead, ensure the hero section renders immediately without any lazy loading or delay. It already does (it is eagerly imported in LandingPage.jsx). Skip this sub-step.",
+    "In apps/frontend/src/pages/LandingPage.jsx: Add `content-visibility: auto` and `contain-intrinsic-size` to the wrapper divs of the below-fold lazy sections. Specifically, add style={{ contentVisibility: 'auto', containIntrinsicSize: '0 720px' }} to the FeaturesGrid wrapper div, style={{ contentVisibility: 'auto', containIntrinsicSize: '0 640px' }} to the PlatformSection wrapper div, style={{ contentVisibility: 'auto', containIntrinsicSize: '0 720px' }} to the PricingSection wrapper div, and style={{ contentVisibility: 'auto', containIntrinsicSize: '0 480px' }} to the TestimonialsFooter wrapper div. These wrappers already exist with minHeight styles.",
+    "Search the codebase for <img> tags in landing page sections (FeaturesGrid, PlatformSection, PricingSection, TestimonialsFooter, PopularSubjects) and add loading='lazy' to any that are below-fold and don't already have it. Also check TrustpilotReviewsSection.",
+    "In apps/frontend/src/pages/landing/HeroSection.jsx: The HeroBelowFold lazy component already has a Suspense boundary. The above-fold content (h1, subtitle, CTAs) is eagerly rendered. This is already optimal.",
+    "Verify that when React mounts, the #__shell div gets hidden. Check apps/frontend/src/index.jsx to see if it removes or hides #__shell after hydration/render. If not, add code to hide it (display:none) once React's root mounts."
+  ],
+  "acceptance_criteria": [
+    "LandingPage.jsx below-fold section wrappers have content-visibility: auto and contain-intrinsic-size styles",
+    "Below-fold images in landing sections have loading='lazy'",
+    "The #__shell pre-hydration div is hidden after React mounts",
+    "All existing tests still pass",
+    "Build succeeds"
+  ],
+  "verification": [
+    "Run `pnpm --filter @workspace/syrabit test` and confirm all tests pass",
+    "Run `pnpm --filter @workspace/syrabit build:client` and confirm build succeeds"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
