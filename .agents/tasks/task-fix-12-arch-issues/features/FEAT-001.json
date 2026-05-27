@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Layer 1 - Edge Fixes: Remove duplicate CORS from backend, clean bot.ts blocking logic, consolidate rate limiting to edge-only burst enforcement",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In apps/backend/app/main.py, REMOVE the CORSMiddleware import and the entire app.add_middleware(CORSMiddleware, ...) block (lines that add CORSMiddleware with allow_origins, allow_credentials, allow_methods, allow_headers). The edge worker (apps/edge/src/middleware/cors.ts) already handles CORS for all traffic. Keep the import of FastAPI, Request, etc.",
     "2. In apps/edge/src/index.ts, locate the bot detection section (around line 60-70) where it checks User-Agent with regex /bot|crawl|spider|scrape|curl|wget|python-requests|httpie/i. Currently it sets X-Bot-Detected header. REMOVE ANY blocking logic for bots in this section. The code currently only tags (sets X-Bot-Detected: true) which is correct for ISR routing. Verify there is NO return statement or 403 response for bot-detected requests in this section.",
@@ -23,5 +23,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit src/index.ts 2>/dev/null || echo 'TS check skipped (no tsconfig)'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Used pyenv global 3.11.15 to activate Python. All AST validation passed. No tests reference removed CORS or burst constants. Edge bot detection was already tag-only (no blocking). X-Rate-Limited-By header was already set at edge line ~107."
 }
