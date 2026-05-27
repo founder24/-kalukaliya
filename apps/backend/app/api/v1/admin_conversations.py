@@ -24,6 +24,7 @@ async def list_conversations(
 ):
     """Paginated list of chat sessions."""
     _validate_admin_session(request)
+    limit = min(limit, 100)
 
     try:
         client = get_mongo_client()
@@ -68,10 +69,16 @@ async def list_conversations(
                 }
             )
 
-        return {"conversations": conversations, "total": total}
+        return {
+            "conversations": conversations,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + limit < total,
+        }
     except Exception as e:
         logger.error(f"List conversations error: {e}")
-        return {"conversations": [], "total": 0}
+        return {"conversations": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
 
 
 @router.get("/conversations/{session_id}")

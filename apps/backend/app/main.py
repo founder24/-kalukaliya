@@ -31,6 +31,7 @@ from app.api.v1 import (
     indexnow,
     content,
     public_content,
+    changelog,
 )
 from app.api.webhooks import razorpay
 
@@ -194,6 +195,7 @@ def create_app() -> FastAPI:
 
         # Request ID header + logging
         response.headers["X-Request-ID"] = request_id
+        response.headers["X-API-Version"] = "3.0.0"
         logger.info(
             "request_completed",
             extra={
@@ -271,6 +273,9 @@ def create_app() -> FastAPI:
         admin_translate.router,
         prefix="/api/v1/admin",
         tags=["Admin Translation"],
+    )
+    app.include_router(
+        changelog.router, prefix="/api/v1", tags=["Changelog"]
     )
 
     # Legacy health probe redirects for backward compatibility.

@@ -93,17 +93,26 @@ class VertexAIClient:
                 return self._cached_token
 
             from google.oauth2 import service_account
-            import google.auth.transport.requests
 
             creds = service_account.Credentials.from_service_account_info(
                 settings.google_credentials,
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
 
-            # Refresh token (blocking call wrapped in executor)
-            request = google.auth.transport.requests.Request()
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, creds.refresh, request)
+            # Try native async refresh via aiohttp transport first
+            try:
+                from google.auth.transport._aiohttp_requests import Request as AiohttpRequest
+
+                aiohttp_request = AiohttpRequest()
+                await creds.refresh(aiohttp_request)
+                await aiohttp_request.close()
+            except (ImportError, AttributeError):
+                # aiohttp transport not available, fall back to executor pattern
+                import google.auth.transport.requests
+
+                request = google.auth.transport.requests.Request()
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, creds.refresh, request)
 
             self._cached_token = creds.token
             # Token typically valid for 1 hour

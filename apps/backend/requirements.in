@@ -1,6 +1,6 @@
 # Direct dependencies for the backend application.
 # Test dependencies live in requirements-dev.in (pytest, pytest-asyncio, pytest-cov)
-# Run: pip-compile --generate-hashes --output-file=requirements.txt --strip-extras requirements.in
+# Run: pip-compile --python-version 3.11 --generate-hashes --output-file=requirements.txt --strip-extras requirements.in
 
 aiohttp
 azure-identity
@@ -9,7 +9,7 @@ azure-search-documents
 bcrypt
 beanie
 fastapi
-google-auth
+google-auth[aiohttp]
 google-cloud-aiplatform
 gunicorn
 httpx

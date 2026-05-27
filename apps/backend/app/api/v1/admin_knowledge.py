@@ -144,6 +144,7 @@ async def list_knowledge(
 ):
     """List knowledge objects with pagination."""
     _validate_admin_session(request)
+    limit = min(limit, 100)
 
     query = {}
     if status:
@@ -175,8 +176,9 @@ async def list_knowledge(
             for obj in objects
         ],
         "total": total,
-        "skip": skip,
+        "offset": skip,
         "limit": limit,
+        "has_more": skip + limit < total,
     }
 
 

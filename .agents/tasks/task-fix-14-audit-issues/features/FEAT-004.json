@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-004",
+  "type": "fix",
+  "description": "Critical fixes: Delete cloudflare_client.py dead code and remove CF_AI_MODEL from config (issue #1), and implement RS256 JWT support with backward-compatible HS256 fallback (issue #2).",
+  "status": "pending",
+  "steps": [
+    "Issue #1 - Delete dead code: (a) Delete apps/backend/app/services/ai/cloudflare_client.py entirely. (b) In apps/backend/app/config.py, remove the 'CF_AI_MODEL' field (line 36: CF_AI_MODEL: str = ...) and its section comment '# --- Cloudflare Workers AI (LLM) ---' (line 35). Keep the other Cloudflare config fields (CF_ACCOUNT_ID, CF_API_TOKEN, etc.) as they are used by the Edge worker config. (c) Verify no other file imports from cloudflare_client - grep confirmed only the file itself references the client. The router.py does NOT import it. (d) In apps/backend/app/services/ai/__init__.py, ensure there is no cloudflare_client import. (e) Run tests to confirm nothing breaks.",
+    "Issue #2 - RS256 JWT support: (a) In apps/backend/app/config.py, add two new optional config fields: JWT_PRIVATE_KEY: Optional[str] = None and JWT_PUBLIC_KEY: Optional[str] = None. (b) In apps/backend/app/api/v1/auth.py, update create_access_token() and create_refresh_token() to: if settings.JWT_PRIVATE_KEY is set AND settings.JWT_ALGORITHM == 'RS256', sign with the private key; otherwise use existing HS256 with JWT_SECRET. (c) Update jwt.decode() calls in get_current_user(), get_current_user_optional(), refresh_token_endpoint(), and logout() to: if settings.JWT_PUBLIC_KEY is set AND settings.JWT_ALGORITHM == 'RS256', verify with public key; otherwise use JWT_SECRET. (d) Update create_reset_token() similarly - use RESET_TOKEN_SECRET or fall back to JWT_PRIVATE_KEY/JWT_SECRET based on algorithm. (e) The default remains HS256, so all existing tests continue to pass without any config changes. (f) Add a production validator: if JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY or JWT_PUBLIC_KEY is missing, log a warning."
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/services/ai/cloudflare_client.py is deleted",
+    "CF_AI_MODEL and its section comment are removed from config.py",
+    "No import errors or test failures from removing cloudflare_client",
+    "JWT token creation supports RS256 when JWT_PRIVATE_KEY + JWT_PUBLIC_KEY are configured",
+    "JWT token verification supports RS256 when JWT_PUBLIC_KEY is configured",
+    "Default behavior (HS256 with JWT_SECRET) is unchanged - all existing tests pass",
+    "All 163 existing backend tests still pass"
+  ],
+  "verification": [
+    "Run python -m pytest from apps/backend/ and confirm all tests pass",
+    "Verify cloudflare_client.py no longer exists"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
