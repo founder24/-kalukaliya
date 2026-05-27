@@ -41,9 +41,6 @@ class VertexAIClient:
         try:
 
             async def _do_generate():
-                # Build prompt
-                full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-
                 response = await self._client.post(
                     f"{self.base_url}/{self.model}:generateContent",
                     headers={
@@ -51,7 +48,15 @@ class VertexAIClient:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "contents": [{"parts": [{"text": full_prompt}]}],
+                        "systemInstruction": {
+                            "parts": [{"text": system_prompt}]
+                        },
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{"text": user_message}]
+                            }
+                        ],
                         "generationConfig": {
                             "temperature": 0.7,
                             "maxOutputTokens": 1024,
@@ -134,15 +139,21 @@ class VertexAIClient:
         if vertex_circuit_breaker.state == CircuitState.OPEN:
             raise RuntimeError("Vertex AI unavailable (circuit open)")
 
-        full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-
         url = f"{self.base_url}/{self.model}:streamGenerateContent?alt=sse"
         headers = {
             "Authorization": f"Bearer {await self._get_access_token()}",
             "Content-Type": "application/json",
         }
         payload = {
-            "contents": [{"parts": [{"text": full_prompt}]}],
+            "systemInstruction": {
+                "parts": [{"text": system_prompt}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_message}]
+                }
+            ],
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 2048,

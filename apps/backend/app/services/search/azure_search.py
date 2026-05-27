@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
@@ -60,7 +61,7 @@ class AzureSearchService:
         limit: int,
         semantic: bool,
     ):
-        """Async search using the native async client."""
+        """Async search using the native async client with timeout."""
         filter_expr = f"tier_access eq '{user_tier}'" if user_tier else None
         if semantic:
             kwargs = {
@@ -74,7 +75,6 @@ class AzureSearchService:
             }
             if filter_expr:
                 kwargs["filter"] = filter_expr
-            results = self.client.search(**kwargs)
         else:
             kwargs = {
                 "search_text": query,
@@ -84,8 +84,16 @@ class AzureSearchService:
             }
             if filter_expr:
                 kwargs["filter"] = filter_expr
+
+        async def _execute():
             results = self.client.search(**kwargs)
-        return [doc async for doc in results]
+            return [doc async for doc in results]
+
+        try:
+            return await asyncio.wait_for(_execute(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Azure Search timed out after 10s for query '{query[:20]}...'")
+            return []
 
     async def search_context(
         self, query: str, text: str, user_tier: str, limit: int = 5

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 import hashlib
 import logging
+import re
 import time
 import json
 import asyncio
@@ -20,6 +21,15 @@ from app.utils.tracking import track_chat_completed
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
+
+
+def _log_task_exception(task: asyncio.Task) -> None:
+    """Log unhandled exceptions from fire-and-forget background tasks."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(f"Background task failed: {type(exc).__name__}: {exc}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -40,6 +50,16 @@ class ChatRequest(BaseModel):
             raise ValueError("message must not be empty")
         if len(v) > 2000:
             raise ValueError("message must not exceed 2000 characters")
+        return v
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        # Allow UUID format or alphanumeric with hyphens/underscores (1-64 chars)
+        if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', v):
+            raise ValueError("session_id must be 1-64 alphanumeric characters, hyphens, or underscores")
         return v
 
 
@@ -153,7 +173,7 @@ async def chat(
             latency_ms = int((time.time() - start_time) * 1000)
 
             # 5. Save chat to MongoDB (fire-and-forget)
-            asyncio.create_task(
+            task = asyncio.create_task(
                 ChatService.save_chat(
                     user_id=user_id if user else None,
                     session_id=request.session_id,
@@ -164,6 +184,7 @@ async def chat(
                     context_chunks=context_chunks,
                 )
             )
+            task.add_done_callback(_log_task_exception)
 
             # 6. Update usage counter
             if user:
@@ -420,7 +441,7 @@ async def chat_stream(
         )
 
         # -- Persist chat (fire-and-forget) --
-        asyncio.create_task(
+        task = asyncio.create_task(
             ChatService.save_chat(
                 user_id=user_id,
                 session_id=request.session_id,
@@ -431,6 +452,7 @@ async def chat_stream(
                 context_chunks=context_chunks,
             )
         )
+        task.add_done_callback(_log_task_exception)
 
     return StreamingResponse(
         event_stream(),
