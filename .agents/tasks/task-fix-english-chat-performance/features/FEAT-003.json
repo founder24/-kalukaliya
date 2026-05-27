@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Backend performance optimizations for chat latency reduction. Optimize the Vertex AI client for faster English responses (target 3-4s), reduce RAG overhead, and improve streaming response times.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/services/ai/vertex_client.py, reduce the HTTP timeout from 15.0s to 10.0s for faster failure detection. Increase max_connections from 20 to 50 and max_keepalive_connections from 10 to 25 for better connection reuse under load.",
     "In apps/backend/app/services/ai/vertex_client.py, in the generate() method, reduce maxOutputTokens from 512 to 1024 (keep same) and reduce temperature from 0.7 to 0.3 for faster, more deterministic responses. In stream_generate(), keep the existing 0.3 temperature and 2048 maxOutputTokens.",
@@ -23,5 +23,5 @@
     "Run: grep -n 'timeout=15.0\\|wait_for.*15' apps/backend/app/api/v1/chat.py && echo 'PASS: Chat timeout is 15s'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes verified: Timeout 10s/3s, pool 50/25, temperature 0.3, RAG timeout 1.5s, chat timeout 15s, CF_AI_MODEL documented as OCR/TTS only. All files pass Python AST parsing."
 }
