@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 import hashlib
+import io
+import base64
 import logging
 import re
 import time
@@ -11,12 +13,15 @@ import asyncio
 import httpx
 from datetime import datetime, timezone
 
+from fastapi import File, UploadFile, Form
 from app.models.user import User
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
 from app.services.chat_service import ChatService
 from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
+from app.services.ai.cloudflare_client import cloudflare_client
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -608,3 +613,85 @@ async def conversations_alias(
 ):
     """Alias for /history - supports frontend legacy route."""
     return await get_chat_history(skip=skip, limit=limit, user=user)
+
+
+# ═══════════════════════════════════════════════════════════════
+# OCR / IMAGE ANALYSIS ENDPOINT
+# ═══════════════════════════════════════════════════════════════
+
+class ImageAnalysisResponse(BaseModel):
+    text: str
+    model: str
+
+
+@router.post("/image", response_model=ImageAnalysisResponse)
+async def analyze_image(
+    file: UploadFile = File(...),
+    prompt: str = Form(default="Extract all text from this image"),
+    user: User = Depends(get_current_user),
+    http_request: Request = None,
+):
+    """Analyze an image using Cloudflare Workers AI vision model (OCR)."""
+    user_id = str(user.id)
+    user_tier = getattr(user, "subscription_tier", "free")
+    client_ip = http_request.client.host if http_request and http_request.client else None
+
+    allowed, current_count, limit, limit_type = await check_rate_limit(
+        user_id, user_tier, client_ip, request=http_request
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
+    sanitized_prompt = sanitize_user_input(prompt)
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    image_bytes = await file.read()
+    if len(image_bytes) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image must be less than 4MB")
+
+    try:
+        result = await cloudflare_client.vision_analyze(image_bytes, sanitized_prompt)
+        return ImageAnalysisResponse(text=result, model=settings.CF_AI_VISION_MODEL)
+    except RuntimeError as e:
+        logger.error(f"Vision analysis failed: {e}")
+        raise HTTPException(status_code=502, detail="AI vision service temporarily unavailable")
+
+
+# ═══════════════════════════════════════════════════════════════
+# TEXT-TO-SPEECH ENDPOINT
+# ═══════════════════════════════════════════════════════════════
+
+class TTSRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=5000)
+    lang: str = Field(default="en", pattern="^(en|as)$")
+
+
+@router.post("/tts")
+async def text_to_speech(
+    request: TTSRequest,
+    user: User = Depends(get_current_user),
+    http_request: Request = None,
+):
+    """Convert text to speech using Cloudflare Workers AI TTS model."""
+    user_id = str(user.id)
+    user_tier = getattr(user, "subscription_tier", "free")
+    client_ip = http_request.client.host if http_request and http_request.client else None
+
+    allowed, current_count, limit, limit_type = await check_rate_limit(
+        user_id, user_tier, client_ip, request=http_request
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
+    try:
+        audio_bytes = await cloudflare_client.text_to_speech(request.text, request.lang)
+        return StreamingResponse(
+            io.BytesIO(audio_bytes),
+            media_type="audio/wav",
+            headers={"Content-Disposition": "attachment; filename=speech.wav"},
+        )
+    except RuntimeError as e:
+        logger.error(f"TTS failed: {e}")
+        raise HTTPException(status_code=502, detail="AI TTS service temporarily unavailable")
