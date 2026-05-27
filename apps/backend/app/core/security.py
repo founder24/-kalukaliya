@@ -43,6 +43,18 @@ def sanitize_user_input(text: str) -> str:
     # Strip zero-width characters
     text = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", text)
 
+    # Strip invisible formatting characters that could be used for
+    # homoglyph/confusable attacks. Includes soft hyphen, combining grapheme
+    # joiner, line/paragraph separators, variation selectors, hangul fillers,
+    # and khmer invisible characters.
+    text = re.sub(
+        r"[\u00ad\u034f\u2028\u2029\ufe00-\ufe0f\u115f\u1160\u17b4\u17b5]",
+        "",
+        text,
+    )
+    # Strip supplementary variation selectors (U+E0100-U+E01EF)
+    text = re.sub(r"[\U000E0100-\U000E01EF]", "", text)
+
     # Reject potential prompt injection markers
     injection_patterns = [
         r"Ignore previous instructions",

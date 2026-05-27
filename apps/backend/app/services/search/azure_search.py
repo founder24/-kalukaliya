@@ -115,6 +115,9 @@ class AzureSearchService:
             from app.db.redis import get_redis
 
             cache_input = f"{query}:{text}:{user_tier}"
+            # Cache key uses SHA-256 hash of the full input (query + text + tier)
+            # to ensure fixed-length keys regardless of input size. This is already
+            # optimal since SHA-256 produces a constant 64-char hex digest.
             cache_key = (
                 f"search_cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
             )
