@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Update existing latency comparison tests across all three apps (backend, frontend, edge) to reflect post-audit architecture, and add NEW English and Assamese response speed benchmark tests to the backend.",
+  "status": "completed",
+  "steps": [
+    "1. Update apps/backend/tests/test_latency_comparison.py: Add new test sections for (a) Azure Search 10s timeout behavior (simulate a search that times out at 10s and returns empty vs one that completes within 10s), (b) async token refresh improvement (simulate aiohttp native async refresh vs executor-based fallback, showing async is faster), (c) English response speed pipeline test that measures: language detection (<1ms regex), Azure Search RAG retrieval (~75ms mocked), Vertex AI API call (~250ms mocked), total pipeline. Assert total < 400ms TTFB. Use asyncio.sleep to simulate realistic delays. (d) Assamese response speed pipeline test that measures: language detection (<1ms regex), Azure Search RAG retrieval (~75ms mocked), Sarvam AI API call (~200ms mocked), total pipeline. Assert total < 400ms TTFB. (e) Assamese fallback scenario test: Sarvam fails, falls back to Vertex AI. Measure: detection + RAG + Sarvam attempt (~50ms timeout) + Vertex fallback (~250ms). Assert total < 600ms. Keep ALL existing tests in the file unchanged.",
+    "2. Update apps/frontend/src/__tests__/latency-comparison.test.js: Add new test sections for (a) SSR page load timing: simulate server-side render returning pre-rendered HTML (~30ms) + client hydration (~50ms) vs old CSR full render (~200ms), showing SSR improvement. (b) React Router v7 hydration timing: simulate route-level code splitting with lazy loading (~40ms) vs monolithic bundle parse (~120ms). (c) X-API-Version header overhead: verify adding the header adds negligible overhead (<2ms simulated). Keep ALL existing tests in the file unchanged.",
+    "3. Update apps/edge/tests/latency-comparison.test.ts: Add new test sections for (a) Unified middleware overhead: simulate single middleware doing rate-limit + security headers + request-id in one pass (~10ms) vs 3 separate middlewares (~30ms). (b) X-API-Version header injection: verify the edge worker adds X-API-Version header with minimal overhead (<1ms simulated). Keep ALL existing tests in the file unchanged."
+  ],
+  "acceptance_criteria": [
+    "Running `python -m pytest apps/backend/tests/test_latency_comparison.py -v` from the project root passes all tests (existing + new)",
+    "Running `pnpm test` from apps/frontend passes all tests (existing + new)",
+    "Running `pnpm test` from apps/edge passes all tests (existing + new)",
+    "New backend tests include: test_english_response_pipeline_latency, test_assamese_response_pipeline_latency, test_assamese_fallback_latency, test_azure_search_10s_timeout, test_async_token_refresh_improvement",
+    "New frontend tests include describe blocks for SSR page load, React Router v7 hydration, and X-API-Version header",
+    "New edge tests include describe blocks for unified middleware and X-API-Version header",
+    "All 843 existing tests still pass when running full test suites",
+    "English pipeline test asserts total TTFB < 400ms with mocked delays (detection <1ms + RAG ~75ms + Vertex ~250ms)",
+    "Assamese pipeline test asserts total TTFB < 400ms with mocked delays (detection <1ms + RAG ~75ms + Sarvam ~200ms)",
+    "Assamese fallback test asserts total TTFB < 600ms (detection + RAG + Sarvam timeout + Vertex fallback)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_latency_comparison.py -v",
+    "cd /projects/sandbox/-kalukaliya/apps/frontend && pnpm test",
+    "cd /projects/sandbox/-kalukaliya/apps/edge && pnpm test"
+  ],
+  "blocked_reason": null,
+  "findings": "All tests pass. Backend: 168 tests (13 in latency file). Frontend: 623 tests (67 files). Edge: 62 tests (10 files). The timeout test uses 100ms/200ms to demonstrate the mechanism quickly instead of actual 10s. The executor refresh test uses run_in_executor with a no-op lambda to avoid asyncio.sleep issue inside sync context."
+}
