@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "chore",
   "description": "Low priority tech debt fixes: Fix requirements.txt Python version header (issue #11), add google-auth[aiohttp] for native async token refresh (issue #12), add cursor-based pagination to admin list endpoints (issue #13), and add API version header to OpenAPI spec (issue #14).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Issue #11: In apps/backend/requirements.txt, change the header comment from 'Python 3.12' to 'Python 3.11' (line 3). In apps/backend/requirements.in, add a comment noting that requirements.txt should be compiled with --python-version 3.11.",
     "Issue #12: In apps/backend/requirements.in, change 'google-auth' to 'google-auth[aiohttp]'. In apps/backend/app/services/ai/vertex_client.py, update _get_access_token() to try using google.auth.transport._aiohttp_requests.Request for native async refresh first, and fall back to the executor pattern if the aiohttp transport is not available.",
@@ -21,5 +21,5 @@
     "Run python -m pytest from apps/backend/ and confirm all tests pass"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 163 backend tests pass. No pre-existing test failures. The admin_analytics endpoint is an aggregation endpoint (no list pagination needed). The admin_knowledge endpoint already had le=100 validation on the Query param but we added explicit min() capping for consistency."
 }
