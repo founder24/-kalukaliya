@@ -32,8 +32,7 @@ class Settings(BaseSettings):
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
 
-    # --- Cloudflare Workers AI (LLM) ---
-    CF_AI_MODEL: str = "@cf/meta/llama-3.1-70b-instruct"
+
 
     # --- P2: Azure Compute (Backend) — metadata only ---
     AZURE_SUBSCRIPTION_ID: Optional[str] = None
@@ -112,6 +111,8 @@ class Settings(BaseSettings):
     ADMIN_JWT_SECRET: Optional[str] = None
     RESET_TOKEN_SECRET: Optional[str] = None
     JWT_ALGORITHM: str = "HS256"
+    JWT_PRIVATE_KEY: Optional[str] = None  # PEM-encoded RSA private key for RS256
+    JWT_PUBLIC_KEY: Optional[str] = None  # PEM-encoded RSA public key for RS256
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
     ALLOWED_ORIGINS: str = (
@@ -159,6 +160,15 @@ class Settings(BaseSettings):
                     "RESET_TOKEN_SECRET is not set — reset tokens use the shared JWT_SECRET. "
                     "Set a separate RESET_TOKEN_SECRET for improved key isolation."
                 )
+            if self.JWT_ALGORITHM == "RS256":
+                if not self.JWT_PRIVATE_KEY:
+                    raise ValueError(
+                        "JWT_PRIVATE_KEY is required when JWT_ALGORITHM is RS256"
+                    )
+                if not self.JWT_PUBLIC_KEY:
+                    raise ValueError(
+                        "JWT_PUBLIC_KEY is required when JWT_ALGORITHM is RS256"
+                    )
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
             if not self.UPSTASH_REDIS_REST_URL:
