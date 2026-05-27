@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     # --- Cloudflare Workers AI (LLM) ---
     CF_AI_MODEL: str = "@cf/meta/llama-3.1-70b-instruct"
+    CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
+    CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
 
     # --- P2: Azure Compute (Backend) — metadata only ---
     AZURE_SUBSCRIPTION_ID: Optional[str] = None

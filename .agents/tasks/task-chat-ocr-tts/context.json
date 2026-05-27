@@ -1,0 +1,24 @@
+{
+  "project_type": "Python FastAPI backend for educational AI platform (Syrabit)",
+  "language": "Python 3.11+",
+  "build_system": "pip with requirements.txt (pip-compiled from requirements.in)",
+  "test_framework": "pytest with anyio, httpx AsyncClient, unittest.mock",
+  "build_command": "cd apps/backend && pip install -r requirements.txt",
+  "test_command": "cd apps/backend && python -m pytest tests/ -x -q",
+  "verification_instructions": "Run pytest for the backend tests. Validate new endpoints with test cases.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -r apps/backend/requirements.txt",
+  "environment_constraints": "No external network for testing. Use mocked HTTP calls in tests. Cloudflare API credentials (CF_ACCOUNT_ID, CF_API_TOKEN) are in settings but may not be available at test time.",
+  "contribution_requirements": "Follow existing patterns in the codebase. Use circuit breaker pattern for external calls. Use pydantic models for request/response validation.",
+  "key_patterns": "CloudflareAIClient singleton pattern in cloudflare_client.py; circuit breaker wrapping external calls; FastAPI router with Pydantic models; auth via get_current_user/get_current_user_optional dependencies; rate limiting via check_rate_limit; Cloudflare API URL pattern: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}",
+  "relevant_files": [
+    "apps/backend/app/services/ai/cloudflare_client.py",
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/core/circuit_breaker.py",
+    "apps/backend/tests/test_chat.py",
+    "apps/backend/tests/conftest.py",
+    "apps/backend/app/main.py"
+  ],
+  "directory_structure": "apps/backend/app/ - FastAPI app root; app/api/v1/ - API endpoint routers; app/services/ai/ - AI provider clients; app/core/ - shared utilities (circuit breaker, telemetry); app/config.py - pydantic Settings; tests/ - pytest test files"
+}

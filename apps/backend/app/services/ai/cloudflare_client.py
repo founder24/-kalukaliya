@@ -81,6 +81,90 @@ class CloudflareAIClient:
             logger.error(f"Cloudflare AI error: {str(e)}")
             raise RuntimeError(f"Cloudflare AI service failed: {e}")
 
+    async def vision_analyze(
+        self, image_bytes: bytes, prompt: str = "Extract all text from this image"
+    ) -> str:
+        if not self.account_id or not self.api_token:
+            raise RuntimeError(
+                "Cloudflare Workers AI not configured (CF_ACCOUNT_ID or CF_API_TOKEN is empty)"
+            )
+
+        try:
+
+            async def _do_vision():
+                response = await self._client.post(
+                    f"{self.base_url}/{settings.CF_AI_VISION_MODEL}",
+                    headers={
+                        "Authorization": f"Bearer {self.api_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "image": list(image_bytes),
+                        "prompt": prompt,
+                        "max_tokens": 512,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                result = data.get("result", {})
+                if isinstance(result, dict):
+                    description = result.get("description")
+                    if description:
+                        return description
+                raise RuntimeError("Vision model returned no description")
+
+            result = await cloudflare_circuit_breaker.call(_do_vision)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Cloudflare AI unavailable: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Cloudflare AI Vision HTTP error: {e.response.status_code}")
+            raise RuntimeError(
+                f"Cloudflare AI Vision error: HTTP {e.response.status_code}"
+            )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            logger.error(f"Cloudflare AI Vision error: {str(e)}")
+            raise RuntimeError(f"Cloudflare AI Vision service failed: {e}")
+
+    async def text_to_speech(self, text: str, lang: str = "en") -> bytes:
+        if not self.account_id or not self.api_token:
+            raise RuntimeError(
+                "Cloudflare Workers AI not configured (CF_ACCOUNT_ID or CF_API_TOKEN is empty)"
+            )
+
+        try:
+
+            async def _do_tts():
+                response = await self._client.post(
+                    f"{self.base_url}/{settings.CF_AI_TTS_MODEL}",
+                    headers={
+                        "Authorization": f"Bearer {self.api_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"text": text, "lang": lang},
+                    timeout=60.0,
+                )
+                response.raise_for_status()
+                return response.content
+
+            result = await cloudflare_circuit_breaker.call(_do_tts)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Cloudflare AI unavailable: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Cloudflare AI TTS HTTP error: {e.response.status_code}")
+            raise RuntimeError(
+                f"Cloudflare AI TTS error: HTTP {e.response.status_code}"
+            )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            logger.error(f"Cloudflare AI TTS error: {str(e)}")
+            raise RuntimeError(f"Cloudflare AI TTS service failed: {e}")
+
     async def stream_generate(
         self, system_prompt: str, user_message: str
     ) -> AsyncGenerator[str, None]:

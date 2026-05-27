@@ -1,0 +1,7 @@
+{
+  "task_id": "task-chat-ocr-tts",
+  "task_description": "Add OCR/image analysis endpoint (/api/v1/chat/image) and TTS endpoint (/api/v1/chat/tts) using Cloudflare Workers AI vision and speech models",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
