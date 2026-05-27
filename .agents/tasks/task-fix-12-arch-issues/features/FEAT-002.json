@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Layer 2 - Backend Security: Remove HS256 JWT fallback, implement edge-trust header for JWT verification bypass",
+  "status": "completed",
+  "steps": [
+    "1. In apps/backend/app/api/v1/auth.py, modify _get_signing_key() to REQUIRE RS256 with JWT_PRIVATE_KEY. If JWT_PRIVATE_KEY is not set, raise a clear RuntimeError('RS256 signing key not configured') instead of falling back to HS256. Keep HS256 ONLY for non-production (when APP_ENV in ['development', 'test', 'local']) as a dev convenience.",
+    "2. In apps/backend/app/api/v1/auth.py, modify _get_verification_key() similarly: REQUIRE RS256 with JWT_PUBLIC_KEY in production. If JWT_PUBLIC_KEY is not set in production, raise RuntimeError. Allow HS256 fallback only for APP_ENV in ['development', 'test', 'local'].",
+    "3. In apps/backend/app/config.py, add a new setting: EDGE_SHARED_SECRET: Optional[str] = None. This is a shared secret between edge and backend. Also add TRUST_EDGE_AUTH: bool = True as a feature flag.",
+    "4. In apps/backend/app/api/v1/auth.py, modify get_current_user() to check for trusted edge headers FIRST: if request has X-Edge-Secret header matching settings.EDGE_SHARED_SECRET AND X-User-ID header is present AND settings.TRUST_EDGE_AUTH is True, then trust X-User-ID directly (look up user by ID, skip JWT decode). This requires adding request: Request parameter to get_current_user() via Depends.",
+    "5. In apps/backend/app/api/v1/auth.py, similarly modify get_current_user_optional() to check for trusted edge headers first. If X-Edge-Secret matches and X-User-ID is 'anonymous', return None. If X-User-ID is a real ID, look up and return the user.",
+    "6. In apps/edge/src/index.ts, after JWT verification passes, add the X-Edge-Secret header to the request before proxying to backend. Read env.EDGE_SHARED_SECRET and set it as a header. This proves to the backend that the request came through the verified edge layer."
+  ],
+  "acceptance_criteria": [
+    "In production (APP_ENV=production), HS256 fallback is not available - only RS256",
+    "In dev/test environments, HS256 still works for convenience",
+    "Backend can trust X-User-ID + X-Edge-Secret headers and skip JWT re-verification",
+    "Edge sets X-Edge-Secret header on all proxied requests",
+    "get_current_user and get_current_user_optional support both trust-header and traditional JWT paths"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/v1/auth.py').read()); print('auth.py valid')\"",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/config.py').read()); print('config.py valid')\""
+  ],
+  "blocked_reason": null,
+  "findings": "Moved security_optional definition before get_current_user since it now uses Depends(security_optional). Also stripped X-Edge-Secret from incoming requests at edge to prevent client-side header forgery. AST validation passes for all Python files. No npm/pip installs possible in INTEGRATIONS_ONLY mode so TypeScript type-check was basic only."
+}
