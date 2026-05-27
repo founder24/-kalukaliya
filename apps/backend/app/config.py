@@ -32,8 +32,6 @@ class Settings(BaseSettings):
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
 
-
-
     # --- P2: Azure Compute (Backend) — metadata only ---
     AZURE_SUBSCRIPTION_ID: Optional[str] = None
     AZURE_RESOURCE_GROUP: str = "rg-syrabit-prod"

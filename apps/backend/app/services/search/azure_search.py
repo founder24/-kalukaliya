@@ -92,7 +92,9 @@ class AzureSearchService:
         try:
             return await asyncio.wait_for(_execute(), timeout=10.0)
         except asyncio.TimeoutError:
-            logger.error(f"Azure Search timed out after 10s for query '{query[:20]}...'")
+            logger.error(
+                f"Azure Search timed out after 10s for query '{query[:20]}...'"
+            )
             return []
 
     async def search_context(

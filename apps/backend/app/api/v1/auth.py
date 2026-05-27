@@ -108,7 +108,9 @@ def _get_signing_key() -> tuple[str, str]:
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
         return settings.JWT_PRIVATE_KEY, "RS256"
     if settings.JWT_ALGORITHM == "RS256":
-        logger.warning("JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256")
+        logger.warning(
+            "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256"
+        )
     return settings.JWT_SECRET, "HS256"
 
 
@@ -121,7 +123,9 @@ def _get_verification_key() -> tuple[str, str]:
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
         return settings.JWT_PUBLIC_KEY, "RS256"
     if settings.JWT_ALGORITHM == "RS256":
-        logger.warning("JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256")
+        logger.warning(
+            "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256"
+        )
     return settings.JWT_SECRET, "HS256"
 
 
@@ -170,9 +174,7 @@ async def get_current_user(
     token = credentials.credentials
     try:
         key, algorithm = _get_verification_key()
-        payload = jwt.decode(
-            token, key, algorithms=[algorithm]
-        )
+        payload = jwt.decode(token, key, algorithms=[algorithm])
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
@@ -235,9 +237,7 @@ async def get_current_user_optional(
 
     try:
         key, algorithm = _get_verification_key()
-        payload = jwt.decode(
-            token, key, algorithms=[algorithm]
-        )
+        payload = jwt.decode(token, key, algorithms=[algorithm])
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
@@ -489,9 +489,7 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
 
     try:
         key, algorithm = _get_verification_key()
-        payload = jwt.decode(
-            body.refresh_token, key, algorithms=[algorithm]
-        )
+        payload = jwt.decode(body.refresh_token, key, algorithms=[algorithm])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
 
@@ -571,9 +569,7 @@ async def logout(
         # Blacklist the access token
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         key, algorithm = _get_verification_key()
-        payload = jwt.decode(
-            token, key, algorithms=[algorithm]
-        )
+        payload = jwt.decode(token, key, algorithms=[algorithm])
         exp = payload.get("exp", 0)
         now = int(datetime.now(timezone.utc).timestamp())
         ttl = max(exp - now, 0)

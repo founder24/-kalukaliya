@@ -274,9 +274,7 @@ def create_app() -> FastAPI:
         prefix="/api/v1/admin",
         tags=["Admin Translation"],
     )
-    app.include_router(
-        changelog.router, prefix="/api/v1", tags=["Changelog"]
-    )
+    app.include_router(changelog.router, prefix="/api/v1", tags=["Changelog"])
 
     # Legacy health probe redirects for backward compatibility.
     # The canonical health endpoint is /health (registered via health.router).

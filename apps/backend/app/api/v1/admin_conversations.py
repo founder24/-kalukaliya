@@ -78,7 +78,13 @@ async def list_conversations(
         }
     except Exception as e:
         logger.error(f"List conversations error: {e}")
-        return {"conversations": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
+        return {
+            "conversations": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
+        }
 
 
 @router.get("/conversations/{session_id}")

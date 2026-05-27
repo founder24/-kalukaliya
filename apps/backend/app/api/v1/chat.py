@@ -58,8 +58,10 @@ class ChatRequest(BaseModel):
         if v is None:
             return v
         # Allow UUID format or alphanumeric with hyphens/underscores (1-64 chars)
-        if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', v):
-            raise ValueError("session_id must be 1-64 alphanumeric characters, hyphens, or underscores")
+        if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", v):
+            raise ValueError(
+                "session_id must be 1-64 alphanumeric characters, hyphens, or underscores"
+            )
         return v
 
 
