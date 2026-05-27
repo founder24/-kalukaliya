@@ -118,6 +118,8 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY: Optional[str] = None  # PEM-encoded RSA public key for RS256
     JWT_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
+    EDGE_SHARED_SECRET: Optional[str] = None
+    TRUST_EDGE_AUTH: bool = True
     ALLOWED_ORIGINS: str = (
         "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai"
     )

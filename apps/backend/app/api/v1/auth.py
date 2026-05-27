@@ -103,10 +103,13 @@ def _get_signing_key() -> tuple[str, str]:
     """Get the key and algorithm for signing JWTs.
     Returns (key, algorithm).
     If RS256 is configured with a private key, use RS256.
-    Otherwise fall back to HS256 with JWT_SECRET.
+    In production, RS256 with JWT_PRIVATE_KEY is required.
+    In dev/test/local, fall back to HS256 with JWT_SECRET.
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
         return settings.JWT_PRIVATE_KEY, "RS256"
+    if settings.APP_ENV == "production":
+        raise RuntimeError("RS256 JWT_PRIVATE_KEY required in production")
     if settings.JWT_ALGORITHM == "RS256":
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256"
@@ -118,10 +121,13 @@ def _get_verification_key() -> tuple[str, str]:
     """Get the key and algorithm for verifying JWTs.
     Returns (key, algorithm).
     If RS256 is configured with a public key, use RS256.
-    Otherwise fall back to HS256 with JWT_SECRET.
+    In production, RS256 with JWT_PUBLIC_KEY is required.
+    In dev/test/local, fall back to HS256 with JWT_SECRET.
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
         return settings.JWT_PUBLIC_KEY, "RS256"
+    if settings.APP_ENV == "production":
+        raise RuntimeError("RS256 JWT_PUBLIC_KEY required in production")
     if settings.JWT_ALGORITHM == "RS256":
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256"
@@ -166,11 +172,35 @@ def create_reset_token(user_id: str) -> str:
 
 # ─── Auth Dependencies ───────────────────────────────────────────────────────
 
+security_optional = HTTPBearer(auto_error=False)
+
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
 ) -> User:
-    """Get current user from JWT token (required — raises 401 if invalid)"""
+    """Get current user from JWT token (required -- raises 401 if invalid).
+    Supports edge-trust bypass: if TRUST_EDGE_AUTH is enabled and X-Edge-Secret
+    matches, trusts X-User-ID header directly (skips JWT decode).
+    """
+    # Edge-trust bypass: if edge shared secret matches, trust X-User-ID header
+    if (
+        settings.TRUST_EDGE_AUTH
+        and settings.EDGE_SHARED_SECRET is not None
+        and request.headers.get("X-Edge-Secret") == settings.EDGE_SHARED_SECRET
+        and request.headers.get("X-User-ID")
+        and request.headers.get("X-User-ID") != "anonymous"
+    ):
+        user_id = request.headers.get("X-User-ID")
+        user = await User.get(user_id)
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+
+    # No edge trust -- require credentials
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token = credentials.credentials
     try:
         key, algorithm = _get_verification_key()
@@ -218,16 +248,29 @@ async def get_current_user(
         raise
 
 
-security_optional = HTTPBearer(auto_error=False)
-
 
 async def get_current_user_optional(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
 ) -> Optional[User]:
     """
     Get current user from JWT token if present.
     Returns None for anonymous/unsigned users (no 401 raised).
+    Supports edge-trust bypass: if TRUST_EDGE_AUTH is enabled and X-Edge-Secret
+    matches, trusts X-User-ID header directly.
     """
+    # Edge-trust bypass: if edge shared secret matches, trust X-User-ID header
+    if (
+        settings.TRUST_EDGE_AUTH
+        and settings.EDGE_SHARED_SECRET is not None
+        and request.headers.get("X-Edge-Secret") == settings.EDGE_SHARED_SECRET
+    ):
+        user_id = request.headers.get("X-User-ID")
+        if not user_id or user_id == "anonymous":
+            return None
+        user = await User.get(user_id)
+        return user
+
     if credentials is None:
         return None
 

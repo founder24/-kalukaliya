@@ -32,6 +32,7 @@ interface Env {
   // ── Secrets (set via `npx wrangler secret put <NAME>`) ──
   JWT_SECRET: string;
   CF_TURNSTILE_SECRET: string;
+  EDGE_SHARED_SECRET: string;
 
   // ── Variables (defined in wrangler.toml [vars]) ──
   AZURE_BACKEND_URL: string;

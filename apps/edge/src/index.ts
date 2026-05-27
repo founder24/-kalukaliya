@@ -32,6 +32,7 @@ export default {
     // Strip trust headers that only the edge itself should set
     const sanitizedHeaders = new Headers(request.headers);
     sanitizedHeaders.delete('X-Rate-Limited-By');
+    sanitizedHeaders.delete('X-Edge-Secret');
     request = new Request(request, { headers: sanitizedHeaders });
 
     // ── 2. JWT Verification (all /api/ routes except public) ──
@@ -46,6 +47,9 @@ export default {
       // Inject authenticated user ID (or 'anonymous') for downstream backend
       const headers = new Headers(request.headers);
       headers.set('X-User-ID', jwtResult.userId || 'anonymous');
+      if (env.EDGE_SHARED_SECRET) {
+        headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
+      }
       request = new Request(request, { headers });
     }
 
