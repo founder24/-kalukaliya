@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Phase 1 Quick Wins: Remove Emergent.sh script, PostHog client SDK, CF Web Analytics fetcher, and subset Google Fonts to eliminate ~200ms TBT and ~800ms TTI. These are all changes to apps/frontend/index.html and apps/frontend/tailwind.config.js.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/frontend/index.html: Remove the entire `<style>#emergent-badge,...` block (the CSS that hides Emergent badges) - it is a standalone <style> element in the <head>",
     "In apps/frontend/index.html: Remove the `<link rel=\"dns-prefetch\" href=\"https://assets.emergent.sh\" />` line",
@@ -33,5 +33,5 @@
     "Verify no 'cf-web-analytics' fetch in index.html with grep"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 623 tests pass. Build succeeds. Removed ~112 lines of third-party script code (emergent, posthog SDK, cf-web-analytics). Font subsetting reduces network requests (no Inter download). Preserved all required elements per acceptance criteria."
 }
