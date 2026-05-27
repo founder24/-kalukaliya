@@ -191,7 +191,13 @@ export default {
       return isrResponse;
     }
 
-    // Fallback
+    // Fallback: redirect GET/HEAD to the frontend domain; 404 for other methods
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      const frontendOrigin = env.ALLOWED_ORIGIN || 'https://syrabit.ai';
+      const redirectUrl = frontendOrigin + url.pathname + url.search;
+      return Response.redirect(redirectUrl, 302);
+    }
+
     return new Response('Not Found', { status: 404 });
   },
 };
