@@ -757,9 +757,7 @@ async def trigger_pipeline(request: Request, body: PipelineGenerateRequest):
                     status_code=404, detail="Knowledge object not found"
                 )
         except ImportError:
-            raise HTTPException(
-                status_code=501, detail="Knowledge model not available"
-            )
+            raise HTTPException(status_code=501, detail="Knowledge model not available")
 
         from app.services.content.pipeline import content_pipeline
 
@@ -779,9 +777,7 @@ async def trigger_pipeline(request: Request, body: PipelineGenerateRequest):
 
 
 @router.get("/content/pipeline/status")
-async def get_pipeline_status(
-    request: Request, knowledge_id: str = Query(...)
-):
+async def get_pipeline_status(request: Request, knowledge_id: str = Query(...)):
     """
     Check content pipeline status for a knowledge object.
     Returns the last pipeline run timestamp and current status.
@@ -793,27 +789,21 @@ async def get_pipeline_status(
 
         knowledge_obj = await Knowledge.get(PydanticObjectId(knowledge_id))
         if not knowledge_obj:
-            raise HTTPException(
-                status_code=404, detail="Knowledge object not found"
-            )
+            raise HTTPException(status_code=404, detail="Knowledge object not found")
 
         return {
             "knowledge_id": knowledge_id,
             "last_pipeline_run": knowledge_obj.last_pipeline_run.isoformat()
             if knowledge_obj.last_pipeline_run
             else None,
-            "has_rendered_html": bool(
-                getattr(knowledge_obj, "rendered_html", None)
-            ),
+            "has_rendered_html": bool(getattr(knowledge_obj, "rendered_html", None)),
             "has_derivative_hashes": bool(
                 getattr(knowledge_obj, "derivative_hashes", None)
             ),
             "slug": getattr(knowledge_obj, "slug", None),
         }
     except ImportError:
-        raise HTTPException(
-            status_code=501, detail="Knowledge model not available"
-        )
+        raise HTTPException(status_code=501, detail="Knowledge model not available")
     except Exception as e:
         logger.error(f"Pipeline status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
