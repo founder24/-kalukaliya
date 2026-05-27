@@ -99,7 +99,53 @@ async def chat(
                 },
             )
 
-            # 1b. Check response cache before doing expensive work
+            # 2. RAG retrieval + history load + rate limit in parallel
+            # Using return_exceptions=True so one failure does not cancel others
+            results = await asyncio.gather(
+                ChatService.retrieve_context(sanitized_message, user_tier),
+                ChatService.load_conversation_history(request.session_id),
+                check_rate_limit(
+                    user_id, user_tier, client_ip, request=http_request
+                ),
+                return_exceptions=True,
+            )
+
+            # Unpack results, treating exceptions as safe defaults
+            context_chunks = results[0] if not isinstance(results[0], Exception) else []
+            if isinstance(results[0], Exception):
+                logger.error(f"RAG retrieval failed: {results[0]}")
+
+            history = results[1] if not isinstance(results[1], Exception) else ""
+            if isinstance(results[1], Exception):
+                logger.error(f"History load failed: {results[1]}")
+
+            if isinstance(results[2], Exception):
+                logger.warning(
+                    f"Rate limit check failed: {results[2]} - allowing request"
+                )
+                rate_result = (True, 0, 100, "monthly")
+            else:
+                rate_result = results[2]
+
+            # Check rate limit result - always enforced, even for cache hits
+            allowed, current_count, limit, limit_type = rate_result
+            if not allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
+                    headers={
+                        "X-RateLimit-Limit": str(limit),
+                        "X-RateLimit-Remaining": "0",
+                        "Retry-After": "3600",
+                    },
+                )
+
+            # 2b. Check response cache after rate limit enforcement.
+            # NOTE: Cache key is hash(message:lang) and intentionally ignores
+            # user/session identity. This is acceptable because cached responses
+            # are only stored when context_chunks is empty (no RAG context),
+            # meaning the response is generic and not personalized. If user-tier
+            # specific behavior diverges in the future, include user_tier in the key.
             message_hash = ChatService._make_cache_hash(
                 sanitized_message, detected_lang
             )
@@ -115,36 +161,6 @@ async def chat(
                     model_used=cached["model"],
                     latency_ms=latency_ms,
                     sources=[],
-                )
-
-            # 2. RAG retrieval + history load + rate limit in parallel
-            try:
-                context_chunks, history, rate_result = await asyncio.gather(
-                    ChatService.retrieve_context(sanitized_message, user_tier),
-                    ChatService.load_conversation_history(request.session_id),
-                    check_rate_limit(
-                        user_id, user_tier, client_ip, request=http_request
-                    ),
-                )
-            except Exception as e:
-                logger.error(f"RAG/history retrieval failed: {e}")
-                context_chunks = []
-                history = ""
-                rate_result = await check_rate_limit(
-                    user_id, user_tier, client_ip, request=http_request
-                )
-
-            # Check rate limit result
-            allowed, current_count, limit, limit_type = rate_result
-            if not allowed:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
-                    headers={
-                        "X-RateLimit-Limit": str(limit),
-                        "X-RateLimit-Remaining": "0",
-                        "Retry-After": "3600",
-                    },
                 )
 
             if not context_chunks:

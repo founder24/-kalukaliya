@@ -34,5 +34,5 @@
     "Grep for gemini-2.0-flash-lite in config.py to confirm model switch"
   ],
   "blocked_reason": null,
-  "findings": "All 10 steps implemented successfully. Step 8 (azure_search fast-path) was already correct - the client None check was before Redis lookup. Syntax verified via AST parsing. Cannot run tests due to INTEGRATIONS_ONLY network (httpx not installed). Rate limit test may need adjustment since check_rate_limit moved inside _process_chat, but the mock path (app.api.v1.chat.check_rate_limit) remains valid."
+  "findings": "All 10 steps implemented successfully. Post-review fixes applied: (1) Moved cache check AFTER rate limit enforcement to prevent rate-limit bypass on cache hits. (2) Replaced try/except around asyncio.gather with return_exceptions=True for proper per-task error isolation. (3) Added code comment explaining cache key tradeoff (no user/session in key). Syntax verified via AST parsing. Cannot run tests due to INTEGRATIONS_ONLY network (httpx not installed)."
 }
