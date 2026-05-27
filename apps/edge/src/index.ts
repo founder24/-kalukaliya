@@ -194,6 +194,11 @@ export default {
     // Fallback: redirect GET/HEAD to the frontend domain; 404 for other methods
     if (request.method === 'GET' || request.method === 'HEAD') {
       const frontendOrigin = env.ALLOWED_ORIGIN || 'https://syrabit.ai';
+      // Guard: if the edge worker IS the frontend origin, return 404 to prevent infinite redirect loop
+      const frontendHost = new URL(frontendOrigin).host;
+      if (url.host === frontendHost) {
+        return new Response('Not Found', { status: 404 });
+      }
       const redirectUrl = frontendOrigin + url.pathname + url.search;
       return Response.redirect(redirectUrl, 302);
     }

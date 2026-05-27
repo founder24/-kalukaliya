@@ -54,7 +54,7 @@ class VertexAIClient:
                         ],
                         "generationConfig": {
                             "temperature": 0.3,
-                            "maxOutputTokens": 512,
+                            "maxOutputTokens": 2048,
                         },
                     },
                 )
