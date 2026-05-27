@@ -41,9 +41,6 @@ class VertexAIClient:
         try:
 
             async def _do_generate():
-                # Build prompt
-                full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-
                 response = await self._client.post(
                     f"{self.base_url}/{self.model}:generateContent",
                     headers={
@@ -51,7 +48,10 @@ class VertexAIClient:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "contents": [{"parts": [{"text": full_prompt}]}],
+                        "systemInstruction": {"parts": [{"text": system_prompt}]},
+                        "contents": [
+                            {"role": "user", "parts": [{"text": user_message}]}
+                        ],
                         "generationConfig": {
                             "temperature": 0.7,
                             "maxOutputTokens": 1024,
@@ -93,17 +93,30 @@ class VertexAIClient:
                 return self._cached_token
 
             from google.oauth2 import service_account
-            import google.auth.transport.requests
 
             creds = service_account.Credentials.from_service_account_info(
                 settings.google_credentials,
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
 
-            # Refresh token (blocking call wrapped in executor)
-            request = google.auth.transport.requests.Request()
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, creds.refresh, request)
+            # Try native async refresh via aiohttp transport first
+            try:
+                from google.auth.transport._aiohttp_requests import (
+                    Request as AiohttpRequest,
+                )
+
+                aiohttp_request = AiohttpRequest()
+                try:
+                    await creds.refresh(aiohttp_request)
+                finally:
+                    await aiohttp_request.close()
+            except (ImportError, AttributeError):
+                # aiohttp transport not available, fall back to executor pattern
+                import google.auth.transport.requests
+
+                request = google.auth.transport.requests.Request()
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, creds.refresh, request)
 
             self._cached_token = creds.token
             # Token typically valid for 1 hour
@@ -125,15 +138,14 @@ class VertexAIClient:
         if vertex_circuit_breaker.state == CircuitState.OPEN:
             raise RuntimeError("Vertex AI unavailable (circuit open)")
 
-        full_prompt = f"{system_prompt}\n\nUser: {user_message}\nAssistant:"
-
         url = f"{self.base_url}/{self.model}:streamGenerateContent?alt=sse"
         headers = {
             "Authorization": f"Bearer {await self._get_access_token()}",
             "Content-Type": "application/json",
         }
         payload = {
-            "contents": [{"parts": [{"text": full_prompt}]}],
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_message}]}],
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 2048,

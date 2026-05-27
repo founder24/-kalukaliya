@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Install all workspace dependencies and run edge + frontend test suites. Fix any test failures across edge (9 test files, vitest) and frontend (4 test files, vitest). Backend tests (163 passing) must remain unchanged.",
+  "status": "completed",
+  "steps": [
+    "Run pnpm install from the monorepo root /projects/sandbox/-kalukaliya to install all workspace dependencies (edge and frontend).",
+    "Run edge tests: cd /projects/sandbox/-kalukaliya/apps/edge && npx vitest run. Identify any failures.",
+    "Run frontend tests: cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run. Identify any failures.",
+    "Fix any edge test failures. The tests import from src/middleware/ and src/routes/ - check for TypeScript issues, missing exports, or module resolution problems. The edge vitest.config.ts has globals:true. The tests use vi.stubGlobal('fetch') and mock Env interfaces.",
+    "Fix any frontend test failures. Tests are in src/__tests__/ and src/test/. The setup.js extends jest-dom matchers. The deployment-audit.test.jsx uses dynamic imports and react-dom/server. The post-deploy-lighthouse.test.js uses vi.resetModules + dynamic import for main() integration. The latency-comparison.test.js uses timing-based assertions.",
+    "Verify backend tests still pass: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest (163 tests).",
+    "Run all three test suites one final time to confirm everything passes."
+  ],
+  "acceptance_criteria": [
+    "pnpm install completes without errors for all workspaces",
+    "All edge tests pass: npx vitest run from apps/edge/ reports 0 failures",
+    "All frontend tests pass: npx vitest run from apps/frontend/ reports 0 failures",
+    "Backend tests still pass: python -m pytest from apps/backend/ reports 163 passed",
+    "No source code changes to production logic unless strictly needed to fix test failures caused by genuine bugs"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya && pnpm install",
+    "cd /projects/sandbox/-kalukaliya/apps/edge && npx vitest run",
+    "cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest"
+  ],
+  "blocked_reason": null,
+  "findings": "All tests pass without code changes. Edge: 54 tests (9 files), Frontend: 620 tests (67 files), Backend: 163 tests. The only setup needed was pnpm install for JS workspaces and pip install of requirements.txt (with hash stripping) plus email-validator and test deps for backend. pyenv global 3.11.15 was required to set the Python version."
+}

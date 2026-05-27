@@ -27,6 +27,7 @@ async def list_users(
 ):
     """Paginated user list with optional search."""
     _validate_admin_session(request)
+    limit = min(limit, 100)
 
     try:
         client = get_mongo_client()
@@ -65,10 +66,22 @@ async def list_users(
                 }
             )
 
-        return {"users": users, "total": total}
+        return {
+            "users": users,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + limit < total,
+        }
     except Exception as e:
         logger.error(f"List users error: {e}")
-        return {"users": [], "total": 0}
+        return {
+            "users": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
+        }
 
 
 @router.patch("/users/{user_id}/status")

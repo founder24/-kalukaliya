@@ -99,13 +99,44 @@ class LogoutRequest(BaseModel):
 # ─── Token Helpers ───────────────────────────────────────────────────────────
 
 
+def _get_signing_key() -> tuple[str, str]:
+    """Get the key and algorithm for signing JWTs.
+    Returns (key, algorithm).
+    If RS256 is configured with a private key, use RS256.
+    Otherwise fall back to HS256 with JWT_SECRET.
+    """
+    if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
+        return settings.JWT_PRIVATE_KEY, "RS256"
+    if settings.JWT_ALGORITHM == "RS256":
+        logger.warning(
+            "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256"
+        )
+    return settings.JWT_SECRET, "HS256"
+
+
+def _get_verification_key() -> tuple[str, str]:
+    """Get the key and algorithm for verifying JWTs.
+    Returns (key, algorithm).
+    If RS256 is configured with a public key, use RS256.
+    Otherwise fall back to HS256 with JWT_SECRET.
+    """
+    if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
+        return settings.JWT_PUBLIC_KEY, "RS256"
+    if settings.JWT_ALGORITHM == "RS256":
+        logger.warning(
+            "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256"
+        )
+    return settings.JWT_SECRET, "HS256"
+
+
 def create_access_token(user_id: str, expires_delta: timedelta = None) -> str:
     """Create JWT access token"""
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.JWT_EXPIRY_MINUTES)
     )
     to_encode = {"sub": user_id, "exp": expire, "type": "access"}
-    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    key, algorithm = _get_signing_key()
+    return jwt.encode(to_encode, key, algorithm=algorithm)
 
 
 def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
@@ -119,18 +150,18 @@ def create_refresh_token(user_id: str, expires_delta: timedelta = None) -> str:
         "type": "refresh",
         "jti": str(uuid.uuid4()),
     }
-    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    key, algorithm = _get_signing_key()
+    return jwt.encode(to_encode, key, algorithm=algorithm)
 
 
 def create_reset_token(user_id: str) -> str:
     """Create a password-reset JWT token (1 hour expiry)"""
     expire = datetime.now(timezone.utc) + timedelta(hours=1)
     to_encode = {"sub": user_id, "exp": expire, "type": "reset"}
-    return jwt.encode(
-        to_encode,
-        settings.RESET_TOKEN_SECRET or settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
-    )
+    if settings.RESET_TOKEN_SECRET:
+        return jwt.encode(to_encode, settings.RESET_TOKEN_SECRET, algorithm="HS256")
+    key, algorithm = _get_signing_key()
+    return jwt.encode(to_encode, key, algorithm=algorithm)
 
 
 # ─── Auth Dependencies ───────────────────────────────────────────────────────
@@ -142,9 +173,8 @@ async def get_current_user(
     """Get current user from JWT token (required — raises 401 if invalid)"""
     token = credentials.credentials
     try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-        )
+        key, algorithm = _get_verification_key()
+        payload = jwt.decode(token, key, algorithms=[algorithm])
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
@@ -206,9 +236,8 @@ async def get_current_user_optional(
         return None
 
     try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-        )
+        key, algorithm = _get_verification_key()
+        payload = jwt.decode(token, key, algorithms=[algorithm])
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
@@ -375,11 +404,19 @@ async def reset_password(request: ResetPasswordRequest):
     Tokens are single-use (enforced via Redis).
     """
     try:
-        payload = jwt.decode(
-            request.token,
-            settings.RESET_TOKEN_SECRET or settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-        )
+        if settings.RESET_TOKEN_SECRET:
+            payload = jwt.decode(
+                request.token,
+                settings.RESET_TOKEN_SECRET,
+                algorithms=["HS256"],
+            )
+        else:
+            key, algorithm = _get_verification_key()
+            payload = jwt.decode(
+                request.token,
+                key,
+                algorithms=[algorithm],
+            )
         token_type = payload.get("type")
         user_id = payload.get("sub")
 
@@ -451,9 +488,8 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         await _check_rate_limit(request, "refresh", 10)
 
     try:
-        payload = jwt.decode(
-            body.refresh_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-        )
+        key, algorithm = _get_verification_key()
+        payload = jwt.decode(body.refresh_token, key, algorithms=[algorithm])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
 
@@ -532,9 +568,8 @@ async def logout(
 
         # Blacklist the access token
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-        )
+        key, algorithm = _get_verification_key()
+        payload = jwt.decode(token, key, algorithms=[algorithm])
         exp = payload.get("exp", 0)
         now = int(datetime.now(timezone.utc).timestamp())
         ttl = max(exp - now, 0)
@@ -545,8 +580,8 @@ async def logout(
         try:
             refresh_payload = jwt.decode(
                 body.refresh_token,
-                settings.JWT_SECRET,
-                algorithms=[settings.JWT_ALGORITHM],
+                key,
+                algorithms=[algorithm],
             )
             jti = refresh_payload.get("jti")
             if jti:
