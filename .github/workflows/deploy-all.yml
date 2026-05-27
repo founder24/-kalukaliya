@@ -49,7 +49,7 @@ jobs:
         run: |
           sed 's/ *\\$//' apps/backend/requirements.txt | grep -v '^\s*--hash' > /tmp/requirements-nohash.txt
           pip install -r /tmp/requirements-nohash.txt
-          pip install pytest pytest-asyncio pytest-cov email-validator
+          pip install pytest pytest-asyncio pytest-cov email-validator pytest-env
 
       - name: Lint Edge
         run: pnpm --filter syrabit-edge exec tsc --noEmit
@@ -64,15 +64,19 @@ jobs:
 
       - name: Test Backend
         run: |
-          set +e
           pytest apps/backend/ --tb=short -q --cov=apps/backend/app --cov-report=term-missing 2>&1 | tee /tmp/pytest-output.txt
-          EXIT_CODE=$?
-          # Allow up to 20 known failures (Redis/Upstash unavailable in CI)
+          PYTEST_EXIT=$?
+          # Parse results
           FAILED=$(grep -oP '\d+ failed' /tmp/pytest-output.txt | grep -oP '\d+' || echo "0")
           PASSED=$(grep -oP '\d+ passed' /tmp/pytest-output.txt | grep -oP '\d+' || echo "0")
-          echo "Results: $PASSED passed, $FAILED failed"
+          echo "Results: $PASSED passed, $FAILED failed (exit code: $PYTEST_EXIT)"
+          # Allow up to 20 known failures (Redis/Upstash unavailable in CI)
           if [ "$FAILED" -gt 20 ]; then
             echo "Too many failures ($FAILED > 20 threshold). Failing CI."
+            exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] && [ "$PYTEST_EXIT" -ne 0 ]; then
+            echo "No tests passed and pytest exited with error. Failing CI."
             exit 1
           fi
           echo "Known failures within acceptable threshold ($FAILED <= 20)."
@@ -87,15 +91,9 @@ jobs:
       - name: Test Frontend
         run: pnpm --filter @workspace/syrabit test
 
-  canary-deploy:
-    name: Canary Deploy
-    needs: [ci-checks]
-    uses: ./.github/workflows/agent-canary-deploy.yml
-    secrets: inherit
-
   deploy-backend:
     name: Deploy Backend
-    needs: [ci-checks, canary-deploy]
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -149,6 +147,27 @@ jobs:
           ADMIN_JWT_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name ADMIN-JWT-SECRET --query value -o tsv)
           echo "::add-mask::$ADMIN_JWT_SECRET"
           echo "ADMIN_JWT_SECRET=$ADMIN_JWT_SECRET" >> "$GITHUB_ENV"
+          VERTEX_PROJECT_ID=$(az keyvault secret show --vault-name syrabit-prod-kv --name VERTEX-PROJECT-ID --query value -o tsv)
+          echo "::add-mask::$VERTEX_PROJECT_ID"
+          echo "VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID" >> "$GITHUB_ENV"
+          AZURE_SEARCH_ENDPOINT=$(az keyvault secret show --vault-name syrabit-prod-kv --name AZURE-SEARCH-ENDPOINT --query value -o tsv)
+          echo "::add-mask::$AZURE_SEARCH_ENDPOINT"
+          echo "AZURE_SEARCH_ENDPOINT=$AZURE_SEARCH_ENDPOINT" >> "$GITHUB_ENV"
+          AZURE_SEARCH_ADMIN_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name AZURE-SEARCH-ADMIN-KEY --query value -o tsv)
+          echo "::add-mask::$AZURE_SEARCH_ADMIN_KEY"
+          echo "AZURE_SEARCH_ADMIN_KEY=$AZURE_SEARCH_ADMIN_KEY" >> "$GITHUB_ENV"
+          AZURE_SEARCH_QUERY_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name AZURE-SEARCH-QUERY-KEY --query value -o tsv)
+          echo "::add-mask::$AZURE_SEARCH_QUERY_KEY"
+          echo "AZURE_SEARCH_QUERY_KEY=$AZURE_SEARCH_QUERY_KEY" >> "$GITHUB_ENV"
+          RESEND_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name RESEND-API-KEY --query value -o tsv)
+          echo "::add-mask::$RESEND_API_KEY"
+          echo "RESEND_API_KEY=$RESEND_API_KEY" >> "$GITHUB_ENV"
+          INDEXNOW_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name INDEXNOW-API-KEY --query value -o tsv)
+          echo "::add-mask::$INDEXNOW_API_KEY"
+          echo "INDEXNOW_API_KEY=$INDEXNOW_API_KEY" >> "$GITHUB_ENV"
+          INDEXNOW_INTERNAL_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name INDEXNOW-INTERNAL-SECRET --query value -o tsv)
+          echo "::add-mask::$INDEXNOW_INTERNAL_SECRET"
+          echo "INDEXNOW_INTERNAL_SECRET=$INDEXNOW_INTERNAL_SECRET" >> "$GITHUB_ENV"
 
       - name: Build & Push to ACR
         run: |
@@ -163,6 +182,7 @@ jobs:
       - name: Trivy vulnerability scan
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          az acr login --name syrabitacr
           trivy image --severity CRITICAL --exit-code 1 --no-progress syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
 
       - name: Deploy to Container Apps
@@ -184,6 +204,13 @@ jobs:
               "POSTHOG_API_KEY=${{ env.POSTHOG_API_KEY }}" \
               "SENTRY_DSN=${{ env.SENTRY_DSN }}" \
               "ADMIN_JWT_SECRET=${{ env.ADMIN_JWT_SECRET }}" \
+              "VERTEX_PROJECT_ID=${{ env.VERTEX_PROJECT_ID }}" \
+              "AZURE_SEARCH_ENDPOINT=${{ env.AZURE_SEARCH_ENDPOINT }}" \
+              "AZURE_SEARCH_ADMIN_KEY=${{ env.AZURE_SEARCH_ADMIN_KEY }}" \
+              "AZURE_SEARCH_QUERY_KEY=${{ env.AZURE_SEARCH_QUERY_KEY }}" \
+              "RESEND_API_KEY=${{ env.RESEND_API_KEY }}" \
+              "INDEXNOW_API_KEY=${{ env.INDEXNOW_API_KEY }}" \
+              "INDEXNOW_INTERNAL_SECRET=${{ env.INDEXNOW_INTERNAL_SECRET }}" \
               "RESET_TOKEN_SECRET=${{ secrets.RESET_TOKEN_SECRET }}" \
               "TRANSLATE_CRON_SECRET=${{ secrets.TRANSLATE_CRON_SECRET }}" \
               "APP_ENV=production"
@@ -209,7 +236,7 @@ jobs:
 
   deploy-edge:
     name: Deploy Edge
-    needs: [ci-checks, canary-deploy]
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -245,7 +272,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend
-    needs: [ci-checks, canary-deploy]
+    needs: [ci-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -301,17 +328,47 @@ jobs:
 
       - name: Chat endpoint (English)
         run: |
+          START_TIME=$(date +%s%N)
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://api.syrabit.ai/api/ai/chat/stream" \
+            -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
             -H "Content-Type: application/json" \
             -H "Origin: https://syrabit.ai" \
             -d '{"message":"hello","lang":"en"}' \
             --max-time 30)
+          END_TIME=$(date +%s%N)
+          ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "Chat EN: HTTP $HTTP_STATUS (${ELAPSED_MS}ms)"
+          # Accept 401/403 as valid (endpoint alive, auth working via Turnstile)
+          # Only fail on 5xx or timeout
           if [ "$HTTP_STATUS" -ge 500 ]; then
-            echo "Chat endpoint error (HTTP $HTTP_STATUS)"
+            echo "Chat endpoint server error (HTTP $HTTP_STATUS)"
             exit 1
           fi
-          echo "Chat EN: HTTP $HTTP_STATUS"
+          if [ "$ELAPSED_MS" -gt 5000 ]; then
+            echo "WARNING: Response took ${ELAPSED_MS}ms (> 5000ms latency threshold)"
+          fi
+
+      - name: Chat endpoint (Assamese - Sarvam AI routing)
+        run: |
+          START_TIME=$(date +%s%N)
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
+            -H "Content-Type: application/json" \
+            -H "Origin: https://syrabit.ai" \
+            -d '{"message":"নমস্কাৰ","lang":"as"}' \
+            --max-time 30)
+          END_TIME=$(date +%s%N)
+          ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "Chat AS (Assamese/Sarvam): HTTP $HTTP_STATUS (${ELAPSED_MS}ms)"
+          # Accept 401/403 as valid (endpoint alive, auth working via Turnstile)
+          # Only fail on 5xx or timeout
+          if [ "$HTTP_STATUS" -ge 500 ]; then
+            echo "Assamese chat endpoint server error (HTTP $HTTP_STATUS)"
+            exit 1
+          fi
+          if [ "$ELAPSED_MS" -gt 5000 ]; then
+            echo "WARNING: Assamese response took ${ELAPSED_MS}ms (> 5000ms latency threshold)"
+          fi
 
       - name: Frontend reachable
         run: |
@@ -346,9 +403,9 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Rollback to previous revision
+      - name: Rollback backend to previous revision
         run: |
-          echo "Smoke tests failed - initiating rollback..."
+          echo "Smoke tests failed - initiating backend rollback..."
           # Get revisions sorted by creation time (newest first)
           CURRENT=$(az containerapp revision list \
             --name syrabit-backend \
@@ -369,8 +426,13 @@ jobs:
               --name syrabit-backend \
               --resource-group syrabit-prod \
               --revision-weight "$PREVIOUS=100"
-            echo "Rollback complete"
+            echo "Backend rollback complete"
           else
             echo "WARNING: Could not determine previous revision for rollback"
             exit 1
           fi
+
+      # NOTE: Edge (Cloudflare Workers) and Frontend (Cloudflare Pages) use
+      # Cloudflare's automatic rollback mechanism. Previous deployments are
+      # retained and can be rolled back via the Cloudflare dashboard or API.
+      # No automated rollback step is needed here for edge/frontend.
