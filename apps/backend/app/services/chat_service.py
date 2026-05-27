@@ -10,6 +10,8 @@ Responsibilities:
 - Conversation history loading with Redis caching
 """
 
+import asyncio
+import hashlib
 import json
 import logging
 from typing import AsyncGenerator, Optional
@@ -24,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 # Redis cache TTL for conversation history (30 minutes)
 _HISTORY_CACHE_TTL = 30 * 60
+
+# Redis cache TTL for chat responses (10 minutes)
+_RESPONSE_CACHE_TTL = 10 * 60
 
 
 class ChatService:
@@ -50,22 +55,66 @@ class ChatService:
         return detected_lang, target_model
 
     # ------------------------------------------------------------------
+    # Response caching
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_cache_hash(sanitized_message: str, lang: str) -> str:
+        """Generate a cache key hash from message and language."""
+        cache_input = f"{sanitized_message}:{lang}"
+        return hashlib.sha256(cache_input.encode()).hexdigest()
+
+    @staticmethod
+    async def get_cached_response(message_hash: str) -> Optional[dict]:
+        """Check Redis for a cached chat response."""
+        try:
+            redis = get_redis()
+            cache_key = f"chat_cache:{message_hash}"
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except (RuntimeError, Exception) as e:
+            logger.debug(f"Response cache lookup failed: {e}")
+        return None
+
+    @staticmethod
+    async def set_cached_response(message_hash: str, response: str, model: str) -> None:
+        """Store a chat response in Redis with TTL."""
+        try:
+            redis = get_redis()
+            cache_key = f"chat_cache:{message_hash}"
+            payload = json.dumps({"response": response, "model": model})
+            await redis.set(cache_key, payload, ex=_RESPONSE_CACHE_TTL)
+        except (RuntimeError, Exception) as e:
+            logger.debug(f"Response cache write failed: {e}")
+
+    # ------------------------------------------------------------------
     # RAG retrieval
     # ------------------------------------------------------------------
 
     @staticmethod
     async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
-        from app.services.ai.embedder import generate_embedding
+        try:
+            from app.services.ai.embedder import generate_embedding
 
-        embedding = await generate_embedding(sanitized_message)
-        context_chunks = await search_service.search_context(
-            query=sanitized_message,
-            text=embedding,
-            user_tier=user_tier,
-            limit=settings.MAX_CONTEXT_DOCS,
-        )
-        return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+            async def _do_retrieval():
+                embedding = await generate_embedding(sanitized_message)
+                context_chunks = await search_service.search_context(
+                    query=sanitized_message,
+                    text=embedding,
+                    user_tier=user_tier,
+                    limit=settings.MAX_CONTEXT_DOCS,
+                )
+                return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+
+            return await asyncio.wait_for(_do_retrieval(), timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.warning("RAG retrieval timed out after 2s, returning empty context")
+            return []
+        except Exception as e:
+            logger.error(f"RAG retrieval failed: {e}")
+            return []
 
     # ------------------------------------------------------------------
     # Prompt building
@@ -85,12 +134,18 @@ class ChatService:
         )
 
         if not context_chunks:
-            return (
-                f"{lang_instruction}\n\n"
-                "Note: Knowledge base results are currently unavailable. "
-                "Answer based on your general knowledge and clearly state that "
-                "you cannot verify the answer against the course material."
-            )
+            if detected_lang == "en":
+                return (
+                    "You are Syrabit, an educational AI for Assamese students. "
+                    "Answer clearly and concisely. "
+                    "State when you cannot verify against course materials."
+                )
+            else:
+                return (
+                    "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964 "
+                    "\u09b8\u09cd\u09aa\u09b7\u09cd\u099f \u0986\u09f0\u09c1 \u09b8\u0982\u0995\u09cd\u09b7\u09c7\u09aa\u09c7 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 "
+                    "\u09aa\u09be\u09a0\u09cd\u09af\u0995\u09cd\u09f0\u09ae\u09f0 \u09b8\u09be\u09ae\u0997\u09cd\u09f0\u09c0\u09f0 \u09b2\u0997\u09a4 \u09af\u09be\u099a\u09be\u0987 \u0995\u09f0\u09bf\u09ac \u09a8\u09cb\u09f1\u09be\u09f0\u09be \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964"
+                )
 
         context_text = "\n".join(
             f"[{i + 1}] {chunk['title']}: {chunk['content']}"

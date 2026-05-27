@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
     VERTEX_PROJECT_ID: Optional[str] = None
     VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-1.5-pro"
+    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash-lite"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
     # --- P7: Sarvam AI (Indic) ---
