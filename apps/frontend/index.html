@@ -100,8 +100,7 @@
     <!-- Task #391: trimmed preconnect list. Same-origin preconnect is a
          no-op (we're already connected), and crossorigin on the PostHog
          asset host caused Lighthouse "preconnect misuse" warnings.
-         Emergent gets loaded after LCP via the deferred loader block
-         below, so dns-prefetch is enough — no preconnect needed. -->
+         PostHog dns-prefetch retained for Cloudflare Zaraz compatibility. -->
     <link rel="dns-prefetch" href="https://us.i.posthog.com" />
     <link rel="dns-prefetch" href="https://us-assets.i.posthog.com" />
 
