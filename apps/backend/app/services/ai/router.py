@@ -1,3 +1,9 @@
+"""
+Chat routing exclusively uses Vertex AI (English) and Sarvam AI (Assamese).
+Cloudflare Workers AI is NOT used for chat - it is only used for OCR and TTS
+endpoints in chat.py.
+"""
+
 import re
 import logging
 from typing import AsyncGenerator
@@ -72,13 +78,9 @@ async def generate_response(
             stream=stream,
         )
     else:
-        from app.services.ai.cloudflare_client import generate_with_cloudflare
-
-        return await generate_with_cloudflare(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            model=model,
-            stream=stream,
+        raise RuntimeError(
+            f"Unknown model '{model}': chat routing only supports Vertex AI (gemini) "
+            f"and Sarvam AI (openhathi/sarvam). Cloudflare Workers AI is not used for chat."
         )
 
 
@@ -120,11 +122,7 @@ async def stream_response(
         ):
             yield chunk
     else:
-        from app.services.ai.cloudflare_client import cloudflare_client
-
-        logger.info(f"Streaming from Cloudflare Workers AI (model={model})")
-        async for chunk in cloudflare_client.stream_generate(
-            system_prompt=system_prompt,
-            user_message=user_message,
-        ):
-            yield chunk
+        raise RuntimeError(
+            f"Unknown model '{model}': chat streaming only supports Vertex AI (gemini) "
+            f"and Sarvam AI (openhathi/sarvam/saaras). Cloudflare Workers AI is not used for chat."
+        )

@@ -57,28 +57,16 @@ async def test_generate_response_routes_sarvam_to_sarvam():
 
 @pytest.mark.anyio
 async def test_generate_response_routes_cloudflare_as_default():
-    """Test that unrecognized model routes to Cloudflare as fallback"""
-    mock_generate = AsyncMock(return_value="cloudflare response")
+    """Test that unrecognized model raises RuntimeError (Cloudflare removed from chat)"""
+    from app.services.ai.router import generate_response
 
-    with patch(
-        "app.services.ai.cloudflare_client.generate_with_cloudflare", mock_generate
-    ):
-        from app.services.ai.router import generate_response
-
-        result = await generate_response(
+    with pytest.raises(RuntimeError, match="Unknown model"):
+        await generate_response(
             system_prompt="You are helpful.",
             user_message="Hello",
             model="@cf/meta/llama-3.1-70b-instruct",
             stream=False,
         )
-
-    mock_generate.assert_called_once_with(
-        system_prompt="You are helpful.",
-        user_message="Hello",
-        model="@cf/meta/llama-3.1-70b-instruct",
-        stream=False,
-    )
-    assert result == "cloudflare response"
 
 
 @pytest.mark.anyio
@@ -133,24 +121,13 @@ async def test_stream_response_routes_sarvam_to_sarvam():
 
 @pytest.mark.anyio
 async def test_stream_response_routes_cloudflare_as_default():
-    """Test that streaming with unrecognized model routes to Cloudflare as fallback"""
+    """Test that streaming with unrecognized model raises RuntimeError (Cloudflare removed from chat)"""
+    from app.services.ai.router import stream_response
 
-    async def mock_stream(*args, **kwargs):
-        for chunk in ["Hello", " from", " Cloudflare"]:
-            yield chunk
-
-    mock_client = MagicMock()
-    mock_client.stream_generate = mock_stream
-
-    with patch("app.services.ai.cloudflare_client.cloudflare_client", mock_client):
-        from app.services.ai.router import stream_response
-
-        chunks = []
-        async for chunk in stream_response(
+    with pytest.raises(RuntimeError, match="Unknown model"):
+        async for _ in stream_response(
             system_prompt="You are helpful.",
             user_message="Hello",
             model="@cf/meta/llama-3.1-70b-instruct",
         ):
-            chunks.append(chunk)
-
-    assert chunks == ["Hello", " from", " Cloudflare"]
+            pass
