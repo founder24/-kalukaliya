@@ -52,3 +52,14 @@ def auth_headers():
 
     token = create_access_token("test-user-id-123")
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def set_webhook_secret():
+    """Ensure RAZORPAY_WEBHOOK_SECRET is set for all tests so webhook handlers don't 503."""
+    from app.config import settings
+
+    original = settings.RAZORPAY_WEBHOOK_SECRET
+    settings.RAZORPAY_WEBHOOK_SECRET = "test_webhook_secret"
+    yield
+    settings.RAZORPAY_WEBHOOK_SECRET = original

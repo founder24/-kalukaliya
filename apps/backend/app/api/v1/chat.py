@@ -140,7 +140,7 @@ async def chat(
             if history:
                 system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
-            # 4. Call LLM (with Sarvam -> Cloudflare AI fallback)
+            # 4. Call LLM (with Sarvam -> Vertex AI fallback)
             response_text, actual_model = await ChatService.call_llm(
                 system_prompt=system_prompt,
                 sanitized_message=sanitized_message,
@@ -188,7 +188,7 @@ async def chat(
                     "provider": "sarvam"
                     if "sarvam" in actual_model.lower()
                     or "openhathi" in actual_model.lower()
-                    else "cloudflare",
+                    else "vertex",
                     "latency_ms": latency_ms,
                     "response_length": len(response_text),
                 },
@@ -288,7 +288,7 @@ async def chat_stream(
 
     Features:
     - Explicit lang param (en/as) or auto-detection fallback
-    - Sarvam -> Cloudflare AI fallback on failure for Assamese
+    - Sarvam -> Vertex AI fallback on failure for Assamese
     - Fire-and-forget MongoDB persistence after stream completes
     """
     start_time = time.time()
@@ -369,7 +369,7 @@ async def chat_stream(
     if history:
         system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
-    # -- Stream generator with Sarvam->Cloudflare fallback --
+    # -- Stream generator with Sarvam->Vertex fallback --
     async def event_stream():
         full_response = ""
         actual_model = target_model
@@ -405,7 +405,7 @@ async def chat_stream(
                 "sarvam"
                 if "sarvam" in actual_model.lower()
                 or "openhathi" in actual_model.lower()
-                else "cloudflare",
+                else "vertex",
             )
 
         # Track in PostHog

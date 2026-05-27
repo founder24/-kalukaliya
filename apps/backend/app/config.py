@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     # --- Application Logic ---
     APP_ENV: str = "production"
     DEBUG: bool = False
-    JWT_SECRET: str
+    JWT_SECRET: str = "dev-only-secret-not-for-production-use-32chars"
     ADMIN_JWT_SECRET: Optional[str] = None
     RESET_TOKEN_SECRET: Optional[str] = None
     JWT_ALGORITHM: str = "HS256"
@@ -137,6 +137,7 @@ class Settings(BaseSettings):
             "super_secret_jwt_key_32_chars_min",
             "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",
             "test-secret-at-least-32-characters-long",
+            "dev-only-secret-not-for-production-use-32chars",
         }
 
         if self.APP_ENV == "production":
