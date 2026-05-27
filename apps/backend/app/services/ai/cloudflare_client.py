@@ -1,6 +1,7 @@
 import httpx
 import json
 import logging
+import base64
 from typing import AsyncGenerator
 
 from app.config import settings
@@ -99,7 +100,7 @@ class CloudflareAIClient:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "image": list(image_bytes),
+                        "image": [base64.b64encode(image_bytes).decode("utf-8")],
                         "prompt": prompt,
                         "max_tokens": 512,
                     },

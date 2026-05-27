@@ -602,16 +602,31 @@ async def analyze_image(
         if http_request and hasattr(http_request, "client")
         else None
     )
-    await check_rate_limit(user_id, user_tier, client_ip, request=http_request)
+    allowed, current_count, limit, limit_type = await check_rate_limit(
+        user_id, user_tier, client_ip, request=http_request
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
+            headers={
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Remaining": "0",
+                "Retry-After": "3600",
+            },
+        )
+
+    # Sanitize prompt to prevent prompt injection
+    prompt = sanitize_user_input(prompt)
 
     # Validate content type
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    # Read and validate file size (max 10MB)
+    # Read and validate file size (max 4MB)
     image_bytes = await file.read()
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image must be less than 10MB")
+    if len(image_bytes) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image must be less than 4MB")
 
     try:
         result = await cloudflare_client.vision_analyze(image_bytes, prompt)
@@ -646,7 +661,19 @@ async def text_to_speech(
         if http_request and hasattr(http_request, "client")
         else None
     )
-    await check_rate_limit(user_id, user_tier, client_ip, request=http_request)
+    allowed, current_count, limit, limit_type = await check_rate_limit(
+        user_id, user_tier, client_ip, request=http_request
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
+            headers={
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Remaining": "0",
+                "Retry-After": "3600",
+            },
+        )
 
     try:
         audio_bytes = await cloudflare_client.text_to_speech(request.text, request.lang)
