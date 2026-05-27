@@ -151,13 +151,73 @@ export default {
       return proxyRequest(rewrittenRequest, env.AZURE_BACKEND_URL, env);
     }
 
-    // Edge-level health check (no backend proxy)
+    /**
+     * Edge-level health check with backend reachability ping.
+     * Checks: Edge own status + lightweight backend reachability (2s timeout).
+     * Returns backend_reachable: true/false without failing the edge health.
+     */
     if (url.pathname === '/health') {
+      let backendReachable = false;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${env.AZURE_BACKEND_URL}/health`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        backendReachable = res.ok;
+      } catch {
+        backendReachable = false;
+      }
+
       return new Response(
         JSON.stringify({
           status: 'healthy',
           service: 'syrabit-edge',
           timestamp: new Date().toISOString(),
+          backend_reachable: backendReachable,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    /**
+     * Full health check: Edge + full backend dependency health.
+     * Calls backend /health/deep which checks MongoDB, Redis, Azure Search, Vertex AI.
+     * Returns aggregated status: "healthy" if all pass, "degraded" if backend unreachable.
+     */
+    if (url.pathname === '/health/full') {
+      const edgeStatus = { status: 'healthy', timestamp: new Date().toISOString() };
+      let backendStatus: Record<string, unknown>;
+      let overallStatus: 'healthy' | 'degraded' = 'healthy';
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`${env.AZURE_BACKEND_URL}/health/deep`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        backendStatus = await res.json() as Record<string, unknown>;
+        if (!res.ok) {
+          overallStatus = 'degraded';
+        }
+      } catch (err) {
+        overallStatus = 'degraded';
+        backendStatus = {
+          status: 'unreachable',
+          error: err instanceof Error ? err.message : 'timeout or connection refused',
+        };
+      }
+
+      return new Response(
+        JSON.stringify({
+          status: overallStatus,
+          edge: edgeStatus,
+          backend: backendStatus,
         }),
         {
           status: 200,
@@ -167,8 +227,8 @@ export default {
     }
 
     // API routes → proxy to Azure backend
-    // Note: Only /health/ sub-paths (e.g. /health/deep) are proxied; /health is handled at edge above.
-    // Other paths like /healthz are intentionally not routed.
+    // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
+    // are proxied to backend. /health is handled at edge above.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
       return proxyRequest(request, env.AZURE_BACKEND_URL, env);
     }
