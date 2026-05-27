@@ -238,16 +238,31 @@ async function botRender(request, env, url) {
 }
 
 async function spaShellResponse(request, env, url, originalStatus) {
-  const indexResponse = await env.ASSETS.fetch(new URL("/", url.origin));
-  if (request.method === "HEAD") {
-    return new Response(null, {
+  try {
+    const indexResponse = await env.ASSETS.fetch(new URL("/", url.origin));
+    if (!indexResponse || indexResponse.status !== 200) {
+      return minimalRedirectResponse();
+    }
+    if (request.method === "HEAD") {
+      return new Response(null, {
+        headers: indexResponse.headers,
+        status: 200,
+      });
+    }
+    return new Response(indexResponse.body, {
       headers: indexResponse.headers,
-      status: 200,
+      status: originalStatus === 404 ? 200 : (originalStatus || 200),
     });
+  } catch {
+    return minimalRedirectResponse();
   }
-  return new Response(indexResponse.body, {
-    headers: indexResponse.headers,
-    status: originalStatus === 404 ? 200 : (originalStatus || 200),
+}
+
+function minimalRedirectResponse() {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.replace('/chat')</script></head><body></body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 }
 

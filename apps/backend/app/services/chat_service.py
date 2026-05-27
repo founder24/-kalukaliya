@@ -46,7 +46,9 @@ class ChatService:
         if lang_override:
             detected_lang = lang_override
             target_model = (
-                settings.SARVAM_MODEL if lang_override == "as" else settings.CF_AI_MODEL
+                settings.SARVAM_MODEL
+                if lang_override == "as"
+                else settings.VERTEX_GEMINI_MODEL
             )
         else:
             detected_lang, target_model = detect_language_and_route(message)
@@ -106,9 +108,11 @@ class ChatService:
                 )
                 return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=2.0)
+            return await asyncio.wait_for(_do_retrieval(), timeout=1.5)
         except asyncio.TimeoutError:
-            logger.warning("RAG retrieval timed out after 2s, returning empty context")
+            logger.warning(
+                "RAG retrieval timed out after 1.5s, returning empty context"
+            )
             return []
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")
@@ -122,6 +126,7 @@ class ChatService:
     def build_system_prompt(detected_lang: str, context_chunks: list[dict]) -> str:
         """Build system prompt with numbered [#] citation format."""
         lang_instruction = (
+            "IMPORTANT: You MUST respond in English only. Do NOT respond in any other language including Bengali, Assamese, or Hindi.\n"
             "You are Syrabit, an expert educational assistant for Assamese students.\n"
             "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
             "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
@@ -134,6 +139,7 @@ class ChatService:
         if not context_chunks:
             if detected_lang == "en":
                 return (
+                    "IMPORTANT: You MUST respond in English only. Do NOT respond in any other language including Bengali, Assamese, or Hindi. "
                     "You are Syrabit, an educational AI for Assamese students. "
                     "Answer clearly and concisely. "
                     "State when you cannot verify against course materials."
