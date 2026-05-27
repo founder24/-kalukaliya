@@ -44,9 +44,9 @@ def detect_language_and_route(text: str) -> tuple[str, str]:
         logger.info("Routing to Sarvam AI for Assamese content")
         return "as", settings.SARVAM_MODEL
     else:
-        # Route to Cloudflare Workers AI for English
-        logger.info("Routing to Cloudflare Workers AI for English content")
-        return "en", settings.CF_AI_MODEL
+        # Route to Vertex AI for English
+        logger.info("Routing to Vertex AI for English content")
+        return "en", settings.VERTEX_GEMINI_MODEL
 
 
 async def generate_response(
