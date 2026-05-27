@@ -9,7 +9,7 @@
  *   5. Route to backend proxy or R2 assets
  */
 
-import { getCorsHeaders } from './middleware/cors';
+import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { turnstileVerify } from './middleware/bot';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
@@ -170,7 +170,7 @@ export default {
         backendReachable = false;
       }
 
-      return new Response(
+      const healthResponse = new Response(
         JSON.stringify({
           status: 'healthy',
           service: 'syrabit-edge',
@@ -182,6 +182,7 @@ export default {
           headers: { 'Content-Type': 'application/json' },
         }
       );
+      return addSecurityHeaders(healthResponse);
     }
 
     /**
@@ -213,7 +214,7 @@ export default {
         };
       }
 
-      return new Response(
+      const fullHealthResponse = new Response(
         JSON.stringify({
           status: overallStatus,
           edge: edgeStatus,
@@ -224,13 +225,18 @@ export default {
           headers: { 'Content-Type': 'application/json' },
         }
       );
+      return addSecurityHeaders(fullHealthResponse);
     }
 
     // API routes → proxy to Azure backend
     // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
     // are proxied to backend. /health is handled at edge above.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
-      return proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const secured = addSecurityHeaders(response);
+      const origin = request.headers.get('Origin') || '';
+      applyCorsHeaders(secured.headers, origin);
+      return secured;
     }
 
     // Static assets → serve from R2
@@ -271,6 +277,18 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 };
+
+/** Add security headers to proxied responses. These are set at the edge to avoid duplication with Cloudflare's built-in headers. */
+function addSecurityHeaders(response: Response): Response {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.set('X-Content-Type-Options', 'nosniff');
+  newResponse.headers.set('X-Frame-Options', 'DENY');
+  newResponse.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  newResponse.headers.set('X-XSS-Protection', '0');
+  newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com; frame-ancestors 'none'");
+  return newResponse;
+}
 
 /** Helper to create JSON error responses */
 function jsonResponse(status: number, body: Record<string, string>): Response {

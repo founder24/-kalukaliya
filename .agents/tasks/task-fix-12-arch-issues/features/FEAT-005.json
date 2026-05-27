@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Layer 5 & 6 - Security Headers & Content Pipeline: Move security headers to edge response transform, wire ContentPipeline to admin endpoints",
+  "status": "in_progress",
+  "steps": [
+    "1. In apps/backend/app/main.py unified_middleware, REMOVE the security header lines (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, X-XSS-Protection, Referrer-Policy, Content-Security-Policy). Keep ONLY: X-Request-ID and X-API-Version headers, the CSRF origin check, and request timing/logging.",
+    "2. In apps/edge/src/index.ts, create a helper function addSecurityHeaders(response: Response): Response that clones the response and adds all security headers: X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Strict-Transport-Security: max-age=31536000; includeSubDomains, X-XSS-Protection: 0, Referrer-Policy: strict-origin-when-cross-origin, Content-Security-Policy (the full CSP string from the backend). Apply this function to all responses returned from the API proxy (proxyRequest calls) and health endpoints.",
+    "3. In apps/edge/src/index.ts, also apply CORS headers to all API responses (not just OPTIONS preflight). After proxying, call applyCorsHeaders on the response headers. This ensures CORS works for actual requests too (previously only preflight OPTIONS got explicit CORS headers from the edge).",
+    "4. In apps/backend/app/api/v1/admin_content.py (or create a new section at bottom), add two new endpoints: (a) POST /content/pipeline/generate that accepts a knowledge_id, fetches the Knowledge object from MongoDB, runs content_pipeline.run(knowledge_obj), and returns the pipeline result dict. (b) GET /content/pipeline/status that returns the last_pipeline_run timestamp and pipeline step results for a given knowledge_id. Both require admin session.",
+    "5. Import ContentPipeline singleton (content_pipeline from apps/backend/app/services/content/pipeline.py) in the admin_content router. Add the Knowledge model import from apps/backend/app/models/knowledge.py.",
+    "6. Add clear docstrings to both new pipeline endpoints explaining: the generate endpoint triggers the full content pipeline (render -> index -> hash -> IndexNow -> Cloudflare KV -> save), and the status endpoint checks when pipeline last ran for a knowledge object."
+  ],
+  "acceptance_criteria": [
+    "Backend unified_middleware only sets X-Request-ID and X-API-Version (no security headers)",
+    "Edge worker adds all security headers to proxied API responses",
+    "Edge worker adds CORS headers to all API responses (not just preflight)",
+    "POST /api/v1/admin/content/pipeline/generate endpoint triggers ContentPipeline.run()",
+    "GET /api/v1/admin/content/pipeline/status returns pipeline status for a knowledge object",
+    "All files pass syntax validation"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/main.py').read()); print('main.py valid')\"",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/v1/admin_content.py').read()); print('admin_content.py valid')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

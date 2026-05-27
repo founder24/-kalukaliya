@@ -720,3 +720,100 @@ async def set_faq_jsonld(request: Request, chapter_id: str, body: FAQRequest):
     await chapter.save()
 
     return {"status": "updated", "faq_count": len(faq_jsonld)}
+
+
+# ============================
+# LAYER 4: Content Pipeline
+# ============================
+
+
+class PipelineGenerateRequest(BaseModel):
+    knowledge_id: str
+
+
+@router.post("/content/pipeline/generate")
+async def trigger_pipeline(request: Request, body: PipelineGenerateRequest):
+    """
+    Trigger the full content pipeline for a knowledge object.
+    Pipeline steps: render HTML -> index Azure Search -> compute hashes ->
+    submit IndexNow -> push Cloudflare KV -> save to database.
+    """
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.db.mongo import get_mongo_client
+        from app.config import settings
+
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        # Try to use Knowledge model if available
+        try:
+            from app.models.knowledge import Knowledge
+
+            knowledge_obj = await Knowledge.get(PydanticObjectId(body.knowledge_id))
+            if not knowledge_obj:
+                raise HTTPException(
+                    status_code=404, detail="Knowledge object not found"
+                )
+        except ImportError:
+            raise HTTPException(
+                status_code=501, detail="Knowledge model not available"
+            )
+
+        from app.services.content.pipeline import content_pipeline
+
+        result = await content_pipeline.run(knowledge_obj)
+        return {
+            "status": "completed",
+            "knowledge_id": body.knowledge_id,
+            "pipeline_results": result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pipeline trigger error: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Pipeline execution failed: {str(e)}"
+        )
+
+
+@router.get("/content/pipeline/status")
+async def get_pipeline_status(
+    request: Request, knowledge_id: str = Query(...)
+):
+    """
+    Check content pipeline status for a knowledge object.
+    Returns the last pipeline run timestamp and current status.
+    """
+    _validate_admin_session(request)
+
+    try:
+        from app.models.knowledge import Knowledge
+
+        knowledge_obj = await Knowledge.get(PydanticObjectId(knowledge_id))
+        if not knowledge_obj:
+            raise HTTPException(
+                status_code=404, detail="Knowledge object not found"
+            )
+
+        return {
+            "knowledge_id": knowledge_id,
+            "last_pipeline_run": knowledge_obj.last_pipeline_run.isoformat()
+            if knowledge_obj.last_pipeline_run
+            else None,
+            "has_rendered_html": bool(
+                getattr(knowledge_obj, "rendered_html", None)
+            ),
+            "has_derivative_hashes": bool(
+                getattr(knowledge_obj, "derivative_hashes", None)
+            ),
+            "slug": getattr(knowledge_obj, "slug", None),
+        }
+    except ImportError:
+        raise HTTPException(
+            status_code=501, detail="Knowledge model not available"
+        )
+    except Exception as e:
+        logger.error(f"Pipeline status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
