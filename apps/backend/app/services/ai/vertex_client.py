@@ -48,14 +48,9 @@ class VertexAIClient:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "systemInstruction": {
-                            "parts": [{"text": system_prompt}]
-                        },
+                        "systemInstruction": {"parts": [{"text": system_prompt}]},
                         "contents": [
-                            {
-                                "role": "user",
-                                "parts": [{"text": user_message}]
-                            }
+                            {"role": "user", "parts": [{"text": user_message}]}
                         ],
                         "generationConfig": {
                             "temperature": 0.7,
@@ -106,7 +101,9 @@ class VertexAIClient:
 
             # Try native async refresh via aiohttp transport first
             try:
-                from google.auth.transport._aiohttp_requests import Request as AiohttpRequest
+                from google.auth.transport._aiohttp_requests import (
+                    Request as AiohttpRequest,
+                )
 
                 aiohttp_request = AiohttpRequest()
                 try:
@@ -147,15 +144,8 @@ class VertexAIClient:
             "Content-Type": "application/json",
         }
         payload = {
-            "systemInstruction": {
-                "parts": [{"text": system_prompt}]
-            },
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": user_message}]
-                }
-            ],
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_message}]}],
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 2048,

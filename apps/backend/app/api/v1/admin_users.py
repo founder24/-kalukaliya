@@ -75,7 +75,13 @@ async def list_users(
         }
     except Exception as e:
         logger.error(f"List users error: {e}")
-        return {"users": [], "total": 0, "offset": offset, "limit": limit, "has_more": False}
+        return {
+            "users": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
+        }
 
 
 @router.patch("/users/{user_id}/status")

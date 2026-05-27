@@ -410,6 +410,7 @@ async def test_azure_search_10s_timeout_behavior():
     vs a normal query completing within the timeout.
     Uses 100ms timeout to demonstrate the mechanism (production uses 10s).
     """
+
     # Simulate a query that times out (takes 200ms but is cut off at 100ms)
     async def slow_search():
         await asyncio.sleep(0.2)
@@ -439,11 +440,11 @@ async def test_azure_search_10s_timeout_behavior():
     assert len(normal_result) == 1
 
     print(
-        f"\n  Azure Search timeout enforcement: demonstrated with 100ms timeout "
-        f"(production uses 10s)"
+        "\n  Azure Search timeout enforcement: demonstrated with 100ms timeout "
+        "(production uses 10s)"
     )
-    print(f"  Timeout correctly enforced at: {timeout_elapsed*1000:.1f}ms")
-    print(f"  Normal query completion: {normal_elapsed*1000:.1f}ms")
+    print(f"  Timeout correctly enforced at: {timeout_elapsed * 1000:.1f}ms")
+    print(f"  Normal query completion: {normal_elapsed * 1000:.1f}ms")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -482,11 +483,11 @@ async def test_async_token_refresh_improvement():
 
     improvement = ((old_elapsed - new_elapsed) / old_elapsed) * 100
 
-    print(f"\n  === TOKEN REFRESH COMPARISON ===")
+    print("\n  === TOKEN REFRESH COMPARISON ===")
     print(f"  Executor-based (sync in thread pool): {old_elapsed:.1f}ms")
     print(f"  Native async (aiohttp):               {new_elapsed:.1f}ms")
     print(f"  Improvement:                          {improvement:.1f}%")
-    print(f"  =================================")
+    print("  =================================")
 
     assert token_old == "token_sync"
     assert token_new == "token_async"
@@ -546,13 +547,13 @@ async def test_english_response_pipeline_latency():
 
     pipeline_elapsed = (time.perf_counter() - pipeline_start) * 1000
 
-    print(f"\n  === ENGLISH RESPONSE PIPELINE ===")
+    print("\n  === ENGLISH RESPONSE PIPELINE ===")
     print(f"  Language detection:  {detection_time:.2f}ms")
-    print(f"  RAG retrieval:       ~75ms (simulated)")
-    print(f"  Vertex AI call:      ~250ms (simulated)")
+    print("  RAG retrieval:       ~75ms (simulated)")
+    print("  Vertex AI call:      ~250ms (simulated)")
     print(f"  Total pipeline:      {pipeline_elapsed:.1f}ms")
-    print(f"  Target TTFB:         < 400ms")
-    print(f"  ==================================")
+    print("  Target TTFB:         < 400ms")
+    print("  ==================================")
 
     assert len(context) == 1
     assert "Photosynthesis" in response
@@ -615,13 +616,13 @@ async def test_assamese_response_pipeline_latency():
     response = await mock_sarvam_generate()
     pipeline_elapsed = (time.perf_counter() - pipeline_start) * 1000
 
-    print(f"\n  === ASSAMESE RESPONSE PIPELINE ===")
+    print("\n  === ASSAMESE RESPONSE PIPELINE ===")
     print(f"  Language detection:  {detection_time:.2f}ms")
-    print(f"  RAG retrieval:       ~75ms (simulated)")
-    print(f"  Sarvam AI call:      ~200ms (simulated)")
+    print("  RAG retrieval:       ~75ms (simulated)")
+    print("  Sarvam AI call:      ~200ms (simulated)")
     print(f"  Total pipeline:      {pipeline_elapsed:.1f}ms")
-    print(f"  Target TTFB:         < 400ms")
-    print(f"  ====================================")
+    print("  Target TTFB:         < 400ms")
+    print("  ====================================")
 
     assert len(context) == 1
     assert len(response) > 0
@@ -678,13 +679,13 @@ async def test_assamese_fallback_latency():
         response = await mock_vertex_fallback()
     pipeline_elapsed = (time.perf_counter() - pipeline_start) * 1000
 
-    print(f"\n  === ASSAMESE FALLBACK PIPELINE ===")
-    print(f"  RAG retrieval:       ~75ms")
-    print(f"  Sarvam attempt:      ~50ms (failed)")
-    print(f"  Vertex AI fallback:  ~250ms")
+    print("\n  === ASSAMESE FALLBACK PIPELINE ===")
+    print("  RAG retrieval:       ~75ms")
+    print("  Sarvam attempt:      ~50ms (failed)")
+    print("  Vertex AI fallback:  ~250ms")
     print(f"  Total pipeline:      {pipeline_elapsed:.1f}ms")
-    print(f"  Target:              < 600ms")
-    print(f"  ====================================")
+    print("  Target:              < 600ms")
+    print("  ====================================")
 
     assert len(context) == 1
     assert "Fallback" in response
