@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Reduce backend chat latency from 6-7s to under 2-3s by optimizing AI client timeouts, model selection, RAG graceful degradation, response caching, and connection warm-up",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Switch Vertex AI default model from gemini-1.5-pro to gemini-2.0-flash-lite in apps/backend/app/config.py (change VERTEX_GEMINI_MODEL default). gemini-2.0-flash-lite is Google's fastest model with sub-second TTFB. If that is not available, use gemini-2.0-flash.",
+    "Step 2 - Reduce AI client timeouts in apps/backend/app/services/ai/vertex_client.py: Change from httpx.Timeout(60.0, connect=10.0) to httpx.Timeout(15.0, connect=5.0). Same for sarvam_client.py. These are chat responses, not batch jobs - 15s is plenty.",
+    "Step 3 - Reduce max_tokens for non-streaming generate calls. In vertex_client.py, change maxOutputTokens from 1024 to 512. In sarvam_client.py, change max_tokens from 1024 to 512. This cuts generation time roughly in half while still allowing meaningful responses.",
+    "Step 4 - Add a RAG timeout with fast-fail in apps/backend/app/services/chat_service.py retrieve_context method: Wrap the search call in asyncio.wait_for with a 2-second timeout. If it times out or fails, return empty list immediately. This prevents RAG from blocking the critical path.",
+    "Step 5 - Add response caching for the non-streaming /chat endpoint. In apps/backend/app/services/chat_service.py, add a new static method cached_generate that checks Redis for a cache key based on hash(sanitized_message + detected_lang). Cache hits return immediately (target: <100ms). Cache TTL should be 10 minutes. Only cache when context_chunks is empty (since RAG is dynamic).",
+    "Step 6 - Warm up Vertex AI token at startup in apps/backend/app/main.py lifespan function. After Azure Search warm-up, add: from app.services.ai.vertex_client import vertex_client; await vertex_client._get_access_token(). This pre-fetches the OAuth token so the first request doesn't pay the token refresh penalty.",
+    "Step 7 - Make rate limit check run in parallel with language detection + input sanitization in apps/backend/app/api/v1/chat.py. Currently rate limit completes before _process_chat starts. Move rate_limit to run concurrently with the initial setup work using asyncio.gather or by moving it inside _process_chat alongside the RAG gather.",
+    "Step 8 - Add a fast-path short-circuit in apps/backend/app/services/search/azure_search.py search_context method: If self.client is None, return [] immediately without attempting Redis cache lookup (saves a round-trip when search is unconfigured).",
+    "Step 9 - Reduce the Vertex AI circuit breaker reset_timeout from 60s to 30s in apps/backend/app/core/circuit_breaker.py, so recovery is faster after transient failures.",
+    "Step 10 - Add concise system prompt option: In chat_service.py build_system_prompt, reduce the system prompt length when context_chunks is empty. Use a shorter instruction (2-3 sentences max) to reduce prompt tokens and speed up LLM inference."
+  ],
+  "acceptance_criteria": [
+    "VERTEX_GEMINI_MODEL default is gemini-2.0-flash-lite in config.py",
+    "Vertex client timeout is 15s total, 5s connect",
+    "Sarvam client timeout is 15s total, 5s connect",
+    "max_tokens for non-streaming is 512 in both vertex and sarvam clients",
+    "retrieve_context has a 2-second asyncio.wait_for timeout",
+    "Response caching logic exists and checks Redis before calling LLM",
+    "Vertex AI OAuth token is pre-fetched at startup in lifespan",
+    "Azure Search returns [] immediately when client is None without Redis lookup",
+    "Circuit breaker reset_timeout for Vertex AI is 30s",
+    "System prompt is shorter when no RAG context is available",
+    "Existing tests still pass (no breaking changes to API contract)"
+  ],
+  "verification": [
+    "Run: cd apps/backend && python -m pytest tests/ -x -q to confirm all tests pass",
+    "Grep for the new timeout values to confirm they were applied",
+    "Grep for gemini-2.0-flash-lite in config.py to confirm model switch"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

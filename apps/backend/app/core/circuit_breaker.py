@@ -157,7 +157,7 @@ class CircuitBreaker:
 
 # Pre-configured circuit breakers for each AI provider
 vertex_circuit_breaker = CircuitBreaker(
-    name="Vertex AI", failure_threshold=5, reset_timeout=60
+    name="Vertex AI", failure_threshold=5, reset_timeout=30
 )
 
 sarvam_circuit_breaker = CircuitBreaker(

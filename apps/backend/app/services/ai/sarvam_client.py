@@ -22,7 +22,7 @@ class SarvamAIClient:
         self.base_url = settings.SARVAM_BASE_URL
         self.model = settings.SARVAM_MODEL
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, connect=10.0),
+            timeout=httpx.Timeout(15.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
@@ -53,7 +53,7 @@ class SarvamAIClient:
                             {"role": "user", "content": user_message},
                         ],
                         "temperature": 0.7,
-                        "max_tokens": 1024,
+                        "max_tokens": 512,
                         "stream": stream,
                     },
                 )

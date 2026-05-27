@@ -79,21 +79,6 @@ async def chat(
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
     user_id = str(user.id) if user else "anonymous"
 
-    # Check rate limit
-    allowed, current_count, limit, limit_type = await check_rate_limit(
-        user_id, user_tier, client_ip, request=http_request
-    )
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
-            headers={
-                "X-RateLimit-Limit": str(limit),
-                "X-RateLimit-Remaining": "0",
-                "Retry-After": "3600",
-            },
-        )
-
     try:
 
         async def _process_chat():
@@ -114,16 +99,53 @@ async def chat(
                 },
             )
 
-            # 2. RAG retrieval + history load in parallel (independent I/O)
+            # 1b. Check response cache before doing expensive work
+            message_hash = ChatService._make_cache_hash(
+                sanitized_message, detected_lang
+            )
+            cached = await ChatService.get_cached_response(message_hash)
+            if cached:
+                latency_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    "chat_cache_hit",
+                    extra={"user_id": user_id, "latency_ms": latency_ms},
+                )
+                return ChatResponse(
+                    response=cached["response"],
+                    model_used=cached["model"],
+                    latency_ms=latency_ms,
+                    sources=[],
+                )
+
+            # 2. RAG retrieval + history load + rate limit in parallel
             try:
-                context_chunks, history = await asyncio.gather(
+                context_chunks, history, rate_result = await asyncio.gather(
                     ChatService.retrieve_context(sanitized_message, user_tier),
                     ChatService.load_conversation_history(request.session_id),
+                    check_rate_limit(
+                        user_id, user_tier, client_ip, request=http_request
+                    ),
                 )
             except Exception as e:
                 logger.error(f"RAG/history retrieval failed: {e}")
                 context_chunks = []
                 history = ""
+                rate_result = await check_rate_limit(
+                    user_id, user_tier, client_ip, request=http_request
+                )
+
+            # Check rate limit result
+            allowed, current_count, limit, limit_type = rate_result
+            if not allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
+                    headers={
+                        "X-RateLimit-Limit": str(limit),
+                        "X-RateLimit-Remaining": "0",
+                        "Retry-After": "3600",
+                    },
+                )
 
             if not context_chunks:
                 logger.warning(
@@ -151,6 +173,14 @@ async def chat(
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
+
+            # 4b. Cache response when no RAG context (static answers)
+            if not context_chunks:
+                asyncio.create_task(
+                    ChatService.set_cached_response(
+                        message_hash, response_text, actual_model
+                    )
+                )
 
             # 5. Save chat to MongoDB (fire-and-forget)
             asyncio.create_task(

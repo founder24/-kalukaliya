@@ -66,6 +66,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Azure Search warm-up failed: {e}")
 
+    # Warm up Vertex AI OAuth token
+    try:
+        from app.services.ai.vertex_client import vertex_client
+
+        await vertex_client._get_access_token()
+        logger.info("Vertex AI OAuth token pre-fetched")
+    except Exception as e:
+        logger.warning(f"Vertex AI token warm-up failed: {e}")
+
     if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
         logger.warning(
             "WARNING: Using default JWT_SECRET. "
