@@ -248,7 +248,6 @@ async def get_current_user(
         raise
 
 
-
 async def get_current_user_optional(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
