@@ -26,8 +26,7 @@ async def check_rate_limit(
     """Check if user has exceeded rate limit. Returns (allowed, current_count, limit, limit_type).
 
     Only tracks monthly quota. Burst/per-request rate limiting is enforced at the edge layer.
-    When the X-Rate-Limited-By: edge header is present, this function still tracks the monthly
-    quota increment but skips any per-request enforcement.
+    The request parameter is retained for caller compatibility but is not inspected.
     """
     limit = (
         settings.RATE_LIMIT_PRO_TIER
@@ -41,11 +40,6 @@ async def check_rate_limit(
         logger.warning("Redis unavailable - rate limiting disabled")
         return True, 0, limit, "monthly"
 
-    # Check if edge already performed burst rate limiting
-    edge_rate_limited = False
-    if request:
-        edge_rate_limited = request.headers.get("x-rate-limited-by") == "edge"
-
     try:
         # Monthly quota check
         month_key = time.strftime("%Y-%m", time.gmtime())
@@ -54,7 +48,7 @@ async def check_rate_limit(
         else:
             key = f"rate:{user_id}:{month_key}"
 
-        # Track monthly quota (same path whether edge-limited or not)
+        # Track monthly quota
         current_count = await redis.incr(key)
         if current_count == 1:
             next_month = datetime.now().replace(day=28) + timedelta(days=4)

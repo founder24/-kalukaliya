@@ -143,20 +143,17 @@ async def test_rate_limit_skips_burst_when_edge_header_present():
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_uses_pipeline_without_edge_header():
+async def test_rate_limit_uses_incr_without_edge_header():
     """
-    Without edge header, rate_limit should use pipeline to batch
-    monthly + burst Redis calls.
+    Without edge header, rate_limit should still use incr for monthly quota only.
+    Burst limiting is handled at the edge layer exclusively.
     """
     from app.api.deps.rate_limit import check_rate_limit
 
-    mock_pipe = MagicMock()
-    mock_pipe.incr = MagicMock(return_value=mock_pipe)
-    mock_pipe.exec = AsyncMock(return_value=[1, 1])
-
     mock_redis = MagicMock()
-    mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+    mock_redis.incr = AsyncMock(return_value=1)
     mock_redis.expire = AsyncMock()
+    mock_redis.pipeline = MagicMock()
 
     mock_request = MagicMock()
     mock_request.headers = {}
@@ -168,9 +165,10 @@ async def test_rate_limit_uses_pipeline_without_edge_header():
 
     allowed, current_count, limit, limit_type = result
     assert allowed is True
-    # Pipeline should have been used
-    mock_redis.pipeline.assert_called_once()
-    mock_pipe.incr.assert_called()
+    assert limit_type == "monthly"
+    # Only incr for monthly quota (no burst/pipeline needed)
+    mock_redis.incr.assert_called_once()
+    mock_redis.pipeline.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════

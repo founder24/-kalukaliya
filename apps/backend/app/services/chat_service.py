@@ -411,8 +411,8 @@ class ChatService:
         """Invalidate all cached history entries for a session on new message save."""
         try:
             redis = get_redis()
-            # Invalidate common max_turns values
-            for max_turns in (5, 10):
+            # Invalidate all known max_turns values used by callers
+            for max_turns in (3, 5, 10, 15, 20):
                 cache_key = f"chat_history:{session_id}:{max_turns}"
                 await redis.delete(cache_key)
         except (RuntimeError, Exception):

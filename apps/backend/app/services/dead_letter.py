@@ -97,11 +97,20 @@ async def replay_dead_letter(dead_letter_id: str) -> dict:
     if not doc:
         raise ValueError("Dead letter not found")
 
-    # Mark as retrying and increment retry_count
-    await collection.update_one(
-        {"_id": ObjectId(dead_letter_id)},
+    # Refuse replay if max retries exceeded
+    if doc.get("retry_count", 0) >= 3:
+        raise ValueError("Dead letter has exceeded maximum retry attempts (3)")
+
+    # Atomically mark as retrying with status precondition to prevent concurrent replays
+    result = await collection.find_one_and_update(
+        {
+            "_id": ObjectId(dead_letter_id),
+            "status": {"$in": ["pending", "retry_failed"]},
+        },
         {"$set": {"status": "retrying"}, "$inc": {"retry_count": 1}},
     )
+    if result is None:
+        raise ValueError("Dead letter is already being replayed")
 
     try:
         user_id = doc["user_id"]
