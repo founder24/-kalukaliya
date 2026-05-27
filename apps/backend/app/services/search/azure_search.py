@@ -121,23 +121,24 @@ class AzureSearchService:
 
         # Redis cache - try cache first
         cache_key = None
-        try:
-            from app.db.redis import get_redis
+        if settings.SEARCH_CACHE_ENABLED:
+            try:
+                from app.db.redis import get_redis
 
-            cache_input = f"{query}:{text}:{user_tier}"
-            # Cache key uses SHA-256 hash of the full input (query + text + tier)
-            # to ensure fixed-length keys regardless of input size. This is already
-            # optimal since SHA-256 produces a constant 64-char hex digest.
-            cache_key = (
-                f"search_cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
-            )
-            redis = get_redis()
-            cached = await redis.get(cache_key)
-            if cached:
-                logger.info(f"Search cache HIT for query '{query[:20]}...'")
-                return json.loads(cached)
-        except (RuntimeError, Exception) as e:
-            logger.debug(f"Search cache unavailable: {e}")
+                cache_input = f"{query}:{text}:{user_tier}"
+                # Cache key uses SHA-256 hash of the full input (query + text + tier)
+                # to ensure fixed-length keys regardless of input size. This is already
+                # optimal since SHA-256 produces a constant 64-char hex digest.
+                cache_key = (
+                    f"search_cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
+                )
+                redis = get_redis()
+                cached = await redis.get(cache_key)
+                if cached:
+                    logger.info(f"Search cache HIT for query '{query[:20]}...'")
+                    return json.loads(cached)
+            except (RuntimeError, Exception) as e:
+                logger.debug(f"Search cache unavailable: {e}")
 
         try:
             # 1. Define Vector Query using built-in vectorization
@@ -210,7 +211,7 @@ class AzureSearchService:
             )
 
             # Cache the result
-            if cache_key and context_chunks:
+            if settings.SEARCH_CACHE_ENABLED and cache_key and context_chunks:
                 try:
                     from app.db.redis import get_redis
 

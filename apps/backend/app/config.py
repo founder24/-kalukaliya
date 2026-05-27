@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     AZURE_SEARCH_QUERY_KEY: Optional[str] = None
     AZURE_SEARCH_INDEX_NAME: str = "syrabit-edu-index"
     AZURE_SEARCH_SEMANTIC_CONFIG: str = "default"
+    SEARCH_CACHE_ENABLED: bool = False
 
     # --- P4: MongoDB (Data) ---
     MONGODB_URI: Optional[str] = None
