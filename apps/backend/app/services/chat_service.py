@@ -46,7 +46,9 @@ class ChatService:
         if lang_override:
             detected_lang = lang_override
             target_model = (
-                settings.SARVAM_MODEL if lang_override == "as" else settings.VERTEX_GEMINI_MODEL
+                settings.SARVAM_MODEL
+                if lang_override == "as"
+                else settings.VERTEX_GEMINI_MODEL
             )
         else:
             detected_lang, target_model = detect_language_and_route(message)
@@ -108,7 +110,9 @@ class ChatService:
 
             return await asyncio.wait_for(_do_retrieval(), timeout=1.5)
         except asyncio.TimeoutError:
-            logger.warning("RAG retrieval timed out after 1.5s, returning empty context")
+            logger.warning(
+                "RAG retrieval timed out after 1.5s, returning empty context"
+            )
             return []
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")

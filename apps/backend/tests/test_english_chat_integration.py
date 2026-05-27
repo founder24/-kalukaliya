@@ -4,7 +4,6 @@ system prompt construction, and router error handling.
 """
 
 import pytest
-from unittest.mock import patch
 
 
 class TestDetectLanguageAndRoute:
@@ -33,14 +32,18 @@ class TestResolveLanguageAndModel:
     def test_explicit_en_override_returns_vertex(self):
         from app.services.chat_service import ChatService
 
-        lang, model = ChatService.resolve_language_and_model("some text", lang_override="en")
+        lang, model = ChatService.resolve_language_and_model(
+            "some text", lang_override="en"
+        )
         assert lang == "en"
         assert "gemini" in model.lower()
 
     def test_explicit_as_override_returns_sarvam(self):
         from app.services.chat_service import ChatService
 
-        lang, model = ChatService.resolve_language_and_model("some text", lang_override="as")
+        lang, model = ChatService.resolve_language_and_model(
+            "some text", lang_override="as"
+        )
         assert lang == "as"
         assert "openhathi" in model.lower() or "sarvam" in model.lower()
 
