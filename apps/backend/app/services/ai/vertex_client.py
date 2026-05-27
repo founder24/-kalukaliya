@@ -109,8 +109,10 @@ class VertexAIClient:
                 from google.auth.transport._aiohttp_requests import Request as AiohttpRequest
 
                 aiohttp_request = AiohttpRequest()
-                await creds.refresh(aiohttp_request)
-                await aiohttp_request.close()
+                try:
+                    await creds.refresh(aiohttp_request)
+                finally:
+                    await aiohttp_request.close()
             except (ImportError, AttributeError):
                 # aiohttp transport not available, fall back to executor pattern
                 import google.auth.transport.requests

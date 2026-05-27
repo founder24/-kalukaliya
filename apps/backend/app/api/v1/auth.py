@@ -107,6 +107,8 @@ def _get_signing_key() -> tuple[str, str]:
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
         return settings.JWT_PRIVATE_KEY, "RS256"
+    if settings.JWT_ALGORITHM == "RS256":
+        logger.warning("JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256")
     return settings.JWT_SECRET, "HS256"
 
 
@@ -118,6 +120,8 @@ def _get_verification_key() -> tuple[str, str]:
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
         return settings.JWT_PUBLIC_KEY, "RS256"
+    if settings.JWT_ALGORITHM == "RS256":
+        logger.warning("JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256")
     return settings.JWT_SECRET, "HS256"
 
 

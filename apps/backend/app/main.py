@@ -195,7 +195,7 @@ def create_app() -> FastAPI:
 
         # Request ID header + logging
         response.headers["X-Request-ID"] = request_id
-        response.headers["X-API-Version"] = "3.0.0"
+        response.headers["X-API-Version"] = app.version
         logger.info(
             "request_completed",
             extra={
