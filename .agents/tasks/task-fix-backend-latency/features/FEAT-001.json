@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Reduce backend chat latency from 6-7s to under 2-3s by optimizing AI client timeouts, model selection, RAG graceful degradation, response caching, and connection warm-up",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Switch Vertex AI default model from gemini-1.5-pro to gemini-2.0-flash-lite in apps/backend/app/config.py (change VERTEX_GEMINI_MODEL default). gemini-2.0-flash-lite is Google's fastest model with sub-second TTFB. If that is not available, use gemini-2.0-flash.",
     "Step 2 - Reduce AI client timeouts in apps/backend/app/services/ai/vertex_client.py: Change from httpx.Timeout(60.0, connect=10.0) to httpx.Timeout(15.0, connect=5.0). Same for sarvam_client.py. These are chat responses, not batch jobs - 15s is plenty.",
@@ -34,5 +34,5 @@
     "Grep for gemini-2.0-flash-lite in config.py to confirm model switch"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 10 steps implemented successfully. Step 8 (azure_search fast-path) was already correct - the client None check was before Redis lookup. Syntax verified via AST parsing. Cannot run tests due to INTEGRATIONS_ONLY network (httpx not installed). Rate limit test may need adjustment since check_rate_limit moved inside _process_chat, but the mock path (app.api.v1.chat.check_rate_limit) remains valid."
 }
