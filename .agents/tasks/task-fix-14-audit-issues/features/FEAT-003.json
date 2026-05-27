@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "High priority reliability and security fixes: Add request-level timeout to Azure Search client (issue #3), add exception handler to fire-and-forget asyncio.create_task calls (issue #4), fix Vertex AI prompt building to use proper contents array (issue #5), and validate session_id format (issue #6).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Issue #3: In apps/backend/app/services/search/azure_search.py, add a timeout parameter to the SearchClient constructor or wrap the search calls with asyncio.wait_for(timeout=10). The azure-search-documents async client supports connection_timeout and read_timeout. Add timeout=10 to the _async_search method calls using asyncio.wait_for(), and catch asyncio.TimeoutError with appropriate logging.",
     "Issue #4: In apps/backend/app/api/v1/chat.py, there are two asyncio.create_task(ChatService.save_chat(...)) calls (one in chat() around line 130, one in chat_stream() event_stream() around line 270). Create a helper function _save_chat_task_callback(task) that logs exceptions from completed tasks. After each create_task, call task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None) or better, define a proper callback that logs via logger.error. Create a utility function in chat.py or a shared utils module.",
@@ -20,5 +20,5 @@
     "Run python -m pytest from apps/backend/ and confirm all tests pass"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 163 backend tests pass. No test modifications needed. The Vertex AI prompt format change only affects the JSON payload structure, not response parsing, so existing tests that mock the HTTP client continue to work."
 }
