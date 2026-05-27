@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Backend performance optimizations for chat latency reduction. Optimize the Vertex AI client for faster English responses (target 3-4s), reduce RAG overhead, and improve streaming response times.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/backend/app/services/ai/vertex_client.py, reduce the HTTP timeout from 15.0s to 10.0s for faster failure detection. Increase max_connections from 20 to 50 and max_keepalive_connections from 10 to 25 for better connection reuse under load.",
+    "In apps/backend/app/services/ai/vertex_client.py, in the generate() method, reduce maxOutputTokens from 512 to 1024 (keep same) and reduce temperature from 0.7 to 0.3 for faster, more deterministic responses. In stream_generate(), keep the existing 0.3 temperature and 2048 maxOutputTokens.",
+    "In apps/backend/app/services/chat_service.py, in retrieve_context(), reduce the timeout from 2.0s to 1.5s since RAG should not dominate latency. If RAG times out, the chat still works without context.",
+    "In apps/backend/app/services/chat_service.py, add a parallel execution optimization: in stream_llm(), the system prompt is already built before calling. No additional changes needed here - the streaming is already optimized.",
+    "In apps/backend/app/api/v1/chat.py, in the non-streaming chat endpoint, reduce the overall timeout from 30.0s to 15.0s with asyncio.wait_for since we target 3-4s responses and 30s is way too generous.",
+    "In apps/backend/app/config.py, add a comment documenting that CF_AI_MODEL is now only used for OCR and TTS (not chat) to prevent future regressions where someone might re-enable it for chat."
+  ],
+  "acceptance_criteria": [
+    "Vertex AI client timeout is 10s, connection pool is 50/25",
+    "RAG retrieval timeout is 1.5s",
+    "Chat endpoint overall timeout is 15s",
+    "Config has documentation that CF_AI_MODEL is OCR/TTS only"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya && python -c \"import sys; sys.path.insert(0, 'apps/backend'); from app.services.ai.vertex_client import vertex_client; assert vertex_client._client.timeout.read == 10.0 or vertex_client._client._timeout.read == 10.0; print('PASS')\" 2>/dev/null || echo 'Verify timeout manually in code'",
+    "Run: grep -n 'timeout=1.5' apps/backend/app/services/chat_service.py && echo 'PASS: RAG timeout is 1.5s'",
+    "Run: grep -n 'timeout=15.0\\|wait_for.*15' apps/backend/app/api/v1/chat.py && echo 'PASS: Chat timeout is 15s'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

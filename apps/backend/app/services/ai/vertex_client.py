@@ -23,8 +23,8 @@ class VertexAIClient:
         self.model = settings.VERTEX_GEMINI_MODEL
         self.base_url = f"https://{self.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}/publishers/google/models"
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(15.0, connect=5.0),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=httpx.Timeout(10.0, connect=3.0),
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=25),
         )
         self._token_lock = asyncio.Lock()
         self._cached_token: str | None = None
@@ -53,7 +53,7 @@ class VertexAIClient:
                             {"role": "user", "parts": [{"text": user_message}]}
                         ],
                         "generationConfig": {
-                            "temperature": 0.7,
+                            "temperature": 0.3,
                             "maxOutputTokens": 512,
                         },
                     },

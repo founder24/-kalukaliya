@@ -106,9 +106,9 @@ class ChatService:
                 )
                 return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=2.0)
+            return await asyncio.wait_for(_do_retrieval(), timeout=1.5)
         except asyncio.TimeoutError:
-            logger.warning("RAG retrieval timed out after 2s, returning empty context")
+            logger.warning("RAG retrieval timed out after 1.5s, returning empty context")
             return []
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")

@@ -290,7 +290,7 @@ async def chat(
                 ],
             )
 
-        result = await asyncio.wait_for(_process_chat(), timeout=30.0)
+        result = await asyncio.wait_for(_process_chat(), timeout=15.0)
         return result
 
     except HTTPException:
