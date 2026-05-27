@@ -1,6 +1,11 @@
 """
 Rate Limiter: Token Bucket Implementation with Upstash Redis
 Supports atomic operations and rate limit headers
+
+LEGACY MODULE: Per-request burst rate limiting is now handled by the Cloudflare Edge
+worker (apps/edge/src/middleware/rate-limit.ts). This module is retained as a reference
+for the monthly quota Lua script pattern used by apps/backend/app/api/deps/rate_limit.py.
+Do not use this for new per-request enforcement.
 """
 
 from upstash_redis.asyncio import Redis

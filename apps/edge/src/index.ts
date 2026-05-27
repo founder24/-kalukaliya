@@ -82,10 +82,11 @@ export default {
         }
       }
 
-      // Basic bot heuristic: reject requests with no User-Agent or known bot patterns
+      // Basic bot heuristic: tag requests with bot User-Agent for analytics filtering.
+      // NOTE: Bots are NOT blocked here - they are tagged only (X-Bot-Detected header)
+      // for ISR routing and analytics. Edge never returns 403 for bot-detected requests.
       const ua = request.headers.get('User-Agent') || '';
       if (!ua || /bot|crawl|spider|scrape|curl|wget|python-requests|httpie/i.test(ua)) {
-        // Still allow through but tag as bot for analytics filtering
         const headers = new Headers(request.headers);
         headers.set('X-Bot-Detected', 'true');
         request = new Request(request, { headers });

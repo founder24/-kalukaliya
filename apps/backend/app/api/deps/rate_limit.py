@@ -1,6 +1,9 @@
-"""Rate limiting dependency for FastAPI endpoints."""
+"""Rate limiting dependency for FastAPI endpoints.
 
-import asyncio
+Monthly quota tracking only. Per-request burst rate limiting is handled
+by the Cloudflare Edge worker (apps/edge/src/middleware/rate-limit.ts).
+"""
+
 import time
 import logging
 from datetime import datetime, timedelta
@@ -13,10 +16,6 @@ from app.db.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
-# Burst rate limits (per minute)
-BURST_LIMIT_FREE = 5
-BURST_LIMIT_PRO = 30
-
 
 async def check_rate_limit(
     user_id: str,
@@ -24,7 +23,12 @@ async def check_rate_limit(
     client_ip: str = None,
     request: Optional[Request] = None,
 ) -> tuple[bool, int, int, str]:
-    """Check if user has exceeded rate limit. Returns (allowed, current_count, limit, limit_type)."""
+    """Check if user has exceeded rate limit. Returns (allowed, current_count, limit, limit_type).
+
+    Only tracks monthly quota. Burst/per-request rate limiting is enforced at the edge layer.
+    When the X-Rate-Limited-By: edge header is present, this function still tracks the monthly
+    quota increment but skips any per-request enforcement.
+    """
     limit = (
         settings.RATE_LIMIT_PRO_TIER
         if user_tier == "pro"
@@ -50,56 +54,18 @@ async def check_rate_limit(
         else:
             key = f"rate:{user_id}:{month_key}"
 
-        # Use pipeline to batch Redis HTTP calls (reduces round-trips)
-        burst_limit = BURST_LIMIT_PRO if user_tier == "pro" else BURST_LIMIT_FREE
-        minute_key = int(time.time() // 60)
-        burst_key = f"burst:{user_id}:{minute_key}"
+        # Track monthly quota (same path whether edge-limited or not)
+        current_count = await redis.incr(key)
+        if current_count == 1:
+            next_month = datetime.now().replace(day=28) + timedelta(days=4)
+            expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
+            ttl = int(expire_at.timestamp() - time.time())
+            await redis.expire(key, ttl)
 
-        if edge_rate_limited:
-            # Edge already checked burst - only check monthly quota
-            current_count = await redis.incr(key)
-            if current_count == 1:
-                next_month = datetime.now().replace(day=28) + timedelta(days=4)
-                expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
-                ttl = int(expire_at.timestamp() - time.time())
-                await redis.expire(key, ttl)
+        if current_count > limit:
+            return False, current_count, limit, "monthly"
 
-            if current_count > limit:
-                return False, current_count, limit, "monthly"
-            return current_count <= limit, current_count, limit, "monthly"
-        else:
-            # Full rate limit check - pipeline monthly + burst together
-            pipe = redis.pipeline()
-            pipe.incr(key)
-            pipe.incr(burst_key)
-            results = await pipe.exec()
-
-            current_count = results[0] if results and len(results) > 0 else 1
-            burst_count = results[1] if results and len(results) > 1 else 1
-
-            # Set expiry on first increment (concurrently if both need it)
-            if current_count == 1 and burst_count == 1:
-                next_month = datetime.now().replace(day=28) + timedelta(days=4)
-                expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
-                ttl = int(expire_at.timestamp() - time.time())
-                await asyncio.gather(
-                    redis.expire(key, ttl),
-                    redis.expire(burst_key, 60),
-                )
-            elif current_count == 1:
-                next_month = datetime.now().replace(day=28) + timedelta(days=4)
-                expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
-                ttl = int(expire_at.timestamp() - time.time())
-                await redis.expire(key, ttl)
-            elif burst_count == 1:
-                await redis.expire(burst_key, 60)
-
-            if current_count > limit:
-                return False, current_count, limit, "monthly"
-            if burst_count > burst_limit:
-                return False, burst_count, burst_limit, "burst"
-
-            return current_count <= limit, current_count, limit, "monthly"
+        return True, current_count, limit, "monthly"
     except Exception as e:
         logger.warning(f"Rate limit check failed: {e} - allowing request")
         return True, 0, limit, "monthly"

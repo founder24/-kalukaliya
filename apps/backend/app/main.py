@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 import sentry_sdk
@@ -131,24 +130,6 @@ def create_app() -> FastAPI:
         description="Educational AI Assistant for Assamese Students",
         version="3.0.0",
         lifespan=lifespan,
-    )
-
-    # CORS Middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.allowed_origins_list,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=[
-            "Authorization",
-            "Content-Type",
-            "X-Request-ID",
-            "X-Razorpay-Signature",
-            "Accept",
-            "Origin",
-            "x-turnstile-token",
-            "CF-Turnstile-Response",
-        ],
     )
 
     # Unified Middleware - combines CSRF, security headers, and request ID
