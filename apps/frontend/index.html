@@ -104,7 +104,6 @@
          below, so dns-prefetch is enough — no preconnect needed. -->
     <link rel="dns-prefetch" href="https://us.i.posthog.com" />
     <link rel="dns-prefetch" href="https://us-assets.i.posthog.com" />
-    <link rel="dns-prefetch" href="https://assets.emergent.sh" />
 
     <!-- Font preconnect — reduces DNS/TLS handshake latency -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -112,8 +111,8 @@
     <!-- Preload primary font weight to eliminate FOIT -->
     <link rel="preload" href="https://fonts.gstatic.com/s/spacegrotesk/v16/V8mDoQDjQSkFtoMM3T6r8E7mPbF4Cw.woff2" as="font" type="font/woff2" crossorigin />
     <!-- Fonts: loaded as non-blocking stylesheet via media hack -->
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-    <noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
 
     <!-- ── Security Meta Headers ── -->
     <!-- Security: handled by backend HTTP headers, not meta tags -->
@@ -263,7 +262,7 @@
     <style>
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
       html{-webkit-text-size-adjust:100%;font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent;scroll-behavior:smooth}
-      body{font-family:'Space Grotesk','Inter',system-ui,-apple-system,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+      body{font-family:'Space Grotesk',system-ui,-apple-system,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
       html.dark{color-scheme:dark}
       .dark body,.dark #root{background:#06060e;color:#e2e8f0}
       #root{min-height:100vh;isolation:isolate}
@@ -278,30 +277,6 @@
 
     <!-- modulepreload hints for vendor/router chunks injected at build time by vite-plugins/modulepreload-inject.js (Task #535) -->
 
-    <style>#emergent-badge,a[href*="emergent.sh"],[id*="emergent"],[class*="emergent"]{display:none!important;visibility:hidden!important;width:0!important;height:0!important;opacity:0!important;pointer-events:none!important;position:fixed!important;z-index:-99999!important}</style>
-
-    <!-- Task #383 — Cloudflare Web Analytics beacon injector. Fetches the
-         live token from the origin so ops can flip CF_WEB_ANALYTICS_ON
-         (and rotate the token) without a SPA rebuild. Fails closed and
-         silent when the flag is off or the request errors. -->
-    <script>
-      (function(){
-        try {
-          fetch('/api/cf-web-analytics/config', { credentials: 'omit' })
-            .then(function(r){ return r.ok ? r.json() : null; })
-            .then(function(cfg){
-              if (!cfg || !cfg.enabled || !cfg.beacon_url || !cfg.token) return;
-              if (document.querySelector('script[data-cf-beacon]')) return;
-              var s = document.createElement('script');
-              s.defer = true;
-              s.src = cfg.beacon_url;
-              s.setAttribute('data-cf-beacon', JSON.stringify({ token: cfg.token }));
-              document.head.appendChild(s);
-            })
-            .catch(function(){ /* swallow — analytics must never break the app */ });
-        } catch (e) { /* noop */ }
-      })();
-    </script>
   </head>
   <body>
     <!-- Skip link for keyboard users (WCAG 2.1) -->
@@ -401,130 +376,6 @@
     </div>
     <div id="root"></div>
       <script type="module" src="/src/index.jsx"></script>
-      <script>
-        (function deferThirdParty(){
-          // Task #391: gate ALL third-party loaders strictly behind LCP.
-          // No interaction-triggered load path — early scrolls/taps must
-          // not race ahead of the largest-contentful-paint entry, since
-          // those would still compete for bandwidth/main-thread during
-          // the critical render window. Triggers, in order:
-          //   1. PerformanceObserver fires on the largest-contentful-paint entry
-          //   2. Hard 4 s fallback for headless tools / no-LCP cases
-          var loaded=false,po=null,timer=null;
-          function load(){
-            if(loaded)return;loaded=true;
-            window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);
-            var em=document.createElement("script");em.src="https://assets.emergent.sh/scripts/emergent-main.js";em.async=true;document.body.appendChild(em);
-            if(po){try{po.disconnect()}catch(e){}}
-            if(timer){clearTimeout(timer);timer=null;}
-          }
-          if('PerformanceObserver' in window){
-            try{
-              po=new PerformanceObserver(function(list){
-                if(list.getEntries().length){ setTimeout(load,250); }
-              });
-              po.observe({type:'largest-contentful-paint',buffered:true});
-            }catch(e){}
-          }
-          // Hard fallback for headless / no-LCP cases.
-          timer=setTimeout(load,4000);
-        })();
-      </script>
-      <script>
-        (function deferPosthog(){
-          // Task #391: PostHog gated strictly by LCP — no interaction
-          // trigger. The array.js download (~50 KB gzip + execution)
-          // previously fired on rIC ~1.5 s and consistently beat LCP
-          // on slow 3G mobile, inflating TBT and pushing LCP past 2.5 s.
-          var loaded=false,po=null,timer=null;
-          function load(){
-            if(loaded)return;loaded=true;
-            try{ initPosthog(); }catch(e){}
-            if(po){try{po.disconnect()}catch(e){}}
-            if(timer){clearTimeout(timer);timer=null;}
-          }
-          if('PerformanceObserver' in window){
-            try{
-              po=new PerformanceObserver(function(list){
-                if(list.getEntries().length){ setTimeout(load,250); }
-              });
-              po.observe({type:'largest-contentful-paint',buffered:true});
-            }catch(e){}
-          }
-          timer=setTimeout(load,5000);
-        })();
-        function initPosthog(){
-            !(function (t, e) {
-                var o, n, p, r;
-                e.__SV ||
-                    ((window.posthog = e),
-                    (e._i = []),
-                    (e.init = function (i, s, a) {
-                        function g(t, e) {
-                            var o = e.split(".");
-                            2 == o.length && ((t = t[o[0]]), (e = o[1])),
-                                (t[e] = function () {
-                                    t.push(
-                                        [e].concat(
-                                            Array.prototype.slice.call(
-                                                arguments,
-                                                0,
-                                            ),
-                                        ),
-                                    );
-                                });
-                        }
-                        ((p = t.createElement("script")).type =
-                            "text/javascript"),
-                            (p.crossOrigin = "anonymous"),
-                            (p.async = !0),
-                            (p.src =
-                                s.api_host.replace(
-                                    ".i.posthog.com",
-                                    "-assets.i.posthog.com",
-                                ) + "/static/array.js"),
-                            (r =
-                                t.getElementsByTagName(
-                                    "script",
-                                )[0]).parentNode.insertBefore(p, r);
-                        var u = e;
-                        for (
-                            void 0 !== a ? (u = e[a] = []) : (a = "posthog"),
-                                u.people = u.people || [],
-                                u.toString = function (t) {
-                                    var e = "posthog";
-                                    return (
-                                        "posthog" !== a && (e += "." + a),
-                                        t || (e += " (stub)"),
-                                        e
-                                    );
-                                },
-                                u.people.toString = function () {
-                                    return u.toString(1) + ".people (stub)";
-                                },
-                                o =
-                                    "init me ws ys ps bs capture je Di ks register register_once register_for_session unregister unregister_for_session Ps getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey canRenderSurveyAsync identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty Es $s createPersonProfile Is opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing Ss debug xs getPageViewId captureTraceFeedback captureTraceMetric".split(
-                                        " ",
-                                    ),
-                                n = 0;
-                            n < o.length;
-                            n++
-                        )
-                            g(u, o[n]);
-                        e._i.push([i, s, a]);
-                    }),
-                    (e.__SV = 1));
-            })(document, window.posthog || []);
-            posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
-                api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only",
-                session_recording: {
-                    recordCrossOriginIframes: true,
-                    capturePerformance: false,
-                },
-            });
-        }
-      </script>
 
     <!--CF_ANALYTICS_BEACON-->
   </body>

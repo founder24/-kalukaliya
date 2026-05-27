@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Phase 1 Quick Wins: Remove Emergent.sh script, PostHog client SDK, CF Web Analytics fetcher, and subset Google Fonts to eliminate ~200ms TBT and ~800ms TTI. These are all changes to apps/frontend/index.html and apps/frontend/tailwind.config.js.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/frontend/index.html: Remove the entire `<style>#emergent-badge,...` block (the CSS that hides Emergent badges) - it is a standalone <style> element in the <head>",
+    "In apps/frontend/index.html: Remove the `<link rel=\"dns-prefetch\" href=\"https://assets.emergent.sh\" />` line",
+    "In apps/frontend/index.html: Remove the entire `(function deferThirdParty(){...})();` script block in the <body> that loads emergent-main.js. This is the IIFE wrapped in a <script> tag after the module src tag",
+    "In apps/frontend/index.html: Remove the entire `(function deferPosthog(){...})();` and the `function initPosthog(){...}` script block. This is the second <script> block after the emergent one. Keep the dns-prefetch links for posthog (Zaraz will handle it)",
+    "In apps/frontend/index.html: Remove the CF Web Analytics fetcher script in <head> - the <script> block that calls `fetch('/api/cf-web-analytics/config', ...)` and dynamically creates the beacon script",
+    "In apps/frontend/index.html: Change the Google Fonts URL from `family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap` to `family=Space+Grotesk:wght@400;500;600;700&display=swap` (remove Inter) in BOTH the media=print link AND the noscript fallback link",
+    "In apps/frontend/tailwind.config.js: Update fontFamily.sans from `[\"'Space Grotesk'\", \"Inter\", \"-apple-system\", \"BlinkMacSystemFont\", \"'Segoe UI'\", \"sans-serif\"]` to `[\"'Space Grotesk'\", \"system-ui\", \"-apple-system\", \"BlinkMacSystemFont\", \"'Segoe UI'\", \"sans-serif\"]` (replace Inter with system-ui)",
+    "In apps/frontend/index.html: In the inline critical CSS <style> block, update the body font-family from `'Space Grotesk','Inter',system-ui,-apple-system,sans-serif` to `'Space Grotesk',system-ui,-apple-system,sans-serif`"
+  ],
+  "acceptance_criteria": [
+    "No references to emergent.sh remain in index.html (no script, no CSS, no dns-prefetch)",
+    "No PostHog client SDK init code remains in index.html (no deferPosthog IIFE, no initPosthog function)",
+    "No cf-web-analytics fetch script remains in index.html",
+    "Google Fonts URL only loads Space Grotesk (no Inter)",
+    "tailwind.config.js fontFamily.sans uses system-ui instead of Inter",
+    "The dns-prefetch for us.i.posthog.com and us-assets.i.posthog.com are preserved",
+    "The <!--CF_ANALYTICS_BEACON--> placeholder comment at the end of body is preserved",
+    "The noscript content is preserved",
+    "The pre-hydration shell (#__shell) is preserved",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "Run `pnpm --filter @workspace/syrabit test` and confirm all tests pass",
+    "Run `pnpm --filter @workspace/syrabit build:client` and confirm build succeeds",
+    "Verify no 'emergent' references in index.html with grep",
+    "Verify no 'initPosthog' or 'deferPosthog' in index.html with grep",
+    "Verify no 'cf-web-analytics' fetch in index.html with grep"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
