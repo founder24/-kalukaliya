@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Add OCR/image analysis and TTS methods to CloudflareAIClient, add new config settings for vision and TTS models, and create /api/v1/chat/image and /api/v1/chat/tts endpoints",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Add new settings to apps/backend/app/config.py - CF_AI_VISION_MODEL (default '@cf/unum/uform-gen2-qwen-500m') and CF_AI_TTS_MODEL (default '@cf/myshell/melotts')",
     "Step 2: Add a `vision_analyze` method to CloudflareAIClient in apps/backend/app/services/ai/cloudflare_client.py that accepts a base64-encoded image and an optional prompt, calls the Cloudflare vision model endpoint (POST to {base_url}/{vision_model} with image array input format), and returns the extracted text/analysis. Use the circuit breaker pattern already in place. The Cloudflare vision API format for uform-gen2-qwen-500m is: json body with {\"image\": [<int bytes array>], \"prompt\": \"...\", \"max_tokens\": 512}. Alternatively, accept base64 directly as the image field if the model supports it. For llama-3.2-11b-vision-instruct, use messages format with image_url. Use the uform model for fast OCR.",
@@ -25,5 +25,5 @@
     "cd apps/backend && python -c \"from app.config import settings; assert hasattr(settings, 'CF_AI_VISION_MODEL'); assert hasattr(settings, 'CF_AI_TTS_MODEL'); print('OK')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Tests required FastAPI dependency_overrides pattern for mocking get_current_user (not simple patch). All 8 tests pass including new OCR/TTS tests. Environment needed many pip installs since hash-pinned requirements.txt could not be used directly."
 }
