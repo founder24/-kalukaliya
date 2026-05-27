@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Medium priority fixes: Improve search cache key hashing (issue #7), add unicode confusable detection to sanitize_user_input (issue #8), verify React Router v7 + React 18 compatibility (issue #9), and add edge-to-backend contract tests (issue #10).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Issue #7: In apps/backend/app/services/search/azure_search.py search_context(), the cache key already hashes with sha256. Verify the cache_input uses 'query:text:user_tier'. The 'text' component here is the embedding (already compact). This is fine as-is. But to improve, change the cache key to hash only the text component separately if it's large, ensuring the key stays fixed-length even if inputs change. The current implementation already does sha256 on the full string which is fine - just add a comment documenting this design decision.",
     "Issue #8: In apps/backend/app/core/security.py sanitize_user_input(), after NFKC normalization and zero-width stripping, add unicode confusable detection. Import unicodedata and add detection for: (1) mixed-script text that could be homoglyph attacks (e.g., Cyrillic 'a' vs Latin 'a'), (2) additional invisible/formatting characters beyond the existing zero-width set (like U+00AD soft hyphen, U+034F combining grapheme joiner, U+2028 line separator, U+2029 paragraph separator, U+FE00-U+FE0F variation selectors). Strip these additional invisible characters. Do NOT reject mixed-script text outright (users legitimately write in Assamese+English) - just strip the dangerous invisible chars.",
@@ -23,5 +23,5 @@
     "Run pnpm test from apps/frontend/ and confirm tests pass"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All tests pass: 163 backend, 60 edge (including 6 new contract tests), 620 frontend. React Router v7 + React 18 confirmed compatible with no version changes needed. Unicode confusable stripping added without breaking existing sanitization tests."
 }
