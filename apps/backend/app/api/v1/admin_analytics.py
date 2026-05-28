@@ -76,3 +76,103 @@ async def analytics_overview(request: Request):
                 "positive_rate": 0,
             },
         }
+
+
+@router.get("/analytics/daily")
+async def analytics_daily(request: Request):
+    """Daily analytics breakdown."""
+    _validate_admin_session(request)
+    return {"daily": [], "days": 30}
+
+
+@router.get("/analytics/revenue")
+async def analytics_revenue(request: Request):
+    """Revenue analytics."""
+    _validate_admin_session(request)
+    return {"revenue": [], "total": 0, "currency": "INR"}
+
+
+@router.get("/analytics/predictor")
+async def analytics_predictor(request: Request):
+    """Growth/churn predictor."""
+    _validate_admin_session(request)
+    return {"predictions": [], "accuracy": 0, "model_version": "stub"}
+
+
+@router.get("/analytics/cf-status")
+async def analytics_cf_status(request: Request):
+    """Cloudflare analytics token status."""
+    _validate_admin_session(request)
+    return {
+        "configured": False,
+        "auth_ok": False,
+        "needs_rotation": False,
+        "last_error": None,
+        "last_check_at": None,
+        "blocked_for_seconds": 0,
+        "consecutive_failures": 0,
+        "rotation_hint": None,
+    }
+
+
+@router.post("/analytics/cf-recheck")
+async def analytics_cf_recheck(request: Request):
+    """Recheck Cloudflare analytics auth."""
+    _validate_admin_session(request)
+    return {"status": "ok", "auth_ok": False}
+
+
+@router.get("/analytics/cf-overview")
+async def analytics_cf_overview(request: Request):
+    """Cloudflare account overview."""
+    _validate_admin_session(request)
+    return {"requests": 0, "bandwidth": 0, "threats": 0, "range": "7d"}
+
+
+@router.get("/analytics/bot-traffic")
+async def analytics_bot_traffic(request: Request):
+    """Bot traffic analytics."""
+    _validate_admin_session(request)
+    return {"bots": [], "total": 0, "period": "24h"}
+
+
+@router.get("/analytics/hydrate-stats")
+async def analytics_hydrate_stats(request: Request):
+    """Hydrate lifecycle stats."""
+    _validate_admin_session(request)
+    return {"stats": [], "days": 7}
+
+
+@router.get("/analytics/review-prompt-stats")
+async def analytics_review_prompt_stats(request: Request):
+    """Review prompt funnel stats."""
+    _validate_admin_session(request)
+    return {"stats": [], "funnel": {}, "days": 30}
+
+
+@router.get("/analytics/review-prompt-stats/baseline-noise")
+async def analytics_review_prompt_baseline_noise(request: Request):
+    """Review prompt baseline noise analysis."""
+    _validate_admin_session(request)
+    return {"baselines": []}
+
+
+@router.get("/analytics/review-prompt-stats/by-reason-trend")
+async def analytics_review_prompt_by_reason_trend(request: Request):
+    """Review prompt trend by reason."""
+    _validate_admin_session(request)
+    return {"trend": [], "weeks": 8}
+
+
+@router.get("/analytics/content-card-views")
+async def analytics_content_card_views(request: Request):
+    """Content card view analytics."""
+    _validate_admin_session(request)
+    return {"views": [], "total": 0}
+
+
+@router.get("/analytics/page-conversions")
+async def analytics_page_conversions(request: Request):
+    """Page conversion analytics."""
+    _validate_admin_session(request)
+    return {"conversions": [], "days": 30}
