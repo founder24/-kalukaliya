@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Phase 1: Security & Compliance fixes - NoSQL injection, OData injection, HTML escaping, unsubscribe links, AuthGuard on protected routes, ISR cache key and Set-Cookie stripping",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Fix NoSQL injection in apps/backend/app/api/v1/content.py: Add regex validation (^[a-z0-9-]+$) for all path parameters (board, class_level, subject, chapter, page_type) in render_chapter, render_chapter_page_type, list_chapters, and get_by_slug endpoints. Raise HTTPException(400) if validation fails. Import 're' module.",
     "2. Fix OData injection in apps/backend/app/services/search/azure_search.py: In _async_search method, validate user_tier against an explicit allowlist ['free', 'pro'] before constructing filter_expr. If user_tier is not in the allowlist AND not None, set it to None (skip filtering). Log a warning for invalid tier values.",
@@ -30,5 +30,5 @@
     "Verify grep for AuthGuard wrapping in App.jsx for protected routes"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 7 steps implemented. Ruff check passes clean on all 3 backend files. TypeScript noEmit passes for edge worker. pnpm install was needed to resolve @cloudflare/workers-types. pyenv global 3.11.15 set for python commands."
 }
