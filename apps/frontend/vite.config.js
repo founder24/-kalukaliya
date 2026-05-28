@@ -645,7 +645,7 @@ export default defineConfig(({ mode }) => ({
       '@': path.resolve(__dirname, 'src'),
     },
     extensions: ['.js', '.jsx', '.ts', '.tsx'],
-    dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
   },
 
   server: {
@@ -816,7 +816,6 @@ export default defineConfig(({ mode }) => ({
     include: [
       'react',
       'react-dom',
-      'react/jsx-dev-runtime',
       'react/jsx-runtime',
       'react-router-dom',
       '@tanstack/react-query',
@@ -826,7 +825,6 @@ export default defineConfig(({ mode }) => ({
     needsInterop: [
       'react',
       'react-dom',
-      'react/jsx-dev-runtime',
       'react/jsx-runtime',
     ],
     extensions: ['.js', '.jsx'],
