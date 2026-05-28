@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Layer 1 (Basic HTML fixes): Add data-cfasync='false' to the module script tag and fix the skip-to-content link to be keyboard-focusable before React hydration. These are simple attribute additions in index.html.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/frontend/index.html, find the line `<script type=\"module\" src=\"/src/index.jsx\"></script>` and add `data-cfasync=\"false\"` attribute to prevent Cloudflare Rocket Loader from processing the module script. This reduces render-blocking by ~150ms and TBT by ~168ms.",
     "In apps/frontend/index.html, fix the skip-to-content link accessibility. The link has class `sr-only focus:not-sr-only` but Lighthouse flags it as not keyboard-focusable. The issue is that the `sr-only` class uses `clip: rect(0,0,0,0)` which can interfere with focus in some browsers. Add explicit `tabindex=\"1\"` to ensure it receives keyboard focus reliably. Actually, the better fix is to ensure the skip link has proper focus styles by adding `focus:clip-auto focus:w-auto focus:h-auto focus:overflow-visible focus:whitespace-normal` to override ALL sr-only properties on focus. The current `focus:not-sr-only` class should handle this but check that Tailwind v3 generates the correct output. The inline critical CSS has `.sr-only` but no `.focus\\:not-sr-only` rule. Add a `focus:not-sr-only` rule to the inline critical CSS that properly resets position, width, height, clip, overflow, margin, and padding.",
@@ -18,5 +18,5 @@
     "Run: grep -A5 'focus.*not-sr-only\\|focus:not-sr-only' apps/frontend/index.html - should show focus CSS that resets sr-only"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Build succeeds cleanly. All 623 tests pass across 67 test files. No snapshot updates needed. The inline critical CSS now has .focus\\:not-sr-only:focus rule placed directly after .sr-only."
 }
