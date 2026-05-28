@@ -1,0 +1,42 @@
+{
+  "id": "FEAT-001",
+  "type": "docs",
+  "description": "Produce comprehensive HIDDEN_FUNCTIONALITY_AUDIT.md at project root cataloging 100+ hidden functionality issues across 15 audit categories with file paths, line numbers, severity ratings, code evidence, and recommended fixes.",
+  "status": "in_progress",
+  "steps": [
+    "Create HIDDEN_FUNCTIONALITY_AUDIT.md at project root with structured sections for each of the 15 audit categories",
+    "Document issues found in Authentication & Session Logic (auth.py, admin.py, edge jwt.ts)",
+    "Document issues found in Chat/AI Pipeline Logic (chat_service.py, ai/router.py, vertex_client.py, sarvam_client.py)",
+    "Document issues found in Payment & Subscription Logic (razorpay.py webhook, payments.py, subscription.py, razorpay_client.py)",
+    "Document issues found in User Model & Data Integrity (user.py, chat.py, content.py, knowledge.py, feedback.py)",
+    "Document issues found in Rate Limiting & Abuse Prevention (rate_limit.py, rate-limit.ts, core/rate_limiter.py)",
+    "Document issues found in Frontend State Management (AuthContext.jsx, useAuthRefresh.js, useTokenManager.js, api.jsx)",
+    "Document issues found in Content Rendering & Display (ChatPage.jsx, MarkdownRenderer.jsx)",
+    "Document issues found in Database Query Logic (mongo.py, azure_search.py, dead_letter.py)",
+    "Document issues found in Webhook & External Integration Logic (razorpay webhook, resend_client.py, cloudflare_client.py)",
+    "Document issues found in File Upload & Media Handling (chat.py image endpoint)",
+    "Document issues found in Cron Jobs & Background Tasks (dead_letter.py replay, fire-and-forget tasks)",
+    "Document issues found in API Response Contract Violations (comparing frontend api.jsx expectations vs backend responses)",
+    "Document issues found in Concurrency & Race Conditions (async handlers, read-modify-write patterns)",
+    "Document issues found in Environment & Configuration Logic (config.py)",
+    "Document issues found in Logging, Monitoring & Observability Gaps (logging_config.py, telemetry.py)",
+    "Each issue must include: issue number, title, file path with line number, severity (Critical/High/Medium/Low), code evidence snippet, explanation of the production bug, and recommended fix"
+  ],
+  "acceptance_criteria": [
+    "HIDDEN_FUNCTIONALITY_AUDIT.md exists at /projects/sandbox/-kalukaliya/HIDDEN_FUNCTIONALITY_AUDIT.md",
+    "Report contains at least 100 distinct issues",
+    "Each issue has severity classification (Critical/High/Medium/Low)",
+    "Each issue references specific file paths and line numbers",
+    "Each issue includes code evidence showing the problematic pattern",
+    "Each issue explains the real user-facing production impact",
+    "Each issue includes a recommended fix",
+    "Issues are organized into the 15 audit categories",
+    "Report includes an executive summary with issue count by severity"
+  ],
+  "verification": [
+    "Check file exists: ls /projects/sandbox/-kalukaliya/HIDDEN_FUNCTIONALITY_AUDIT.md",
+    "Count issues: grep -c '### HF-' /projects/sandbox/-kalukaliya/HIDDEN_FUNCTIONALITY_AUDIT.md should be >= 100"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
