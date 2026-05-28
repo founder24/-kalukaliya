@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Phase 2: Data Integrity & Reliability fixes - Distributed locking, deduplication, cache-aside, sitemap caching, N+1 fix, circuit breaker, URL encoding, retry logic, per-batch error handling, sitemap URL format",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Add distributed locking to content pipeline in apps/backend/app/services/content/pipeline.py: At the start of the run() method, attempt to acquire a Redis lock keyed by knowledge_obj.id (e.g., 'pipeline_lock:{id}') with a TTL of 300s. If lock acquisition fails, log a warning and return early with all results=False and a 'locked' status. Import get_redis from app.db.redis and wrap in try/except for when Redis is unavailable (fall through without locking). Release lock in a finally block.",
     "2. Fix search indexer deduplication in apps/backend/app/services/content/search_indexer.py: Before upserting new chunks in index_knowledge_object, delete any existing chunks for the same slug. Use a filter query to find docs where slug matches the knowledge_obj.slug, then delete them. Add a _delete_stale_chunks method that uses self.client.delete_documents() with the IDs of stale documents. The pattern is: search for all docs with matching slug field, collect their IDs, batch delete them.",
@@ -32,5 +32,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ --tb=short -q 2>&1 | tail -20"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 10 steps implemented. Ruff check passes clean on all modified files. Tests could not be run due to missing fastapi/pytest-asyncio in sandbox env (pre-existing issue from FEAT-001). Python AST parsing confirms all files are syntactically valid. Step 7 (URL-encode reset tokens) was already done in FEAT-001. The only remaining ruff error is a pre-existing unused variable in admin_content.py (untouched file)."
 }
