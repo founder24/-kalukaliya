@@ -11,7 +11,7 @@ import time
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
-from app.api.v1 import chat, auth, subscription, users, health, feedback, admin, edu, conversations
+from app.api.v1 import chat, auth, subscription, users, health, feedback, admin, edu, conversations, payments
 from app.api.v1 import (
     admin_dashboard,
     admin_users,
@@ -201,7 +201,11 @@ def create_app() -> FastAPI:
     app.include_router(
         subscription.router, prefix="/api/v1/subscription", tags=["Subscription"]
     )
+    app.include_router(
+        payments.router, prefix="/api/v1/payments", tags=["Payments"]
+    )
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
+    app.include_router(users.router, prefix="/api/v1/user", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["Health"])
     app.include_router(

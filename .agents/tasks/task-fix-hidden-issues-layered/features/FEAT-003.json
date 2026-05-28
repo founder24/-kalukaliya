@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "LAYER 3: Backend Route Aliases & Missing Core Endpoints - Add /user/onboarding, /user/credits, and /payments/* endpoints",
+  "status": "in_progress",
+  "steps": [
+    "1. In apps/backend/app/api/v1/users.py: Add a POST /onboarding endpoint. It should accept a JSON body with fields: language (str), grade (str, optional), board (str, optional). It saves these to the user document using user.update({'$set': {..., 'onboarding_done': True}}). Use Depends(get_current_user) for auth. Return {'status': 'ok'}.",
+    "2. In apps/backend/app/api/v1/users.py: Add a GET /credits endpoint. It returns the user's credit balance. The response should be {'credits': user.monthly_message_count, 'limit': settings.RATE_LIMIT_PRO_TIER if user.is_pro() else settings.RATE_LIMIT_FREE_TIER, 'tier': user.subscription_tier}. Import settings from app.config.",
+    "3. Create apps/backend/app/api/v1/payments.py with a new payments router. Implement these endpoints using the existing razorpay_client service: (a) POST /create-order - accepts {plan: str}, calls create_subscription_order(user), returns the order data. (b) POST /verify - accepts payment verification data {razorpay_payment_id, razorpay_subscription_id, razorpay_signature}, verifies HMAC signature, updates user subscription status. (c) POST /recover - checks for pending payments and returns status. (d) POST /credit-topup - creates a one-time Razorpay order for credits. (e) POST /credit-topup/verify - verifies credit topup payment and credits the user. (f) GET /history - returns payment history from the payments collection. (g) POST /refund-request - accepts {payment_id, reason}, stores refund request. All endpoints use Depends(get_current_user) for auth.",
+    "4. In apps/backend/app/main.py: Import the new payments module and register it: app.include_router(payments.router, prefix='/api/v1/payments', tags=['Payments']). Also add a legacy alias: app.include_router(users.router, prefix='/api/v1/user', tags=['Users']) so /user/onboarding and /user/credits work alongside /users/onboarding and /users/credits."
+  ],
+  "acceptance_criteria": [
+    "POST /api/v1/user/onboarding endpoint exists and saves preferences",
+    "GET /api/v1/user/credits endpoint exists and returns credit balance",
+    "All 7 payment endpoints exist under /api/v1/payments/",
+    "payments.py is registered in main.py",
+    "All files parse without Python syntax errors"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; ast.parse(open('apps/backend/app/api/v1/payments.py').read())\"",
+    "Run: python -c \"import ast; ast.parse(open('apps/backend/app/api/v1/users.py').read())\"",
+    "Run: python -c \"import ast; ast.parse(open('apps/backend/app/main.py').read())\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

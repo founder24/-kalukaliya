@@ -4,6 +4,7 @@ from typing import Optional
 import logging
 
 from app.models.user import User
+from app.config import settings
 from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -82,3 +83,36 @@ async def delete_account(user: User = Depends(get_current_user)):
 
     logger.info(f"User account deleted: {user.email}")
     return {"status": "success", "message": "Account deleted"}
+
+
+class OnboardingRequest(BaseModel):
+    language: Optional[str] = None
+    grade: Optional[str] = None
+    board: Optional[str] = None
+
+
+@router.post("/onboarding")
+async def save_onboarding(body: OnboardingRequest, user: User = Depends(get_current_user)):
+    """Save user onboarding preferences"""
+    updates = {"onboarding_done": True}
+    if body.language:
+        updates["preferred_language"] = body.language
+    if body.grade:
+        updates["grade"] = body.grade
+    if body.board:
+        updates["board"] = body.board
+
+    await user.update({"$set": updates})
+    return {"status": "ok", "message": "Onboarding saved"}
+
+
+@router.get("/credits")
+async def get_credits(user: User = Depends(get_current_user)):
+    """Get current credit balance"""
+    limit = settings.RATE_LIMIT_PRO_TIER if user.is_pro() else settings.RATE_LIMIT_FREE_TIER
+    return {
+        "credits": max(0, limit - user.monthly_message_count),
+        "used": user.monthly_message_count,
+        "limit": limit,
+        "tier": user.subscription_tier,
+    }
