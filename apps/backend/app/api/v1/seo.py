@@ -33,6 +33,7 @@ def _get_cached_sitemap(key: str) -> str | None:
 def _set_cached_sitemap(key: str, content: str) -> None:
     _sitemap_cache[key] = (time.time(), content)
 
+
 SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>

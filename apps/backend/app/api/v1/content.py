@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SAFE_PATH_RE = re.compile(r'^[a-z0-9-]+$')
+SAFE_PATH_RE = re.compile(r"^[a-z0-9-]+$")
 
 # Cache-Control for CDN: 60s stale-while-revalidate, 1 hour max
 ISR_CACHE_HEADER = "public, max-age=60, s-maxage=3600, stale-while-revalidate=3600"
@@ -41,7 +41,9 @@ async def render_chapter(
     chapter: str,
 ):
     """Render the default (notes) page for a chapter."""
-    _validate_path_params(board=board, class_level=class_level, subject=subject, chapter=chapter)
+    _validate_path_params(
+        board=board, class_level=class_level, subject=subject, chapter=chapter
+    )
     obj = await KnowledgeObject.find_one(
         {
             "metadata.board": board,
@@ -87,7 +89,9 @@ async def render_chapter_page_type(
     page_type: str,
 ):
     """Render a specific page type for a chapter."""
-    _validate_path_params(board=board, class_level=class_level, subject=subject, chapter=chapter)
+    _validate_path_params(
+        board=board, class_level=class_level, subject=subject, chapter=chapter
+    )
     if page_type not in PAGE_TYPES:
         raise HTTPException(
             status_code=400,

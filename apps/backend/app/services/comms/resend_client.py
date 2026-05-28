@@ -36,13 +36,14 @@ def _check_rate_limit(recipient: str) -> bool:
     _email_send_times[recipient].append(now)
     return True
 
+
 RESEND_API_URL = "https://api.resend.com/emails"
 
 UNSUBSCRIBE_FOOTER = (
     '<hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">'
     '<p style="font-size: 12px; color: #666;">If you no longer wish to receive '
     'emails from us, <a href="https://syrabit.ai/profile?unsubscribe=true">'
-    'unsubscribe here</a>.</p>'
+    "unsubscribe here</a>.</p>"
 )
 
 
@@ -153,7 +154,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
 
 async def send_password_reset_email(email: str, reset_token: str) -> bool:
     """Send password reset email."""
-    safe_token = url_quote(reset_token, safe='')
+    safe_token = url_quote(reset_token, safe="")
     reset_link = f"https://syrabit.ai/reset-password?token={safe_token}"
     email_html = f"""
     <h1>Password Reset Request</h1>

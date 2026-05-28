@@ -165,9 +165,25 @@ class ContentTranslator:
             translated_mcq = dict(mcq)
             tasks = []
             if "question" in mcq:
-                tasks.append(("question", self._translate_with_retry(TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ question]\n\n{mcq['question']}")))
+                tasks.append(
+                    (
+                        "question",
+                        self._translate_with_retry(
+                            TRANSLATION_SYSTEM_PROMPT,
+                            f"[Context: MCQ question]\n\n{mcq['question']}",
+                        ),
+                    )
+                )
             if "explanation" in mcq:
-                tasks.append(("explanation", self._translate_with_retry(TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ explanation]\n\n{mcq['explanation']}")))
+                tasks.append(
+                    (
+                        "explanation",
+                        self._translate_with_retry(
+                            TRANSLATION_SYSTEM_PROMPT,
+                            f"[Context: MCQ explanation]\n\n{mcq['explanation']}",
+                        ),
+                    )
+                )
 
             # Gather question + explanation
             if tasks:
@@ -177,15 +193,19 @@ class ContentTranslator:
 
             # Translate options in parallel
             if "options" in mcq and isinstance(mcq["options"], list):
-                translated_mcq["options"] = await asyncio.gather(*[
-                    self._translate_with_retry(TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ option]\n\n{opt}")
-                    for opt in mcq["options"]
-                ])
+                translated_mcq["options"] = await asyncio.gather(
+                    *[
+                        self._translate_with_retry(
+                            TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ option]\n\n{opt}"
+                        )
+                        for opt in mcq["options"]
+                    ]
+                )
             return translated_mcq
 
-        translated_mcqs = await asyncio.gather(*[
-            _translate_single_mcq(mcq) for mcq in generated.mcqs
-        ])
+        translated_mcqs = await asyncio.gather(
+            *[_translate_single_mcq(mcq) for mcq in generated.mcqs]
+        )
 
         # Translate definitions
         translated_definitions = []
