@@ -9,7 +9,6 @@ import hashlib
 import hmac
 import logging
 import time
-import time as _time
 import uuid
 
 from app.config import settings
@@ -197,7 +196,7 @@ def _verify_edge_hmac(request: Request, edge_secret: str) -> tuple[bool, str]:
     except (ValueError, TypeError):
         return False, ""
 
-    now = int(_time.time())
+    now = int(time.time())
     if abs(now - timestamp) > 30:
         logger.warning(f"Edge HMAC timestamp too old: {abs(now - timestamp)}s")
         return False, ""

@@ -9,12 +9,26 @@ from typing import Optional
 from datetime import datetime, timezone
 from bson import ObjectId
 import logging
+import re
 
 from app.models.user import User
 from app.models.chat import Chat
 from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
+
+_ANON_ID_PATTERN = re.compile(r'^anon_[a-f0-9]{32}$')
+
+
+def _validate_anon_id(anon_id: str) -> str:
+    """Validate the anonymous ID format (must match frontend's getAnonId pattern)."""
+    if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid anonymous identifier format"
+        )
+    return anon_id
+
 
 router = APIRouter(tags=["Conversations"])
 
@@ -73,9 +87,7 @@ async def list_anon_conversations(
     limit: int = 20,
 ):
     """List conversations for anonymous users (identified by x-anon-id header)."""
-    anon_id = request.headers.get("x-anon-id")
-    if not anon_id:
-        raise HTTPException(status_code=400, detail="x-anon-id header required")
+    anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
 
     limit = min(limit, 100)
 
@@ -116,9 +128,7 @@ async def get_anon_conversation(
     request: Request,
 ):
     """Get a single anonymous conversation by ID."""
-    anon_id = request.headers.get("x-anon-id")
-    if not anon_id:
-        raise HTTPException(status_code=400, detail="x-anon-id header required")
+    anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
 
     chat = await _find_chat_by_id(conversation_id)
     if not chat:
@@ -136,9 +146,7 @@ async def delete_anon_conversation(
     request: Request,
 ):
     """Delete an anonymous conversation."""
-    anon_id = request.headers.get("x-anon-id")
-    if not anon_id:
-        raise HTTPException(status_code=400, detail="x-anon-id header required")
+    anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
 
     chat = await _find_chat_by_id(conversation_id)
     if not chat:

@@ -137,7 +137,10 @@ async function decodeAndVerify(
   const signatureInput = encoder.encode(`${headerB64}.${payloadB64}`);
   const signature = base64UrlDecode(signatureB64);
 
-  if (alg === 'RS256' && publicKey) {
+  if (alg === 'RS256') {
+    if (!publicKey) {
+      throw new Error('RS256 token received but no public key configured');
+    }
     // RS256 verification using RSASSA-PKCS1-v1_5
     const key = await importRSAPublicKey(publicKey);
     const isValid = await crypto.subtle.verify(
@@ -149,8 +152,8 @@ async function decodeAndVerify(
     if (!isValid) {
       throw new Error('Invalid signature');
     }
-  } else if (alg === 'HS256' || (alg === 'RS256' && !publicKey)) {
-    // HS256 verification (or RS256 fallback when no public key is available)
+  } else if (alg === 'HS256') {
+    // HS256 verification
     const key = await crypto.subtle.importKey(
       'raw',
       encoder.encode(secret),
