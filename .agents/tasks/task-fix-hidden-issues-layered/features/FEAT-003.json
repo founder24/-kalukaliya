@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "LAYER 3: Backend Route Aliases & Missing Core Endpoints - Add /user/onboarding, /user/credits, and /payments/* endpoints",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In apps/backend/app/api/v1/users.py: Add a POST /onboarding endpoint. It should accept a JSON body with fields: language (str), grade (str, optional), board (str, optional). It saves these to the user document using user.update({'$set': {..., 'onboarding_done': True}}). Use Depends(get_current_user) for auth. Return {'status': 'ok'}.",
     "2. In apps/backend/app/api/v1/users.py: Add a GET /credits endpoint. It returns the user's credit balance. The response should be {'credits': user.monthly_message_count, 'limit': settings.RATE_LIMIT_PRO_TIER if user.is_pro() else settings.RATE_LIMIT_FREE_TIER, 'tier': user.subscription_tier}. Import settings from app.config.",
@@ -22,5 +22,5 @@
     "Run: python -c \"import ast; ast.parse(open('apps/backend/app/main.py').read())\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 3 files pass syntax validation. payments.py created with 7 endpoints (create-order, verify, recover, credit-topup, credit-topup/verify, history, refund-request). users.py updated with /onboarding and /credits endpoints. main.py registers payments router at /api/v1/payments and adds /api/v1/user alias for users router."
 }
