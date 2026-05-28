@@ -27,5 +27,5 @@
     "python3 -m py_compile /projects/sandbox/-kalukaliya/apps/backend/app/main.py"
   ],
   "blocked_reason": null,
-  "findings": "Implementation complete. All 7 endpoints created in conversations.py and router registered in main.py. Python compilation verification passed. FastAPI runtime import test not possible without pip-installed dependencies, but py_compile confirms no syntax errors. Route ordering ensures /anon and /anon/{id} are defined before /{conversation_id} to avoid FastAPI treating 'anon' as a path parameter."
+  "findings": "Implementation complete. All 7 endpoints created in conversations.py and router registered in main.py. Python compilation verification passed. FastAPI runtime import test not possible without pip-installed dependencies, but py_compile confirms no syntax errors. Route ordering ensures /anon and /anon/{id} are defined before /{conversation_id} to avoid FastAPI treating 'anon' as a path parameter. Post-review fix: added x-anon-id format validation (must match anon_[32 hex chars]) to prevent enumeration attacks."
 }

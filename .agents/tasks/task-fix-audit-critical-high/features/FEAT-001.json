@@ -21,5 +21,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit"
   ],
   "blocked_reason": null,
-  "findings": "TypeScript compiles cleanly with tsc --noEmit. pnpm install needed first for @cloudflare/workers-types. TypeScript 6.0.3 and wrangler 4.94.0 are available."
+  "findings": "TypeScript compiles cleanly with tsc --noEmit. pnpm install needed first for @cloudflare/workers-types. TypeScript 6.0.3 and wrangler 4.94.0 are available. Post-review fix: removed RS256->HS256 silent fallback (algorithm confusion vulnerability) - now rejects RS256 tokens when no public key is configured."
 }
