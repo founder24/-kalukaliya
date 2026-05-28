@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Phase 5: Address semantic review findings - OData injection, CI thresholds, StaffGuard redirect, unbounded dict growth, sitemap URL format",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Fix OData injection in _delete_stale_chunks (search_indexer.py): Validate slug matches ^[a-z0-9-]+$ before using in filter. If it doesn't match, skip deletion and log a warning.",
     "2. Fix CI deploy threshold in deploy-all.yml: Change from 0 back to 5. Update echo message to match.",
@@ -23,5 +23,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m ruff check app/services/content/search_indexer.py app/services/comms/resend_client.py app/services/content_publisher.py"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 6 review issues fixed. Ruff passes clean on all modified Python files. Changes are minimal and targeted."
 }
