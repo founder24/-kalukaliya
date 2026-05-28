@@ -67,8 +67,9 @@ async def handle_razorpay_webhook(request: Request):
         from app.db.redis import get_redis
 
         redis = get_redis()
-        exists = await redis.get(f"webhook_processed:{event_id}")
-        if exists:
+        # Atomic SET NX: returns True if key was set (new event), False if already exists
+        was_set = await redis.set(f"webhook_processed:{event_id}", "1", ex=604800, nx=True)
+        if not was_set:
             return {"status": "duplicate", "event_id": event_id}
     except HTTPException:
         raise
@@ -123,14 +124,5 @@ async def handle_razorpay_webhook(request: Request):
         if user:
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
-
-    # Mark event as processed for idempotency
-    try:
-        from app.db.redis import get_redis
-
-        redis = get_redis()
-        await redis.set(f"webhook_processed:{event_id}", "1", ex=604800)
-    except Exception as e:
-        logger.error(f"Redis unavailable for webhook idempotency storage: {e}")
 
     return {"status": "ok"}

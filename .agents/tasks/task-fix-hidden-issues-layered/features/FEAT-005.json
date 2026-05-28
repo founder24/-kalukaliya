@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "LAYER 5: Fix Critical Code Bugs - Fix HMAC verification in auth.py, admin session cookie path, and webhook race condition",
+  "status": "in_progress",
+  "steps": [
+    "1. In apps/backend/app/api/v1/auth.py around line 206: Fix the HMAC verification. The code uses `hmac.new()` which does NOT exist in Python's hmac module. The correct API is `hmac.HMAC()` (or the lower-level `hmac.new` which is actually just `hmac.HMAC`). Change `hmac.new(edge_secret.encode(), message.encode(), hashlib.sha256).hexdigest()` to `hmac.HMAC(edge_secret.encode(), message.encode(), hashlib.sha256).hexdigest()`. Also wrap the entire HMAC verification in a try/except block to prevent crashes on unexpected input.",
+    "2. In apps/backend/app/api/v1/admin.py: Change the cookie path from '/api/v1/admin' to '/api/v1'. This affects both set_cookie and delete_cookie calls. The admin cookie path '/api/v1/admin' is too restrictive - it prevents the cookie from being sent to /api/v1/seo and /api/v1/content routes that also require admin auth. Change path='/api/v1/admin' to path='/api/v1' in both the set_cookie (in admin_login) and delete_cookie (in admin_logout).",
+    "3. In apps/backend/app/api/webhooks/razorpay.py: Fix the webhook race condition. Currently the code does GET (check if exists) then SET (mark as processed) with a gap between them. Use atomic SET NX (set if not exists) instead. Replace the pattern: `exists = await redis.get(f'webhook_processed:{event_id}'); if exists: return duplicate` with: `was_set = await redis.set(f'webhook_processed:{event_id}', '1', ex=604800, nx=True); if not was_set: return duplicate`. Also remove the second redis.set call at the bottom of the function since we now set it atomically at the top."
+  ],
+  "acceptance_criteria": [
+    "auth.py uses hmac.HMAC() instead of hmac.new() for HMAC verification",
+    "auth.py HMAC verification is wrapped in try/except",
+    "admin.py cookie path is '/api/v1' in both set_cookie and delete_cookie",
+    "razorpay.py uses atomic SET NX for idempotency instead of GET-then-SET pattern"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; ast.parse(open('apps/backend/app/api/v1/auth.py').read())\"",
+    "Run: python -c \"import ast; ast.parse(open('apps/backend/app/api/v1/admin.py').read())\"",
+    "Run: python -c \"import ast; ast.parse(open('apps/backend/app/api/webhooks/razorpay.py').read())\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

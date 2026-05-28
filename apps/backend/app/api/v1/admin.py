@@ -127,7 +127,7 @@ async def admin_login(request: Request):
         secure=True,
         samesite="strict",
         max_age=28800,  # 8 hours
-        path="/api/v1/admin",
+        path="/api/v1",
     )
     return response
 
@@ -139,7 +139,7 @@ async def admin_logout(request: Request):
     response = JSONResponse({"status": "ok", "message": "Logged out"})
     response.delete_cookie(
         key="syrabit_admin_session",
-        path="/api/v1/admin",
+        path="/api/v1",
         secure=True,
         samesite="strict",
     )

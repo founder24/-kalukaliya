@@ -183,36 +183,39 @@ def _verify_edge_hmac(request: Request, edge_secret: str) -> tuple[bool, str]:
 
     Signature format: HMAC-SHA256(secret, "timestamp:user_id:path")
     """
-    signature = request.headers.get("X-Edge-Signature")
-    timestamp_str = request.headers.get("X-Edge-Timestamp")
-    user_id = request.headers.get("X-User-ID")
-
-    if not signature or not timestamp_str or not user_id:
-        return False, ""
-
-    # Reject stale requests (>30 seconds old)
     try:
-        timestamp = int(timestamp_str)
-    except (ValueError, TypeError):
+        signature = request.headers.get("X-Edge-Signature")
+        timestamp_str = request.headers.get("X-Edge-Timestamp")
+        user_id = request.headers.get("X-User-ID")
+
+        if not signature or not timestamp_str or not user_id:
+            return False, ""
+
+        # Reject stale requests (>30 seconds old)
+        try:
+            timestamp = int(timestamp_str)
+        except (ValueError, TypeError):
+            return False, ""
+
+        now = int(time.time())
+        if abs(now - timestamp) > 30:
+            logger.warning(f"Edge HMAC timestamp too old: {abs(now - timestamp)}s")
+            return False, ""
+
+        # Compute expected signature
+        message = f"{timestamp_str}:{user_id}:{request.url.path}"
+        expected = hmac.HMAC(
+            edge_secret.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected):
+            return False, ""
+
+        return True, user_id
+    except Exception:
         return False, ""
-
-    now = int(time.time())
-    if abs(now - timestamp) > 30:
-        logger.warning(f"Edge HMAC timestamp too old: {abs(now - timestamp)}s")
-        return False, ""
-
-    # Compute expected signature
-    message = f"{timestamp_str}:{user_id}:{request.url.path}"
-    expected = hmac.new(
-        edge_secret.encode(),
-        message.encode(),
-        hashlib.sha256
-    ).hexdigest()
-
-    if not hmac.compare_digest(signature, expected):
-        return False, ""
-
-    return True, user_id
 
 
 async def get_current_user(
