@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime, timezone
 import logging
 
 from app.models.user import User
@@ -82,3 +83,41 @@ async def delete_account(user: User = Depends(get_current_user)):
 
     logger.info(f"User account deleted: {user.email}")
     return {"status": "success", "message": "Account deleted"}
+
+
+@router.post("/onboarding")
+async def save_onboarding(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Save user onboarding preferences (language, grade, board)."""
+    body = await request.json()
+    update_data = {}
+    if "language" in body:
+        update_data["language"] = body["language"]
+    if "grade" in body:
+        update_data["grade"] = body["grade"]
+    if "board" in body:
+        update_data["board"] = body["board"]
+    if "stream" in body:
+        update_data["stream"] = body["stream"]
+    if update_data:
+        update_data["onboarding_complete"] = True
+        update_data["updated_at"] = datetime.now(timezone.utc)
+        await user.update({"$set": update_data})
+    return {"message": "Onboarding saved", "data": update_data}
+
+
+@router.get("/credits")
+async def get_credits(user: User = Depends(get_current_user)):
+    """Get current user credit balance and limits."""
+    tier = getattr(user, "subscription_tier", "free")
+    monthly_limit = 100 if tier == "free" else 1000
+    current_count = getattr(user, "monthly_message_count", 0)
+    return {
+        "credits_remaining": max(0, monthly_limit - current_count),
+        "credits_used": current_count,
+        "monthly_limit": monthly_limit,
+        "tier": tier,
+        "lifetime_messages": getattr(user, "total_lifetime_messages", 0),
+    }
