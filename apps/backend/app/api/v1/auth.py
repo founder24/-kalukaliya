@@ -204,9 +204,7 @@ def _verify_edge_hmac(request: Request, edge_secret: str) -> tuple[bool, str]:
     # Compute expected signature
     message = f"{timestamp_str}:{user_id}:{request.url.path}"
     expected = hmac.new(
-        edge_secret.encode(),
-        message.encode(),
-        hashlib.sha256
+        edge_secret.encode(), message.encode(), hashlib.sha256
     ).hexdigest()
 
     if not hmac.compare_digest(signature, expected):
@@ -233,7 +231,9 @@ async def get_current_user(
         user_id_header = request.headers.get("X-User-ID")
         if user_id_header and user_id_header != "anonymous":
             # Prefer HMAC signature verification (new secure path)
-            hmac_valid, hmac_user_id = _verify_edge_hmac(request, settings.EDGE_SHARED_SECRET)
+            hmac_valid, hmac_user_id = _verify_edge_hmac(
+                request, settings.EDGE_SHARED_SECRET
+            )
             if hmac_valid:
                 user = await User.get(hmac_user_id)
                 if not user:
@@ -328,7 +328,9 @@ async def get_current_user_optional(
             return None
 
         # Prefer HMAC signature verification (new secure path)
-        hmac_valid, hmac_user_id = _verify_edge_hmac(request, settings.EDGE_SHARED_SECRET)
+        hmac_valid, hmac_user_id = _verify_edge_hmac(
+            request, settings.EDGE_SHARED_SECRET
+        )
         if hmac_valid:
             user = await User.get(hmac_user_id)
             return user

@@ -17,15 +17,14 @@ from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
-_ANON_ID_PATTERN = re.compile(r'^anon_[a-f0-9]{32}$')
+_ANON_ID_PATTERN = re.compile(r"^anon_[a-f0-9]{32}$")
 
 
 def _validate_anon_id(anon_id: str) -> str:
     """Validate the anonymous ID format (must match frontend's getAnonId pattern)."""
     if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
         raise HTTPException(
-            status_code=400,
-            detail="Invalid anonymous identifier format"
+            status_code=400, detail="Invalid anonymous identifier format"
         )
     return anon_id
 

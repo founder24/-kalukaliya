@@ -11,7 +11,17 @@ import time
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.db.redis import init_redis, close_redis
-from app.api.v1 import chat, auth, subscription, users, health, feedback, admin, edu, conversations
+from app.api.v1 import (
+    chat,
+    auth,
+    subscription,
+    users,
+    health,
+    feedback,
+    admin,
+    edu,
+    conversations,
+)
 from app.api.v1 import (
     admin_dashboard,
     admin_users,
