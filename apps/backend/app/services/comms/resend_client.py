@@ -1,3 +1,4 @@
+import hashlib
 import html
 import httpx
 import logging
@@ -70,11 +71,16 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
 
     client = _get_client()
     try:
+        # Generate idempotency key to prevent duplicate sends
+        idempotency_input = f"{to}:{subject}:{int(_time.time() // 60)}"
+        idempotency_key = hashlib.sha256(idempotency_input.encode()).hexdigest()[:32]
+
         response = await client.post(
             RESEND_API_URL,
             headers={
                 "Authorization": f"Bearer {settings.RESEND_API_KEY}",
                 "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key,
             },
             json={
                 "from": f"{settings.RESEND_FROM_NAME} <{settings.RESEND_FROM_ADDRESS}>",
@@ -83,6 +89,7 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
                 "html": html_body,
                 "headers": {
                     "List-Unsubscribe": "<https://syrabit.ai/profile?unsubscribe=true>",
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
                 },
             },
         )

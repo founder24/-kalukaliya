@@ -17,7 +17,7 @@ const safeObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {}
 // same way as Cloudflare's own Overview tab. Falls back to a plain
 // localised string for values < 1,000 (where compact would just print
 // the same digits) so small counts like "108" or "11" stay legible.
-const _COMPACT_INT_FORMATTER = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 });
+const _COMPACT_INT_FORMATTER = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 });
 const formatCompactInt = (n) => {
   const num = Number(n) || 0;
   return num >= 1000 ? _COMPACT_INT_FORMATTER.format(num) : num.toLocaleString();
@@ -1118,7 +1118,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   ];
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-[1400px]">
+    <div className="p-4 md:p-6 space-y-5 max-w-[1400px]" role="main" aria-label="Admin Dashboard">
 
       {failedSections.length > 0 && (
         <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">

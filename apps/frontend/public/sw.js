@@ -37,7 +37,7 @@ const SW_BYPASS_PATTERNS = [
   /^\/\.well-known\//i,
 ];
 
-const API_CACHE_TTL = 3600 * 1000;
+const API_CACHE_TTL = 300 * 1000;
 const RUNTIME_CACHE_MAX = 200;
 const API_CACHE_MAX = 100;
 
@@ -113,7 +113,7 @@ self.addEventListener('fetch', (event) => {
   // the browser hit the network directly guarantees fresh HTML + fresh chunks.
   // Symptom this prevents: "login succeeds, then bounced back / page doesn't
   // load" caused by SW returning yesterday's index.html with dead chunk URLs.
-  if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+  if (url.pathname === '/admin' || url.pathname.startsWith('/admin/') || url.pathname === '/staff' || url.pathname.startsWith('/staff/')) {
     return;
   }
 

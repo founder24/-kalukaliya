@@ -11,6 +11,7 @@
   "background_color": "#ffffff",
   "theme_color": "#7c3aed",
   "lang": "en-IN",
+  "dir": "ltr",
   "categories": ["education", "productivity"],
   "launch_handler": {
     "client_mode": "navigate-existing"

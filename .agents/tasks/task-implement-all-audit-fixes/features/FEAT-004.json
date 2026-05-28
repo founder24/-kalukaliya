@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "fix",
   "description": "Phase 4: Accessibility & UX fixes - ARIA labels, locale formatter, List-Unsubscribe header, manifest lang, API cache TTL, SW admin bypass, offline.html color scheme, idempotency keys",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. Add ARIA labels to AdminDashboard.jsx interactive elements in apps/frontend/src/components/admin/AdminDashboard.jsx: Since the file is 5681 lines, add aria-label attributes to key interactive patterns. Specifically: (a) Add aria-label to the main dashboard container/section elements, (b) Add role='region' and aria-label to major card/widget wrappers that are identifiable in the first 50 lines or at component boundaries, (c) This is a targeted fix - not a full accessibility audit of 5681 lines.",
     "2. Fix number formatter locale in apps/frontend/src/components/admin/AdminDashboard.jsx: Change line 22 from new Intl.NumberFormat('en', ...) to use undefined (which defaults to user's locale) or use navigator.language. Change to: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).",
