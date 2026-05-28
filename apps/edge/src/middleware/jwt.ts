@@ -36,6 +36,7 @@ const PUBLIC_PATHS = [
   '/api/v1/admin/login',
   '/api/v1/admin/logout',
   '/api/webhooks',
+  '/api/v1/content',
 ];
 
 /**
@@ -45,6 +46,8 @@ const PUBLIC_PATHS = [
 const OPTIONAL_AUTH_PATHS = [
   '/api/v1/chat',
   '/api/v1/ai/chat',
+  '/api/v1/conversations/anon',
+  '/api/v1/edu',
 ];
 
 /**

@@ -37,11 +37,13 @@ from app.api.v1 import (
     admin_knowledge,
     admin_translate,
     admin_dead_letters,
+    admin_security,
     seo,
     indexnow,
     content,
     public_content,
     changelog,
+    payments,
 )
 from app.api.webhooks import razorpay
 
@@ -270,6 +272,11 @@ def create_app() -> FastAPI:
         tags=["Admin Dead Letters"],
     )
     app.include_router(changelog.router, prefix="/api/v1", tags=["Changelog"])
+    app.include_router(payments.router, prefix="/api/v1/payments", tags=["Payments"])
+    app.include_router(
+        admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
+    )
+    app.include_router(users.router, prefix="/api/v1/user", tags=["Users"])
 
     # Legacy health probe redirects for backward compatibility.
     # The canonical health endpoint is /health (registered via health.router).
