@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "SEC-001 (CRITICAL): Add RS256 JWT support to Edge worker. The backend can sign tokens with RS256 (when JWT_PRIVATE_KEY is set) but the edge worker only supports HS256 verification. Add RS256 verification using Web Crypto RSASSA-PKCS1-v1_5 algorithm, making the algorithm configurable via an environment variable (JWT_ALGORITHM). Also fix CFG-001/DEPLOY-005: Add AZURE_BACKEND_URL production placeholder in wrangler.toml and add startup validation in the edge worker rejecting localhost URLs in production.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Update apps/edge/src/env.d.ts: Add optional JWT_ALGORITHM field (string, 'HS256' | 'RS256'), and optional JWT_PUBLIC_KEY field (string, PEM-encoded RSA public key for RS256 verification).",
     "2. Rewrite apps/edge/src/middleware/jwt.ts: In the decodeAndVerify function, detect the algorithm from the JWT header's 'alg' field. If alg is 'RS256', use crypto.subtle.importKey with 'spki' format and RSASSA-PKCS1-v1_5 algorithm to verify. If alg is 'HS256', keep the existing HMAC verification. Accept both jwtSecret (for HS256) and jwtPublicKey (for RS256) as parameters. Update the verifyJWT function signature to accept an env-like object or both keys.",
@@ -21,5 +21,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "TypeScript compiles cleanly with tsc --noEmit. pnpm install needed first for @cloudflare/workers-types. TypeScript 6.0.3 and wrangler 4.94.0 are available."
 }
