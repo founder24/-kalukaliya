@@ -6,8 +6,6 @@ Site-wide settings management.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
-from typing import Optional
 import logging
 
 from app.api.v1.admin import _validate_admin_session, _csrf_check

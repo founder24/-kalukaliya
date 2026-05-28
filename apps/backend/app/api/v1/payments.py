@@ -46,7 +46,9 @@ class RefundRequest(BaseModel):
 
 
 @router.post("/create-order")
-async def create_order(body: CreateOrderRequest, user: User = Depends(get_current_user)):
+async def create_order(
+    body: CreateOrderRequest, user: User = Depends(get_current_user)
+):
     """Create a Razorpay order for plan upgrade."""
     import razorpay
 
@@ -58,19 +60,25 @@ async def create_order(body: CreateOrderRequest, user: User = Depends(get_curren
     if not amount:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
-    client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-    order = client.order.create({
-        "amount": amount,
-        "currency": "INR",
-        "receipt": f"user_{user.id}_{body.plan}",
-        "notes": {"user_id": str(user.id), "plan": body.plan},
-    })
+    client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
+    order = client.order.create(
+        {
+            "amount": amount,
+            "currency": "INR",
+            "receipt": f"user_{user.id}_{body.plan}",
+            "notes": {"user_id": str(user.id), "plan": body.plan},
+        }
+    )
 
     return {"order_id": order["id"], "amount": amount, "currency": "INR"}
 
 
 @router.post("/verify")
-async def verify_payment(body: VerifyPaymentRequest, user: User = Depends(get_current_user)):
+async def verify_payment(
+    body: VerifyPaymentRequest, user: User = Depends(get_current_user)
+):
     """Verify Razorpay payment signature and upgrade user to pro."""
     if not settings.RAZORPAY_KEY_SECRET:
         raise HTTPException(status_code=503, detail="Payment service not configured")
@@ -85,12 +93,14 @@ async def verify_payment(body: VerifyPaymentRequest, user: User = Depends(get_cu
     if not hmac.compare_digest(expected, body.razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
-    await user.update({
-        "$set": {
-            "subscription_tier": "pro",
-            "subscription_status": "active",
+    await user.update(
+        {
+            "$set": {
+                "subscription_tier": "pro",
+                "subscription_status": "active",
+            }
         }
-    })
+    )
 
     logger.info("Payment verified, user upgraded", extra={"user_id": str(user.id)})
     return {"status": "success", "message": "Payment verified, plan upgraded to pro"}
@@ -103,7 +113,9 @@ async def recover_payment(user: User = Depends(get_current_user)):
 
 
 @router.post("/credit-topup")
-async def create_credit_topup(body: CreditTopUpRequest, user: User = Depends(get_current_user)):
+async def create_credit_topup(
+    body: CreditTopUpRequest, user: User = Depends(get_current_user)
+):
     """Create a Razorpay order for credit top-up."""
     import razorpay
 
@@ -112,19 +124,34 @@ async def create_credit_topup(body: CreditTopUpRequest, user: User = Depends(get
 
     amount = body.credits * 100  # 1 credit = 1 INR
 
-    client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-    order = client.order.create({
+    client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
+    order = client.order.create(
+        {
+            "amount": amount,
+            "currency": "INR",
+            "receipt": f"credit_{user.id}_{body.credits}",
+            "notes": {
+                "user_id": str(user.id),
+                "credits": str(body.credits),
+                "type": "credit_topup",
+            },
+        }
+    )
+
+    return {
+        "order_id": order["id"],
         "amount": amount,
         "currency": "INR",
-        "receipt": f"credit_{user.id}_{body.credits}",
-        "notes": {"user_id": str(user.id), "credits": str(body.credits), "type": "credit_topup"},
-    })
-
-    return {"order_id": order["id"], "amount": amount, "currency": "INR", "credits": body.credits}
+        "credits": body.credits,
+    }
 
 
 @router.post("/credit-topup/verify")
-async def verify_credit_topup(body: CreditTopUpVerifyRequest, user: User = Depends(get_current_user)):
+async def verify_credit_topup(
+    body: CreditTopUpVerifyRequest, user: User = Depends(get_current_user)
+):
     """Verify credit top-up payment and grant credits with idempotency."""
     if not settings.RAZORPAY_KEY_SECRET:
         raise HTTPException(status_code=503, detail="Payment service not configured")
@@ -147,15 +174,22 @@ async def verify_credit_topup(body: CreditTopUpVerifyRequest, user: User = Depen
         dedup_key = f"credit_topup:{body.razorpay_order_id}"
         was_new = await redis.set(dedup_key, "1", ex=604800, nx=True)
         if not was_new:
-            return {"status": "already_processed", "message": "Credits already granted for this order"}
+            return {
+                "status": "already_processed",
+                "message": "Credits already granted for this order",
+            }
     except Exception as e:
-        logger.error("Redis unavailable for credit topup idempotency", extra={"error": str(e)})
+        logger.error(
+            "Redis unavailable for credit topup idempotency", extra={"error": str(e)}
+        )
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     # Fetch order to get credits from notes
     import razorpay
 
-    client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+    client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
     order = client.order.fetch(body.razorpay_order_id)
     credits = int(order.get("notes", {}).get("credits", 0))
 
@@ -178,9 +212,11 @@ async def payment_history(user: User = Depends(get_current_user)):
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        payments = await db.payments.find(
-            {"user_id": str(user.id)}
-        ).sort("created_at", -1).to_list(50)
+        payments = (
+            await db.payments.find({"user_id": str(user.id)})
+            .sort("created_at", -1)
+            .to_list(50)
+        )
 
         for p in payments:
             p["_id"] = str(p["_id"])
@@ -200,15 +236,20 @@ async def refund_request(body: RefundRequest, user: User = Depends(get_current_u
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        await db.refund_requests.insert_one({
-            "user_id": str(user.id),
-            "payment_id": body.payment_id,
-            "reason": body.reason,
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc),
-        })
+        await db.refund_requests.insert_one(
+            {
+                "user_id": str(user.id),
+                "payment_id": body.payment_id,
+                "reason": body.reason,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
 
-        logger.info("Refund request submitted", extra={"user_id": str(user.id), "payment_id": body.payment_id})
+        logger.info(
+            "Refund request submitted",
+            extra={"user_id": str(user.id), "payment_id": body.payment_id},
+        )
         return {"status": "submitted", "message": "Refund request received"}
     except Exception as e:
         logger.error("Failed to submit refund request", extra={"error": str(e)})

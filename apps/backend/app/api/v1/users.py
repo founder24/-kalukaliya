@@ -92,7 +92,9 @@ async def delete_account(user: User = Depends(get_current_user)):
 
 
 @router.post("/onboarding")
-async def save_onboarding(body: OnboardingRequest, user: User = Depends(get_current_user)):
+async def save_onboarding(
+    body: OnboardingRequest, user: User = Depends(get_current_user)
+):
     """Save user onboarding preferences (language, grade, board, stream)."""
     updates = {}
     if body.language:

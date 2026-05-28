@@ -3,7 +3,7 @@ Admin Security Endpoints
 Bot detection, IP blocking, and security monitoring stubs.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Optional
 import logging
@@ -50,7 +50,9 @@ async def get_block_trends(request: Request):
 async def block_ip(body: BlockIpRequest, request: Request):
     """Block an IP hash."""
     _validate_admin_session(request)
-    logger.info("IP block requested", extra={"ip_hash": body.ip_hash, "reason": body.reason})
+    logger.info(
+        "IP block requested", extra={"ip_hash": body.ip_hash, "reason": body.reason}
+    )
     return {"status": "ok", "message": "IP blocked", "ip_hash": body.ip_hash}
 
 

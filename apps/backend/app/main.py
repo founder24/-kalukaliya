@@ -272,9 +272,7 @@ def create_app() -> FastAPI:
         tags=["Admin Dead Letters"],
     )
     app.include_router(changelog.router, prefix="/api/v1", tags=["Changelog"])
-    app.include_router(
-        payments.router, prefix="/api/v1/payments", tags=["Payments"]
-    )
+    app.include_router(payments.router, prefix="/api/v1/payments", tags=["Payments"])
     app.include_router(
         admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
     )
