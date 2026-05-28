@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "LAYER 2: Frontend URL Path Fixes - Fix broken API paths in frontend that call wrong backend routes",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In apps/frontend/src/hooks/useTTS.jsx: Change the fetch URL from `${API_BASE}/voice/tts` to `${API_BASE}/chat/tts`. The backend TTS endpoint is registered at /api/v1/chat/tts (on the chat router).",
     "2. In apps/frontend/src/utils/api.jsx: Change all 3 chat-feedback references from '/chat-feedback' to '/chat/feedback'. Specifically: (a) postChatFeedback uses '/chat-feedback' -> change to '/chat/feedback', (b) adminGetChatFeedback uses '/chat-feedback?limit=...' -> change to '/chat/feedback?limit=...', (c) adminGetFeedbackStats uses '/chat-feedback/stats' -> change to '/chat/feedback/stats'.",
@@ -21,5 +21,5 @@
     "Grep for 'unacknowledged-count' in frontend - should find 0 results"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 6 changes applied successfully. Verification confirmed no remaining references to the old paths in frontend code. A comment in SyraAssistant.jsx still mentions 'unacknowledged-count' as documentation text but it does not affect any API call."
 }
