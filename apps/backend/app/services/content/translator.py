@@ -31,6 +31,23 @@ CHUNK_WORD_LIMIT = 800
 class ContentTranslator:
     """Translates English KnowledgeObjects to Assamese using Sarvam AI."""
 
+    async def _translate_with_retry(
+        self, system_prompt: str, user_message: str, max_retries: int = 3
+    ) -> str:
+        """Translate with exponential backoff retry."""
+        for attempt in range(max_retries):
+            try:
+                return await sarvam_client.generate(system_prompt, user_message)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                wait_time = 2**attempt  # 1s, 2s, 4s
+                logger.warning(
+                    f"Translation attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s..."
+                )
+                await asyncio.sleep(wait_time)
+        raise RuntimeError("Translation failed after all retries")  # unreachable
+
     async def translate_text(self, text: str, context: str = "") -> str:
         """
         Translate a single text block from English to Assamese.
@@ -44,7 +61,9 @@ class ContentTranslator:
             user_message = text
             if context:
                 user_message = f"[Context: {context}]\n\n{text}"
-            return await sarvam_client.generate(TRANSLATION_SYSTEM_PROMPT, user_message)
+            return await self._translate_with_retry(
+                TRANSLATION_SYSTEM_PROMPT, user_message
+            )
 
         # Chunk long content at paragraph boundaries
         chunks = self._chunk_text(text, CHUNK_WORD_LIMIT)
@@ -53,7 +72,7 @@ class ContentTranslator:
             user_message = chunk
             if context:
                 user_message = f"[Context: {context}]\n\n{chunk}"
-            translated = await sarvam_client.generate(
+            translated = await self._translate_with_retry(
                 TRANSLATION_SYSTEM_PROMPT, user_message
             )
             translated_chunks.append(translated)

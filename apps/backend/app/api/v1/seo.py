@@ -4,6 +4,7 @@ Queries KnowledgeObject collection for dynamic sitemap generation.
 """
 
 import logging
+import time
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -16,6 +17,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 BASE_URL = "https://syrabit.ai"
+
+_sitemap_cache: dict[str, tuple[float, str]] = {}
+SITEMAP_CACHE_TTL = 600  # 10 minutes
+
+
+def _get_cached_sitemap(key: str) -> str | None:
+    if key in _sitemap_cache:
+        ts, content = _sitemap_cache[key]
+        if time.time() - ts < SITEMAP_CACHE_TTL:
+            return content
+    return None
+
+
+def _set_cached_sitemap(key: str, content: str) -> None:
+    _sitemap_cache[key] = (time.time(), content)
 
 SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -74,6 +90,10 @@ async def sitemap_static():
 @router.get("/sitemap-subjects.xml")
 async def sitemap_subjects():
     """Generate subjects sitemap from published knowledge objects."""
+    cached = _get_cached_sitemap("subjects")
+    if cached:
+        return Response(content=cached, media_type="application/xml")
+
     try:
         # Use aggregation to get distinct board/class/subject combinations
         pipeline = [
@@ -112,6 +132,7 @@ async def sitemap_subjects():
             + "\n".join(urls)
             + "\n</urlset>"
         )
+        _set_cached_sitemap("subjects", xml_content)
         return Response(content=xml_content, media_type="application/xml")
 
     except Exception as e:
@@ -128,6 +149,10 @@ async def sitemap_subjects():
 @router.get("/sitemap-chapters.xml")
 async def sitemap_chapters():
     """Generate chapters sitemap from published knowledge objects with deduplication."""
+    cached = _get_cached_sitemap("chapters")
+    if cached:
+        return Response(content=cached, media_type="application/xml")
+
     try:
         # Fetch published objects with only the fields we need
         objects = (
@@ -181,6 +206,7 @@ async def sitemap_chapters():
             + "\n".join(urls)
             + "\n</urlset>"
         )
+        _set_cached_sitemap("chapters", xml_content)
         return Response(content=xml_content, media_type="application/xml")
 
     except Exception as e:

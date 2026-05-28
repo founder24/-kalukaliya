@@ -59,6 +59,14 @@ async def render_chapter(
         html = obj.rendered_html["notes"]
     else:
         html = content_renderer.render(obj, "notes")
+        # Cache-aside: persist rendered HTML for future requests
+        try:
+            if obj.rendered_html is None:
+                obj.rendered_html = {}
+            obj.rendered_html["notes"] = html
+            await obj.save()
+        except Exception as e:
+            logger.warning(f"Failed to cache rendered HTML: {e}")
 
     return HTMLResponse(
         content=html,
@@ -103,6 +111,14 @@ async def render_chapter_page_type(
         html = obj.rendered_html[page_type]
     else:
         html = content_renderer.render(obj, page_type)
+        # Cache-aside: persist rendered HTML for future requests
+        try:
+            if obj.rendered_html is None:
+                obj.rendered_html = {}
+            obj.rendered_html[page_type] = html
+            await obj.save()
+        except Exception as e:
+            logger.warning(f"Failed to cache rendered HTML: {e}")
 
     return HTMLResponse(
         content=html,

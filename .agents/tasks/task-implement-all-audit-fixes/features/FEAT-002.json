@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Phase 2: Data Integrity & Reliability fixes - Distributed locking, deduplication, cache-aside, sitemap caching, N+1 fix, circuit breaker, URL encoding, retry logic, per-batch error handling, sitemap URL format",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. Add distributed locking to content pipeline in apps/backend/app/services/content/pipeline.py: At the start of the run() method, attempt to acquire a Redis lock keyed by knowledge_obj.id (e.g., 'pipeline_lock:{id}') with a TTL of 300s. If lock acquisition fails, log a warning and return early with all results=False and a 'locked' status. Import get_redis from app.db.redis and wrap in try/except for when Redis is unavailable (fall through without locking). Release lock in a finally block.",
     "2. Fix search indexer deduplication in apps/backend/app/services/content/search_indexer.py: Before upserting new chunks in index_knowledge_object, delete any existing chunks for the same slug. Use a filter query to find docs where slug matches the knowledge_obj.slug, then delete them. Add a _delete_stale_chunks method that uses self.client.delete_documents() with the IDs of stale documents. The pattern is: search for all docs with matching slug field, collect their IDs, batch delete them.",

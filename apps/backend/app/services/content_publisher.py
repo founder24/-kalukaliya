@@ -130,7 +130,7 @@ class ContentPublisherService:
         for ch in chapters:
             url_el = ET.SubElement(urlset, "url")
             loc = ET.SubElement(url_el, "loc")
-            loc.text = f"https://syrabit.ai/{ch.slug}"
+            loc.text = f"https://syrabit.ai/{ch.slug}/notes"
             lastmod = ET.SubElement(url_el, "lastmod")
             lastmod.text = ch.updated_at.strftime("%Y-%m-%d")
             priority = ET.SubElement(url_el, "priority")

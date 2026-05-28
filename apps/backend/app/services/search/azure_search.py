@@ -1,4 +1,5 @@
 import asyncio
+import time as _time
 from typing import Optional
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
@@ -19,6 +20,41 @@ logger = logging.getLogger(__name__)
 VALID_USER_TIERS = {"free", "pro"}
 
 
+class _CircuitBreaker:
+    """Simple circuit breaker for Azure Search calls."""
+
+    def __init__(self, failure_threshold=5, recovery_timeout=30):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_failure_time = 0.0
+        self.state = "closed"  # closed, open, half_open
+
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = _time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.state = "open"
+            logger.warning(
+                f"Circuit breaker OPENED after {self.failure_count} failures"
+            )
+
+    def record_success(self):
+        self.failure_count = 0
+        self.state = "closed"
+
+    def allow_request(self) -> bool:
+        if self.state == "closed":
+            return True
+        if self.state == "open":
+            if _time.time() - self.last_failure_time > self.recovery_timeout:
+                self.state = "half_open"
+                return True
+            return False
+        # half_open
+        return True
+
+
 class AzureSearchService:
     """
     Azure Cognitive Search Service - Hybrid Search with Semantic Reranking
@@ -33,6 +69,7 @@ class AzureSearchService:
 
     def __init__(self):
         self.client = None
+        self._circuit_breaker = _CircuitBreaker()
         if settings.AZURE_SEARCH_ENDPOINT and settings.AZURE_SEARCH_QUERY_KEY:
             self.client = SearchClient(
                 endpoint=settings.AZURE_SEARCH_ENDPOINT,
@@ -147,6 +184,11 @@ class AzureSearchService:
                 logger.debug(f"Search cache unavailable: {e}")
 
         try:
+            # Circuit breaker check
+            if not self._circuit_breaker.allow_request():
+                logger.warning("Circuit breaker OPEN - returning empty results")
+                return []
+
             # 1. Define Vector Query using built-in vectorization
             vector_query = VectorizableTextQuery(
                 text=text,
@@ -226,9 +268,11 @@ class AzureSearchService:
                 except (RuntimeError, Exception) as e:
                     logger.debug(f"Failed to cache search results: {e}")
 
+            self._circuit_breaker.record_success()
             return context_chunks
 
         except Exception as e:
+            self._circuit_breaker.record_failure()
             logger.error(f"Azure Search failed completely: {str(e)}")
             logger.warning("search_context returned empty due to error")
             # Return empty list instead of raising to allow graceful degradation
