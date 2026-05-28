@@ -345,16 +345,16 @@ export function AppRoutes() {
       <Route path="/:board/:classSlug/:subjectSlug" element={<SubjectLandingPage />} />
 
       {/* ── Protected routes (require login) ── */}
-      <Route path="/chat"              element={<ChatPage />} />
-      <Route path="/read"              element={<BrowsePage />} />
-      <Route path="/history"           element={<HistoryPage />} />
-      <Route path="/profile"           element={<ProfilePage />} />
-      <Route path="/profile/memories"  element={<MyMemoriesPage />} />
+      <Route path="/chat"              element={<AuthGuard><ChatPage /></AuthGuard>} />
+      <Route path="/read"              element={<AuthGuard><BrowsePage /></AuthGuard>} />
+      <Route path="/history"           element={<AuthGuard><HistoryPage /></AuthGuard>} />
+      <Route path="/profile"           element={<AuthGuard><ProfilePage /></AuthGuard>} />
+      <Route path="/profile/memories"  element={<AuthGuard><MyMemoriesPage /></AuthGuard>} />
 
       {/* ── Educational Browser Phase 3 — study tools ── */}
-      <Route path="/notebook"          element={<NotebookPage />} />
-      <Route path="/flashcards"        element={<FlashcardsPage />} />
-      <Route path="/guardian"          element={<GuardianPage />} />
+      <Route path="/notebook"          element={<AuthGuard><NotebookPage /></AuthGuard>} />
+      <Route path="/flashcards"        element={<AuthGuard><FlashcardsPage /></AuthGuard>} />
+      <Route path="/guardian"          element={<AuthGuard><GuardianPage /></AuthGuard>} />
 
       {/* ── Test-only harness for the Phase-3 study e2e suite (Task #594).
             Gated on `import.meta.env.DEV` so it ships only in the dev

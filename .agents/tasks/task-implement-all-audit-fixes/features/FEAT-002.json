@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Phase 2: Data Integrity & Reliability fixes - Distributed locking, deduplication, cache-aside, sitemap caching, N+1 fix, circuit breaker, URL encoding, retry logic, per-batch error handling, sitemap URL format",
+  "status": "pending",
+  "steps": [
+    "1. Add distributed locking to content pipeline in apps/backend/app/services/content/pipeline.py: At the start of the run() method, attempt to acquire a Redis lock keyed by knowledge_obj.id (e.g., 'pipeline_lock:{id}') with a TTL of 300s. If lock acquisition fails, log a warning and return early with all results=False and a 'locked' status. Import get_redis from app.db.redis and wrap in try/except for when Redis is unavailable (fall through without locking). Release lock in a finally block.",
+    "2. Fix search indexer deduplication in apps/backend/app/services/content/search_indexer.py: Before upserting new chunks in index_knowledge_object, delete any existing chunks for the same slug. Use a filter query to find docs where slug matches the knowledge_obj.slug, then delete them. Add a _delete_stale_chunks method that uses self.client.delete_documents() with the IDs of stale documents. The pattern is: search for all docs with matching slug field, collect their IDs, batch delete them.",
+    "3. Add cache-aside pattern to content delivery in apps/backend/app/api/v1/content.py: In both render_chapter and render_chapter_page_type, when the rendered_html cache misses (else branch), after rendering via content_renderer.render(), write the result back to obj.rendered_html[page_type] and save the object (await obj.save()). This ensures subsequent requests hit the cache. Wrap the save in try/except so rendering still works if save fails.",
+    "4. Add sitemap caching in apps/backend/app/api/v1/seo.py: Add an in-memory cache (module-level dict) with TTL for the sitemap_subjects and sitemap_chapters endpoints. Use a simple pattern: store (timestamp, content) tuple. If cached content is less than 600 seconds old, return it directly. Otherwise regenerate and cache.",
+    "5. Fix N+1 query in apps/backend/app/api/v1/admin_seo.py: In the seo_pipeline_status endpoint, replace the loop that queries chapters per subject with a single aggregation pipeline that groups chapters by subject_id and computes counts for each status. Then match against subjects list.",
+    "6. Add circuit breaker to Azure Search in apps/backend/app/services/search/azure_search.py: Add a simple circuit breaker class (or inline state) with: failure_count, last_failure_time, state (closed/open/half_open). If failure_count > 5 within 60 seconds, circuit opens. In open state, return [] immediately for 30 seconds. After 30s, allow one request (half_open). On success, reset. On failure, re-open.",
+    "7. URL-encode password reset tokens in apps/backend/app/services/comms/resend_client.py: In send_password_reset_email, URL-encode the reset_token using urllib.parse.quote(reset_token, safe='') before inserting it into the reset link URL. (This may already be partially done in FEAT-001 step 3 - ensure it is fully correct.)",
+    "8. Add retry logic with exponential backoff to translator in apps/backend/app/services/content/translator.py: In the translate_text method, wrap the sarvam_client.generate() call in a retry loop (max 3 attempts) with exponential backoff (1s, 2s, 4s). Catch Exception, log warning on retry, re-raise on final failure.",
+    "9. Add per-batch error handling in apps/backend/app/services/content/search_indexer.py: In the batch upload loop in index_knowledge_object, wrap each batch's upload_documents call in try/except. Log failed batches but continue with remaining batches. Track success/failure counts and return True only if at least one batch succeeded.",
+    "10. Fix sitemap URL format in apps/backend/app/services/content_publisher.py: In regenerate_sitemap(), change the URL format from 'https://syrabit.ai/{ch.slug}' to 'https://syrabit.ai/{board}/{class_level}/{subject}/{chapter}/notes' using the chapter's metadata fields (if available). If the chapter doesn't have those fields, fall back to the slug-based URL pattern."
+  ],
+  "acceptance_criteria": [
+    "Pipeline run() acquires and releases a Redis lock (gracefully degrades if Redis unavailable)",
+    "Search indexer deletes stale chunks before re-indexing a knowledge object",
+    "Content delivery writes rendered HTML back to the KnowledgeObject on cache miss",
+    "Sitemap endpoints cache results for ~10 minutes before regenerating",
+    "seo_pipeline_status uses aggregation instead of N+1 per-subject queries",
+    "Azure Search returns [] immediately when circuit is open (after 5+ consecutive failures)",
+    "Reset tokens are URL-encoded in the password reset email link",
+    "Translator retries up to 3 times with exponential backoff on failure",
+    "Search indexer continues processing remaining batches after one batch fails",
+    "Sitemap URLs use the full path format with board/class/subject/chapter"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m ruff check app/services/content/pipeline.py app/services/content/search_indexer.py app/api/v1/content.py app/api/v1/seo.py app/api/v1/admin_seo.py app/services/search/azure_search.py app/services/comms/resend_client.py app/services/content/translator.py app/services/content_publisher.py",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ --tb=short -q 2>&1 | tail -20"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -16,6 +16,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+VALID_USER_TIERS = {"free", "pro"}
+
 
 class AzureSearchService:
     """
@@ -62,7 +64,11 @@ class AzureSearchService:
         semantic: bool,
     ):
         """Async search using the native async client with timeout."""
-        filter_expr = f"tier_access eq '{user_tier}'" if user_tier else None
+        if user_tier and user_tier not in VALID_USER_TIERS:
+            logger.warning(f"Invalid user_tier value rejected: {user_tier}")
+            filter_expr = None
+        else:
+            filter_expr = f"tier_access eq '{user_tier}'" if user_tier else None
         if semantic:
             kwargs = {
                 "search_text": query,

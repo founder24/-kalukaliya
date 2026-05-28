@@ -27,7 +27,7 @@ export async function handleISR(
     }
 
     const url = new URL(request.url);
-    const cacheKey = url.pathname;
+    const cacheKey = url.pathname + url.search;
 
     // Check KV cache
     const cached = await env.ISR_CACHE_KV.get(cacheKey);
@@ -63,6 +63,10 @@ export async function handleISR(
           env.ISR_CACHE_KV.put(cacheKey, html, { expirationTtl: 3600 }),
         );
 
+        // Intentionally construct the Response with only explicitly listed
+        // headers (Content-Type, X-ISR-Cache). This ensures Set-Cookie and
+        // other sensitive headers from the backend response are never
+        // forwarded to the client or persisted in cache.
         return new Response(html, {
           status: 200,
           headers: {

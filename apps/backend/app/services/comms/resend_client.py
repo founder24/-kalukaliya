@@ -1,6 +1,8 @@
+import html
 import httpx
 import logging
 from typing import Optional
+from urllib.parse import quote as url_quote
 
 from app.config import settings
 
@@ -9,6 +11,13 @@ logger = logging.getLogger(__name__)
 _http_client: Optional[httpx.AsyncClient] = None
 
 RESEND_API_URL = "https://api.resend.com/emails"
+
+UNSUBSCRIBE_FOOTER = (
+    '<hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">'
+    '<p style="font-size: 12px; color: #666;">If you no longer wish to receive '
+    'emails from us, <a href="https://syrabit.ai/profile?unsubscribe=true">'
+    'unsubscribe here</a>.</p>'
+)
 
 
 def _get_client() -> httpx.AsyncClient:
@@ -27,7 +36,7 @@ async def close_resend_client():
         _http_client = None
 
 
-async def _send_email(to: str, subject: str, html: str) -> bool:
+async def _send_email(to: str, subject: str, html_body: str) -> bool:
     """Send an email via Resend API using async httpx."""
     if not settings.RESEND_API_KEY:
         logger.warning("RESEND_API_KEY not set - email sending disabled")
@@ -45,7 +54,10 @@ async def _send_email(to: str, subject: str, html: str) -> bool:
                 "from": f"{settings.RESEND_FROM_NAME} <{settings.RESEND_FROM_ADDRESS}>",
                 "to": to,
                 "subject": subject,
-                "html": html,
+                "html": html_body,
+                "headers": {
+                    "List-Unsubscribe": "<https://syrabit.ai/profile?unsubscribe=true>",
+                },
             },
         )
         response.raise_for_status()
@@ -57,14 +69,16 @@ async def _send_email(to: str, subject: str, html: str) -> bool:
 
 async def send_welcome_email(email: str, name: str = None) -> bool:
     """Send welcome email to new user."""
-    html = f"""
+    safe_name = html.escape(name) if name else "there"
+    email_html = f"""
     <h1>Welcome to Syrabit!</h1>
-    <p>Hi {name or "there"},</p>
+    <p>Hi {safe_name},</p>
     <p>Thank you for joining Syrabit - your AI-powered educational assistant for Assamese students.</p>
     <p>Get started by asking your first question!</p>
     <p>Best regards,<br>The Syrabit Team</p>
+    {UNSUBSCRIBE_FOOTER}
     """
-    result = await _send_email(email, "Welcome to Syrabit! \U0001f393", html)
+    result = await _send_email(email, "Welcome to Syrabit! \U0001f393", email_html)
     if result:
         logger.info(f"Welcome email sent to {email}")
     return result
@@ -73,7 +87,8 @@ async def send_welcome_email(email: str, name: str = None) -> bool:
 async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
     """Send payment receipt email."""
     amount_inr = amount / 100  # Convert paise to rupees
-    html = f"""
+    safe_event_id = html.escape(event_id)
+    email_html = f"""
     <h1>Payment Successful!</h1>
     <p>Thank you for subscribing to Syrabit Pro.</p>
     <table style="width: 100%; max-width: 400px; border-collapse: collapse;">
@@ -83,7 +98,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
         </tr>
         <tr>
             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Transaction ID:</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{event_id}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{safe_event_id}</td>
         </tr>
         <tr>
             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Status:</strong></td>
@@ -92,8 +107,9 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
     </table>
     <p>You now have unlimited access to Syrabit Pro features!</p>
     <p>Best regards,<br>The Syrabit Team</p>
+    {UNSUBSCRIBE_FOOTER}
     """
-    result = await _send_email(email, "Payment Receipt - Syrabit Pro", html)
+    result = await _send_email(email, "Payment Receipt - Syrabit Pro", email_html)
     if result:
         logger.info(f"Receipt email sent to {email}")
     return result
@@ -101,16 +117,18 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
 
 async def send_password_reset_email(email: str, reset_token: str) -> bool:
     """Send password reset email."""
-    reset_link = f"https://syrabit.ai/reset-password?token={reset_token}"
-    html = f"""
+    safe_token = url_quote(reset_token, safe='')
+    reset_link = f"https://syrabit.ai/reset-password?token={safe_token}"
+    email_html = f"""
     <h1>Password Reset Request</h1>
     <p>You requested to reset your password.</p>
     <p><a href="{reset_link}" style="display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px;">Reset Password</a></p>
     <p>This link will expire in 1 hour.</p>
     <p>If you didn't request this, please ignore this email.</p>
     <p>Best regards,<br>The Syrabit Team</p>
+    {UNSUBSCRIBE_FOOTER}
     """
-    result = await _send_email(email, "Password Reset Request - Syrabit", html)
+    result = await _send_email(email, "Password Reset Request - Syrabit", email_html)
     if result:
         logger.info(f"Password reset email sent to {email}")
     return result
