@@ -408,13 +408,16 @@ class ChatService:
 
     @staticmethod
     async def _invalidate_history_cache(session_id: str) -> None:
-        """Invalidate all cached history entries for a session on new message save."""
+        """Invalidate all cached history entries for a session on new message save.
+        Uses a Redis pipeline to batch all DELETEs in a single round-trip.
+        """
         try:
             redis = get_redis()
-            # Invalidate all known max_turns values used by callers
+            pipe = redis.pipeline()
             for max_turns in (3, 5, 10, 15, 20):
                 cache_key = f"chat_history:{session_id}:{max_turns}"
-                await redis.delete(cache_key)
+                pipe.delete(cache_key)
+            await pipe.execute()
         except (RuntimeError, Exception):
             # Redis unavailable - silently skip
             pass

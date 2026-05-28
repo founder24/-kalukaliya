@@ -17,6 +17,10 @@ import { proxyRequest } from './routes/api-proxy';
 import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
 
+// Cached health probe state (module-level)
+let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
+const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -155,19 +159,29 @@ export default {
      * Edge-level health check with backend reachability ping.
      * Checks: Edge own status + lightweight backend reachability (2s timeout).
      * Returns backend_reachable: true/false without failing the edge health.
+     * Result is cached for 10s to avoid blocking every health poll.
      */
     if (url.pathname === '/health') {
       let backendReachable = false;
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch(`${env.AZURE_BACKEND_URL}/health`, {
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        backendReachable = res.ok;
-      } catch {
-        backendReachable = false;
+      const now = Date.now();
+
+      if (healthCache && (now - healthCache.timestamp) < HEALTH_CACHE_TTL_MS) {
+        // Use cached result
+        backendReachable = healthCache.backendReachable;
+      } else {
+        // Cache is stale or empty - make a real fetch
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const res = await fetch(`${env.AZURE_BACKEND_URL}/health`, {
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          backendReachable = res.ok;
+        } catch {
+          backendReachable = false;
+        }
+        healthCache = { backendReachable, timestamp: now };
       }
 
       const healthResponse = new Response(

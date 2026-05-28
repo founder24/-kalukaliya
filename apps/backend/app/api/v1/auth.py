@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 import hashlib
+import hmac
 import logging
 import time
 import uuid
@@ -184,10 +185,11 @@ async def get_current_user(
     matches, trusts X-User-ID header directly (skips JWT decode).
     """
     # Edge-trust bypass: if edge shared secret matches, trust X-User-ID header
+    edge_secret = request.headers.get("X-Edge-Secret") or ""
     if (
         settings.TRUST_EDGE_AUTH
         and settings.EDGE_SHARED_SECRET is not None
-        and request.headers.get("X-Edge-Secret") == settings.EDGE_SHARED_SECRET
+        and hmac.compare_digest(edge_secret, settings.EDGE_SHARED_SECRET)
         and request.headers.get("X-User-ID")
         and request.headers.get("X-User-ID") != "anonymous"
     ):
@@ -259,10 +261,11 @@ async def get_current_user_optional(
     matches, trusts X-User-ID header directly.
     """
     # Edge-trust bypass: if edge shared secret matches, trust X-User-ID header
+    edge_secret_opt = request.headers.get("X-Edge-Secret") or ""
     if (
         settings.TRUST_EDGE_AUTH
         and settings.EDGE_SHARED_SECRET is not None
-        and request.headers.get("X-Edge-Secret") == settings.EDGE_SHARED_SECRET
+        and hmac.compare_digest(edge_secret_opt, settings.EDGE_SHARED_SECRET)
     ):
         user_id = request.headers.get("X-User-ID")
         if not user_id or user_id == "anonymous":
