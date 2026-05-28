@@ -2,6 +2,7 @@
 SEOGeneratorService - Generates SEO-optimized pages and extracts topics using AI.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -38,35 +39,45 @@ class SEOGeneratorService:
                 "Include key concepts, explanations, and examples. "
                 "Format with clear headings and bullet points."
             )
-            notes = await vertex_client.generate(system_prompt, notes_prompt)
 
             # Generate definition
             def_prompt = (
                 f"Write a clear, concise academic definition for: {title}. "
                 "Include context and significance."
             )
-            definition = await vertex_client.generate(system_prompt, def_prompt)
 
             # Generate MCQs
             mcq_prompt = (
                 f"Generate 5 multiple choice questions about: {title}. "
                 "Format each with question, 4 options (A-D), and correct answer."
             )
-            mcqs = await vertex_client.generate(system_prompt, mcq_prompt)
 
             # Generate important questions
             iq_prompt = (
                 f"Generate 5 important exam questions about: {title}. "
                 "Include both short answer and long answer type questions."
             )
-            important_questions = await vertex_client.generate(system_prompt, iq_prompt)
 
             # Generate examples
             examples_prompt = (
                 f"Provide 3 detailed examples or solved problems for: {title}. "
                 "Show step-by-step solutions where applicable."
             )
-            examples = await vertex_client.generate(system_prompt, examples_prompt)
+
+            # Run all 5 generation calls in parallel
+            (
+                notes,
+                definition,
+                mcqs,
+                important_questions,
+                examples,
+            ) = await asyncio.gather(
+                vertex_client.generate(system_prompt, notes_prompt),
+                vertex_client.generate(system_prompt, def_prompt),
+                vertex_client.generate(system_prompt, mcq_prompt),
+                vertex_client.generate(system_prompt, iq_prompt),
+                vertex_client.generate(system_prompt, examples_prompt),
+            )
 
             results.append(
                 {

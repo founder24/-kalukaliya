@@ -1,0 +1,48 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Phase 3: Performance & Quality fixes - Parallelization, memory leak fix, HMAC clock skew, hop-by-hop headers, cache keys, rate limiting, CI thresholds, batch translations, bot UA, stale-while-revalidate, error handling, StaffGuard redirect",
+  "status": "completed",
+  "steps": [
+    "1. Parallelize independent API calls (Steps 4 & 5) in apps/backend/app/services/content/pipeline.py: Use asyncio.gather() to run _submit_indexnow and _push_cloudflare_kv concurrently instead of sequentially. Assign results with tuple unpacking.",
+    "2. Parallelize SEO generation calls in apps/backend/app/services/seo_generator.py: In generate_seo_pages, for each topic, the 5 vertex_client.generate() calls (notes, definition, mcqs, important_questions, examples) are independent. Use asyncio.gather() to run all 5 in parallel for each topic.",
+    "3. Fix AdminDashboard.jsx sequential API calls in apps/frontend/src/components/admin/AdminDashboard.jsx: In the loadNotifPrefs function (line ~511), the 8 sequential axios.get() calls are independent. Wrap them in a Promise.allSettled() call instead of sequential try/catch blocks. Map results back to their respective setState calls.",
+    "4. Add memory leak fix for prevAlertIdsRef in apps/frontend/src/components/admin/AdminDashboard.jsx: Add a size limit to prevAlertIdsRef. In the useEffect that updates it (around line 711), if the Set size exceeds 1000, clear it and rebuild from current alerts only. This prevents unbounded growth.",
+    "5. Fix HMAC clock skew tolerance in apps/edge/src/routes/api-proxy.ts: The timestamp is already sent via X-Edge-Timestamp header. Add a comment noting that the backend should validate with +/- 30s tolerance. (The edge side is correct - it sends the timestamp. The fix is primarily backend-side, but add a comment in the edge code documenting the expected tolerance window.)",
+    "6. Remove hop-by-hop Connection header from apps/edge/src/routes/api-proxy.ts: Add headers.delete('Connection') alongside the existing headers.delete('Host') and headers.delete('Content-Length') in the request forwarding section. Also remove the 'Connection: keep-alive' header set on stream responses (responseHeaders.set('Connection', 'keep-alive') line) since Connection is a hop-by-hop header that should not be forwarded.",
+    "7. Fix cache key to include limit parameter in apps/backend/app/services/search/azure_search.py: In the search_context method, include the 'limit' parameter in the cache_input string used for generating the Redis cache key. Change from f'{query}:{text}:{user_tier}' to f'{query}:{text}:{user_tier}:{limit}'.",
+    "8. Add email rate limiting in apps/backend/app/services/comms/resend_client.py: Add a simple in-memory rate limiter (token bucket or sliding window) that limits email sends to 10 per minute per recipient. Track sends in a module-level dict with timestamps. In _send_email, check rate limit before sending; if exceeded, log warning and return False.",
+    "9. Reduce CI test failure threshold in .github/workflows/deploy-all.yml: Change the failure threshold from 20 to 0. Change the line 'if [ \"$FAILED\" -gt 20 ]; then' to 'if [ \"$FAILED\" -gt 0 ]; then'. Update the echo message accordingly.",
+    "10. Raise coverage threshold in .github/workflows/ci-backend.yml: Change the minimum coverage threshold from 30% to 60%. Change the line 'if [ \"${COV_PCT:-0}\" -lt \"30\" ]; then' to 'if [ \"${COV_PCT:-0}\" -lt \"60\" ]; then'. Update the error message and success message.",
+    "11. Fix translator to batch MCQ translations in apps/backend/app/services/content/translator.py: In _translate_generated_content, the MCQ translations are done one at a time (sequential await for each question, option, explanation). Use asyncio.gather() to translate all MCQs in parallel (gather across MCQ items), and within each MCQ, gather the question + options + explanation translations.",
+    "12. Add social media bots to BOT_UA_RE in apps/edge/src/routes/isr.ts: Extend the BOT_UA_RE regex to include additional social media and SEO bots: facebookexternalhit, Twitterbot, LinkedInBot, WhatsApp, Slackbot, Discordbot, TelegramBot, Pinterestbot.",
+    "13. Fix stale-while-revalidate from 86400 to 3600 in apps/backend/app/api/v1/content.py: Change ISR_CACHE_HEADER from 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400' to 'public, max-age=60, s-maxage=3600, stale-while-revalidate=3600'.",
+    "14. Add error handling to silent catch in apps/frontend/src/components/admin/AdminDashboard.jsx: Replace the '.catch(() => {})' on line 181 (seoPipelineStatus) with proper error handling: .catch(err => { console.warn('SEO pipeline status fetch failed:', err.message); }).",
+    "15. Fix StaffGuard redirect to '/' instead of '/login' in apps/frontend/src/components/StaffGuard.jsx: Change both Navigate to='/login' instances to Navigate to='/' since unauthorized users should go to the home/landing page, not the login page (which may confuse users who are logged in but lack staff role)."
+  ],
+  "acceptance_criteria": [
+    "Pipeline Steps 4 and 5 run concurrently via asyncio.gather()",
+    "SEO generator runs 5 AI calls per topic in parallel",
+    "AdminDashboard loadNotifPrefs uses Promise.allSettled for independent API calls",
+    "prevAlertIdsRef is capped at 1000 entries",
+    "Connection header is deleted from forwarded requests in api-proxy.ts",
+    "Connection: keep-alive is removed from stream response headers",
+    "Search cache key includes the limit parameter",
+    "Email rate limiting prevents more than 10 sends/minute per recipient",
+    "CI deploy-all.yml fails on any test failure (threshold = 0)",
+    "CI ci-backend.yml requires 60% minimum coverage",
+    "MCQ translations run in parallel within _translate_generated_content",
+    "ISR bot regex matches facebookexternalhit, Twitterbot, LinkedInBot, WhatsApp, etc.",
+    "stale-while-revalidate is 3600 (not 86400)",
+    "seoPipelineStatus error is logged (not silently swallowed)",
+    "StaffGuard redirects unauthorized to '/' not '/login'"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m ruff check app/",
+    "Run: cd /projects/sandbox/-kalukaliya && pnpm --filter syrabit-edge exec tsc --noEmit",
+    "Verify with grep that asyncio.gather is used in pipeline.py and seo_generator.py",
+    "Verify with grep that Promise.allSettled is used in AdminDashboard.jsx"
+  ],
+  "blocked_reason": null,
+  "findings": "All 15 steps implemented successfully. TypeScript (tsc --noEmit) passes for both edge and frontend. Ruff check passes on all modified backend files. One pre-existing ruff error in admin_content.py (unused variable) is unrelated."
+}

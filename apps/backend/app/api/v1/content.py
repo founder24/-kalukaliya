@@ -4,6 +4,7 @@ Supports ISR (Incremental Static Regeneration) via Cache-Control headers.
 """
 
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -15,8 +16,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SAFE_PATH_RE = re.compile(r"^[a-z0-9-]+$")
+
 # Cache-Control for CDN: 60s stale-while-revalidate, 1 hour max
-ISR_CACHE_HEADER = "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400"
+ISR_CACHE_HEADER = "public, max-age=60, s-maxage=3600, stale-while-revalidate=3600"
+
+
+def _validate_path_params(**params: str) -> None:
+    """Validate path parameters against the safe pattern to prevent NoSQL injection."""
+    for name, value in params.items():
+        if not SAFE_PATH_RE.match(value):
+            raise HTTPException(status_code=400, detail="Invalid path parameter")
 
 
 @router.get(
@@ -31,6 +41,9 @@ async def render_chapter(
     chapter: str,
 ):
     """Render the default (notes) page for a chapter."""
+    _validate_path_params(
+        board=board, class_level=class_level, subject=subject, chapter=chapter
+    )
     obj = await KnowledgeObject.find_one(
         {
             "metadata.board": board,
@@ -48,6 +61,14 @@ async def render_chapter(
         html = obj.rendered_html["notes"]
     else:
         html = content_renderer.render(obj, "notes")
+        # Cache-aside: persist rendered HTML for future requests
+        try:
+            if obj.rendered_html is None:
+                obj.rendered_html = {}
+            obj.rendered_html["notes"] = html
+            await obj.save()
+        except Exception as e:
+            logger.warning(f"Failed to cache rendered HTML: {e}")
 
     return HTMLResponse(
         content=html,
@@ -68,6 +89,9 @@ async def render_chapter_page_type(
     page_type: str,
 ):
     """Render a specific page type for a chapter."""
+    _validate_path_params(
+        board=board, class_level=class_level, subject=subject, chapter=chapter
+    )
     if page_type not in PAGE_TYPES:
         raise HTTPException(
             status_code=400,
@@ -91,6 +115,14 @@ async def render_chapter_page_type(
         html = obj.rendered_html[page_type]
     else:
         html = content_renderer.render(obj, page_type)
+        # Cache-aside: persist rendered HTML for future requests
+        try:
+            if obj.rendered_html is None:
+                obj.rendered_html = {}
+            obj.rendered_html[page_type] = html
+            await obj.save()
+        except Exception as e:
+            logger.warning(f"Failed to cache rendered HTML: {e}")
 
     return HTMLResponse(
         content=html,
@@ -110,6 +142,7 @@ async def list_chapters(
     limit: int = Query(50, ge=1, le=100),
 ):
     """List all published chapters for a given board/class/subject."""
+    _validate_path_params(board=board, class_level=class_level, subject=subject)
     chapters = (
         await KnowledgeObject.find(
             {
@@ -150,6 +183,7 @@ async def list_chapters(
 )
 async def get_by_slug(slug: str):
     """Get a published knowledge object by slug (excludes derivatives and page_views)."""
+    _validate_path_params(slug=slug)
     obj = await KnowledgeObject.find_one({"slug": slug, "status": "published"})
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")

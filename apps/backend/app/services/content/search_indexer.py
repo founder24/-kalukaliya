@@ -3,11 +3,15 @@ SearchIndexer - Chunks content and upserts to Azure AI Search.
 """
 
 import logging
+import re
 
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError
 
 from app.config import settings
+
+# Slug must be lowercase alphanumeric with hyphens only
+_SAFE_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,38 @@ class SearchIndexer:
                 logger.warning(f"Failed to initialize search indexer: {e}")
         else:
             logger.info("Azure Search admin key not configured - indexing disabled")
+
+    async def _delete_stale_chunks(self, knowledge_obj) -> None:
+        """Delete existing chunks for a knowledge object before re-indexing."""
+        slug = knowledge_obj.slug
+        if not _SAFE_SLUG_RE.match(slug):
+            logger.warning(
+                f"Skipping stale chunk deletion: invalid slug format '{slug}'"
+            )
+            return
+
+        try:
+            results = self.client.search(
+                search_text="*",
+                filter=f"slug eq '{slug}'",
+                select=["id"],
+                top=1000,
+            )
+            stale_ids = []
+            async for doc in results:
+                stale_ids.append(doc["id"])
+
+            if stale_ids:
+                await self.client.delete_documents(
+                    documents=[{"id": doc_id} for doc_id in stale_ids]
+                )
+                logger.info(
+                    f"Deleted {len(stale_ids)} stale chunks for slug={knowledge_obj.slug}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to delete stale chunks for slug={knowledge_obj.slug}: {e}"
+            )
 
     def chunk_text(self, text: str, chunk_size: int = CHUNK_SIZE_TOKENS) -> list[str]:
         """
@@ -98,6 +134,9 @@ class SearchIndexer:
             return False
 
         try:
+            # Delete stale chunks before re-indexing
+            await self._delete_stale_chunks(knowledge_obj)
+
             chunks = self.chunk_text(knowledge_obj.body_markdown)
             if not chunks:
                 logger.warning(f"No content to index for slug={knowledge_obj.slug}")
@@ -126,16 +165,31 @@ class SearchIndexer:
                     }
                 )
 
-            # Upsert in batches of 100
+            # Upsert in batches of 100 with per-batch error handling
             batch_size = 100
+            batches_succeeded = 0
+            batches_failed = 0
             for start in range(0, len(documents), batch_size):
                 batch = documents[start : start + batch_size]
-                await self.client.upload_documents(documents=batch)
+                try:
+                    await self.client.upload_documents(documents=batch)
+                    batches_succeeded += 1
+                except Exception as e:
+                    batches_failed += 1
+                    logger.error(
+                        f"Batch {start // batch_size + 1} failed for slug={knowledge_obj.slug}: {e}"
+                    )
 
-            logger.info(
-                f"Indexed {len(documents)} chunks for slug={knowledge_obj.slug}"
-            )
-            return True
+            if batches_failed > 0:
+                logger.warning(
+                    f"{batches_failed} batch(es) failed for slug={knowledge_obj.slug}"
+                )
+
+            if batches_succeeded > 0:
+                logger.info(
+                    f"Indexed {len(documents)} chunks for slug={knowledge_obj.slug}"
+                )
+            return batches_succeeded > 0
 
         except AzureError as e:
             logger.error(

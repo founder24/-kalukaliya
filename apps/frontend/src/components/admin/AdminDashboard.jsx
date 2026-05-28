@@ -17,7 +17,7 @@ const safeObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {}
 // same way as Cloudflare's own Overview tab. Falls back to a plain
 // localised string for values < 1,000 (where compact would just print
 // the same digits) so small counts like "108" or "11" stay legible.
-const _COMPACT_INT_FORMATTER = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 });
+const _COMPACT_INT_FORMATTER = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 });
 const formatCompactInt = (n) => {
   const num = Number(n) || 0;
   return num >= 1000 ? _COMPACT_INT_FORMATTER.format(num) : num.toLocaleString();
@@ -178,7 +178,7 @@ function DepStatusCard({ name, status, latency }) {
 function PipelineWidget({ token }) {
   const [pipe, setPipe] = useState(null);
   useEffect(() => {
-    seoPipelineStatus(token).then(r => setPipe(r.data)).catch(() => {});
+    seoPipelineStatus(token).then(r => setPipe(r.data)).catch(err => { console.warn('SEO pipeline status fetch failed:', err?.message || err); });
   }, [token]);
   if (!pipe) return null;
   const bars = [
@@ -509,80 +509,57 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   };
 
   const loadNotifPrefs = useCallback(async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/admin/notification-prefs`, adminHdr(adminToken));
-      setNotifPrefs(res.data);
-    } catch (e) {
-      log.error('Failed to load notification prefs', { error: e.message });
-      setNotifPrefs({
-        sound_enabled: true, push_enabled: false, chime_tone: 'default',
-        sound_severities: ['high_error_rate', 'high_latency', 'spoofed_bot_surge', 'high_fallback_rate', 'endpoint_down', 'auto_block_expired'],
-        push_severities: ['high_error_rate', 'spoofed_bot_surge', 'endpoint_down', 'auto_block_expired'],
-      });
+    const [prefsResult, statsResult, settingsResult, dispResult, kvResult, r2Result, ciResult, vpResult] = await Promise.allSettled([
+      axios.get(`${API_BASE}/admin/notification-prefs`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/push/delivery-stats?days=7`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/alert-settings`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/seo/daily-summary-dispatches?limit=5`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/kv-health`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/r2-storage-health`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/ci-status`, adminHdr(adminToken)),
+      axios.get(`${API_BASE}/admin/vertex/probe-status`, adminHdr(adminToken)),
+    ]);
+
+    // Process results
+    if (prefsResult.status === 'fulfilled') {
+      setNotifPrefs(prefsResult.value.data);
+    } else {
+      log.error('Failed to load notification prefs', { error: prefsResult.reason?.message });
+      setNotifPrefs({ sound_enabled: true, push_enabled: false, chime_tone: 'default', sound_severities: ['high_error_rate', 'high_latency', 'spoofed_bot_surge', 'high_fallback_rate', 'endpoint_down', 'auto_block_expired'], push_severities: ['high_error_rate', 'spoofed_bot_surge', 'endpoint_down', 'auto_block_expired'] });
     }
-    try {
-      const statsRes = await axios.get(`${API_BASE}/admin/push/delivery-stats?days=7`, adminHdr(adminToken));
-      setPushDeliverySummary(statsRes.data);
-    } catch (err) {
-      console.warn('AdminDashboard: /admin/push/delivery-stats fetch failed:', err);
+    if (statsResult.status === 'fulfilled') {
+      setPushDeliverySummary(statsResult.value.data);
+    } else {
+      console.warn('AdminDashboard: /admin/push/delivery-stats fetch failed:', statsResult.reason);
     }
-    // Task #434 — pull channel_status.push from /admin/alert-settings
-    // (the same payload Bot Security's Alert Settings panel uses) so
-    // the dashboard tile can show last_success_at + last_error inline.
-    try {
-      const settingsRes = await axios.get(`${API_BASE}/admin/alert-settings`, adminHdr(adminToken));
-      setPushChannelStatus(settingsRes.data?.channel_status?.push || null);
-    } catch {
+    if (settingsResult.status === 'fulfilled') {
+      setPushChannelStatus(settingsResult.value.data?.channel_status?.push || null);
+    } else {
       setPushChannelStatus(null);
     }
-    // Task #474 — recent SEO daily-summary email dispatches.
-    try {
-      const dispRes = await axios.get(
-        `${API_BASE}/admin/seo/daily-summary-dispatches?limit=5`,
-        adminHdr(adminToken),
-      );
-      setSeoSummaryDispatches(dispRes.data?.dispatches || []);
-    } catch {
+    if (dispResult.status === 'fulfilled') {
+      setSeoSummaryDispatches(dispResult.value.data?.dispatches || []);
+    } else {
       setSeoSummaryDispatches([]);
     }
-    // Task #476 — Cloudflare Workers KV usage snapshot.
-    try {
-      const kvRes = await axios.get(
-        `${API_BASE}/admin/kv-health`,
-        adminHdr(adminToken),
-      );
-      setKvHealth(kvRes.data || null);
-    } catch {
+    if (kvResult.status === 'fulfilled') {
+      setKvHealth(kvResult.value.data || null);
+    } else {
       setKvHealth({ configured: false, reason: 'Backend unreachable' });
     }
-    // Task #315 — R2 cold-storage watchdog snapshot.
-    try {
-      const r2Res = await axios.get(
-        `${API_BASE}/admin/r2-storage-health`,
-        adminHdr(adminToken),
-      );
-      setR2Health(r2Res.data || null);
-    } catch {
+    if (r2Result.status === 'fulfilled') {
+      setR2Health(r2Result.value.data || null);
+    } else {
       setR2Health({ configured: false, reason: 'Backend unreachable' });
     }
-    // Task #470 — latest CI build status (backend + frontend workflows).
-    try {
-      const ciRes = await axios.get(
-        `${API_BASE}/admin/ci-status`,
-        adminHdr(adminToken),
-      );
-      setCiStatus(ciRes.data || null);
-    } catch {
+    if (ciResult.status === 'fulfilled') {
+      setCiStatus(ciResult.value.data || null);
+    } else {
       setCiStatus({ configured: false, reason: 'Backend unreachable' });
     }
-    // Task #689 — cached state of the periodic Gemini health probe.
-    try {
-      const vpRes = await axios.get(
-        `${API_BASE}/admin/vertex/probe-status`,
-        adminHdr(adminToken),
-      );
-      setVertexProbe(vpRes.data || null);
-    } catch {
+    if (vpResult.status === 'fulfilled') {
+      setVertexProbe(vpResult.value.data || null);
+    } else {
       setVertexProbe({ status: 'unknown', reason: 'Backend unreachable' });
     }
   }, [adminToken]);
@@ -708,7 +685,13 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
       const shouldSound = newAlerts.some(a => soundSeverities.has(a.type));
       if (shouldSound) playAlertChime();
     }
-    prevAlertIdsRef.current = currentIds;
+    // Cap prevAlertIdsRef to prevent unbounded memory growth
+    if (currentIds.size > 1000) {
+      const recent = [...currentIds].slice(-500);
+      prevAlertIdsRef.current = new Set(recent);
+    } else {
+      prevAlertIdsRef.current = currentIds;
+    }
   }, [alertHistory, alertSoundEnabled, notifPrefs, playAlertChime]);
 
   const headers = { withCredentials: true };
@@ -1135,7 +1118,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   ];
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-[1400px]">
+    <div className="p-4 md:p-6 space-y-5 max-w-[1400px]" role="main" aria-label="Admin Dashboard">
 
       {failedSections.length > 0 && (
         <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">

@@ -5,6 +5,7 @@ Steps: fetch -> generate MCQs/summary -> render HTML -> index search ->
 Each step is fail-soft with logging.
 """
 
+import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone
@@ -37,70 +38,110 @@ class ContentPipeline:
             "saved": False,
         }
 
-        # Step 1: Render HTML for all page types
+        # Distributed lock: prevent concurrent pipeline runs for the same object
+        lock_key = f"pipeline_lock:{knowledge_obj.id}"
+        redis_lock = None
         try:
-            rendered = {}
-            for page_type in PAGE_TYPES:
-                html = content_renderer.render(knowledge_obj, page_type)
-                rendered[page_type] = html
-            knowledge_obj.rendered_html = rendered
-            results["render"] = True
-            logger.info(f"Rendered all page types for slug={knowledge_obj.slug}")
-        except Exception as e:
-            logger.error(f"Render failed for slug={knowledge_obj.slug}: {e}")
+            from app.db.redis import get_redis
 
-        # Step 2: Index to Azure AI Search
-        try:
-            indexed = await search_indexer.index_knowledge_object(knowledge_obj)
-            results["search_index"] = indexed
-        except Exception as e:
-            logger.error(f"Search indexing failed for slug={knowledge_obj.slug}: {e}")
-
-        # Step 3: Compute derivative hashes
-        try:
-            if results["render"]:
-                from app.models.knowledge import DerivativeHashes
-
-                hashes = DerivativeHashes(
-                    notes_html=_hash(rendered.get("notes", "")),
-                    mcqs_html=_hash(rendered.get("mcqs", "")),
-                    summary_html=_hash(rendered.get("summary", "")),
-                    definitions_html=_hash(rendered.get("definitions", "")),
-                    important_questions_html=_hash(
-                        rendered.get("important-questions", "")
-                    ),
-                    search_index=_hash(knowledge_obj.body_markdown),
+            redis = get_redis()
+            acquired = await redis.set(lock_key, "1", nx=True, ex=300)
+            if not acquired:
+                logger.warning(
+                    f"Pipeline already running for slug={knowledge_obj.slug}, skipping"
                 )
-                knowledge_obj.derivative_hashes = hashes
-                results["hashes_updated"] = True
-        except Exception as e:
-            logger.error(f"Hash computation failed for slug={knowledge_obj.slug}: {e}")
+                return {k: False for k in results}
+            redis_lock = lock_key
+        except (RuntimeError, Exception) as e:
+            logger.debug(f"Redis lock unavailable, proceeding without lock: {e}")
 
-        # Step 4: Submit IndexNow
         try:
-            indexnow_ok = await self._submit_indexnow(knowledge_obj)
-            results["indexnow"] = indexnow_ok
-        except Exception as e:
-            logger.error(f"IndexNow failed for slug={knowledge_obj.slug}: {e}")
+            # Step 1: Render HTML for all page types
+            try:
+                rendered = {}
+                for page_type in PAGE_TYPES:
+                    html = content_renderer.render(knowledge_obj, page_type)
+                    rendered[page_type] = html
+                knowledge_obj.rendered_html = rendered
+                results["render"] = True
+                logger.info(f"Rendered all page types for slug={knowledge_obj.slug}")
+            except Exception as e:
+                logger.error(f"Render failed for slug={knowledge_obj.slug}: {e}")
 
-        # Step 5: Push to Cloudflare KV
-        try:
-            kv_ok = await self._push_cloudflare_kv(knowledge_obj)
-            results["cloudflare_kv"] = kv_ok
-        except Exception as e:
-            logger.error(
-                f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {e}"
-            )
+            # Step 2: Index to Azure AI Search
+            try:
+                indexed = await search_indexer.index_knowledge_object(knowledge_obj)
+                results["search_index"] = indexed
+            except Exception as e:
+                logger.error(
+                    f"Search indexing failed for slug={knowledge_obj.slug}: {e}"
+                )
 
-        # Step 6: Save to database
-        try:
-            knowledge_obj.last_pipeline_run = datetime.now(timezone.utc)
-            knowledge_obj.updated_at = datetime.now(timezone.utc)
-            await knowledge_obj.save()
-            results["saved"] = True
-            logger.info(f"Pipeline complete for slug={knowledge_obj.slug}")
-        except Exception as e:
-            logger.error(f"Save failed for slug={knowledge_obj.slug}: {e}")
+            # Step 3: Compute derivative hashes
+            try:
+                if results["render"]:
+                    from app.models.knowledge import DerivativeHashes
+
+                    hashes = DerivativeHashes(
+                        notes_html=_hash(rendered.get("notes", "")),
+                        mcqs_html=_hash(rendered.get("mcqs", "")),
+                        summary_html=_hash(rendered.get("summary", "")),
+                        definitions_html=_hash(rendered.get("definitions", "")),
+                        important_questions_html=_hash(
+                            rendered.get("important-questions", "")
+                        ),
+                        search_index=_hash(knowledge_obj.body_markdown),
+                    )
+                    knowledge_obj.derivative_hashes = hashes
+                    results["hashes_updated"] = True
+            except Exception as e:
+                logger.error(
+                    f"Hash computation failed for slug={knowledge_obj.slug}: {e}"
+                )
+
+            # Steps 4 & 5: IndexNow + Cloudflare KV (independent, run in parallel)
+            try:
+                indexnow_result, kv_result = await asyncio.gather(
+                    self._submit_indexnow(knowledge_obj),
+                    self._push_cloudflare_kv(knowledge_obj),
+                    return_exceptions=True,
+                )
+                if isinstance(indexnow_result, Exception):
+                    logger.error(
+                        f"IndexNow failed for slug={knowledge_obj.slug}: {indexnow_result}"
+                    )
+                else:
+                    results["indexnow"] = indexnow_result
+                if isinstance(kv_result, Exception):
+                    logger.error(
+                        f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {kv_result}"
+                    )
+                else:
+                    results["cloudflare_kv"] = kv_result
+            except Exception as e:
+                logger.error(
+                    f"Parallel steps 4-5 failed for slug={knowledge_obj.slug}: {e}"
+                )
+
+            # Step 6: Save to database
+            try:
+                knowledge_obj.last_pipeline_run = datetime.now(timezone.utc)
+                knowledge_obj.updated_at = datetime.now(timezone.utc)
+                await knowledge_obj.save()
+                results["saved"] = True
+                logger.info(f"Pipeline complete for slug={knowledge_obj.slug}")
+            except Exception as e:
+                logger.error(f"Save failed for slug={knowledge_obj.slug}: {e}")
+
+        finally:
+            if redis_lock:
+                try:
+                    from app.db.redis import get_redis
+
+                    redis = get_redis()
+                    await redis.delete(redis_lock)
+                except Exception:
+                    pass
 
         return results
 

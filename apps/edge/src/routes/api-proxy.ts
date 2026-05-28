@@ -31,9 +31,12 @@ export async function proxyRequest(
   // Remove hop-by-hop headers that shouldn't be forwarded
   headers.delete('Host');
   headers.delete('Content-Length');
+  headers.delete('Connection');
 
   // Per-request HMAC signature (SEC-002 fix)
   if (env.EDGE_SHARED_SECRET) {
+    // Timestamp for HMAC. Backend should validate within +/- 30s tolerance
+    // to account for clock skew between edge and origin.
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const userId = headers.get('X-User-ID') || 'anonymous';
     const message = `${timestamp}:${userId}:${url.pathname}`;
@@ -80,7 +83,6 @@ export async function proxyRequest(
       // Pass response body directly without buffering (chunked transfer)
       responseHeaders.set('Content-Type', 'text/event-stream');
       responseHeaders.set('Cache-Control', 'no-store');
-      responseHeaders.set('Connection', 'keep-alive');
       responseHeaders.set('X-Content-Type-Options', 'nosniff');
       responseHeaders.set('X-Accel-Buffering', 'no');
       responseHeaders.set('X-Robots-Tag', 'noindex');

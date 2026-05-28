@@ -77,14 +77,42 @@ async def seo_pipeline_status(request: Request):
     except Exception:
         return {"pipelines": [], "total_subjects": 0}
 
-    pipelines = []
+    # Single aggregation to get chapter stats grouped by subject_id
+    try:
+        chapter_stats = await Chapter.aggregate(
+            [
+                {
+                    "$group": {
+                        "_id": "$subject_id",
+                        "total": {"$sum": 1},
+                        "published": {
+                            "$sum": {"$cond": [{"$eq": ["$status", "published"]}, 1, 0]}
+                        },
+                        "generated": {
+                            "$sum": {"$cond": [{"$eq": ["$status", "generated"]}, 1, 0]}
+                        },
+                        "draft": {
+                            "$sum": {"$cond": [{"$eq": ["$status", "draft"]}, 1, 0]}
+                        },
+                    }
+                }
+            ]
+        ).to_list()
+    except Exception:
+        chapter_stats = []
 
+    # Build lookup from subject_id to stats
+    stats_lookup = {}
+    for stat in chapter_stats:
+        stats_lookup[stat["_id"]] = stat
+
+    pipelines = []
     for subj in subjects:
-        chapters = await Chapter.find({"subject_id": subj.id}).to_list()
-        total = len(chapters)
-        published = sum(1 for c in chapters if c.status == "published")
-        generated = sum(1 for c in chapters if c.status == "generated")
-        draft = sum(1 for c in chapters if c.status == "draft")
+        stat = stats_lookup.get(subj.id, {})
+        total = stat.get("total", 0)
+        published = stat.get("published", 0)
+        generated = stat.get("generated", 0)
+        draft = stat.get("draft", 0)
 
         pipelines.append(
             {
