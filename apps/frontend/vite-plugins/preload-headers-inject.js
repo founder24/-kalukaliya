@@ -116,14 +116,14 @@ export default function preloadHeadersInjectPlugin() {
             .filter(
               (l) =>
                 !l.trim().toLowerCase().startsWith("link:") &&
-                l !== "/*",
+                l !== "/*" &&
+                l.trim() !== "",
             )
             .join("\n");
-          const otherTrimmed = otherLines.replace(/^\s+|\s+$/g, "");
           return (
             `/*\n` +
             linkLines.join("\n") +
-            (otherTrimmed ? "\n" + otherTrimmed : "") +
+            (otherLines ? "\n" + otherLines : "") +
             "\n"
           );
         });
