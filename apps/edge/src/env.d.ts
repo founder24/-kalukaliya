@@ -34,6 +34,12 @@ interface Env {
   CF_TURNSTILE_SECRET: string;
   EDGE_SHARED_SECRET: string;
 
+  // ── JWT Configuration ──
+  // Optional: algorithm auto-detected from token header ('HS256' | 'RS256')
+  JWT_ALGORITHM?: string;
+  // Optional: PEM-encoded RSA public key for RS256 verification
+  JWT_PUBLIC_KEY?: string;
+
   // ── Variables (defined in wrangler.toml [vars]) ──
   AZURE_BACKEND_URL: string;
   ALLOWED_ORIGIN: string;

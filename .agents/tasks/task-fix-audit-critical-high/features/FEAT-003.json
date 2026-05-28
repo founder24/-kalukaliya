@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "SEC-002 (HIGH): Add per-request HMAC signature verification to prevent Edge shared secret trust bypass. Edge should sign requests with HMAC-SHA256(secret, timestamp + user_id + path) and backend should verify the signature and reject stale requests (>30s old).",
+  "status": "completed",
+  "steps": [
+    "1. In apps/edge/src/routes/api-proxy.ts, add HMAC signature generation: Before forwarding, compute HMAC-SHA256 of (timestamp + userId + pathname) using the EDGE_SHARED_SECRET as key. Set headers X-Edge-Signature and X-Edge-Timestamp on the proxied request. Use the Web Crypto API (crypto.subtle) for HMAC generation. The userId comes from the X-User-ID header already set. Import or inline the necessary crypto logic.",
+    "2. In apps/edge/src/index.ts, ensure the X-User-ID header is set BEFORE the request reaches the proxy function (it already is in step 2 of the pipeline). No changes needed here if the flow already sets X-User-ID before proxy.",
+    "3. In apps/backend/app/api/v1/auth.py, update the get_current_user function's edge-trust bypass section: Instead of just comparing X-Edge-Secret, verify the HMAC signature. Extract X-Edge-Signature and X-Edge-Timestamp headers. Compute expected signature = HMAC-SHA256(EDGE_SHARED_SECRET, timestamp + user_id + request.url.path). Compare signatures using hmac.compare_digest. Reject if timestamp is older than 30 seconds. Keep backward compatibility: if X-Edge-Signature is not present but X-Edge-Secret matches, log a deprecation warning and allow (for rollover period).",
+    "4. Apply the same HMAC verification logic to get_current_user_optional in the same file.",
+    "5. Add a helper function _verify_edge_signature(request, edge_secret) in auth.py that encapsulates the HMAC verification logic, returning (valid: bool, user_id: str | None)."
+  ],
+  "acceptance_criteria": [
+    "Edge proxy sends X-Edge-Signature (hex-encoded HMAC-SHA256) and X-Edge-Timestamp headers",
+    "Backend verifies HMAC signature in edge-trust bypass path",
+    "Backend rejects requests with timestamps older than 30 seconds",
+    "Backward compatible: requests with only X-Edge-Secret (no signature) still work with a deprecation warning",
+    "TypeScript compiles without errors for edge",
+    "Python files have no syntax errors"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit",
+    "python3 -m py_compile /projects/sandbox/-kalukaliya/apps/backend/app/api/v1/auth.py"
+  ],
+  "blocked_reason": null,
+  "findings": "Implementation complete. Edge generates HMAC-SHA256(secret, timestamp:userId:path) and sets X-Edge-Timestamp and X-Edge-Signature headers. Backend verifies with 30s staleness window. Backward compatibility maintained for rollover. Both TypeScript (tsc --noEmit) and Python (py_compile) pass cleanly."
+}

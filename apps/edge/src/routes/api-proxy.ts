@@ -32,6 +32,29 @@ export async function proxyRequest(
   headers.delete('Host');
   headers.delete('Content-Length');
 
+  // Per-request HMAC signature (SEC-002 fix)
+  if (env.EDGE_SHARED_SECRET) {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const userId = headers.get('X-User-ID') || 'anonymous';
+    const message = `${timestamp}:${userId}:${url.pathname}`;
+
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(env.EDGE_SHARED_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+    const signatureHex = Array.from(new Uint8Array(signatureBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    headers.set('X-Edge-Timestamp', timestamp);
+    headers.set('X-Edge-Signature', signatureHex);
+  }
+
   const controller = new AbortController();
   const timeoutMs = parseInt(env.PROXY_TIMEOUT_MS || '30000', 10) || 30000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);

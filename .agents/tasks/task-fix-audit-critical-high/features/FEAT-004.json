@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "API-001 (HIGH): Implement missing backend routes for Conversation CRUD. Frontend calls GET/DELETE/PATCH /api/v1/conversations/{id}, GET /api/v1/conversations/anon, GET/DELETE /api/v1/conversations/anon/{id} - none of which exist in the backend. Create a new router file implementing these endpoints.",
+  "status": "completed",
+  "steps": [
+    "1. Create apps/backend/app/api/v1/conversations.py with an APIRouter. Follow the patterns from chat.py and admin_conversations.py.",
+    "2. Implement GET /conversations - list conversations for authenticated user. Use the Chat beanie model (find by user_id, sort by updated_at desc, paginate). This mirrors the existing /chat/history endpoint but at the /conversations path the frontend expects.",
+    "3. Implement GET /conversations/{id} - get a single conversation by its MongoDB _id or session_id. Require authentication, verify ownership (chat.user_id == str(user.id)).",
+    "4. Implement DELETE /conversations/{id} - delete a conversation. Require authentication, verify ownership before deletion.",
+    "5. Implement PATCH /conversations/{id} - update conversation metadata (title). Require authentication, verify ownership. Accept a body with optional 'title' field.",
+    "6. Implement GET /conversations/anon - list anonymous conversations. Identify by x-anon-id header (sent by frontend as getAnonId()). Find chats where user_id is null and match by a stored anon_id field, OR where session_id matches. For simplicity, use the x-anon-id header to find chats tagged with that anon identifier. NOTE: The Chat model stores user_id as null for anonymous. We will match using a combination approach: store the anon_id in a query or match by IP. The frontend sends 'x-anon-id' header. Look for chats where user_id equals the anon_id value.",
+    "7. Implement GET /conversations/anon/{id} - get single anonymous conversation by id, verify anon ownership via x-anon-id header.",
+    "8. Implement DELETE /conversations/anon/{id} - delete anonymous conversation, verify anon ownership.",
+    "9. Register the new router in apps/backend/app/main.py with prefix '/api/v1/conversations'. Add the import at the top with other v1 imports."
+  ],
+  "acceptance_criteria": [
+    "All 7 endpoints exist and are registered at /api/v1/conversations prefix",
+    "Authenticated endpoints require valid JWT (use get_current_user dependency)",
+    "Anonymous endpoints use x-anon-id header for identification",
+    "Ownership verification prevents users from accessing others' conversations",
+    "Python files compile without syntax errors",
+    "Router is properly registered in main.py"
+  ],
+  "verification": [
+    "python3 -m py_compile /projects/sandbox/-kalukaliya/apps/backend/app/api/v1/conversations.py",
+    "python3 -m py_compile /projects/sandbox/-kalukaliya/apps/backend/app/main.py"
+  ],
+  "blocked_reason": null,
+  "findings": "Implementation complete. All 7 endpoints created in conversations.py and router registered in main.py. Python compilation verification passed. FastAPI runtime import test not possible without pip-installed dependencies, but py_compile confirms no syntax errors. Route ordering ensures /anon and /anon/{id} are defined before /{conversation_id} to avoid FastAPI treating 'anon' as a path parameter. Post-review fix: added x-anon-id format validation (must match anon_[32 hex chars]) to prevent enumeration attacks."
+}

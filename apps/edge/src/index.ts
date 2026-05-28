@@ -39,9 +39,19 @@ export default {
     sanitizedHeaders.delete('X-Edge-Secret');
     request = new Request(request, { headers: sanitizedHeaders });
 
+    // ── Production safety: reject if backend URL is localhost in production ──
+    const isProduction = !env.ALLOWED_ORIGIN?.includes('localhost');
+    const isLocalBackend = env.AZURE_BACKEND_URL?.includes('localhost') || env.AZURE_BACKEND_URL?.includes('127.0.0.1');
+    if (isProduction && isLocalBackend && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/'))) {
+      return new Response(JSON.stringify({ error: 'Backend URL misconfiguration detected' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     // ── 2. JWT Verification (all /api/ routes except public) ──
     if (url.pathname.startsWith('/api/')) {
-      const jwtResult = await verifyJWT(request, env.JWT_SECRET);
+      const jwtResult = await verifyJWT(request, env.JWT_SECRET, env.JWT_PUBLIC_KEY);
 
       if (!jwtResult.valid && jwtResult.error !== 'Missing or invalid Authorization header') {
         // Token was provided but is invalid/expired — reject
@@ -300,7 +310,7 @@ function addSecurityHeaders(response: Response): Response {
   newResponse.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   newResponse.headers.set('X-XSS-Protection', '0');
   newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com; frame-ancestors 'none'");
+  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://app.posthog.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'");
   return newResponse;
 }
 

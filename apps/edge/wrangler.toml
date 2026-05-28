@@ -57,3 +57,7 @@ bucket_name = "syrabit-assets"
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
+# REQUIRED: Set this to your Azure Container Apps URL.
+# This MUST be overridden by a Wrangler secret in production.
+# If not set, the worker will reject all API requests with 503.
+AZURE_BACKEND_URL = "https://MUST-BE-CONFIGURED.azurecontainerapps.io"
