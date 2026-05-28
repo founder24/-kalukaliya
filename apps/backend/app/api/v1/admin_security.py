@@ -42,7 +42,7 @@ async def block_ip(request: Request):
     body = await request.json()
     ip_hash = body.get("ip_hash", "")
     reason = body.get("reason", "manual")
-    logger.info(f"IP block requested: {ip_hash}, reason: {reason}")
+    logger.info("IP block requested", extra={"ip_hash": ip_hash, "reason": reason})
     return {"status": "ok", "message": f"IP {ip_hash} blocked"}
 
 
@@ -53,7 +53,7 @@ async def unblock_ip(request: Request):
     await _csrf_check(request)
     body = await request.json()
     ip_hash = body.get("ip_hash", "")
-    logger.info(f"IP unblock requested: {ip_hash}")
+    logger.info("IP unblock requested", extra={"ip_hash": ip_hash})
     return {"status": "ok", "message": f"IP {ip_hash} unblocked"}
 
 

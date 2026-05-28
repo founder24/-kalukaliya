@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 import hashlib
@@ -28,7 +28,7 @@ class VerifyPaymentRequest(BaseModel):
 
 
 class CreditTopUpRequest(BaseModel):
-    credits: int
+    credits: int = Field(ge=1, le=1000)
     provider: str = "razorpay"
 
 
@@ -133,8 +133,8 @@ async def create_credit_topup(body: CreditTopUpRequest, user: User = Depends(get
         async with httpx.AsyncClient(
             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
             timeout=30.0,
-        ) as client:
-            response = await client.post(
+        ) as http_client:
+            response = await http_client.post(
                 "https://api.razorpay.com/v1/orders",
                 json={
                     "amount": amount,
@@ -150,12 +150,26 @@ async def create_credit_topup(body: CreditTopUpRequest, user: User = Depends(get
             response.raise_for_status()
             order = response.json()
 
+        # Store the pending order locally so verify can look up the credits amount
+        mongo_client = get_mongo_client()
+        db = mongo_client[settings.MONGODB_DB_NAME]
+        await db.credit_topup_orders.insert_one({
+            "order_id": order["id"],
+            "user_id": str(user.id),
+            "credits": body.credits,
+            "amount": amount,
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc),
+        })
+
         return {
             "order_id": order["id"],
             "amount": order["amount"],
             "currency": order["currency"],
             "credits": body.credits,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Credit topup order failed: {e}")
         raise HTTPException(status_code=502, detail="Payment gateway error")
@@ -183,21 +197,42 @@ async def verify_credit_topup(body: CreditTopUpVerifyRequest, user: User = Depen
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
 
+        # Check if already processed (idempotency guard)
+        existing = await db.payments.find_one({"order_id": body.razorpay_order_id, "status": "captured"})
+        if existing:
+            return {"status": "ok", "message": "Already processed"}
+
+        # Look up the stored order to get the credits amount
+        topup_order = await db.credit_topup_orders.find_one({"order_id": body.razorpay_order_id})
+        if not topup_order:
+            raise HTTPException(status_code=400, detail="Order not found")
+
+        credits_to_add = topup_order["credits"]
+
         # Record payment and credit user
         await db.payments.insert_one({
             "user_id": str(user.id),
             "payment_id": body.razorpay_payment_id,
             "order_id": body.razorpay_order_id,
             "type": "credit_topup",
+            "credits": credits_to_add,
             "status": "captured",
             "created_at": datetime.now(timezone.utc),
         })
 
+        # Mark the topup order as completed
+        await db.credit_topup_orders.update_one(
+            {"order_id": body.razorpay_order_id},
+            {"$set": {"status": "captured"}},
+        )
+
         # Reset/reduce message count (effectively adding credits)
         current_count = user.monthly_message_count
-        new_count = max(0, current_count - 50)  # Add 50 credits
+        new_count = max(0, current_count - credits_to_add)
         await user.update({"$set": {"monthly_message_count": new_count}})
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Credit topup verification failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to process credit topup")

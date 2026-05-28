@@ -159,17 +159,23 @@ async def delete_roadmap_item(item_id: str, request: Request):
         return {"status": "ok"}
 
 
+ROADMAP_ALLOWED_FIELDS = {"title", "description", "status", "priority", "eta", "tags"}
+
+
 @router.put("/roadmap/{item_id}")
 async def update_roadmap_item(item_id: str, request: Request):
     """Update a roadmap item."""
     _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
+    filtered_body = {k: v for k, v in body.items() if k in ROADMAP_ALLOWED_FIELDS}
+    if not filtered_body:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
     try:
         from bson import ObjectId
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        await db.roadmap.update_one({"_id": ObjectId(item_id)}, {"$set": body})
+        await db.roadmap.update_one({"_id": ObjectId(item_id)}, {"$set": filtered_body})
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Update roadmap item error: {e}")
@@ -182,11 +188,14 @@ async def patch_roadmap_item(item_id: str, request: Request):
     _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
+    filtered_body = {k: v for k, v in body.items() if k in ROADMAP_ALLOWED_FIELDS}
+    if not filtered_body:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
     try:
         from bson import ObjectId
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
-        await db.roadmap.update_one({"_id": ObjectId(item_id)}, {"$set": body})
+        await db.roadmap.update_one({"_id": ObjectId(item_id)}, {"$set": filtered_body})
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Patch roadmap item error: {e}")
