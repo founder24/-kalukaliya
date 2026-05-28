@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "SEC-006 (HIGH): Update CSP headers in the edge worker to allow required third-party resources. The current CSP blocks Turnstile, PostHog, Sentry, and Cloudflare Web Analytics scripts from loading, breaking bot protection and analytics in production.",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "1. In apps/edge/src/index.ts, find the addSecurityHeaders function which sets Content-Security-Policy.",
     "2. Update the CSP header value to include: script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://app.posthog.com https://*.sentry-cdn.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com;",
@@ -19,5 +19,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "CSP updated successfully. TypeScript compiles clean. Added script-src for Turnstile, CF Web Analytics, PostHog, Sentry SDK. Added connect-src for Sentry ingest endpoints and Turnstile API. Added frame-src for Turnstile widget iframe."
 }
