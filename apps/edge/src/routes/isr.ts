@@ -8,7 +8,7 @@
  */
 
 const BOT_UA_RE =
-  /googlebot|bingbot|gptbot|claudebot|perplexitybot|applebot|yandex|baidu/i;
+  /googlebot|bingbot|gptbot|claudebot|perplexitybot|applebot|yandex|baidu|facebookexternalhit|twitterbot|linkedinbot|whatsapp|slackbot|discordbot|telegrambot|pinterestbot/i;
 
 export async function handleISR(
   request: Request,

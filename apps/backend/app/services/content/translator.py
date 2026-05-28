@@ -160,24 +160,32 @@ class ContentTranslator:
             generated.summary, context="summary"
         )
 
-        # Translate MCQs
-        translated_mcqs = []
-        for mcq in generated.mcqs:
+        # Translate MCQs in parallel
+        async def _translate_single_mcq(mcq):
             translated_mcq = dict(mcq)
+            tasks = []
             if "question" in mcq:
-                translated_mcq["question"] = await self.translate_text(
-                    mcq["question"], context="MCQ question"
-                )
-            if "options" in mcq and isinstance(mcq["options"], list):
-                translated_mcq["options"] = [
-                    await self.translate_text(opt, context="MCQ option")
-                    for opt in mcq["options"]
-                ]
+                tasks.append(("question", self._translate_with_retry(TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ question]\n\n{mcq['question']}")))
             if "explanation" in mcq:
-                translated_mcq["explanation"] = await self.translate_text(
-                    mcq["explanation"], context="MCQ explanation"
-                )
-            translated_mcqs.append(translated_mcq)
+                tasks.append(("explanation", self._translate_with_retry(TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ explanation]\n\n{mcq['explanation']}")))
+
+            # Gather question + explanation
+            if tasks:
+                results = await asyncio.gather(*[t[1] for t in tasks])
+                for (key, _), result in zip(tasks, results):
+                    translated_mcq[key] = result
+
+            # Translate options in parallel
+            if "options" in mcq and isinstance(mcq["options"], list):
+                translated_mcq["options"] = await asyncio.gather(*[
+                    self._translate_with_retry(TRANSLATION_SYSTEM_PROMPT, f"[Context: MCQ option]\n\n{opt}")
+                    for opt in mcq["options"]
+                ])
+            return translated_mcq
+
+        translated_mcqs = await asyncio.gather(*[
+            _translate_single_mcq(mcq) for mcq in generated.mcqs
+        ])
 
         # Translate definitions
         translated_definitions = []

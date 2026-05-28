@@ -71,15 +71,15 @@ jobs:
           PASSED=$(grep -oP '\d+ passed' /tmp/pytest-output.txt | grep -oP '\d+' || echo "0")
           echo "Results: $PASSED passed, $FAILED failed (exit code: $PYTEST_EXIT)"
           # Allow up to 20 known failures (Redis/Upstash unavailable in CI)
-          if [ "$FAILED" -gt 20 ]; then
-            echo "Too many failures ($FAILED > 20 threshold). Failing CI."
+          if [ "$FAILED" -gt 0 ]; then
+            echo "Test failures detected ($FAILED > 0). Failing CI."
             exit 1
           fi
           if [ "$PASSED" -eq 0 ] && [ "$PYTEST_EXIT" -ne 0 ]; then
             echo "No tests passed and pytest exited with error. Failing CI."
             exit 1
           fi
-          echo "Known failures within acceptable threshold ($FAILED <= 20)."
+          echo "All tests passed ($FAILED failures within threshold)."
         env:
           APP_ENV: test
           JWT_SECRET: test-secret-at-least-32-characters-long-for-ci

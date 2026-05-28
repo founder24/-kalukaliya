@@ -5,6 +5,7 @@ Steps: fetch -> generate MCQs/summary -> render HTML -> index search ->
 Each step is fail-soft with logging.
 """
 
+import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone
@@ -98,21 +99,23 @@ class ContentPipeline:
                     f"Hash computation failed for slug={knowledge_obj.slug}: {e}"
                 )
 
-            # Step 4: Submit IndexNow
+            # Steps 4 & 5: IndexNow + Cloudflare KV (independent, run in parallel)
             try:
-                indexnow_ok = await self._submit_indexnow(knowledge_obj)
-                results["indexnow"] = indexnow_ok
-            except Exception as e:
-                logger.error(f"IndexNow failed for slug={knowledge_obj.slug}: {e}")
-
-            # Step 5: Push to Cloudflare KV
-            try:
-                kv_ok = await self._push_cloudflare_kv(knowledge_obj)
-                results["cloudflare_kv"] = kv_ok
-            except Exception as e:
-                logger.error(
-                    f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {e}"
+                indexnow_result, kv_result = await asyncio.gather(
+                    self._submit_indexnow(knowledge_obj),
+                    self._push_cloudflare_kv(knowledge_obj),
+                    return_exceptions=True,
                 )
+                if isinstance(indexnow_result, Exception):
+                    logger.error(f"IndexNow failed for slug={knowledge_obj.slug}: {indexnow_result}")
+                else:
+                    results["indexnow"] = indexnow_result
+                if isinstance(kv_result, Exception):
+                    logger.error(f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {kv_result}")
+                else:
+                    results["cloudflare_kv"] = kv_result
+            except Exception as e:
+                logger.error(f"Parallel steps 4-5 failed for slug={knowledge_obj.slug}: {e}")
 
             # Step 6: Save to database
             try:

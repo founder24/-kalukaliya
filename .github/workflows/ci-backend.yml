@@ -80,8 +80,8 @@ jobs:
           # Only fail if coverage drops below 30% (pre-existing failures from
           # missing Razorpay/Beanie/admin services are expected in CI)
           COV_PCT=$(echo "$OUTPUT" | grep -oP 'TOTAL.*?(\d+)%' | grep -oP '\d+' | tail -1 || echo "0")
-          if [ "${COV_PCT:-0}" -lt "30" ]; then
-            echo "::error::Coverage ${COV_PCT}% is below minimum 30%"
+          if [ "${COV_PCT:-0}" -lt "60" ]; then
+            echo "::error::Coverage ${COV_PCT}% is below minimum 60%"
             exit 1
           fi
-          echo "Coverage ${COV_PCT}% passes minimum threshold (30%)"
+          echo "Coverage ${COV_PCT}% passes minimum threshold (60%)"

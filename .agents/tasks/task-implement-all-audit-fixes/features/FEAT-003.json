@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Phase 3: Performance & Quality fixes - Parallelization, memory leak fix, HMAC clock skew, hop-by-hop headers, cache keys, rate limiting, CI thresholds, batch translations, bot UA, stale-while-revalidate, error handling, StaffGuard redirect",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. Parallelize independent API calls (Steps 4 & 5) in apps/backend/app/services/content/pipeline.py: Use asyncio.gather() to run _submit_indexnow and _push_cloudflare_kv concurrently instead of sequentially. Assign results with tuple unpacking.",
     "2. Parallelize SEO generation calls in apps/backend/app/services/seo_generator.py: In generate_seo_pages, for each topic, the 5 vertex_client.generate() calls (notes, definition, mcqs, important_questions, examples) are independent. Use asyncio.gather() to run all 5 in parallel for each topic.",

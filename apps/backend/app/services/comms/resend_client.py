@@ -1,6 +1,8 @@
 import html
 import httpx
 import logging
+import time as _time
+from collections import defaultdict
 from typing import Optional
 from urllib.parse import quote as url_quote
 
@@ -9,6 +11,26 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _http_client: Optional[httpx.AsyncClient] = None
+
+RESEND_API_URL = "https://api.resend.com/emails"
+
+# Simple in-memory rate limiter: max 10 emails per minute per recipient
+_EMAIL_RATE_LIMIT = 10
+_EMAIL_RATE_WINDOW = 60  # seconds
+_email_send_times: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_rate_limit(recipient: str) -> bool:
+    """Check if sending to this recipient would exceed rate limit."""
+    now = _time.time()
+    # Clean old entries
+    _email_send_times[recipient] = [
+        t for t in _email_send_times[recipient] if now - t < _EMAIL_RATE_WINDOW
+    ]
+    if len(_email_send_times[recipient]) >= _EMAIL_RATE_LIMIT:
+        return False
+    _email_send_times[recipient].append(now)
+    return True
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
@@ -40,6 +62,10 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
     """Send an email via Resend API using async httpx."""
     if not settings.RESEND_API_KEY:
         logger.warning("RESEND_API_KEY not set - email sending disabled")
+        return False
+
+    if not _check_rate_limit(to):
+        logger.warning(f"Rate limit exceeded for {to} - email not sent")
         return False
 
     client = _get_client()

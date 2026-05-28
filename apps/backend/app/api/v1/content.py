@@ -19,7 +19,7 @@ router = APIRouter()
 SAFE_PATH_RE = re.compile(r'^[a-z0-9-]+$')
 
 # Cache-Control for CDN: 60s stale-while-revalidate, 1 hour max
-ISR_CACHE_HEADER = "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400"
+ISR_CACHE_HEADER = "public, max-age=60, s-maxage=3600, stale-while-revalidate=3600"
 
 
 def _validate_path_params(**params: str) -> None:
