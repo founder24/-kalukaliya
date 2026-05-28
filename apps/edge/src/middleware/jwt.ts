@@ -1,7 +1,8 @@
 /**
  * JWT Verification Middleware for Cloudflare Workers
  *
- * Verifies HS256 JWTs using the Web Crypto API (available in Workers runtime).
+ * Verifies HS256 and RS256 JWTs using the Web Crypto API (available in Workers runtime).
+ * Algorithm is auto-detected from the token header's `alg` field.
  * Extracts user ID from the `sub` claim and injects it as X-User-ID header.
  * Skips verification for public endpoints (login, signup, health).
  */
@@ -17,6 +18,11 @@ interface JWTPayload {
   exp: number;
   type: string;
   iat?: number;
+}
+
+interface JWTHeader {
+  alg: string;
+  typ?: string;
 }
 
 /** Paths that do NOT require JWT authentication */
@@ -43,10 +49,12 @@ const OPTIONAL_AUTH_PATHS = [
 /**
  * Verify JWT from Authorization header.
  * Returns { valid: true, userId } on success, or { valid: false, error } on failure.
+ * Supports both HS256 (with jwtSecret) and RS256 (with jwtPublicKey).
  */
 export async function verifyJWT(
   request: Request,
-  jwtSecret: string
+  jwtSecret: string,
+  jwtPublicKey?: string
 ): Promise<JWTVerifyResult> {
   const url = new URL(request.url);
 
@@ -74,7 +82,7 @@ export async function verifyJWT(
   }
 
   try {
-    const payload = await decodeAndVerify(token, jwtSecret);
+    const payload = await decodeAndVerify(token, jwtSecret, jwtPublicKey);
 
     // Check expiry
     const now = Math.floor(Date.now() / 1000);
@@ -99,9 +107,15 @@ export async function verifyJWT(
 }
 
 /**
- * Decode JWT parts, verify HMAC-SHA256 signature using Web Crypto API.
+ * Decode JWT parts, verify signature using Web Crypto API.
+ * Supports HS256 (HMAC-SHA256) and RS256 (RSASSA-PKCS1-v1_5 with SHA-256).
+ * Algorithm is detected from the token header.
  */
-async function decodeAndVerify(token: string, secret: string): Promise<JWTPayload> {
+async function decodeAndVerify(
+  token: string,
+  secret: string,
+  publicKey?: string
+): Promise<JWTPayload> {
   const parts = token.split('.');
   if (parts.length !== 3) {
     throw new Error('Malformed token: expected 3 parts');
@@ -109,23 +123,47 @@ async function decodeAndVerify(token: string, secret: string): Promise<JWTPayloa
 
   const [headerB64, payloadB64, signatureB64] = parts;
 
-  // Import secret key for HMAC verification
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify']
-  );
+  // Decode header to determine algorithm
+  const headerJson = atob(base64UrlToBase64(headerB64));
+  const header: JWTHeader = JSON.parse(headerJson);
+  const alg = header.alg;
 
-  // Verify signature
+  // Security: reject 'none' algorithm to prevent algorithm confusion attacks
+  if (!alg || alg.toLowerCase() === 'none') {
+    throw new Error('Unsupported algorithm: none');
+  }
+
+  const encoder = new TextEncoder();
   const signatureInput = encoder.encode(`${headerB64}.${payloadB64}`);
   const signature = base64UrlDecode(signatureB64);
 
-  const isValid = await crypto.subtle.verify('HMAC', key, signature, signatureInput);
-  if (!isValid) {
-    throw new Error('Invalid signature');
+  if (alg === 'RS256' && publicKey) {
+    // RS256 verification using RSASSA-PKCS1-v1_5
+    const key = await importRSAPublicKey(publicKey);
+    const isValid = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      key,
+      signature,
+      signatureInput
+    );
+    if (!isValid) {
+      throw new Error('Invalid signature');
+    }
+  } else if (alg === 'HS256' || (alg === 'RS256' && !publicKey)) {
+    // HS256 verification (or RS256 fallback when no public key is available)
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+    const isValid = await crypto.subtle.verify('HMAC', key, signature, signatureInput);
+    if (!isValid) {
+      throw new Error('Invalid signature');
+    }
+  } else {
+    throw new Error(`Unsupported algorithm: ${alg}`);
   }
 
   // Decode payload
@@ -133,6 +171,34 @@ async function decodeAndVerify(token: string, secret: string): Promise<JWTPayloa
   const payload: JWTPayload = JSON.parse(payloadJson);
 
   return payload;
+}
+
+/**
+ * Import a PEM-encoded RSA public key for use with Web Crypto API.
+ * Strips PEM headers/footers, decodes base64 to get DER bytes,
+ * then imports as SPKI format for RSASSA-PKCS1-v1_5 verification.
+ */
+async function importRSAPublicKey(pem: string): Promise<CryptoKey> {
+  // Strip PEM headers and whitespace
+  const pemContents = pem
+    .replace(/-----BEGIN PUBLIC KEY-----/g, '')
+    .replace(/-----END PUBLIC KEY-----/g, '')
+    .replace(/\s+/g, '');
+
+  // Decode base64 to binary
+  const binary = atob(pemContents);
+  const derBytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    derBytes[i] = binary.charCodeAt(i);
+  }
+
+  return crypto.subtle.importKey(
+    'spki',
+    derBytes.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['verify']
+  );
 }
 
 /**

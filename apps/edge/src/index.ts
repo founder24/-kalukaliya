@@ -39,9 +39,19 @@ export default {
     sanitizedHeaders.delete('X-Edge-Secret');
     request = new Request(request, { headers: sanitizedHeaders });
 
+    // ── Production safety: reject if backend URL is localhost in production ──
+    const isProduction = !env.ALLOWED_ORIGIN?.includes('localhost');
+    const isLocalBackend = env.AZURE_BACKEND_URL?.includes('localhost') || env.AZURE_BACKEND_URL?.includes('127.0.0.1');
+    if (isProduction && isLocalBackend && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/'))) {
+      return new Response(JSON.stringify({ error: 'Backend URL misconfiguration detected' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     // ── 2. JWT Verification (all /api/ routes except public) ──
     if (url.pathname.startsWith('/api/')) {
-      const jwtResult = await verifyJWT(request, env.JWT_SECRET);
+      const jwtResult = await verifyJWT(request, env.JWT_SECRET, env.JWT_PUBLIC_KEY);
 
       if (!jwtResult.valid && jwtResult.error !== 'Missing or invalid Authorization header') {
         // Token was provided but is invalid/expired — reject
