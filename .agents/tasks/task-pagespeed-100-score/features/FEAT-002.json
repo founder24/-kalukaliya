@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Layer 2 (Security headers): Add comprehensive security headers to apps/frontend/public/_headers for Cloudflare Pages. This fixes Best Practices score by adding CSP, COOP, and X-Frame-Options headers.",
+  "status": "completed",
+  "steps": [
+    "Edit apps/frontend/public/_headers to add a global `/*` rule block AT THE TOP of the file (before the /assets/* block) with the following headers: X-Frame-Options: DENY, X-Content-Type-Options: nosniff (move from /assets/* to global), Content-Security-Policy with: default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://us.i.posthog.com; frame-ancestors 'none', Cross-Origin-Opener-Policy: same-origin, Referrer-Policy: strict-origin-when-cross-origin, Permissions-Policy: geolocation=(), microphone=(), camera=()",
+    "Remove the X-Content-Type-Options line from the /assets/* block since it will now be covered by the global /* rule",
+    "Ensure the /* block is placed FIRST in the file (before the existing NOTE comment about Link headers) since Cloudflare Pages processes _headers from top to bottom and more specific paths override"
+  ],
+  "acceptance_criteria": [
+    "The _headers file has a /* block with all six security headers (X-Frame-Options, X-Content-Type-Options, Content-Security-Policy, Cross-Origin-Opener-Policy, Referrer-Policy, Permissions-Policy)",
+    "The CSP allows 'unsafe-inline' for scripts (needed for inline scripts in index.html) and static.cloudflareinsights.com for CF analytics",
+    "The CSP includes frame-ancestors 'none' which is equivalent to X-Frame-Options: DENY"
+  ],
+  "verification": [
+    "Run: grep -c 'Content-Security-Policy\\|Cross-Origin-Opener-Policy\\|X-Frame-Options' apps/frontend/public/_headers - should show at least 3 matches",
+    "Run: grep 'frame-ancestors' apps/frontend/public/_headers - should show frame-ancestors 'none'"
+  ],
+  "blocked_reason": null,
+  "findings": "The preload-headers-inject.js plugin had a bug where otherTrimmed = otherLines.replace(/^\\s+|\\s+$/g, '') stripped leading indentation from the first non-Link header line in the /* block, causing X-Frame-Options to appear without the required 2-space indent in dist/_headers. Fixed by filtering empty lines and removing the trim. All 623 tests pass, build succeeds."
+}
