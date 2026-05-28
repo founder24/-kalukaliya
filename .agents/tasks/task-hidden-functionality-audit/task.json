@@ -1,0 +1,7 @@
+{
+  "task_id": "task-hidden-functionality-audit",
+  "task_description": "Deep-dive audit focusing on hidden functionality issues - bugs in actual logic and behavior that would manifest in production. Produces a detailed HIDDEN_FUNCTIONALITY_AUDIT.md with 100+ issues across 15 categories.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
