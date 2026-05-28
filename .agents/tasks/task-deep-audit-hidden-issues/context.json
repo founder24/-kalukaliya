@@ -1,0 +1,24 @@
+{
+  "project_type": "Full-stack SaaS: Python FastAPI backend + React (Vite) frontend + Cloudflare Edge Worker",
+  "language": "Python (backend), JavaScript/JSX (frontend), TypeScript (edge)",
+  "build_system": "pip/uvicorn (backend), vite (frontend), wrangler (edge)",
+  "test_framework": "pytest (backend), vitest (frontend)",
+  "build_command": "N/A - audit only",
+  "test_command": "N/A - audit only",
+  "verification_instructions": "Report file must exist at HIDDEN_ISSUES_DEEP_AUDIT.md with 50+ issues",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "N/A - read-only audit",
+  "environment_constraints": "Read-only audit task. Only create the report file.",
+  "contribution_requirements": "Report only, no code changes",
+  "key_patterns": "Frontend uses axios + fetch with API_BASE=/api/v1, Backend registers routers at /api/v1/* prefixes, Edge proxies /api/ to backend",
+  "relevant_files": [
+    "apps/frontend/src/utils/api.jsx",
+    "apps/frontend/src/pages/ChatPage.jsx",
+    "apps/backend/app/main.py",
+    "apps/backend/app/api/v1/",
+    "apps/edge/src/index.ts",
+    "apps/edge/src/middleware/jwt.ts",
+    "apps/edge/src/middleware/cors.ts"
+  ],
+  "directory_structure": "apps/backend/ (FastAPI), apps/frontend/ (React+Vite), apps/edge/ (Cloudflare Worker)"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "FEAT-001",
+  "type": "docs",
+  "description": "Write a comprehensive HIDDEN_ISSUES_DEEP_AUDIT.md report at the repository root documenting 50+ hidden production issues found through systematic code analysis",
+  "status": "in_progress",
+  "steps": [
+    "Create HIDDEN_ISSUES_DEEP_AUDIT.md at /projects/sandbox/-kalukaliya/HIDDEN_ISSUES_DEEP_AUDIT.md",
+    "Include summary table at top with category counts and severity breakdown",
+    "Document all issues with evidence, severity, impact, and fix for each"
+  ],
+  "acceptance_criteria": [
+    "Report exists at /projects/sandbox/-kalukaliya/HIDDEN_ISSUES_DEEP_AUDIT.md",
+    "Contains 50+ distinct issues with code evidence",
+    "Each issue has severity, files, evidence, impact, and fix sections",
+    "Issues are organized by category"
+  ],
+  "verification": ["Check file exists and has proper markdown structure"],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,7 @@
+{
+  "task_id": "task-deep-audit-hidden-issues",
+  "task_description": "Deep-dive full-stack audit finding 50+ hidden production issues in the Syrabit AI project",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
