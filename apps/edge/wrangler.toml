@@ -57,3 +57,4 @@ bucket_name = "syrabit-assets"
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
+AZURE_BACKEND_URL = "https://ca-syrabit-api.azurecontainerapps.io"

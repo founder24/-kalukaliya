@@ -30,6 +30,7 @@ const PUBLIC_PATHS = [
   '/api/v1/admin/login',
   '/api/v1/admin/logout',
   '/api/webhooks',
+  '/api/v1/content',
 ];
 
 /**
@@ -38,6 +39,9 @@ const PUBLIC_PATHS = [
  */
 const OPTIONAL_AUTH_PATHS = [
   '/api/v1/chat',
+  '/api/v1/ai/chat',
+  '/api/v1/conversations/anon',
+  '/api/v1/edu',
 ];
 
 /**
@@ -46,7 +50,8 @@ const OPTIONAL_AUTH_PATHS = [
  */
 export async function verifyJWT(
   request: Request,
-  jwtSecret: string
+  jwtSecret: string,
+  jwtPublicKey?: string
 ): Promise<JWTVerifyResult> {
   const url = new URL(request.url);
 
@@ -74,7 +79,7 @@ export async function verifyJWT(
   }
 
   try {
-    const payload = await decodeAndVerify(token, jwtSecret);
+    const payload = await decodeAndVerify(token, jwtSecret, jwtPublicKey);
 
     // Check expiry
     const now = Math.floor(Date.now() / 1000);
@@ -99,9 +104,10 @@ export async function verifyJWT(
 }
 
 /**
- * Decode JWT parts, verify HMAC-SHA256 signature using Web Crypto API.
+ * Decode JWT parts, verify signature using Web Crypto API.
+ * Supports both HS256 (HMAC) and RS256 (RSA) algorithms.
  */
-async function decodeAndVerify(token: string, secret: string): Promise<JWTPayload> {
+async function decodeAndVerify(token: string, secret: string, publicKey?: string): Promise<JWTPayload> {
   const parts = token.split('.');
   if (parts.length !== 3) {
     throw new Error('Malformed token: expected 3 parts');
@@ -109,23 +115,42 @@ async function decodeAndVerify(token: string, secret: string): Promise<JWTPayloa
 
   const [headerB64, payloadB64, signatureB64] = parts;
 
-  // Import secret key for HMAC verification
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify']
-  );
+  // Decode header to check algorithm
+  const headerJson = atob(base64UrlToBase64(headerB64));
+  const header: { alg?: string } = JSON.parse(headerJson);
 
-  // Verify signature
+  const encoder = new TextEncoder();
   const signatureInput = encoder.encode(`${headerB64}.${payloadB64}`);
   const signature = base64UrlDecode(signatureB64);
 
-  const isValid = await crypto.subtle.verify('HMAC', key, signature, signatureInput);
-  if (!isValid) {
-    throw new Error('Invalid signature');
+  if (header.alg === 'RS256') {
+    // RS256: verify with RSA public key
+    if (!publicKey) {
+      throw new Error('RS256 token received but no public key configured');
+    }
+    const key = await importRSAPublicKey(publicKey);
+    const isValid = await crypto.subtle.verify(
+      { name: 'RSASSA-PKCS1-v1_5' },
+      key,
+      signature,
+      signatureInput
+    );
+    if (!isValid) {
+      throw new Error('Invalid signature');
+    }
+  } else {
+    // HS256 (default): verify with HMAC secret
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+    const isValid = await crypto.subtle.verify('HMAC', key, signature, signatureInput);
+    if (!isValid) {
+      throw new Error('Invalid signature');
+    }
   }
 
   // Decode payload
@@ -133,6 +158,26 @@ async function decodeAndVerify(token: string, secret: string): Promise<JWTPayloa
   const payload: JWTPayload = JSON.parse(payloadJson);
 
   return payload;
+}
+
+/**
+ * Import a PEM-encoded RSA public key for RS256 verification.
+ */
+async function importRSAPublicKey(pem: string): Promise<CryptoKey> {
+  const pemContents = pem
+    .replace(/-----BEGIN PUBLIC KEY-----/, '')
+    .replace(/-----END PUBLIC KEY-----/, '')
+    .replace(/\s/g, '');
+  const binaryDer = base64UrlDecode(
+    pemContents.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+  );
+  return crypto.subtle.importKey(
+    'spki',
+    binaryDer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['verify']
+  );
 }
 
 /**

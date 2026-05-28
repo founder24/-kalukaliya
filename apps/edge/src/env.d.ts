@@ -31,6 +31,7 @@ declare interface ExecutionContext {
 interface Env {
   // ── Secrets (set via `npx wrangler secret put <NAME>`) ──
   JWT_SECRET: string;
+  JWT_PUBLIC_KEY?: string;
   CF_TURNSTILE_SECRET: string;
   EDGE_SHARED_SECRET: string;
 
