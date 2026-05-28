@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "LAYER 1: Edge Security Foundation - Fix CORS headers, JWT optional auth paths, and Turnstile fail-closed behavior",
+  "status": "in_progress",
+  "steps": [
+    "1. In apps/edge/src/middleware/cors.ts: Add 'x-anon-id' to the Access-Control-Allow-Headers string in getCorsHeaders(). The current value is 'Content-Type, Authorization, CF-Turnstile-Response, x-turnstile-token'. Add x-anon-id to this list.",
+    "2. In apps/edge/src/middleware/jwt.ts: Add '/api/v1/content' to the PUBLIC_PATHS array (content pages should be accessible without auth).",
+    "3. In apps/edge/src/middleware/jwt.ts: Add '/api/v1/conversations/anon' and '/api/v1/edu' to the OPTIONAL_AUTH_PATHS array (these support both anonymous and authenticated usage).",
+    "4. In apps/edge/src/index.ts: Fix the Turnstile verification section. Currently when CF_TURNSTILE_SECRET is not configured, it logs a warning and skips verification. Change this to: if env is production (check isProduction variable which is already defined above), REJECT the request with 403 'Turnstile verification not configured' instead of skipping. Only skip in non-production."
+  ],
+  "acceptance_criteria": [
+    "cors.ts Access-Control-Allow-Headers includes 'x-anon-id'",
+    "jwt.ts PUBLIC_PATHS includes '/api/v1/content'",
+    "jwt.ts OPTIONAL_AUTH_PATHS includes '/api/v1/conversations/anon' and '/api/v1/edu'",
+    "index.ts rejects requests with 403 when CF_TURNSTILE_SECRET is missing in production mode"
+  ],
+  "verification": [
+    "Run: npx tsc --noEmit --project apps/edge/tsconfig.json (or just verify TypeScript syntax is correct)",
+    "Verify the files parse without errors"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

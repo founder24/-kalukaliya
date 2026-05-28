@@ -15,7 +15,7 @@ export function getCorsHeaders(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': validOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, CF-Turnstile-Response, x-turnstile-token',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, CF-Turnstile-Response, x-turnstile-token, x-anon-id',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
   };

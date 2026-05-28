@@ -91,7 +91,11 @@ export default {
 
       if (turnstileToken) {
         if (!env.CF_TURNSTILE_SECRET) {
-          console.warn('CF_TURNSTILE_SECRET is not configured — skipping Turnstile verification');
+          const isProductionEnv = !env.ALLOWED_ORIGIN?.includes('localhost');
+          if (isProductionEnv) {
+            return jsonResponse(403, { error: 'Turnstile verification not configured' });
+          }
+          // Non-production: skip verification
         } else {
           const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
           if (!isValid) {
