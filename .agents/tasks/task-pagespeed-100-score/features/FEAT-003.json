@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Layer 3 (Build configuration - jsxDEV fix): Fix the production build to NOT include jsxDEV references. The vite.config.js has `react/jsx-dev-runtime` in both `resolve.dedupe` and `optimizeDeps.include`/`optimizeDeps.needsInterop` arrays, which causes the dev runtime to be bundled. Remove these references and ensure the oxc/react plugin only uses the production jsx runtime.",
+  "status": "completed",
+  "steps": [
+    "In apps/frontend/vite.config.js, remove 'react/jsx-dev-runtime' from the `resolve.dedupe` array (line ~648). Keep 'react/jsx-runtime' in the array.",
+    "In apps/frontend/vite.config.js, remove 'react/jsx-dev-runtime' from the `optimizeDeps.include` array (line ~819). Keep 'react/jsx-runtime'.",
+    "In apps/frontend/vite.config.js, remove 'react/jsx-dev-runtime' from the `optimizeDeps.needsInterop` array (line ~829). Keep 'react/jsx-runtime'.",
+    "Verify the oxc config block has `runtime: 'automatic'` and `importSource: 'react'` which correctly uses 'react/jsx-runtime' in production (this is already correct, just confirm it stays).",
+    "The @vitejs/plugin-react with the `include` option is fine - it does not set jsxDev explicitly so it defaults to false in production mode."
+  ],
+  "acceptance_criteria": [
+    "The string 'jsx-dev-runtime' does NOT appear anywhere in vite.config.js (it should only use jsx-runtime)",
+    "The resolve.dedupe array contains 'react/jsx-runtime' but NOT 'react/jsx-dev-runtime'",
+    "The optimizeDeps.include array contains 'react/jsx-runtime' but NOT 'react/jsx-dev-runtime'",
+    "The optimizeDeps.needsInterop array contains 'react/jsx-runtime' but NOT 'react/jsx-dev-runtime'"
+  ],
+  "verification": [
+    "Run: grep 'jsx-dev-runtime' apps/frontend/vite.config.js - should return NO matches",
+    "Run: grep 'jsx-runtime' apps/frontend/vite.config.js - should return matches for the production runtime only"
+  ],
+  "blocked_reason": null,
+  "findings": "All three jsx-dev-runtime entries removed from vite.config.js (resolve.dedupe, optimizeDeps.include, optimizeDeps.needsInterop). Build succeeds in 15.36s with no jsxDEV references in dist/. All 623 tests pass across 67 test files."
+}
