@@ -27,6 +27,7 @@ from app.api.v1 import (
     admin_knowledge,
     admin_translate,
     admin_dead_letters,
+    admin_security,
     seo,
     indexnow,
     content,
@@ -234,6 +235,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"]
+    )
+    app.include_router(
+        admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
     )
     app.include_router(seo.router, prefix="/api/v1/seo", tags=["SEO"])
     app.include_router(indexnow.router, prefix="/api/v1/indexnow", tags=["IndexNow"])

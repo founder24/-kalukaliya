@@ -4,6 +4,7 @@ Overview analytics: users, chats, messages, feedback stats.
 """
 
 from fastapi import APIRouter, Request
+from typing import Optional
 import logging
 
 from app.api.v1.admin import _validate_admin_session
@@ -76,3 +77,73 @@ async def analytics_overview(request: Request):
                 "positive_rate": 0,
             },
         }
+
+
+@router.get("/analytics/daily")
+async def analytics_daily(request: Request, days: int = 30):
+    """Daily analytics breakdown."""
+    _validate_admin_session(request)
+    return {"daily": [], "period_days": days}
+
+
+@router.get("/analytics/revenue")
+async def analytics_revenue(request: Request, days: int = 30):
+    """Revenue analytics."""
+    _validate_admin_session(request)
+    return {"total_revenue": 0, "mrr": 0, "subscriptions": []}
+
+
+@router.get("/analytics/predictor")
+async def analytics_predictor(request: Request):
+    """Churn/growth predictor."""
+    _validate_admin_session(request)
+    return {"predictions": [], "confidence": 0}
+
+
+@router.get("/analytics/cf-status")
+async def analytics_cf_status(request: Request):
+    """Cloudflare Analytics token health."""
+    _validate_admin_session(request)
+    return {"configured": False, "auth_ok": False}
+
+
+@router.post("/analytics/cf-recheck")
+async def analytics_cf_recheck(request: Request):
+    """Re-probe Cloudflare Analytics auth."""
+    _validate_admin_session(request)
+    return {"status": "not_configured"}
+
+
+@router.get("/analytics/cf-overview")
+async def analytics_cf_overview(request: Request, range: str = "7d"):
+    """Cloudflare Account Analytics overview."""
+    _validate_admin_session(request)
+    return {"requests": 0, "bandwidth": 0, "threats": 0}
+
+
+@router.get("/analytics/bot-traffic")
+async def analytics_bot_traffic(request: Request, period: str = "24h"):
+    """Bot traffic analytics."""
+    _validate_admin_session(request)
+    return {"bots": [], "total": 0}
+
+
+@router.get("/analytics/hydrate-stats")
+async def analytics_hydrate_stats(request: Request, days: int = 7):
+    """Hydrate lifecycle telemetry."""
+    _validate_admin_session(request)
+    return {"stats": []}
+
+
+@router.get("/analytics/review-prompt-stats")
+async def analytics_review_prompt_stats(request: Request, days: int = 30):
+    """Review prompt funnel stats."""
+    _validate_admin_session(request)
+    return {"stats": [], "total_shown": 0, "total_clicked": 0}
+
+
+@router.get("/analytics/content-card-views")
+async def analytics_content_card_views(request: Request, days: int = 0):
+    """Content card view analytics."""
+    _validate_admin_session(request)
+    return {"views": [], "total": 0}
