@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "SEC-002 (HIGH): Add per-request HMAC signature verification to prevent Edge shared secret trust bypass. Edge should sign requests with HMAC-SHA256(secret, timestamp + user_id + path) and backend should verify the signature and reject stale requests (>30s old).",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. In apps/edge/src/routes/api-proxy.ts, add HMAC signature generation: Before forwarding, compute HMAC-SHA256 of (timestamp + userId + pathname) using the EDGE_SHARED_SECRET as key. Set headers X-Edge-Signature and X-Edge-Timestamp on the proxied request. Use the Web Crypto API (crypto.subtle) for HMAC generation. The userId comes from the X-User-ID header already set. Import or inline the necessary crypto logic.",
     "2. In apps/edge/src/index.ts, ensure the X-User-ID header is set BEFORE the request reaches the proxy function (it already is in step 2 of the pipeline). No changes needed here if the flow already sets X-User-ID before proxy.",

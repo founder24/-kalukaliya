@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import logging
 import time
+import time as _time
 import uuid
 
 from app.config import settings
@@ -176,6 +177,45 @@ def create_reset_token(user_id: str) -> str:
 security_optional = HTTPBearer(auto_error=False)
 
 
+def _verify_edge_hmac(request: Request, edge_secret: str) -> tuple[bool, str]:
+    """
+    Verify per-request HMAC signature from edge worker.
+    Returns (is_valid, user_id).
+
+    Signature format: HMAC-SHA256(secret, "timestamp:user_id:path")
+    """
+    signature = request.headers.get("X-Edge-Signature")
+    timestamp_str = request.headers.get("X-Edge-Timestamp")
+    user_id = request.headers.get("X-User-ID")
+
+    if not signature or not timestamp_str or not user_id:
+        return False, ""
+
+    # Reject stale requests (>30 seconds old)
+    try:
+        timestamp = int(timestamp_str)
+    except (ValueError, TypeError):
+        return False, ""
+
+    now = int(_time.time())
+    if abs(now - timestamp) > 30:
+        logger.warning(f"Edge HMAC timestamp too old: {abs(now - timestamp)}s")
+        return False, ""
+
+    # Compute expected signature
+    message = f"{timestamp_str}:{user_id}:{request.url.path}"
+    expected = hmac.new(
+        edge_secret.encode(),
+        message.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        return False, ""
+
+    return True, user_id
+
+
 async def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
@@ -184,20 +224,37 @@ async def get_current_user(
     Supports edge-trust bypass: if TRUST_EDGE_AUTH is enabled and X-Edge-Secret
     matches, trusts X-User-ID header directly (skips JWT decode).
     """
-    # Edge-trust bypass: if edge shared secret matches, trust X-User-ID header
-    edge_secret = request.headers.get("X-Edge-Secret") or ""
+    # Edge-trust bypass with HMAC signature verification (SEC-002)
+    edge_secret_header = request.headers.get("X-Edge-Secret") or ""
     if (
         settings.TRUST_EDGE_AUTH
         and settings.EDGE_SHARED_SECRET is not None
-        and hmac.compare_digest(edge_secret, settings.EDGE_SHARED_SECRET)
-        and request.headers.get("X-User-ID")
-        and request.headers.get("X-User-ID") != "anonymous"
+        and hmac.compare_digest(edge_secret_header, settings.EDGE_SHARED_SECRET)
     ):
-        user_id = request.headers.get("X-User-ID")
-        user = await User.get(user_id)
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
+        user_id_header = request.headers.get("X-User-ID")
+        if user_id_header and user_id_header != "anonymous":
+            # Prefer HMAC signature verification (new secure path)
+            hmac_valid, hmac_user_id = _verify_edge_hmac(request, settings.EDGE_SHARED_SECRET)
+            if hmac_valid:
+                user = await User.get(hmac_user_id)
+                if not user:
+                    raise HTTPException(status_code=401, detail="User not found")
+                return user
+
+            # Backward compatibility: allow shared-secret-only during rollover
+            # (will be removed once all edge workers are updated)
+            if not request.headers.get("X-Edge-Signature"):
+                logger.warning(
+                    "Edge request using legacy shared-secret-only auth (no HMAC signature). "
+                    "Update edge worker to include X-Edge-Signature."
+                )
+                user = await User.get(user_id_header)
+                if not user:
+                    raise HTTPException(status_code=401, detail="User not found")
+                return user
+
+            # Signature present but invalid - reject
+            raise HTTPException(status_code=401, detail="Invalid edge signature")
 
     # No edge trust -- require credentials
     if credentials is None:
@@ -267,11 +324,26 @@ async def get_current_user_optional(
         and settings.EDGE_SHARED_SECRET is not None
         and hmac.compare_digest(edge_secret_opt, settings.EDGE_SHARED_SECRET)
     ):
-        user_id = request.headers.get("X-User-ID")
-        if not user_id or user_id == "anonymous":
+        user_id_header = request.headers.get("X-User-ID")
+        if not user_id_header or user_id_header == "anonymous":
             return None
-        user = await User.get(user_id)
-        return user
+
+        # Prefer HMAC signature verification (new secure path)
+        hmac_valid, hmac_user_id = _verify_edge_hmac(request, settings.EDGE_SHARED_SECRET)
+        if hmac_valid:
+            user = await User.get(hmac_user_id)
+            return user
+
+        # Backward compatibility: allow shared-secret-only during rollover
+        if not request.headers.get("X-Edge-Signature"):
+            logger.warning(
+                "Edge request using legacy shared-secret-only auth (no HMAC signature)."
+            )
+            user = await User.get(user_id_header)
+            return user
+
+        # Signature present but invalid
+        return None
 
     if credentials is None:
         return None
