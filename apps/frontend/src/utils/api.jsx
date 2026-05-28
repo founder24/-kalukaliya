@@ -424,7 +424,7 @@ export const adminDisableBreakGlass = (token) =>
   axios.post(`${API_BASE}/admin/break-glass/disable`, {}, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminUpdateSettings = (token, data) =>
-  axios.patch(`${API_BASE}/admin/settings`, data, { headers: adminHeaders(token), withCredentials: true });
+  axios.put(`${API_BASE}/admin/settings`, data, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminGetRoadmap = (token) =>
   axios.get(`${API_BASE}/admin/roadmap`, { headers: adminHeaders(token), withCredentials: true });
@@ -1000,13 +1000,13 @@ const adminContentVersionHistory = (token, chapterId) =>
   axios.get(`${API_BASE}/admin/content/version-history/${chapterId}`, { headers: adminHeaders(token), withCredentials: true });
 
 export const postChatFeedback = (data) =>
-  axios.post(`${API_BASE}/chat-feedback`, data, { headers: anonHeaders(), withCredentials: true });
+  axios.post(`${API_BASE}/chat/feedback`, data, { headers: anonHeaders(), withCredentials: true });
 
 export const adminGetChatFeedback = (token, limit = 100, offset = 0) =>
-  axios.get(`${API_BASE}/chat-feedback?limit=${limit}&offset=${offset}`, { headers: adminHeaders(token), withCredentials: true });
+  axios.get(`${API_BASE}/chat/feedback?limit=${limit}&offset=${offset}`, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminGetFeedbackStats = (token) =>
-  axios.get(`${API_BASE}/chat-feedback/stats`, { headers: adminHeaders(token), withCredentials: true });
+  axios.get(`${API_BASE}/chat/feedback/stats`, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminPurgeAllCache = (token) =>
   axios.post(`${API_BASE}/admin/cache/purge-all`, {}, { headers: adminHeaders(token), withCredentials: true });
@@ -1066,7 +1066,7 @@ export const adminGetAlerts = (token, { limit = 50, acknowledged, type, date_fro
 };
 
 export const adminGetUnacknowledgedAlertCount = (token) =>
-  axios.get(`${API_BASE}/admin/alerts/unacknowledged-count`, { headers: adminHeaders(token), withCredentials: true });
+  axios.get(`${API_BASE}/admin/alerts/unacknowledged/count`, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminAcknowledgeAlert = (token, alertId) =>
   axios.patch(`${API_BASE}/admin/alerts/${alertId}/acknowledge`, {}, { headers: adminHeaders(token), withCredentials: true });

@@ -134,7 +134,7 @@ export function useTTS() {
     const lang = getTTSLang();
 
     const fetchChunkAudio = async (chunk, signal) => {
-      const res = await fetch(`${API_BASE}/voice/tts`, {
+      const res = await fetch(`${API_BASE}/chat/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
