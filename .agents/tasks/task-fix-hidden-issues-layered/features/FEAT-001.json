@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "LAYER 1: Edge Security Foundation - Fix CORS headers, JWT optional auth paths, and Turnstile fail-closed behavior",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In apps/edge/src/middleware/cors.ts: Add 'x-anon-id' to the Access-Control-Allow-Headers string in getCorsHeaders(). The current value is 'Content-Type, Authorization, CF-Turnstile-Response, x-turnstile-token'. Add x-anon-id to this list.",
     "2. In apps/edge/src/middleware/jwt.ts: Add '/api/v1/content' to the PUBLIC_PATHS array (content pages should be accessible without auth).",
@@ -20,5 +20,5 @@
     "Verify the files parse without errors"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "TypeScript type-check passes cleanly (npx tsc --noEmit). All 3 edge files modified as specified."
 }
