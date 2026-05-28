@@ -3,11 +3,15 @@ SearchIndexer - Chunks content and upserts to Azure AI Search.
 """
 
 import logging
+import re
 
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError
 
 from app.config import settings
+
+# Slug must be lowercase alphanumeric with hyphens only
+_SAFE_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +42,17 @@ class SearchIndexer:
 
     async def _delete_stale_chunks(self, knowledge_obj) -> None:
         """Delete existing chunks for a knowledge object before re-indexing."""
+        slug = knowledge_obj.slug
+        if not _SAFE_SLUG_RE.match(slug):
+            logger.warning(
+                f"Skipping stale chunk deletion: invalid slug format '{slug}'"
+            )
+            return
+
         try:
             results = self.client.search(
                 search_text="*",
-                filter=f"slug eq '{knowledge_obj.slug}'",
+                filter=f"slug eq '{slug}'",
                 select=["id"],
                 top=1000,
             )

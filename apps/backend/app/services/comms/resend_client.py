@@ -24,10 +24,13 @@ _email_send_times: dict[str, list[float]] = defaultdict(list)
 def _check_rate_limit(recipient: str) -> bool:
     """Check if sending to this recipient would exceed rate limit."""
     now = _time.time()
-    # Clean old entries
+    # Clean old entries for this recipient
     _email_send_times[recipient] = [
         t for t in _email_send_times[recipient] if now - t < _EMAIL_RATE_WINDOW
     ]
+    # Prune global dict if it grows too large to prevent unbounded memory usage
+    if len(_email_send_times) > 10000:
+        _email_send_times.clear()
     if len(_email_send_times[recipient]) >= _EMAIL_RATE_LIMIT:
         return False
     _email_send_times[recipient].append(now)

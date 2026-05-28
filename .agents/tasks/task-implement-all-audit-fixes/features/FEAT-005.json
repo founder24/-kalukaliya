@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Phase 5: Address semantic review findings - OData injection, CI thresholds, StaffGuard redirect, unbounded dict growth, sitemap URL format",
+  "status": "in_progress",
+  "steps": [
+    "1. Fix OData injection in _delete_stale_chunks (search_indexer.py): Validate slug matches ^[a-z0-9-]+$ before using in filter. If it doesn't match, skip deletion and log a warning.",
+    "2. Fix CI deploy threshold in deploy-all.yml: Change from 0 back to 5. Update echo message to match.",
+    "3. Fix CI coverage threshold in ci-backend.yml: Change from 60% to 45%. Update comments and messages.",
+    "4. Fix StaffGuard redirect: Change !user case back to /login, keep role check case as / since user IS logged in.",
+    "5. Fix unbounded _email_send_times dict growth in resend_client.py: Add pruning when len > 10000.",
+    "6. Fix sitemap URL format in content_publisher.py: Revert to https://syrabit.ai/{ch.slug} without /notes suffix."
+  ],
+  "acceptance_criteria": [
+    "search_indexer validates slug before OData filter interpolation",
+    "deploy-all.yml threshold is 5",
+    "ci-backend.yml coverage threshold is 45%",
+    "StaffGuard redirects unauthenticated users to /login and unauthorized (wrong role) to /",
+    "_email_send_times is pruned when exceeding 10000 entries",
+    "content_publisher sitemap uses https://syrabit.ai/{ch.slug} format"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m ruff check app/services/content/search_indexer.py app/services/comms/resend_client.py app/services/content_publisher.py"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}
