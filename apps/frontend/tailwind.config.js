@@ -3,7 +3,7 @@ module.exports = {
 
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
-    "./public/index.html",
+    "./index.html",
   ],
   theme: {
     extend: {
@@ -70,7 +70,7 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ["'Space Grotesk'", "Inter", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "sans-serif"],
+        sans: ["'Space Grotesk'", "system-ui", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "sans-serif"],
       },
       keyframes: {
         /* Shadcn accordion */
