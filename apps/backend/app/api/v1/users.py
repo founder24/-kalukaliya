@@ -29,6 +29,13 @@ class UpdateProfileRequest(BaseModel):
     preferred_language: Optional[str] = None
 
 
+class OnboardingRequest(BaseModel):
+    language: Optional[str] = None
+    grade: Optional[str] = None
+    board: Optional[str] = None
+    stream: Optional[str] = None
+
+
 @router.get("/me", response_model=UserProfile)
 async def get_current_user_profile(user: User = Depends(get_current_user)):
     """Get current user profile"""
@@ -82,3 +89,42 @@ async def delete_account(user: User = Depends(get_current_user)):
 
     logger.info(f"User account deleted: {user.email}")
     return {"status": "success", "message": "Account deleted"}
+
+
+@router.post("/onboarding")
+async def save_onboarding(body: OnboardingRequest, user: User = Depends(get_current_user)):
+    """Save user onboarding preferences (language, grade, board, stream)."""
+    updates = {}
+    if body.language:
+        updates["preferred_language"] = body.language
+    if body.grade:
+        updates["grade"] = body.grade
+    if body.board:
+        updates["board"] = body.board
+    if body.stream:
+        updates["stream"] = body.stream
+    updates["onboarding_done"] = True
+
+    if updates:
+        await user.update({"$set": updates})
+
+    logger.info("Onboarding saved", extra={"user_id": str(user.id)})
+    return {"status": "success", "message": "Onboarding preferences saved"}
+
+
+@router.get("/credits")
+async def get_credits(user: User = Depends(get_current_user)):
+    """Get user credits information."""
+    tier = getattr(user, "subscription_tier", "free")
+    credits_remaining = getattr(user, "credits_remaining", 0) or 0
+    credits_used = getattr(user, "credits_used", 0) or 0
+
+    tier_limits = {"free": 30, "pro": 999999, "premium": 999999}
+    monthly_limit = tier_limits.get(tier, 30)
+
+    return {
+        "credits_remaining": credits_remaining,
+        "credits_used": credits_used,
+        "monthly_limit": monthly_limit,
+        "tier": tier,
+    }
