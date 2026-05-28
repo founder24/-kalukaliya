@@ -310,7 +310,7 @@ function addSecurityHeaders(response: Response): Response {
   newResponse.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   newResponse.headers.set('X-XSS-Protection', '0');
   newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com; frame-ancestors 'none'");
+  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://app.posthog.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'");
   return newResponse;
 }
 
