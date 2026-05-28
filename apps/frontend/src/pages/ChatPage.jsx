@@ -350,7 +350,7 @@ export default function ChatPage() {
       if (!user) {
         fetchHeaders['x-anon-id'] = getAnonId();
       }
-      const response = await fetch(`${API_BASE}/ai/chat/stream`, {
+      const response = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST', headers: fetchHeaders,
         credentials: 'include', body: JSON.stringify(payload), signal: controller.signal,
       });

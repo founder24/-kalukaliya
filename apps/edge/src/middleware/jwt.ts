@@ -44,6 +44,7 @@ const PUBLIC_PATHS = [
  */
 const OPTIONAL_AUTH_PATHS = [
   '/api/v1/chat',
+  '/api/v1/ai/chat',
 ];
 
 /**

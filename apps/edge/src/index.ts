@@ -70,7 +70,7 @@ export default {
     // ── 3. Turnstile Bot Protection (chat/auth endpoints) ──
     // SEC: Turnstile verification is MANDATORY (not optional) for auth and chat POST.
     // Requests without a valid token are rejected with 403.
-    if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/auth')) {
+    if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/ai/chat') || url.pathname.startsWith('/api/v1/auth')) {
       const turnstileToken = request.headers.get('x-turnstile-token') || request.headers.get('CF-Turnstile-Response');
 
       // Turnstile is MANDATORY for auth endpoints
@@ -81,7 +81,7 @@ export default {
 
       // Turnstile is MANDATORY for chat POST requests (except feedback)
       const isChatPost =
-        url.pathname.startsWith('/api/v1/chat') &&
+        (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/ai/chat')) &&
         request.method === 'POST' &&
         !url.pathname.startsWith('/api/v1/chat/feedback');
 
@@ -112,10 +112,10 @@ export default {
     }
 
     // ── 4. Per-Language Rate Limiting (chat POST only) ──
-    if (!env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+    if (!env.RATE_LIMIT_KV && (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/ai/chat')) && request.method === 'POST') {
       console.warn('RATE_LIMIT_KV binding not available - rate limiting disabled');
     }
-    if (env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+    if (env.RATE_LIMIT_KV && (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/ai/chat')) && request.method === 'POST') {
       const userId = request.headers.get('X-User-ID') || 'anonymous';
 
       // Best-effort lang extraction from request body

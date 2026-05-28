@@ -199,6 +199,8 @@ def create_app() -> FastAPI:
 
     # Register Routes
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+    # Legacy alias: frontend historically used /api/v1/ai/chat/stream
+    app.include_router(chat.router, prefix="/api/v1/ai/chat", tags=["Chat"])
     app.include_router(
         conversations.router,
         prefix="/api/v1/conversations",
