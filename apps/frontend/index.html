@@ -270,6 +270,7 @@
       .flex-col{flex-direction:column}.gap-4{gap:1rem}
       .text-white{color:#fff}.overflow-x-hidden{overflow-x:hidden}
       .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}
+      .focus\:not-sr-only:focus{position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;white-space:normal}
       .animate-spin{animation:spin 1s linear infinite}
       @keyframes spin{to{transform:rotate(360deg)}}
     </style>
@@ -374,7 +375,7 @@
       <div class="__nav"></div>
     </div>
     <div id="root"></div>
-      <script type="module" src="/src/index.jsx"></script>
+      <script type="module" src="/src/index.jsx" data-cfasync="false"></script>
 
     <!--CF_ANALYTICS_BEACON-->
   </body>
