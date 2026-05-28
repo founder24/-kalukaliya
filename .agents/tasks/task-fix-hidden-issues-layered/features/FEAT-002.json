@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "LAYER 2: Frontend URL Path Fixes - Fix broken API paths in frontend that call wrong backend routes",
+  "status": "in_progress",
+  "steps": [
+    "1. In apps/frontend/src/hooks/useTTS.jsx: Change the fetch URL from `${API_BASE}/voice/tts` to `${API_BASE}/chat/tts`. The backend TTS endpoint is registered at /api/v1/chat/tts (on the chat router).",
+    "2. In apps/frontend/src/utils/api.jsx: Change all 3 chat-feedback references from '/chat-feedback' to '/chat/feedback'. Specifically: (a) postChatFeedback uses '/chat-feedback' -> change to '/chat/feedback', (b) adminGetChatFeedback uses '/chat-feedback?limit=...' -> change to '/chat/feedback?limit=...', (c) adminGetFeedbackStats uses '/chat-feedback/stats' -> change to '/chat/feedback/stats'.",
+    "3. In apps/frontend/src/utils/api.jsx: Change adminGetUnacknowledgedAlertCount from '/admin/alerts/unacknowledged-count' to '/admin/alerts/unacknowledged/count' (the backend uses a slash, not a hyphen).",
+    "4. In apps/frontend/src/utils/api.jsx: Change adminUpdateSettings from axios.patch to axios.put. The backend only defines @router.put('/settings') so PATCH will get 405. Change `axios.patch(`${API_BASE}/admin/settings`, data, ...)` to `axios.put(`${API_BASE}/admin/settings`, data, ...)`."
+  ],
+  "acceptance_criteria": [
+    "useTTS.jsx fetches from /chat/tts instead of /voice/tts",
+    "api.jsx chat feedback functions use '/chat/feedback' path (not '/chat-feedback')",
+    "api.jsx adminGetUnacknowledgedAlertCount uses '/admin/alerts/unacknowledged/count'",
+    "api.jsx adminUpdateSettings uses axios.put instead of axios.patch"
+  ],
+  "verification": [
+    "Grep for '/voice/tts' in frontend - should find 0 results",
+    "Grep for '/chat-feedback' in frontend - should find 0 results",
+    "Grep for 'unacknowledged-count' in frontend - should find 0 results"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
