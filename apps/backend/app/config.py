@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # --- P7: Sarvam AI (Indic) ---
     SARVAM_API_KEY: Optional[str] = None
     SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
-    SARVAM_MODEL: str = "openhathi-7b"
+    SARVAM_MODEL: str = "sarvam-m"
 
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: Optional[str] = None
