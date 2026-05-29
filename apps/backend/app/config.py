@@ -147,7 +147,7 @@ class Settings(BaseSettings):
             "dev-only-secret-not-for-production-use-32chars",
         }
 
-        if self.APP_ENV == "production":
+        if self.APP_ENV in ("production", "staging"):
             if self.JWT_SECRET in KNOWN_PLACEHOLDER_SECRETS:
                 raise ValueError(
                     "JWT_SECRET is a known placeholder value and must be changed in production"

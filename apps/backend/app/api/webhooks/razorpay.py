@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +16,9 @@ router = APIRouter(tags=["Payments"])
 _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
 
 
-def calculate_next_billing_date() -> str:
+def calculate_next_billing_date() -> datetime:
     """Calculate next billing date (1 month from now)"""
-    from datetime import datetime, timedelta, timezone
-
-    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    return datetime.now(timezone.utc) + timedelta(days=30)
 
 
 def _validate_subscription_id(value) -> str:
@@ -124,5 +123,16 @@ async def handle_razorpay_webhook(request: Request):
         if user:
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
+
+    elif event.get("event") == "subscription.expired":
+        sub_id = _validate_subscription_id(payload["subscription"]["id"])
+        user = await User.find_one({"razorpay_subscription_id": sub_id})
+        if user:
+            await user.update({"$set": {
+                "subscription_tier": "free",
+                "subscription_status": "cancelled",
+                "cancel_at_period_end": False,
+            }})
+        logger.info(f"Subscription expired, user downgraded: {sub_id}")
 
     return {"status": "ok"}

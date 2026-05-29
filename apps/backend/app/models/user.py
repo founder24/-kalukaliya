@@ -49,7 +49,7 @@ class User(Document):
         name = "users"
         indexes = [
             [("email", 1)],  # Unique index created in mongo.py
-            [("subscription.razorpay_subscription_id", 1)],
+            [("razorpay_subscription_id", 1)],
             [("preferred_language", 1)],
             [("created_at", -1)],
         ]

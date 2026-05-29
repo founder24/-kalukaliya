@@ -311,7 +311,38 @@ class ChatService:
                 await ChatService._invalidate_history_cache(session_id)
 
         except Exception as e:
-            logger.error(f"Failed to save chat: {e}")
+            logger.error(f"Failed to save chat (attempt 1): {e}")
+            # Retry once
+            try:
+                from app.models.chat import Chat
+
+                chat_doc = Chat(
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                chat_doc.add_message(role="user", content=user_message)
+                chat_doc.add_message(
+                    role="assistant",
+                    content=assistant_response,
+                    model_used=target_model,
+                    latency_ms=latency_ms,
+                    rag_sources=[
+                        {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
+                        for c in context_chunks
+                    ],
+                )
+                await chat_doc.save()
+
+                if session_id:
+                    await ChatService._invalidate_history_cache(session_id)
+            except Exception as retry_err:
+                logger.error(f"Failed to save chat (attempt 2): {retry_err}")
+                # Store dead letter for later recovery
+                from app.services.dead_letter import store_dead_letter
+
+                await store_dead_letter(
+                    user_id, user_message, "unknown", str(retry_err)
+                )
 
     # ------------------------------------------------------------------
     # Conversation history (with Redis caching, 30-min TTL)

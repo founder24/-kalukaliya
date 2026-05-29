@@ -74,7 +74,7 @@ async def create_indexes() -> None:
     # Users collection indexes
     await db.users.create_index([("email", ASCENDING)], unique=True)
     await db.users.create_index(
-        [("subscription.razorpay_subscription_id", ASCENDING)], sparse=True
+        [("razorpay_subscription_id", ASCENDING)], sparse=True
     )
     await db.users.create_index([("profile.preferences.language", ASCENDING)])
     await db.users.create_index([("created_at", DESCENDING)])

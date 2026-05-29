@@ -126,6 +126,14 @@ async def chat(
             )
 
             # 2. RAG retrieval + history load + rate limit in parallel
+            # Reset monthly message count if we're in a new month
+            if user and hasattr(user, 'last_reset_date') and user.last_reset_date:
+                now = datetime.now(timezone.utc)
+                if user.last_reset_date.month != now.month or user.last_reset_date.year != now.year:
+                    await user.update({"$set": {"monthly_message_count": 0, "last_reset_date": now}})
+                    user.monthly_message_count = 0
+                    user.last_reset_date = now
+
             # Using return_exceptions=True so one failure does not cancel others
             results = await asyncio.gather(
                 ChatService.retrieve_context(sanitized_message, user_tier),
@@ -237,6 +245,8 @@ async def chat(
             task.add_done_callback(_log_task_exception)
 
             # 6. Update usage counter
+            # NOTE: Redis is the authoritative source for rate limiting.
+            # This MongoDB increment is for analytics/display purposes only.
             if user:
                 try:
                     await user.update(

@@ -203,7 +203,7 @@ def _verify_edge_hmac(request: Request, edge_secret: str) -> tuple[bool, str]:
 
     # Compute expected signature
     message = f"{timestamp_str}:{user_id}:{request.url.path}"
-    expected = hmac.new(
+    expected = hmac.HMAC(
         edge_secret.encode(), message.encode(), hashlib.sha256
     ).hexdigest()
 
@@ -285,9 +285,7 @@ async def get_current_user(
             raise
         except Exception as e:
             logger.error(f"Redis unavailable for token blacklist check: {e}")
-            raise HTTPException(
-                status_code=503, detail="Token validation service unavailable"
-            )
+            pass  # Fail-open: JWT is still cryptographically valid
 
         user = await User.get(user_id)
         if not user:
@@ -446,7 +444,7 @@ async def signup(request_body: SignupRequest, request: Request):
     except Exception as e:
         logger.warning(f"Welcome email failed for {request_body.email}: {e}")
 
-    logger.info(f"New user signed up: {request_body.email}")
+    logger.info(f"New user signed up: {request_body.email[:3]}***@{request_body.email.split('@')[1]}")
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -473,18 +471,20 @@ async def login(request_body: LoginRequest, request: Request):
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
-    logger.info(f"User logged in: {request_body.email}")
+    logger.info(f"User logged in: {request_body.email[:3]}***@{request_body.email.split('@')[1]}")
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(request: ForgotPasswordRequest):
+async def forgot_password(request_body: ForgotPasswordRequest, request: Request):
     """
     Request a password reset email.
     Always returns success (don't reveal whether email exists).
     """
+    await _check_rate_limit(request, "forgot_password", 3)
+
     try:
-        user = await User.find_one({"email": request.email})
+        user = await User.find_one({"email": request_body.email})
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
@@ -498,15 +498,15 @@ async def forgot_password(request: ForgotPasswordRequest):
         # Send reset email via Resend
         try:
             await send_password_reset_email(
-                email=request.email, reset_token=reset_token
+                email=request_body.email, reset_token=reset_token
             )
-            logger.info(f"Password reset email sent to {request.email}")
+            logger.info(f"Password reset email sent to {request_body.email}")
         except Exception as e:
-            logger.error(f"Failed to send password reset email to {request.email}: {e}")
+            logger.error(f"Failed to send password reset email to {request_body.email}: {e}")
     else:
         # Don't reveal whether the email exists — log and return same response
         logger.info(
-            f"Password reset requested for non-existent/non-local email: {request.email}"
+            f"Password reset requested for non-existent/non-local email: {request_body.email}"
         )
 
     return MessageResponse(

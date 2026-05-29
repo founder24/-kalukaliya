@@ -98,6 +98,7 @@ async def verify_payment(
             "$set": {
                 "subscription_tier": "pro",
                 "subscription_status": "active",
+                "razorpay_subscription_id": body.razorpay_order_id,
             }
         }
     )
@@ -139,6 +140,15 @@ async def create_credit_topup(
             },
         }
     )
+
+    # Store credits locally for verification resilience
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        await redis.set(f"credit_order:{order['id']}", str(body.credits), ex=86400)
+    except Exception:
+        pass  # Redis failure is non-fatal here
 
     return {
         "order_id": order["id"],
@@ -184,14 +194,27 @@ async def verify_credit_topup(
         )
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
-    # Fetch order to get credits from notes
-    import razorpay
+    # Try local Redis first (resilient to Razorpay API outage)
+    credits = 0
+    try:
+        from app.db.redis import get_redis
 
-    client = razorpay.Client(
-        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
-    )
-    order = client.order.fetch(body.razorpay_order_id)
-    credits = int(order.get("notes", {}).get("credits", 0))
+        redis = get_redis()
+        cached_credits = await redis.get(f"credit_order:{body.razorpay_order_id}")
+        if cached_credits:
+            credits = int(cached_credits)
+    except Exception:
+        pass
+
+    if not credits:
+        # Fallback to Razorpay API
+        import razorpay
+
+        client = razorpay.Client(
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+        )
+        order = client.order.fetch(body.razorpay_order_id)
+        credits = int(order.get("notes", {}).get("credits", 0))
 
     if credits <= 0:
         raise HTTPException(status_code=400, detail="Invalid credit amount in order")
