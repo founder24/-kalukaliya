@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Fix edge worker security issue (HF-006) and frontend token refresh race condition (HF-002/HF-051), plus frontend state issues (HF-056) and edge correlation ID (HF-116)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "HF-006: In apps/edge/src/index.ts, only set X-Edge-Secret when jwtResult.valid is true. Currently the code sets X-Edge-Secret unconditionally after JWT verification (around line 56). Wrap it in: `if (jwtResult.valid && env.EDGE_SHARED_SECRET) { headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET); }`. When JWT is not valid (missing/invalid), do NOT set the secret.",
     "HF-002/HF-051: In apps/frontend/src/hooks/useAuthRefresh.js, add a module-level promise deduplication (mutex). Add: `let _refreshPromise = null;` at module level. In silentRefresh(), at the start check: `if (_refreshPromise) return _refreshPromise;`. Then wrap the actual refresh in a promise: `_refreshPromise = (async () => { ... })().finally(() => { _refreshPromise = null; });`. Return _refreshPromise.",
@@ -20,5 +20,5 @@
     "Check that useAuthRefresh.js has the deduplication logic with: grep -n '_refreshPromise' apps/frontend/src/hooks/useAuthRefresh.js"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "TypeScript compiles cleanly with no errors. JS syntax verified. All four acceptance criteria met."
 }
