@@ -135,8 +135,15 @@ def seed_from_sample(project_id: str, location: str, datastore_id: str):
         for i, chunk in enumerate(chunks):
             doc_id = hashlib.md5(f"sample:{doc_data['title']}:{i}".encode()).hexdigest()
 
+            # content field is required for CONTENT_REQUIRED datastores
+            content = discoveryengine.Document.Content(
+                raw_bytes=chunk.encode("utf-8"),
+                mime_type="text/plain",
+            )
+
             document = discoveryengine.Document(
                 id=doc_id,
+                content=content,
                 struct_data={
                     "id": doc_id,
                     "title": doc_data["title"],
@@ -203,8 +210,15 @@ def seed_from_directory(project_id: str, location: str, datastore_id: str, data_
         for i, chunk in enumerate(chunks):
             doc_id = hashlib.md5(f"{file_path}:{i}".encode()).hexdigest()
 
+            # content field is required for CONTENT_REQUIRED datastores
+            content = discoveryengine.Document.Content(
+                raw_bytes=chunk.encode("utf-8"),
+                mime_type="text/plain",
+            )
+
             document = discoveryengine.Document(
                 id=doc_id,
+                content=content,
                 struct_data={
                     "id": doc_id,
                     "title": file_path.stem,
