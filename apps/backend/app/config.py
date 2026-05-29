@@ -63,9 +63,11 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
     # Option 2 (legacy): Inline JSON string of service account key
     GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
+    # Option 3: Gemini API key (Generative Language API - bypasses Vertex AI SDK)
+    GEMINI_API_KEY: Optional[str] = None
     VERTEX_PROJECT_ID: Optional[str] = None
     VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash-lite"
+    VERTEX_GEMINI_MODEL: str = "gemini-2.5-flash"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
     # --- P7: Sarvam AI (Indic) ---
