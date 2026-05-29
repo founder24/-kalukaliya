@@ -1,0 +1,22 @@
+{
+  "project_type": "React SPA with SSR prerendering, Vite 7 build system",
+  "language": "JavaScript/JSX",
+  "build_system": "pnpm monorepo with Vite 7.3.3, @vitejs/plugin-react 4.7.0",
+  "test_framework": "vitest with jsdom, @testing-library/react",
+  "build_command": "pnpm --filter @workspace/syrabit run build:client",
+  "test_command": "pnpm --filter @workspace/syrabit exec vitest run",
+  "verification_instructions": "1. Run pnpm install from repo root. 2. Run the client build. 3. Run vitest. 4. Start dev server and verify HTML is served.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pnpm install from /projects/sandbox/-kalukaliya",
+  "environment_constraints": "Node 22, pnpm available, OPEN_INTERNET network mode",
+  "contribution_requirements": "None specified",
+  "key_patterns": "Vite config at apps/frontend/vite.config.js uses react() plugin, path alias @/ -> src/, manual chunk splitting, custom plugins for SEO/bot rendering. The oxc top-level config and optimizeDeps.rolldownOptions are INVALID Vite 7 keys that are silently ignored.",
+  "relevant_files": [
+    "apps/frontend/vite.config.js",
+    "apps/frontend/src/index.jsx",
+    "apps/frontend/src/App.jsx",
+    "apps/frontend/index.html",
+    "apps/frontend/package.json"
+  ],
+  "directory_structure": "Monorepo: apps/frontend (React SPA), apps/backend (FastAPI), apps/edge (Cloudflare Workers). Frontend uses Vite 7, React 18, react-router-dom 7, TailwindCSS."
+}
