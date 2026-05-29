@@ -33,5 +33,5 @@
     "Confirm the script references all Vertex-related config vars from config.py"
   ],
   "blocked_reason": null,
-  "findings": "Script passes bash -n syntax validation. All 7 env vars from config.py are output. All 7 APIs enabled. All 6 IAM roles assigned. Datastore and search engine created via REST API. Script is idempotent (checks for existing resources). --dry-run flag works via run_cmd wrapper and conditional blocks for REST API calls."
+  "findings": "Script passes bash -n syntax validation. All 7 env vars from config.py are output. All 7 APIs enabled. All 6 IAM roles assigned. Datastore and search engine created via REST API. Script is idempotent (checks for existing resources). --dry-run flag works via run_cmd wrapper and conditional blocks for REST API calls. Review fixes applied: (1) key JSON no longer echoed to stdout, (2) inline schema removed in favor of deploy-search-index.py referencing vertex-search-schema.json, (3) dry-run now covers schema deployment step, (4) access token fetched once before Section 4, (5) Workload Identity Federation note added to Next Steps."
 }
