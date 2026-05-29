@@ -10,6 +10,7 @@
  */
 
 import { getCorsHeaders } from '../middleware/cors';
+import { getIdentityToken } from '../utils/google-auth';
 
 export async function proxyRequest(
   request: Request,
@@ -56,6 +57,12 @@ export async function proxyRequest(
 
     headers.set('X-Edge-Timestamp', timestamp);
     headers.set('X-Edge-Signature', signatureHex);
+  }
+
+  // Inject Google identity token for Cloud Run authentication
+  const idToken = await getIdentityToken(env);
+  if (idToken) {
+    headers.set('Authorization', 'Bearer ' + idToken);
   }
 
   const controller = new AbortController();
