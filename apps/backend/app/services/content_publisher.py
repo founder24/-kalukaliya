@@ -19,6 +19,24 @@ logger = logging.getLogger(__name__)
 class ContentPublisherService:
     """Service for publishing chapters to Vertex AI Search and Cloudflare."""
 
+    def __init__(self):
+        self._vertex_client = None
+
+    def _get_vertex_client(self):
+        """Lazily initialize and cache the DocumentServiceClient."""
+        if self._vertex_client is None:
+            from google.cloud import discoveryengine_v1
+            from google.oauth2 import service_account
+
+            credentials = service_account.Credentials.from_service_account_info(
+                settings.google_credentials,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            self._vertex_client = discoveryengine_v1.DocumentServiceClient(
+                credentials=credentials,
+            )
+        return self._vertex_client
+
     def _chunk_content(self, text: str, max_tokens: int = 512) -> list[str]:
         """Split content into chunks of approximately max_tokens tokens (~4 chars per token)."""
         max_chars = max_tokens * 4
@@ -49,17 +67,9 @@ class ContentPublisherService:
 
         try:
             from google.cloud import discoveryengine_v1
-            from google.oauth2 import service_account
             from google.protobuf import struct_pb2
 
-            credentials = service_account.Credentials.from_service_account_info(
-                settings.google_credentials,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-
-            client = discoveryengine_v1.DocumentServiceClient(
-                credentials=credentials,
-            )
+            client = self._get_vertex_client()
 
             parent = client.branch_path(
                 project=settings.VERTEX_PROJECT_ID,

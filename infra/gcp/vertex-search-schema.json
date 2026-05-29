@@ -34,13 +34,6 @@
           "searchable": true
         },
         {
-          "fieldName": "content_vector",
-          "type": "STRING",
-          "indexable": false,
-          "retrievable": false,
-          "searchable": false
-        },
-        {
           "fieldName": "language",
           "type": "STRING",
           "indexable": true,

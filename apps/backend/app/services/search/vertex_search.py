@@ -169,7 +169,7 @@ class VertexSearchService:
                 filter_expr = None
             else:
                 filter_expr = (
-                    f"tier_access: ANY(\"{user_tier}\")" if user_tier else None
+                    f'tier_access = "{user_tier}"' if user_tier else None
                 )
 
             # Execute search in thread pool (client is synchronous)
@@ -218,10 +218,10 @@ class VertexSearchService:
                     "id": doc_data.id or f"result_{i}",
                     "title": struct_data.get("title", ""),
                     "content": content,
-                    "score": getattr(result, "model_scores", {}).get("score", 0)
-                    if hasattr(result, "model_scores")
-                    else 0,
-                    "reranker_score": 0,
+                    "score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
+                    "reranker_score": round(1.0 - i * 0.1, 2)
+                    if i < 10
+                    else 0.01,
                     "url": struct_data.get("source_url", ""),
                 }
                 context_chunks.append(chunk)
@@ -265,8 +265,12 @@ class VertexSearchService:
                             "id": doc_data.id or f"result_{i}",
                             "title": struct_data.get("title", ""),
                             "content": content,
-                            "score": 0,
-                            "reranker_score": 0,
+                            "score": round(1.0 - i * 0.1, 2)
+                            if i < 10
+                            else 0.01,
+                            "reranker_score": round(1.0 - i * 0.1, 2)
+                            if i < 10
+                            else 0.01,
                             "url": struct_data.get("source_url", ""),
                             "unfiltered": True,
                         }

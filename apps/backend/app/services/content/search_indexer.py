@@ -164,16 +164,16 @@ class SearchIndexer:
                 )
                 documents.append(doc)
 
-            # Upsert documents using import_documents in batches
-            batch_size = 100
-            batches_succeeded = 0
-            batches_failed = 0
+            # Upsert documents concurrently with bounded semaphore
+            semaphore = asyncio.Semaphore(10)
+            succeeded = 0
+            failed = 0
 
-            for start in range(0, len(documents), batch_size):
-                batch = documents[start : start + batch_size]
-                try:
-                    # Use create_document for each document in the batch
-                    for doc in batch:
+            async def _upsert_document(doc):
+                """Upsert a single document (create, fallback to update)."""
+                nonlocal succeeded, failed
+                async with semaphore:
+                    try:
                         request = discoveryengine_v1.CreateDocumentRequest(
                             parent=self._parent,
                             document=doc,
@@ -182,11 +182,9 @@ class SearchIndexer:
                         await asyncio.to_thread(
                             self._client.create_document, request=request
                         )
-                    batches_succeeded += 1
-                except Exception:
-                    # Try update if create fails (document already exists)
-                    try:
-                        for doc in batch:
+                        succeeded += 1
+                    except Exception:
+                        try:
                             doc.name = f"{self._parent}/documents/{doc.id}"
                             request = discoveryengine_v1.UpdateDocumentRequest(
                                 document=doc,
@@ -195,24 +193,26 @@ class SearchIndexer:
                             await asyncio.to_thread(
                                 self._client.update_document, request=request
                             )
-                        batches_succeeded += 1
-                    except Exception as update_err:
-                        batches_failed += 1
-                        logger.error(
-                            f"Batch {start // batch_size + 1} failed for "
-                            f"slug={knowledge_obj.slug}: {update_err}"
-                        )
+                            succeeded += 1
+                        except Exception as update_err:
+                            failed += 1
+                            logger.error(
+                                f"Failed to upsert doc {doc.id} for "
+                                f"slug={knowledge_obj.slug}: {update_err}"
+                            )
 
-            if batches_failed > 0:
+            await asyncio.gather(*[_upsert_document(doc) for doc in documents])
+
+            if failed > 0:
                 logger.warning(
-                    f"{batches_failed} batch(es) failed for slug={knowledge_obj.slug}"
+                    f"{failed} document(s) failed for slug={knowledge_obj.slug}"
                 )
 
-            if batches_succeeded > 0:
+            if succeeded > 0:
                 logger.info(
-                    f"Indexed {len(documents)} chunks for slug={knowledge_obj.slug}"
+                    f"Indexed {succeeded}/{len(documents)} chunks for slug={knowledge_obj.slug}"
                 )
-            return batches_succeeded > 0
+            return succeeded > 0
 
         except Exception as e:
             logger.error(f"Vertex Search indexing failed for slug={knowledge_obj.slug}: {e}")
