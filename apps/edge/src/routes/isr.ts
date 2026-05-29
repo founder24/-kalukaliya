@@ -42,7 +42,7 @@ export async function handleISR(
     }
 
     // Cache miss: proxy to backend
-    const backendUrl = `${env.AZURE_BACKEND_URL.replace(/\/$/, '')}${url.pathname}${url.search}`;
+    const backendUrl = `${env.BACKEND_URL.replace(/\/$/, '')}${url.pathname}${url.search}`;
     const sanitizedHeaders = new Headers(request.headers);
     sanitizedHeaders.delete('Cookie');
     sanitizedHeaders.delete('Authorization');

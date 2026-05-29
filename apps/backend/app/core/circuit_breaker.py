@@ -154,6 +154,21 @@ class CircuitBreaker:
             "last_failure_time": self._last_failure_time,
         }
 
+    def allow_request(self) -> bool:
+        """Check if a request should be allowed through the circuit breaker."""
+        current_state = self.state
+        if current_state == CircuitState.OPEN:
+            return False
+        return True
+
+    def record_success(self):
+        """Record a successful call (public wrapper around _on_success)."""
+        self._on_success()
+
+    def record_failure(self):
+        """Record a failed call (public wrapper around _on_failure)."""
+        self._on_failure()
+
 
 # Pre-configured circuit breakers for each AI provider
 vertex_circuit_breaker = CircuitBreaker(
@@ -164,6 +179,6 @@ sarvam_circuit_breaker = CircuitBreaker(
     name="Sarvam AI", failure_threshold=5, reset_timeout=60
 )
 
-azure_search_circuit_breaker = CircuitBreaker(
-    name="Azure Search", failure_threshold=3, reset_timeout=30
+vertex_search_circuit_breaker = CircuitBreaker(
+    name="Vertex Search", failure_threshold=3, reset_timeout=30
 )

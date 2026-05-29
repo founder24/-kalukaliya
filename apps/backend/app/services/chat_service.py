@@ -20,7 +20,7 @@ from app.config import settings
 from app.core.token_budget import truncate_chunks_to_budget
 from app.db.redis import get_redis
 from app.services.ai.router import detect_language_and_route
-from app.services.search.azure_search import search_service
+from app.services.search.vertex_search import search_service
 
 logger = logging.getLogger(__name__)
 

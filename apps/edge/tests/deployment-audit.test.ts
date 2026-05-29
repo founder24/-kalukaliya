@@ -6,7 +6,7 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
     CF_TURNSTILE_SECRET: 'test-turnstile-secret',
-    AZURE_BACKEND_URL: 'http://localhost:8000',
+    BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
     RATE_LIMIT_KV: {

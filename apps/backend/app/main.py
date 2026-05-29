@@ -70,14 +70,14 @@ async def lifespan(app: FastAPI):
             f"Redis initialization failed (expected in local dev without DB): {e}"
         )
 
-    # Warm up Azure Search connection (DNS/TLS handshake)
+    # Warm up Vertex AI Search connection
     try:
-        from app.services.search.azure_search import search_service
+        from app.services.search.vertex_search import search_service
 
         await search_service.warm_up()
-        logger.info("Azure Search warmed up successfully")
+        logger.info("Vertex AI Search warmed up successfully")
     except Exception as e:
-        logger.warning(f"Azure Search warm-up failed: {e}")
+        logger.warning(f"Vertex AI Search warm-up failed: {e}")
 
     # Warm up Vertex AI OAuth token
     try:

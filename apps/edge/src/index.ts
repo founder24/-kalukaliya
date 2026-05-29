@@ -41,7 +41,7 @@ export default {
 
     // ── Production safety: reject if backend URL is localhost in production ──
     const isProduction = !env.ALLOWED_ORIGIN?.includes('localhost');
-    const isLocalBackend = env.AZURE_BACKEND_URL?.includes('localhost') || env.AZURE_BACKEND_URL?.includes('127.0.0.1');
+    const isLocalBackend = env.BACKEND_URL?.includes('localhost') || env.BACKEND_URL?.includes('127.0.0.1');
     if (isProduction && isLocalBackend && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/'))) {
       return new Response(JSON.stringify({ error: 'Backend URL misconfiguration detected' }), {
         status: 503,
@@ -166,7 +166,7 @@ export default {
       const rewrittenUrl = new URL(request.url);
       rewrittenUrl.pathname = `/api/v1/seo${url.pathname}`;
       const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
-      return proxyRequest(rewrittenRequest, env.AZURE_BACKEND_URL, env);
+      return proxyRequest(rewrittenRequest, env.BACKEND_URL, env);
     }
 
     /**
@@ -187,7 +187,7 @@ export default {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2000);
-          const res = await fetch(`${env.AZURE_BACKEND_URL}/health`, {
+          const res = await fetch(`${env.BACKEND_URL}/health`, {
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
@@ -215,7 +215,7 @@ export default {
 
     /**
      * Full health check: Edge + full backend dependency health.
-     * Calls backend /health/deep which checks MongoDB, Redis, Azure Search, Vertex AI.
+     * Calls backend /health/deep which checks MongoDB, Redis, Vertex AI Search.
      * Returns aggregated status: "healthy" if all pass, "degraded" if backend unreachable.
      */
     if (url.pathname === '/health/full') {
@@ -226,7 +226,7 @@ export default {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch(`${env.AZURE_BACKEND_URL}/health/deep`, {
+        const res = await fetch(`${env.BACKEND_URL}/health/deep`, {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
@@ -256,11 +256,11 @@ export default {
       return addSecurityHeaders(fullHealthResponse);
     }
 
-    // API routes → proxy to Azure backend
+    // API routes → proxy to backend
     // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
     // are proxied to backend. /health is handled at edge above.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
-      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.BACKEND_URL, env);
       const secured = addSecurityHeaders(response);
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);

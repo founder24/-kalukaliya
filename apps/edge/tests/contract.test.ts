@@ -5,7 +5,7 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
     CF_TURNSTILE_SECRET: 'test-turnstile-secret',
-    AZURE_BACKEND_URL: 'http://localhost:8000',
+    BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
     RATE_LIMIT_KV: {
@@ -65,7 +65,7 @@ describe('Edge-to-Backend Contract Tests', () => {
         body: chatBody,
       });
 
-      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.BACKEND_URL, env);
 
       // Verify the proxy forwards to the correct backend URL
       expect(capturedUrl).toBe('http://localhost:8000/api/v1/chat');
@@ -107,7 +107,7 @@ describe('Edge-to-Backend Contract Tests', () => {
         body: JSON.stringify({ message: 'test', lang: 'as', session_id: 'sess-xyz' }),
       });
 
-      await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      await proxyRequest(request, env.BACKEND_URL, env);
 
       expect(capturedHeaders).not.toBeNull();
       expect(capturedHeaders!.get('X-Rate-Limited-By')).toBe('edge');
@@ -130,7 +130,7 @@ describe('Edge-to-Backend Contract Tests', () => {
         body: JSON.stringify({ message: 'hello', lang: 'en', session_id: 'sess-001' }),
       });
 
-      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.BACKEND_URL, env);
 
       expect(response.status).toBe(503);
       const body = await response.json();
@@ -156,7 +156,7 @@ describe('Edge-to-Backend Contract Tests', () => {
         body: JSON.stringify({ message: 'test', lang: 'en', session_id: 'sess-002' }),
       });
 
-      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.BACKEND_URL, env);
 
       // Backend 5xx is passed through (not swallowed)
       expect(response.status).toBe(500);
@@ -198,7 +198,7 @@ describe('Edge-to-Backend Contract Tests', () => {
         body: JSON.stringify(chatRequest),
       });
 
-      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.BACKEND_URL, env);
 
       expect(response.status).toBe(200);
       const responseBody = await response.json();
@@ -243,7 +243,7 @@ describe('Edge-to-Backend Contract Tests', () => {
         body: JSON.stringify({ message: 'hello', lang: 'en', session_id: 'sess-stream' }),
       });
 
-      const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+      const response = await proxyRequest(request, env.BACKEND_URL, env);
 
       // Streaming response contract
       expect(response.status).toBe(200);

@@ -1,12 +1,9 @@
 """
-SearchIndexer - Chunks content and upserts to Azure AI Search.
+SearchIndexer - Chunks content and upserts to Vertex AI Search (Discovery Engine).
 """
 
 import logging
 import re
-
-from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import AzureError
 
 from app.config import settings
 
@@ -22,55 +19,47 @@ CHARS_PER_TOKEN = 4
 
 
 class SearchIndexer:
-    """Chunks body_markdown and upserts documents to Azure AI Search."""
+    """Chunks body_markdown and upserts documents to Vertex AI Search (Discovery Engine)."""
 
     def __init__(self):
-        self.client = None
-        if settings.AZURE_SEARCH_ENDPOINT and settings.AZURE_SEARCH_ADMIN_KEY:
-            try:
-                from azure.search.documents.aio import SearchClient
+        self._client = None
+        self._parent: str | None = None
 
-                self.client = SearchClient(
-                    endpoint=settings.AZURE_SEARCH_ENDPOINT,
-                    index_name=settings.AZURE_SEARCH_INDEX_NAME,
-                    credential=AzureKeyCredential(settings.AZURE_SEARCH_ADMIN_KEY),
-                )
+        if (
+            settings.VERTEX_PROJECT_ID
+            and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
+            and settings.VERTEX_SEARCH_DATASTORE_ID
+        ):
+            try:
+                self._init_client()
             except Exception as e:
                 logger.warning(f"Failed to initialize search indexer: {e}")
         else:
-            logger.info("Azure Search admin key not configured - indexing disabled")
-
-    async def _delete_stale_chunks(self, knowledge_obj) -> None:
-        """Delete existing chunks for a knowledge object before re-indexing."""
-        slug = knowledge_obj.slug
-        if not _SAFE_SLUG_RE.match(slug):
-            logger.warning(
-                f"Skipping stale chunk deletion: invalid slug format '{slug}'"
+            logger.info(
+                "Vertex AI Search credentials not configured - indexing disabled"
             )
-            return
 
-        try:
-            results = self.client.search(
-                search_text="*",
-                filter=f"slug eq '{slug}'",
-                select=["id"],
-                top=1000,
-            )
-            stale_ids = []
-            async for doc in results:
-                stale_ids.append(doc["id"])
+    def _init_client(self):
+        """Initialize the Discovery Engine DocumentServiceClient."""
+        from google.cloud import discoveryengine_v1
+        from google.oauth2 import service_account
 
-            if stale_ids:
-                await self.client.delete_documents(
-                    documents=[{"id": doc_id} for doc_id in stale_ids]
-                )
-                logger.info(
-                    f"Deleted {len(stale_ids)} stale chunks for slug={knowledge_obj.slug}"
-                )
-        except Exception as e:
-            logger.warning(
-                f"Failed to delete stale chunks for slug={knowledge_obj.slug}: {e}"
-            )
+        credentials = service_account.Credentials.from_service_account_info(
+            settings.google_credentials,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+
+        self._client = discoveryengine_v1.DocumentServiceClient(
+            credentials=credentials,
+        )
+
+        # Build the parent branch resource name for document operations
+        self._parent = self._client.branch_path(
+            project=settings.VERTEX_PROJECT_ID,
+            location=settings.VERTEX_SEARCH_LOCATION,
+            data_store=settings.VERTEX_SEARCH_DATASTORE_ID,
+            branch="default_branch",
+        )
 
     def chunk_text(self, text: str, chunk_size: int = CHUNK_SIZE_TOKENS) -> list[str]:
         """
@@ -121,7 +110,7 @@ class SearchIndexer:
 
     async def index_knowledge_object(self, knowledge_obj) -> bool:
         """
-        Chunk and upsert a knowledge object to Azure AI Search.
+        Chunk and upsert a knowledge object to Vertex AI Search.
 
         Args:
             knowledge_obj: KnowledgeObject instance
@@ -129,13 +118,15 @@ class SearchIndexer:
         Returns:
             True if indexing succeeded, False otherwise
         """
-        if not self.client:
+        if not self._client:
             logger.warning("Search indexer not configured - skipping indexing")
             return False
 
         try:
-            # Delete stale chunks before re-indexing
-            await self._delete_stale_chunks(knowledge_obj)
+            import asyncio
+
+            from google.cloud import discoveryengine_v1
+            from google.protobuf import struct_pb2
 
             chunks = self.chunk_text(knowledge_obj.body_markdown)
             if not chunks:
@@ -147,9 +138,11 @@ class SearchIndexer:
 
             for i, chunk in enumerate(chunks):
                 doc_id = f"{knowledge_obj.slug}_chunk_{i}"
-                documents.append(
+
+                # Build struct data for the document
+                struct_data = struct_pb2.Struct()
+                struct_data.update(
                     {
-                        "id": doc_id,
                         "title": knowledge_obj.title,
                         "content": chunk,
                         "source_url": f"/render/{meta.board}/{meta.class_level}/{meta.subject}/{meta.chapter}/notes",
@@ -165,39 +158,66 @@ class SearchIndexer:
                     }
                 )
 
-            # Upsert in batches of 100 with per-batch error handling
-            batch_size = 100
-            batches_succeeded = 0
-            batches_failed = 0
-            for start in range(0, len(documents), batch_size):
-                batch = documents[start : start + batch_size]
-                try:
-                    await self.client.upload_documents(documents=batch)
-                    batches_succeeded += 1
-                except Exception as e:
-                    batches_failed += 1
-                    logger.error(
-                        f"Batch {start // batch_size + 1} failed for slug={knowledge_obj.slug}: {e}"
-                    )
+                doc = discoveryengine_v1.Document(
+                    id=doc_id,
+                    struct_data=struct_data,
+                )
+                documents.append(doc)
 
-            if batches_failed > 0:
+            # Upsert documents concurrently with bounded semaphore
+            semaphore = asyncio.Semaphore(10)
+            succeeded = 0
+            failed = 0
+
+            async def _upsert_document(doc):
+                """Upsert a single document (create, fallback to update)."""
+                nonlocal succeeded, failed
+                async with semaphore:
+                    try:
+                        request = discoveryengine_v1.CreateDocumentRequest(
+                            parent=self._parent,
+                            document=doc,
+                            document_id=doc.id,
+                        )
+                        await asyncio.to_thread(
+                            self._client.create_document, request=request
+                        )
+                        succeeded += 1
+                    except Exception:
+                        try:
+                            doc.name = f"{self._parent}/documents/{doc.id}"
+                            request = discoveryengine_v1.UpdateDocumentRequest(
+                                document=doc,
+                                allow_missing=True,
+                            )
+                            await asyncio.to_thread(
+                                self._client.update_document, request=request
+                            )
+                            succeeded += 1
+                        except Exception as update_err:
+                            failed += 1
+                            logger.error(
+                                f"Failed to upsert doc {doc.id} for "
+                                f"slug={knowledge_obj.slug}: {update_err}"
+                            )
+
+            await asyncio.gather(*[_upsert_document(doc) for doc in documents])
+
+            if failed > 0:
                 logger.warning(
-                    f"{batches_failed} batch(es) failed for slug={knowledge_obj.slug}"
+                    f"{failed} document(s) failed for slug={knowledge_obj.slug}"
                 )
 
-            if batches_succeeded > 0:
+            if succeeded > 0:
                 logger.info(
-                    f"Indexed {len(documents)} chunks for slug={knowledge_obj.slug}"
+                    f"Indexed {succeeded}/{len(documents)} chunks for slug={knowledge_obj.slug}"
                 )
-            return batches_succeeded > 0
+            return succeeded > 0
 
-        except AzureError as e:
-            logger.error(
-                f"Azure Search indexing failed for slug={knowledge_obj.slug}: {e}"
-            )
-            return False
         except Exception as e:
-            logger.error(f"Unexpected error indexing slug={knowledge_obj.slug}: {e}")
+            logger.error(
+                f"Vertex Search indexing failed for slug={knowledge_obj.slug}: {e}"
+            )
             return False
 
 

@@ -41,7 +41,7 @@ interface Env {
   JWT_PUBLIC_KEY?: string;
 
   // ── Variables (defined in wrangler.toml [vars]) ──
-  AZURE_BACKEND_URL: string;
+  BACKEND_URL: string;
   ALLOWED_ORIGIN: string;
 
   // Optional: override default 30s proxy timeout (milliseconds)

@@ -15,19 +15,17 @@ import CfAuditCard from './CfAuditCard';
 import AiGatewayCacheByModelTile from './AiGatewayCacheByModelTile';
 import AiGatewayGuardrailByModelTile from './AiGatewayGuardrailByModelTile';
 // Phase 4 — Task #332. SQS+Lambda worker tier health (replaces the
-// GCP Cloud Tasks tile inside AdminGcpPanel) and the Azure Container
-// Apps Jobs cron health table (replaces the Cloud Scheduler source
+// GCP Cloud Tasks tile inside AdminGcpPanel) and the Cloud Run Jobs
+// cron health table (replaces the Cloud Scheduler source
 // previously consumed by CronHealthPill). Both cards live under the
 // Infrastructure tab so the on-call has a single pane of glass.
 import AdminAwsInfraCard from './AdminAwsInfraCard';
 import AdminCronJobsCard from './AdminCronJobsCard';
 import AdminMemoryBrainTile from './AdminMemoryBrainTile';
-// Phase 5b — Task #338. Azure-native AI features panel (Azure OpenAI,
-// AI Speech, Translator, Document Intelligence, AI Vision, Content
-// Safety, AI Language, AI Search, Anomaly Detector, Personalizer).
-// Renders below the AWS + Azure cron tiles so the admin sees the
-// per-feature throttle / latency / spend together with the rest of
-// the migrated infrastructure.
+// Phase 5b — Task #338. GCP AI features panel (Vertex AI, Discovery
+// Engine, Cloud Run services). Renders below the AWS + GCP cron tiles
+// so the admin sees the per-feature throttle / latency / spend
+// together with the rest of the migrated infrastructure.
 import AdminAzureAiPanel from './AdminAzureAiPanel';
 import { toast } from 'sonner';
 import AdminQuickLinks from './AdminQuickLinks';
@@ -733,18 +731,18 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       .finally(() => setAwsCreditsLoading(false));
   }, [adminToken]);
 
-  // Task #263 — Azure for Startups credit burn panel.
-  const [azureCredits, setAzureCredits] = useState(null);
-  const [azureCreditsLoading, setAzureCreditsLoading] = useState(false);
+  // Task #263 — GCP credit burn panel.
+  const [gcpCredits, setGcpCredits] = useState(null);
+  const [gcpCreditsLoading, setGcpCreditsLoading] = useState(false);
 
-  const loadAzureCredits = useCallback(() => {
-    setAzureCreditsLoading(true);
-    axios.get(`${API_BASE}/admin/billing/azure-startups`, {
+  const loadGcpCredits = useCallback(() => {
+    setGcpCreditsLoading(true);
+    axios.get(`${API_BASE}/admin/billing/gcp-credits`, {
       headers: adminHeaders(adminToken), withCredentials: true,
     })
-      .then((r) => setAzureCredits(r.data))
-      .catch((err) => setAzureCredits(err?.response?.status === 404 ? { configured: false } : { _error: true }))
-      .finally(() => setAzureCreditsLoading(false));
+      .then((r) => setGcpCredits(r.data))
+      .catch((err) => setGcpCredits(err?.response?.status === 404 ? { configured: false } : { _error: true }))
+      .finally(() => setGcpCreditsLoading(false));
   }, [adminToken]);
 
   // Task #263 — Axiom startup-tier usage panel.
@@ -937,7 +935,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     // Task #263 — CF add-on migration panel + per-provider credit burn panels.
     loadCfAddons();
     loadAwsCredits();
-    loadAzureCredits();
+    loadGcpCredits();
     loadAxiomCredits();
     loadSentryCredits();
     const id = setInterval(() => {
@@ -962,7 +960,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadGcpCredits();
       loadCfAddons();
       loadAwsCredits();
-      loadAzureCredits();
+      loadGcpCredits();
       loadAxiomCredits();
       loadSentryCredits();
     }, 60000);
@@ -976,7 +974,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadAigGuardrailAlertState,
       loadSlackWebhookMissingAlertStates,
       loadSlackWebhookMissingAlertHistories, loadCfAudit, loadCfHealth, loadGcpCredits,
-      loadCfAddons, loadAwsCredits, loadAzureCredits, loadAxiomCredits, loadSentryCredits]);
+      loadCfAddons, loadAwsCredits, loadGcpCredits, loadAxiomCredits, loadSentryCredits]);
 
   // Task #609 — managed AI response cache stats + admin purge controls.
   const [aiCacheStats, setAiCacheStats] = useState(null);
@@ -4232,51 +4230,51 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             );
           })()}
 
-          {/* ── Azure for Startups ───────────────────────────────────────── */}
+          {/* ── GCP Credits ───────────────────────────────────────── */}
           {(() => {
-            const d = azureCredits && !azureCredits._error ? azureCredits : null;
+            const d = gcpCredits && !gcpCredits._error ? gcpCredits : null;
             const low = d?.credits_low ?? false;
-            const unconfigured = !azureCreditsLoading && (!d || !d.configured);
+            const unconfigured = !gcpCreditsLoading && (!d || !d.configured);
             const tile = low ? 'bg-red-50 border-red-200' : unconfigured ? 'bg-gray-50 border-gray-200' : 'bg-blue-50 border-blue-200';
             const hdr = low ? 'text-red-600' : unconfigured ? 'text-gray-500' : 'text-blue-600';
             return (
-              <div className={`rounded-2xl p-4 border ${tile}`} data-testid="azure-credit-panel">
+              <div className={`rounded-2xl p-4 border ${tile}`} data-testid="gcp-credit-panel">
                 <div className="flex items-center gap-3 mb-3">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${low ? 'bg-red-100' : unconfigured ? 'bg-gray-100' : 'bg-blue-100'}`}>
                     <DollarSign size={17} className={low ? 'text-red-500' : unconfigured ? 'text-gray-400' : 'text-blue-500'} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className={`text-sm font-semibold ${hdr}`} data-testid="azure-credit-heading">Azure for Startups</p>
+                      <p className={`text-sm font-semibold ${hdr}`} data-testid="gcp-credit-heading">GCP Credits</p>
                       {low && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">Credits Low</span>}
                       {d?.configured && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-600 border-blue-200">
-                          Front Door · Cosmos DB · DDoS · Monitor
+                          Cloud Run · Vertex AI · Secret Manager
                         </span>
                       )}
                     </div>
                     <p className="text-[11px] text-gray-500 mt-0.5">
-                      {unconfigured ? 'Azure Cost Management not configured' : d?.subscription_name ?? 'Azure for Startups ($5 000)'}
+                      {unconfigured ? 'GCP Billing not configured' : d?.subscription_name ?? 'GCP Credits'}
                     </p>
                   </div>
-                  <button onClick={loadAzureCredits} disabled={azureCreditsLoading}
+                  <button onClick={loadGcpCredits} disabled={gcpCreditsLoading}
                     className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60"
-                    data-testid="button-refresh-azure-credits" title="Refresh Azure credit data">
-                    <RefreshCw size={13} className={azureCreditsLoading ? 'animate-spin' : ''} />
+                    data-testid="button-refresh-gcp-credits" title="Refresh GCP credit data">
+                    <RefreshCw size={13} className={gcpCreditsLoading ? 'animate-spin' : ''} />
                   </button>
                 </div>
 
-                {azureCreditsLoading && !d && <div className="flex justify-center py-4"><RefreshCw size={16} className="animate-spin text-gray-300" /></div>}
-                {azureCredits?._error && <p className="text-xs text-red-500 mt-1">Failed to load Azure credit data — check backend logs.</p>}
+                {gcpCreditsLoading && !d && <div className="flex justify-center py-4"><RefreshCw size={16} className="animate-spin text-gray-300" /></div>}
+                {gcpCredits?._error && <p className="text-xs text-red-500 mt-1">Failed to load GCP credit data - check backend logs.</p>}
 
-                {unconfigured && !azureCredits?._error && (
+                {unconfigured && !gcpCredits?._error && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-xs text-gray-600 font-medium">Setup instructions:</p>
                     <ol className="space-y-1">
                       {[
-                        'Create an Azure service principal with Billing Reader role',
-                        'Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID',
-                        'Set AZURE_ACTIVATE_GRANT_USD and AZURE_ACTIVATE_EXPIRY (YYYY-MM-DD)',
+                        'Create a GCP service account with Billing Account Viewer role',
+                        'Set GCP_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS_JSON',
+                        'Set GCP_CREDITS_GRANT_USD and GCP_CREDITS_EXPIRY (YYYY-MM-DD)',
                       ].map((s, i) => (
                         <li key={i} className="flex items-start gap-2 text-xs text-gray-500">
                           <span className="w-4 h-4 rounded-full bg-blue-50 flex items-center justify-center text-[9px] font-bold text-blue-600 flex-shrink-0 mt-0.5">{i + 1}</span>

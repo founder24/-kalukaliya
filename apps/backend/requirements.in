@@ -3,14 +3,12 @@
 # Run: pip-compile --python-version 3.11 --generate-hashes --output-file=requirements.txt --strip-extras requirements.in
 
 aiohttp
-azure-identity
-azure-keyvault-secrets
-azure-search-documents
 bcrypt
 beanie
 fastapi
 google-auth[aiohttp]
 google-cloud-aiplatform
+google-cloud-discoveryengine
 gunicorn
 httpx
 jinja2

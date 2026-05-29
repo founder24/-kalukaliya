@@ -645,7 +645,7 @@ async def generate_notes_assamese(request: Request, chapter_id: str):
 
 @router.post("/content/chapters/{chapter_id}/publish")
 async def publish_chapter(request: Request, chapter_id: str):
-    """Full publish pipeline: Azure Search + Cloudflare + status update."""
+    """Full publish pipeline: Vertex AI Search + Cloudflare + status update."""
     _validate_admin_session(request)
     await _csrf_check(request)
 
@@ -661,7 +661,7 @@ async def publish_chapter(request: Request, chapter_id: str):
 
 @router.post("/content/chapters/{chapter_id}/publish/search-index")
 async def publish_search_index(request: Request, chapter_id: str):
-    """Publish chapter to Azure Search index only."""
+    """Publish chapter to Vertex AI Search index only."""
     _validate_admin_session(request)
     await _csrf_check(request)
 
@@ -669,7 +669,7 @@ async def publish_search_index(request: Request, chapter_id: str):
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    result = await content_publisher_service.publish_to_azure_search(chapter)
+    result = await content_publisher_service.publish_to_vertex_search(chapter)
     return {"chapter_id": chapter_id, "result": result}
 
 
@@ -735,7 +735,7 @@ class PipelineGenerateRequest(BaseModel):
 async def trigger_pipeline(request: Request, body: PipelineGenerateRequest):
     """
     Trigger the full content pipeline for a knowledge object.
-    Pipeline steps: render HTML -> index Azure Search -> compute hashes ->
+    Pipeline steps: render HTML -> index Vertex AI Search -> compute hashes ->
     submit IndexNow -> push Cloudflare KV -> save to database.
     """
     _validate_admin_session(request)

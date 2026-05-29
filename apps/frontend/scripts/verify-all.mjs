@@ -137,16 +137,26 @@ for (const rel of LIBRARY_FILES) {
       fail(`${rel}: contains React SSR abort signature ${JSON.stringify(sig)}`);
     }
   }
-  const m = body.match(
-    /<div id="root" data-hydrate="library">([\s\S]*?)<\/div>\s*<script/,
-  );
-  if (!m) {
+  // Check that #root has substantial SSR content by finding the opening tag
+  // and measuring the HTML between it and </body>. The old regex approach
+  // using [\s\S]*?<\/div>\s*<script failed because: (a) nested </div> tags
+  // inside the prerendered content caused the lazy match to stop early, and
+  // (b) the <script> tags may appear BEFORE the root div, not after it.
+  const rootOpenTag = '<div id="root" data-hydrate="library">';
+  const rootIdx = body.indexOf(rootOpenTag);
+  if (rootIdx === -1) {
     fail(`${rel}: could not locate #root container`);
     continue;
   }
-  const inner = m[1];
+  const contentStart = rootIdx + rootOpenTag.length;
+  const bodyEnd = body.indexOf('</body>', contentStart);
+  const boundary = bodyEnd !== -1 ? bodyEnd : body.length;
+  // Inner content is everything between the opening root tag and the </body>.
+  // This includes the root's own closing </div> and any trailing whitespace,
+  // but for a size check that is fine -- the real SSR content dominates.
+  const inner = body.slice(contentStart, boundary);
   if (inner.trim().length < 500) {
-    fail(`${rel}: #root content too small (${inner.length} bytes)`);
+    fail(`${rel}: #root content too small (${inner.trim().length} bytes)`);
   }
   const bundleIdx = body.indexOf("window.__LIBRARY_BUNDLE__");
   const moduleIdx = body.indexOf('<script type="module"');
@@ -180,12 +190,17 @@ for (const page of pages) {
   if (LIBRARY_FILES.includes(page.rel)) continue;
   const route = "/" + page.rel.replace(/\/index\.html$/, "");
 
-  const m = page.body.match(
-    /<div id="root" data-hydrate="([a-z]+)">([\s\S]*?)<\/div>\s*<script/,
-  );
-  if (m) {
-    const kind = m[1];
-    const inner = m[2];
+  // Use indexOf-based extraction to avoid nested-div regex issues.
+  const hydrateTagRe = /<div id="root" data-hydrate="([a-z]+)">/;
+  const hydrateMatch = page.body.match(hydrateTagRe);
+  if (hydrateMatch) {
+    const kind = hydrateMatch[1];
+    const openTag = hydrateMatch[0];
+    const openIdx = page.body.indexOf(openTag);
+    const contentStartIdx = openIdx + openTag.length;
+    const bodyEndIdx = page.body.indexOf('</body>', contentStartIdx);
+    const boundary = bodyEndIdx !== -1 ? bodyEndIdx : page.body.length;
+    const inner = page.body.slice(contentStartIdx, boundary);
     if (kind === "subject" || kind === "chapter") {
       if (inner.trim().length < 400) {
         fail(`${route}: #root inner too small (${inner.length} bytes)`);

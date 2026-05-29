@@ -37,19 +37,13 @@ class Settings(BaseSettings):
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
 
-    # --- P2: Azure Compute (Backend) — metadata only ---
-    AZURE_SUBSCRIPTION_ID: Optional[str] = None
-    AZURE_RESOURCE_GROUP: str = "rg-syrabit-prod"
-    AZURE_CONTAINER_APP_NAME: str = "ca-syrabit-api"
-    AZURE_LOG_ANALYTICS_WORKSPACE: str = "law-syrabit"
-    KEYVAULT_URL: Optional[str] = None
+    # --- P2: Azure Compute (Backend) --- metadata only, not used at runtime ---
+    # (Removed: AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, etc. - migrated to GCP)
 
-    # --- P3: Azure Search (Intelligence) ---
-    AZURE_SEARCH_ENDPOINT: Optional[str] = None
-    AZURE_SEARCH_ADMIN_KEY: Optional[str] = None
-    AZURE_SEARCH_QUERY_KEY: Optional[str] = None
-    AZURE_SEARCH_INDEX_NAME: str = "syrabit-edu-index"
-    AZURE_SEARCH_SEMANTIC_CONFIG: str = "default"
+    # --- P3: Vertex AI Search (Discovery Engine) ---
+    VERTEX_SEARCH_DATASTORE_ID: Optional[str] = None
+    VERTEX_SEARCH_SERVING_CONFIG: str = "default_search"
+    VERTEX_SEARCH_LOCATION: str = "global"
     SEARCH_CACHE_ENABLED: bool = True
 
     # --- P4: MongoDB (Data) ---
@@ -179,8 +173,8 @@ class Settings(BaseSettings):
                 logger.warning("MONGODB_URI is not set in production")
             if not self.UPSTASH_REDIS_REST_URL:
                 logger.warning("UPSTASH_REDIS_REST_URL is not set in production")
-            if not self.AZURE_SEARCH_ENDPOINT:
-                logger.warning("AZURE_SEARCH_ENDPOINT is not set in production")
+            if not self.VERTEX_SEARCH_DATASTORE_ID:
+                logger.warning("VERTEX_SEARCH_DATASTORE_ID is not set in production")
             # Warn about missing service credentials
             if (
                 not self.VERTEX_PROJECT_ID

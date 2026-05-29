@@ -41,19 +41,18 @@ async def redis_ping() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(e)}
 
 
-async def azure_search_ping() -> Dict[str, Any]:
-    """Ping Azure Search service"""
+async def vertex_search_ping() -> Dict[str, Any]:
+    """Ping Vertex AI Search (Discovery Engine) service"""
     try:
-        from app.services.search.azure_search import search_service
+        from app.services.search.vertex_search import search_service
 
-        if not search_service.client:
+        if not search_service._initialized:
             return {"status": "unhealthy", "error": "Search client not configured"}
 
-        # Use the warm_up pattern that works in azure_search.py
         await search_service.warm_up()
         return {"status": "healthy"}
     except Exception as e:
-        logger.error(f"Azure Search ping failed: {str(e)}")
+        logger.error(f"Vertex Search ping failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 
@@ -90,13 +89,13 @@ async def deep_health_check():
     Checks:
     - MongoDB connection
     - Redis connection
-    - Azure Search service
+    - Vertex AI Search service
     - Vertex AI configuration
     """
     checks = {
         "mongodb": await mongo_ping(),
         "redis": await redis_ping(),
-        "azure_search": await azure_search_ping(),
+        "vertex_search": await vertex_search_ping(),
         "vertex_ai": await vertex_ping(),
     }
 
@@ -122,11 +121,11 @@ async def circuit_breaker_status():
     from app.core.circuit_breaker import (
         vertex_circuit_breaker,
         sarvam_circuit_breaker,
-        azure_search_circuit_breaker,
+        vertex_search_circuit_breaker,
     )
 
     return {
         "vertex_ai": vertex_circuit_breaker.get_status(),
         "sarvam_ai": sarvam_circuit_breaker.get_status(),
-        "azure_search": azure_search_circuit_breaker.get_status(),
+        "vertex_search": vertex_search_circuit_breaker.get_status(),
     }
