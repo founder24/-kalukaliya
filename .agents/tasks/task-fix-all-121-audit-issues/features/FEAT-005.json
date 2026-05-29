@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Address review findings: two-phase idempotency staleness check, circuit breaker state mutations under lock, monthly reset race condition, payment amount storage",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In razorpay.py: Add import time at module level, store timestamp with processing state, add actual staleness check for processing entries",
     "2. In circuit_breaker.py: Wrap _on_success() and _on_failure() calls in the call() method under self._state_lock",
@@ -20,5 +20,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; import glob; [ast.parse(open(f).read()) for f in glob.glob('app/**/*.py', recursive=True)]\""
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All four review findings addressed. AST syntax check passes for all Python files. Idempotency now stores timestamp and checks 5-min staleness window. Circuit breaker state mutations are protected by asyncio.Lock. Monthly reset uses conditional find+update. Payment amount stored in Redis at order creation and retrieved during verification."
 }
