@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "refactor",
   "description": "Replace Azure Cognitive Search with Vertex AI Search (Discovery Engine) for RAG retrieval and content indexing. This is the core migration: replace the Azure Search SDK with Google Cloud Discovery Engine API calls, update config settings, update the search indexer, content publisher, embedder, and health checks.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Update apps/backend/requirements.in - Remove azure-identity, azure-keyvault-secrets, azure-search-documents. Add google-cloud-discoveryengine (the Vertex AI Search / Discovery Engine client library).",
     "Step 2: Rewrite apps/backend/app/services/search/azure_search.py as apps/backend/app/services/search/vertex_search.py - Create a VertexSearchService class that uses the google.cloud.discoveryengine_v1 library to perform search. The service should: (a) Initialize a SearchServiceClient using the same google credentials pattern from vertex_client.py (GOOGLE_APPLICATION_CREDENTIALS_JSON), (b) Implement search_context() with the same interface (query, text, user_tier, limit) returning the same dict format [{id, title, content, score, reranker_score, url}], (c) Implement warm_up() method, (d) Keep the existing Redis cache logic, (e) Keep the circuit breaker pattern. Use the Discovery Engine SearchRequest with content_search_spec for extractive answers. The serving config should be configurable via settings.",
@@ -32,5 +32,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && pip install ruff && ruff check app/"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All Azure imports removed from apps/backend/app/. Circuit breaker class needed public allow_request/record_success/record_failure methods added. admin_content.py also had a reference to publish_to_azure_search that needed updating. pipeline.py had a comment referencing Azure. Pre-existing ruff error in admin_content.py (unused variable db) was not touched. Config imports work with python -c test. google-cloud-discoveryengine 0.19.0 installed successfully."
 }
