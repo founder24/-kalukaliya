@@ -259,6 +259,9 @@ def create_app() -> FastAPI:
         public_content.router, prefix="/api/v1/content", tags=["Public Content"]
     )
     app.include_router(
+        public_content.router, prefix="/api/content", tags=["Public Content Legacy"]
+    )
+    app.include_router(
         admin_knowledge.router, prefix="/api/v1/admin", tags=["Admin Knowledge"]
     )
     app.include_router(
