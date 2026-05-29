@@ -61,7 +61,8 @@ export default {
       // Inject authenticated user ID (or 'anonymous') for downstream backend
       const headers = new Headers(request.headers);
       headers.set('X-User-ID', jwtResult.userId || 'anonymous');
-      if (env.EDGE_SHARED_SECRET) {
+      headers.set('X-Request-ID', crypto.randomUUID());
+      if (jwtResult.valid && env.EDGE_SHARED_SECRET) {
         headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
       }
       request = new Request(request, { headers });

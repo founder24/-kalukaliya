@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix edge worker security issue (HF-006) and frontend token refresh race condition (HF-002/HF-051), plus frontend state issues (HF-056) and edge correlation ID (HF-116)",
+  "status": "in_progress",
+  "steps": [
+    "HF-006: In apps/edge/src/index.ts, only set X-Edge-Secret when jwtResult.valid is true. Currently the code sets X-Edge-Secret unconditionally after JWT verification (around line 56). Wrap it in: `if (jwtResult.valid && env.EDGE_SHARED_SECRET) { headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET); }`. When JWT is not valid (missing/invalid), do NOT set the secret.",
+    "HF-002/HF-051: In apps/frontend/src/hooks/useAuthRefresh.js, add a module-level promise deduplication (mutex). Add: `let _refreshPromise = null;` at module level. In silentRefresh(), at the start check: `if (_refreshPromise) return _refreshPromise;`. Then wrap the actual refresh in a promise: `_refreshPromise = (async () => { ... })().finally(() => { _refreshPromise = null; });`. Return _refreshPromise.",
+    "HF-056: In apps/frontend/src/pages/ChatPage.jsx (or wherever credits are consumed), update the frontend to correctly map backend response fields. The backend returns {credits_remaining, credits_used, monthly_limit, tier}. The frontend should map: used = c.credits_used ?? c.used ?? 0, limit = c.monthly_limit ?? c.limit ?? null. Search for setCredits and update the mapping.",
+    "HF-116: In apps/edge/src/index.ts, generate a UUID for X-Request-ID at the top of the /api/ block and pass it to the backend. Add: `headers.set('X-Request-ID', crypto.randomUUID());` in the headers setup section for API routes."
+  ],
+  "acceptance_criteria": [
+    "Edge worker only sets X-Edge-Secret when JWT is valid",
+    "silentRefresh uses promise deduplication to prevent concurrent refreshes",
+    "Frontend correctly maps credit field names from backend response",
+    "Edge worker generates and passes X-Request-ID to backend"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit 2>&1 || echo 'TypeScript check attempted'",
+    "Check that useAuthRefresh.js has the deduplication logic with: grep -n '_refreshPromise' apps/frontend/src/hooks/useAuthRefresh.js"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
