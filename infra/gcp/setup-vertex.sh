@@ -218,6 +218,9 @@ else
     --project="$PROJECT_ID"
 fi
 
+# Allow time for the service account to propagate before assigning roles
+sleep 10
+
 # Assign required IAM roles
 IAM_ROLES=(
   "roles/discoveryengine.editor"
@@ -234,7 +237,6 @@ for role in "${IAM_ROLES[@]}"; do
   run_cmd gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
     --role="$role" \
-    --condition=None \
     --quiet
 done
 
