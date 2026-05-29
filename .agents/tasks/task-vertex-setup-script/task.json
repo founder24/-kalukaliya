@@ -1,0 +1,7 @@
+{
+  "task_id": "task-vertex-setup-script",
+  "task_description": "Create a comprehensive shell script at infra/gcp/setup-vertex.sh that sets up a new GCP project with Vertex AI Search, Vertex AI Gemini, Cloud Run, and all related infrastructure from scratch using gcloud CLI and REST APIs.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

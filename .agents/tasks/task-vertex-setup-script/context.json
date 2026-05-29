@@ -1,0 +1,23 @@
+{
+  "project_type": "Python FastAPI monorepo (backend) + Cloudflare Workers (edge) for educational AI assistant",
+  "language": "Python (backend), TypeScript (edge)",
+  "build_system": "pip + requirements.txt for backend, npm + wrangler for edge",
+  "test_framework": "pytest for backend",
+  "build_command": "N/A for this task (shell script only)",
+  "test_command": "bash -n infra/gcp/setup-vertex.sh (syntax check)",
+  "verification_instructions": "Run bash -n on the script to validate syntax. Verify the script references all config vars from apps/backend/app/config.py.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "N/A - this task creates a new shell script",
+  "environment_constraints": "OPEN_INTERNET network mode. Script is for user to run locally with gcloud CLI, not executed in sandbox.",
+  "contribution_requirements": "Follow existing infra/gcp/ conventions. Script should be executable and well-commented.",
+  "key_patterns": "Existing infra uses: clouddeploy.yaml (Cloud Run knative service), vertex-search-schema.json (Discovery Engine schema with structured fields: id, title, content, language, tier_access, source_url, last_updated). Backend uses discoveryengine_v1 Python SDK. Config vars: VERTEX_PROJECT_ID, VERTEX_SEARCH_DATASTORE_ID, VERTEX_SEARCH_SERVING_CONFIG (default_search), VERTEX_SEARCH_LOCATION (global), GOOGLE_APPLICATION_CREDENTIALS_JSON, VERTEX_GEMINI_MODEL (gemini-2.0-flash-lite), VERTEX_LOCATION (us-central1).",
+  "relevant_files": [
+    "infra/gcp/clouddeploy.yaml",
+    "infra/gcp/vertex-search-schema.json",
+    "infra/scripts/deploy-search-index.py",
+    "infra/scripts/seed-search.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/services/search/vertex_search.py"
+  ],
+  "directory_structure": "infra/gcp/ contains Cloud Run service YAML and Vertex Search schema. infra/scripts/ contains Python scripts for deploying schema and seeding data. apps/backend/app/config.py defines all environment variables the backend needs."
+}
