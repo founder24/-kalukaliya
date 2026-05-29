@@ -1,0 +1,7 @@
+{
+  "task_id": "task-azure-to-vertex-migration",
+  "task_description": "Remove all Azure dependencies and migrate to Vertex AI Search (Discovery Engine) for RAG and Google Cloud Run for backend hosting. Keep Vertex AI for Gemini (already in use) and Sarvam AI for Assamese.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
