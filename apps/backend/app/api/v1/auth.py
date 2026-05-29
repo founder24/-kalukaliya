@@ -445,7 +445,9 @@ async def signup(request_body: SignupRequest, request: Request):
     except Exception as e:
         logger.warning(f"Welcome email failed for {request_body.email}: {e}")
 
-    logger.info(f"New user signed up: {request_body.email[:3]}***@{request_body.email.split('@')[1]}")
+    logger.info(
+        f"New user signed up: {request_body.email[:3]}***@{request_body.email.split('@')[1]}"
+    )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -472,7 +474,9 @@ async def login(request_body: LoginRequest, request: Request):
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
-    logger.info(f"User logged in: {request_body.email[:3]}***@{request_body.email.split('@')[1]}")
+    logger.info(
+        f"User logged in: {request_body.email[:3]}***@{request_body.email.split('@')[1]}"
+    )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -503,7 +507,9 @@ async def forgot_password(request_body: ForgotPasswordRequest, request: Request)
             )
             logger.info(f"Password reset email sent to {request_body.email}")
         except Exception as e:
-            logger.error(f"Failed to send password reset email to {request_body.email}: {e}")
+            logger.error(
+                f"Failed to send password reset email to {request_body.email}: {e}"
+            )
     else:
         # Don't reveal whether the email exists — log and return same response
         logger.info(
@@ -581,7 +587,10 @@ async def reset_password(request: ResetPasswordRequest):
 
     # HF-003: Prevent password reuse
     if user.verify_password(request.new_password):
-        raise HTTPException(status_code=400, detail="New password must be different from current password")
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from current password",
+        )
 
     # Update password
     user.hashed_password = User.hash_password(request.new_password)
@@ -631,6 +640,7 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         if jti:
             try:
                 from app.db.redis import get_redis
+
                 redis = get_redis()
                 claimed = await redis.set(
                     f"revoked_refresh:{jti}",
@@ -639,7 +649,9 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                     nx=True,
                 )
                 if not claimed:
-                    raise HTTPException(status_code=401, detail="Token has been revoked")
+                    raise HTTPException(
+                        status_code=401, detail="Token has been revoked"
+                    )
             except HTTPException:
                 raise
             except Exception as e:

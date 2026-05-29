@@ -107,15 +107,21 @@ class ContentPipeline:
                     return_exceptions=True,
                 )
                 if isinstance(indexnow_result, Exception):
-                    logger.error(f"IndexNow failed for slug={knowledge_obj.slug}: {indexnow_result}")
+                    logger.error(
+                        f"IndexNow failed for slug={knowledge_obj.slug}: {indexnow_result}"
+                    )
                 else:
                     results["indexnow"] = indexnow_result
                 if isinstance(kv_result, Exception):
-                    logger.error(f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {kv_result}")
+                    logger.error(
+                        f"Cloudflare KV push failed for slug={knowledge_obj.slug}: {kv_result}"
+                    )
                 else:
                     results["cloudflare_kv"] = kv_result
             except Exception as e:
-                logger.error(f"Parallel steps 4-5 failed for slug={knowledge_obj.slug}: {e}")
+                logger.error(
+                    f"Parallel steps 4-5 failed for slug={knowledge_obj.slug}: {e}"
+                )
 
             # Step 6: Save to database
             try:

@@ -103,9 +103,13 @@ async def chat(
 
     # User tier and ID - handle anonymous users gracefully
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
-    user_id = str(user.id) if user else (
-        http_request.headers.get("X-Anon-ID") or "anonymous"
-    ) if http_request else "anonymous"
+    user_id = (
+        str(user.id)
+        if user
+        else (http_request.headers.get("X-Anon-ID") or "anonymous")
+        if http_request
+        else "anonymous"
+    )
 
     try:
 
@@ -129,15 +133,25 @@ async def chat(
 
             # 2. RAG retrieval + history load + rate limit in parallel
             # Reset monthly message count if we're in a new month (atomic with precondition)
-            if user and hasattr(user, 'last_reset_date') and user.last_reset_date:
+            if user and hasattr(user, "last_reset_date") and user.last_reset_date:
                 now = datetime.now(timezone.utc)
-                if user.last_reset_date.month != now.month or user.last_reset_date.year != now.year:
+                if (
+                    user.last_reset_date.month != now.month
+                    or user.last_reset_date.year != now.year
+                ):
                     # Atomic: only reset if last_reset_date hasn't been updated by another request
                     result = await User.find_one(
                         {"_id": user.id, "last_reset_date": user.last_reset_date}
                     )
                     if result:
-                        await result.update({"$set": {"monthly_message_count": 0, "last_reset_date": now}})
+                        await result.update(
+                            {
+                                "$set": {
+                                    "monthly_message_count": 0,
+                                    "last_reset_date": now,
+                                }
+                            }
+                        )
                         user.monthly_message_count = 0
                         user.last_reset_date = now
 
@@ -226,12 +240,22 @@ async def chat(
 
             # HF-018: Context window overflow protection
             from app.core.token_budget import estimate_tokens
-            max_context = 4096 if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else 32000
-            total_tokens = estimate_tokens(system_prompt) + estimate_tokens(sanitized_message)
+
+            max_context = (
+                4096
+                if "sarvam" in target_model.lower()
+                or "openhathi" in target_model.lower()
+                else 32000
+            )
+            total_tokens = estimate_tokens(system_prompt) + estimate_tokens(
+                sanitized_message
+            )
             if total_tokens > max_context - 1000:  # Leave room for response
                 # Trim history to fit
                 if history:
-                    system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
+                    system_prompt = ChatService.build_system_prompt(
+                        detected_lang, context_chunks
+                    )
 
             # 4. Call LLM (with Sarvam -> Vertex AI fallback)
             response_text, actual_model = await ChatService.call_llm(
@@ -404,9 +428,13 @@ async def chat_stream(
         else None
     )
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
-    user_id = str(user.id) if user else (
-        http_request.headers.get("X-Anon-ID") or "anonymous"
-    ) if http_request else "anonymous"
+    user_id = (
+        str(user.id)
+        if user
+        else (http_request.headers.get("X-Anon-ID") or "anonymous")
+        if http_request
+        else "anonymous"
+    )
 
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
@@ -477,12 +505,19 @@ async def chat_stream(
 
     # HF-018: Context window overflow protection
     from app.core.token_budget import estimate_tokens
-    max_context = 4096 if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else 32000
+
+    max_context = (
+        4096
+        if "sarvam" in target_model.lower() or "openhathi" in target_model.lower()
+        else 32000
+    )
     total_tokens = estimate_tokens(system_prompt) + estimate_tokens(sanitized_message)
     if total_tokens > max_context - 1000:  # Leave room for response
         # Trim history to fit
         if history:
-            system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
+            system_prompt = ChatService.build_system_prompt(
+                detected_lang, context_chunks
+            )
 
     # -- Stream generator with Sarvam->Vertex fallback --
     async def event_stream():
@@ -596,8 +631,15 @@ async def get_chat_history(
             {
                 "id": str(chat.id),
                 "session_id": chat.session_id,
-                "title": chat.title or (f"Chat: {chat.messages[0].get('content', '')[:40]}..." if chat.messages else "New chat"),
-                "message_count": sum(1 for m in chat.messages if m.get("role") in ("user", "assistant")),
+                "title": chat.title
+                or (
+                    f"Chat: {chat.messages[0].get('content', '')[:40]}..."
+                    if chat.messages
+                    else "New chat"
+                ),
+                "message_count": sum(
+                    1 for m in chat.messages if m.get("role") in ("user", "assistant")
+                ),
                 "updated_at": chat.updated_at.isoformat(),
             }
             for chat in chats
@@ -709,7 +751,9 @@ async def analyze_image(
         raise HTTPException(status_code=400, detail="File must be an image")
 
     if file.content_type == "image/svg+xml":
-        raise HTTPException(status_code=400, detail="SVG files are not supported for security reasons")
+        raise HTTPException(
+            status_code=400, detail="SVG files are not supported for security reasons"
+        )
 
     image_bytes = await file.read()
     if len(image_bytes) > 4 * 1024 * 1024:

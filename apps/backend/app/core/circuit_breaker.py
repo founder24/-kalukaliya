@@ -56,6 +56,7 @@ class CircuitBreaker:
 
         # HF-101: asyncio.Lock for state transitions
         import asyncio
+
         self._state_lock = asyncio.Lock()
 
         # HF-119: Rate limiting for state transition logs
@@ -111,7 +112,9 @@ class CircuitBreaker:
                     now = time.time()
                     if now - self._last_state_log_time > 60:
                         self._last_state_log_time = now
-                        logger.warning(f"Circuit '{self.name}' HALF_OPEN max calls reached")
+                        logger.warning(
+                            f"Circuit '{self.name}' HALF_OPEN max calls reached"
+                        )
                     raise CircuitBreakerError(
                         f"Service {self.name} is being tested (half-open limit reached)"
                     )
@@ -135,7 +138,9 @@ class CircuitBreaker:
                 now = time.time()
                 if now - self._last_state_log_time > 60:
                     self._last_state_log_time = now
-                    logger.info(f"Circuit '{self.name}' recovered. Transitioning to CLOSED")
+                    logger.info(
+                        f"Circuit '{self.name}' recovered. Transitioning to CLOSED"
+                    )
                 self._state = CircuitState.CLOSED
                 self._failure_count = 0
                 self._success_count = 0

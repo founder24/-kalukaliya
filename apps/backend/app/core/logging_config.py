@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 class JSONFormatter(logging.Formatter):
     """Formats log records as structured JSON for observability pipelines."""
+
     # CONTRACT: user_id must always be MongoDB ObjectId, never email or PII
 
     def format(self, record: logging.LogRecord) -> str:
@@ -70,5 +71,8 @@ def setup_logging() -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JSONFormatter())
     # Avoid duplicate handlers on repeated calls
-    if not any(isinstance(h, logging.StreamHandler) and isinstance(h.formatter, JSONFormatter) for h in root_logger.handlers):
+    if not any(
+        isinstance(h, logging.StreamHandler) and isinstance(h.formatter, JSONFormatter)
+        for h in root_logger.handlers
+    ):
         root_logger.addHandler(handler)

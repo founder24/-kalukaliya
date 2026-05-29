@@ -96,6 +96,7 @@ class ChatService:
     async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
         try:
+
             async def _do_retrieval():
                 # HF-011: Pass raw text - Azure Search handles vectorization
                 # via VectorizableTextQuery internally

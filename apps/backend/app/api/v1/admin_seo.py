@@ -79,15 +79,25 @@ async def seo_pipeline_status(request: Request):
 
     # Single aggregation to get chapter stats grouped by subject_id
     try:
-        chapter_stats = await Chapter.aggregate([
-            {"$group": {
-                "_id": "$subject_id",
-                "total": {"$sum": 1},
-                "published": {"$sum": {"$cond": [{"$eq": ["$status", "published"]}, 1, 0]}},
-                "generated": {"$sum": {"$cond": [{"$eq": ["$status", "generated"]}, 1, 0]}},
-                "draft": {"$sum": {"$cond": [{"$eq": ["$status", "draft"]}, 1, 0]}},
-            }}
-        ]).to_list()
+        chapter_stats = await Chapter.aggregate(
+            [
+                {
+                    "$group": {
+                        "_id": "$subject_id",
+                        "total": {"$sum": 1},
+                        "published": {
+                            "$sum": {"$cond": [{"$eq": ["$status", "published"]}, 1, 0]}
+                        },
+                        "generated": {
+                            "$sum": {"$cond": [{"$eq": ["$status", "generated"]}, 1, 0]}
+                        },
+                        "draft": {
+                            "$sum": {"$cond": [{"$eq": ["$status", "draft"]}, 1, 0]}
+                        },
+                    }
+                }
+            ]
+        ).to_list()
     except Exception:
         chapter_stats = []
 

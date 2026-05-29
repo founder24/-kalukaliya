@@ -65,7 +65,13 @@ class SEOGeneratorService:
             )
 
             # Run all 5 generation calls in parallel
-            notes, definition, mcqs, important_questions, examples = await asyncio.gather(
+            (
+                notes,
+                definition,
+                mcqs,
+                important_questions,
+                examples,
+            ) = await asyncio.gather(
                 vertex_client.generate(system_prompt, notes_prompt),
                 vertex_client.generate(system_prompt, def_prompt),
                 vertex_client.generate(system_prompt, mcq_prompt),

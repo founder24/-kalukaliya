@@ -17,7 +17,9 @@ class UserProfile(BaseModel):
     email: str
     role: Optional[str] = None
     subscription_tier: str
-    plan: Optional[str] = None  # HF-097: Explicit alias of subscription_tier for frontend compat
+    plan: Optional[str] = (
+        None  # HF-097: Explicit alias of subscription_tier for frontend compat
+    )
     monthly_message_count: int
     preferred_language: str
     onboarding_done: bool = False
@@ -91,6 +93,7 @@ async def delete_account(user: User = Depends(get_current_user)):
     # HF-040: Cascade delete dead letters
     from app.db.mongo import get_mongo_client
     from app.config import settings
+
     client = get_mongo_client()
     db = client[settings.MONGODB_DB_NAME]
     await db.dead_letters.delete_many({"user_id": str(user.id)})

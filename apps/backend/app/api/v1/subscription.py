@@ -26,7 +26,9 @@ async def get_subscription_status(user: User = Depends(get_current_user)):
     return SubscriptionStatus(
         tier=user.subscription_tier,
         status=user.subscription_status,
-        current_period_end=user.current_period_end.isoformat() if hasattr(user.current_period_end, 'isoformat') else str(user.current_period_end or ""),
+        current_period_end=user.current_period_end.isoformat()
+        if hasattr(user.current_period_end, "isoformat")
+        else str(user.current_period_end or ""),
         monthly_message_count=user.monthly_message_count,
         monthly_limit=settings.RATE_LIMIT_PRO_TIER
         if user.is_pro()
@@ -96,11 +98,15 @@ async def downgrade_expired_subscriptions(request: Request):
 
     downgraded = 0
     for u in expired_users:
-        await u.update({"$set": {
-            "subscription_tier": "free",
-            "subscription_status": "cancelled",
-            "cancel_at_period_end": False,
-        }})
+        await u.update(
+            {
+                "$set": {
+                    "subscription_tier": "free",
+                    "subscription_status": "cancelled",
+                    "cancel_at_period_end": False,
+                }
+            }
+        )
         downgraded += 1
 
     logger.info(f"Downgraded {downgraded} expired subscriptions")

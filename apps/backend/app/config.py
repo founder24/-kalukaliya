@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     @classmethod
     def empty_strings_to_none(cls, values):
         """Convert empty strings to None so Optional fields work correctly.
-        
+
         Note (HF-112): empty_strings_to_none intentionally converts "" to None for all fields.
         """
         if isinstance(values, dict):

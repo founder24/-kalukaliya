@@ -149,16 +149,21 @@ async def handle_razorpay_webhook(request: Request):
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
         user = await User.find_one({"razorpay_subscription_id": sub_id})
         if user:
-            await user.update({"$set": {
-                "subscription_tier": "free",
-                "subscription_status": "cancelled",
-                "cancel_at_period_end": False,
-            }})
+            await user.update(
+                {
+                    "$set": {
+                        "subscription_tier": "free",
+                        "subscription_status": "cancelled",
+                        "cancel_at_period_end": False,
+                    }
+                }
+            )
         logger.info(f"Subscription expired, user downgraded: {sub_id}")
 
     # Mark as completed
     try:
         from app.db.redis import get_redis
+
         redis = get_redis()
         dedup_key = f"webhook_processed:{event_id}"
         await redis.set(dedup_key, "completed", ex=3024000)

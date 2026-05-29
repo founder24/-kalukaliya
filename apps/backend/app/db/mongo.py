@@ -26,6 +26,7 @@ async def init_mongo() -> None:
         return
 
     import asyncio
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -66,11 +67,15 @@ async def init_mongo() -> None:
             return
         except ConnectionFailure as e:
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                logger.warning(f"MongoDB connection attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+                wait_time = 2**attempt
+                logger.warning(
+                    f"MongoDB connection attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
+                )
                 await asyncio.sleep(wait_time)
             else:
-                logger.error(f"Failed to connect to MongoDB after {max_retries} attempts: {e}")
+                logger.error(
+                    f"Failed to connect to MongoDB after {max_retries} attempts: {e}"
+                )
                 raise
 
 
@@ -89,9 +94,7 @@ async def create_indexes() -> None:
             logger.error(f"FATAL: Failed to create email unique index: {e}")
             raise
         logger.warning(f"Email unique index creation failed (non-prod): {e}")
-    await db.users.create_index(
-        [("razorpay_subscription_id", ASCENDING)], sparse=True
-    )
+    await db.users.create_index([("razorpay_subscription_id", ASCENDING)], sparse=True)
     await db.users.create_index([("profile.preferences.language", ASCENDING)])
     await db.users.create_index([("created_at", DESCENDING)])
 
