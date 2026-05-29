@@ -689,19 +689,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     }
   }, [adminToken]);
 
-  // Task #255 — GCP credit burn panel row.
-  const [gcpCredits, setGcpCredits] = useState(null);
-  const [gcpCreditsLoading, setGcpCreditsLoading] = useState(false);
-
-  const loadGcpCredits = useCallback(() => {
-    setGcpCreditsLoading(true);
-    axios.get(`${API_BASE}/admin/vertex/gcp-credits`, {
-      headers: adminHeaders(adminToken), withCredentials: true,
-    })
-      .then((r) => setGcpCredits(r.data))
-      .catch(() => setGcpCredits({ _error: true }))
-      .finally(() => setGcpCreditsLoading(false));
-  }, [adminToken]);
+  // Task #255 — GCP credit burn panel row (merged into Task #263 below).
 
   // Task #263 — CF paid add-on migration status panel.
   const [cfAddons, setCfAddons] = useState(null);
