@@ -128,13 +128,18 @@ async def chat(
             )
 
             # 2. RAG retrieval + history load + rate limit in parallel
-            # Reset monthly message count if we're in a new month
+            # Reset monthly message count if we're in a new month (atomic with precondition)
             if user and hasattr(user, 'last_reset_date') and user.last_reset_date:
                 now = datetime.now(timezone.utc)
                 if user.last_reset_date.month != now.month or user.last_reset_date.year != now.year:
-                    await user.update({"$set": {"monthly_message_count": 0, "last_reset_date": now}})
-                    user.monthly_message_count = 0
-                    user.last_reset_date = now
+                    # Atomic: only reset if last_reset_date hasn't been updated by another request
+                    result = await User.find_one(
+                        {"_id": user.id, "last_reset_date": user.last_reset_date}
+                    )
+                    if result:
+                        await result.update({"$set": {"monthly_message_count": 0, "last_reset_date": now}})
+                        user.monthly_message_count = 0
+                        user.last_reset_date = now
 
             # Using return_exceptions=True so one failure does not cancel others
             results = await asyncio.gather(

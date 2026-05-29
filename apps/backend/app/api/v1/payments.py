@@ -72,6 +72,14 @@ async def create_order(
         }
     )
 
+    # Store amount for later verification (resilient payment record)
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        await redis.set(f"order_amount:{order['id']}", str(amount), ex=86400)
+    except Exception:
+        pass
+
     return {"order_id": order["id"], "amount": amount, "currency": "INR"}
 
 
@@ -93,6 +101,17 @@ async def verify_payment(
     if not hmac.compare_digest(expected, body.razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
+    # Retrieve stored amount for payment record
+    payment_amount = None
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        stored_amount = await redis.get(f"order_amount:{body.razorpay_order_id}")
+        if stored_amount:
+            payment_amount = int(stored_amount)
+    except Exception:
+        pass
+
     await user.update(
         {
             "$set": {
@@ -113,7 +132,7 @@ async def verify_payment(
             "user_id": str(user.id),
             "razorpay_order_id": body.razorpay_order_id,
             "razorpay_payment_id": body.razorpay_payment_id,
-            "amount": None,  # Amount not available in verify request
+            "amount": payment_amount,
             "status": "completed",
             "type": "subscription",
             "created_at": datetime.now(timezone.utc),

@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,16 @@ async def handle_razorpay_webhook(request: Request):
         existing = await redis.get(dedup_key)
         if existing == "completed":
             return {"status": "already_processed"}
-        if existing == "processing":
+        if existing and existing.startswith("processing:"):
             # Check if stuck (processing for > 5 min means previous attempt crashed)
-            # Allow reprocessing for stuck entries
-            pass
-        await redis.set(dedup_key, "processing", ex=3024000)
+            try:
+                started_at = float(existing.split(":")[1])
+                if time.time() - started_at < 300:  # Less than 5 minutes
+                    return {"status": "already_processing"}
+            except (ValueError, IndexError):
+                pass
+            # Stale processing entry - allow reprocessing
+        await redis.set(dedup_key, f"processing:{time.time()}", ex=3024000)
     except HTTPException:
         raise
     except Exception as e:

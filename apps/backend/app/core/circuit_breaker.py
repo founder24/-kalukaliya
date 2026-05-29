@@ -119,10 +119,12 @@ class CircuitBreaker:
 
         try:
             result = await func(*args, **kwargs)
-            self._on_success()
+            async with self._state_lock:
+                self._on_success()
             return result
         except Exception:
-            self._on_failure()
+            async with self._state_lock:
+                self._on_failure()
             raise
 
     def _on_success(self):
