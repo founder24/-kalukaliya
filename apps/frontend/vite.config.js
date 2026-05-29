@@ -594,16 +594,6 @@ function backendPreconnectPlugin() {
 }
 
 export default defineConfig(({ mode }) => ({
-  oxc: {
-    include: /\.(m?[jt]sx?)$/,
-    exclude: /node_modules/,
-    lang: 'jsx',
-    jsx: {
-      runtime: 'automatic',
-      importSource: 'react',
-    },
-  },
-
   plugins: [
     react({
       include: /\.(js|jsx|ts|tsx)$/,
@@ -828,8 +818,5 @@ export default defineConfig(({ mode }) => ({
       'react/jsx-runtime',
     ],
     extensions: ['.js', '.jsx'],
-    rolldownOptions: {
-      moduleTypes: { '.js': 'jsx' },
-    },
   },
 }));
