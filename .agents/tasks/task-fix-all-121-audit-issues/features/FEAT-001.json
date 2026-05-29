@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix all Critical and High severity backend issues (HF-001, HF-004, HF-009, HF-020, HF-021, HF-022, HF-023, HF-024, HF-031, HF-033, HF-088, HF-092, HF-099, HF-106, HF-114, HF-115)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "HF-001: In apps/backend/app/api/v1/auth.py around line 180, replace `hmac.new(edge_secret.encode(), message.encode(), hashlib.sha256).hexdigest()` with `hmac.HMAC(edge_secret.encode(), message.encode(), hashlib.sha256).hexdigest()`",
     "HF-004: In apps/backend/app/api/v1/auth.py in the forgot_password handler (the function signature `async def forgot_password(request: ForgotPasswordRequest):`), add a `request: Request` parameter and call `await _check_rate_limit(request, 'forgot_password', 3)` at the start. The function signature needs to become `async def forgot_password(request_body: ForgotPasswordRequest, request: Request):` and the body references to `request.email` become `request_body.email`.",
@@ -35,5 +35,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; import glob; [ast.parse(open(f).read()) for f in glob.glob('app/**/*.py', recursive=True)]\" to verify all Python files have valid syntax"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 15 backend fixes (HF-001, HF-004, HF-009, HF-020, HF-021, HF-022, HF-023, HF-024, HF-031, HF-033, HF-088, HF-092, HF-099, HF-106, HF-114, HF-115) implemented and verified with AST parsing. pyenv global 3.11.15 needed to access python command."
 }
