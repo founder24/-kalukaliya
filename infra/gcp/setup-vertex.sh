@@ -252,13 +252,21 @@ info "=== Section 4: Vertex AI Search - Datastore Creation ==="
 
 DATASTORE_ID="${DATASTORE_DISPLAY_NAME}"
 
+# Fetch access token once for all REST API calls (Sections 4 and 5)
+if [ "$DRY_RUN" = false ]; then
+  info "Fetching access token for REST API calls..."
+  ACCESS_TOKEN=$(gcloud auth print-access-token)
+fi
+
 if [ "$DRY_RUN" = true ]; then
   echo -e "${YELLOW}[DRY-RUN]${NC} Would create Discovery Engine datastore via REST API:"
   echo "  POST https://discoveryengine.googleapis.com/v1/projects/${PROJECT_ID}/locations/${DATASTORE_LOCATION}/collections/default_collection/dataStores?dataStoreId=${DATASTORE_ID}"
   echo "  Body: { displayName: ${DATASTORE_DISPLAY_NAME}, industryVertical: GENERIC, solutionTypes: [SOLUTION_TYPE_SEARCH], contentConfig: CONTENT_REQUIRED }"
+  echo ""
+  echo -e "${YELLOW}[DRY-RUN]${NC} Would deploy schema from infra/gcp/vertex-search-schema.json using:"
+  echo "  python infra/scripts/deploy-search-index.py"
+  echo "  (Schema source: infra/gcp/vertex-search-schema.json)"
 else
-  ACCESS_TOKEN=$(gcloud auth print-access-token)
-
   # Check if datastore already exists
   DATASTORE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Authorization: Bearer ${ACCESS_TOKEN}" \
@@ -297,36 +305,11 @@ else
     sleep 10
   fi
 
-  # Apply schema to the datastore
-  info "Applying schema to datastore..."
-
-  SCHEMA_BODY='{
-    "structSchema": {
-      "type": "object",
-      "properties": {
-        "id": { "type": "string", "indexable": true, "retrievable": true, "searchable": false },
-        "title": { "type": "string", "indexable": true, "retrievable": true, "searchable": true, "completable": true },
-        "content": { "type": "string", "indexable": true, "retrievable": true, "searchable": true },
-        "language": { "type": "string", "indexable": true, "retrievable": true, "searchable": false },
-        "tier_access": { "type": "string", "indexable": true, "retrievable": true, "searchable": false },
-        "source_url": { "type": "string", "indexable": false, "retrievable": true, "searchable": false },
-        "last_updated": { "type": "string", "indexable": true, "retrievable": true, "searchable": false }
-      }
-    }
-  }'
-
-  SCHEMA_RESPONSE=$(curl -s -X PATCH \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "$SCHEMA_BODY" \
-    "https://discoveryengine.googleapis.com/v1/projects/${PROJECT_ID}/locations/${DATASTORE_LOCATION}/collections/default_collection/dataStores/${DATASTORE_ID}/schemas/default_schema")
-
-  if echo "$SCHEMA_RESPONSE" | grep -q '"error"'; then
-    warning "Schema update returned an error (this may be normal if schema already exists):"
-    echo "$SCHEMA_RESPONSE"
-  else
-    success "Schema applied to datastore"
-  fi
+  # Schema deployment is handled by the dedicated deploy-search-index.py script
+  # which reads from the canonical schema definition at infra/gcp/vertex-search-schema.json.
+  # This avoids maintaining a duplicate inline schema that can drift.
+  info "Schema deployment: run 'python infra/scripts/deploy-search-index.py' after this script completes."
+  info "  (Schema source: infra/gcp/vertex-search-schema.json)"
 fi
 
 # =============================================================================
@@ -343,8 +326,6 @@ if [ "$DRY_RUN" = true ]; then
   echo "  POST https://discoveryengine.googleapis.com/v1/projects/${PROJECT_ID}/locations/${DATASTORE_LOCATION}/collections/default_collection/engines?engineId=${SEARCH_ENGINE_ID}"
   echo "  Body: { displayName: ${SEARCH_ENGINE_DISPLAY_NAME}, solutionType: SOLUTION_TYPE_SEARCH, dataStoreIds: [${DATASTORE_ID}] }"
 else
-  ACCESS_TOKEN=$(gcloud auth print-access-token)
-
   # Check if search engine already exists
   ENGINE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Authorization: Bearer ${ACCESS_TOKEN}" \
@@ -444,7 +425,7 @@ echo "VERTEX_PROJECT_ID=${PROJECT_ID}"
 echo "VERTEX_SEARCH_DATASTORE_ID=${DATASTORE_ID}"
 echo "VERTEX_SEARCH_SERVING_CONFIG=default_search"
 echo "VERTEX_SEARCH_LOCATION=${DATASTORE_LOCATION}"
-echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$(cat "$KEY_FILE_PATH" 2>/dev/null | tr -d '\n' || echo "<content of ${KEY_FILE_PATH}>")"
+echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=<paste content of ${KEY_FILE_PATH}>"
 echo "VERTEX_GEMINI_MODEL=gemini-2.0-flash-lite"
 echo "VERTEX_LOCATION=${REGION}"
 echo ""
@@ -475,6 +456,11 @@ echo "     docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/backe
 echo ""
 echo "  4. Deploy to Cloud Run:"
 echo "     gcloud run services replace infra/gcp/clouddeploy.yaml --region=${REGION}"
+echo ""
+echo "  5. (Production) Set up Workload Identity Federation for Cloud Run:"
+echo "     # For production deployments, use Workload Identity instead of the downloaded"
+echo "     # service account key. This eliminates the need for GOOGLE_APPLICATION_CREDENTIALS_JSON."
+echo "     # See: https://cloud.google.com/run/docs/securing/service-identity"
 echo ""
 echo "============================================================================="
 
