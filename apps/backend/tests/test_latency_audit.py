@@ -5,7 +5,7 @@ Verify that production latency optimizations are in place:
 1. Parallel execution of retrieve_context + load_conversation_history
 2. Rate limit uses Redis pipeline (reduces HTTP round-trips)
 3. Unified middleware adds all expected headers in a single pass
-4. Azure Search warm_up is called during startup
+4. Vertex Search warm_up is called during startup
 """
 
 import asyncio
@@ -208,16 +208,16 @@ def test_middleware_is_single_pass():
 
 
 # ═══════════════════════════════════════════════════════════════
-# (d) Azure Search warm_up is called during startup
+# (d) Vertex Search warm_up is called during startup
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_azure_search_has_warm_up_method():
-    """Verify AzureSearchService has a warm_up method."""
-    from app.services.search.azure_search import AzureSearchService
+def test_vertex_search_has_warm_up_method():
+    """Verify VertexSearchService has a warm_up method."""
+    from app.services.search.vertex_search import VertexSearchService
 
-    assert hasattr(AzureSearchService, "warm_up"), (
-        "AzureSearchService must have a warm_up method"
+    assert hasattr(VertexSearchService, "warm_up"), (
+        "VertexSearchService must have a warm_up method"
     )
 
 
@@ -227,4 +227,4 @@ def test_lifespan_calls_warm_up():
     from app import main
 
     source = inspect.getsource(main.lifespan)
-    assert "warm_up" in source, "Lifespan should call warm_up for Azure Search"
+    assert "warm_up" in source, "Lifespan should call warm_up for Vertex Search"
