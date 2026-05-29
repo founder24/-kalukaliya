@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "refactor",
   "description": "Rename AZURE_BACKEND_URL to BACKEND_URL across the edge worker, update .env.shared, CI/CD workflows, infrastructure, and documentation to remove all Azure references. Rename infra/azure/ to infra/gcp/ with Cloud Run equivalents.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Step 1: Edge Worker - Rename AZURE_BACKEND_URL to BACKEND_URL in: (a) apps/edge/src/env.d.ts - Change the Env interface field, (b) apps/edge/src/index.ts - Replace all occurrences of env.AZURE_BACKEND_URL with env.BACKEND_URL, update comment mentioning 'Azure Container Apps', (c) apps/edge/wrangler.toml - Rename AZURE_BACKEND_URL vars/secrets references to BACKEND_URL, change the production default from azurecontainerapps.io to a placeholder like MUST-BE-CONFIGURED.run.app, (d) apps/edge/src/routes/api-proxy.ts - Update the JSDoc comment that says 'Forwards requests to Azure Backend' to 'Forwards requests to Backend'.",
     "Step 2: Edge Worker Tests - Update AZURE_BACKEND_URL to BACKEND_URL in: (a) apps/edge/tests/api-proxy.test.ts, (b) apps/edge/tests/contract.test.ts, (c) apps/edge/tests/latency-audit.test.ts.",

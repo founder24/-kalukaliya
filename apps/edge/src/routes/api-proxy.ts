@@ -1,5 +1,5 @@
 /**
- * API Proxy — Forwards requests to Azure Backend
+ * API Proxy — Forwards requests to Backend
  *
  * Features:
  * - Stream-aware: detects /stream paths and passes response.body directly (chunked)

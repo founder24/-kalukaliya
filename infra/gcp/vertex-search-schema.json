@@ -1,0 +1,74 @@
+{
+  "displayName": "syrabit-edu-datastore",
+  "industryVertical": "GENERIC",
+  "solutionTypes": ["SOLUTION_TYPE_SEARCH"],
+  "contentConfig": "CONTENT_REQUIRED",
+  "documentProcessingConfig": {
+    "defaultParsingConfig": {
+      "digitalParsingConfig": {}
+    }
+  },
+  "schema": {
+    "structDefinition": {
+      "fields": [
+        {
+          "fieldName": "id",
+          "type": "STRING",
+          "indexable": true,
+          "retrievable": true,
+          "searchable": false
+        },
+        {
+          "fieldName": "title",
+          "type": "STRING",
+          "indexable": true,
+          "retrievable": true,
+          "searchable": true,
+          "completable": true
+        },
+        {
+          "fieldName": "content",
+          "type": "STRING",
+          "indexable": true,
+          "retrievable": true,
+          "searchable": true
+        },
+        {
+          "fieldName": "content_vector",
+          "type": "STRING",
+          "indexable": false,
+          "retrievable": false,
+          "searchable": false
+        },
+        {
+          "fieldName": "language",
+          "type": "STRING",
+          "indexable": true,
+          "retrievable": true,
+          "searchable": false
+        },
+        {
+          "fieldName": "tier_access",
+          "type": "STRING",
+          "indexable": true,
+          "retrievable": true,
+          "searchable": false
+        },
+        {
+          "fieldName": "source_url",
+          "type": "STRING",
+          "indexable": false,
+          "retrievable": true,
+          "searchable": false
+        },
+        {
+          "fieldName": "last_updated",
+          "type": "STRING",
+          "indexable": true,
+          "retrievable": true,
+          "searchable": false
+        }
+      ]
+    }
+  }
+}

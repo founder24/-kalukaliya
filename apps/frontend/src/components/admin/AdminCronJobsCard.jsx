@@ -9,11 +9,11 @@ import { API_BASE } from '@/utils/api';
 // Phase 4 — Cron port (Task #332).
 //
 // Replaces the GCP Cloud Scheduler-sourced rendering inside
-// CronHealthPill. Polls the Azure Container Apps Jobs run history
-// (proxied by `routes/admin_azure_cron.py` on the backend so the
-// React bundle never holds an Azure ARM token).
+// CronHealthPill. Polls the Cloud Run Jobs run history
+// (proxied by `routes/admin_cron.py` on the backend so the
+// React bundle never holds a GCP token).
 //
-// Backend contract — `GET /admin/azure/cron/health`:
+// Backend contract — `GET /admin/gcp/cron/health`:
 // {
 // asOf: "2026-05-04T12:34:56Z",
 // composite: "ok" | "degraded" | "failed" | "unknown",
@@ -34,14 +34,14 @@ import { API_BASE } from '@/utils/api';
 //
 // ─ Why a separate card and not a re-source inside CronHealthPill ─
 // CronHealthPill renders one *named* cron with a workflow URL and an
-// alert-history drawer; the Azure source lists ~48 jobs. Trying to
+// alert-history drawer; the Cloud Run Jobs source lists ~48 jobs. Trying to
 // fan that count through CronHealthPill's per-pill render path would
 // blow the AdminHealth scroll length and double the existing
 // per-cron useState plumbing for no benefit. This card lists them
 // in a compact table; CronHealthPill keeps rendering the few crons
 // that actually have a paged-history drawer (Trustpilot refresh,
 // edge-proxy deploy, CF-WAF drift, unified-logs CF pull). Those four
-// pills now read from Azure too (see the same backend route, fields
+// pills now read from Cloud Run Jobs too (see the same backend route, fields
 // `lastRunAt` + `lastRunStatus`) but their tile shape is unchanged.
 
 const STATUS_STYLES = {
