@@ -27,5 +27,5 @@
     "Run 'python infra/scripts/seed-search.py --help' to verify the updated CLI interface"
   ],
   "blocked_reason": null,
-  "findings": "2 pre-existing test failures in tests/deployment-audit.test.ts (JWT-protected endpoint and Rate-limited chat POST tests) - these fail on the base branch without any changes. All new tests pass (7/7 in google-auth.test.ts). TypeScript compiles cleanly."
+  "findings": "2 pre-existing test failures in tests/deployment-audit.test.ts (JWT-protected endpoint and Rate-limited chat POST tests) - these fail on the base branch without any changes. All new tests pass (7/7 in google-auth.test.ts). TypeScript compiles cleanly. Post-review fix applied: getIdentityToken now wraps token fetch in try/catch, logs errors, clears cache, and returns null on failure (fail-open) instead of throwing unhandled exceptions."
 }
