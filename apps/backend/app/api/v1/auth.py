@@ -379,7 +379,8 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
 
         redis = get_redis()
         client_ip = (
-            request.headers.get("X-Real-IP")
+            request.headers.get("CF-Connecting-IP")
+            or request.headers.get("X-Real-IP")
             or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or (request.client.host if request.client else "unknown")
         )
@@ -400,7 +401,7 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
     except Exception as e:
         # Fail-closed: if Redis is unavailable, reject the request rather than
         # allowing unlimited unauthenticated attempts.
-        logger.warning(f"Rate limiting unavailable ({endpoint}): {e}")
+        logger.warning(f"Rate limiting unavailable ({endpoint}): {type(e).__name__}")
         raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
 
 
@@ -578,6 +579,10 @@ async def reset_password(request: ResetPasswordRequest):
             detail="Password reset is not available for OAuth accounts. Please sign in with your OAuth provider.",
         )
 
+    # HF-003: Prevent password reuse
+    if user.verify_password(request.new_password):
+        raise HTTPException(status_code=400, detail="New password must be different from current password")
+
     # Update password
     user.hashed_password = User.hash_password(request.new_password)
     user.updated_at = datetime.now(timezone.utc)
@@ -614,25 +619,6 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         user_id = payload.get("sub")
         jti = payload.get("jti")
 
-        # Check if token has been revoked
-        if jti:
-            try:
-                from app.db.redis import get_redis
-
-                redis = get_redis()
-                revoked = await redis.get(f"revoked_refresh:{jti}")
-                if revoked:
-                    raise HTTPException(
-                        status_code=401, detail="Token has been revoked"
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Redis unavailable for token revocation check: {e}")
-                raise HTTPException(
-                    status_code=503, detail="Token validation service unavailable"
-                )
-
         user = await User.get(user_id)
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -641,20 +627,25 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         new_access_token = create_access_token(str(user.id))
         new_refresh_token = create_refresh_token(str(user.id))
 
-        # Revoke old refresh token jti
+        # Atomically claim the old token (SET NX ensures only one request succeeds)
         if jti:
             try:
                 from app.db.redis import get_redis
-
                 redis = get_redis()
-                await redis.set(
+                claimed = await redis.set(
                     f"revoked_refresh:{jti}",
                     "1",
                     ex=settings.REFRESH_TOKEN_EXPIRY_DAYS * 86400,
+                    nx=True,
                 )
+                if not claimed:
+                    raise HTTPException(status_code=401, detail="Token has been revoked")
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error(
-                    f"Redis unavailable for refresh token revocation storage: {e}"
+                logger.error(f"Redis unavailable for refresh token revocation: {e}")
+                raise HTTPException(
+                    status_code=503, detail="Token validation service unavailable"
                 )
 
         return TokenResponse(

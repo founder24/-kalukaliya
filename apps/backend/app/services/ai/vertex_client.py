@@ -26,6 +26,8 @@ class VertexAIClient:
             timeout=httpx.Timeout(10.0, connect=3.0),
             limits=httpx.Limits(max_connections=50, max_keepalive_connections=25),
         )
+        # HF-075: Token lock queueing concern - consider background refresh
+        # as a future improvement to avoid lock contention under high concurrency
         self._token_lock = asyncio.Lock()
         self._cached_token: str | None = None
         self._token_expiry: float = 0

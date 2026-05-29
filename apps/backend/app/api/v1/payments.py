@@ -103,6 +103,24 @@ async def verify_payment(
         }
     )
 
+    # HF-029: Record payment in payments collection
+    try:
+        from app.db.mongo import get_mongo_client
+        from datetime import datetime, timezone
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        await db.payments.insert_one({
+            "user_id": str(user.id),
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "amount": None,  # Amount not available in verify request
+            "status": "completed",
+            "type": "subscription",
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.error(f"Failed to record payment: {e}")
+
     logger.info("Payment verified, user upgraded", extra={"user_id": str(user.id)})
     return {"status": "success", "message": "Payment verified, plan upgraded to pro"}
 

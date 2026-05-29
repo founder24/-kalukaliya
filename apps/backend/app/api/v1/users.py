@@ -84,6 +84,13 @@ async def delete_account(user: User = Depends(get_current_user)):
 
     await ChatFeedback.find({"user_id": str(user.id)}).delete()
 
+    # HF-040: Cascade delete dead letters
+    from app.db.mongo import get_mongo_client
+    from app.config import settings
+    client = get_mongo_client()
+    db = client[settings.MONGODB_DB_NAME]
+    await db.dead_letters.delete_many({"user_id": str(user.id)})
+
     # Delete user
     await user.delete()
 

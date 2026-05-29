@@ -157,9 +157,8 @@ class Settings(BaseSettings):
                     "JWT_SECRET must be at least 32 characters long in production"
                 )
             if not self.ADMIN_JWT_SECRET:
-                logger.warning(
-                    "ADMIN_JWT_SECRET is not set — admin tokens use the shared JWT_SECRET. "
-                    "Set a separate ADMIN_JWT_SECRET for improved key isolation."
+                raise ValueError(
+                    "ADMIN_JWT_SECRET is required in production for admin key isolation"
                 )
             if not self.RESET_TOKEN_SECRET:
                 logger.warning(

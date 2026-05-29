@@ -96,13 +96,12 @@ class ChatService:
     async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
         try:
-            from app.services.ai.embedder import generate_embedding
-
             async def _do_retrieval():
-                embedding = await generate_embedding(sanitized_message)
+                # HF-011: Pass raw text - Azure Search handles vectorization
+                # via VectorizableTextQuery internally
                 context_chunks = await search_service.search_context(
                     query=sanitized_message,
-                    text=embedding,
+                    text=sanitized_message,
                     user_tier=user_tier,
                     limit=settings.MAX_CONTEXT_DOCS,
                 )
@@ -263,13 +262,7 @@ class ChatService:
                 return
 
         # Emit the sentinel value so the router knows the model/response
-        yield json.dumps(
-            {
-                "__internal_complete": True,
-                "full_response": full_response,
-                "actual_model": actual_model,
-            }
-        )
+        yield f"data: {json.dumps({'__internal_complete': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
 
     # ------------------------------------------------------------------
     # Chat persistence (fire-and-forget)

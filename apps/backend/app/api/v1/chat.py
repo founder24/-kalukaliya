@@ -103,7 +103,9 @@ async def chat(
 
     # User tier and ID - handle anonymous users gracefully
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
-    user_id = str(user.id) if user else "anonymous"
+    user_id = str(user.id) if user else (
+        http_request.headers.get("X-Anon-ID") or "anonymous"
+    ) if http_request else "anonymous"
 
     try:
 
@@ -178,10 +180,17 @@ async def chat(
             # are only stored when context_chunks is empty (no RAG context),
             # meaning the response is generic and not personalized. If user-tier
             # specific behavior diverges in the future, include user_tier in the key.
-            message_hash = ChatService._make_cache_hash(
-                sanitized_message, detected_lang
-            )
-            cached = await ChatService.get_cached_response(message_hash)
+            # HF-015: Only serve cached responses when no active conversation
+            cached = None
+            if not request.session_id:
+                message_hash = ChatService._make_cache_hash(
+                    sanitized_message, detected_lang
+                )
+                cached = await ChatService.get_cached_response(message_hash)
+            else:
+                message_hash = ChatService._make_cache_hash(
+                    sanitized_message, detected_lang
+                )
             if cached:
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.info(
@@ -209,6 +218,15 @@ async def chat(
             # Include multi-turn conversation history
             if history:
                 system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
+
+            # HF-018: Context window overflow protection
+            from app.core.token_budget import estimate_tokens
+            max_context = 4096 if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else 32000
+            total_tokens = estimate_tokens(system_prompt) + estimate_tokens(sanitized_message)
+            if total_tokens > max_context - 1000:  # Leave room for response
+                # Trim history to fit
+                if history:
+                    system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
 
             # 4. Call LLM (with Sarvam -> Vertex AI fallback)
             response_text, actual_model = await ChatService.call_llm(
@@ -381,7 +399,9 @@ async def chat_stream(
         else None
     )
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
-    user_id = str(user.id) if user else "anonymous"
+    user_id = str(user.id) if user else (
+        http_request.headers.get("X-Anon-ID") or "anonymous"
+    ) if http_request else "anonymous"
 
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
@@ -450,6 +470,15 @@ async def chat_stream(
     if history:
         system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
+    # HF-018: Context window overflow protection
+    from app.core.token_budget import estimate_tokens
+    max_context = 4096 if "sarvam" in target_model.lower() or "openhathi" in target_model.lower() else 32000
+    total_tokens = estimate_tokens(system_prompt) + estimate_tokens(sanitized_message)
+    if total_tokens > max_context - 1000:  # Leave room for response
+        # Trim history to fit
+        if history:
+            system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
+
     # -- Stream generator with Sarvam->Vertex fallback --
     async def event_stream():
         full_response = ""
@@ -464,8 +493,12 @@ async def chat_stream(
             request_message=sanitized_message,
         ):
             # Internal sentinel carries the full response and actual model
-            if event.startswith("{") and '"__internal_complete"' in event:
-                data = json.loads(event)
+            if "__internal_complete" in event:
+                # Strip SSE prefix if present
+                raw = event
+                if raw.startswith("data: "):
+                    raw = raw[6:].strip()
+                data = json.loads(raw)
                 full_response = data["full_response"]
                 actual_model = data["actual_model"]
                 continue
@@ -658,6 +691,9 @@ async def analyze_image(
 
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
+
+    if file.content_type == "image/svg+xml":
+        raise HTTPException(status_code=400, detail="SVG files are not supported for security reasons")
 
     image_bytes = await file.read()
     if len(image_bytes) > 4 * 1024 * 1024:

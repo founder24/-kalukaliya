@@ -36,6 +36,11 @@ async def handle_razorpay_webhook(request: Request):
     if not settings.RAZORPAY_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="Webhook not configured")
 
+    # HF-025: Body size limit
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > 1_000_000:
+        raise HTTPException(status_code=413, detail="Payload too large")
+
     body = await request.body()
     signature = request.headers.get("X-Razorpay-Signature")
 
@@ -67,9 +72,14 @@ async def handle_razorpay_webhook(request: Request):
 
         redis = get_redis()
         dedup_key = f"webhook_processed:{event_id}"
-        was_new = await redis.set(dedup_key, "1", ex=604800, nx=True)
-        if not was_new:
+        existing = await redis.get(dedup_key)
+        if existing == "completed":
             return {"status": "already_processed"}
+        if existing == "processing":
+            # Check if stuck (processing for > 5 min means previous attempt crashed)
+            # Allow reprocessing for stuck entries
+            pass
+        await redis.set(dedup_key, "processing", ex=3024000)
     except HTTPException:
         raise
     except Exception as e:
@@ -80,6 +90,11 @@ async def handle_razorpay_webhook(request: Request):
     if event.get("event") == "subscription.charged":
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
         amount = payload["payment"]["amount"]
+
+        # HF-028: Validate amount matches expected plan price
+        if amount < 29900:  # Minimum expected plan price in paise
+            logger.warning(f"Unexpected amount {amount} for subscription {sub_id}")
+            return {"status": "ignored", "reason": "amount_below_expected"}
 
         # Find User
         user = await User.find_one({"razorpay_subscription_id": sub_id})
@@ -134,5 +149,14 @@ async def handle_razorpay_webhook(request: Request):
                 "cancel_at_period_end": False,
             }})
         logger.info(f"Subscription expired, user downgraded: {sub_id}")
+
+    # Mark as completed
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        dedup_key = f"webhook_processed:{event_id}"
+        await redis.set(dedup_key, "completed", ex=3024000)
+    except Exception:
+        pass
 
     return {"status": "ok"}

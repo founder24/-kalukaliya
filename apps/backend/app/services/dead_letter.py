@@ -31,7 +31,7 @@ async def store_dead_letter(
 
         document = {
             "user_id": user_id,
-            "message": message,
+            "message": message[:200],
             "lang": lang,
             "error": error,
             "timestamp": datetime.now(timezone.utc),

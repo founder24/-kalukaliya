@@ -53,7 +53,7 @@ class SarvamAIClient:
                             {"role": "user", "content": user_message},
                         ],
                         "temperature": 0.7,
-                        "max_tokens": 512,
+                        "max_tokens": 2048,
                         "stream": stream,
                     },
                 )
@@ -161,16 +161,22 @@ class SarvamAIClient:
 
         - On 5xx or timeout: retries up to max_retries times
         - If all retries exhausted, raises to let caller handle fallback
+        - HF-078: If chunks were already sent to client, cannot retry
         """
         last_error: Exception | None = None
+        chunks_yielded = False
 
         for attempt in range(max_retries + 1):
             try:
                 async for chunk in self.stream_generate(system_prompt, user_message):
+                    chunks_yielded = True
                     yield chunk
                 return  # Success - exit after full stream
             except RuntimeError as e:
                 last_error = e
+                # HF-078: If chunks were already sent to client, cannot retry
+                if chunks_yielded:
+                    raise
                 if attempt < max_retries:
                     logger.warning(
                         f"Sarvam stream attempt {attempt + 1} failed: {e}, "
