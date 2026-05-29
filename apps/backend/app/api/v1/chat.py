@@ -591,8 +591,8 @@ async def get_chat_history(
             {
                 "id": str(chat.id),
                 "session_id": chat.session_id,
-                "title": chat.title,
-                "message_count": len(chat.messages),
+                "title": chat.title or (f"Chat: {chat.messages[0].get('content', '')[:40]}..." if chat.messages else "New chat"),
+                "message_count": sum(1 for m in chat.messages if m.get("role") in ("user", "assistant")),
                 "updated_at": chat.updated_at.isoformat(),
             }
             for chat in chats
@@ -631,8 +631,19 @@ async def get_chat_messages(
     limit = min(limit, 200)
     messages = chat.messages[skip : skip + limit]
 
+    # HF-096: Filter to user-facing fields only (exclude internal rag_sources, feedback)
+    filtered_messages = [
+        {
+            "role": m.get("role"),
+            "content": m.get("content"),
+            "timestamp": m.get("timestamp"),
+            "model_used": m.get("model_used"),
+        }
+        for m in messages
+    ]
+
     return {
-        "messages": messages,
+        "messages": filtered_messages,
         "pagination": {
             "skip": skip,
             "limit": limit,

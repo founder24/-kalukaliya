@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     CF_API_TOKEN: Optional[str] = None
     CF_TURNSTILE_SECRET: Optional[str] = None
     CF_R2_BUCKET: str = "syrabit-assets"
+    # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
@@ -56,6 +57,7 @@ class Settings(BaseSettings):
     MONGODB_URI: Optional[str] = None
     MONGODB_DB_NAME: str = "syrabit_prod"
     MONGODB_MAX_POOL_SIZE: int = 50
+    # Note (HF-111): MONGODB_MAX_POOL_SIZE=50 is sufficient. Monitor via OTel metrics.
     MONGODB_MIN_POOL_SIZE: int = 10
 
     # --- P5: Upstash (Gatekeeper) ---
@@ -105,6 +107,8 @@ class Settings(BaseSettings):
     SENTRY_DSN: Optional[str] = None
     SENTRY_ENVIRONMENT: str = "production"
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    # Note (HF-109): SENTRY_TRACES_SAMPLE_RATE=0.1 is acceptable for current traffic.
+    # Lower to 0.01 if Sentry costs become a concern at scale.
     POSTHOG_API_KEY: Optional[str] = None
     POSTHOG_HOST: str = "https://app.posthog.com"
 
@@ -124,13 +128,18 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = (
         "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai"
     )
+    # Note (HF-108): ALLOWED_ORIGINS uses exact match; Cloudflare Pages preview URLs
+    # are handled by is_origin_allowed() regex. Use that method for all origin checks.
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
     @model_validator(mode="before")
     @classmethod
     def empty_strings_to_none(cls, values):
-        """Convert empty strings to None so Optional fields work correctly."""
+        """Convert empty strings to None so Optional fields work correctly.
+        
+        Note (HF-112): empty_strings_to_none intentionally converts "" to None for all fields.
+        """
         if isinstance(values, dict):
             for key, val in values.items():
                 if val == "":

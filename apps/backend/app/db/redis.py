@@ -9,7 +9,11 @@ _redis: Optional[Redis] = None
 
 
 async def init_redis() -> None:
-    """Initialize Upstash Redis connection"""
+    """Initialize Upstash Redis connection.
+
+    Note (HF-090): Upstash uses HTTP-based requests (not persistent TCP connections),
+    so stale connection concerns do not apply. Each request is independent.
+    """
     global _redis
 
     if not settings.UPSTASH_REDIS_REST_URL or not settings.UPSTASH_REDIS_REST_TOKEN:

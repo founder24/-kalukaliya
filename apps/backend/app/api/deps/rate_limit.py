@@ -2,6 +2,11 @@
 
 Monthly quota tracking only. Per-request burst rate limiting is handled
 by the Cloudflare Edge worker (apps/edge/src/middleware/rate-limit.ts).
+
+Architecture note (HF-026): Double rate limiting is intentional:
+- Edge: 30 req/hr per language (burst protection, fast rejection)
+- Backend: 30 req/month total for free tier (quota enforcement)
+The edge limit prevents burst abuse; the backend limit enforces billing quotas.
 """
 
 import time

@@ -434,6 +434,10 @@ class ChatService:
     async def _invalidate_history_cache(session_id: str) -> None:
         """Invalidate all cached history entries for a session on new message save.
         Uses a Redis pipeline to batch all DELETEs in a single round-trip.
+
+        Note (HF-014): The hardcoded max_turns values (3, 5, 10, 15, 20) cover all
+        expected usage. The only production caller uses max_turns=5. If new callers
+        use non-standard values, add them here or switch to wildcard pattern deletion.
         """
         try:
             redis = get_redis()

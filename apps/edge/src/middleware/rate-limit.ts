@@ -49,6 +49,9 @@ export async function checkRateLimit(
 
   // Increment counter (eventual consistency is acceptable for rate limiting)
   // TTL of 2 hours ensures cleanup even if window rolls over
+  // Note: Read-then-write with KV eventual consistency means concurrent requests
+  // may both pass the check. This is an accepted trade-off for edge rate limiting.
+  // For strong consistency, use Cloudflare Durable Objects.
   await kv.put(key, String(count + 1), { expirationTtl: 7200 });
 
   return {

@@ -17,7 +17,7 @@ class UserProfile(BaseModel):
     email: str
     role: Optional[str] = None
     subscription_tier: str
-    plan: Optional[str] = None  # alias for subscription_tier for frontend compat
+    plan: Optional[str] = None  # HF-097: Explicit alias of subscription_tier for frontend compat
     monthly_message_count: int
     preferred_language: str
     onboarding_done: bool = False
@@ -38,7 +38,11 @@ class OnboardingRequest(BaseModel):
 
 @router.get("/me", response_model=UserProfile)
 async def get_current_user_profile(user: User = Depends(get_current_user)):
-    """Get current user profile"""
+    """Get current user profile.
+
+    Note (HF-047): No explicit rate limit here. Protected by JWT auth requirement
+    and edge-level rate limiting which covers all /api/ paths.
+    """
     return UserProfile(
         id=str(user.id),
         name=user.name or "",

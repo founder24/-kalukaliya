@@ -15,7 +15,7 @@ class User(Document):
 
     # Subscription
     subscription_tier: Literal["free", "pro"] = "free"
-    subscription_status: Literal["active", "past_due", "cancelled", "trialing"] = (
+    subscription_status: Literal["active", "past_due", "cancelled"] = (
         "active"
     )
     razorpay_subscription_id: Optional[str] = None
