@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fix-page-not-loading",
+  "task_description": "Fix browser page not loading issue caused by invalid Vite 7 configuration (invalid oxc and rolldownOptions keys in vite.config.js)",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
