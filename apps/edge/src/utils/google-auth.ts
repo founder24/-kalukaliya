@@ -127,8 +127,11 @@ async function exchangeJwtForIdToken(signedJwt: string): Promise<string> {
 
 /**
  * Get a Google identity token for authenticating to Cloud Run.
- * Returns null if GOOGLE_SA_KEY is not configured.
+ * Returns null if GOOGLE_SA_KEY is not configured or if token fetch fails.
  * Caches the token and refreshes 5 minutes before expiry.
+ * On failure, clears the cache and returns null (fail-open: lets the
+ * request proceed without auth so Cloud Run can return 403 if needed,
+ * which is more informative than a generic 503 from the edge).
  */
 export async function getIdentityToken(env: Env): Promise<string | null> {
   if (!env.GOOGLE_SA_KEY) {
@@ -142,24 +145,32 @@ export async function getIdentityToken(env: Env): Promise<string | null> {
     return cachedToken.token;
   }
 
-  const saKey: ServiceAccountKey = JSON.parse(env.GOOGLE_SA_KEY);
-  const targetAudience = env.BACKEND_URL;
+  try {
+    const saKey: ServiceAccountKey = JSON.parse(env.GOOGLE_SA_KEY);
+    const targetAudience = env.BACKEND_URL;
 
-  const signedJwt = await createSignedJwt(
-    saKey.client_email,
-    saKey.private_key,
-    targetAudience
-  );
+    const signedJwt = await createSignedJwt(
+      saKey.client_email,
+      saKey.private_key,
+      targetAudience
+    );
 
-  const idToken = await exchangeJwtForIdToken(signedJwt);
+    const idToken = await exchangeJwtForIdToken(signedJwt);
 
-  // Cache with 1 hour expiry (matching JWT exp)
-  cachedToken = {
-    token: idToken,
-    expiresAt: now + 3600,
-  };
+    // Cache with 1 hour expiry (matching JWT exp)
+    cachedToken = {
+      token: idToken,
+      expiresAt: now + 3600,
+    };
 
-  return idToken;
+    return idToken;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[google-auth] Failed to fetch identity token: ${message}`);
+    // Clear cache so next request retries
+    cachedToken = null;
+    return null;
+  }
 }
 
 // Exported for testing
