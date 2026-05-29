@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Create a comprehensive setup-vertex.sh script at infra/gcp/setup-vertex.sh that automates the complete GCP/Vertex AI setup from a brand-new account. The script must cover: project creation/selection, enabling all required APIs, creating a service account with correct IAM roles, setting up Vertex AI Search datastore and search engine/app, generating service account key JSON, creating Artifact Registry for Docker images, and outputting all the environment variables the backend needs.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create infra/gcp/setup-vertex.sh as an executable bash script with clear section headers and comments",
     "Section 1 - Configuration Variables: Define user-editable variables at the top: PROJECT_ID, BILLING_ACCOUNT_ID, REGION (default us-central1), DATASTORE_LOCATION (default global), DATASTORE_DISPLAY_NAME (default syrabit-edu-datastore), SERVICE_ACCOUNT_NAME (default syrabit-backend-sa), SEARCH_ENGINE_ID",
@@ -33,5 +33,5 @@
     "Confirm the script references all Vertex-related config vars from config.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Script passes bash -n syntax validation. All 7 env vars from config.py are output. All 7 APIs enabled. All 6 IAM roles assigned. Datastore and search engine created via REST API. Script is idempotent (checks for existing resources). --dry-run flag works via run_cmd wrapper and conditional blocks for REST API calls."
 }
