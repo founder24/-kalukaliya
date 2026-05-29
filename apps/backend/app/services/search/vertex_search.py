@@ -168,9 +168,7 @@ class VertexSearchService:
                 logger.warning(f"Invalid user_tier value rejected: {user_tier}")
                 filter_expr = None
             else:
-                filter_expr = (
-                    f'tier_access = "{user_tier}"' if user_tier else None
-                )
+                filter_expr = f'tier_access = "{user_tier}"' if user_tier else None
 
             # Execute search in thread pool (client is synchronous)
             try:
@@ -219,9 +217,7 @@ class VertexSearchService:
                     "title": struct_data.get("title", ""),
                     "content": content,
                     "score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
-                    "reranker_score": round(1.0 - i * 0.1, 2)
-                    if i < 10
-                    else 0.01,
+                    "reranker_score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
                     "url": struct_data.get("source_url", ""),
                 }
                 context_chunks.append(chunk)
@@ -248,9 +244,7 @@ class VertexSearchService:
                             and result.document.derived_struct_data
                         ):
                             derived = dict(result.document.derived_struct_data)
-                            extractive_answers = derived.get(
-                                "extractive_answers", []
-                            )
+                            extractive_answers = derived.get("extractive_answers", [])
                             if extractive_answers:
                                 content = extractive_answers[0].get("content", "")
                             if not content:
@@ -265,9 +259,7 @@ class VertexSearchService:
                             "id": doc_data.id or f"result_{i}",
                             "title": struct_data.get("title", ""),
                             "content": content,
-                            "score": round(1.0 - i * 0.1, 2)
-                            if i < 10
-                            else 0.01,
+                            "score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
                             "reranker_score": round(1.0 - i * 0.1, 2)
                             if i < 10
                             else 0.01,
