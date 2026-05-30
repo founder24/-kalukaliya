@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Pre-rendered answer blocks with Q&A structure (Tier 1 #3), embedding-optimized content structure (Tier 2 #6), and enhanced internal link graph with anchor text diversity (Tier 1 #4). Improves how content is chunked for RAG retrieval by structuring it as explicit Q&A pairs with consistent terminology, and enhances the internal linking topology.",
+  "status": "completed",
+  "steps": [
+    "In apps/frontend/src/lib/jsonld.js chapterSchema(): (a) Ensure FAQPage entries use the EXACT question phrasing that students would search for (e.g., 'What is [Topic]?', 'Define [Topic]', 'Explain [Topic] with examples'). (b) Add DefinedTerm schema nodes for each topic in published_topics - this gives RAG systems explicit term-definition pairs to index. (c) Add 'teaches' and 'assesses' properties to the LearningResource node.",
+    "Create a new exported function `definedTermSchema(topic, parentUrl, inLanguage)` in apps/frontend/src/lib/jsonld.js that returns a DefinedTerm node with: name, description (definition), url (anchor link), inDefinedTermSet pointing to the parent chapter, sameAs (Wikidata URI if available).",
+    "In apps/frontend/src/lib/jsonld.js chapterSchema(): Integrate definedTermSchema by adding DefinedTerm nodes to the @graph for each published_topic that has a definition. This makes each topic definition a standalone retrievable unit for RAG.",
+    "In apps/frontend/src/components/chapter/ChapterTopicGraph.jsx: (a) Enhance anchor text diversity - instead of just showing topic title, use varied descriptive anchors like '[Topic] - [Subject] Notes', '[Topic] definition and examples', 'Learn about [Topic]'. (b) Add aria-label attributes describing the link destination. (c) Add itemscope/itemtype microdata attributes (Article, LearningResource) on the container for triple-stacking with JSON-LD.",
+    "In apps/frontend/src/pages/ChapterPage.jsx: (a) Add semantic HTML5 landmarks: wrap the main content area in <article> with itemscope itemtype='https://schema.org/Article'. (b) Add role='main' to the primary content area. (c) Add <aside> landmark for sidebar/related content. (d) Add microdata itemprops (headline, datePublished, dateModified, author, publisher) on the article element to triple-stack with JSON-LD.",
+    "In apps/frontend/src/pages/SubjectPage.jsx: Add itemscope/itemtype microdata for CollectionPage on the main container, with itemprop='hasPart' on chapter links to enable triple-stacking.",
+    "In apps/frontend/vite.config.js buildBotHtml(): (a) Add structured Q&A blocks in the bot-rendered HTML - convert the first 5 FAQ entries into visible <section> elements with <h3> question and <p> answer format, each wrapped in proper microdata (Question/Answer). (b) Add DefinedTerm microdata to topic definitions in the rendered HTML. (c) Diversify internal link anchor text in the related topics section - use descriptive phrases instead of bare titles."
+  ],
+  "acceptance_criteria": [
+    "chapterSchema() includes DefinedTerm nodes for topics that have definitions",
+    "definedTermSchema() function is exported and produces valid schema.org DefinedTerm output",
+    "ChapterTopicGraph uses varied anchor text patterns, not just bare topic titles",
+    "ChapterPage article wrapper has microdata attributes (itemscope, itemtype)",
+    "Bot-rendered HTML (buildBotHtml in vite.config.js) includes visible Q&A sections with microdata",
+    "No existing tests break"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run` and confirm all tests pass",
+    "Check that definedTermSchema is exported: grep 'export function definedTermSchema' apps/frontend/src/lib/jsonld.js"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 pre-existing test failures in AdminHealth.credits.test.jsx remain unchanged. 579 tests pass. The definedTermSchema function is exported and integrates with chapterSchema via the seenTopicSlugs set (only emits DefinedTerm for topics already processed as LearningResources). SubjectPage AccordionItem already had inner article itemScope in existing code, so we added hasPart+itemScope at the AccordionItem level without conflict."
+}

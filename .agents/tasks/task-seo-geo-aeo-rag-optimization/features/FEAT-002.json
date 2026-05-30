@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Entity-first structured data with full Knowledge Graph (@graph with sameAs, hasPart, isPartOf linking to Wikidata/DBpedia URIs), enhanced freshness signals (dateModified, lastReviewed), and removal of hype/placeholder content (Content-Signal comment in robots.txt that has no spec). Implements Tier 1 items #1 and #5, plus hype removal.",
+  "status": "completed",
+  "steps": [
+    "In apps/frontend/src/lib/jsonld.js: (a) Add a WIKIDATA_ENTITIES constant mapping key educational concepts to their Wikidata URIs (e.g., 'AHSEC' -> 'https://www.wikidata.org/entity/Q...', 'Assam' -> 'https://www.wikidata.org/entity/Q1195', 'India' -> 'https://www.wikidata.org/entity/Q668', etc.). (b) Add DBpedia URIs for the same entities. (c) Update ORG_SAMEAS to include the Wikidata entity URI for Syrabit.ai itself (if they have one) or placeholder comment for when they create one.",
+    "In apps/frontend/src/lib/jsonld.js globalSiteSchema(): (a) Add sameAs entries pointing to Wikidata/DBpedia for the Organization node. (b) Add 'isPartOf' linking to the broader EducationalOrganization concept. (c) Add 'knowsAbout' array linking to Wikidata URIs for the educational boards served (AHSEC, SEBA, CBSE). (d) Ensure every @graph node has a stable @id for cross-referencing.",
+    "In apps/frontend/src/lib/jsonld.js chapterSchema(): (a) Add sameAs to the Article's 'about' Things when the topic matches a known Wikidata concept. (b) Add 'isPartOf' chain: Topic -> Chapter -> Subject -> Board hierarchy using @id references. (c) Add 'lastReviewed' field alongside dateModified when data.reviewed_at is available. (d) Ensure dateModified is genuinely updated (already does this correctly - just verify). (e) Add 'citation' array for .edu/.gov references when available in data.citations.",
+    "In apps/frontend/src/lib/jsonld.js subjectHubSchema(): (a) Link the CollectionPage to its parent Board/Class via isPartOf chain. (b) Add sameAs to the subject Thing nodes mapping to Wikidata URIs for standard subjects (Physics, Chemistry, Mathematics, Biology, etc.). (c) Add hasPart references from CollectionPage to child chapters with proper @id references.",
+    "Remove the hype 'Content-Signal' comment block from apps/frontend/public/robots.txt (lines 74-78 containing 'ai-input=yes' - this is not a recognized standard and crawlers ignore it).",
+    "Remove the same 'Content-Signal' comment block from apps/edge/src/routes/robots.ts.",
+    "In apps/backend/app/api/v1/seo.py: Add <lastmod> to sitemap-static.xml entries using genuine last-modified dates (not hardcoded 'daily' without dates). Add <changefreq> based on actual update patterns."
+  ],
+  "acceptance_criteria": [
+    "globalSiteSchema() output contains sameAs with Wikidata URIs for AHSEC/SEBA/Assam entities",
+    "chapterSchema() output links topics to Wikidata URIs via sameAs on Thing nodes when the topic matches known entities",
+    "All @graph nodes in chapterSchema use stable @id values enabling cross-referencing",
+    "The 'Content-Signal: search=yes, ai-input=yes, ai-train=no' comment is removed from robots.txt and edge robots.ts",
+    "Sitemap static entries include genuine <lastmod> dates",
+    "No existing tests break"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run` and confirm all tests pass",
+    "Grep robots.txt and edge/robots.ts to confirm Content-Signal comment is removed: `grep -c 'Content-Signal' apps/frontend/public/robots.txt` should return 0"
+  ],
+  "blocked_reason": null,
+  "findings": "All changes verified. 62 test files pass (579 tests). Only failures are the 5 pre-existing ones in AdminHealth.credits.test.jsx. Content-Signal grep confirms 0 occurrences in both robots.txt and edge robots.ts."
+}

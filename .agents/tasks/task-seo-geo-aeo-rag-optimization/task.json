@@ -1,0 +1,14 @@
+{
+  "task_id": "task-seo-geo-aeo-rag-optimization",
+  "task_description": "Implement SEO/GEO/AEO/RAG optimization features across the monorepo: entity-first structured data with Knowledge Graph linking to Wikidata/DBpedia, pre-rendered answer blocks for LLM chunking, internal link graph enhancement, freshness signals, embedding-optimized content structure, citations graph, multi-modal grounding, API/feed exposure, and programmatic sitemap expansion. Also remove hype placeholders (Content-Signal comment in robots.txt).",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "Vite build succeeds (16s). Vitest 579/584 tests pass (5 pre-existing failures in AdminHealth.credits.test.jsx unrelated to changes). Review issues addressed: fragment URLs removed from sitemap, feed content uses real markdown-stripped text, XML escaping includes &apos;, entity lookup is case-insensitive, geographic sameAs removed from Organization node."
+  }
+}
