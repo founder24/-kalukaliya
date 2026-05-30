@@ -10,7 +10,6 @@ import {
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
-    CF_TURNSTILE_SECRET: 'test-turnstile-secret',
     EDGE_SHARED_SECRET: 'test-edge-secret',
     BACKEND_URL: 'https://syrabit-backend-851687450401.asia-south1.run.app',
     ALLOWED_ORIGIN: 'https://syrabit.ai',

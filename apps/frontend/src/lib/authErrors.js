@@ -9,10 +9,6 @@ const FRIENDLY = {
   google_token_invalid: 'Google sign-in failed. Please try again.',
   reset_token_invalid: 'This password reset link is no longer valid. Please request a new one.',
   reset_token_expired: 'This password reset link has expired. Please request a new one.',
-  turnstile_required: 'Please complete the verification challenge and try again.',
-  turnstile_failed: 'Verification challenge failed. Please complete the new challenge and try again.',
-  turnstile_misconfigured: 'Verification is temporarily unavailable. Please try again in a moment.',
-  turnstile_unreachable: 'Could not reach the verification service. Please check your connection and try again.',
 };
 
 export function formatAuthError(err, fallback = 'Something went wrong. Please try again.') {

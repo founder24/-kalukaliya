@@ -4,13 +4,12 @@
  * Request pipeline:
  *   1. CORS preflight
  *   2. JWT verification (all /api/ except public paths)
- *   3. Turnstile bot protection (chat/auth endpoints, if token present)
+ *   3. Bot heuristic tagging (for ISR routing and analytics)
  *   4. Per-language rate limiting (chat POST endpoints)
  *   5. Route to backend proxy or R2 assets
  */
 
 import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
-import { turnstileVerify } from './middleware/bot';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
@@ -68,46 +67,10 @@ export default {
       request = new Request(request, { headers });
     }
 
-    // ── 3. Turnstile Bot Protection (chat/auth endpoints) ──
-    // SEC: Turnstile verification is MANDATORY (not optional) for auth and chat POST.
-    // Requests without a valid token are rejected with 403.
-    if (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/ai/chat') || url.pathname.startsWith('/api/v1/auth')) {
-      const turnstileToken = request.headers.get('x-turnstile-token') || request.headers.get('CF-Turnstile-Response');
-
-      // Turnstile is MANDATORY for auth endpoints
-      const isAuthEndpoint =
-        url.pathname.startsWith('/api/v1/auth/signup') ||
-        url.pathname.startsWith('/api/v1/auth/login') ||
-        url.pathname.startsWith('/api/v1/auth/forgot-password');
-
-      // Turnstile is MANDATORY for chat POST requests (except feedback)
-      const isChatPost =
-        (url.pathname.startsWith('/api/v1/chat') || url.pathname.startsWith('/api/v1/ai/chat')) &&
-        request.method === 'POST' &&
-        !url.pathname.startsWith('/api/v1/chat/feedback');
-
-      if ((isAuthEndpoint || isChatPost) && !turnstileToken) {
-        return jsonResponse(403, { error: 'Bot verification required' });
-      }
-
-      if (turnstileToken) {
-        if (!env.CF_TURNSTILE_SECRET) {
-          const isProd = !env.ALLOWED_ORIGIN?.includes('localhost');
-          if (isProd) {
-            return jsonResponse(403, { error: 'Bot verification temporarily unavailable' });
-          }
-          console.warn('CF_TURNSTILE_SECRET not configured — skipping in dev');
-        } else {
-          const isValid = await turnstileVerify(turnstileToken, env.CF_TURNSTILE_SECRET);
-          if (!isValid) {
-            return jsonResponse(403, { error: 'Bot verification failed' });
-          }
-        }
-      }
-
-      // Basic bot heuristic: tag requests with bot User-Agent for analytics filtering.
-      // NOTE: Bots are NOT blocked here - they are tagged only (X-Bot-Detected header)
-      // for ISR routing and analytics. Edge never returns 403 for bot-detected requests.
+    // ── 3. Bot Heuristic Tagging (for ISR routing and analytics) ──
+    // NOTE: Bots are NOT blocked here - they are tagged only (X-Bot-Detected header)
+    // for ISR routing and analytics. Edge never returns 403 for bot-detected requests.
+    if (url.pathname.startsWith('/api/')) {
       const ua = request.headers.get('User-Agent') || '';
       if (!ua || /bot|crawl|spider|scrape|curl|wget|python-requests|httpie/i.test(ua)) {
         const headers = new Headers(request.headers);
@@ -315,7 +278,7 @@ function addSecurityHeaders(response: Response): Response {
   newResponse.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   newResponse.headers.set('X-XSS-Protection', '0');
   newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://app.posthog.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'");
+  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com https://app.posthog.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'");
   return newResponse;
 }
 

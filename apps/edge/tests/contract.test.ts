@@ -4,7 +4,6 @@ import { proxyRequest } from '../src/routes/api-proxy';
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
-    CF_TURNSTILE_SECRET: 'test-turnstile-secret',
     BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
