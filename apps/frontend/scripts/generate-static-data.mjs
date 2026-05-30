@@ -1,10 +1,11 @@
-// Static data generation — fetches public content from the backend at
-// build time and writes JSON / XML files into public/ so the CDN can
+// Static data generation — fetches public content from GCS (source of truth)
+// at build time and writes JSON / XML files into public/ so the CDN can
 // serve them directly without hitting the API on every page load.
 //
-// Non-fatal: if any fetch fails (backend unreachable, endpoint 5xx,
-// network timeout) we log a warning and continue. The frontend has a
-// runtime fallback that hits the live API when static files are missing.
+// Priority: GCS bucket (if GCS_BUCKET env set) → Backend API (fallback)
+//
+// Non-fatal: if any fetch fails we log a warning and continue. The frontend
+// has a runtime fallback that hits the live API when static files are missing.
 
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
@@ -14,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
 const staticDir = path.join(publicDir, "static");
 
+const GCS_BUCKET = (process.env.GCS_BUCKET || "").replace(/\/+$/, "");
 const backendUrl = (
   process.env.BUILD_BACKEND_URL ||
   process.env.VITE_BACKEND_URL ||
@@ -21,40 +23,53 @@ const backendUrl = (
 ).replace(/\/+$/, "");
 
 const API_BASE = `${backendUrl}/api/v1`;
+const GCS_BASE = GCS_BUCKET ? `https://storage.googleapis.com/${GCS_BUCKET}` : "";
 
-// ── JSON endpoints → public/static/*.json ───────────────────────────────────
+// ── JSON endpoints ──────────────────────────────────────────────────────────
 const JSON_ENDPOINTS = [
-  { endpoint: "/content/library-bundle", file: "library-bundle.json" },
-  { endpoint: "/content/library-bundle?slim=1", file: "library-bundle-slim.json" },
-  { endpoint: "/content/boards", file: "boards.json" },
-  { endpoint: "/content/subjects", file: "subjects.json" },
-  { endpoint: "/content/classes", file: "classes.json" },
-  { endpoint: "/content/streams", file: "streams.json" },
-  { endpoint: "/subscription/plans", file: "plans.json" },
+  { gcsPath: "derived/library-bundle.json", apiPath: "/content/library-bundle", file: "library-bundle.json" },
+  { gcsPath: "derived/library-bundle-slim.json", apiPath: "/content/library-bundle?slim=1", file: "library-bundle-slim.json" },
+  { gcsPath: "hierarchy/boards.json", apiPath: "/content/boards", file: "boards.json" },
+  { gcsPath: "hierarchy/subjects.json", apiPath: "/content/subjects", file: "subjects.json" },
+  { gcsPath: "hierarchy/classes.json", apiPath: "/content/classes", file: "classes.json" },
+  { gcsPath: "hierarchy/streams.json", apiPath: "/content/streams", file: "streams.json" },
+  { gcsPath: "derived/plans.json", apiPath: "/subscription/plans", file: "plans.json" },
 ];
 
-// ── Sitemap XML endpoints → public/*.xml ────────────────────────────────────
+// ── Sitemap XML endpoints ───────────────────────────────────────────────────
 const SITEMAP_ENDPOINTS = [
-  { endpoint: "/seo/sitemap.xml", file: "sitemap-index.xml", rewrite: true },
-  { endpoint: "/seo/sitemap-static.xml", file: "sitemap-static.xml" },
-  { endpoint: "/seo/sitemap-subjects.xml", file: "sitemap-subjects.xml" },
-  { endpoint: "/seo/sitemap-chapters.xml", file: "sitemap-chapters.xml" },
+  { gcsPath: "sitemaps/sitemap-index.xml", apiPath: "/seo/sitemap.xml", file: "sitemap-index.xml", rewrite: true },
+  { gcsPath: "sitemaps/sitemap-static.xml", apiPath: "/seo/sitemap-static.xml", file: "sitemap-static.xml" },
+  { gcsPath: "sitemaps/sitemap-subjects.xml", apiPath: "/seo/sitemap-subjects.xml", file: "sitemap-subjects.xml" },
+  { gcsPath: "sitemaps/sitemap-chapters.xml", apiPath: "/seo/sitemap-chapters.xml", file: "sitemap-chapters.xml" },
 ];
 
-async function fetchAndWrite(url, destPath, { transform } = {}) {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) {
-      console.warn(`[static-data] WARN: ${url} responded ${res.status} — skipped`);
-      return;
+async function fetchWithFallback(gcsPath, apiPath, { transform } = {}) {
+  // Try GCS first (source of truth)
+  if (GCS_BASE) {
+    try {
+      const url = `${GCS_BASE}/${gcsPath}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      if (res.ok) {
+        let body = await res.text();
+        if (transform) body = transform(body);
+        console.log(`[static-data] \u2713 ${gcsPath} (from GCS)`);
+        return body;
+      }
+      console.warn(`[static-data] GCS ${gcsPath}: ${res.status}, trying API fallback`);
+    } catch (err) {
+      console.warn(`[static-data] GCS ${gcsPath}: ${err.message}, trying API fallback`);
     }
-    let body = await res.text();
-    if (transform) body = transform(body);
-    await writeFile(destPath, body, "utf-8");
-    console.log(`[static-data] ✓ ${path.relative(publicDir, destPath)}`);
-  } catch (err) {
-    console.warn(`[static-data] WARN: ${url} — ${err.message || err}`);
   }
+
+  // Fallback to backend API
+  const url = `${API_BASE}${apiPath}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`API ${apiPath}: ${res.status}`);
+  let body = await res.text();
+  if (transform) body = transform(body);
+  console.log(`[static-data] \u2713 ${apiPath} (from API)`);
+  return body;
 }
 
 /**
@@ -71,25 +86,36 @@ function rewriteSitemapLocs(xml) {
 }
 
 async function main() {
-  console.log(`[static-data] Backend: ${API_BASE}`);
+  console.log(`[static-data] GCS Bucket: ${GCS_BUCKET || "(not set, API-only mode)"}`);
+  console.log(`[static-data] Backend API: ${API_BASE}`);
 
   // Ensure output directory exists.
   await mkdir(staticDir, { recursive: true });
 
   // Fetch JSON endpoints in parallel.
   await Promise.all(
-    JSON_ENDPOINTS.map(({ endpoint, file }) =>
-      fetchAndWrite(`${API_BASE}${endpoint}`, path.join(staticDir, file)),
-    ),
+    JSON_ENDPOINTS.map(async ({ gcsPath, apiPath, file }) => {
+      try {
+        const body = await fetchWithFallback(gcsPath, apiPath);
+        await writeFile(path.join(staticDir, file), body, "utf-8");
+      } catch (err) {
+        console.warn(`[static-data] WARN: ${file} — ${err.message}`);
+      }
+    }),
   );
 
   // Fetch sitemap XML endpoints in parallel.
   await Promise.all(
-    SITEMAP_ENDPOINTS.map(({ endpoint, file, rewrite }) =>
-      fetchAndWrite(`${API_BASE}${endpoint}`, path.join(publicDir, file), {
-        transform: rewrite ? rewriteSitemapLocs : undefined,
-      }),
-    ),
+    SITEMAP_ENDPOINTS.map(async ({ gcsPath, apiPath, file, rewrite }) => {
+      try {
+        const body = await fetchWithFallback(gcsPath, apiPath, {
+          transform: rewrite ? rewriteSitemapLocs : undefined,
+        });
+        await writeFile(path.join(publicDir, file), body, "utf-8");
+      } catch (err) {
+        console.warn(`[static-data] WARN: ${file} — ${err.message}`);
+      }
+    }),
   );
 
   console.log("[static-data] Done.");

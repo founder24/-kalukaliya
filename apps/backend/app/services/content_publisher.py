@@ -137,6 +137,36 @@ class ContentPublisherService:
             logger.error(f"Cloudflare publish failed: {e}")
             return {"status": "error", "detail": str(e)}
 
+    async def publish_to_gcs(self, chapter: Chapter) -> dict:
+        """Write chapter content to GCS (source of truth for educational content)."""
+        if not settings.GCS_CONTENT_BUCKET and not settings.VERTEX_PROJECT_ID:
+            logger.warning("GCS not configured, skipping")
+            return {"status": "skipped", "reason": "not_configured"}
+
+        try:
+            from app.services.content.gcs_store import gcs_content_store
+
+            data = {
+                "id": str(chapter.id),
+                "title": chapter.title,
+                "slug": chapter.slug,
+                "content_en": chapter.content_en,
+                "content_as": getattr(chapter, 'content_as', None),
+                "meta_description": chapter.meta_description,
+                "keywords": chapter.keywords,
+                "published_topics": [t.model_dump() for t in (chapter.published_topics or [])],
+                "faq_jsonld": getattr(chapter, 'faq_jsonld', None),
+                "chapter_number": getattr(chapter, 'chapter_number', None),
+                "subject_id": str(chapter.subject_id) if hasattr(chapter, 'subject_id') and chapter.subject_id else None,
+                "status": chapter.status,
+                "updated_at": chapter.updated_at.isoformat() if chapter.updated_at else None,
+            }
+            path = await gcs_content_store.write_knowledge_object(chapter.slug, data)
+            return {"status": "written", "path": path}
+        except Exception as e:
+            logger.error(f"GCS write failed for chapter {chapter.slug}: {e}")
+            return {"status": "error", "detail": str(e)}
+
     async def trigger_pages_rebuild(self):
         """Trigger Cloudflare Pages rebuild to regenerate static content."""
         hook_url = settings.CF_PAGES_DEPLOY_HOOK
@@ -151,23 +181,32 @@ class ContentPublisherService:
             logger.warning(f"Failed to trigger Pages rebuild: {e}")
 
     async def publish_chapter(self, chapter_id: str) -> dict:
-        """Full publish pipeline: Vertex AI Search + Cloudflare, then mark as published."""
+        """Full publish pipeline: GCS + Vertex AI Search + CF rebuild."""
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
 
+        # 1. Write to GCS (source of truth for educational content)
+        gcs_result = await self.publish_to_gcs(chapter)
+
+        # 2. Index in Vertex AI Search (for RAG)
         search_result = await self.publish_to_vertex_search(chapter)
+
+        # 3. Trigger Cloudflare prerender for the chapter page
         cf_result = await self.publish_to_cloudflare(chapter)
 
+        # 4. Mark published in MongoDB (auth/session store, kept for backward compat)
         chapter.status = "published"
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
 
+        # 5. Trigger CF Pages rebuild (regenerates static HTML/JSON/XML from GCS)
         await self.trigger_pages_rebuild()
 
         return {
             "chapter_id": chapter_id,
             "status": "published",
+            "gcs": gcs_result,
             "vertex_search": search_result,
             "cloudflare": cf_result,
         }
