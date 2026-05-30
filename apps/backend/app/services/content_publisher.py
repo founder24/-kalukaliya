@@ -151,15 +151,21 @@ class ContentPublisherService:
                 "title": chapter.title,
                 "slug": chapter.slug,
                 "content_en": chapter.content_en,
-                "content_as": getattr(chapter, 'content_as', None),
+                "content_as": getattr(chapter, "content_as", None),
                 "meta_description": chapter.meta_description,
                 "keywords": chapter.keywords,
-                "published_topics": [t.model_dump() for t in (chapter.published_topics or [])],
-                "faq_jsonld": getattr(chapter, 'faq_jsonld', None),
-                "chapter_number": getattr(chapter, 'chapter_number', None),
-                "subject_id": str(chapter.subject_id) if hasattr(chapter, 'subject_id') and chapter.subject_id else None,
+                "published_topics": [
+                    t.model_dump() for t in (chapter.published_topics or [])
+                ],
+                "faq_jsonld": getattr(chapter, "faq_jsonld", None),
+                "chapter_number": getattr(chapter, "chapter_number", None),
+                "subject_id": str(chapter.subject_id)
+                if hasattr(chapter, "subject_id") and chapter.subject_id
+                else None,
                 "status": chapter.status,
-                "updated_at": chapter.updated_at.isoformat() if chapter.updated_at else None,
+                "updated_at": chapter.updated_at.isoformat()
+                if chapter.updated_at
+                else None,
             }
             path = await gcs_content_store.write_knowledge_object(chapter.slug, data)
             return {"status": "written", "path": path}

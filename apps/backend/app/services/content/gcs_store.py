@@ -26,7 +26,10 @@ class GCSContentStore:
 
     @property
     def _bucket_name(self) -> str:
-        return settings.GCS_CONTENT_BUCKET or f"{settings.VERTEX_PROJECT_ID}-syrabit-content"
+        return (
+            settings.GCS_CONTENT_BUCKET
+            or f"{settings.VERTEX_PROJECT_ID}-syrabit-content"
+        )
 
     def _get_client(self) -> storage.Client:
         if self._client is None:
@@ -59,7 +62,9 @@ class GCSContentStore:
             )
 
         await asyncio.to_thread(_upload)
-        logger.info(f"Written knowledge object to gs://{self._bucket_name}/knowledge/{slug}.json")
+        logger.info(
+            f"Written knowledge object to gs://{self._bucket_name}/knowledge/{slug}.json"
+        )
         return f"gs://{self._bucket_name}/knowledge/{slug}.json"
 
     async def write_hierarchy(self, hierarchy_type: str, data: list) -> str:
@@ -76,7 +81,9 @@ class GCSContentStore:
             )
 
         await asyncio.to_thread(_upload)
-        logger.info(f"Written hierarchy to gs://{self._bucket_name}/hierarchy/{hierarchy_type}.json")
+        logger.info(
+            f"Written hierarchy to gs://{self._bucket_name}/hierarchy/{hierarchy_type}.json"
+        )
         return f"gs://{self._bucket_name}/hierarchy/{hierarchy_type}.json"
 
     async def write_library_bundle(self, bundle: dict) -> str:
@@ -93,7 +100,9 @@ class GCSContentStore:
             )
 
         await asyncio.to_thread(_upload)
-        logger.info(f"Written library-bundle to gs://{self._bucket_name}/derived/library-bundle.json")
+        logger.info(
+            f"Written library-bundle to gs://{self._bucket_name}/derived/library-bundle.json"
+        )
         return f"gs://{self._bucket_name}/derived/library-bundle.json"
 
     async def write_library_bundle_slim(self, bundle: dict) -> str:

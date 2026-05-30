@@ -52,13 +52,16 @@ async def sync_hierarchy_to_gcs():
         )
         logger.info(f"Synced {len(chapters)} published chapters to GCS")
 
-        return {"status": "success", "counts": {
-            "boards": len(boards),
-            "classes": len(classes),
-            "streams": len(streams),
-            "subjects": len(subjects),
-            "chapters": len(chapters),
-        }}
+        return {
+            "status": "success",
+            "counts": {
+                "boards": len(boards),
+                "classes": len(classes),
+                "streams": len(streams),
+                "subjects": len(subjects),
+                "chapters": len(chapters),
+            },
+        }
     except Exception as e:
         logger.error(f"Hierarchy sync to GCS failed: {e}")
         return {"status": "error", "detail": str(e)}
