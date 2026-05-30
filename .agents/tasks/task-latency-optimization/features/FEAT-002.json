@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Backend chat pipeline latency optimizations: Reduce RAG timeout from 1.5s to 0.8s, and add a fast-path skip for RAG when the search service is not initialized (content DB empty). These save 700ms on timeout scenarios and eliminate the RAG call entirely when there is no content to search.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/services/chat_service.py, change the RAG retrieval timeout from 1.5s to 0.8s in the `retrieve_context` method. Update the warning log message to reflect the new timeout value.",
     "In apps/backend/app/services/chat_service.py, add an early-return fast path at the top of `retrieve_context` that checks if the search service is initialized. Import and check `search_service._initialized` - if False, immediately return [] without any async work. This skips the entire RAG pipeline (embedding + search + timeout) when there is no content database configured.",
@@ -21,5 +21,5 @@
     "Grep to confirm timeout is 0.8: grep -n 'timeout=0.8' apps/backend/app/services/chat_service.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All tests pass (test_chat.py 5/5, test_latency_audit.py 8/8). Import validation requires APP_ENV=test and JWT_SECRET env vars (set via pytest.ini). The _rag_available cached flag gets set on first call and persists for process lifetime."
 }
