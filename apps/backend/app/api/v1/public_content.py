@@ -27,10 +27,11 @@ def _slugify(text: str) -> str:
 @router.get("/library-bundle")
 async def get_library_bundle(response: Response, slim: int = Query(0)):
     """
-    Return the full content hierarchy for the library page.
+    Return the full content hierarchy for the library page as flat arrays.
 
-    When slim=1, returns minimal data (titles, slugs, counts) without
-    full chapter content. No authentication required.
+    Returns separate top-level arrays for boards, classes, streams, subjects,
+    and chapters (unless slim=1, which omits chapters).
+    No authentication required.
     """
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
 
@@ -40,92 +41,92 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
     subjects = await Subject.find({"status": "active"}).to_list()
     chapters = await Chapter.find_all().to_list()
 
-    # Index by parent ID for fast lookups
-    classes_by_board: dict[str, list] = {}
-    for cls in classes:
-        key = str(cls.board_id)
-        classes_by_board.setdefault(key, []).append(cls)
+    # Build lookup maps for parent relationships
+    board_by_id: dict[str, object] = {str(b.id): b for b in boards}
+    class_by_id: dict[str, object] = {str(c.id): c for c in classes}
+    stream_by_id: dict[str, object] = {str(s.id): s for s in streams}
 
-    streams_by_class: dict[str, list] = {}
-    for stream in streams:
-        key = str(stream.class_id)
-        streams_by_class.setdefault(key, []).append(stream)
-
-    subjects_by_stream: dict[str, list] = {}
-    for subj in subjects:
-        key = str(subj.stream_id)
-        subjects_by_stream.setdefault(key, []).append(subj)
-
+    # Count chapters per subject
     chapters_by_subject: dict[str, list] = {}
     for ch in chapters:
         key = str(ch.subject_id)
         chapters_by_subject.setdefault(key, []).append(ch)
 
+    # Build flat boards array
     result_boards = []
     for board in boards:
-        board_id = str(board.id)
-        board_classes = classes_by_board.get(board_id, [])
-
-        result_classes = []
-        for cls in board_classes:
-            cls_id = str(cls.id)
-            cls_streams = streams_by_class.get(cls_id, [])
-
-            result_streams = []
-            for stream in cls_streams:
-                stream_id = str(stream.id)
-                stream_subjects = subjects_by_stream.get(stream_id, [])
-
-                result_subjects = []
-                for subj in stream_subjects:
-                    subj_id = str(subj.id)
-                    subj_chapters = chapters_by_subject.get(subj_id, [])
-                    subj_chapters.sort(key=lambda c: c.chapter_number)
-
-                    chapter_list = []
-                    for ch in subj_chapters:
-                        ch_data = {
-                            "id": str(ch.id),
-                            "title": ch.title,
-                            "slug": ch.slug,
-                            "order": ch.chapter_number,
-                            "topic_count": len(ch.published_topics),
-                        }
-                        chapter_list.append(ch_data)
-
-                    subj_data = {
-                        "id": subj_id,
-                        "name": subj.name,
-                        "slug": _slugify(subj.name),
-                        "chapter_count": len(subj_chapters),
-                    }
-                    if not slim:
-                        subj_data["chapters"] = chapter_list
-
-                    result_subjects.append(subj_data)
-
-                result_streams.append({
-                    "id": stream_id,
-                    "name": stream.name,
-                    "slug": _slugify(stream.name),
-                    "subjects": result_subjects,
-                })
-
-            result_classes.append({
-                "id": cls_id,
-                "name": cls.name,
-                "slug": _slugify(cls.name),
-                "streams": result_streams,
-            })
-
         result_boards.append({
-            "id": board_id,
+            "id": str(board.id),
             "name": board.name,
             "slug": board.slug,
-            "classes": result_classes,
         })
 
-    return {"boards": result_boards}
+    # Build flat classes array
+    result_classes = []
+    for cls in classes:
+        result_classes.append({
+            "id": str(cls.id),
+            "name": cls.name,
+            "slug": _slugify(cls.name),
+            "board_id": str(cls.board_id),
+        })
+
+    # Build flat streams array
+    result_streams = []
+    for stream in streams:
+        result_streams.append({
+            "id": str(stream.id),
+            "name": stream.name,
+            "slug": _slugify(stream.name),
+            "class_id": str(stream.class_id),
+        })
+
+    # Build flat subjects array with parent slugs for URL construction
+    result_subjects = []
+    for subj in subjects:
+        stream_id = str(subj.stream_id)
+        stream_obj = stream_by_id.get(stream_id)
+        class_id = str(stream_obj.class_id) if stream_obj else ""
+        class_obj = class_by_id.get(class_id) if class_id else None
+        board_id = str(class_obj.board_id) if class_obj else ""
+        board_obj = board_by_id.get(board_id) if board_id else None
+
+        subj_chapters = chapters_by_subject.get(str(subj.id), [])
+
+        result_subjects.append({
+            "id": str(subj.id),
+            "name": subj.name,
+            "slug": _slugify(subj.name),
+            "stream_id": stream_id,
+            "board_id": board_id,
+            "class_id": class_id,
+            "boardSlug": board_obj.slug if board_obj else "",
+            "classSlug": _slugify(class_obj.name) if class_obj else "",
+            "chapter_count": len(subj_chapters),
+        })
+
+    result = {
+        "boards": result_boards,
+        "classes": result_classes,
+        "streams": result_streams,
+        "subjects": result_subjects,
+    }
+
+    # Include chapters unless slim mode is requested
+    if not slim:
+        result_chapters = []
+        for ch in chapters:
+            result_chapters.append({
+                "id": str(ch.id),
+                "title": ch.title,
+                "slug": ch.slug,
+                "subject_id": str(ch.subject_id),
+                "chapter_number": ch.chapter_number,
+                "topic_count": len(ch.published_topics),
+            })
+        result["chapters"] = result_chapters
+
+    return result
 
 
 @router.get("/chapters/{chapter_id}/faq-jsonld")
