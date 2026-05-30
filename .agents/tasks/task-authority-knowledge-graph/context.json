@@ -1,0 +1,29 @@
+{
+  "project_type": "Python FastAPI monorepo with React frontend - educational platform",
+  "language": "Python 3.11",
+  "build_system": "pip with requirements.txt (pip-compile generated hashes), Docker for deployment",
+  "test_framework": "pytest with unittest.mock, AsyncMock for async services, no conftest fixtures (each test file self-contained)",
+  "build_command": "cd apps/backend && pip install -r requirements.txt",
+  "test_command": "cd apps/backend && python -m pytest tests/ -x -q",
+  "verification_instructions": "1. Run pytest tests. 2. Verify FastAPI app imports cleanly with: python -c 'from app.main import app'",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/-kalukaliya/apps/backend && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET network mode. No MongoDB or Redis running locally - tests must mock DB. No GCP credentials available - AI service calls must be mocked in tests.",
+  "contribution_requirements": "Follow existing patterns: admin routes use _validate_admin_session and _csrf_check from app.api.v1.admin. Beanie Documents registered in app/db/mongo.py init_beanie call. Services use class-based pattern with module-level singleton instances.",
+  "key_patterns": "1. Models in app/models/ as Beanie Documents. 2. Services in app/services/ as classes with module-level singletons. 3. API routes in app/api/v1/ using FastAPI APIRouter. 4. Admin auth via cookie-based session validation. 5. Vertex AI client in app/services/ai/vertex_client.py with circuit breaker. 6. Content publisher indexes to Vertex Search Discovery Engine. 7. Public endpoints have no auth; admin endpoints check _validate_admin_session.",
+  "relevant_files": [
+    "apps/backend/app/models/content.py",
+    "apps/backend/app/db/mongo.py",
+    "apps/backend/app/main.py",
+    "apps/backend/app/services/content_publisher.py",
+    "apps/backend/app/services/chat_service.py",
+    "apps/backend/app/services/content_generation.py",
+    "apps/backend/app/services/ai/vertex_client.py",
+    "apps/backend/app/api/v1/admin_content.py",
+    "apps/backend/app/api/v1/public_content.py",
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/config.py",
+    "apps/backend/tests/test_knowledge.py"
+  ],
+  "directory_structure": "apps/backend/app/ - FastAPI app root. app/models/ - Beanie Document models. app/services/ - business logic services. app/services/ai/ - AI client wrappers (vertex, sarvam). app/services/search/ - Vertex Search service. app/services/content/ - content pipeline, renderer, GCS. app/api/v1/ - all API routers (admin_*, public_content, content, chat, etc). app/core/ - security, rate limiter, circuit breaker. app/db/ - mongo.py and redis.py initialization."
+}

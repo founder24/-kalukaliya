@@ -1,0 +1,14 @@
+{
+  "task_id": "task-authority-knowledge-graph",
+  "task_description": "Implement the Authority Layer + Knowledge Graph Layer for the educational content system. Creates TopicHub Document model, Knowledge Graph traversal service, AI-driven content generation service (MCQs, PYQs, relations), public and admin API endpoints, Vertex Search indexing integration, and RAG enhancement in chat service.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 226 tests pass (25 new TopicHub tests + 201 existing). App loads cleanly. Review issues #2, #4, #5 addressed in post-review fix pass."
+  }
+}
