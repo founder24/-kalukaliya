@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address code review findings: fix fragment URLs in sitemap-topics.xml, improve RSS/JSON feed content, add apostrophe escaping to _xml_escape, add case-insensitive entity lookup in jsonld.js, and remove geographic sameAs from Organization.",
+  "status": "in_progress",
+  "steps": [
+    "Issue 1: In apps/backend/app/api/v1/seo.py sitemap_topics(): Remove per-topic fragment URLs. Instead emit one chapter-level URL per chapter that has topics, at priority 0.6.",
+    "Issue 2: In apps/backend/app/api/v1/seo.py feed endpoints: Use ch.description or ch.body_markdown (first 300/500 chars stripped of markdown) for feed content instead of template strings.",
+    "Issue 3: In apps/backend/app/api/v1/seo.py _xml_escape(): Add apostrophe escaping (' -> &apos;).",
+    "Issue 4: In apps/frontend/src/lib/jsonld.js: Add lookupEntity() helper with case-insensitive fallback and update all direct WIKIDATA_ENTITIES[name] lookups to use it.",
+    "Issue 5: In apps/frontend/src/lib/jsonld.js globalSiteSchema(): Remove Wikidata/DBpedia geographic entity URIs from Organization sameAs array."
+  ],
+  "acceptance_criteria": [
+    "sitemap-topics.xml emits chapter-level URLs (no fragments), one per chapter with topics",
+    "RSS feed <description> uses first 300 chars of actual content when available",
+    "JSON feed content_text uses first 500 chars of actual content when available",
+    "_xml_escape handles apostrophes",
+    "lookupEntity function provides case-insensitive entity lookup",
+    "Organization sameAs does not contain geographic Wikidata/DBpedia URIs",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "Run cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run and confirm tests pass",
+    "Grep for fragment in sitemap-topics endpoint: should not contain '#topic-'",
+    "Grep for &apos; in _xml_escape function"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

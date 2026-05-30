@@ -101,6 +101,25 @@ export const FOUNDER = {
   ],
 };
 
+/**
+ * Case-insensitive entity lookup helper. Tries exact match first, then
+ * title-case normalization, then a full lowercase scan of all keys.
+ * Returns { wikidata, dbpedia } URIs or null if no match found.
+ */
+export function lookupEntity(name) {
+  if (!name) return null;
+  // Try exact match first
+  if (WIKIDATA_ENTITIES[name]) return { wikidata: WIKIDATA_ENTITIES[name], dbpedia: DBPEDIA_ENTITIES[name] };
+  // Try title-case normalization
+  const normalized = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+  if (WIKIDATA_ENTITIES[normalized]) return { wikidata: WIKIDATA_ENTITIES[normalized], dbpedia: DBPEDIA_ENTITIES[normalized] };
+  // Try lowercase keys
+  const lowerName = name.toLowerCase();
+  const key = Object.keys(WIKIDATA_ENTITIES).find(k => k.toLowerCase() === lowerName);
+  if (key) return { wikidata: WIKIDATA_ENTITIES[key], dbpedia: DBPEDIA_ENTITIES[key] };
+  return null;
+}
+
 const FOUNDER_NODE_ID = `${SITE_ORIGIN}/#founder`;
 
 // Single source of truth for the publisher's address/geo. Reused by the
@@ -174,7 +193,7 @@ export function globalSiteSchema(url) {
         // the Knowledge Graph + AI crawlers can map every off-site
         // mention back to the canonical Syrabit.ai entity. SITE_ORIGIN
         // stays first so existing test snapshots don't shift.
-        sameAs: [SITE_ORIGIN, ...ORG_SAMEAS, WIKIDATA_ENTITIES.Assam, DBPEDIA_ENTITIES.Assam, WIKIDATA_ENTITIES.Guwahati, DBPEDIA_ENTITIES.Guwahati, WIKIDATA_ENTITIES.India, DBPEDIA_ENTITIES.India],
+        sameAs: [SITE_ORIGIN, ...ORG_SAMEAS],
         address: SYRABIT_ADDRESS,
         areaServed: { '@type': 'AdministrativeArea', name: 'Assam, India' },
         knowsLanguage: ['en', 'as'],
@@ -386,8 +405,8 @@ export function definedTermSchema(topic, parentUrl, inLanguage = 'en-IN') {
     inDefinedTermSet: { '@type': 'DefinedTermSet', '@id': parentUrl, name: 'Chapter Definitions' },
     inLanguage,
   };
-  const sameAs = WIKIDATA_ENTITIES[topic.title];
-  if (sameAs) node.sameAs = sameAs;
+  const entityMatch = lookupEntity(topic.title);
+  if (entityMatch) node.sameAs = entityMatch.wikidata;
   return node;
 }
 
@@ -428,11 +447,12 @@ export function chapterSchema(data, url, basePath = '') {
     aboutThings.push({ '@type': 'Thing', name: data.chapter_title });
   }
   // Link about Things to Wikidata/DBpedia when the subject matches a known entity
-  if (subjectName && WIKIDATA_ENTITIES[subjectName]) {
+  const subjectEntity = lookupEntity(subjectName);
+  if (subjectName && subjectEntity) {
     aboutThings.push({
       '@type': 'Thing',
       name: subjectName,
-      sameAs: [WIKIDATA_ENTITIES[subjectName], DBPEDIA_ENTITIES[subjectName]],
+      sameAs: [subjectEntity.wikidata, subjectEntity.dbpedia],
     });
   }
 
@@ -773,7 +793,7 @@ export function subjectHubSchema(subject, url) {
       url,
       isPartOf: { '@type': 'WebSite', '@id': SITE_ORIGIN, name: 'Syrabit.ai' },
       inLanguage,
-      ...(WIKIDATA_ENTITIES[subject.name] ? { sameAs: [WIKIDATA_ENTITIES[subject.name], DBPEDIA_ENTITIES[subject.name]] } : {}),
+      ...((() => { const e = lookupEntity(subject.name); return e ? { sameAs: [e.wikidata, e.dbpedia] } : {}; })()),
       hasPart: chapters.slice(0, 50).map(ch => {
         const chUrl = subject.board_slug && subject.class_slug && subject.slug && ch.slug
           ? `${SITE_ORIGIN}/${subject.board_slug}/${subject.class_slug}/${subject.slug}/${ch.slug}`

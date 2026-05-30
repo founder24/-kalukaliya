@@ -5,6 +5,7 @@ Queries KnowledgeObject collection for dynamic sitemap generation.
 
 import json
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -45,7 +46,42 @@ def _xml_escape(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&apos;")
     )
+
+
+_MD_STRIP_RE = re.compile(
+    r"(?:"
+    r"!\[[^\]]*\]\([^)]*\)"  # images
+    r"|\[[^\]]*\]\([^)]*\)"  # links -> keep text handled below
+    r"|```[\s\S]*?```"  # fenced code blocks
+    r"|`[^`]+`"  # inline code
+    r"|^#{1,6}\s+"  # headings
+    r"|[*_~]{1,3}"  # bold/italic/strikethrough markers
+    r"|^[>\-\+\*]\s+"  # blockquotes and list markers
+    r"|^\d+\.\s+"  # numbered list markers
+    r"|\|"  # table pipes
+    r")",
+    re.MULTILINE,
+)
+
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def _strip_markdown(text: str, max_chars: int = 500) -> str:
+    """Strip markdown formatting and return plain text truncated to max_chars."""
+    if not text:
+        return ""
+    # Replace links with their text content
+    result = _LINK_RE.sub(r"\1", text)
+    # Remove other markdown syntax
+    result = _MD_STRIP_RE.sub("", result)
+    # Collapse whitespace
+    result = re.sub(r"\s+", " ", result).strip()
+    if len(result) > max_chars:
+        # Truncate at word boundary
+        result = result[:max_chars].rsplit(" ", 1)[0] + "..."
+    return result
 
 
 SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -248,7 +284,12 @@ async def sitemap_chapters():
 
 @router.get("/sitemap-topics.xml")
 async def sitemap_topics():
-    """Generate topics sitemap from published knowledge objects' topics."""
+    """Generate sitemap of chapters that contain rich topic content.
+
+    Emits one chapter-level URL per chapter that has topics (no fragment
+    identifiers, since Google ignores fragments in sitemaps). Priority 0.6
+    distinguishes these from the broader chapters sitemap.
+    """
     cached = _get_cached_sitemap("topics")
     if cached:
         return Response(content=cached, media_type="application/xml")
@@ -270,6 +311,14 @@ async def sitemap_topics():
             topics = meta.get("topics", [])
             if not all([board, class_level, subject, chapter]):
                 continue
+            # Only include chapters that actually have topics
+            if not isinstance(topics, list) or len(topics) == 0:
+                continue
+            key = f"{board}/{class_level}/{subject}/{chapter}"
+            if key in seen:
+                continue
+            seen.add(key)
+
             updated = obj.get("updated_at")
             lastmod = ""
             if updated:
@@ -278,30 +327,14 @@ async def sitemap_topics():
                 elif isinstance(updated, str):
                     lastmod = f"\n    <lastmod>{updated[:10]}</lastmod>"
 
-            # Generate entry for topic anchors on the chapter page
-            base_loc = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes"
-            if isinstance(topics, list):
-                for topic in topics:
-                    if isinstance(topic, dict):
-                        slug = topic.get("topic_slug") or topic.get("slug", "")
-                    elif isinstance(topic, str):
-                        slug = topic.lower().replace(" ", "-")
-                    else:
-                        continue
-                    if not slug:
-                        continue
-                    key = f"{board}/{class_level}/{subject}/{chapter}/{slug}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    loc = f"{base_loc}#topic-{slug}"
-                    urls.append(
-                        f"  <url>\n"
-                        f"    <loc>{loc}</loc>{lastmod}\n"
-                        f"    <changefreq>monthly</changefreq>\n"
-                        f"    <priority>0.6</priority>\n"
-                        f"  </url>"
-                    )
+            loc = f"{BASE_URL}/{board}/{class_level}/{subject}/{chapter}/notes"
+            urls.append(
+                f"  <url>\n"
+                f"    <loc>{loc}</loc>{lastmod}\n"
+                f"    <changefreq>monthly</changefreq>\n"
+                f"    <priority>0.6</priority>\n"
+                f"  </url>"
+            )
 
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -326,19 +359,29 @@ async def rss_feed():
         items = []
         for ch in chapters:
             meta = ch.metadata or {}
-            board = meta.get("board", "")
-            class_level = meta.get("class_level", "")
-            subject = meta.get("subject", "")
-            chapter = meta.get("chapter", "")
+            board = meta.get("board", "") if isinstance(meta, dict) else getattr(meta, "board", "")
+            class_level = meta.get("class_level", "") if isinstance(meta, dict) else getattr(meta, "class_level", "")
+            subject = meta.get("subject", "") if isinstance(meta, dict) else getattr(meta, "subject", "")
+            chapter = meta.get("chapter", "") if isinstance(meta, dict) else getattr(meta, "chapter", "")
             title = f"{chapter} - {subject} ({board} {class_level})"
             link = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes" if all([board, class_level, subject, chapter]) else BASE_URL
             pub_date = ch.updated_at.strftime("%a, %d %b %Y %H:%M:%S +0000") if ch.updated_at else ""
-            description = f"Study notes for {chapter} in {subject} for {board} {class_level} students."
+
+            # Use actual content for description (first 300 chars stripped of markdown)
+            real_content = getattr(ch, "description", None) or ""
+            if not real_content:
+                body = getattr(ch, "body_markdown", None) or ""
+                real_content = _strip_markdown(body, max_chars=300)
+            else:
+                real_content = _strip_markdown(real_content, max_chars=300)
+
+            if not real_content:
+                real_content = f"Study notes for {chapter} in {subject} for {board} {class_level} students."
 
             items.append(f"""    <item>
       <title>{_xml_escape(title)}</title>
       <link>{link}</link>
-      <description>{_xml_escape(description)}</description>
+      <description>{_xml_escape(real_content)}</description>
       <pubDate>{pub_date}</pubDate>
       <category>{_xml_escape(subject)}</category>
       <guid isPermaLink="true">{link}</guid>
@@ -372,16 +415,28 @@ async def json_feed():
         items = []
         for ch in chapters:
             meta = ch.metadata or {}
-            board = meta.get("board", "")
-            class_level = meta.get("class_level", "")
-            subject = meta.get("subject", "")
-            chapter = meta.get("chapter", "")
+            board = meta.get("board", "") if isinstance(meta, dict) else getattr(meta, "board", "")
+            class_level = meta.get("class_level", "") if isinstance(meta, dict) else getattr(meta, "class_level", "")
+            subject = meta.get("subject", "") if isinstance(meta, dict) else getattr(meta, "subject", "")
+            chapter = meta.get("chapter", "") if isinstance(meta, dict) else getattr(meta, "chapter", "")
             link = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes" if all([board, class_level, subject, chapter]) else BASE_URL
+
+            # Use actual content for content_text (first 500 chars stripped of markdown)
+            real_content = getattr(ch, "description", None) or ""
+            if not real_content:
+                body = getattr(ch, "body_markdown", None) or ""
+                real_content = _strip_markdown(body, max_chars=500)
+            else:
+                real_content = _strip_markdown(real_content, max_chars=500)
+
+            if not real_content:
+                real_content = f"Study notes for {chapter} in {subject} for {board} {class_level} students."
+
             items.append({
                 "id": link,
                 "url": link,
                 "title": f"{chapter} - {subject} ({board} {class_level})",
-                "content_text": f"Study notes for {chapter} in {subject} for {board} {class_level} students.",
+                "content_text": real_content,
                 "date_modified": ch.updated_at.isoformat() if ch.updated_at else None,
                 "tags": [subject, board, class_level],
             })
