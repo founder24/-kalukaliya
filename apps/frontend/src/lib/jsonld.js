@@ -370,6 +370,27 @@ export function detectHowToFromDoc(doc) {
   };
 }
 
+/**
+ * DefinedTerm schema node for a single topic. Returns a schema.org
+ * DefinedTerm object that gives RAG systems explicit term-definition
+ * pairs to index.
+ */
+export function definedTermSchema(topic, parentUrl, inLanguage = 'en-IN') {
+  if (!topic || !topic.topic_slug || !topic.title) return null;
+  const node = {
+    '@type': 'DefinedTerm',
+    '@id': `${parentUrl}#term-${topic.topic_slug}`,
+    name: topic.title,
+    description: topic.definition,
+    url: `${parentUrl}#topic-${topic.topic_slug}`,
+    inDefinedTermSet: { '@type': 'DefinedTermSet', '@id': parentUrl, name: 'Chapter Definitions' },
+    inLanguage,
+  };
+  const sameAs = WIKIDATA_ENTITIES[topic.title];
+  if (sameAs) node.sameAs = sameAs;
+  return node;
+}
+
 export function chapterSchema(data, url, basePath = '') {
   if (!data || !url) return null;
   const subjectName = data.subject_name || '';
@@ -515,6 +536,13 @@ export function chapterSchema(data, url, basePath = '') {
       },
     },
     ...topicLearningResources,
+    // DefinedTerm nodes for topics with definitions — gives RAG systems
+    // standalone term-definition pairs to index alongside LearningResources.
+    ...publishedTopics
+      .filter(t => t && t.topic_slug && t.title && (t.definition || '').trim())
+      .filter(t => seenTopicSlugs.has(t.topic_slug))
+      .map(t => definedTermSchema(t, url, inLanguage))
+      .filter(Boolean),
     {
       '@type': 'WebPage',
       '@id': url,

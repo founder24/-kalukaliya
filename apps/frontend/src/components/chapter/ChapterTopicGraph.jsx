@@ -20,7 +20,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 
-function GraphPill({ to, title, chapterTitle, isAnchor }) {
+function GraphPill({ to, title, chapterTitle, isAnchor, index = 0 }) {
   // Anchor links (#topic-<slug>) use a plain <a> so the browser handles
   // the in-page jump. Cross-route links use react-router's <Link> so
   // the SPA navigation stays single-page.
@@ -28,10 +28,27 @@ function GraphPill({ to, title, chapterTitle, isAnchor }) {
     'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ' +
     'bg-purple-50 text-purple-700 hover:bg-purple-100 hover:text-purple-900 ' +
     'border border-purple-200/70 transition-colors no-underline';
+
+  // Diversify anchor text for sibling links based on index
+  const siblingLabel = (() => {
+    if (!isAnchor) return title;
+    const pattern = index % 3;
+    if (pattern === 1) return `${title} - definition`;
+    if (pattern === 2) return `${title} notes`;
+    return title;
+  })();
+
   if (isAnchor) {
     return (
-      <a href={to} className={className} data-topic-graph-link="sibling">
-        {title}
+      <a
+        href={to}
+        className={className}
+        data-topic-graph-link="sibling"
+        itemScope
+        itemType="https://schema.org/Thing"
+        itemProp="mentions"
+      >
+        <span itemProp="name">{siblingLabel}</span>
         {chapterTitle && chapterTitle !== title ? (
           <span className="text-purple-500/70 font-normal">· {chapterTitle}</span>
         ) : null}
@@ -39,8 +56,16 @@ function GraphPill({ to, title, chapterTitle, isAnchor }) {
     );
   }
   return (
-    <Link to={to} className={className} data-topic-graph-link="cross-chapter">
-      {title}
+    <Link
+      to={to}
+      className={className}
+      data-topic-graph-link="cross-chapter"
+      title={`Study ${title} in ${chapterTitle || 'related chapter'}`}
+      itemScope
+      itemType="https://schema.org/Thing"
+      itemProp="mentions"
+    >
+      <span itemProp="name">{title}</span>
       {chapterTitle && chapterTitle !== title ? (
         <span className="text-purple-500/70 font-normal">· {chapterTitle}</span>
       ) : null}
@@ -58,6 +83,8 @@ export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) 
       data-testid="chapter-topic-graph"
       className="mt-10 mb-8 space-y-6"
       aria-label="Related topics"
+      itemScope
+      itemType="https://schema.org/ItemList"
     >
       {hasSiblings && (
         <aside data-topic-graph="siblings">
@@ -65,12 +92,13 @@ export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) 
             More topics in this chapter
           </h2>
           <div className="flex flex-wrap gap-2">
-            {siblings.map((t) => (
+            {siblings.map((t, i) => (
               <GraphPill
                 key={`sib-${t.topic_id || t.topic_slug}`}
                 to={`#topic-${t.topic_slug}`}
                 title={t.title}
                 isAnchor
+                index={i}
               />
             ))}
           </div>
@@ -84,12 +112,13 @@ export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) 
             <ArrowRight size={12} className="opacity-60" />
           </h2>
           <div className="flex flex-wrap gap-2">
-            {crossChapter.map((t) => (
+            {crossChapter.map((t, i) => (
               <GraphPill
                 key={`cross-${t.topic_id || t.topic_slug}`}
                 to={t.deep_link_path}
                 title={t.title}
                 chapterTitle={t.chapter_title}
+                index={i}
               />
             ))}
           </div>

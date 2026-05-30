@@ -269,7 +269,7 @@ function LegacyAccordion({ subject, subjectId, chapters }) {
           ? `/${subject.board_slug}/${subject.class_slug}/${subject.slug}/${chapter.slug}`
           : null;
         return (
-          <AccordionItem key={chapter.id} value={chapter.id} className="chapter-textbook rounded-xl border-0 px-4">
+          <AccordionItem key={chapter.id} value={chapter.id} className="chapter-textbook rounded-xl border-0 px-4" itemProp="hasPart" itemScope itemType="https://schema.org/LearningResource">
             <AccordionTrigger className="hover:no-underline py-4" onClick={() => loadChapterData(chapter.id)}>
               <div className="flex items-center gap-3">
                 <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-semibold flex-shrink-0" style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed' }}>
@@ -467,7 +467,7 @@ export default function SubjectPage() {
         pageType="subject"
         pageData={{ subject: { ...subject, chapters } }}
       />
-      <div className="p-4 sm:p-6 space-y-6" data-testid="subject-detail">
+      <div className="p-4 sm:p-6 space-y-6" data-testid="subject-detail" itemScope itemType="https://schema.org/CollectionPage">
         {/* Back */}
         <Link to="/library" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft size={14} /> Browser

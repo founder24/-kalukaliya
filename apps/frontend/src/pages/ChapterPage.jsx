@@ -1183,7 +1183,7 @@ export default function ChapterPage() {
                 <Badge variant="outline" className="text-[11px] text-blue-600 border-blue-500/25 bg-blue-500/5">{className}</Badge>
                 {streamName && <Badge variant="outline" className="text-[11px] text-emerald-600 border-emerald-500/25 bg-emerald-500/5">{streamName}</Badge>}
               </div>
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight" itemProp="headline">
                 {chapterTitle}
               </h1>
               {data.meta_description && (
@@ -1209,6 +1209,8 @@ export default function ChapterPage() {
                   <p
                     className="text-[11px] text-muted-foreground/80 mt-1.5"
                     data-testid="chapter-byline"
+                    itemProp="dateModified"
+                    content={stamp}
                   >
                     Updated <time dateTime={stamp}>{formatted}</time> · by <span className="font-medium">{author}</span>
                   </p>
@@ -1289,7 +1291,7 @@ export default function ChapterPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex gap-8">
-          <article ref={articleRef} data-savable="true" className="flex-1 min-w-0">
+          <article ref={articleRef} data-savable="true" className="flex-1 min-w-0" itemScope itemType="https://schema.org/Article" role="article">
             <div
               id="chapter-content-top"
               className="chapter-textbook rounded-2xl p-5 sm:p-8 scroll-mt-20"

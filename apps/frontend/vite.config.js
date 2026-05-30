@@ -228,6 +228,54 @@ ${typeLinks}
 ${contentHtml}
 </div>
 
+${(() => {
+  // FAQ section: extract Q&A pairs from content lines ending with ?
+  const contentLines = (page.content || '').split('\n').filter(Boolean);
+  const qaPairs = [];
+  for (let i = 0; i < contentLines.length && qaPairs.length < 5; i++) {
+    const line = contentLines[i].replace(/^#+\s*/, '').replace(/^\*\*/, '').replace(/\*\*$/, '').trim();
+    if (line.endsWith('?') && line.length > 10) {
+      // Look for answer in subsequent non-empty lines
+      let answer = '';
+      for (let j = i + 1; j < contentLines.length && j <= i + 3; j++) {
+        const ans = contentLines[j].replace(/^#+\s*/, '').replace(/^\*\*/, '').replace(/\*\*$/, '').trim();
+        if (ans.length > 10 && !ans.endsWith('?')) { answer = ans; break; }
+      }
+      if (answer) qaPairs.push({ q: line, a: answer });
+    }
+  }
+  if (qaPairs.length < 1) return '';
+  const faqItems = qaPairs.map(qa =>
+    `<div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+<h3 itemprop="name">${qa.q.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h3>
+<div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+<p itemprop="text">${qa.a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
+</div>
+</div>`
+  ).join('\n');
+  return `<section itemscope itemtype="https://schema.org/FAQPage">
+<h2>Frequently Asked Questions</h2>
+${faqItems}
+</section>`;
+})()}
+
+${(() => {
+  // DefinedTerm section: render key terms if topic data is available
+  const topics = Array.isArray(page.published_topics) ? page.published_topics : [];
+  const termsWithDef = topics.filter(t => t && t.title && (t.definition || '').trim());
+  if (termsWithDef.length === 0) return '';
+  const termItems = termsWithDef.slice(0, 15).map(t =>
+    `<dl itemscope itemtype="https://schema.org/DefinedTerm">
+<dt itemprop="name">${(t.title || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</dt>
+<dd itemprop="description">${(t.definition || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</dd>
+</dl>`
+  ).join('\n');
+  return `<section>
+<h2>Key Terms</h2>
+${termItems}
+</section>`;
+})()}
+
 ${prevNext ? `<div class="prevnext">${prevNext}</div>` : ''}
 
 ${navLinks ? `<div class="related"><h2>Related Topics in ${page.subject_name}</h2><ul>${navLinks}</ul></div>` : ''}
