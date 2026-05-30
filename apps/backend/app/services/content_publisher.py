@@ -137,6 +137,19 @@ class ContentPublisherService:
             logger.error(f"Cloudflare publish failed: {e}")
             return {"status": "error", "detail": str(e)}
 
+    async def trigger_pages_rebuild(self):
+        """Trigger Cloudflare Pages rebuild to regenerate static content."""
+        hook_url = settings.CF_PAGES_DEPLOY_HOOK
+        if not hook_url:
+            logger.warning("CF_PAGES_DEPLOY_HOOK not set, skipping rebuild trigger")
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(hook_url)
+            logger.info("Cloudflare Pages rebuild triggered")
+        except Exception as e:
+            logger.warning(f"Failed to trigger Pages rebuild: {e}")
+
     async def publish_chapter(self, chapter_id: str) -> dict:
         """Full publish pipeline: Vertex AI Search + Cloudflare, then mark as published."""
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
@@ -149,6 +162,8 @@ class ContentPublisherService:
         chapter.status = "published"
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
+
+        await self.trigger_pages_rebuild()
 
         return {
             "chapter_id": chapter_id,
