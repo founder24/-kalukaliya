@@ -95,6 +95,9 @@ class ChatService:
     @staticmethod
     async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
+        if not search_service.is_available():
+            return []
+
         try:
 
             async def _do_retrieval():
@@ -108,10 +111,10 @@ class ChatService:
                 )
                 return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=1.5)
+            return await asyncio.wait_for(_do_retrieval(), timeout=0.8)
         except asyncio.TimeoutError:
             logger.warning(
-                "RAG retrieval timed out after 1.5s, returning empty context"
+                "RAG retrieval timed out after 0.8s, returning empty context"
             )
             return []
         except Exception as e:

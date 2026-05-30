@@ -70,12 +70,39 @@ export async function proxyRequest(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(targetUrl, {
+    // Buffer request body to allow retransmission on redirects
+    const body = request.method !== 'GET' && request.method !== 'HEAD'
+      ? await request.arrayBuffer()
+      : undefined;
+
+    let response = await fetch(targetUrl, {
       method: request.method,
       headers: headers,
-      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      body: body,
+      redirect: 'manual',
       signal: controller.signal,
     });
+
+    // Follow same-origin redirects (e.g., FastAPI trailing-slash redirects)
+    if ([301, 302, 307, 308].includes(response.status)) {
+      const location = response.headers.get('Location');
+      if (location) {
+        const redirectUrl = new URL(location, targetUrl);
+        // Only follow if redirecting to the same backend host
+        const backendHost = new URL(backendUrl).host;
+        if (redirectUrl.host === backendHost) {
+          // Ensure HTTPS for the redirect target
+          redirectUrl.protocol = 'https:';
+          response = await fetch(redirectUrl.toString(), {
+            method: request.method,
+            headers: headers,
+            body: body,
+            redirect: 'manual',
+            signal: controller.signal,
+          });
+        }
+      }
+    }
 
     clearTimeout(timeout);
 

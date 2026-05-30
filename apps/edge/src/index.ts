@@ -143,23 +143,31 @@ export default {
       let backendReachable = false;
       const now = Date.now();
 
+      // Layer 1: Module-level in-memory cache (10s TTL, per-isolate)
       if (healthCache && (now - healthCache.timestamp) < HEALTH_CACHE_TTL_MS) {
-        // Use cached result
         backendReachable = healthCache.backendReachable;
       } else {
-        // Cache is stale or empty - make a real fetch
+        // Layer 2: KV cache (30s TTL, globally shared across all PoPs)
         try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 2000);
-          const res = await fetch(`${env.BACKEND_URL}/health`, {
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-          backendReachable = res.ok;
+          const kvCached = await env.ISR_CACHE_KV.get('edge:health');
+          if (kvCached) {
+            const parsed = JSON.parse(kvCached) as { backend_reachable: boolean };
+            backendReachable = parsed.backend_reachable;
+            // Refresh in-memory cache from KV
+            healthCache = { backendReachable, timestamp: now };
+          } else {
+            // Layer 3: Fresh backend fetch
+            backendReachable = await fetchBackendHealth(env.BACKEND_URL);
+            healthCache = { backendReachable, timestamp: now };
+            // Store in KV for other PoPs (30s TTL)
+            const kvPayload = JSON.stringify({ backend_reachable: backendReachable });
+            ctx.waitUntil(env.ISR_CACHE_KV.put('edge:health', kvPayload, { expirationTtl: 30 }));
+          }
         } catch {
-          backendReachable = false;
+          // KV read failed - fall back to direct fetch
+          backendReachable = await fetchBackendHealth(env.BACKEND_URL);
+          healthCache = { backendReachable, timestamp: now };
         }
-        healthCache = { backendReachable, timestamp: now };
       }
 
       const healthResponse = new Response(
@@ -254,8 +262,15 @@ export default {
       return isrResponse;
     }
 
-    // Fallback: redirect GET/HEAD to the frontend domain; 404 for other methods
+    // ── CF Cache API for non-API GET requests ──
+    // Cache redirect responses so repeat visitors get them instantly from edge cache.
     if (request.method === 'GET' || request.method === 'HEAD') {
+      const cache = caches.default;
+      const cached = await cache.match(request);
+      if (cached) {
+        return cached;
+      }
+
       const frontendOrigin = env.ALLOWED_ORIGIN || 'https://syrabit.ai';
       // Guard: if the edge worker IS the frontend origin, return 404 to prevent infinite redirect loop
       const frontendHost = new URL(frontendOrigin).host;
@@ -263,12 +278,33 @@ export default {
         return new Response('Not Found', { status: 404 });
       }
       const redirectUrl = frontendOrigin + url.pathname + url.search;
-      return Response.redirect(redirectUrl, 302);
+      const redirectResponse = new Response(null, {
+        status: 302,
+        headers: {
+          'Location': redirectUrl,
+          'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+        },
+      });
+      ctx.waitUntil(cache.put(request, redirectResponse.clone()));
+      return redirectResponse;
     }
 
     return new Response('Not Found', { status: 404 });
   },
 };
+
+/** Fetch backend health with a 2s timeout. Returns true if backend responds with 2xx. */
+async function fetchBackendHealth(backendUrl: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`${backendUrl}/health`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 /** Add security headers to proxied responses. These are set at the edge to avoid duplication with Cloudflare's built-in headers. */
 function addSecurityHeaders(response: Response): Response {
