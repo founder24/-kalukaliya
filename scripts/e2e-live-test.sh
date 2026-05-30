@@ -261,10 +261,14 @@ echo ""
 echo -e "${BOLD}[2/10] SSL/TLS${NC}"
 echo -e "${DIM}------------------------------------------------------------------------${NC}"
 
-# Check TLS version
-TLS_INFO=$(curl -sS --tlsv1.3 --max-time 10 "$FRONTEND_URL" -w '%{ssl_version}' -o /dev/null 2>/dev/null) || TLS_INFO=""
+# Check TLS version (use verbose stderr output as %{ssl_version} is unreliable in some curl versions)
+TLS_INFO=$(curl -svI --max-time 10 "$FRONTEND_URL" 2>&1 | grep -i "SSL connection" | head -1) || TLS_INFO=""
+if [[ -z "$TLS_INFO" ]]; then
+    # Fallback: try -w format
+    TLS_INFO=$(curl -sS --tlsv1.3 --max-time 10 "$FRONTEND_URL" -w '%{ssl_version}' -o /dev/null 2>/dev/null) || TLS_INFO=""
+fi
 if [[ "$TLS_INFO" == *"TLSv1.3"* ]]; then
-    record_result "CRITICAL" "TLS" "TLS 1.3 supported (syrabit.ai)" "PASS" "0" "Version: ${TLS_INFO}"
+    record_result "CRITICAL" "TLS" "TLS 1.3 supported (syrabit.ai)" "PASS" "0" "${TLS_INFO}"
 elif [[ -n "$TLS_INFO" ]]; then
     record_result "HIGH" "TLS" "TLS 1.3 supported (syrabit.ai)" "WARN" "0" "Version: ${TLS_INFO} (expected TLSv1.3)"
 else
