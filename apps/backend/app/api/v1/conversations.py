@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 _ANON_ID_PATTERN = re.compile(r"^anon_[a-f0-9]{32}$")
 
+ANON_HISTORY_LIMIT = 5
+
 
 def _validate_anon_id(anon_id: str) -> str:
     """Validate the anonymous ID format (must match frontend's getAnonId pattern)."""
@@ -88,7 +90,7 @@ async def list_anon_conversations(
     """List conversations for anonymous users (identified by x-anon-id header)."""
     anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
 
-    limit = min(limit, 100)
+    limit = min(limit, ANON_HISTORY_LIMIT)
 
     chats = (
         await Chat.find({"user_id": anon_id})

@@ -604,27 +604,56 @@ async def chat_stream(
 # ═══════════════════════════════════════════════════════════════
 
 
+ANON_HISTORY_LIMIT = 5
+
+
 @router.get("/history")
 async def get_chat_history(
     skip: int = 0,
     limit: int = 20,
-    user: User = Depends(get_current_user),
+    user: Optional[User] = Depends(get_current_user_optional),
+    http_request: Request = None,
 ):
-    """Get paginated chat history for the current user"""
+    """Get paginated chat history for the current user or anonymous user."""
     from app.models.chat import Chat
 
-    # Clamp limit to prevent abuse
-    limit = min(limit, 100)
+    if user:
+        # Authenticated user: full paginated access
+        limit = min(limit, 100)
 
-    chats = (
-        await Chat.find({"user_id": str(user.id)})
-        .sort("-updated_at")
-        .skip(skip)
-        .limit(limit)
-        .to_list()
-    )
+        chats = (
+            await Chat.find({"user_id": str(user.id)})
+            .sort("-updated_at")
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+        )
 
-    total = await Chat.find({"user_id": str(user.id)}).count()
+        total = await Chat.find({"user_id": str(user.id)}).count()
+    else:
+        # Anonymous user: read anon_id from header, hard-cap at 5
+        anon_id = None
+        if http_request:
+            anon_id = http_request.headers.get("x-anon-id") or http_request.headers.get("X-Anon-ID")
+
+        if not anon_id:
+            return {
+                "chats": [],
+                "pagination": {"skip": 0, "limit": 0, "total": 0, "has_more": False},
+            }
+
+        limit = ANON_HISTORY_LIMIT
+        skip = 0
+
+        chats = (
+            await Chat.find({"user_id": anon_id})
+            .sort("-updated_at")
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+        )
+
+        total = await Chat.find({"user_id": anon_id}).count()
 
     return {
         "chats": [
@@ -709,10 +738,11 @@ async def get_chat_messages(
 async def conversations_alias(
     skip: int = 0,
     limit: int = 20,
-    user: User = Depends(get_current_user),
+    user: Optional[User] = Depends(get_current_user_optional),
+    http_request: Request = None,
 ):
     """Alias for /history - supports frontend legacy route."""
-    return await get_chat_history(skip=skip, limit=limit, user=user)
+    return await get_chat_history(skip=skip, limit=limit, user=user, http_request=http_request)
 
 
 # ═══════════════════════════════════════════════════════════════

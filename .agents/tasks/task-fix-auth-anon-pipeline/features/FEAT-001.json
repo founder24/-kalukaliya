@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix the auth pipeline so anonymous users (identified by IP/anon-id) can access chat, chat history (limited to 5 entries), and library without authentication, while authenticated users get full access.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: In apps/backend/app/api/v1/chat.py, modify the /history endpoint to use get_current_user_optional instead of get_current_user. When user is None (anonymous), read the x-anon-id header (or X-Anon-ID) from the request to identify the anonymous user. If neither user nor anon_id is available, return an empty list. For anonymous users, hard-limit the result to max 5 chat entries (ignore the limit param for anon, always cap at 5). For authenticated users, keep existing behavior unchanged.",
+    "Step 2: In apps/backend/app/api/v1/chat.py, modify the /conversations legacy alias endpoint similarly - use get_current_user_optional and support anonymous access with the 5-entry limit.",
+    "Step 3: In apps/backend/app/api/v1/conversations.py, modify the /anon endpoint (list_anon_conversations) to enforce a hard limit of 5 conversations for anonymous users. Currently it has no such limit. Add a constant ANON_HISTORY_LIMIT = 5 and apply it.",
+    "Step 4: In apps/backend/app/api/v1/chat.py, verify the /{session_id}/messages endpoint already uses get_current_user_optional and that anonymous users can access their own chat messages (it currently does - confirm ownership check works with anon_id stored in chat.user_id).",
+    "Step 5: In apps/edge/src/middleware/jwt.ts, ensure the OPTIONAL_AUTH_PATHS array includes '/api/v1/conversations' (not just '/api/v1/conversations/anon'). Currently only '/api/v1/conversations/anon' is listed but the main /conversations path also needs optional auth for the history endpoint.",
+    "Step 6: Add a new test file apps/backend/tests/test_anon_access.py that tests: (a) anonymous user can POST to /api/v1/chat/ without auth, (b) anonymous user can GET /api/v1/chat/history with x-anon-id header and receives max 5 results, (c) authenticated user can GET /api/v1/chat/history with full access (no 5-item cap), (d) anonymous user can GET /api/v1/conversations/anon with x-anon-id and receives max 5 results, (e) requests without auth or anon-id to /chat/history return empty list (not 401).",
+    "Step 7: In apps/backend/app/api/v1/chat.py, ensure the chat POST and stream endpoints handle the X-Anon-ID header consistently. Currently they read from http_request.headers.get('X-Anon-ID') which is correct. Verify that when saving chat (ChatService.save_chat), the user_id passed for anonymous users matches what the history endpoint will query (should be the anon_id value like 'anon_abc123...')."
+  ],
+  "acceptance_criteria": [
+    "Anonymous users (no JWT token) can POST /api/v1/chat/ and /api/v1/chat/stream without 401",
+    "Anonymous users with x-anon-id header can GET /api/v1/chat/history and receive at most 5 entries",
+    "Anonymous users without x-anon-id header calling GET /api/v1/chat/history receive an empty list (not 401)",
+    "Authenticated users calling GET /api/v1/chat/history receive full paginated results (no 5-item cap)",
+    "Anonymous users calling GET /api/v1/conversations/anon receive at most 5 conversations",
+    "Edge worker allows requests to /api/v1/conversations without JWT (optional auth)",
+    "All existing tests continue to pass",
+    "New test_anon_access.py tests pass"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_anon_access.py -v",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_auth.py -v",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ -x --timeout=60"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
