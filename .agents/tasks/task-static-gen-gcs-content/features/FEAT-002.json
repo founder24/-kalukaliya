@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create build-time static data generator script, update frontend content fetchers for static-first pattern, and update _routes.json. This covers Steps 4, 5, and 8 from the implementation plan - all frontend changes.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 (Step 4): Create apps/frontend/scripts/generate-static-data.mjs - a Node.js script that runs at BUILD TIME on Cloudflare Pages. It should: (a) Read env vars: GCS_BUCKET, BUILD_BACKEND_URL (fallback), VITE_BACKEND_URL (fallback for backend URL). (b) Construct GCS public URL pattern: https://storage.googleapis.com/${GCS_BUCKET}/${path}. (c) Define an async function fetchFromGCSOrBackend(gcsPath, apiPath) that tries GCS first, falls back to backend API. (d) Generate and write these files to public/static/: library-bundle.json (from GCS static/library-bundle.json or API /api/content/library-bundle), library-bundle-slim.json (from GCS static/library-bundle-slim.json or API /api/content/library-bundle?slim=1), boards.json (extract boards array from library bundle), subjects.json (flatten all subjects from bundle). (e) Generate sitemaps and write to public/: sitemap-index.xml (referencing the other sitemaps), sitemap-static.xml (homepage, /library, /pricing, /login), sitemap-subjects.xml (one URL per subject using board/class/subject slug pattern), sitemap-chapters.xml (one URL per chapter slug). (f) Generate public/static/plans.json (stub: [{id: 'pro', name: 'Pro Monthly', price: 499, currency: 'INR'}]). (g) Use proper error handling - if GCS and API both fail, log warning and skip that file (don't break the build). (h) Make the script idempotent and safe to run multiple times. (i) Use mkdir -p equivalent (fs.mkdirSync recursive) for public/static/ directory.",
     "Step 2 (Step 5): Update apps/frontend/src/hooks/useContent.jsx to use static-first fetching pattern. For these fetchers - fetchBoards, fetchLibraryBundle, fetchLibraryBundleSlim - wrap them so they first try fetching from /static/*.json (e.g., /static/boards.json, /static/library-bundle.json, /static/library-bundle-slim.json) and only fall back to the API if the static file is not available (404 or network error). Pattern: try { const res = await fetch('/static/X.json'); if (res.ok) return res.json(); } catch {} return apiClient().get('/content/X').then(r => r.data);",
@@ -25,5 +25,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && grep -c '/static/' src/hooks/useContent.jsx (verify static-first pattern is in use)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verification commands pass. Script syntax check (node -c) passes. Module loads and runs without error when no GCS_BUCKET or BACKEND_URL set - gracefully skips data fetch and still generates plans.json and all sitemaps. The _routes.json contains all required exclusions. useContent.jsx has 3 static-first fetch patterns for boards, library-bundle, and library-bundle-slim."
 }
