@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Address code review findings: fix fragment URLs in sitemap-topics.xml, improve RSS/JSON feed content, add apostrophe escaping to _xml_escape, add case-insensitive entity lookup in jsonld.js, and remove geographic sameAs from Organization.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Issue 1: In apps/backend/app/api/v1/seo.py sitemap_topics(): Remove per-topic fragment URLs. Instead emit one chapter-level URL per chapter that has topics, at priority 0.6.",
     "Issue 2: In apps/backend/app/api/v1/seo.py feed endpoints: Use ch.description or ch.body_markdown (first 300/500 chars stripped of markdown) for feed content instead of template strings.",
@@ -25,5 +25,5 @@
     "Grep for &apos; in _xml_escape function"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 5 review issues addressed. Tests pass (579/584, 5 pre-existing failures in AdminHealth.credits.test.jsx). The sitemap-topics endpoint now emits one URL per chapter with topics at priority 0.6, using the canonical path pattern without /render/ prefix. Feed endpoints pull real content from ch.description or ch.body_markdown with markdown stripping. The lookupEntity helper supports exact, title-case, and full case-insensitive lookup."
 }
