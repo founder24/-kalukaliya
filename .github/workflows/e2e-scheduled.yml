@@ -1,0 +1,63 @@
+name: Scheduled E2E Tests
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: 'Enable verbose output'
+        type: boolean
+        default: false
+      skip_functional:
+        description: 'Skip functional tests (faster, no GCP needed)'
+        type: boolean
+        default: false
+
+jobs:
+  e2e-tests:
+    name: Full Stack E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup gcloud
+        if: ${{ !inputs.skip_functional }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Setup gcloud SDK
+        if: ${{ !inputs.skip_functional }}
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq dnsutils openssl
+
+      - name: Run E2E Tests
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          VERBOSE: ${{ inputs.verbose && 'true' || 'false' }}
+          SKIP_FUNCTIONAL: ${{ inputs.skip_functional && 'true' || 'false' }}
+        run: |
+          chmod +x scripts/ci-e2e-runner.sh scripts/e2e-live-test.sh scripts/e2e-functional-test.sh
+          bash scripts/ci-e2e-runner.sh
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results-${{ github.run_id }}
+          path: |
+            /tmp/e2e-*.log
+          retention-days: 7
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::E2E tests failed! Check the test output above for details."
+          echo "Run manually: gh workflow run e2e-scheduled.yml -f verbose=true"
