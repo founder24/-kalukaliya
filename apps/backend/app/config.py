@@ -232,6 +232,7 @@ class Settings(BaseSettings):
         # Option 1: Load from file path
         if self.GOOGLE_APPLICATION_CREDENTIALS:
             import os
+
             creds_path = os.path.expanduser(self.GOOGLE_APPLICATION_CREDENTIALS)
             try:
                 with open(creds_path) as f:
@@ -245,7 +246,9 @@ class Settings(BaseSettings):
             try:
                 return json.loads(self.GOOGLE_APPLICATION_CREDENTIALS_JSON)
             except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
+                logger.warning(
+                    f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}"
+                )
                 return {}
 
         return {}

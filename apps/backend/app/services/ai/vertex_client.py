@@ -71,9 +71,7 @@ class VertexAIClient:
             logger.error(f"Vertex AI error: {str(e)}")
             raise RuntimeError(f"Vertex AI service failed: {e}")
 
-    async def _generate_via_genai(
-        self, system_prompt: str, user_message: str
-    ) -> str:
+    async def _generate_via_genai(self, system_prompt: str, user_message: str) -> str:
         """Generate using the Generative Language API (API key)."""
         url = f"{GENAI_BASE_URL}/{self.model}:generateContent?key={self._api_key}"
         payload = {
@@ -97,9 +95,7 @@ class VertexAIClient:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         return "I couldn't generate a response. Please try again."
 
-    async def _generate_via_vertex(
-        self, system_prompt: str, user_message: str
-    ) -> str:
+    async def _generate_via_vertex(self, system_prompt: str, user_message: str) -> str:
         """Generate using the Vertex AI endpoint (OAuth2 token)."""
         response = await self._client.post(
             f"{self.base_url}/{self.model}:generateContent",
@@ -109,9 +105,7 @@ class VertexAIClient:
             },
             json={
                 "systemInstruction": {"parts": [{"text": system_prompt}]},
-                "contents": [
-                    {"role": "user", "parts": [{"text": user_message}]}
-                ],
+                "contents": [{"role": "user", "parts": [{"text": user_message}]}],
                 "generationConfig": {
                     "temperature": 0.3,
                     "maxOutputTokens": 2048,

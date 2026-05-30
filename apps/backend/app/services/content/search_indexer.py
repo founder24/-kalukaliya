@@ -215,7 +215,9 @@ class SearchIndexer:
             return succeeded > 0
 
         except Exception as e:
-            logger.error(f"Vertex Search indexing failed for slug={knowledge_obj.slug}: {e}")
+            logger.error(
+                f"Vertex Search indexing failed for slug={knowledge_obj.slug}: {e}"
+            )
             return False
 
 

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _strip_think_block(text: str) -> str:
     """Remove <think>...</think> reasoning blocks from Sarvam model output."""
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     return cleaned.strip()
 
 

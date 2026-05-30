@@ -104,26 +104,32 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
 
                     result_subjects.append(subj_data)
 
-                result_streams.append({
-                    "id": stream_id,
-                    "name": stream.name,
-                    "slug": _slugify(stream.name),
-                    "subjects": result_subjects,
-                })
+                result_streams.append(
+                    {
+                        "id": stream_id,
+                        "name": stream.name,
+                        "slug": _slugify(stream.name),
+                        "subjects": result_subjects,
+                    }
+                )
 
-            result_classes.append({
-                "id": cls_id,
-                "name": cls.name,
-                "slug": _slugify(cls.name),
-                "streams": result_streams,
-            })
+            result_classes.append(
+                {
+                    "id": cls_id,
+                    "name": cls.name,
+                    "slug": _slugify(cls.name),
+                    "streams": result_streams,
+                }
+            )
 
-        result_boards.append({
-            "id": board_id,
-            "name": board.name,
-            "slug": board.slug,
-            "classes": result_classes,
-        })
+        result_boards.append(
+            {
+                "id": board_id,
+                "name": board.name,
+                "slug": board.slug,
+                "classes": result_classes,
+            }
+        )
 
     return {"boards": result_boards}
 
