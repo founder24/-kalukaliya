@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 
 @pytest.mark.anyio
@@ -46,3 +46,31 @@ async def test_chat_error_does_not_leak_details(client: AsyncClient):
             detail = response.json().get("detail", "")
             assert "secret db connection string" not in detail
             assert "internal error" in detail.lower() or "try again" in detail.lower()
+
+
+@pytest.mark.anyio
+async def test_retrieve_context_returns_empty_when_search_not_initialized():
+    """Test that retrieve_context returns [] immediately when search service is not initialized."""
+    import app.services.chat_service as chat_module
+    from app.services.chat_service import ChatService
+
+    # Reset the cached flag so we re-check _initialized
+    original_flag = chat_module._rag_available
+    chat_module._rag_available = None
+
+    try:
+        with patch(
+            "app.services.chat_service.search_service"
+        ) as mock_search:
+            mock_search._initialized = False
+            mock_search.search_context = AsyncMock(
+                side_effect=AssertionError("search_context should not be called")
+            )
+
+            result = await ChatService.retrieve_context("test query", "free")
+
+            assert result == []
+            mock_search.search_context.assert_not_called()
+    finally:
+        # Restore the cached flag
+        chat_module._rag_available = original_flag
