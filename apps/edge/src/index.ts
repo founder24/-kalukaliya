@@ -16,6 +16,7 @@ import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
 import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
+import { getIdentityToken } from './utils/google-auth';
 
 // Cached health probe state (module-level)
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
@@ -188,8 +189,14 @@ export default {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const healthHeaders: HeadersInit = {};
+          const healthToken = await getIdentityToken(env);
+          if (healthToken) {
+            healthHeaders['Authorization'] = `Bearer ${healthToken}`;
+          }
           const res = await fetch(`${env.BACKEND_URL}/health`, {
             signal: controller.signal,
+            headers: healthHeaders,
           });
           clearTimeout(timeoutId);
           backendReachable = res.ok;
@@ -227,8 +234,14 @@ export default {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const deepHeaders: HeadersInit = {};
+        const deepToken = await getIdentityToken(env);
+        if (deepToken) {
+          deepHeaders['Authorization'] = `Bearer ${deepToken}`;
+        }
         const res = await fetch(`${env.BACKEND_URL}/health/deep`, {
           signal: controller.signal,
+          headers: deepHeaders,
         });
         clearTimeout(timeoutId);
         backendStatus = await res.json() as Record<string, unknown>;
