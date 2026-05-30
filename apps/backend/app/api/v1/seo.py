@@ -37,13 +37,13 @@ def _set_cached_sitemap(key: str, content: str) -> None:
 SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
-    <loc>{base_url}/api/v1/seo/sitemap-static.xml</loc>
+    <loc>{base_url}/sitemap-static.xml</loc>
   </sitemap>
   <sitemap>
-    <loc>{base_url}/api/v1/seo/sitemap-subjects.xml</loc>
+    <loc>{base_url}/sitemap-subjects.xml</loc>
   </sitemap>
   <sitemap>
-    <loc>{base_url}/api/v1/seo/sitemap-chapters.xml</loc>
+    <loc>{base_url}/sitemap-chapters.xml</loc>
   </sitemap>
 </sitemapindex>"""
 

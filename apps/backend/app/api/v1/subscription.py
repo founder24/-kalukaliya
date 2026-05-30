@@ -12,6 +12,77 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Subscription"])
 
 
+class PlanFeature(BaseModel):
+    label: str
+    included: bool
+
+
+class Plan(BaseModel):
+    id: str
+    name: str
+    price_inr: int
+    price_label: str
+    billing: str
+    message_limit: int
+    message_label: str
+    features: list[PlanFeature]
+    popular: bool = False
+    cta: str
+
+
+class PlansResponse(BaseModel):
+    plans: list[Plan]
+    currency: str = "INR"
+
+
+@router.get("/plans", response_model=PlansResponse)
+async def get_subscription_plans():
+    """Public endpoint: returns available subscription plan tiers."""
+    free_limit = settings.RATE_LIMIT_FREE_TIER
+    pro_limit = settings.RATE_LIMIT_PRO_TIER
+    return PlansResponse(
+        plans=[
+            Plan(
+                id="free",
+                name="Free",
+                price_inr=0,
+                price_label="₹0",
+                billing="forever",
+                message_limit=free_limit,
+                message_label=f"{free_limit} messages/month",
+                cta="Get started free",
+                features=[
+                    PlanFeature(label="AHSEC & SEBA content", included=True),
+                    PlanFeature(label=f"{free_limit} AI messages/month", included=True),
+                    PlanFeature(label="English & Assamese chat", included=True),
+                    PlanFeature(label="Study library access", included=True),
+                    PlanFeature(label="Priority AI responses", included=False),
+                    PlanFeature(label="Unlimited AI messages", included=False),
+                ],
+            ),
+            Plan(
+                id="pro",
+                name="Pro",
+                price_inr=99,
+                price_label="₹99",
+                billing="per month",
+                message_limit=pro_limit,
+                message_label="Unlimited messages",
+                cta="Upgrade to Pro",
+                popular=True,
+                features=[
+                    PlanFeature(label="AHSEC & SEBA content", included=True),
+                    PlanFeature(label="Unlimited AI messages", included=True),
+                    PlanFeature(label="English & Assamese chat", included=True),
+                    PlanFeature(label="Study library access", included=True),
+                    PlanFeature(label="Priority AI responses", included=True),
+                    PlanFeature(label="Early access to new features", included=True),
+                ],
+            ),
+        ]
+    )
+
+
 class SubscriptionStatus(BaseModel):
     tier: str
     status: str
