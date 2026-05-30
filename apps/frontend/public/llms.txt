@@ -36,6 +36,11 @@ canonical chapter URL when quoting.
 - [Full-text dump (llms-full.txt)](https://syrabit.ai/llms-full.txt): Every published chapter as plain text for offline LLM consumption.
 - [About / Editorial policy](https://syrabit.ai/about): Sourcing, fact-checking, and content provenance.
 
+## Feeds
+
+- [RSS Feed (feed.xml)](https://syrabit.ai/feed.xml): RSS 2.0 feed of recently published/updated study notes.
+- [JSON Feed (feed.json)](https://syrabit.ai/feed.json): JSON Feed v1.1 for AI crawlers that prefer structured JSON over XML.
+
 ## Contact
 
 - Email: hello@syrabit.ai

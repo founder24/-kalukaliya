@@ -391,6 +391,27 @@ export function definedTermSchema(topic, parentUrl, inLanguage = 'en-IN') {
   return node;
 }
 
+/**
+ * ImageObject schema node for multimodal RAG grounding.
+ * Returns a schema.org ImageObject with descriptive fields for accessibility
+ * and AI indexing. Filters out undefined/null values.
+ */
+export function imageObjectSchema({ url, caption, width, height, contentUrl, name }) {
+  const obj = {
+    '@type': 'ImageObject',
+    '@id': url,
+    url: url,
+    contentUrl: contentUrl || url,
+    name: name || caption,
+    caption: caption,
+    description: caption,
+    width: width,
+    height: height,
+    inLanguage: 'en-IN',
+  };
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v != null));
+}
+
 export function chapterSchema(data, url, basePath = '') {
   if (!data || !url) return null;
   const subjectName = data.subject_name || '';
@@ -464,6 +485,32 @@ export function chapterSchema(data, url, basePath = '') {
       }));
   }
 
+  // Image/diagram nodes for multimodal RAG indexing
+  const imageNodes = [];
+  const allImages = [
+    ...(Array.isArray(data.images) ? data.images : []),
+    ...(Array.isArray(data.diagrams) ? data.diagrams : []),
+  ];
+  if (allImages.length > 0) {
+    const imageRefs = [];
+    for (const img of allImages) {
+      if (!img || !img.url) continue;
+      const node = imageObjectSchema({
+        url: img.url,
+        caption: img.caption || img.alt || img.name,
+        width: img.width,
+        height: img.height,
+        contentUrl: img.contentUrl || img.url,
+        name: img.name || img.caption || img.alt,
+      });
+      imageNodes.push(node);
+      imageRefs.push({ '@id': img.url });
+    }
+    if (imageRefs.length > 0) {
+      articleNode.image = imageRefs;
+    }
+  }
+
   // Topical-authority pack (Task: topical mapping + topical authority).
   // Per-topic LearningResource entries — one structured datum per
   // citable topic on this chapter, each pointing at its anchor on the
@@ -516,6 +563,7 @@ export function chapterSchema(data, url, basePath = '') {
 
   const graph = [
     articleNode,
+    ...imageNodes,
     {
       '@type': 'LearningResource',
       name: chapterTitle,

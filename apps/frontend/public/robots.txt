@@ -158,3 +158,5 @@ Sitemap: https://syrabit.ai/sitemap-learn.xml
 # Task #11 — sitemap-chapters now fans out 7 page-types per chapter
 # (notes, mcqs, flashcards, pyqs, summary, definitions, revision) under
 # the canonical /board/.../chapter/.../{type} URL pattern.
+Sitemap: https://syrabit.ai/sitemap-topics.xml
+Sitemap: https://syrabit.ai/feed.xml

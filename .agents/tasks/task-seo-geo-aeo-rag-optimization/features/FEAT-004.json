@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Citations graph for credibility signals (Tier 2 #8), multi-modal grounding with ImageObject schema (Tier 2 #9), and API/feed exposure via RSS/Atom/JSON feeds for AI crawlers (Tier 2 #10). Also adds programmatic sitemap expansion for topic-level pages (Tier 2 #7).",
+  "status": "in_progress",
+  "steps": [
+    "In apps/frontend/src/lib/jsonld.js chapterSchema(): (a) Add a 'citation' array to the Article node when data.citations is available - each citation becomes a CreativeWork with url, name, and publisher (prioritize .edu/.gov sources). (b) Add 'sourceOrganization' when the content references an authoritative board/institution.",
+    "In apps/frontend/src/lib/jsonld.js: Create a new exported function `imageObjectSchema({ url, caption, width, height, contentUrl })` that returns a proper ImageObject node with detailed descriptive fields. Add image node support to chapterSchema - when data.images or data.diagrams are present, emit ImageObject nodes with alt text as 'description', linking to the parent Article.",
+    "In apps/backend/app/api/v1/seo.py: (a) Add a new endpoint `GET /feed.xml` that generates an RSS 2.0 feed of recently published/updated chapters (last 50). Include: title, link, description, pubDate, lastBuildDate, category (board/subject). (b) Add a `GET /feed/{subject_slug}.xml` endpoint for per-subject RSS feeds. (c) Add a `GET /feed.json` endpoint that returns a JSON Feed (version 1.1) of the same content for AI crawlers that prefer JSON over XML.",
+    "In apps/backend/app/api/v1/seo.py: (a) Add a new endpoint `GET /sitemap-topics.xml` that generates a sitemap for all individual topic pages (subject x chapter x topic combinations). Each published chapter's published_topics generate entries at the URL pattern /{board}/{class}/{subject}/{chapter}#topic-{slug}. (b) Add this new sitemap to the sitemap index.",
+    "In apps/backend/app/main.py: Register the new feed endpoints. Add the feed router at prefix '/api/v1/seo' (same as existing seo router - the endpoints go into the same file).",
+    "Update apps/frontend/public/robots.txt: Add the feed URLs to the Sitemap: list at the bottom (Sitemap: https://syrabit.ai/feed.xml).",
+    "Update apps/frontend/public/ai.txt: Add the feed URLs to the [sitemap] section.",
+    "Update apps/frontend/public/llms.txt: Add a 'Feeds' section documenting the RSS, JSON Feed, and per-subject feed URLs.",
+    "In the existing _worker.js SEO_PASSTHROUGH_RE regex: Verify it already matches /feed.xml and /feed/*.xml paths (it does based on exploration - just confirm no changes needed)."
+  ],
+  "acceptance_criteria": [
+    "GET /api/v1/seo/feed.xml returns valid RSS 2.0 XML with Content-Type application/xml",
+    "GET /api/v1/seo/feed.json returns valid JSON Feed v1.1 with Content-Type application/json",
+    "GET /api/v1/seo/sitemap-topics.xml returns valid sitemap XML listing topic-level URLs",
+    "The sitemap index includes sitemap-topics.xml",
+    "chapterSchema includes citation array when data.citations is provided",
+    "imageObjectSchema function is exported and produces valid ImageObject schema",
+    "robots.txt includes Sitemap: https://syrabit.ai/feed.xml",
+    "ai.txt includes feed.xml in the sitemap/feeds section",
+    "No existing tests break"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run` and confirm all tests pass",
+    "Check the new feed endpoint exists: grep 'feed.xml' apps/backend/app/api/v1/seo.py",
+    "Verify sitemap-topics is registered: grep 'sitemap-topics' apps/backend/app/api/v1/seo.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -31,7 +31,12 @@ mailto:hello@syrabit.ai
 
 [sitemap]
 https://syrabit.ai/sitemap-index.xml
+https://syrabit.ai/sitemap-topics.xml
 
 [llms]
 https://syrabit.ai/llms.txt
 https://syrabit.ai/llms-full.txt
+
+[feeds]
+https://syrabit.ai/feed.xml
+https://syrabit.ai/feed.json
