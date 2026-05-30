@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create the Knowledge Graph service and Authority Content Generator service that power topic relationship traversal and AI-driven content generation (MCQs, PYQ solutions, relations, authority sources).",
+  "status": "in_progress",
+  "steps": [
+    "Create apps/backend/app/services/knowledge_graph.py with class KnowledgeGraphService containing: (1) get_related_topics(topic_slug) - queries TopicHub for the given slug, returns its relations list enriched with the related hub's title/definition. (2) get_prerequisite_chain(topic_slug) - recursively follows 'prerequisite' and 'builds_on' relation types to build a learning path list. (3) get_topic_cluster(topic_slug, depth=2) - BFS traversal returning a subgraph dict with nodes and edges. (4) auto_generate_relations(chapter_id) - loads all TopicHubs for a chapter, uses Vertex AI to infer semantic relationships between them, returns proposed TopicRelation objects. Export a module-level singleton: knowledge_graph_service = KnowledgeGraphService()",
+    "Create apps/backend/app/services/authority_generator.py with class AuthorityGeneratorService containing: (1) generate_mcqs(topic_hub_id, count=5) - builds a prompt with the topic's title, definition, key_points and calls vertex_client.generate() to produce MCQs in JSON format, parses them into TopicMCQ objects and saves to the TopicHub. (2) generate_pyq_solutions(topic_hub_id) - for each PYQ without a solution, generates one using Vertex AI. (3) generate_topic_relations(chapter_id) - delegates to knowledge_graph_service.auto_generate_relations(). (4) enrich_authority_sources(topic_hub_id) - generates search queries for NCERT/board sources and returns TopicSource suggestions. Export singleton: authority_generator_service = AuthorityGeneratorService()",
+    "Both services should import vertex_client from app.services.ai.vertex_client and TopicHub from app.models.topic_hub. Use json.loads for parsing AI responses with try/except for robustness.",
+    "Verify both services import cleanly."
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/services/knowledge_graph.py exists with KnowledgeGraphService class and all 4 methods",
+    "apps/backend/app/services/authority_generator.py exists with AuthorityGeneratorService class and all 4 methods",
+    "Both modules import without errors: python -c 'from app.services.knowledge_graph import knowledge_graph_service; from app.services.authority_generator import authority_generator_service'"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.knowledge_graph import knowledge_graph_service; print(\"KG OK\")'",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.authority_generator import authority_generator_service; print(\"AG OK\")'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
