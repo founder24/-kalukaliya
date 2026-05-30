@@ -112,6 +112,17 @@ class GCSContentStore:
         except Exception as e:
             logger.error(f"Failed to write library bundle: {e}")
 
+    async def write_library_bundle_slim(self, data: dict) -> None:
+        """Write the slim library bundle to GCS at static/library-bundle-slim.json."""
+        if not self._configured:
+            return
+        path = "static/library-bundle-slim.json"
+        try:
+            await asyncio.to_thread(self._write_json, path, data)
+            logger.info(f"Wrote slim library bundle to GCS: {path}")
+        except Exception as e:
+            logger.error(f"Failed to write slim library bundle: {e}")
+
     async def write_sitemap(self, filename: str, xml_content: str) -> None:
         """Write a sitemap XML file to GCS at static/{filename}."""
         if not self._configured:

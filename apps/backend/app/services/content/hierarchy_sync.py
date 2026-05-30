@@ -132,7 +132,7 @@ async def sync_hierarchy_to_gcs() -> dict:
                                 "title": ch.title,
                                 "slug": ch.slug,
                                 "order": ch.chapter_number,
-                                "topic_count": len(ch.published_topics),
+                                "topic_count": len(ch.published_topics or []),
                             }
                             chapter_list.append(ch_data)
 
@@ -175,6 +175,29 @@ async def sync_hierarchy_to_gcs() -> dict:
 
         library_bundle = {"boards": result_boards}
         await gcs_content_store.write_library_bundle(library_bundle)
+
+        # Build slim library bundle (same structure but subjects exclude chapters)
+        slim_boards = []
+        for board_data in result_boards:
+            slim_board = {**board_data, "classes": []}
+            for cls_data in board_data["classes"]:
+                slim_cls = {**cls_data, "streams": []}
+                for stream_data in cls_data["streams"]:
+                    slim_stream = {**stream_data, "subjects": []}
+                    for subj_data in stream_data["subjects"]:
+                        slim_subj = {
+                            "id": subj_data["id"],
+                            "name": subj_data["name"],
+                            "slug": subj_data["slug"],
+                            "chapter_count": subj_data["chapter_count"],
+                        }
+                        slim_stream["subjects"].append(slim_subj)
+                    slim_cls["streams"].append(slim_stream)
+                slim_board["classes"].append(slim_cls)
+            slim_boards.append(slim_board)
+
+        library_bundle_slim = {"boards": slim_boards}
+        await gcs_content_store.write_library_bundle_slim(library_bundle_slim)
 
         summary = {
             "status": "synced",

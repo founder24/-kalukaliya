@@ -156,7 +156,7 @@ class ContentPublisherService:
                 "meta_description": chapter.meta_description,
                 "keywords": chapter.keywords,
                 "published_topics": [
-                    t.model_dump() for t in chapter.published_topics
+                    t.model_dump() for t in (chapter.published_topics or [])
                 ],
                 "status": chapter.status,
                 "updated_at": chapter.updated_at.isoformat()
