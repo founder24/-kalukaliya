@@ -807,3 +807,24 @@ async def get_pipeline_status(request: Request, knowledge_id: str = Query(...)):
     except Exception as e:
         logger.error(f"Pipeline status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================
+# LAYER 5: GCS Sync
+# ============================
+
+
+@router.post("/sync-to-gcs")
+async def sync_to_gcs(request: Request):
+    """Sync all content hierarchy and library bundles to GCS."""
+    _validate_admin_session(request)
+    await _csrf_check(request)
+
+    try:
+        from app.services.content.hierarchy_sync import sync_hierarchy_to_gcs
+
+        result = await sync_hierarchy_to_gcs()
+        return result
+    except Exception as e:
+        logger.error(f"GCS sync error: {e}")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
