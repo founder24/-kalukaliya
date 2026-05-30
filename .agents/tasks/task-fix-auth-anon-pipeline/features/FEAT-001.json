@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix the auth pipeline so anonymous users (identified by IP/anon-id) can access chat, chat history (limited to 5 entries), and library without authentication, while authenticated users get full access.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: In apps/backend/app/api/v1/chat.py, modify the /history endpoint to use get_current_user_optional instead of get_current_user. When user is None (anonymous), read the x-anon-id header (or X-Anon-ID) from the request to identify the anonymous user. If neither user nor anon_id is available, return an empty list. For anonymous users, hard-limit the result to max 5 chat entries (ignore the limit param for anon, always cap at 5). For authenticated users, keep existing behavior unchanged.",
     "Step 2: In apps/backend/app/api/v1/chat.py, modify the /conversations legacy alias endpoint similarly - use get_current_user_optional and support anonymous access with the 5-entry limit.",
@@ -28,5 +28,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ -x --timeout=60"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Environment setup: Python 3.11 via pyenv, requirements.txt uses hashes so needed to strip them for install. pytest-env not installed so JWT_SECRET and APP_ENV must be set as env vars. Pre-existing test failures: test_endpoints_audit.py::test_get_endpoints_no_500 (health/deep needs MongoDB/Redis), test_knowledge.py::TestContentAPI::test_render_chapter_not_found, test_latency_audit.py::test_middleware_adds_security_headers, test_payment_lifecycle.py::test_duplicate_event_returns_duplicate - all confirmed failing on base branch."
 }
