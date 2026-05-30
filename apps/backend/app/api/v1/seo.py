@@ -294,11 +294,20 @@ async def sitemap_topics():
     if cached:
         return Response(content=cached, media_type="application/xml")
     try:
-        objects = await KnowledgeObject.find({"status": "published"}).project({
-            "metadata.board": 1, "metadata.class_level": 1,
-            "metadata.subject": 1, "metadata.chapter": 1,
-            "metadata.topics": 1, "updated_at": 1,
-        }).to_list()
+        objects = (
+            await KnowledgeObject.find({"status": "published"})
+            .project(
+                {
+                    "metadata.board": 1,
+                    "metadata.class_level": 1,
+                    "metadata.subject": 1,
+                    "metadata.chapter": 1,
+                    "metadata.topics": 1,
+                    "updated_at": 1,
+                }
+            )
+            .to_list()
+        )
 
         urls = []
         seen = set()
@@ -354,18 +363,47 @@ async def sitemap_topics():
 async def rss_feed():
     """RSS 2.0 feed of recently published/updated chapters for AI crawlers."""
     try:
-        chapters = await KnowledgeObject.find({"status": "published"}).sort("-updated_at").limit(50).to_list()
+        chapters = (
+            await KnowledgeObject.find({"status": "published"})
+            .sort("-updated_at")
+            .limit(50)
+            .to_list()
+        )
 
         items = []
         for ch in chapters:
             meta = ch.metadata or {}
-            board = meta.get("board", "") if isinstance(meta, dict) else getattr(meta, "board", "")
-            class_level = meta.get("class_level", "") if isinstance(meta, dict) else getattr(meta, "class_level", "")
-            subject = meta.get("subject", "") if isinstance(meta, dict) else getattr(meta, "subject", "")
-            chapter = meta.get("chapter", "") if isinstance(meta, dict) else getattr(meta, "chapter", "")
+            board = (
+                meta.get("board", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "board", "")
+            )
+            class_level = (
+                meta.get("class_level", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "class_level", "")
+            )
+            subject = (
+                meta.get("subject", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "subject", "")
+            )
+            chapter = (
+                meta.get("chapter", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "chapter", "")
+            )
             title = f"{chapter} - {subject} ({board} {class_level})"
-            link = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes" if all([board, class_level, subject, chapter]) else BASE_URL
-            pub_date = ch.updated_at.strftime("%a, %d %b %Y %H:%M:%S +0000") if ch.updated_at else ""
+            link = (
+                f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes"
+                if all([board, class_level, subject, chapter])
+                else BASE_URL
+            )
+            pub_date = (
+                ch.updated_at.strftime("%a, %d %b %Y %H:%M:%S +0000")
+                if ch.updated_at
+                else ""
+            )
 
             # Use actual content for description (first 300 chars stripped of markdown)
             real_content = getattr(ch, "description", None) or ""
@@ -411,15 +449,40 @@ async def rss_feed():
 async def json_feed():
     """JSON Feed v1.1 of recently published chapters for AI crawlers."""
     try:
-        chapters = await KnowledgeObject.find({"status": "published"}).sort("-updated_at").limit(50).to_list()
+        chapters = (
+            await KnowledgeObject.find({"status": "published"})
+            .sort("-updated_at")
+            .limit(50)
+            .to_list()
+        )
         items = []
         for ch in chapters:
             meta = ch.metadata or {}
-            board = meta.get("board", "") if isinstance(meta, dict) else getattr(meta, "board", "")
-            class_level = meta.get("class_level", "") if isinstance(meta, dict) else getattr(meta, "class_level", "")
-            subject = meta.get("subject", "") if isinstance(meta, dict) else getattr(meta, "subject", "")
-            chapter = meta.get("chapter", "") if isinstance(meta, dict) else getattr(meta, "chapter", "")
-            link = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes" if all([board, class_level, subject, chapter]) else BASE_URL
+            board = (
+                meta.get("board", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "board", "")
+            )
+            class_level = (
+                meta.get("class_level", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "class_level", "")
+            )
+            subject = (
+                meta.get("subject", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "subject", "")
+            )
+            chapter = (
+                meta.get("chapter", "")
+                if isinstance(meta, dict)
+                else getattr(meta, "chapter", "")
+            )
+            link = (
+                f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes"
+                if all([board, class_level, subject, chapter])
+                else BASE_URL
+            )
 
             # Use actual content for content_text (first 500 chars stripped of markdown)
             real_content = getattr(ch, "description", None) or ""
@@ -432,14 +495,18 @@ async def json_feed():
             if not real_content:
                 real_content = f"Study notes for {chapter} in {subject} for {board} {class_level} students."
 
-            items.append({
-                "id": link,
-                "url": link,
-                "title": f"{chapter} - {subject} ({board} {class_level})",
-                "content_text": real_content,
-                "date_modified": ch.updated_at.isoformat() if ch.updated_at else None,
-                "tags": [subject, board, class_level],
-            })
+            items.append(
+                {
+                    "id": link,
+                    "url": link,
+                    "title": f"{chapter} - {subject} ({board} {class_level})",
+                    "content_text": real_content,
+                    "date_modified": ch.updated_at.isoformat()
+                    if ch.updated_at
+                    else None,
+                    "tags": [subject, board, class_level],
+                }
+            )
 
         feed = {
             "version": "https://jsonfeed.org/version/1.1",
@@ -450,8 +517,14 @@ async def json_feed():
             "language": "en-IN",
             "items": items,
         }
-        return Response(content=json.dumps(feed, default=str), media_type="application/json")
+        return Response(
+            content=json.dumps(feed, default=str), media_type="application/json"
+        )
     except Exception as e:
         logger.warning(f"Failed to generate JSON feed: {e}")
-        fallback = {"version": "https://jsonfeed.org/version/1.1", "title": "Syrabit.ai", "items": []}
+        fallback = {
+            "version": "https://jsonfeed.org/version/1.1",
+            "title": "Syrabit.ai",
+            "items": [],
+        }
         return Response(content=json.dumps(fallback), media_type="application/json")
