@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Citations graph for credibility signals (Tier 2 #8), multi-modal grounding with ImageObject schema (Tier 2 #9), and API/feed exposure via RSS/Atom/JSON feeds for AI crawlers (Tier 2 #10). Also adds programmatic sitemap expansion for topic-level pages (Tier 2 #7).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/frontend/src/lib/jsonld.js chapterSchema(): (a) Add a 'citation' array to the Article node when data.citations is available - each citation becomes a CreativeWork with url, name, and publisher (prioritize .edu/.gov sources). (b) Add 'sourceOrganization' when the content references an authoritative board/institution.",
     "In apps/frontend/src/lib/jsonld.js: Create a new exported function `imageObjectSchema({ url, caption, width, height, contentUrl })` that returns a proper ImageObject node with detailed descriptive fields. Add image node support to chapterSchema - when data.images or data.diagrams are present, emit ImageObject nodes with alt text as 'description', linking to the parent Article.",
@@ -31,5 +31,5 @@
     "Verify sitemap-topics is registered: grep 'sitemap-topics' apps/backend/app/api/v1/seo.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 9 steps implemented successfully. Tests pass (579 passed, 5 pre-existing failures in AdminHealth.credits.test.jsx). imageObjectSchema exports correctly and integrates into chapterSchema graph. Backend endpoints for feed.xml, feed.json, and sitemap-topics.xml added with proper error handling and caching. Static files (robots.txt, ai.txt, llms.txt) updated with feed/sitemap references."
 }
