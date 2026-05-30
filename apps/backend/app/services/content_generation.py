@@ -76,6 +76,33 @@ class ContentGenerationService:
 
         chapter.meta_description = meta_description
         chapter.keywords = keywords
+
+        # Generate FAQ entries for the chapter topics
+        faq_prompt = (
+            f"Generate exactly 5 frequently asked questions and answers about: {chapter.title}. "
+            f"Topics covered: {topics_text}\n\n"
+            "Format each as:\nQ: <question>\nA: <answer>\n\n"
+            "Make questions specific and educational. Answers should be 1-3 sentences."
+        )
+        try:
+            faq_response = await vertex_client.generate(
+                "You are an educational FAQ writer for Indian board exam students.",
+                faq_prompt,
+            )
+            faq_entries = []
+            current_q = ""
+            for line in faq_response.split("\n"):
+                line = line.strip()
+                if line.startswith("Q:"):
+                    current_q = line[2:].strip()
+                elif line.startswith("A:") and current_q:
+                    faq_entries.append({"question": current_q, "answer": line[2:].strip()})
+                    current_q = ""
+            if len(faq_entries) >= 2:
+                chapter.faq_jsonld = faq_entries
+        except Exception as e:
+            logger.warning(f"FAQ generation failed for {chapter.title}: {e}")
+
         chapter.word_count = len(content_en.split())
         chapter.status = "generated"
         chapter.updated_at = datetime.now(timezone.utc)
