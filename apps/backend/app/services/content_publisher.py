@@ -30,7 +30,9 @@ class ContentPublisherService:
 
         subject = await Subject.get(chapter.subject_id) if chapter.subject_id else None
         stream = (
-            await Stream.get(subject.stream_id) if subject and subject.stream_id else None
+            await Stream.get(subject.stream_id)
+            if subject and subject.stream_id
+            else None
         )
         cls = await Class.get(stream.class_id) if stream and stream.class_id else None
         board = await Board.get(cls.board_id) if cls and cls.board_id else None
@@ -127,13 +129,15 @@ class ContentPublisherService:
                         "board_name": board.name if board else "",
                         "stream_name": stream.name if stream else "",
                         "hierarchy": " > ".join(
-                            seg for seg in [
+                            seg
+                            for seg in [
                                 board.name if board else "",
                                 cls.name if cls else "",
                                 stream.name if stream else "",
                                 subject.name if subject else "",
                                 chapter.title,
-                            ] if seg
+                            ]
+                            if seg
                         ),
                     }
                 )
@@ -153,7 +157,7 @@ class ContentPublisherService:
                     await asyncio.to_thread(client.update_document, request=request)
 
                 # Index each topic as a micro-document for precise matching
-                for topic in (chapter.published_topics or []):
+                for topic in chapter.published_topics or []:
                     topic_doc_id = f"{str(chapter.id)}_topic_{topic.id}"
                     topic_struct = struct_pb2.Struct()
                     topic_struct.update(
@@ -169,14 +173,16 @@ class ContentPublisherService:
                             "board_name": board.name if board else "",
                             "stream_name": stream.name if stream else "",
                             "hierarchy": " > ".join(
-                                seg for seg in [
+                                seg
+                                for seg in [
                                     board.name if board else "",
                                     cls.name if cls else "",
                                     stream.name if stream else "",
                                     subject.name if subject else "",
                                     chapter.title,
                                     topic.title,
-                                ] if seg
+                                ]
+                                if seg
                             ),
                             "keywords": chapter.keywords or "",
                             "is_topic_doc": "true",
@@ -198,6 +204,7 @@ class ContentPublisherService:
                 # Index TopicHub documents for enhanced RAG
                 try:
                     from app.models.topic_hub import TopicHub as TopicHubModel
+
                     topic_hubs = await TopicHubModel.find(
                         {"chapter_id": chapter.id}
                     ).to_list()
@@ -220,14 +227,16 @@ class ContentPublisherService:
                                 ),
                                 "key_points": "; ".join(hub.key_points),
                                 "hierarchy": " > ".join(
-                                    seg for seg in [
+                                    seg
+                                    for seg in [
                                         board.name if board else "",
                                         cls.name if cls else "",
                                         stream.name if stream else "",
                                         subject.name if subject else "",
                                         chapter.title,
                                         hub.title,
-                                    ] if seg
+                                    ]
+                                    if seg
                                 ),
                                 "difficulty": hub.difficulty_level,
                                 "importance": hub.importance,
@@ -248,9 +257,13 @@ class ContentPublisherService:
                             document=hub_doc,
                             allow_missing=True,
                         )
-                        await asyncio.to_thread(client.update_document, request=request_obj)
+                        await asyncio.to_thread(
+                            client.update_document, request=request_obj
+                        )
 
-                    logger.info(f"Indexed {len(topic_hubs)} TopicHub docs for chapter {chapter.id}")
+                    logger.info(
+                        f"Indexed {len(topic_hubs)} TopicHub docs for chapter {chapter.id}"
+                    )
                 except ImportError:
                     pass
                 except Exception as e:

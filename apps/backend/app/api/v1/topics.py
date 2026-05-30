@@ -21,6 +21,7 @@ async def get_topic_hub(topic_slug: str, chapter_id: Optional[str] = Query(None)
     query = {"topic_slug": topic_slug}
     if chapter_id:
         from beanie import PydanticObjectId
+
         query["chapter_id"] = PydanticObjectId(chapter_id)
 
     hub = await TopicHub.find_one(query)
@@ -36,6 +37,7 @@ async def get_topic_mcqs(topic_slug: str, chapter_id: Optional[str] = Query(None
     query = {"topic_slug": topic_slug}
     if chapter_id:
         from beanie import PydanticObjectId
+
         query["chapter_id"] = PydanticObjectId(chapter_id)
 
     hub = await TopicHub.find_one(query)
@@ -56,6 +58,7 @@ async def get_topic_pyqs(topic_slug: str, chapter_id: Optional[str] = Query(None
     query = {"topic_slug": topic_slug}
     if chapter_id:
         from beanie import PydanticObjectId
+
         query["chapter_id"] = PydanticObjectId(chapter_id)
 
     hub = await TopicHub.find_one(query)

@@ -4,7 +4,6 @@ KnowledgeGraphService - Traverses topic relationships for learning paths and clu
 
 import json
 import logging
-from typing import Optional
 
 from beanie import PydanticObjectId
 
@@ -24,18 +23,24 @@ class KnowledgeGraphService:
 
         related = []
         for relation in hub.relations:
-            related_hub = await TopicHub.find_one({"topic_slug": relation.related_topic_slug})
-            related.append({
-                "topic_slug": relation.related_topic_slug,
-                "relation_type": relation.relation_type,
-                "strength": relation.strength,
-                "description": relation.description,
-                "title": related_hub.title if related_hub else None,
-                "definition": related_hub.definition if related_hub else None,
-            })
+            related_hub = await TopicHub.find_one(
+                {"topic_slug": relation.related_topic_slug}
+            )
+            related.append(
+                {
+                    "topic_slug": relation.related_topic_slug,
+                    "relation_type": relation.relation_type,
+                    "strength": relation.strength,
+                    "description": relation.description,
+                    "title": related_hub.title if related_hub else None,
+                    "definition": related_hub.definition if related_hub else None,
+                }
+            )
         return related
 
-    async def get_prerequisite_chain(self, topic_slug: str, max_depth: int = 10) -> list[dict]:
+    async def get_prerequisite_chain(
+        self, topic_slug: str, max_depth: int = 10
+    ) -> list[dict]:
         """Return the learning path - what to study first (follows prerequisite/builds_on edges)."""
         chain = []
         visited = set()
@@ -52,7 +57,8 @@ class KnowledgeGraphService:
 
             # Find prerequisite relations
             prereqs = [
-                r for r in hub.relations
+                r
+                for r in hub.relations
                 if r.relation_type in ("prerequisite", "builds_on")
             ]
             if not prereqs:
@@ -62,14 +68,20 @@ class KnowledgeGraphService:
             prereqs.sort(key=lambda r: r.strength, reverse=True)
             best = prereqs[0]
 
-            prereq_hub = await TopicHub.find_one({"topic_slug": best.related_topic_slug})
-            chain.append({
-                "topic_slug": best.related_topic_slug,
-                "title": prereq_hub.title if prereq_hub else best.related_topic_slug,
-                "definition": prereq_hub.definition if prereq_hub else None,
-                "relation_type": best.relation_type,
-                "strength": best.strength,
-            })
+            prereq_hub = await TopicHub.find_one(
+                {"topic_slug": best.related_topic_slug}
+            )
+            chain.append(
+                {
+                    "topic_slug": best.related_topic_slug,
+                    "title": prereq_hub.title
+                    if prereq_hub
+                    else best.related_topic_slug,
+                    "definition": prereq_hub.definition if prereq_hub else None,
+                    "relation_type": best.relation_type,
+                    "strength": best.strength,
+                }
+            )
             current_slug = best.related_topic_slug
 
         # Reverse so prerequisites come first (learning order)
@@ -102,12 +114,14 @@ class KnowledgeGraphService:
             }
 
             for relation in hub.relations:
-                edges.append({
-                    "source": current_slug,
-                    "target": relation.related_topic_slug,
-                    "relation_type": relation.relation_type,
-                    "strength": relation.strength,
-                })
+                edges.append(
+                    {
+                        "source": current_slug,
+                        "target": relation.related_topic_slug,
+                        "relation_type": relation.relation_type,
+                        "strength": relation.strength,
+                    }
+                )
                 if relation.related_topic_slug not in visited:
                     queue.append((relation.related_topic_slug, current_depth + 1))
 
@@ -117,7 +131,9 @@ class KnowledgeGraphService:
         """Use Vertex AI to infer relationships between topics in the same chapter."""
         from app.services.ai.vertex_client import vertex_client
 
-        hubs = await TopicHub.find({"chapter_id": PydanticObjectId(chapter_id)}).to_list()
+        hubs = await TopicHub.find(
+            {"chapter_id": PydanticObjectId(chapter_id)}
+        ).to_list()
         if len(hubs) < 2:
             return []
 
@@ -154,7 +170,9 @@ class KnowledgeGraphService:
             for item in relations:
                 try:
                     validated = TopicRelation(
-                        related_topic_slug=item.get("target_slug", item.get("related_topic_slug", "")),
+                        related_topic_slug=item.get(
+                            "target_slug", item.get("related_topic_slug", "")
+                        ),
                         relation_type=item.get("relation_type", "related"),
                         strength=float(item.get("strength", 0.5)),
                         description=item.get("description"),

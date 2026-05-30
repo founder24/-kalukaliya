@@ -332,9 +332,7 @@ def create_app() -> FastAPI:
     app.include_router(
         admin_topics.router, prefix="/api/v1/admin", tags=["Admin Topics"]
     )
-    app.include_router(
-        topics.router, prefix="/api/v1/topics", tags=["Topics"]
-    )
+    app.include_router(topics.router, prefix="/api/v1/topics", tags=["Topics"])
     app.include_router(users.router, prefix="/api/v1/user", tags=["Users"])
 
     # Legacy health probe redirects for backward compatibility.

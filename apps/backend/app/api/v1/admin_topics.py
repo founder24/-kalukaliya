@@ -73,12 +73,16 @@ async def generate_topic_hub(request: Request, body: GenerateHubRequest):
         raise HTTPException(status_code=404, detail="Topic not found in chapter")
 
     # Check if hub already exists
-    existing = await TopicHub.find_one({
-        "topic_slug": body.topic_slug,
-        "chapter_id": PydanticObjectId(body.chapter_id),
-    })
+    existing = await TopicHub.find_one(
+        {
+            "topic_slug": body.topic_slug,
+            "chapter_id": PydanticObjectId(body.chapter_id),
+        }
+    )
     if existing:
-        raise HTTPException(status_code=409, detail="TopicHub already exists for this topic")
+        raise HTTPException(
+            status_code=409, detail="TopicHub already exists for this topic"
+        )
 
     # Create the hub
     hub = TopicHub(
@@ -129,7 +133,9 @@ async def generate_relations(request: Request, hub_id: str):
     if not hub:
         raise HTTPException(status_code=404, detail="TopicHub not found")
 
-    relations = await authority_generator_service.generate_topic_relations(str(hub.chapter_id))
+    relations = await authority_generator_service.generate_topic_relations(
+        str(hub.chapter_id)
+    )
     return {
         "hub_id": hub_id,
         "chapter_id": str(hub.chapter_id),

@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
 
-from app.models.topic_hub import TopicHub, TopicMCQ, TopicPYQ, TopicSource, TopicRelation
+from app.models.topic_hub import (
+    TopicHub,
+    TopicMCQ,
+    TopicSource,
+)
 from app.services.ai.vertex_client import vertex_client
 
 logger = logging.getLogger(__name__)
@@ -113,19 +117,23 @@ class AuthorityGeneratorService:
             try:
                 solution = await vertex_client.generate(system_prompt, user_message)
                 pyq.solution = solution.strip()
-                results.append({
-                    "question": pyq.question,
-                    "year": pyq.year,
-                    "solution_generated": True,
-                })
+                results.append(
+                    {
+                        "question": pyq.question,
+                        "year": pyq.year,
+                        "solution_generated": True,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Failed to generate solution for PYQ: {e}")
-                results.append({
-                    "question": pyq.question,
-                    "year": pyq.year,
-                    "solution_generated": False,
-                    "error": str(e),
-                })
+                results.append(
+                    {
+                        "question": pyq.question,
+                        "year": pyq.year,
+                        "solution_generated": False,
+                        "error": str(e),
+                    }
+                )
 
         hub.updated_at = datetime.now(timezone.utc)
         await hub.save()
@@ -134,6 +142,7 @@ class AuthorityGeneratorService:
     async def generate_topic_relations(self, chapter_id: str) -> list[dict]:
         """Auto-infer inter-topic relations using AI. Delegates to knowledge_graph_service."""
         from app.services.knowledge_graph import knowledge_graph_service
+
         return await knowledge_graph_service.auto_generate_relations(chapter_id)
 
     async def enrich_authority_sources(self, topic_hub_id: str) -> list[TopicSource]:

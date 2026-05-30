@@ -37,7 +37,14 @@ def _set_cached_sitemap(key: str, content: str) -> None:
 
 def _xml_escape(text: str) -> str:
     """Escape special XML characters."""
-    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&apos;")
+    return (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
 
 
 SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -326,7 +333,16 @@ async def feed_xml():
             await KnowledgeObject.find({"status": "published"})
             .sort("-updated_at")
             .limit(50)
-            .project({"slug": 1, "title": 1, "description": 1, "metadata": 1, "updated_at": 1, "published_at": 1})
+            .project(
+                {
+                    "slug": 1,
+                    "title": 1,
+                    "description": 1,
+                    "metadata": 1,
+                    "updated_at": 1,
+                    "published_at": 1,
+                }
+            )
             .to_list()
         )
         items_xml = []
@@ -348,23 +364,24 @@ async def feed_xml():
                 f"      <link>{link}</link>\n"
                 f"      <description>{_xml_escape(desc)}</description>\n"
                 f"      <pubDate>{pub_str}</pubDate>\n"
-                f"      <guid isPermaLink=\"true\">{link}</guid>\n"
+                f'      <guid isPermaLink="true">{link}</guid>\n'
                 f"    </item>"
             )
         now_str = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
-            '  <channel>\n'
-            f'    <title>Syrabit.ai - Study Notes &amp; Exam Prep</title>\n'
-            f'    <link>{BASE_URL}</link>\n'
-            f'    <description>Latest study notes, definitions, and exam prep for Assam Board students</description>\n'
-            f'    <language>en-in</language>\n'
-            f'    <lastBuildDate>{now_str}</lastBuildDate>\n'
+            "  <channel>\n"
+            f"    <title>Syrabit.ai - Study Notes &amp; Exam Prep</title>\n"
+            f"    <link>{BASE_URL}</link>\n"
+            f"    <description>Latest study notes, definitions, and exam prep for Assam Board students</description>\n"
+            f"    <language>en-in</language>\n"
+            f"    <lastBuildDate>{now_str}</lastBuildDate>\n"
             f'    <atom:link href="{BASE_URL}/feed.xml" rel="self" type="application/rss+xml" />\n'
-            + "\n".join(items_xml) + "\n"
-            '  </channel>\n'
-            '</rss>'
+            + "\n".join(items_xml)
+            + "\n"
+            "  </channel>\n"
+            "</rss>"
         )
         _set_cached_sitemap("feed_xml", xml_content)
         return Response(content=xml_content, media_type="application/rss+xml")
@@ -383,10 +400,21 @@ async def feed_subject_xml(subject_slug: str):
         return Response(content=cached, media_type="application/rss+xml")
     try:
         objects = (
-            await KnowledgeObject.find({"status": "published", "metadata.subject": subject_slug})
+            await KnowledgeObject.find(
+                {"status": "published", "metadata.subject": subject_slug}
+            )
             .sort("-updated_at")
             .limit(50)
-            .project({"slug": 1, "title": 1, "description": 1, "metadata": 1, "updated_at": 1, "published_at": 1})
+            .project(
+                {
+                    "slug": 1,
+                    "title": 1,
+                    "description": 1,
+                    "metadata": 1,
+                    "updated_at": 1,
+                    "published_at": 1,
+                }
+            )
             .to_list()
         )
         items_xml = []
@@ -408,7 +436,7 @@ async def feed_subject_xml(subject_slug: str):
                 f"      <link>{link}</link>\n"
                 f"      <description>{_xml_escape(desc)}</description>\n"
                 f"      <pubDate>{pub_str}</pubDate>\n"
-                f"      <guid isPermaLink=\"true\">{link}</guid>\n"
+                f'      <guid isPermaLink="true">{link}</guid>\n'
                 f"    </item>"
             )
         subject_name = subject_slug.replace("-", " ").title()
@@ -416,16 +444,17 @@ async def feed_subject_xml(subject_slug: str):
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
-            '  <channel>\n'
-            f'    <title>Syrabit.ai - {_xml_escape(subject_name)}</title>\n'
-            f'    <link>{BASE_URL}</link>\n'
-            f'    <description>{_xml_escape(subject_name)} study notes and exam prep for Assam Board</description>\n'
-            f'    <language>en-in</language>\n'
-            f'    <lastBuildDate>{now_str}</lastBuildDate>\n'
+            "  <channel>\n"
+            f"    <title>Syrabit.ai - {_xml_escape(subject_name)}</title>\n"
+            f"    <link>{BASE_URL}</link>\n"
+            f"    <description>{_xml_escape(subject_name)} study notes and exam prep for Assam Board</description>\n"
+            f"    <language>en-in</language>\n"
+            f"    <lastBuildDate>{now_str}</lastBuildDate>\n"
             f'    <atom:link href="{BASE_URL}/feed/{subject_slug}.xml" rel="self" type="application/rss+xml" />\n'
-            + "\n".join(items_xml) + "\n"
-            '  </channel>\n'
-            '</rss>'
+            + "\n".join(items_xml)
+            + "\n"
+            "  </channel>\n"
+            "</rss>"
         )
         _set_cached_sitemap(cache_key, xml_content)
         return Response(content=xml_content, media_type="application/rss+xml")
@@ -446,7 +475,16 @@ async def feed_json():
             await KnowledgeObject.find({"status": "published"})
             .sort("-updated_at")
             .limit(50)
-            .project({"slug": 1, "title": 1, "description": 1, "metadata": 1, "updated_at": 1, "published_at": 1})
+            .project(
+                {
+                    "slug": 1,
+                    "title": 1,
+                    "description": 1,
+                    "metadata": 1,
+                    "updated_at": 1,
+                    "published_at": 1,
+                }
+            )
             .to_list()
         )
         items = []
@@ -465,9 +503,17 @@ async def feed_json():
                 "tags": [kw for kw in meta.get("keywords", []) if kw],
             }
             if pub_date:
-                item["date_published"] = pub_date.isoformat() if isinstance(pub_date, datetime) else str(pub_date)
+                item["date_published"] = (
+                    pub_date.isoformat()
+                    if isinstance(pub_date, datetime)
+                    else str(pub_date)
+                )
             if mod_date:
-                item["date_modified"] = mod_date.isoformat() if isinstance(mod_date, datetime) else str(mod_date)
+                item["date_modified"] = (
+                    mod_date.isoformat()
+                    if isinstance(mod_date, datetime)
+                    else str(mod_date)
+                )
             items.append(item)
 
         feed = {
@@ -484,5 +530,11 @@ async def feed_json():
         return Response(content=content, media_type="application/feed+json")
     except Exception as e:
         logger.warning(f"Failed to generate JSON feed: {e}")
-        fallback = json.dumps({"version": "https://jsonfeed.org/version/1.1", "title": "Syrabit.ai", "items": []})
+        fallback = json.dumps(
+            {
+                "version": "https://jsonfeed.org/version/1.1",
+                "title": "Syrabit.ai",
+                "items": [],
+            }
+        )
         return Response(content=fallback, media_type="application/feed+json")

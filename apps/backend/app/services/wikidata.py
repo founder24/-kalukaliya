@@ -41,7 +41,9 @@ async def lookup_wikidata_uri(topic_title: str) -> Optional[str]:
             response = await client.get(
                 WIKIDATA_SEARCH_URL,
                 params=params,
-                headers={"User-Agent": "SyrabitBot/1.0 (https://syrabit.ai; contact@syrabit.ai)"},
+                headers={
+                    "User-Agent": "SyrabitBot/1.0 (https://syrabit.ai; contact@syrabit.ai)"
+                },
             )
             if response.status_code != 200:
                 return None

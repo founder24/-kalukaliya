@@ -97,7 +97,9 @@ class ContentGenerationService:
                     if line.startswith("Q:"):
                         current_q = line[2:].strip()
                     elif line.startswith("A:") and current_q:
-                        faq_entries.append({"question": current_q, "answer": line[2:].strip()})
+                        faq_entries.append(
+                            {"question": current_q, "answer": line[2:].strip()}
+                        )
                         current_q = ""
                 if len(faq_entries) >= 2:
                     chapter.faq_jsonld = faq_entries

@@ -399,7 +399,9 @@ class TestAuthorityGeneratorService:
     @pytest.mark.asyncio
     @patch("app.services.authority_generator.vertex_client")
     @patch("app.services.authority_generator.TopicHub")
-    async def test_generate_mcqs_strips_markdown_fences(self, mock_hub_class, mock_vertex):
+    async def test_generate_mcqs_strips_markdown_fences(
+        self, mock_hub_class, mock_vertex
+    ):
         """Test MCQ generation strips markdown code fences from AI response."""
         from app.services.authority_generator import AuthorityGeneratorService
 
@@ -443,14 +445,16 @@ class TestTopicsAPI:
         app.include_router(router, prefix="/api/v1/topics")
 
         mock_hub = MagicMock()
-        mock_hub.model_dump = MagicMock(return_value={
-            "topic_slug": "osmosis",
-            "title": "Osmosis",
-            "definition": "Solvent movement",
-            "mcqs": [],
-            "pyqs": [],
-            "relations": [],
-        })
+        mock_hub.model_dump = MagicMock(
+            return_value={
+                "topic_slug": "osmosis",
+                "title": "Osmosis",
+                "definition": "Solvent movement",
+                "mcqs": [],
+                "pyqs": [],
+                "relations": [],
+            }
+        )
         mock_hub_class.find_one = AsyncMock(return_value=mock_hub)
 
         client = TestClient(app)
@@ -551,16 +555,18 @@ class TestTopicsAPI:
         app = FastAPI()
         app.include_router(router, prefix="/api/v1/topics")
 
-        mock_kg_service.get_related_topics = AsyncMock(return_value=[
-            {
-                "topic_slug": "diffusion",
-                "relation_type": "prerequisite",
-                "strength": 0.9,
-                "description": "Required prerequisite",
-                "title": "Diffusion",
-                "definition": "Particle movement",
-            }
-        ])
+        mock_kg_service.get_related_topics = AsyncMock(
+            return_value=[
+                {
+                    "topic_slug": "diffusion",
+                    "relation_type": "prerequisite",
+                    "strength": 0.9,
+                    "description": "Required prerequisite",
+                    "title": "Diffusion",
+                    "definition": "Particle movement",
+                }
+            ]
+        )
 
         client = TestClient(app)
         response = client.get("/api/v1/topics/osmosis/related")
@@ -581,15 +587,17 @@ class TestTopicsAPI:
         app = FastAPI()
         app.include_router(router, prefix="/api/v1/topics")
 
-        mock_kg_service.get_prerequisite_chain = AsyncMock(return_value=[
-            {
-                "topic_slug": "diffusion",
-                "title": "Diffusion",
-                "definition": "Particle movement",
-                "relation_type": "prerequisite",
-                "strength": 0.9,
-            }
-        ])
+        mock_kg_service.get_prerequisite_chain = AsyncMock(
+            return_value=[
+                {
+                    "topic_slug": "diffusion",
+                    "title": "Diffusion",
+                    "definition": "Particle movement",
+                    "relation_type": "prerequisite",
+                    "strength": 0.9,
+                }
+            ]
+        )
 
         client = TestClient(app)
         response = client.get("/api/v1/topics/osmosis/study-path")

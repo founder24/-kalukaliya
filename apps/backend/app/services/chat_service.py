@@ -171,9 +171,13 @@ class ChatService:
             if chunk.get("is_topic_hub") == "true":
                 hints = []
                 if chunk.get("mcq_count") and chunk["mcq_count"] != "0":
-                    hints.append(f"[{i + 1}] has {chunk['mcq_count']} practice MCQs available")
+                    hints.append(
+                        f"[{i + 1}] has {chunk['mcq_count']} practice MCQs available"
+                    )
                 if chunk.get("pyq_count") and chunk["pyq_count"] != "0":
-                    hints.append(f"[{i + 1}] has {chunk['pyq_count']} previous year questions")
+                    hints.append(
+                        f"[{i + 1}] has {chunk['pyq_count']} previous year questions"
+                    )
                 if chunk.get("related_topics"):
                     hints.append(f"[{i + 1}] related topics: {chunk['related_topics']}")
                 topic_hub_hints.extend(hints)

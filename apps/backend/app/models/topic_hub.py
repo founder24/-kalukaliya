@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 class TopicSource(BaseModel):
     """A linked authoritative source for a topic."""
+
     source_type: str  # "ncert", "ahsec_syllabus", "official", "pyq", "reference"
     title: str
     url: Optional[str] = None
@@ -21,6 +22,7 @@ class TopicSource(BaseModel):
 
 class TopicMCQ(BaseModel):
     """A multiple-choice question linked to a topic."""
+
     question: str
     options: list[str]  # 4 options
     correct_index: int  # 0-3
@@ -31,6 +33,7 @@ class TopicMCQ(BaseModel):
 
 class TopicPYQ(BaseModel):
     """A Previous Year Question linked to a topic."""
+
     question: str
     year: int
     board: str  # "AHSEC", "SEBA"
@@ -41,6 +44,7 @@ class TopicPYQ(BaseModel):
 
 class TopicRelation(BaseModel):
     """A semantic relationship between topics in the Knowledge Graph."""
+
     related_topic_slug: str
     relation_type: str  # "prerequisite", "builds_on", "related", "contrasts", "part_of", "leads_to"
     strength: float = 0.5  # 0.0-1.0 relationship strength
@@ -52,6 +56,7 @@ class TopicHub(Document):
     The Authority Layer - makes each topic a rich knowledge hub.
     Links a topic to official sources, PYQs, MCQs, solutions, and related topics.
     """
+
     topic_slug: str
     chapter_id: PydanticObjectId
     subject_id: PydanticObjectId
