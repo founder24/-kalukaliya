@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 def mocked_pipeline_client():
     """
     TestClient with ALL external services mocked:
-    - Azure Search (embedding + search)
+    - Vertex Search (embedding + search)
     - Redis (rate limit, cache)
     - MongoDB (chat save, user update)
     - LLM providers (Sarvam, Cloudflare, Vertex)
@@ -57,7 +57,7 @@ def mocked_pipeline_client():
             return_value="mock-embedding-vector",
         ),
         "search": patch(
-            "app.services.search.azure_search.search_service.search_context",
+            "app.services.search.vertex_search.search_service.search_context",
             new_callable=AsyncMock,
             return_value=mock_context_chunks,
         ),

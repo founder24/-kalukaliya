@@ -9,7 +9,7 @@
 - Node.js 18+
 - Docker & Docker Compose
 - Cloudflare Account
-- Azure Subscription
+- GCP Project
 - MongoDB Atlas Cluster
 
 ### Local Development Setup
@@ -49,8 +49,8 @@ Syrabit uses a **9-Pillar Hybrid Architecture**:
 | Pillar | Provider | Service | Purpose |
 |--------|----------|---------|---------|
 | P1 | Cloudflare | Workers, Turnstile, R2 | Edge shield, bot protection, static assets |
-| P2 | Azure | Container Apps, KeyVault | FastAPI backend, orchestration |
-| P3 | Azure | Cognitive Search | Hybrid RAG (BM25 + Vector + Semantic Rerank) |
+| P2 | Google Cloud | Cloud Run | FastAPI backend, orchestration |
+| P3 | Vertex AI | Search (Discovery Engine) | Hybrid RAG (BM25 + Vector + Semantic Rerank) |
 | P4 | MongoDB | Atlas M10 | User profiles, chat history, subscriptions |
 | P5 | Upstash | Redis Global | Rate limiting, real-time counters |
 | P6 | Vertex AI | Gemini 1.5 Pro | English language reasoning |
@@ -87,7 +87,7 @@ syrabit-monorepo/
 │       │   └── services/  # AI, search, payments
 │       └── Dockerfile
 ├── infra/
-│   ├── azure/             # Bicep templates, search schema
+│   ├── gcp/               # Cloud Run service definition, Vertex Search schema
 │   └── scripts/           # Deployment & migration scripts
 ├── .github/workflows/     # CI/CD pipelines
 ├── docs/                  # Architecture documentation
@@ -96,12 +96,14 @@ syrabit-monorepo/
 
 ## 🔧 Configuration
 
-All 42 environment variables are documented in `.env.shared`:
+All environment variables are documented in `.env.shared`:
 
 ```bash
 # Example required variables
 CF_ACCOUNT_ID=acct_xxx
-AZURE_SEARCH_ENDPOINT=https://xxx.search.windows.net
+GCP_PROJECT_ID=your-gcp-project
+GCP_REGION=asia-south1
+BACKEND_URL=https://syrabit-backend-xxxxx.run.app
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net
 UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
 VERTEX_PROJECT_ID=your-gcp-project
@@ -114,15 +116,15 @@ See `.env.shared` for complete list with descriptions.
 
 ## 🚢 Deployment
 
-### Backend (Azure Container Apps)
+### Backend (Google Cloud Run)
 
 ```bash
 # Automated via GitHub Actions
 # Push to main triggers:
 # 1. Build Docker image
-# 2. Push to ACR
-# 3. Update Container App
-# 4. Sync search index schema
+# 2. Push to Artifact Registry
+# 3. Deploy to Cloud Run
+# 4. Health check verification
 ```
 
 ### Edge (Cloudflare Workers)
@@ -138,8 +140,8 @@ See `.env.shared` for complete list with descriptions.
 
 ```bash
 # Backend
-az acr build --registry syrabitregistry --image syrabit-backend:latest apps/backend
-az containerapp update --name ca-syrabit-api --image syrabitregistry.azurecr.io/syrabit-backend:latest
+gcloud builds submit --tag REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend:latest apps/backend
+gcloud run deploy syrabit-backend --image REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend:latest --region REGION
 
 # Edge
 cd apps/edge
@@ -164,8 +166,8 @@ python infra/scripts/test-rag-quality.py
 
 - **Errors**: Sentry (`SENTRY_DSN`)
 - **Analytics**: PostHog (`POSTHOG_API_KEY`)
-- **Logs**: Azure Application Insights
-- **Metrics**: Upstash dashboard, Azure Monitor
+- **Logs**: Cloud Run logs via Cloud Logging
+- **Metrics**: Upstash dashboard, GCP Cloud Monitoring
 
 ### Key Alerts
 
@@ -180,7 +182,7 @@ This architecture eliminates redundant services:
 
 | Service | Old Cost | New Cost | Savings |
 |---------|----------|----------|---------|
-| Pinecone | $70/mo | $0 (Azure Search) | 100% |
+| Pinecone | $70/mo | $0 (Vertex Search) | 100% |
 | Separate Compute | $200/mo | Consolidated | 40% |
 | Rate Limiting | $50/mo | Upstash Free | 100% |
 
@@ -188,11 +190,11 @@ This architecture eliminates redundant services:
 
 ## 🔒 Security & Compliance
 
-- **Data Residency**: All data in India regions (Azure India Central, MongoDB Mumbai)
+- **Data Residency**: All data in India regions (GCP asia-south1, MongoDB Mumbai)
 - **GDPR/DPDP**: Right to delete, data portability
 - **Rate Limiting**: DDoS protection
 - **Bot Mitigation**: Turnstile verification
-- **Secrets Management**: Azure KeyVault integration
+- **Secrets Management**: GCP Secret Manager
 
 ## 📈 Performance Targets
 
@@ -207,11 +209,11 @@ This architecture eliminates redundant services:
 
 ### Common Issues
 
-**1. Azure Search connection failed**
+**1. Vertex AI Search connection failed**
 ```bash
-# Check firewall settings
-# Verify AZURE_SEARCH_QUERY_KEY is correct
-# Test: curl "https://xxx.search.windows.net/indexes?api-version=2023-10-01-Preview" -H "api-key: xxx"
+# Verify GOOGLE_APPLICATION_CREDENTIALS_JSON is set correctly
+# Check that the service account has Discovery Engine permissions
+# Test: gcloud ai-platform operations list --project=PROJECT_ID
 ```
 
 **2. Rate limiting not working**
@@ -223,7 +225,7 @@ This architecture eliminates redundant services:
 
 **3. High latency**
 ```bash
-# Check Azure Search semantic reranker is enabled
+# Check Vertex Search reranker configuration
 # Verify embedding dimensions match (1536)
 # Monitor Upstash latency (<20ms target)
 ```

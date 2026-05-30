@@ -5,7 +5,7 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
     CF_TURNSTILE_SECRET: 'test-turnstile-secret',
-    AZURE_BACKEND_URL: 'http://localhost:8000',
+    BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
     RATE_LIMIT_KV: {
@@ -50,7 +50,7 @@ describe('API Proxy - proxyRequest', () => {
       },
     });
 
-    const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -84,7 +84,7 @@ describe('API Proxy - proxyRequest', () => {
       body: JSON.stringify({ message: 'hello' }),
     });
 
-    const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('text/event-stream');
@@ -102,7 +102,7 @@ describe('API Proxy - proxyRequest', () => {
       method: 'GET',
     });
 
-    const response = await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
 
     expect(response.status).toBe(503);
     const body = await response.json();
@@ -126,7 +126,7 @@ describe('API Proxy - proxyRequest', () => {
       },
     });
 
-    await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    await proxyRequest(request, env.BACKEND_URL, env);
 
     expect(capturedHeaders).not.toBeNull();
     expect(capturedHeaders!.get('X-Real-IP')).toBe('10.0.0.1');

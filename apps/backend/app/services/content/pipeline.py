@@ -68,7 +68,7 @@ class ContentPipeline:
             except Exception as e:
                 logger.error(f"Render failed for slug={knowledge_obj.slug}: {e}")
 
-            # Step 2: Index to Azure AI Search
+            # Step 2: Index to Vertex AI Search
             try:
                 indexed = await search_indexer.index_knowledge_object(knowledge_obj)
                 results["search_index"] = indexed

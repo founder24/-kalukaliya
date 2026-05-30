@@ -41,11 +41,14 @@ interface Env {
   JWT_PUBLIC_KEY?: string;
 
   // ── Variables (defined in wrangler.toml [vars]) ──
-  AZURE_BACKEND_URL: string;
+  BACKEND_URL: string;
   ALLOWED_ORIGIN: string;
 
   // Optional: override default 30s proxy timeout (milliseconds)
   PROXY_TIMEOUT_MS?: string;
+
+  // Optional: Google Service Account JSON key for Cloud Run authentication
+  GOOGLE_SA_KEY?: string;
 
   // ── Bindings ──
   R2_BUCKET: R2Bucket;

@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Trigger bulk translation
         env:
-          BACKEND_URL: ${{ secrets.AZURE_BACKEND_URL }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
           TRANSLATE_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
         run: |
           set -euo pipefail

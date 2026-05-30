@@ -15,7 +15,7 @@ const adminHdr = (token) => ({
 
 // Task #333 — observability rewire. The Scheduler + Tasks tabs were
 // retired alongside the GCP cron / async-worker tier; their live data
-// is now sourced from Azure ACA Jobs (`AdminCronJobsCard`) and AWS SQS
+// is now sourced from Cloud Run Jobs (`AdminCronJobsCard`) and AWS SQS
 // (`AdminAwsInfraCard`) under the Infrastructure tab. The remaining
 // tabs cover the inference-only Vertex / Discovery / Web Security
 // Scanner dependencies that surface in `/api/readyz` and stay on GCP.

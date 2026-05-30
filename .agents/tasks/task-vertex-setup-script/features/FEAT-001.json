@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create a comprehensive setup-vertex.sh script at infra/gcp/setup-vertex.sh that automates the complete GCP/Vertex AI setup from a brand-new account. The script must cover: project creation/selection, enabling all required APIs, creating a service account with correct IAM roles, setting up Vertex AI Search datastore and search engine/app, generating service account key JSON, creating Artifact Registry for Docker images, and outputting all the environment variables the backend needs.",
+  "status": "completed",
+  "steps": [
+    "Create infra/gcp/setup-vertex.sh as an executable bash script with clear section headers and comments",
+    "Section 1 - Configuration Variables: Define user-editable variables at the top: PROJECT_ID, BILLING_ACCOUNT_ID, REGION (default us-central1), DATASTORE_LOCATION (default global), DATASTORE_DISPLAY_NAME (default syrabit-edu-datastore), SERVICE_ACCOUNT_NAME (default syrabit-backend-sa), SEARCH_ENGINE_ID",
+    "Section 2 - Project Setup: Create GCP project (gcloud projects create) or select existing (gcloud config set project). Link billing account.",
+    "Section 3 - Enable APIs: Enable discoveryengine.googleapis.com, aiplatform.googleapis.com, run.googleapis.com, artifactregistry.googleapis.com, cloudbuild.googleapis.com, iam.googleapis.com, serviceusage.googleapis.com",
+    "Section 4 - Service Account: Create service account, assign roles: roles/discoveryengine.editor, roles/aiplatform.user, roles/run.developer, roles/artifactregistry.writer, roles/logging.logWriter, roles/monitoring.metricWriter",
+    "Section 5 - Vertex AI Search Datastore: Create a Discovery Engine datastore using the REST API (curl to discoveryengine.googleapis.com) since gcloud does not yet have full CLI support for datastore creation. Use the schema from infra/gcp/vertex-search-schema.json.",
+    "Section 6 - Search Engine/App: Create a Discovery Engine search engine that references the datastore using REST API",
+    "Section 7 - Artifact Registry: Create a Docker repository for Cloud Run images (REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend)",
+    "Section 8 - Service Account Key: Generate JSON key (gcloud iam service-accounts keys create), output the path and note it maps to GOOGLE_APPLICATION_CREDENTIALS_JSON env var",
+    "Section 9 - Output Summary: Print all environment variables needed for .env file: VERTEX_PROJECT_ID, VERTEX_SEARCH_DATASTORE_ID, VERTEX_SEARCH_SERVING_CONFIG, VERTEX_SEARCH_LOCATION, GOOGLE_APPLICATION_CREDENTIALS_JSON (path to key file), VERTEX_GEMINI_MODEL, VERTEX_LOCATION",
+    "Include error handling (set -euo pipefail), color output for progress messages, and a prerequisites check (gcloud installed, authenticated, billing account available)",
+    "Add a --dry-run flag that prints commands without executing them",
+    "Make the script chmod +x executable"
+  ],
+  "acceptance_criteria": [
+    "infra/gcp/setup-vertex.sh exists and passes bash -n syntax validation",
+    "Script enables all APIs needed by the backend (discoveryengine, aiplatform, run, artifactregistry, cloudbuild)",
+    "Script creates service account with all roles needed for Discovery Engine search, Vertex AI Gemini, and Cloud Run",
+    "Script creates a Discovery Engine datastore using REST API with proper schema",
+    "Script creates a search engine/app linked to the datastore",
+    "Script generates service account key and outputs all env vars from apps/backend/app/config.py that relate to Vertex/GCP",
+    "Script has clear comments explaining each step",
+    "Script includes prerequisites check and error handling"
+  ],
+  "verification": [
+    "Run: bash -n /projects/sandbox/-kalukaliya/infra/gcp/setup-vertex.sh (must pass with exit 0)",
+    "Confirm the script references all Vertex-related config vars from config.py"
+  ],
+  "blocked_reason": null,
+  "findings": "Script passes bash -n syntax validation. All 7 env vars from config.py are output. All 7 APIs enabled. All 6 IAM roles assigned. Datastore and search engine created via REST API. Script is idempotent (checks for existing resources). --dry-run flag works via run_cmd wrapper and conditional blocks for REST API calls. Review fixes applied: (1) key JSON no longer echoed to stdout, (2) inline schema removed in favor of deploy-search-index.py referencing vertex-search-schema.json, (3) dry-run now covers schema deployment step, (4) access token fetched once before Section 4, (5) Workload Identity Federation note added to Next Steps."
+}

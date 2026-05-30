@@ -81,11 +81,11 @@ describe('Edge Proxy - Connection header', () => {
     });
 
     const env = {
-      AZURE_BACKEND_URL: 'https://backend.azurecontainerapps.io',
+      BACKEND_URL: 'https://backend.run.app',
       ALLOWED_ORIGIN: 'https://syrabit.ai',
     } as unknown as Env;
 
-    await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    await proxyRequest(request, env.BACKEND_URL, env);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [targetUrl, fetchOptions] = fetchMock.mock.calls[0];
@@ -100,15 +100,15 @@ describe('Edge Proxy - Connection header', () => {
     });
 
     const env = {
-      AZURE_BACKEND_URL: 'https://backend.azurecontainerapps.io',
+      BACKEND_URL: 'https://backend.run.app',
       ALLOWED_ORIGIN: 'https://syrabit.ai',
     } as unknown as Env;
 
-    await proxyRequest(request, env.AZURE_BACKEND_URL, env);
+    await proxyRequest(request, env.BACKEND_URL, env);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [targetUrl] = fetchMock.mock.calls[0];
-    expect(targetUrl).toBe('https://backend.azurecontainerapps.io/api/v1/health');
+    expect(targetUrl).toBe('https://backend.run.app/api/v1/health');
   });
 
   it('proxy source code does not set Connection: keep-alive on outbound', async () => {

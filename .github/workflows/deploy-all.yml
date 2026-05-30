@@ -101,129 +101,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Azure
-        uses: azure/login@v2
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Fetch secrets from Azure KeyVault
-        run: |
-          set -euo pipefail
-          JWT_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name JWT-SECRET --query value -o tsv)
-          echo "::add-mask::$JWT_SECRET"
-          echo "JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
-          MONGODB_URI=$(az keyvault secret show --vault-name syrabit-prod-kv --name MONGO-URI --query value -o tsv)
-          echo "::add-mask::$MONGODB_URI"
-          echo "MONGODB_URI=$MONGODB_URI" >> "$GITHUB_ENV"
-          UPSTASH_REDIS_REST_URL=$(az keyvault secret show --vault-name syrabit-prod-kv --name UPSTASH-REDIS-REST-URL --query value -o tsv)
-          echo "::add-mask::$UPSTASH_REDIS_REST_URL"
-          echo "UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL" >> "$GITHUB_ENV"
-          UPSTASH_REDIS_REST_TOKEN=$(az keyvault secret show --vault-name syrabit-prod-kv --name UPSTASH-REDIS-REST-TOKEN --query value -o tsv)
-          echo "::add-mask::$UPSTASH_REDIS_REST_TOKEN"
-          echo "UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN" >> "$GITHUB_ENV"
-          GOOGLE_APPLICATION_CREDENTIALS_JSON=$(az keyvault secret show --vault-name syrabit-prod-kv --name GOOGLE-APPLICATION-CREDENTIALS-JSON --query value -o tsv)
-          echo "::add-mask::$GOOGLE_APPLICATION_CREDENTIALS_JSON"
-          echo "GOOGLE_APPLICATION_CREDENTIALS_JSON=$GOOGLE_APPLICATION_CREDENTIALS_JSON" >> "$GITHUB_ENV"
-          SARVAM_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name SARVAM-API-KEY --query value -o tsv)
-          echo "::add-mask::$SARVAM_API_KEY"
-          echo "SARVAM_API_KEY=$SARVAM_API_KEY" >> "$GITHUB_ENV"
-          RAZORPAY_KEY_ID=$(az keyvault secret show --vault-name syrabit-prod-kv --name RAZORPAY-KEY-ID --query value -o tsv)
-          echo "::add-mask::$RAZORPAY_KEY_ID"
-          echo "RAZORPAY_KEY_ID=$RAZORPAY_KEY_ID" >> "$GITHUB_ENV"
-          RAZORPAY_KEY_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name RAZORPAY-KEY-SECRET --query value -o tsv)
-          echo "::add-mask::$RAZORPAY_KEY_SECRET"
-          echo "RAZORPAY_KEY_SECRET=$RAZORPAY_KEY_SECRET" >> "$GITHUB_ENV"
-          RAZORPAY_WEBHOOK_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name RAZORPAY-WEBHOOK-SECRET --query value -o tsv)
-          echo "::add-mask::$RAZORPAY_WEBHOOK_SECRET"
-          echo "RAZORPAY_WEBHOOK_SECRET=$RAZORPAY_WEBHOOK_SECRET" >> "$GITHUB_ENV"
-          POSTHOG_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name POSTHOG-API-KEY --query value -o tsv)
-          echo "::add-mask::$POSTHOG_API_KEY"
-          echo "POSTHOG_API_KEY=$POSTHOG_API_KEY" >> "$GITHUB_ENV"
-          SENTRY_DSN=$(az keyvault secret show --vault-name syrabit-prod-kv --name SENTRY-DSN --query value -o tsv)
-          echo "::add-mask::$SENTRY_DSN"
-          echo "SENTRY_DSN=$SENTRY_DSN" >> "$GITHUB_ENV"
-          ADMIN_JWT_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name ADMIN-JWT-SECRET --query value -o tsv)
-          echo "::add-mask::$ADMIN_JWT_SECRET"
-          echo "ADMIN_JWT_SECRET=$ADMIN_JWT_SECRET" >> "$GITHUB_ENV"
-          VERTEX_PROJECT_ID=$(az keyvault secret show --vault-name syrabit-prod-kv --name VERTEX-PROJECT-ID --query value -o tsv)
-          echo "::add-mask::$VERTEX_PROJECT_ID"
-          echo "VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID" >> "$GITHUB_ENV"
-          AZURE_SEARCH_ENDPOINT=$(az keyvault secret show --vault-name syrabit-prod-kv --name AZURE-SEARCH-ENDPOINT --query value -o tsv)
-          echo "::add-mask::$AZURE_SEARCH_ENDPOINT"
-          echo "AZURE_SEARCH_ENDPOINT=$AZURE_SEARCH_ENDPOINT" >> "$GITHUB_ENV"
-          AZURE_SEARCH_ADMIN_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name AZURE-SEARCH-ADMIN-KEY --query value -o tsv)
-          echo "::add-mask::$AZURE_SEARCH_ADMIN_KEY"
-          echo "AZURE_SEARCH_ADMIN_KEY=$AZURE_SEARCH_ADMIN_KEY" >> "$GITHUB_ENV"
-          AZURE_SEARCH_QUERY_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name AZURE-SEARCH-QUERY-KEY --query value -o tsv)
-          echo "::add-mask::$AZURE_SEARCH_QUERY_KEY"
-          echo "AZURE_SEARCH_QUERY_KEY=$AZURE_SEARCH_QUERY_KEY" >> "$GITHUB_ENV"
-          RESEND_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name RESEND-API-KEY --query value -o tsv)
-          echo "::add-mask::$RESEND_API_KEY"
-          echo "RESEND_API_KEY=$RESEND_API_KEY" >> "$GITHUB_ENV"
-          INDEXNOW_API_KEY=$(az keyvault secret show --vault-name syrabit-prod-kv --name INDEXNOW-API-KEY --query value -o tsv)
-          echo "::add-mask::$INDEXNOW_API_KEY"
-          echo "INDEXNOW_API_KEY=$INDEXNOW_API_KEY" >> "$GITHUB_ENV"
-          INDEXNOW_INTERNAL_SECRET=$(az keyvault secret show --vault-name syrabit-prod-kv --name INDEXNOW-INTERNAL-SECRET --query value -o tsv)
-          echo "::add-mask::$INDEXNOW_INTERNAL_SECRET"
-          echo "INDEXNOW_INTERNAL_SECRET=$INDEXNOW_INTERNAL_SECRET" >> "$GITHUB_ENV"
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Build & Push to ACR
-        run: |
-          az acr build \
-            --registry syrabitacr \
-            --resource-group syrabit-prod \
-            --image syrabit/backend:${{ github.sha }} \
-            --image syrabit/backend:latest \
-            --file apps/backend/Dockerfile \
-            apps/backend/
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
 
-      - name: Trivy vulnerability scan
+      - name: Build & Push to Artifact Registry
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          az acr login --name syrabitacr
-          trivy image --severity CRITICAL --exit-code 1 --no-progress syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }}
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/syrabit/backend:${{ github.sha }}"
+          IMAGE_LATEST="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/syrabit/backend:latest"
+          docker build -t "$IMAGE" -t "$IMAGE_LATEST" -f apps/backend/Dockerfile apps/backend/
+          docker push "$IMAGE"
+          docker push "$IMAGE_LATEST"
 
-      - name: Deploy to Container Apps
+      - name: Deploy to Cloud Run
         run: |
-          az containerapp update \
-            --name syrabit-backend \
-            --resource-group syrabit-prod \
-            --image syrabitacr.azurecr.io/syrabit/backend:${{ github.sha }} \
-            --set-env-vars \
-              "JWT_SECRET=${{ env.JWT_SECRET }}" \
-              "MONGODB_URI=${{ env.MONGODB_URI }}" \
-              "UPSTASH_REDIS_REST_URL=${{ env.UPSTASH_REDIS_REST_URL }}" \
-              "UPSTASH_REDIS_REST_TOKEN=${{ env.UPSTASH_REDIS_REST_TOKEN }}" \
-              "GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ env.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" \
-              "SARVAM_API_KEY=${{ env.SARVAM_API_KEY }}" \
-              "RAZORPAY_KEY_ID=${{ env.RAZORPAY_KEY_ID }}" \
-              "RAZORPAY_KEY_SECRET=${{ env.RAZORPAY_KEY_SECRET }}" \
-              "RAZORPAY_WEBHOOK_SECRET=${{ env.RAZORPAY_WEBHOOK_SECRET }}" \
-              "POSTHOG_API_KEY=${{ env.POSTHOG_API_KEY }}" \
-              "SENTRY_DSN=${{ env.SENTRY_DSN }}" \
-              "ADMIN_JWT_SECRET=${{ env.ADMIN_JWT_SECRET }}" \
-              "VERTEX_PROJECT_ID=${{ env.VERTEX_PROJECT_ID }}" \
-              "AZURE_SEARCH_ENDPOINT=${{ env.AZURE_SEARCH_ENDPOINT }}" \
-              "AZURE_SEARCH_ADMIN_KEY=${{ env.AZURE_SEARCH_ADMIN_KEY }}" \
-              "AZURE_SEARCH_QUERY_KEY=${{ env.AZURE_SEARCH_QUERY_KEY }}" \
-              "RESEND_API_KEY=${{ env.RESEND_API_KEY }}" \
-              "INDEXNOW_API_KEY=${{ env.INDEXNOW_API_KEY }}" \
-              "INDEXNOW_INTERNAL_SECRET=${{ env.INDEXNOW_INTERNAL_SECRET }}" \
-              "RESET_TOKEN_SECRET=${{ secrets.RESET_TOKEN_SECRET }}" \
-              "TRANSLATE_CRON_SECRET=${{ secrets.TRANSLATE_CRON_SECRET }}" \
-              "APP_ENV=production"
+          gcloud run deploy syrabit-backend \
+            --image "${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/syrabit/backend:${{ github.sha }}" \
+            --region ${{ secrets.GCP_REGION }} \
+            --platform managed \
+            --port 8000 \
+            --min-instances 1 \
+            --max-instances 10 \
+            --memory 1Gi \
+            --cpu 1 \
+            --set-env-vars "APP_ENV=production" \
+            --set-secrets "JWT_SECRET=JWT_SECRET:latest,MONGODB_URI=MONGODB_URI:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=SARVAM_API_KEY:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest,SENTRY_DSN=SENTRY_DSN:latest,ADMIN_JWT_SECRET=ADMIN_JWT_SECRET:latest,VERTEX_PROJECT_ID=VERTEX_PROJECT_ID:latest,RESEND_API_KEY=RESEND_API_KEY:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET:latest,RESET_TOKEN_SECRET=RESET_TOKEN_SECRET:latest,TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET:latest" \
+            --allow-unauthenticated
 
       - name: Wait for healthy revision
         run: |
-          FQDN=$(az containerapp show \
-            --name syrabit-backend \
-            --resource-group syrabit-prod \
-            --query 'properties.configuration.ingress.fqdn' -o tsv)
-          echo "Polling https://${FQDN}/health for up to 150 seconds..."
+          SERVICE_URL=$(gcloud run services describe syrabit-backend \
+            --region ${{ secrets.GCP_REGION }} \
+            --format 'value(status.url)')
+          echo "Polling ${SERVICE_URL}/health for up to 150 seconds..."
           for i in $(seq 1 30); do
-            if curl -sf "https://${FQDN}/health" --max-time 5; then
+            if curl -sf "${SERVICE_URL}/health" --max-time 5; then
               echo ""
               echo "Backend healthy after $((i * 5)) seconds"
               exit 0
@@ -396,36 +316,33 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Authenticate to Azure
-        uses: azure/login@v2
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Rollback backend to previous revision
         run: |
           echo "Smoke tests failed - initiating backend rollback..."
-          # Get revisions sorted by creation time (newest first)
-          CURRENT=$(az containerapp revision list \
-            --name syrabit-backend \
-            --resource-group syrabit-prod \
-            --query "sort_by([?properties.active], &properties.createdTime) | [-1].name" -o tsv)
-          PREVIOUS=$(az containerapp revision list \
-            --name syrabit-backend \
-            --resource-group syrabit-prod \
-            --query "sort_by([?properties.active], &properties.createdTime) | [-2].name" -o tsv)
-          
+          # List revisions sorted by creation time (newest first)
+          REVISIONS=$(gcloud run revisions list \
+            --service syrabit-backend \
+            --region ${{ secrets.GCP_REGION }} \
+            --sort-by ~creationTimestamp \
+            --format 'value(REVISION)' \
+            --limit 2)
+          CURRENT=$(echo "$REVISIONS" | head -1)
+          PREVIOUS=$(echo "$REVISIONS" | tail -1)
+
           if [ -n "$PREVIOUS" ] && [ -n "$CURRENT" ] && [ "$PREVIOUS" != "$CURRENT" ]; then
-            echo "Rolling back: deactivating $CURRENT, activating $PREVIOUS"
-            az containerapp revision deactivate \
-              --name syrabit-backend \
-              --resource-group syrabit-prod \
-              --revision "$CURRENT" || true
-            az containerapp ingress traffic set \
-              --name syrabit-backend \
-              --resource-group syrabit-prod \
-              --revision-weight "$PREVIOUS=100"
+            echo "Rolling back: routing traffic from $CURRENT to $PREVIOUS"
+            gcloud run services update-traffic syrabit-backend \
+              --region ${{ secrets.GCP_REGION }} \
+              --to-revisions "$PREVIOUS=100"
             echo "Backend rollback complete"
           else
             echo "WARNING: Could not determine previous revision for rollback"

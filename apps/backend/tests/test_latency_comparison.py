@@ -13,7 +13,7 @@ Optimizations measured:
 1. Chat endpoint: asyncio.gather for parallel retrieve_context + load_conversation_history
 2. Rate limit: Redis pipeline + edge trust header skips burst check
 3. Middleware: 3 separate chains consolidated into 1 unified middleware
-4. Azure Search: warm-up on startup eliminates cold start DNS/TLS penalty
+4. Vertex Search: warm-up on startup eliminates cold start DNS/TLS penalty
 """
 
 import asyncio
@@ -175,7 +175,7 @@ async def test_page_load_old_middleware_overhead():
     """
     Simulate OLD 3 middleware chains:
     - Each middleware wraps call_next adding ~15ms overhead
-    - First Azure Search call adds 200ms cold start (no warm-up)
+    - First Vertex Search call adds 200ms cold start (no warm-up)
     Total middleware overhead: ~45ms + 200ms cold = 245ms
     """
 
@@ -185,13 +185,13 @@ async def test_page_load_old_middleware_overhead():
         result = await call_next()
         return result
 
-    async def azure_search_cold_start():
+    async def vertex_search_cold_start():
         """First request: DNS + TLS handshake = 200ms cold start."""
         await asyncio.sleep(0.200)
         return {"results": []}
 
     async def handler():
-        return await azure_search_cold_start()
+        return await vertex_search_cold_start()
 
     start = time.perf_counter()
 
@@ -216,7 +216,7 @@ async def test_page_load_new_unified_middleware():
     """
     Simulate NEW single middleware:
     - One middleware with 15ms overhead
-    - Azure Search already warmed up (0ms cold start)
+    - Vertex Search already warmed up (0ms cold start)
     Total: ~15ms
     """
 
@@ -226,16 +226,16 @@ async def test_page_load_new_unified_middleware():
         result = await call_next()
         return result
 
-    async def azure_search_warm():
+    async def vertex_search_warm():
         """Already warmed up: no DNS/TLS delay."""
         return {"results": []}
 
     async def handler():
-        return await azure_search_warm()
+        return await vertex_search_warm()
 
     start = time.perf_counter()
 
-    # NEW: single unified middleware + warm Azure Search
+    # NEW: single unified middleware + warm Vertex Search
     await unified_middleware(handler)
 
     elapsed = time.perf_counter() - start
@@ -257,18 +257,18 @@ async def test_page_load_improvement():
         await asyncio.sleep(0.015)
         return await call_next()
 
-    async def azure_search_cold():
+    async def vertex_search_cold():
         await asyncio.sleep(0.200)
         return {"results": []}
 
-    async def azure_search_warm():
+    async def vertex_search_warm():
         return {"results": []}
 
     async def handler_cold():
-        return await azure_search_cold()
+        return await vertex_search_cold()
 
     async def handler_warm():
-        return await azure_search_warm()
+        return await vertex_search_warm()
 
     # OLD path: 3 middlewares + cold start
     start_old = time.perf_counter()
@@ -399,14 +399,14 @@ async def test_regression_rate_limit_edge_header_single_redis_call():
 
 
 # ═══════════════════════════════════════════════════════════════
-# Azure Search Timeout Behavior
+# Vertex Search Timeout Behavior
 # ═══════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_azure_search_10s_timeout_behavior():
+async def test_vertex_search_10s_timeout_behavior():
     """
-    Verify Azure Search timeout returns empty gracefully
+    Verify Vertex Search timeout returns empty gracefully
     vs a normal query completing within the timeout.
     Uses 100ms timeout to demonstrate the mechanism (production uses 10s).
     """
@@ -440,7 +440,7 @@ async def test_azure_search_10s_timeout_behavior():
     assert len(normal_result) == 1
 
     print(
-        "\n  Azure Search timeout enforcement: demonstrated with 100ms timeout "
+        "\n  Vertex Search timeout enforcement: demonstrated with 100ms timeout "
         "(production uses 10s)"
     )
     print(f"  Timeout correctly enforced at: {timeout_elapsed * 1000:.1f}ms")
@@ -504,7 +504,7 @@ async def test_async_token_refresh_improvement():
 async def test_english_response_pipeline_latency():
     """
     End-to-end English chat pipeline timing:
-    Language detection -> Azure Search RAG -> Vertex AI -> response
+    Language detection -> Vertex Search RAG -> Vertex AI -> response
     Target: < 400ms TTFB
     """
     # Step 1: Language detection (regex-based, <1ms)
@@ -516,7 +516,7 @@ async def test_english_response_pipeline_latency():
     assert detected == "en"
     assert detection_time < 5  # Regex should be near-instant
 
-    # Step 2: Simulate Azure Search RAG retrieval (~75ms)
+    # Step 2: Simulate Vertex Search RAG retrieval (~75ms)
     async def mock_rag_retrieval():
         await asyncio.sleep(0.075)
         return [
@@ -571,7 +571,7 @@ async def test_english_response_pipeline_latency():
 async def test_assamese_response_pipeline_latency():
     """
     End-to-end Assamese chat pipeline timing:
-    Language detection -> Azure Search RAG -> Sarvam AI -> response
+    Language detection -> Vertex Search RAG -> Sarvam AI -> response
     Target: < 400ms TTFB
     """
     # Step 1: Language detection (regex-based, <1ms)
@@ -587,7 +587,7 @@ async def test_assamese_response_pipeline_latency():
     assert detected == "as"
     assert detection_time < 5
 
-    # Step 2: Simulate Azure Search RAG retrieval (~75ms)
+    # Step 2: Simulate Vertex Search RAG retrieval (~75ms)
     async def mock_rag_retrieval():
         await asyncio.sleep(0.075)
         return [

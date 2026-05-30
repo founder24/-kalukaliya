@@ -10,8 +10,8 @@ command = "npx tsc --noEmit"
 
 [vars]
 # Local dev only. In production, set as a Wrangler secret:
-#   npx wrangler secret put AZURE_BACKEND_URL --env production
-AZURE_BACKEND_URL = "http://localhost:8000"
+#   npx wrangler secret put BACKEND_URL --env production
+BACKEND_URL = "http://localhost:8000"
 ALLOWED_ORIGIN = "https://syrabit.ai"
 
 # Top-level bindings (used by default env / Cloudflare Git integration)
@@ -53,11 +53,11 @@ bucket_name = "syrabit-assets"
 # Secrets (set via: npx wrangler secret put <NAME> --env production):
 # - JWT_SECRET
 # - CF_TURNSTILE_SECRET
-# - AZURE_BACKEND_URL
+# - BACKEND_URL
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
-# REQUIRED: Set this to your Azure Container Apps URL.
+# REQUIRED: Set this to your Cloud Run service URL.
 # This MUST be overridden by a Wrangler secret in production.
 # If not set, the worker will reject all API requests with 503.
-AZURE_BACKEND_URL = "https://MUST-BE-CONFIGURED.azurecontainerapps.io"
+BACKEND_URL = "https://syrabit-backend-851687450401.asia-south1.run.app"

@@ -1,5 +1,5 @@
 """
-ContentPublisherService - Publishes content to Azure Search and Cloudflare.
+ContentPublisherService - Publishes content to Vertex AI Search and Cloudflare.
 """
 
 import asyncio
@@ -17,7 +17,25 @@ logger = logging.getLogger(__name__)
 
 
 class ContentPublisherService:
-    """Service for publishing chapters to Azure Search and Cloudflare."""
+    """Service for publishing chapters to Vertex AI Search and Cloudflare."""
+
+    def __init__(self):
+        self._vertex_client = None
+
+    def _get_vertex_client(self):
+        """Lazily initialize and cache the DocumentServiceClient."""
+        if self._vertex_client is None:
+            from google.cloud import discoveryengine_v1
+            from google.oauth2 import service_account
+
+            credentials = service_account.Credentials.from_service_account_info(
+                settings.google_credentials,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            self._vertex_client = discoveryengine_v1.DocumentServiceClient(
+                credentials=credentials,
+            )
+        return self._vertex_client
 
     def _chunk_content(self, text: str, max_tokens: int = 512) -> list[str]:
         """Split content into chunks of approximately max_tokens tokens (~4 chars per token)."""
@@ -37,48 +55,67 @@ class ContentPublisherService:
             text = text[split_at:].lstrip()
         return chunks
 
-    async def publish_to_azure_search(self, chapter: Chapter) -> dict:
-        """Upload chapter content chunks to Azure Search index."""
-        if not settings.AZURE_SEARCH_ENDPOINT or not settings.AZURE_SEARCH_ADMIN_KEY:
-            logger.warning("Azure Search not configured, skipping")
+    async def publish_to_vertex_search(self, chapter: Chapter) -> dict:
+        """Upload chapter content chunks to Vertex AI Search (Discovery Engine)."""
+        if (
+            not settings.VERTEX_PROJECT_ID
+            or not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
+            or not settings.VERTEX_SEARCH_DATASTORE_ID
+        ):
+            logger.warning("Vertex AI Search not configured, skipping")
             return {"status": "skipped", "reason": "not_configured"}
 
         try:
-            from azure.search.documents import SearchClient
-            from azure.core.credentials import AzureKeyCredential
+            from google.cloud import discoveryengine_v1
+            from google.protobuf import struct_pb2
 
-            credential = AzureKeyCredential(settings.AZURE_SEARCH_ADMIN_KEY)
-            client = SearchClient(
-                endpoint=settings.AZURE_SEARCH_ENDPOINT,
-                index_name=settings.AZURE_SEARCH_INDEX_NAME,
-                credential=credential,
+            client = self._get_vertex_client()
+
+            parent = client.branch_path(
+                project=settings.VERTEX_PROJECT_ID,
+                location=settings.VERTEX_SEARCH_LOCATION,
+                data_store=settings.VERTEX_SEARCH_DATASTORE_ID,
+                branch="default_branch",
             )
 
             chunks = self._chunk_content(chapter.content_en or "")
             documents = []
             for i, chunk in enumerate(chunks):
-                doc = {
-                    "id": f"{str(chapter.id)}_{i}",
-                    "chapter_id": str(chapter.id),
-                    "title": chapter.title,
-                    "slug": chapter.slug,
-                    "content": chunk,
-                    "chunk_index": i,
-                    "meta_description": chapter.meta_description or "",
-                    "keywords": chapter.keywords or "",
-                }
+                doc_id = f"{str(chapter.id)}_{i}"
+                struct_data = struct_pb2.Struct()
+                struct_data.update(
+                    {
+                        "chapter_id": str(chapter.id),
+                        "title": chapter.title,
+                        "slug": chapter.slug,
+                        "content": chunk,
+                        "chunk_index": i,
+                        "meta_description": chapter.meta_description or "",
+                        "keywords": chapter.keywords or "",
+                    }
+                )
+                doc = discoveryengine_v1.Document(
+                    id=doc_id,
+                    struct_data=struct_data,
+                )
                 documents.append(doc)
 
             if documents:
-                await asyncio.to_thread(client.upload_documents, documents=documents)
+                for doc in documents:
+                    doc.name = f"{parent}/documents/{doc.id}"
+                    request = discoveryengine_v1.UpdateDocumentRequest(
+                        document=doc,
+                        allow_missing=True,
+                    )
+                    await asyncio.to_thread(client.update_document, request=request)
                 return {"status": "uploaded", "chunks": len(documents)}
 
             return {"status": "no_content"}
         except ImportError:
-            logger.warning("azure-search-documents not installed, skipping")
+            logger.warning("google-cloud-discoveryengine not installed, skipping")
             return {"status": "skipped", "reason": "package_not_installed"}
         except Exception as e:
-            logger.error(f"Azure Search upload failed: {e}")
+            logger.error(f"Vertex AI Search upload failed: {e}")
             return {"status": "error", "detail": str(e)}
 
     async def publish_to_cloudflare(self, chapter: Chapter) -> dict:
@@ -101,12 +138,12 @@ class ContentPublisherService:
             return {"status": "error", "detail": str(e)}
 
     async def publish_chapter(self, chapter_id: str) -> dict:
-        """Full publish pipeline: Azure Search + Cloudflare, then mark as published."""
+        """Full publish pipeline: Vertex AI Search + Cloudflare, then mark as published."""
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
 
-        search_result = await self.publish_to_azure_search(chapter)
+        search_result = await self.publish_to_vertex_search(chapter)
         cf_result = await self.publish_to_cloudflare(chapter)
 
         chapter.status = "published"
@@ -116,7 +153,7 @@ class ContentPublisherService:
         return {
             "chapter_id": chapter_id,
             "status": "published",
-            "azure_search": search_result,
+            "vertex_search": search_result,
             "cloudflare": cf_result,
         }
 

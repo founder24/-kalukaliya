@@ -37,19 +37,13 @@ class Settings(BaseSettings):
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
 
-    # --- P2: Azure Compute (Backend) — metadata only ---
-    AZURE_SUBSCRIPTION_ID: Optional[str] = None
-    AZURE_RESOURCE_GROUP: str = "rg-syrabit-prod"
-    AZURE_CONTAINER_APP_NAME: str = "ca-syrabit-api"
-    AZURE_LOG_ANALYTICS_WORKSPACE: str = "law-syrabit"
-    KEYVAULT_URL: Optional[str] = None
+    # --- P2: Azure Compute (Backend) --- metadata only, not used at runtime ---
+    # (Removed: AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, etc. - migrated to GCP)
 
-    # --- P3: Azure Search (Intelligence) ---
-    AZURE_SEARCH_ENDPOINT: Optional[str] = None
-    AZURE_SEARCH_ADMIN_KEY: Optional[str] = None
-    AZURE_SEARCH_QUERY_KEY: Optional[str] = None
-    AZURE_SEARCH_INDEX_NAME: str = "syrabit-edu-index"
-    AZURE_SEARCH_SEMANTIC_CONFIG: str = "default"
+    # --- P3: Vertex AI Search (Discovery Engine) ---
+    VERTEX_SEARCH_DATASTORE_ID: Optional[str] = None
+    VERTEX_SEARCH_SERVING_CONFIG: str = "default_search"
+    VERTEX_SEARCH_LOCATION: str = "global"
     SEARCH_CACHE_ENABLED: bool = True
 
     # --- P4: MongoDB (Data) ---
@@ -65,16 +59,21 @@ class Settings(BaseSettings):
     RATE_LIMIT_PRO_TIER: int = 999999
 
     # --- P6: Vertex AI (Google) ---
+    # Option 1 (recommended): Path to service account key file
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
+    # Option 2 (legacy): Inline JSON string of service account key
     GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
+    # Option 3: Gemini API key (Generative Language API - bypasses Vertex AI SDK)
+    GEMINI_API_KEY: Optional[str] = None
     VERTEX_PROJECT_ID: Optional[str] = None
     VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash-lite"
+    VERTEX_GEMINI_MODEL: str = "gemini-2.5-flash"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
     # --- P7: Sarvam AI (Indic) ---
     SARVAM_API_KEY: Optional[str] = None
     SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
-    SARVAM_MODEL: str = "openhathi-7b"
+    SARVAM_MODEL: str = "sarvam-m"
 
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: Optional[str] = None
@@ -179,8 +178,8 @@ class Settings(BaseSettings):
                 logger.warning("MONGODB_URI is not set in production")
             if not self.UPSTASH_REDIS_REST_URL:
                 logger.warning("UPSTASH_REDIS_REST_URL is not set in production")
-            if not self.AZURE_SEARCH_ENDPOINT:
-                logger.warning("AZURE_SEARCH_ENDPOINT is not set in production")
+            if not self.VERTEX_SEARCH_DATASTORE_ID:
+                logger.warning("VERTEX_SEARCH_DATASTORE_ID is not set in production")
             # Warn about missing service credentials
             if (
                 not self.VERTEX_PROJECT_ID
@@ -223,9 +222,33 @@ class Settings(BaseSettings):
 
     @property
     def google_credentials(self) -> dict:
-        if not self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
-            return {}
-        return json.loads(self.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+        """Load Google credentials from file path or inline JSON.
+
+        Priority:
+        1. GOOGLE_APPLICATION_CREDENTIALS (file path) - recommended, safer
+        2. GOOGLE_APPLICATION_CREDENTIALS_JSON (inline JSON) - legacy fallback
+        3. On Cloud Run with Workload Identity, neither is needed (uses ADC)
+        """
+        # Option 1: Load from file path
+        if self.GOOGLE_APPLICATION_CREDENTIALS:
+            import os
+            creds_path = os.path.expanduser(self.GOOGLE_APPLICATION_CREDENTIALS)
+            try:
+                with open(creds_path) as f:
+                    return json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load credentials from {creds_path}: {e}")
+                return {}
+
+        # Option 2: Inline JSON string
+        if self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            try:
+                return json.loads(self.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
+                return {}
+
+        return {}
 
 
 settings = Settings()
