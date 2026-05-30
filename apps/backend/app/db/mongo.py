@@ -9,6 +9,7 @@ from app.models.chat import Chat
 from app.models.feedback import ChatFeedback
 from app.models.knowledge import KnowledgeObject
 from app.models.content import Board, Class, Stream, Subject, Chapter
+from app.models.topic_hub import TopicHub
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
@@ -53,6 +54,7 @@ async def init_mongo() -> None:
                     Stream,
                     Subject,
                     Chapter,
+                    TopicHub,
                 ],
             )
 
@@ -134,6 +136,12 @@ async def create_indexes() -> None:
     await db.streams.create_index([("class_id", ASCENDING)])
     await db.subjects.create_index([("stream_id", ASCENDING)])
     await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
+
+    # TopicHub indexes
+    await db.topic_hubs.create_index(
+        [("topic_slug", ASCENDING), ("chapter_id", ASCENDING)], unique=True
+    )
+    await db.topic_hubs.create_index([("subject_id", ASCENDING)])
 
     logger.info("MongoDB indexes created/verified")
 
