@@ -146,7 +146,24 @@ class KnowledgeGraphService:
                     clean = clean[:-3]
                 clean = clean.strip()
             relations = json.loads(clean)
-            return relations if isinstance(relations, list) else []
+            if not isinstance(relations, list):
+                return []
+
+            # Validate each relation against the TopicRelation schema
+            validated_relations = []
+            for item in relations:
+                try:
+                    validated = TopicRelation(
+                        related_topic_slug=item.get("target_slug", item.get("related_topic_slug", "")),
+                        relation_type=item.get("relation_type", "related"),
+                        strength=float(item.get("strength", 0.5)),
+                        description=item.get("description"),
+                    )
+                    validated_relations.append(validated.model_dump())
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Skipping invalid relation: {e}")
+                    continue
+            return validated_relations
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Failed to generate relations for chapter {chapter_id}: {e}")
             return []

@@ -71,12 +71,15 @@ class AuthorityGeneratorService:
                     logger.warning(f"Skipping malformed MCQ: {e}")
                     continue
 
-            # Save to hub
-            hub.mcqs.extend(mcqs)
+            # Save to hub - deduplicate against existing MCQs
+            existing_questions = {mcq.question for mcq in hub.mcqs}
+            new_mcqs = [mcq for mcq in mcqs if mcq.question not in existing_questions]
+
+            hub.mcqs.extend(new_mcqs)
             hub.updated_at = datetime.now(timezone.utc)
             await hub.save()
 
-            return mcqs
+            return new_mcqs
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse MCQ response: {e}")
             return []

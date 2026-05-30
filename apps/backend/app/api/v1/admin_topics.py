@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from beanie import PydanticObjectId
+from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -18,6 +19,14 @@ from app.services.authority_generator import authority_generator_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Admin Topics"])
+
+
+def _parse_object_id(value: str) -> PydanticObjectId:
+    """Validate and parse an ObjectId string, raising 400 on invalid input."""
+    try:
+        return PydanticObjectId(value)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
 
 
 # --- Request Models ---
@@ -96,6 +105,8 @@ async def generate_mcqs(request: Request, hub_id: str, body: GenerateMCQsRequest
     _validate_admin_session(request)
     await _csrf_check(request)
 
+    _parse_object_id(hub_id)
+
     try:
         mcqs = await authority_generator_service.generate_mcqs(hub_id, count=body.count)
         return {
@@ -113,7 +124,8 @@ async def generate_relations(request: Request, hub_id: str):
     _validate_admin_session(request)
     await _csrf_check(request)
 
-    hub = await TopicHub.get(PydanticObjectId(hub_id))
+    oid = _parse_object_id(hub_id)
+    hub = await TopicHub.get(oid)
     if not hub:
         raise HTTPException(status_code=404, detail="TopicHub not found")
 
@@ -132,7 +144,8 @@ async def add_source(request: Request, hub_id: str, body: AddSourceRequest):
     _validate_admin_session(request)
     await _csrf_check(request)
 
-    hub = await TopicHub.get(PydanticObjectId(hub_id))
+    oid = _parse_object_id(hub_id)
+    hub = await TopicHub.get(oid)
     if not hub:
         raise HTTPException(status_code=404, detail="TopicHub not found")
 
