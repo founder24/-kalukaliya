@@ -10,7 +10,12 @@ from app.services.content_publisher import ContentPublisherService
 # ---- Fixtures ----
 
 
-def _make_topic(id="topic-1", title="Osmosis", definition="Movement of water through a membrane", slug="osmosis"):
+def _make_topic(
+    id="topic-1",
+    title="Osmosis",
+    definition="Movement of water through a membrane",
+    slug="osmosis",
+):
     return Topic(
         id=id,
         title=title,
@@ -65,10 +70,18 @@ async def test_resolve_hierarchy_returns_full_chain():
     service = ContentPublisherService()
 
     with (
-        patch("app.models.content.Subject.get", new_callable=AsyncMock, return_value=subject),
-        patch("app.models.content.Stream.get", new_callable=AsyncMock, return_value=stream),
+        patch(
+            "app.models.content.Subject.get",
+            new_callable=AsyncMock,
+            return_value=subject,
+        ),
+        patch(
+            "app.models.content.Stream.get", new_callable=AsyncMock, return_value=stream
+        ),
         patch("app.models.content.Class.get", new_callable=AsyncMock, return_value=cls),
-        patch("app.models.content.Board.get", new_callable=AsyncMock, return_value=board),
+        patch(
+            "app.models.content.Board.get", new_callable=AsyncMock, return_value=board
+        ),
     ):
         result = await service._resolve_hierarchy(chapter)
 
@@ -91,7 +104,9 @@ async def test_resolve_hierarchy_handles_missing_subject():
     service = ContentPublisherService()
 
     with (
-        patch("app.models.content.Subject.get", new_callable=AsyncMock) as mock_subject_get,
+        patch(
+            "app.models.content.Subject.get", new_callable=AsyncMock
+        ) as mock_subject_get,
     ):
         result = await service._resolve_hierarchy(chapter)
 
@@ -113,8 +128,14 @@ async def test_resolve_hierarchy_handles_missing_stream():
     service = ContentPublisherService()
 
     with (
-        patch("app.models.content.Subject.get", new_callable=AsyncMock, return_value=subject),
-        patch("app.models.content.Stream.get", new_callable=AsyncMock) as mock_stream_get,
+        patch(
+            "app.models.content.Subject.get",
+            new_callable=AsyncMock,
+            return_value=subject,
+        ),
+        patch(
+            "app.models.content.Stream.get", new_callable=AsyncMock
+        ) as mock_stream_get,
     ):
         result = await service._resolve_hierarchy(chapter)
 
@@ -139,7 +160,6 @@ async def test_publish_skips_empty_hierarchy_segments():
 
     captured_structs = []
 
-    from google.protobuf import struct_pb2
 
     class FakeDocument:
         def __init__(self, **kwargs):
@@ -162,18 +182,39 @@ async def test_publish_skips_empty_hierarchy_segments():
         return MagicMock()
 
     mock_client = MagicMock()
-    mock_client.branch_path.return_value = "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    mock_client.branch_path.return_value = (
+        "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    )
     mock_client.update_document = capture_update
 
     import sys
+
     with (
         patch.object(service, "_get_vertex_client", return_value=mock_client),
-        patch.object(service, "_resolve_hierarchy", new_callable=AsyncMock, return_value={
-            "subject": subject, "stream": None, "cls": None, "board": None
-        }),
+        patch.object(
+            service,
+            "_resolve_hierarchy",
+            new_callable=AsyncMock,
+            return_value={
+                "subject": subject,
+                "stream": None,
+                "cls": None,
+                "board": None,
+            },
+        ),
         patch("app.services.content_publisher.settings") as mock_settings,
-        patch.dict(sys.modules, {"google.cloud.discoveryengine_v1": mock_discoveryengine, "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine)}),
-        patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=lambda fn, **kwargs: fn(**kwargs)),
+        patch.dict(
+            sys.modules,
+            {
+                "google.cloud.discoveryengine_v1": mock_discoveryengine,
+                "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine),
+            },
+        ),
+        patch(
+            "asyncio.to_thread",
+            new_callable=AsyncMock,
+            side_effect=lambda fn, **kwargs: fn(**kwargs),
+        ),
     ):
         mock_settings.VERTEX_PROJECT_ID = "test-project"
         mock_settings.GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"key": "val"}'
@@ -205,7 +246,6 @@ async def test_publish_no_content_skips_topic_micro_docs():
 
     captured_structs = []
 
-    from google.protobuf import struct_pb2
 
     class FakeDocument:
         def __init__(self, **kwargs):
@@ -228,18 +268,39 @@ async def test_publish_no_content_skips_topic_micro_docs():
         return MagicMock()
 
     mock_client = MagicMock()
-    mock_client.branch_path.return_value = "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    mock_client.branch_path.return_value = (
+        "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    )
     mock_client.update_document = capture_update
 
     import sys
+
     with (
         patch.object(service, "_get_vertex_client", return_value=mock_client),
-        patch.object(service, "_resolve_hierarchy", new_callable=AsyncMock, return_value={
-            "subject": subject, "stream": stream, "cls": cls, "board": board
-        }),
+        patch.object(
+            service,
+            "_resolve_hierarchy",
+            new_callable=AsyncMock,
+            return_value={
+                "subject": subject,
+                "stream": stream,
+                "cls": cls,
+                "board": board,
+            },
+        ),
         patch("app.services.content_publisher.settings") as mock_settings,
-        patch.dict(sys.modules, {"google.cloud.discoveryengine_v1": mock_discoveryengine, "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine)}),
-        patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=lambda fn, **kwargs: fn(**kwargs)),
+        patch.dict(
+            sys.modules,
+            {
+                "google.cloud.discoveryengine_v1": mock_discoveryengine,
+                "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine),
+            },
+        ),
+        patch(
+            "asyncio.to_thread",
+            new_callable=AsyncMock,
+            side_effect=lambda fn, **kwargs: fn(**kwargs),
+        ),
     ):
         mock_settings.VERTEX_PROJECT_ID = "test-project"
         mock_settings.GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"key": "val"}'
@@ -273,15 +334,20 @@ async def test_publish_enriches_chunks_with_hierarchy():
         return MagicMock()
 
     mock_client = MagicMock()
-    mock_client.branch_path.return_value = "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    mock_client.branch_path.return_value = (
+        "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    )
     mock_client.update_document = mock_update_document
 
     # Mock google.cloud.discoveryengine_v1 and struct_pb2
-    from google.protobuf import struct_pb2
 
     mock_discoveryengine = MagicMock()
-    mock_discoveryengine.Document = MagicMock(side_effect=lambda **kwargs: MagicMock(**kwargs))
-    mock_discoveryengine.UpdateDocumentRequest = MagicMock(side_effect=lambda **kwargs: MagicMock(**kwargs))
+    mock_discoveryengine.Document = MagicMock(
+        side_effect=lambda **kwargs: MagicMock(**kwargs)
+    )
+    mock_discoveryengine.UpdateDocumentRequest = MagicMock(
+        side_effect=lambda **kwargs: MagicMock(**kwargs)
+    )
 
     # Use real struct_pb2.Struct for capturing
     class FakeDocument:
@@ -306,14 +372,33 @@ async def test_publish_enriches_chunks_with_hierarchy():
     mock_client.update_document = capture_update
 
     import sys
+
     with (
         patch.object(service, "_get_vertex_client", return_value=mock_client),
-        patch.object(service, "_resolve_hierarchy", new_callable=AsyncMock, return_value={
-            "subject": subject, "stream": stream, "cls": cls, "board": board
-        }),
+        patch.object(
+            service,
+            "_resolve_hierarchy",
+            new_callable=AsyncMock,
+            return_value={
+                "subject": subject,
+                "stream": stream,
+                "cls": cls,
+                "board": board,
+            },
+        ),
         patch("app.services.content_publisher.settings") as mock_settings,
-        patch.dict(sys.modules, {"google.cloud.discoveryengine_v1": mock_discoveryengine, "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine)}),
-        patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=lambda fn, **kwargs: fn(**kwargs)),
+        patch.dict(
+            sys.modules,
+            {
+                "google.cloud.discoveryengine_v1": mock_discoveryengine,
+                "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine),
+            },
+        ),
+        patch(
+            "asyncio.to_thread",
+            new_callable=AsyncMock,
+            side_effect=lambda fn, **kwargs: fn(**kwargs),
+        ),
     ):
         mock_settings.VERTEX_PROJECT_ID = "test-project"
         mock_settings.GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"key": "val"}'
@@ -332,9 +417,15 @@ async def test_publish_enriches_chunks_with_hierarchy():
     assert chunk_struct["class_name"] == "Class 12"
     assert chunk_struct["board_name"] == "AHSEC"
     assert chunk_struct["stream_name"] == "Science"
-    assert "AHSEC > Class 12 > Science > Biology > Cell Biology" == chunk_struct["hierarchy"]
+    assert (
+        "AHSEC > Class 12 > Science > Biology > Cell Biology"
+        == chunk_struct["hierarchy"]
+    )
     assert "Osmosis" in chunk_struct["topics"]
-    assert "Osmosis: Movement of water through a membrane" in chunk_struct["topic_definitions"]
+    assert (
+        "Osmosis: Movement of water through a membrane"
+        in chunk_struct["topic_definitions"]
+    )
 
 
 @pytest.mark.anyio
@@ -342,8 +433,12 @@ async def test_publish_creates_topic_micro_documents():
     """Verify topic micro-documents are created for each published_topic."""
     board, cls, stream, subject = _make_hierarchy()
     topics = [
-        _make_topic(id="t1", title="Osmosis", definition="Water movement", slug="osmosis"),
-        _make_topic(id="t2", title="Diffusion", definition="Particle spread", slug="diffusion"),
+        _make_topic(
+            id="t1", title="Osmosis", definition="Water movement", slug="osmosis"
+        ),
+        _make_topic(
+            id="t2", title="Diffusion", definition="Particle spread", slug="diffusion"
+        ),
     ]
     chapter = _make_chapter(topics=topics)
 
@@ -351,7 +446,6 @@ async def test_publish_creates_topic_micro_documents():
 
     captured_structs = []
 
-    from google.protobuf import struct_pb2
 
     class FakeDocument:
         def __init__(self, **kwargs):
@@ -374,18 +468,39 @@ async def test_publish_creates_topic_micro_documents():
         return MagicMock()
 
     mock_client = MagicMock()
-    mock_client.branch_path.return_value = "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    mock_client.branch_path.return_value = (
+        "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    )
     mock_client.update_document = capture_update
 
     import sys
+
     with (
         patch.object(service, "_get_vertex_client", return_value=mock_client),
-        patch.object(service, "_resolve_hierarchy", new_callable=AsyncMock, return_value={
-            "subject": subject, "stream": stream, "cls": cls, "board": board
-        }),
+        patch.object(
+            service,
+            "_resolve_hierarchy",
+            new_callable=AsyncMock,
+            return_value={
+                "subject": subject,
+                "stream": stream,
+                "cls": cls,
+                "board": board,
+            },
+        ),
         patch("app.services.content_publisher.settings") as mock_settings,
-        patch.dict(sys.modules, {"google.cloud.discoveryengine_v1": mock_discoveryengine, "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine)}),
-        patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=lambda fn, **kwargs: fn(**kwargs)),
+        patch.dict(
+            sys.modules,
+            {
+                "google.cloud.discoveryengine_v1": mock_discoveryengine,
+                "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine),
+            },
+        ),
+        patch(
+            "asyncio.to_thread",
+            new_callable=AsyncMock,
+            side_effect=lambda fn, **kwargs: fn(**kwargs),
+        ),
     ):
         mock_settings.VERTEX_PROJECT_ID = "test-project"
         mock_settings.GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"key": "val"}'
@@ -430,7 +545,10 @@ async def test_build_system_prompt_includes_hierarchy():
 
     result = ChatService.build_system_prompt("en", chunks)
 
-    assert "[1] Cell Biology (AHSEC > Class 12 > Science > Biology > Cell Biology): Cells are the basic unit of life." in result
+    assert (
+        "[1] Cell Biology (AHSEC > Class 12 > Science > Biology > Cell Biology): Cells are the basic unit of life."
+        in result
+    )
 
 
 @pytest.mark.anyio
