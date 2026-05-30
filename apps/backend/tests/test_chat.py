@@ -53,9 +53,7 @@ async def test_retrieve_context_returns_empty_when_search_not_initialized():
     """Test that retrieve_context returns [] immediately when search service is not initialized."""
     from app.services.chat_service import ChatService
 
-    with patch(
-        "app.services.chat_service.search_service"
-    ) as mock_search:
+    with patch("app.services.chat_service.search_service") as mock_search:
         mock_search.is_available.return_value = False
         mock_search.search_context = AsyncMock(
             side_effect=AssertionError("search_context should not be called")
