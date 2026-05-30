@@ -195,6 +195,67 @@ class ContentPublisherService:
                     )
                     await asyncio.to_thread(client.update_document, request=request)
 
+                # Index TopicHub documents for enhanced RAG
+                try:
+                    from app.models.topic_hub import TopicHub as TopicHubModel
+                    topic_hubs = await TopicHubModel.find(
+                        {"chapter_id": chapter.id}
+                    ).to_list()
+
+                    for hub in topic_hubs:
+                        hub_doc_id = f"{str(chapter.id)}_hub_{hub.topic_slug}"
+                        hub_struct = struct_pb2.Struct()
+                        hub_struct.update(
+                            {
+                                "chapter_id": str(chapter.id),
+                                "title": f"{hub.title} - {chapter.title}",
+                                "content": hub.definition_extended or hub.definition,
+                                "topic_title": hub.title,
+                                "topic_slug": hub.topic_slug,
+                                "mcq_count": str(len(hub.mcqs)),
+                                "pyq_count": str(len(hub.pyqs)),
+                                "sources": ", ".join(s.title for s in hub.sources),
+                                "related_topics": ", ".join(
+                                    r.related_topic_slug for r in hub.relations
+                                ),
+                                "key_points": "; ".join(hub.key_points),
+                                "hierarchy": " > ".join(
+                                    seg for seg in [
+                                        board.name if board else "",
+                                        cls.name if cls else "",
+                                        stream.name if stream else "",
+                                        subject.name if subject else "",
+                                        chapter.title,
+                                        hub.title,
+                                    ] if seg
+                                ),
+                                "difficulty": hub.difficulty_level,
+                                "importance": hub.importance,
+                                "has_formula": "true" if hub.formula else "false",
+                                "has_diagram": "true" if hub.diagram_url else "false",
+                                "is_topic_hub": "true",
+                                "subject_name": subject.name if subject else "",
+                                "class_name": cls.name if cls else "",
+                                "board_name": board.name if board else "",
+                            }
+                        )
+                        hub_doc = discoveryengine_v1.Document(
+                            id=hub_doc_id,
+                            struct_data=hub_struct,
+                        )
+                        hub_doc.name = f"{parent}/documents/{hub_doc.id}"
+                        request_obj = discoveryengine_v1.UpdateDocumentRequest(
+                            document=hub_doc,
+                            allow_missing=True,
+                        )
+                        await asyncio.to_thread(client.update_document, request=request_obj)
+
+                    logger.info(f"Indexed {len(topic_hubs)} TopicHub docs for chapter {chapter.id}")
+                except ImportError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"TopicHub indexing failed (non-fatal): {e}")
+
                 return {
                     "status": "uploaded",
                     "chunks": len(documents),

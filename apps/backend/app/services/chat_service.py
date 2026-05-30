@@ -164,6 +164,23 @@ class ChatService:
             f"[{i + 1}] {chunk['title']}{' (' + chunk['hierarchy'] + ')' if chunk.get('hierarchy') else ''}: {chunk['content']}"
             for i, chunk in enumerate(context_chunks)
         )
+
+        # Enhance context with TopicHub metadata if present
+        topic_hub_hints = []
+        for i, chunk in enumerate(context_chunks):
+            if chunk.get("is_topic_hub") == "true":
+                hints = []
+                if chunk.get("mcq_count") and chunk["mcq_count"] != "0":
+                    hints.append(f"[{i + 1}] has {chunk['mcq_count']} practice MCQs available")
+                if chunk.get("pyq_count") and chunk["pyq_count"] != "0":
+                    hints.append(f"[{i + 1}] has {chunk['pyq_count']} previous year questions")
+                if chunk.get("related_topics"):
+                    hints.append(f"[{i + 1}] related topics: {chunk['related_topics']}")
+                topic_hub_hints.extend(hints)
+
+        if topic_hub_hints:
+            context_text += "\n\nAdditional study info:\n" + "\n".join(topic_hub_hints)
+
         return f"{lang_instruction}\n\nContext:\n{context_text}"
 
     # ------------------------------------------------------------------

@@ -38,12 +38,14 @@ from app.api.v1 import (
     admin_translate,
     admin_dead_letters,
     admin_security,
+    admin_topics,
     seo,
     indexnow,
     content,
     public_content,
     changelog,
     payments,
+    topics,
 )
 from app.api.webhooks import razorpay
 
@@ -326,6 +328,12 @@ def create_app() -> FastAPI:
     app.include_router(payments.router, prefix="/api/v1/payments", tags=["Payments"])
     app.include_router(
         admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
+    )
+    app.include_router(
+        admin_topics.router, prefix="/api/v1/admin", tags=["Admin Topics"]
+    )
+    app.include_router(
+        topics.router, prefix="/api/v1/topics", tags=["Topics"]
     )
     app.include_router(users.router, prefix="/api/v1/user", tags=["Users"])
 

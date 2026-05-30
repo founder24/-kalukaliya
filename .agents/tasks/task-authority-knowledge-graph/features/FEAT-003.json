@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Create public and admin API endpoints for TopicHub, then mount the routers in main.py. Also integrate TopicHub into the content publisher (Vertex Search indexing) and the chat service (RAG enhancement).",
+  "status": "in_progress",
+  "steps": [
+    "Create apps/backend/app/api/v1/topics.py with a public APIRouter (no auth). Endpoints: (1) GET /topics/{topic_slug} - full TopicHub data by slug, with optional query param chapter_id to disambiguate. (2) GET /topics/{topic_slug}/mcqs - returns MCQs list. (3) GET /topics/{topic_slug}/pyqs - returns PYQs list. (4) GET /topics/{topic_slug}/related - returns knowledge graph neighbors via knowledge_graph_service.get_related_topics(). (5) GET /topics/{topic_slug}/study-path - returns prerequisite chain via knowledge_graph_service.get_prerequisite_chain(). All endpoints return 404 if TopicHub not found.",
+    "Create apps/backend/app/api/v1/admin_topics.py with admin APIRouter. Use _validate_admin_session and _csrf_check from app.api.v1.admin. Endpoints: (1) POST /admin/topics/generate-hub - takes chapter_id and topic_slug, creates TopicHub from existing Topic in Chapter.published_topics, returns created hub. (2) POST /admin/topics/{hub_id}/generate-mcqs - calls authority_generator_service.generate_mcqs(). (3) POST /admin/topics/{hub_id}/generate-relations - calls authority_generator_service.generate_topic_relations() or knowledge_graph_service.auto_generate_relations(). (4) POST /admin/topics/{hub_id}/add-source - accepts TopicSource data and appends to the hub's sources list.",
+    "Modify apps/backend/app/main.py: import topics and admin_topics routers, add app.include_router for topics (prefix='/api/v1/topics', tags=['Topics']) and admin_topics (prefix='/api/v1/admin', tags=['Admin Topics']).",
+    "Modify apps/backend/app/services/content_publisher.py: in publish_to_vertex_search(), after indexing chapter topics, also query TopicHub documents for the chapter and index them with the enhanced metadata schema (title, content, mcq_count, pyq_count, sources, related_topics, key_points, hierarchy, difficulty, importance, has_formula, has_diagram, is_topic_hub='true').",
+    "Modify apps/backend/app/services/chat_service.py: in the build_system_prompt() method, after the context_text is built, add a note that if any context chunk has is_topic_hub='true', include additional context hints about MCQs, PYQ references, and prerequisite suggestions from the chunk metadata.",
+    "Verify all new files import cleanly and main.py can be loaded."
+  ],
+  "acceptance_criteria": [
+    "apps/backend/app/api/v1/topics.py exists with 5 public GET endpoints",
+    "apps/backend/app/api/v1/admin_topics.py exists with 4 admin POST endpoints",
+    "main.py imports and mounts both new routers without errors",
+    "content_publisher.py includes TopicHub indexing logic in publish_to_vertex_search()",
+    "chat_service.py build_system_prompt includes TopicHub-aware context enhancement",
+    "Running 'python -c \"from app.main import app\"' succeeds"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.main import app; print(\"App loaded OK\")'",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.topics import router; print(\"Topics router OK\")'",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.admin_topics import router; print(\"Admin topics router OK\")'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
