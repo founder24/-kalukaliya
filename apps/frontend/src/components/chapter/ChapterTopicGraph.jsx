@@ -20,7 +20,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 
-function GraphPill({ to, title, chapterTitle, isAnchor }) {
+function GraphPill({ to, title, chapterTitle, isAnchor, subjectName }) {
   // Anchor links (#topic-<slug>) use a plain <a> so the browser handles
   // the in-page jump. Cross-route links use react-router's <Link> so
   // the SPA navigation stays single-page.
@@ -39,9 +39,11 @@ function GraphPill({ to, title, chapterTitle, isAnchor }) {
     );
   }
   return (
-    <Link to={to} className={className} data-topic-graph-link="cross-chapter">
+    <Link to={to} className={className} data-topic-graph-link="cross-chapter" rel="related">
       {title}
-      {chapterTitle && chapterTitle !== title ? (
+      {subjectName && subjectName !== title ? (
+        <span className="text-purple-500/70 font-normal">in {subjectName}</span>
+      ) : chapterTitle && chapterTitle !== title ? (
         <span className="text-purple-500/70 font-normal">· {chapterTitle}</span>
       ) : null}
     </Link>
@@ -90,6 +92,7 @@ export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) 
                 to={t.deep_link_path}
                 title={t.title}
                 chapterTitle={t.chapter_title}
+                subjectName={t.subject_name}
               />
             ))}
           </div>
