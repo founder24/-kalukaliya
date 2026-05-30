@@ -16,7 +16,11 @@ async def anon_client():
 
     with (
         patch("app.api.v1.auth._check_rate_limit", _noop_rate_limit),
-        patch("app.api.deps.rate_limit.check_rate_limit", new_callable=AsyncMock, return_value=(True, 0, 100, "monthly")),
+        patch(
+            "app.api.deps.rate_limit.check_rate_limit",
+            new_callable=AsyncMock,
+            return_value=(True, 0, 100, "monthly"),
+        ),
         patch(
             "app.models.user.User.find_one", new_callable=AsyncMock, return_value=None
         ),
@@ -119,7 +123,9 @@ async def test_authenticated_user_gets_full_history(anon_client: AsyncClient):
     token = create_access_token("test-user-id-123")
     headers = {"Authorization": f"Bearer {token}"}
 
-    mock_chats = [_make_mock_chat(f"session-{i}", "test-user-id-123") for i in range(10)]
+    mock_chats = [
+        _make_mock_chat(f"session-{i}", "test-user-id-123") for i in range(10)
+    ]
 
     mock_query = MagicMock()
     mock_query.sort = MagicMock(return_value=mock_query)
@@ -129,7 +135,9 @@ async def test_authenticated_user_gets_full_history(anon_client: AsyncClient):
     mock_query.count = AsyncMock(return_value=10)
 
     with (
-        patch("app.models.user.User.get", new_callable=AsyncMock, return_value=mock_user),
+        patch(
+            "app.models.user.User.get", new_callable=AsyncMock, return_value=mock_user
+        ),
         patch("app.models.chat.Chat.find", return_value=mock_query),
     ):
         response = await anon_client.get(
@@ -191,7 +199,9 @@ async def test_anon_invalid_anon_id_returns_empty(anon_client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_anon_invalid_anon_id_conversations_alias_returns_empty(anon_client: AsyncClient):
+async def test_anon_invalid_anon_id_conversations_alias_returns_empty(
+    anon_client: AsyncClient,
+):
     """Invalid anon_id via /chat/conversations (legacy alias) also returns empty list."""
     invalid_anon_id = "not-a-valid-format"
 

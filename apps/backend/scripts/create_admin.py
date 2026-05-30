@@ -38,7 +38,11 @@ async def main():
     admin_email = os.environ.get("ADMIN_EMAIL")
     admin_password = os.environ.get("ADMIN_PASSWORD")
     db_name = os.environ.get("MONGODB_DB_NAME", "syrabit_prod")
-    force_reset = os.environ.get("ADMIN_FORCE_RESET", "").lower() in ("true", "1", "yes")
+    force_reset = os.environ.get("ADMIN_FORCE_RESET", "").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
     # ── Validate inputs ──────────────────────────────────────────────────────
     if not mongodb_uri:
@@ -65,6 +69,7 @@ async def main():
 
     # ── Hash password with bcrypt (no Beanie needed) ─────────────────────────
     import bcrypt
+
     hashed_password = bcrypt.hashpw(
         admin_password.encode("utf-8"), bcrypt.gensalt()
     ).decode("utf-8")

@@ -636,7 +636,9 @@ async def get_chat_history(
         # Anonymous user: read anon_id from header, hard-cap at 5
         anon_id = None
         if http_request:
-            anon_id = http_request.headers.get("x-anon-id") or http_request.headers.get("X-Anon-ID")
+            anon_id = http_request.headers.get("x-anon-id") or http_request.headers.get(
+                "X-Anon-ID"
+            )
 
         if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
             return {
@@ -744,7 +746,9 @@ async def conversations_alias(
     http_request: Request = None,
 ):
     """Alias for /history - supports frontend legacy route."""
-    return await get_chat_history(skip=skip, limit=limit, user=user, http_request=http_request)
+    return await get_chat_history(
+        skip=skip, limit=limit, user=user, http_request=http_request
+    )
 
 
 # ═══════════════════════════════════════════════════════════════

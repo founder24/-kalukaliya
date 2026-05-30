@@ -87,6 +87,7 @@ async def admin_login(request: Request):
         # Fail-open for admin login: Redis unavailability must not lock out admins.
         # Admin route is already protected by role check + bcrypt + httpOnly cookie.
         from fastapi import HTTPException as _HTTPException
+
         if isinstance(e, _HTTPException) and e.status_code == 429:
             raise  # Re-raise genuine rate limit exhaustion (5 attempts/min)
         logger.warning(f"Admin rate-limit check skipped (Redis unavailable): {e}")
