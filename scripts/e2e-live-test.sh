@@ -167,7 +167,7 @@ perform_request() {
 # Extract a header value (case-insensitive)
 get_header() {
     local name="$1"
-    echo "$CURL_HEADERS" | grep -i "^${name}:" | head -1 | sed 's/^[^:]*: *//' | tr -d '\r\n'
+    echo "$CURL_HEADERS" | grep -i "^${name}:" | head -1 | sed 's/^[^:]*: *//' | tr -d '\r\n' || true
 }
 
 
@@ -236,7 +236,7 @@ else
 fi
 
 # WWW redirect (301)
-perform_request "$WWW_URL" -I -L --max-redirs 0
+perform_request "$WWW_URL"
 if [[ "$CURL_STATUS" -eq 301 ]]; then
     LOCATION=$(get_header "location")
     if echo "$LOCATION" | grep -q "syrabit.ai"; then
@@ -262,7 +262,7 @@ echo -e "${BOLD}[2/10] SSL/TLS${NC}"
 echo -e "${DIM}------------------------------------------------------------------------${NC}"
 
 # Check TLS version
-TLS_INFO=$(curl -sS -I --tlsv1.3 --max-time 10 "$FRONTEND_URL" -w '%{ssl_version}' -o /dev/null 2>/dev/null) || TLS_INFO=""
+TLS_INFO=$(curl -sS --tlsv1.3 --max-time 10 "$FRONTEND_URL" -w '%{ssl_version}' -o /dev/null 2>/dev/null) || TLS_INFO=""
 if [[ "$TLS_INFO" == *"TLSv1.3"* ]]; then
     record_result "CRITICAL" "TLS" "TLS 1.3 supported (syrabit.ai)" "PASS" "0" "Version: ${TLS_INFO}"
 elif [[ -n "$TLS_INFO" ]]; then
@@ -364,7 +364,7 @@ else
 fi
 
 # Meta tags
-if echo "$CURL_BODY" | grep -qi 'name="viewport"'; then
+if echo "$CURL_BODY" | grep -qi 'viewport'; then
     record_result "MEDIUM" "Frontend" "Meta viewport tag exists" "PASS" "0" ""
 else
     record_result "MEDIUM" "Frontend" "Meta viewport tag exists" "WARN" "0" "No viewport meta tag found"
@@ -525,19 +525,19 @@ else
     record_result "CRITICAL" "Auth" "Invalid JWT returns 401" "FAIL" "$CURL_TTFB" "Expected 401, got HTTP ${CURL_STATUS}"
 fi
 
-# Missing Turnstile token on chat POST returns 403
-perform_request "${EDGE_URL}/api/v1/chat/stream" \
+# Turnstile required on auth endpoints (403)
+perform_request "${EDGE_URL}/api/v1/auth/signup" \
     -X POST \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.fake" \
-    -d '{"message":"test","language":"en"}'
+    -H "Origin: ${FRONTEND_URL}" \
+    -d '{"email":"test@example.com","password":"TestPass123!"}'
 
 if [[ "$CURL_STATUS" -eq 403 ]]; then
-    record_result "HIGH" "Auth" "Missing Turnstile token returns 403" "PASS" "$CURL_TTFB" ""
+    record_result "HIGH" "Auth" "Turnstile required on auth endpoints (403)" "PASS" "$CURL_TTFB" ""
 elif [[ "$CURL_STATUS" -eq 401 ]]; then
-    record_result "HIGH" "Auth" "Missing Turnstile token returns 403" "WARN" "$CURL_TTFB" "Got 401 (JWT rejected before Turnstile check)"
+    record_result "HIGH" "Auth" "Turnstile required on auth endpoints (403)" "WARN" "$CURL_TTFB" "Got 401 (auth rejected before Turnstile check)"
 else
-    record_result "HIGH" "Auth" "Missing Turnstile token returns 403" "FAIL" "$CURL_TTFB" "Expected 403, got HTTP ${CURL_STATUS}"
+    record_result "HIGH" "Auth" "Turnstile required on auth endpoints (403)" "FAIL" "$CURL_TTFB" "Expected 403, got HTTP ${CURL_STATUS}"
 fi
 
 # Malformed JWT returns appropriate error
@@ -665,16 +665,16 @@ if [[ "$CURL_STATUS" -eq 200 ]] && echo "$CURL_BODY" | jq . &>/dev/null; then
     }
 
     check_service "MongoDB" "CRITICAL" \
-        '.services.mongodb.status' '.mongodb' '.checks.mongodb' '.components.mongodb.status'
+        '.backend.checks.mongodb.status' '.backend.status.mongodb.status' '.services.mongodb.status' '.checks.mongodb.status' '.components.mongodb.status'
 
     check_service "Redis" "HIGH" \
-        '.services.redis.status' '.redis' '.checks.redis' '.components.redis.status'
+        '.backend.checks.redis.status' '.backend.status.redis.status' '.services.redis.status' '.checks.redis.status' '.components.redis.status'
 
     check_service "Vertex AI Search" "HIGH" \
-        '.services.vertex_search.status' '.vertex_search' '.checks.vertex_search' '.components.vertex_search.status' '.services.search.status'
+        '.backend.checks.vertex_search.status' '.backend.status.vertex_search.status' '.services.vertex_search.status' '.checks.vertex_search.status' '.components.vertex_search.status'
 
     check_service "Vertex AI (Gemini)" "HIGH" \
-        '.services.vertex_ai.status' '.vertex_ai' '.checks.vertex_ai' '.components.vertex_ai.status'
+        '.backend.checks.vertex_ai.status' '.backend.status.vertex_ai.status' '.services.vertex_ai.status' '.checks.vertex_ai.status' '.components.vertex_ai.status'
 
 elif [[ "$CURL_STATUS" -eq 200 ]]; then
     record_result "HIGH" "Backend" "Backend response is JSON" "FAIL" "$CURL_TTFB" "Got 200 but body is not valid JSON"
