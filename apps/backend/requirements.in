@@ -9,6 +9,7 @@ fastapi
 google-auth[aiohttp]
 google-cloud-aiplatform
 google-cloud-discoveryengine
+google-cloud-storage
 gunicorn
 httpx
 jinja2

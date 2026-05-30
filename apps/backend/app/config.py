@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
+    CF_PAGES_DEPLOY_HOOK: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
     # NOTE: CF_AI_MODEL is used ONLY for OCR (vision_analyze) and TTS (text_to_speech).
     # English chat routing was moved to Vertex AI (VERTEX_GEMINI_MODEL) for performance.
@@ -71,6 +72,7 @@ class Settings(BaseSettings):
     VERTEX_LOCATION: str = "us-central1"
     VERTEX_GEMINI_MODEL: str = "gemini-2.5-flash"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
+    GCS_CONTENT_BUCKET: Optional[str] = None
 
     # --- P7: Sarvam AI (Indic) ---
     SARVAM_API_KEY: Optional[str] = None

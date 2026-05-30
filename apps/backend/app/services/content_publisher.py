@@ -1,5 +1,5 @@
 """
-ContentPublisherService - Publishes content to Vertex AI Search and Cloudflare.
+ContentPublisherService - Publishes content to Vertex AI Search, GCS, and Cloudflare.
 """
 
 import asyncio
@@ -137,24 +137,85 @@ class ContentPublisherService:
             logger.error(f"Cloudflare publish failed: {e}")
             return {"status": "error", "detail": str(e)}
 
+    async def publish_to_gcs(self, chapter: Chapter) -> dict:
+        """Serialize chapter data and write to GCS as a knowledge object."""
+        from app.services.content.gcs_store import gcs_content_store
+
+        if not gcs_content_store._configured:
+            logger.warning("GCS content store not configured, skipping GCS publish")
+            return {"status": "skipped", "reason": "not_configured"}
+
+        try:
+            data = {
+                "id": str(chapter.id),
+                "title": chapter.title,
+                "slug": chapter.slug,
+                "subject_id": str(chapter.subject_id),
+                "chapter_number": chapter.chapter_number,
+                "content_en": chapter.content_en,
+                "meta_description": chapter.meta_description,
+                "keywords": chapter.keywords,
+                "published_topics": [
+                    t.model_dump() for t in chapter.published_topics
+                ],
+                "status": chapter.status,
+                "updated_at": chapter.updated_at.isoformat()
+                if chapter.updated_at
+                else None,
+            }
+            await gcs_content_store.write_knowledge_object(str(chapter.id), data)
+            return {"status": "uploaded"}
+        except Exception as e:
+            logger.error(f"GCS publish failed for chapter {chapter.id}: {e}")
+            return {"status": "error", "detail": str(e)}
+
+    async def trigger_cloudflare_rebuild(self) -> dict:
+        """POST to Cloudflare Pages deploy hook to trigger a site rebuild."""
+        hook_url = settings.CF_PAGES_DEPLOY_HOOK
+        if not hook_url:
+            logger.info("CF_PAGES_DEPLOY_HOOK not configured, skipping rebuild")
+            return {"status": "skipped", "reason": "not_configured"}
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(hook_url)
+                response.raise_for_status()
+                logger.info("Cloudflare Pages rebuild triggered successfully")
+                return {"status": "triggered"}
+        except Exception as e:
+            logger.error(f"Cloudflare rebuild trigger failed: {e}")
+            return {"status": "error", "detail": str(e)}
+
     async def publish_chapter(self, chapter_id: str) -> dict:
-        """Full publish pipeline: Vertex AI Search + Cloudflare, then mark as published."""
+        """Full publish pipeline: GCS + Vertex AI Search + Cloudflare, then mark as published."""
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
 
+        # 1. Write to GCS (fail-soft)
+        gcs_result = await self.publish_to_gcs(chapter)
+
+        # 2. Index in Vertex AI Search (fail-soft)
         search_result = await self.publish_to_vertex_search(chapter)
+
+        # 3. Publish to Cloudflare worker (fail-soft)
         cf_result = await self.publish_to_cloudflare(chapter)
 
+        # 4. Mark as published in MongoDB
         chapter.status = "published"
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
 
+        # 5. Trigger Cloudflare Pages rebuild (fail-soft)
+        rebuild_result = await self.trigger_cloudflare_rebuild()
+
         return {
             "chapter_id": chapter_id,
             "status": "published",
+            "gcs": gcs_result,
             "vertex_search": search_result,
             "cloudflare": cf_result,
+            "cf_rebuild": rebuild_result,
         }
 
     async def regenerate_sitemap(self) -> str:

@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add google-cloud-storage dependency, GCS config fields, GCS Content Store service, updated content publisher with dual-write, and hierarchy sync function. This covers Steps 2, 3, 6, 7, and 10 from the implementation plan - all backend changes.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 (Step 10): Add 'google-cloud-storage' to apps/backend/requirements.in (after the existing google-cloud-discoveryengine line).",
+    "Step 2 (Step 6): Add two new config fields to apps/backend/app/config.py in the Settings class: CF_PAGES_DEPLOY_HOOK: Optional[str] = None and GCS_CONTENT_BUCKET: Optional[str] = None. Place them near the Cloudflare settings section.",
+    "Step 3 (Step 2): Create apps/backend/app/services/content/gcs_store.py with a GCSContentStore class. It should: (a) Initialize a google.cloud.storage Client using service account credentials from settings.google_credentials (use google.oauth2.service_account.Credentials.from_service_account_info). (b) Use bucket name from settings.GCS_CONTENT_BUCKET, falling back to f'{settings.VERTEX_PROJECT_ID}-syrabit-content' if not set. (c) Implement methods: write_knowledge_object(chapter_id: str, data: dict) that writes to 'content/chapters/{chapter_id}.json', write_hierarchy(entity_type: str, entity_id: str, data: dict) that writes to 'hierarchy/{entity_type}/{entity_id}.json', write_library_bundle(data: dict) that writes to 'static/library-bundle.json', write_sitemap(filename: str, xml_content: str) that writes to 'static/{filename}', read_json(path: str) -> dict that reads and returns parsed JSON, list_knowledge_objects() -> list[str] that lists blobs under 'content/chapters/'. (d) All write/read methods should use asyncio.to_thread to wrap sync GCS calls. (e) Include proper error handling and logging. (f) Create a singleton: gcs_content_store = GCSContentStore(). (g) Handle the case where GCS is not configured (no credentials) gracefully - log a warning and skip operations.",
+    "Step 4 (Step 3): Update apps/backend/app/services/content_publisher.py - add a new method publish_to_gcs(self, chapter: Chapter) that serializes chapter data (id, title, slug, subject_id, chapter_number, content_en, meta_description, keywords, published_topics, status, updated_at) as a dict and calls gcs_content_store.write_knowledge_object(str(chapter.id), data). Add a method trigger_cloudflare_rebuild(self) that POSTs to settings.CF_PAGES_DEPLOY_HOOK URL (skip if not configured). Update the publish_chapter method to include: (1) GCS write via publish_to_gcs, (2) existing Vertex AI Search index, (3) mark published in MongoDB (existing), (4) trigger CF rebuild. All new steps should be fail-soft (log errors, don't break pipeline).",
+    "Step 5 (Step 7): Create a new file apps/backend/app/services/content/hierarchy_sync.py with an async function sync_hierarchy_to_gcs() that: (a) Reads all active boards, classes, streams, subjects from MongoDB (using the Beanie models from app.models.content). (b) Writes each entity to GCS via gcs_content_store.write_hierarchy (e.g., write_hierarchy('boards', str(board.id), {'id': str(board.id), 'name': board.name, 'slug': board.slug})). (c) Rebuilds the library bundle JSON (using the same logic as the public_content.py get_library_bundle endpoint) and writes it to GCS via gcs_content_store.write_library_bundle(). (d) The function should be importable and callable from admin routes when content hierarchy changes. Include a singleton-style convenience: hierarchy_syncer module-level function."
+  ],
+  "acceptance_criteria": [
+    "apps/backend/requirements.in contains google-cloud-storage",
+    "apps/backend/app/config.py has CF_PAGES_DEPLOY_HOOK and GCS_CONTENT_BUCKET fields",
+    "apps/backend/app/services/content/gcs_store.py exists with GCSContentStore class and all specified methods",
+    "apps/backend/app/services/content_publisher.py has publish_to_gcs and trigger_cloudflare_rebuild methods, and publish_chapter includes the full pipeline",
+    "apps/backend/app/services/content/hierarchy_sync.py exists with sync_hierarchy_to_gcs function",
+    "All new code follows existing patterns: singleton instances, asyncio.to_thread for sync calls, fail-soft error handling with logging"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && pip install -r requirements.in 2>&1 | tail -5 (verify google-cloud-storage installs)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.config import settings; print(settings.CF_PAGES_DEPLOY_HOOK, settings.GCS_CONTENT_BUCKET)' (verify config loads without error)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.content.gcs_store import gcs_content_store; print(type(gcs_content_store))' (verify import works)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.content_publisher import content_publisher_service; print(dir(content_publisher_service))' (verify publish_to_gcs and trigger_cloudflare_rebuild exist)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.services.content.hierarchy_sync import sync_hierarchy_to_gcs; print(sync_hierarchy_to_gcs)' (verify import works)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
