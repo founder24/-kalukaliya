@@ -606,6 +606,8 @@ async def chat_stream(
 
 ANON_HISTORY_LIMIT = 5
 
+_ANON_ID_PATTERN = re.compile(r"^anon_[a-f0-9]{32}$")
+
 
 @router.get("/history")
 async def get_chat_history(
@@ -636,7 +638,7 @@ async def get_chat_history(
         if http_request:
             anon_id = http_request.headers.get("x-anon-id") or http_request.headers.get("X-Anon-ID")
 
-        if not anon_id:
+        if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
             return {
                 "chats": [],
                 "pagination": {"skip": 0, "limit": 0, "total": 0, "has_more": False},
