@@ -62,7 +62,7 @@ const DEFAULT_BACKEND = "https://api.syrabit.ai";
 // the matching backend route and force the correct Content-Type. Cached
 // at the edge for an hour (matches _headers s-maxage).
 const SEO_PASSTHROUGH_RE =
-  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|\.well-known\/ai-plugin\.json|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml)$/i;
+  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|\.well-known\/ai-plugin\.json|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
 // IndexNow keyfiles (32-hex .txt or *indexnow*.txt) are intentionally
 // excluded — they're shipped as static assets in dist/ so the Pages
 // ASSETS pipeline serves them directly. Routing them through the
@@ -95,6 +95,7 @@ function backendPathForSeo(pathname) {
 }
 
 function contentTypeForSeo(pathname) {
+  if (/feed\.json$/i.test(pathname)) return "application/feed+json; charset=utf-8";
   if (/\.json$/i.test(pathname)) return "application/json; charset=utf-8";
   if (/\.txt$/i.test(pathname)) return "text/plain; charset=utf-8";
   return "application/xml; charset=utf-8";

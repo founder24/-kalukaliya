@@ -300,6 +300,7 @@ def create_app() -> FastAPI:
         admin_alerts.router, prefix="/api/v1/admin", tags=["Admin Alerts"]
     )
     app.include_router(seo.router, prefix="/api/v1/seo", tags=["SEO"])
+    app.include_router(seo.router, prefix="", tags=["SEO Root"])
     app.include_router(indexnow.router, prefix="/api/v1/indexnow", tags=["IndexNow"])
     app.include_router(
         public_content.router, prefix="/api/v1/content", tags=["Public Content"]
