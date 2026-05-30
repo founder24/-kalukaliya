@@ -415,6 +415,10 @@ export function chapterSchema(data, url, basePath = '') {
       inLanguage,
       isAccessibleForFree: true,
       url: topicAnchorUrl,
+      speakable: {
+        '@type': 'SpeakableSpecification',
+        cssSelector: [`#topic-${t.topic_slug} h2`, `#topic-${t.topic_slug} p`],
+      },
       provider: { '@type': 'Organization', name: 'Syrabit.ai', url: SITE_ORIGIN },
     });
     topicMentions.push({ '@type': 'Thing', name: t.title, url: topicAnchorUrl });
@@ -445,6 +449,7 @@ export function chapterSchema(data, url, basePath = '') {
       name: data.title,
       inLanguage,
       isPartOf: { '@type': 'WebSite', '@id': SITE_ORIGIN, name: 'Syrabit.ai' },
+      mainEntity: { '@type': 'Article', '@id': articleNodeId },
       speakable: {
         '@type': 'SpeakableSpecification',
         cssSelector: ['article h1', 'article > p:first-of-type', 'article h2'],
@@ -468,6 +473,9 @@ export function chapterSchema(data, url, basePath = '') {
         }
         items.push({ '@type': 'ListItem', position: pos++, name: subjectName, item: subjectUrl });
         items.push({ '@type': 'ListItem', position: pos, name: chapterTitle, item: url });
+        if (publishedTopics.length > 0 && publishedTopics[0].topic_slug) {
+          items.push({ '@type': 'ListItem', position: pos + 1, name: publishedTopics[0].title, item: `${url}#topic-${publishedTopics[0].topic_slug}` });
+        }
         return items;
       })(),
     },

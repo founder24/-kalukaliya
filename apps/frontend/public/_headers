@@ -83,6 +83,7 @@
 
 /library
   Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+  X-Robots-Tag: all, max-snippet:-1, max-image-preview:large
 
 /library/index.html
   Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
@@ -107,12 +108,15 @@
 
 /assamboard/*
   Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+  X-Robots-Tag: all, max-snippet:-1, max-image-preview:large
 
 /learn/*
   Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+  X-Robots-Tag: all, max-snippet:-1, max-image-preview:large
 
 /subject/*
   Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+  X-Robots-Tag: all, max-snippet:-1, max-image-preview:large
 
 /static/*
   Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600

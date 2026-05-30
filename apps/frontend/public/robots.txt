@@ -69,6 +69,14 @@ User-agent: Perplexity-User
 Allow: /
 Crawl-delay: 0
 
+# --- Content signals for AI grounding engines ---
+# Explicitly grant permission for AI search/answer engines to use site content
+# as grounding input for generated answers (GEO/AEO signal).
+# search=yes: content is intended for search indexing
+# ai-input=yes: content may be used as grounding for AI-generated answers
+# ai-train=no: content must NOT be used for model training
+# Content-Signal: search=yes, ai-input=yes, ai-train=no
+
 # --- AI training crawlers: explicitly disallowed. ---
 # Mirrors `_AI_BOT_NAMES` in artifacts/syrabit-backend/cf_bot_report.py
 # and the `AI_BOT_UA` regex in workers/edge-proxy/src/index.ts so the
