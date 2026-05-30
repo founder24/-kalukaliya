@@ -3,6 +3,7 @@
 Admin User Management Script
 =============================
 Creates or resets the admin user in MongoDB directly.
+Uses raw pymongo — no Beanie dependency, works independently of app version.
 
 Usage:
     cd apps/backend
@@ -18,17 +19,18 @@ Optional:
     ADMIN_FORCE_RESET=true — overwrite password if user already exists
 
 Examples:
-    MONGODB_URI="mongodb+srv://..." ADMIN_EMAIL="admin@syrabit.ai" \
+    MONGODB_URI="mongodb+srv://..." ADMIN_EMAIL="admin@syrabit.ai" \\
         ADMIN_PASSWORD="SuperSecret1!" python scripts/create_admin.py
 
     # Force password reset on existing admin:
-    ADMIN_FORCE_RESET=true MONGODB_URI="..." ADMIN_EMAIL="admin@syrabit.ai" \
+    ADMIN_FORCE_RESET=true MONGODB_URI="..." ADMIN_EMAIL="admin@syrabit.ai" \\
         ADMIN_PASSWORD="NewPass1!" python scripts/create_admin.py
 """
 
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 
 
 async def main():
@@ -38,7 +40,7 @@ async def main():
     db_name = os.environ.get("MONGODB_DB_NAME", "syrabit_prod")
     force_reset = os.environ.get("ADMIN_FORCE_RESET", "").lower() in ("true", "1", "yes")
 
-    # Validate inputs
+    # ── Validate inputs ──────────────────────────────────────────────────────
     if not mongodb_uri:
         print("ERROR: MONGODB_URI is required", file=sys.stderr)
         sys.exit(1)
@@ -61,53 +63,86 @@ async def main():
         print("ERROR: ADMIN_PASSWORD must contain a digit", file=sys.stderr)
         sys.exit(1)
 
+    # ── Hash password with bcrypt (no Beanie needed) ─────────────────────────
+    import bcrypt
+    hashed_password = bcrypt.hashpw(
+        admin_password.encode("utf-8"), bcrypt.gensalt()
+    ).decode("utf-8")
+
+    # ── Connect via raw motor (no Beanie) ────────────────────────────────────
     print(f"Connecting to MongoDB ({db_name})...")
-
     import motor.motor_asyncio
-    from beanie import init_beanie
 
-    # Add parent to path so we can import app modules
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from app.models.user import User
-
-    client = motor.motor_asyncio.AsyncIOMotorClient(mongodb_uri)
+    client = motor.motor_asyncio.AsyncIOMotorClient(
+        mongodb_uri,
+        serverSelectionTimeoutMS=10000,
+        connectTimeoutMS=10000,
+    )
     db = client[db_name]
-    await init_beanie(database=db, document_models=[User])
+    users = db["users"]
 
-    existing = await User.find_one({"email": admin_email})
+    # Verify connection
+    try:
+        await client.admin.command("ping")
+        print("  Connected ✓")
+    except Exception as e:
+        print(f"ERROR: Cannot reach MongoDB: {e}", file=sys.stderr)
+        client.close()
+        sys.exit(1)
+
+    # ── Upsert admin user ────────────────────────────────────────────────────
+    existing = await users.find_one({"email": admin_email})
+    now = datetime.now(timezone.utc)
 
     if existing:
-        print(f"User found: {admin_email} (role: {existing.role or 'none'})")
-        if existing.role == "admin" and not force_reset:
-            print("Admin already exists. Use ADMIN_FORCE_RESET=true to reset the password.")
-            return
-        from datetime import datetime, timezone
-        update: dict = {
-            "role": "admin",
-            "updated_at": datetime.now(timezone.utc),
-        }
-        if force_reset or existing.role != "admin":
-            update["hashed_password"] = User.hash_password(admin_password)
-        await existing.update({"$set": update})
-        print(f"✓ Admin updated: {admin_email}")
-        if force_reset:
-            print("  Password has been reset.")
-    else:
-        from datetime import datetime, timezone
-        admin_user = User(
-            email=admin_email,
-            hashed_password=User.hash_password(admin_password),
-            role="admin",
-            auth_provider="local",
-            name="Admin",
-        )
-        await admin_user.insert()
-        print(f"✓ Admin created: {admin_email}")
+        current_role = existing.get("role", "none")
+        print(f"User found: {admin_email} (role: {current_role})")
 
-    print("\nAdmin login endpoint: POST /api/v1/admin/login")
-    print("  Body: { \"email\": \"...\", \"password\": \"...\" }")
-    print("  Sets httpOnly cookie: syrabit_admin_session (8h TTL)")
-    print("  Verify session: GET /api/v1/admin/verify")
+        if current_role == "admin" and not force_reset:
+            print("Admin already exists and is active.")
+            print("Use ADMIN_FORCE_RESET=true to reset the password.")
+            client.close()
+            return
+
+        update: dict = {"role": "admin", "updated_at": now}
+        if force_reset or current_role != "admin":
+            update["hashed_password"] = hashed_password
+            if force_reset:
+                print("  Resetting password...")
+
+        await users.update_one({"_id": existing["_id"]}, {"$set": update})
+        print(f"✓ Admin updated: {admin_email}")
+    else:
+        doc = {
+            "email": admin_email,
+            "hashed_password": hashed_password,
+            "auth_provider": "local",
+            "role": "admin",
+            "name": "Admin",
+            "subscription_tier": "free",
+            "subscription_status": "active",
+            "monthly_message_count": 0,
+            "total_lifetime_messages": 0,
+            "consent_dpdp": False,
+            "preferred_language": "en",
+            "voice_enabled": True,
+            "theme": "light",
+            "cancel_at_period_end": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = await users.insert_one(doc)
+        print(f"✓ Admin created: {admin_email} (id: {result.inserted_id})")
+
+    print()
+    print("Admin login endpoint : POST /api/v1/admin/login")
+    print('  Body               : { "email": "...", "password": "..." }')
+    print("  Sets cookie        : syrabit_admin_session (httpOnly, 8h TTL)")
+    print("  Verify session     : GET  /api/v1/admin/verify")
+    print()
+    print("For production (Cloud Run), also set these env vars:")
+    print("  ADMIN_EMAIL   — auto-seeds admin on every cold start (idempotent)")
+    print("  ADMIN_PASSWORD")
     client.close()
 
 

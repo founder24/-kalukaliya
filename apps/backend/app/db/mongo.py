@@ -56,12 +56,19 @@ async def init_mongo() -> None:
                 ],
             )
 
-            # Create indexes
-            await create_indexes()
+            # Create indexes — failures here are non-fatal (indexes may already
+            # exist with slightly different specs on an existing cluster).
+            try:
+                await create_indexes()
+            except Exception as idx_err:
+                logger.warning(f"Index creation partially failed (non-fatal): {idx_err}")
 
             # Run pending database migrations
             db = _client[settings.MONGODB_DB_NAME]
-            await check_and_apply_migrations(db)
+            try:
+                await check_and_apply_migrations(db)
+            except Exception as mig_err:
+                logger.warning(f"Migration check failed (non-fatal): {mig_err}")
 
             logger.info("MongoDB connection initialized successfully")
             return
@@ -83,7 +90,7 @@ async def create_indexes() -> None:
     """Create necessary database indexes"""
     db = _client[settings.MONGODB_DB_NAME] if _client else None
 
-    if not db:
+    if db is None:
         return
 
     # Users collection indexes
