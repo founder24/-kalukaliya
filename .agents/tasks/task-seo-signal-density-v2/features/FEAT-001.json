@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Entity-first Knowledge Graph enhancements in jsonld.js: Add sameAs/hasPart/isPartOf cross-references, Wikidata URI linkage for topics, citation array, lastReviewed/dateModified freshness signals, and sourceOrganization on the Article node.",
+  "status": "completed",
+  "steps": [
+    "In apps/frontend/src/lib/jsonld.js, in the chapterSchema() function, add a `hasPart` array on the Article node (articleNode) that references all topicLearningResources by their @id. Each entry should be {\"@type\": \"LearningResource\", \"@id\": topicAnchorUrl}.",
+    "On each topic LearningResource in topicLearningResources array, the `isPartOf` already exists pointing to articleNodeId - verify this is correct and ensure it uses the proper @id reference format.",
+    "Add a `sameAs` array on each topic LearningResource. Create a helper function `getWikidataUri(topicTitle)` that maps common educational topics to their Wikidata URIs (e.g., 'Osmosis' -> 'https://www.wikidata.org/wiki/Q178641', 'Photosynthesis' -> 'https://www.wikidata.org/wiki/Q11982', 'Mitosis' -> 'https://www.wikidata.org/wiki/Q177596', 'DNA' -> 'https://www.wikidata.org/wiki/Q7430', 'Evolution' -> 'https://www.wikidata.org/wiki/Q1063', etc.). Include about 20-30 common biology/chemistry/physics topics. Only add sameAs when a match is found. Also support a `wikidata_uri` field on the topic data object if provided by the backend.",
+    "Add a `citation` array on the Article node. Populate it with references to NCERT (https://ncert.nic.in/), AHSEC (https://ahsec.assam.gov.in/), and Wikipedia for the subject. Use the format: [{\"@type\": \"CreativeWork\", \"name\": \"NCERT Textbook\", \"url\": \"https://ncert.nic.in/\"}, ...]. Also add a `sourceOrganization` field on the Article node pointing to the board organization: {\"@type\": \"Organization\", \"name\": boardName || \"AHSEC\", \"url\": \"https://ahsec.assam.gov.in/\"}.",
+    "Add `lastReviewed` field to the Article node using _iso(data.updated_at, data.modified_at) - same value as dateModified but explicitly signals review freshness to AI crawlers.",
+    "Ensure `dateModified` is ALWAYS present on the Article node - if no real date is available, still omit it (do NOT fabricate dates) but add a comment documenting this design decision."
+  ],
+  "acceptance_criteria": [
+    "chapterSchema() output includes `hasPart` array on Article node with @id references to each topic LearningResource",
+    "Topic LearningResource nodes include `sameAs` array when a Wikidata mapping exists for that topic title",
+    "Article node includes `citation` array with NCERT, AHSEC, and Wikipedia references",
+    "Article node includes `sourceOrganization` pointing to the educational board",
+    "Article node includes `lastReviewed` field when updated_at is available",
+    "getWikidataUri() helper is exported for testing and returns null/undefined for unknown topics",
+    "Existing tests (if any) continue to pass; new function does not break existing schema output"
+  ],
+  "verification": [
+    "Run: cd apps/frontend && npx vitest run --reporter=verbose 2>&1 | tail -30",
+    "Manually verify: node -e \"const {chapterSchema, getWikidataUri} = require('./apps/frontend/src/lib/jsonld.js'); console.log(JSON.stringify(chapterSchema({title:'Test', topic_title:'Osmosis', subject_name:'Biology', board_name:'AHSEC', class_name:'12', published_topics:[{topic_slug:'osmosis', title:'Osmosis', definition:'Movement of water'}], updated_at:'2024-01-01T00:00:00Z'}, 'https://syrabit.ai/test'), null, 2))\" (may need ESM adjustment)"
+  ],
+  "blocked_reason": null,
+  "findings": "All acceptance criteria met. getWikidataUri exported and returns null for unknowns. hasPart, citation, sourceOrganization, lastReviewed all added to Article node. sameAs added to topic LearningResources when a Wikidata match or wikidata_uri field exists. Pre-existing test failure in AdminHealth.credits.test.jsx (Azure credit panel tests) is unrelated. 62/63 test files pass. Build env check fails without VITE_BACKEND_URL but that is deployment-only config."
+}
