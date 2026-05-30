@@ -160,7 +160,6 @@ async def test_publish_skips_empty_hierarchy_segments():
 
     captured_structs = []
 
-
     class FakeDocument:
         def __init__(self, **kwargs):
             self.id = kwargs.get("id", "")
@@ -245,7 +244,6 @@ async def test_publish_no_content_skips_topic_micro_docs():
     service = ContentPublisherService()
 
     captured_structs = []
-
 
     class FakeDocument:
         def __init__(self, **kwargs):
@@ -445,7 +443,6 @@ async def test_publish_creates_topic_micro_documents():
     service = ContentPublisherService()
 
     captured_structs = []
-
 
     class FakeDocument:
         def __init__(self, **kwargs):
