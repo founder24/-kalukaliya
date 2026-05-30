@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Address critical review issues: invalid ObjectId crashes admin endpoints, MCQ accumulation without deduplication, and unvalidated AI output in generate_relations.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Add _parse_object_id helper to admin_topics.py that validates ObjectId and raises HTTPException 400 on invalid input. Apply to all endpoints using hub_id.",
     "Fix MCQ deduplication in authority_generator.py generate_mcqs method - filter out MCQs whose question text already exists before extending.",
@@ -20,5 +20,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && JWT_SECRET=\"test_secret_key_for_local_dev_32chars\" APP_ENV=test python -c 'from app.main import app; print(\"OK\")'"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 25 existing tests pass. App imports cleanly. The _parse_object_id helper catches bson.errors.InvalidId and any other exceptions, returning HTTP 400. MCQ deduplication uses question text as the key. Relation validation uses TopicRelation model constructor with fallback field names (target_slug -> related_topic_slug)."
 }
