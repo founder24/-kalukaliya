@@ -199,8 +199,14 @@ export default {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const headers: Record<string, string> = {};
+        const token = await getIdentityToken(env);
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
         const res = await fetch(`${env.BACKEND_URL}/health/deep`, {
           signal: controller.signal,
+          headers,
         });
         clearTimeout(timeoutId);
         backendStatus = await res.json() as Record<string, unknown>;

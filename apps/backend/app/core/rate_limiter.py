@@ -2,21 +2,30 @@
 Rate Limiter: Token Bucket Implementation with Upstash Redis
 Supports atomic operations and rate limit headers
 
-LEGACY MODULE: Per-request burst rate limiting is now handled by the Cloudflare Edge
-worker (apps/edge/src/middleware/rate-limit.ts). This module is retained as a reference
-for the monthly quota Lua script pattern used by apps/backend/app/api/deps/rate_limit.py.
-Do not use this for new per-request enforcement.
+LEGACY MODULE - DEPRECATED: Per-request burst rate limiting is now handled by the
+Cloudflare Edge worker (apps/edge/src/middleware/rate-limit.ts). Monthly quota
+enforcement lives in apps/backend/app/api/deps/rate_limit.py. This module is retained
+only as a reference for the Lua script pattern. Do NOT import or instantiate anything
+from this module in new code.
 """
+
+import warnings
+import time
+from typing import Tuple
 
 from upstash_redis.asyncio import Redis
 from app.config import settings
-from typing import Tuple
-import time
+
+# Signal that nothing should be imported from this module
+__all__ = []
 
 
 class RateLimiter:
     """
     Token Bucket Rate Limiter using Upstash Redis.
+
+    DEPRECATED: Use apps/backend/app/api/deps/rate_limit.py for monthly quota
+    enforcement and the edge worker for per-request burst limiting.
 
     Features:
     - Atomic operations via Lua scripting
@@ -26,6 +35,12 @@ class RateLimiter:
     """
 
     def __init__(self, redis_client: Redis):
+        warnings.warn(
+            "RateLimiter is deprecated. Use app.api.deps.rate_limit for quota "
+            "enforcement and the edge worker for burst rate limiting.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.redis = redis_client
 
         # Lua script for atomic token bucket operation
@@ -128,7 +143,16 @@ rate_limiter_instance = None
 
 
 def get_rate_limiter(redis_client: Redis) -> RateLimiter:
-    """Get or create rate limiter instance."""
+    """Get or create rate limiter instance.
+
+    DEPRECATED: Do not use. See module docstring for alternatives.
+    """
+    warnings.warn(
+        "get_rate_limiter() is deprecated. Use app.api.deps.rate_limit for quota "
+        "enforcement and the edge worker for burst rate limiting.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     global rate_limiter_instance
     if rate_limiter_instance is None:
         rate_limiter_instance = RateLimiter(redis_client)
