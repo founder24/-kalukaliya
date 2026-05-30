@@ -51,6 +51,46 @@ export const ORG_SAMEAS = [
   'https://www.youtube.com/@syrabit',
 ];
 
+/**
+ * Wikidata entity URIs for educational concepts relevant to Syrabit.ai.
+ * Used to ground JSON-LD sameAs links into the Knowledge Graph so AI
+ * crawlers can disambiguate entities unambiguously.
+ */
+export const WIKIDATA_ENTITIES = {
+  AHSEC: 'https://www.wikidata.org/entity/Q4654856',
+  SEBA: 'https://www.wikidata.org/entity/Q7414203',
+  CBSE: 'https://www.wikidata.org/entity/Q1023406',
+  Assam: 'https://www.wikidata.org/entity/Q1195',
+  India: 'https://www.wikidata.org/entity/Q668',
+  Guwahati: 'https://www.wikidata.org/entity/Q168727',
+  Physics: 'https://www.wikidata.org/entity/Q413',
+  Chemistry: 'https://www.wikidata.org/entity/Q2329',
+  Mathematics: 'https://www.wikidata.org/entity/Q395',
+  Biology: 'https://www.wikidata.org/entity/Q420',
+  Economics: 'https://www.wikidata.org/entity/Q8134',
+  English: 'https://www.wikidata.org/entity/Q1860',
+  Education: 'https://www.wikidata.org/entity/Q8434',
+};
+
+/**
+ * DBpedia resource URIs corresponding to the same educational concepts.
+ */
+export const DBPEDIA_ENTITIES = {
+  AHSEC: 'http://dbpedia.org/resource/Assam_Higher_Secondary_Education_Council',
+  SEBA: 'http://dbpedia.org/resource/Board_of_Secondary_Education,_Assam',
+  CBSE: 'http://dbpedia.org/resource/Central_Board_of_Secondary_Education',
+  Assam: 'http://dbpedia.org/resource/Assam',
+  India: 'http://dbpedia.org/resource/India',
+  Guwahati: 'http://dbpedia.org/resource/Guwahati',
+  Physics: 'http://dbpedia.org/resource/Physics',
+  Chemistry: 'http://dbpedia.org/resource/Chemistry',
+  Mathematics: 'http://dbpedia.org/resource/Mathematics',
+  Biology: 'http://dbpedia.org/resource/Biology',
+  Economics: 'http://dbpedia.org/resource/Economics',
+  English: 'http://dbpedia.org/resource/English_language',
+  Education: 'http://dbpedia.org/resource/Education',
+};
+
 export const FOUNDER = {
   name: 'Dipak Rai',
   jobTitle: 'Founder & CEO',
@@ -134,10 +174,15 @@ export function globalSiteSchema(url) {
         // the Knowledge Graph + AI crawlers can map every off-site
         // mention back to the canonical Syrabit.ai entity. SITE_ORIGIN
         // stays first so existing test snapshots don't shift.
-        sameAs: [SITE_ORIGIN, ...ORG_SAMEAS],
+        sameAs: [SITE_ORIGIN, ...ORG_SAMEAS, WIKIDATA_ENTITIES.Assam, DBPEDIA_ENTITIES.Assam, WIKIDATA_ENTITIES.Guwahati, DBPEDIA_ENTITIES.Guwahati, WIKIDATA_ENTITIES.India, DBPEDIA_ENTITIES.India],
         address: SYRABIT_ADDRESS,
         areaServed: { '@type': 'AdministrativeArea', name: 'Assam, India' },
         knowsLanguage: ['en', 'as'],
+        knowsAbout: [
+          { '@type': 'Thing', name: 'AHSEC', sameAs: WIKIDATA_ENTITIES.AHSEC },
+          { '@type': 'Thing', name: 'SEBA', sameAs: WIKIDATA_ENTITIES.SEBA },
+          { '@type': 'Thing', name: 'CBSE', sameAs: WIKIDATA_ENTITIES.CBSE },
+        ],
         founder: { '@id': FOUNDER_NODE_ID },
       },
       {
@@ -340,6 +385,14 @@ export function chapterSchema(data, url, basePath = '') {
   if (data.chapter_title && data.chapter_title !== chapterTitle) {
     aboutThings.push({ '@type': 'Thing', name: data.chapter_title });
   }
+  // Link about Things to Wikidata/DBpedia when the subject matches a known entity
+  if (subjectName && WIKIDATA_ENTITIES[subjectName]) {
+    aboutThings.push({
+      '@type': 'Thing',
+      name: subjectName,
+      sameAs: [WIKIDATA_ENTITIES[subjectName], DBPEDIA_ENTITIES[subjectName]],
+    });
+  }
 
   // Real timestamps only — never bake build-time dates into Article
   // metadata, since AI crawlers use dateModified to decide whether the
@@ -376,6 +429,19 @@ export function chapterSchema(data, url, basePath = '') {
   articleNode['@id'] = articleNodeId;
   if (datePublished) articleNode.datePublished = datePublished;
   if (dateModified) articleNode.dateModified = dateModified;
+  // lastReviewed: genuine review timestamp when available
+  const lastReviewed = _iso(data.reviewed_at);
+  if (lastReviewed) articleNode.lastReviewed = lastReviewed;
+  // citation: link to authoritative .edu/.gov references when available
+  if (Array.isArray(data.citations) && data.citations.length > 0) {
+    articleNode.citation = data.citations
+      .filter(c => c && (c.url || c.name))
+      .map(c => ({
+        '@type': 'CreativeWork',
+        ...(c.name ? { name: c.name } : {}),
+        ...(c.url ? { url: c.url } : {}),
+      }));
+  }
 
   // Topical-authority pack (Task: topical mapping + topical authority).
   // Per-topic LearningResource entries — one structured datum per
@@ -441,6 +507,12 @@ export function chapterSchema(data, url, basePath = '') {
       isAccessibleForFree: true,
       url,
       about: { '@type': 'Thing', name: chapterTitle },
+      isPartOf: {
+        '@type': 'Course',
+        '@id': `${subjectUrl}#course`,
+        name: `${subjectName} — ${className} ${boardName}`.trim(),
+        provider: { '@type': 'Organization', name: 'Syrabit.ai', url: SITE_ORIGIN },
+      },
     },
     ...topicLearningResources,
     {
@@ -625,15 +697,20 @@ export function subjectHubSchema(subject, url) {
       url,
       isPartOf: { '@type': 'WebSite', '@id': SITE_ORIGIN, name: 'Syrabit.ai' },
       inLanguage,
-      hasPart: chapters.slice(0, 50).map(ch => ({
-        '@type': 'LearningResource',
-        name: ch.title,
-        url: subject.board_slug && subject.class_slug && subject.slug && ch.slug
+      ...(WIKIDATA_ENTITIES[subject.name] ? { sameAs: [WIKIDATA_ENTITIES[subject.name], DBPEDIA_ENTITIES[subject.name]] } : {}),
+      hasPart: chapters.slice(0, 50).map(ch => {
+        const chUrl = subject.board_slug && subject.class_slug && subject.slug && ch.slug
           ? `${SITE_ORIGIN}/${subject.board_slug}/${subject.class_slug}/${subject.slug}/${ch.slug}`
-          : undefined,
-        learningResourceType: 'Study Notes',
-        inLanguage,
-      })),
+          : undefined;
+        return {
+          '@type': 'LearningResource',
+          ...(chUrl ? { '@id': chUrl } : {}),
+          name: ch.title,
+          url: chUrl,
+          learningResourceType: 'Study Notes',
+          inLanguage,
+        };
+      }),
     },
     {
       '@type': 'Course',
