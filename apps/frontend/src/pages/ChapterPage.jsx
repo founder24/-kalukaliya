@@ -1073,7 +1073,12 @@ export default function ChapterPage() {
     .map(k => (typeof k === 'string' ? k : (k && k.keyword) || ''))
     .map(s => (s || '').trim())
     .filter(Boolean);
-  const _baseTitle = `${chapterTitle} — ${subjectName} | ${boardName} ${className} Notes`;
+  // Exact-match keyword optimization: append subject + board + class to title
+  // when total length allows (under 60 chars for optimal SERP display)
+  const _titleSuffix = [subjectName, boardName, className].filter(Boolean).join(' ');
+  const _baseTitle = _titleSuffix && (chapterTitle.length + _titleSuffix.length + 3) <= 60
+    ? `${chapterTitle} | ${_titleSuffix}`
+    : `${chapterTitle} — ${subjectName} | ${boardName} ${className} Notes`;
   // If the top Bing search differs from what's already in the title,
   // append it parenthetically so we surface real search demand without
   // breaking the deterministic fallback. Cap at 70 chars for SERP.

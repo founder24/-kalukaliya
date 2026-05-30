@@ -226,7 +226,8 @@ async function botRender(request, env, url) {
       if (ct.includes("text/html") || ct.includes("application/xhtml")) {
         const headers = new Headers(resp.headers);
         headers.set("X-Source", "bot-render");
-        headers.set("Cache-Control", "public, max-age=300, s-maxage=300");
+        headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
+        headers.set("X-Robots-Tag", "all, max-snippet:-1, max-image-preview:large");
         return new Response(resp.body, { status: 200, headers });
       }
     }
@@ -333,6 +334,8 @@ export default {
           if (ct.includes("text/html") || ct.includes("application/xhtml")) {
             const headers = new Headers(assetResp.headers);
             headers.set("X-Source", "prerender");
+            headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
+            headers.set("X-Robots-Tag", "all, max-snippet:-1, max-image-preview:large");
             return new Response(assetResp.body, {
               status: 200,
               headers,
