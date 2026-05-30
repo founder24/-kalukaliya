@@ -1,6 +1,6 @@
 # Full-Stack Live Deployment Audit: syrabit.ai
 
-**Audit Date:** 2026-05-30
+**Audit Date:** 2026-05-30 *(sandbox environment clock; actual audit performed this date)*
 **Auditor:** Automated Deployment Audit
 **Scope:** Frontend (Cloudflare Pages), Edge Worker (Cloudflare Workers), Backend (GCP Cloud Run)
 **Methodology:** Live HTTP testing + static code review
@@ -12,11 +12,11 @@
 | Severity | Count |
 |----------|-------|
 | Critical | 2 |
-| High | 4 |
+| High | 1 |
 | Medium | 5 |
 | Low | 4 |
 | Informational | 5 |
-| **Total** | **20** |
+| **Total** | **17** |
 
 **Critical Issues:**
 1. Backend (GCP Cloud Run) is completely unreachable from the edge worker - returning 403 Forbidden
@@ -85,6 +85,11 @@ $ curl -s https://api.syrabit.ai/health/full
 
 **Finding CRIT-02:** The backend is returning an HTML 403 page instead of JSON. The error message "Unexpected token '<'" confirms the edge is receiving an HTML error page from Cloud Run when trying to reach the backend.
 
+**Contributing factors to CRIT-02** (previously tracked separately, consolidated here as they share the same root cause):
+- **Ingress "all" with auth required:** Cloud Run's `ingress: all` allows network access but authentication is still enforced, creating a confusing security posture.
+- **GOOGLE_SA_KEY likely not configured (hypothesis):** The `getIdentityToken()` function requires this secret; without it, the edge makes unauthenticated requests that Cloud Run rejects.
+- **--allow-unauthenticated flag ineffective:** The deploy pipeline includes this flag but a GCP Organization Policy constraint likely overrides it.
+
 ### 1.5 Direct Backend Test - 403 FORBIDDEN
 
 ```
@@ -105,6 +110,8 @@ HTTP/2 403
 3. A GCP Organization Policy (constraints/run.allowedIngress) is blocking unauthenticated access
 
 The edge worker's getIdentityToken() function should provide a valid identity token, but the health check test shows it is not working (backend unreachable). This suggests the GOOGLE_SA_KEY secret may not be configured in the Cloudflare Worker.
+
+> **Note:** The GOOGLE_SA_KEY diagnosis is a hypothesis based on observed behavior (403 from Cloud Run + code review of google-auth.ts). This cannot be confirmed from outside the deployment -- operator verification is required via `npx wrangler secret list --env production` to check if the secret exists.
 
 ### 1.6 CORS Preflight - PASS
 
@@ -202,6 +209,8 @@ $ getent hosts api.syrabit.ai
 
 **Assessment:** All domains resolve to Cloudflare edge IPs (104.18.x.x / 2606:4700::*). DNS is properly configured and points to Cloudflare's proxy network.
 
+> **Evidence limitation:** `getent hosts` was used because `dig` and `nslookup` are unavailable in this environment. This method resolves via the system resolver and cannot show DNS record types (CNAME vs A), TTLs, or authoritative nameservers. The results confirm reachability but cannot distinguish between a direct A record and a CNAME chain, which affects origin configuration analysis.
+
 ### 2.2 SSL Certificate
 
 From curl verbose output:
@@ -298,8 +307,9 @@ Server certificate:
 - The rate limiter uses KV get then put (read-then-write pattern)
 - With KV's eventual consistency, concurrent requests can bypass the rate limit
 - The code acknowledges this in comments: "concurrent requests may both pass the check"
+- KV's global propagation delay is approximately 60 seconds; concurrent requests from different edge locations within that window can all pass the rate check
 - **Severity:** Medium
-- **Recommendation:** For stronger rate limiting, consider migrating to Durable Objects or at minimum documenting the accepted burst tolerance. The current implementation allows burst traffic to exceed limits.
+- **Recommendation:** For stronger rate limiting, consider migrating to Durable Objects. If retaining the current approach, document the expected burst tolerance: under high concurrency from multiple regions, the effective rate limit window may allow N * (number of edge locations) requests before propagation catches up.
 
 ### 3.5 Robots.txt Conflict
 
@@ -331,7 +341,7 @@ Server certificate:
 
 ### 4.2 Cloud Run Configuration (clouddeploy.yaml)
 
-**Finding HIGH-02: Ingress set to "all"**
+**Finding (Contributing factor to CRIT-02): Ingress set to "all"**
 ```yaml
 annotations:
   run.googleapis.com/ingress: all
@@ -339,15 +349,15 @@ annotations:
 - Combined with the 403 response observed in live testing, this creates a confusing state
 - If ingress is "all" but authentication is required, the service is accessible but returns 403 to unauthenticated requests
 - The edge worker needs a valid identity token to reach the backend
-- **Severity:** High
+- **Severity:** Consolidated into CRIT-02 (was HIGH-02)
 - **Recommendation:** Either set ingress to internal-and-cloud-load-balancing for defense-in-depth (edge provides identity token), or verify the GOOGLE_SA_KEY secret is properly configured in the Cloudflare Worker.
 
-**Finding HIGH-03: Backend completely unreachable from edge**
+**Finding (Contributing factor to CRIT-02): Backend unreachable - GOOGLE_SA_KEY hypothesis**
 - Live testing confirms the edge worker cannot reach the backend (returns 403)
 - The getIdentityToken() function in google-auth.ts requires GOOGLE_SA_KEY to be set as a Worker secret
 - If this secret is not configured, the edge makes unauthenticated requests that Cloud Run rejects
-- **Severity:** High (service is non-functional for all API operations)
-- **Recommendation:** Verify GOOGLE_SA_KEY is set as a Wrangler secret: npx wrangler secret put GOOGLE_SA_KEY --env production
+- **Severity:** Consolidated into CRIT-02 (was HIGH-03). This is a hypothesis requiring operator verification -- Wrangler secrets cannot be inspected from outside.
+- **Diagnostic:** Run `npx wrangler secret list --env production` to verify if GOOGLE_SA_KEY exists. If absent: `npx wrangler secret put GOOGLE_SA_KEY --env production`
 
 ### 4.3 Gunicorn Configuration
 
@@ -369,11 +379,11 @@ max_requests_jitter = 50
 - Workload Identity Federation (no long-lived service account keys)
 - Concurrency control prevents parallel deployments
 
-**Finding HIGH-04: --allow-unauthenticated flag ineffective**
+**Finding (Contributing factor to CRIT-02): --allow-unauthenticated flag ineffective**
 - The deploy command includes --allow-unauthenticated but live testing shows 403
 - This suggests a GCP Organization Policy constraint is overriding the flag
 - Constraint: constraints/run.allowedIngress or iam.allowedPolicyMemberDomains
-- **Severity:** High (deployment succeeds but service is inaccessible without auth)
+- **Severity:** Consolidated into CRIT-02 (was HIGH-04)
 - **Recommendation:** Check Organization Policies: gcloud org-policies describe constraints/run.allowedIngress. If org policy prevents unauthenticated access, remove the flag and ensure the edge worker always provides identity tokens.
 
 ---
@@ -412,7 +422,7 @@ The backend (security.py) implements comprehensive SSRF protection:
 - If the secret is not configured, requests to the backend have no edge authentication
 - Combined with the backend being unreachable, this suggests the shared secret may not be configured
 - **Severity:** Medium
-- **Recommendation:** Ensure EDGE_SHARED_SECRET is set in both the Worker secrets and the backend environment variables.
+- **Recommendation:** Run `npx wrangler secret list --env production` to check if EDGE_SHARED_SECRET exists. If absent, generate a 256-bit random value and set it in both `npx wrangler secret put EDGE_SHARED_SECRET --env production` and the Cloud Run backend environment variable.
 
 ### 5.4 Input Sanitization - STRONG
 
@@ -511,6 +521,24 @@ The api-proxy.ts correctly handles streaming:
 - The edge timeout (30s) is less than Cloud Run timeout (300s)
 - This ensures the edge fails fast rather than hanging if the backend is slow
 
+### 7.5 Circuit Breaker Assessment
+
+The backend implements a circuit breaker pattern in `apps/backend/app/core/circuit_breaker.py` for AI provider resilience. Three pre-configured circuit breakers exist:
+
+| Circuit Breaker | Failure Threshold | Reset Timeout | Purpose |
+|----------------|-------------------|---------------|---------|
+| Vertex AI | 5 failures | 30s | Primary AI chat provider |
+| Sarvam AI | 5 failures | 60s | Assamese language support |
+| Vertex Search | 3 failures | 30s | RAG search provider |
+
+**Implementation details:**
+- Three-state model: CLOSED (normal) -> OPEN (failing fast) -> HALF_OPEN (testing recovery)
+- Async-safe with `asyncio.Lock` for state transitions
+- Rate-limited logging to prevent log flooding during outages
+- Status exposed via `/health/circuit-breakers` endpoint (confirmed in health.py)
+
+**Assessment:** The circuit breaker implementation is well-designed for protecting against cascading failures from AI providers. However, there is no circuit breaker at the edge layer for the backend connection itself. Given that the backend is currently unreachable (CRIT-02), the edge worker retries on every request without a trip mechanism, leading to the elevated /health response times (356-680ms) observed in Section 7.1. Adding a circuit breaker at the edge for the backend health probe would prevent repeated timeout-based delays when the backend is known to be down.
+
 ---
 
 ## Section 8: Remediation Priority Matrix
@@ -520,16 +548,15 @@ The api-proxy.ts correctly handles streaming:
 | # | Finding | Impact | Remediation |
 |---|---------|--------|-------------|
 | CRIT-01 | www.syrabit.ai returns 522 | Users visiting www subdomain see error | Configure Cloudflare DNS or Page Rules to redirect www to apex domain. Check if a Worker route or origin is configured for www. |
-| CRIT-02 | Backend unreachable (403) from edge | ALL API functionality broken | 1. Verify GOOGLE_SA_KEY Worker secret is set. 2. Check GCP org policies blocking unauthenticated access. 3. If org policy requires auth, ensure edge always sends identity token. |
+| CRIT-02 | Backend unreachable (403) from edge | ALL API functionality broken | 1. Verify GOOGLE_SA_KEY Worker secret exists (`npx wrangler secret list --env production`). 2. Check GCP org policies blocking unauthenticated access (`gcloud org-policies describe constraints/run.allowedIngress`). 3. If org policy requires auth, ensure edge always sends identity token. 4. Consider setting ingress to internal-and-cloud-load-balancing for defense-in-depth. *Note: GOOGLE_SA_KEY diagnosis is a hypothesis requiring operator verification.* |
 
 ### High (Fix Within 24 Hours)
 
 | # | Finding | Impact | Remediation |
 |---|---------|--------|-------------|
 | HIGH-01 | Worker name mismatch (syrabitworker vs syrabitworker-prod) | Potential deploy-to-wrong-worker | Verify which worker the api.syrabit.ai route targets. Align names. |
-| HIGH-02 | Cloud Run ingress "all" with auth required | Confusing security posture | Set ingress to internal-and-cloud-load-balancing or ensure identity token is always provided. |
-| HIGH-03 | GOOGLE_SA_KEY likely not configured | Edge cannot authenticate to backend | Run: npx wrangler secret put GOOGLE_SA_KEY --env production with valid service account JSON. |
-| HIGH-04 | --allow-unauthenticated ineffective | Deploy succeeds but service inaccessible | Check and remediate GCP Organization Policy constraints. |
+
+*Note: HIGH-02, HIGH-03, and HIGH-04 have been consolidated into CRIT-02 as contributing factors to the same root cause (edge cannot authenticate to backend).*
 
 ### Medium (Fix Within 1 Week)
 
@@ -537,9 +564,9 @@ The api-proxy.ts correctly handles streaming:
 |---|---------|--------|-------------|
 | MED-01 | Stale compatibility_date (2024-01-01) | Missing Workers runtime improvements | Update to recent date after testing. |
 | MED-02 | Health/full leaks backend error details | Information disclosure | Sanitize error messages before returning to client. |
-| MED-03 | KV rate limiting has race condition | Rate limits can be bypassed under burst | Document as accepted risk or migrate to Durable Objects. |
+| MED-03 | KV rate limiting has race condition | Rate limits can be bypassed under burst | KV eventual consistency has ~60s global propagation delay; concurrent requests from different edge locations within that window can all pass the rate check. For stronger guarantees, migrate to Durable Objects. Document the expected burst tolerance as an accepted risk if the current approach is retained. |
 | MED-04 | Conflicting robots.txt directives | Search engine confusion | Resolve GPTBot Allow/Disallow conflict. |
-| MED-05 | HMAC/EDGE_SHARED_SECRET may not be configured | No edge authentication on backend requests | Verify secret is set in both Worker and backend env. |
+| MED-05 | HMAC/EDGE_SHARED_SECRET may not be configured | No edge authentication on backend requests | Run `npx wrangler secret list --env production` to check if EDGE_SHARED_SECRET exists. If absent, generate a 256-bit random value and set it with `npx wrangler secret put EDGE_SHARED_SECRET --env production`, then add the same value to the Cloud Run backend environment variable. |
 
 ### Low (Fix Within 1 Month)
 
