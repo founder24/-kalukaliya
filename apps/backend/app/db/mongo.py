@@ -61,7 +61,9 @@ async def init_mongo() -> None:
             try:
                 await create_indexes()
             except Exception as idx_err:
-                logger.warning(f"Index creation partially failed (non-fatal): {idx_err}")
+                logger.warning(
+                    f"Index creation partially failed (non-fatal): {idx_err}"
+                )
 
             # Run pending database migrations
             db = _client[settings.MONGODB_DB_NAME]

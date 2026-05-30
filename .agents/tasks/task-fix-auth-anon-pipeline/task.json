@@ -1,0 +1,14 @@
+{
+  "task_id": "task-fix-auth-anon-pipeline",
+  "task_description": "Fix the authentication and anonymous user pipeline so that auth is NOT compulsory. Anonymous users (identified by IP/anon-id) should be able to access library, chat, and 5 chat history entries without logging in. Authenticated users get full access.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 7 new anon access tests pass. All 6 auth tests pass. 180 tests pass total (3 pre-existing failures unrelated to this change). Security review issue fixed: anon_id is now validated against the pattern before MongoDB query."
+  }
+}
