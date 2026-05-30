@@ -417,7 +417,7 @@ export function chapterSchema(data, url, basePath = '') {
       url: topicAnchorUrl,
       speakable: {
         '@type': 'SpeakableSpecification',
-        cssSelector: [`#topic-${t.topic_slug} h2`, `#topic-${t.topic_slug} p`],
+        cssSelector: [`#topic-${t.topic_slug} h2`, `#topic-${t.topic_slug} p:first-of-type`],
       },
       provider: { '@type': 'Organization', name: 'Syrabit.ai', url: SITE_ORIGIN },
     });
@@ -473,9 +473,6 @@ export function chapterSchema(data, url, basePath = '') {
         }
         items.push({ '@type': 'ListItem', position: pos++, name: subjectName, item: subjectUrl });
         items.push({ '@type': 'ListItem', position: pos, name: chapterTitle, item: url });
-        if (publishedTopics.length > 0 && publishedTopics[0].topic_slug) {
-          items.push({ '@type': 'ListItem', position: pos + 1, name: publishedTopics[0].title, item: `${url}#topic-${publishedTopics[0].topic_slug}` });
-        }
         return items;
       })(),
     },
