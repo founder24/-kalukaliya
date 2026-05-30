@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Enrich Vertex Search indexed documents with syllabus hierarchy metadata and topic micro-documents. Update content_publisher.py to resolve the full Board > Class > Stream > Subject hierarchy for each chapter, include topic titles/definitions in chunk metadata, and index each topic as its own micro-document. Update chat_service.py to include hierarchy info in the system prompt context format.",
-  "status": "completed",
+  "status": "in_progress",
   "steps": [
     "Add a private async method `_resolve_hierarchy(self, chapter: Chapter)` to ContentPublisherService in apps/backend/app/services/content_publisher.py that loads Subject, Stream, Class, and Board using Beanie `get()` lookups. Return a dict with keys: subject, stream, cls, board (or None for each if not found).",
     "Modify `publish_to_vertex_search()` in apps/backend/app/services/content_publisher.py to call `_resolve_hierarchy()` at the top, then enrich each chunk's struct_data with: topics (comma-joined titles from chapter.published_topics), topic_definitions (semicolon-joined 'title: definition' pairs), subject_name, class_name, board_name, stream_name, and hierarchy string (board > class > stream > subject > chapter title).",
@@ -24,5 +24,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": "All 199 existing tests continue to pass. The google-cloud-discoveryengine package is not installed in the test environment, so publish tests mock the imports using sys.modules patching with fake Document/UpdateRequest classes and real struct_pb2.Struct for data capture."
+  "findings": ""
 }
