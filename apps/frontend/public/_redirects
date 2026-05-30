@@ -2,7 +2,6 @@
 # so browsers and crawlers always land on the canonical (no-slash) URL.
 # CF Pages serves these before the Worker runs.
 /library/    /library    301
-/chat/       /chat       301
 /pricing/    /pricing    301
 /about/      /about      301
 /login/      /login      301
