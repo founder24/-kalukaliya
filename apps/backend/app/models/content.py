@@ -61,6 +61,7 @@ class Topic(BaseModel):
     definition: Optional[str] = None
     topic_slug: str
     definition_status: str = "pending"
+    wikidata_uri: Optional[str] = None  # Auto-resolved at publish time
 
 
 class Chapter(Document):
