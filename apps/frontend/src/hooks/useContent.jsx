@@ -5,24 +5,34 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/utils/api';
 
+// ── Static-first helper ──────────────────────────────────────────────────────
+
+/**
+ * Static-first fetcher: tries /static/<file>.json from CDN first,
+ * falls back to the live API if the static file is unavailable.
+ */
+const staticFirst = (staticPath, apiPath) => async () => {
+  try {
+    const res = await fetch(staticPath);
+    if (res.ok) return res.json();
+  } catch {
+    // static file unavailable, fall through to API
+  }
+  return apiClient().get(apiPath).then((r) => r.data);
+};
+
 // ── Raw fetchers ────────────────────────────────────────────────────────────
-const fetchBoards = () =>
-  apiClient().get('/content/boards').then((r) => r.data);
+const fetchBoards = staticFirst('/static/boards.json', '/content/boards');
 
-const fetchClasses = () =>
-  apiClient().get('/content/classes').then((r) => r.data);
+const fetchClasses = staticFirst('/static/classes.json', '/content/classes');
 
-const fetchStreams = () =>
-  apiClient().get('/content/streams').then((r) => r.data);
+const fetchStreams = staticFirst('/static/streams.json', '/content/streams');
 
-const fetchSubjects = () =>
-  apiClient().get('/content/subjects').then((r) => r.data);
+const fetchSubjects = staticFirst('/static/subjects.json', '/content/subjects');
 
-const fetchLibraryBundle = () =>
-  apiClient().get('/content/library-bundle').then((r) => r.data);
+const fetchLibraryBundle = staticFirst('/static/library-bundle.json', '/content/library-bundle');
 
-const fetchLibraryBundleSlim = () =>
-  apiClient().get('/content/library-bundle?slim=1').then((r) => r.data);
+const fetchLibraryBundleSlim = staticFirst('/static/library-bundle-slim.json', '/content/library-bundle?slim=1');
 
 const fetchLibraryBundleBoot = (boardId) =>
   apiClient()

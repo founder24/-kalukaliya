@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct"
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
+    # Cloudflare Pages deploy hook — triggers a rebuild to regenerate static content
+    CF_PAGES_DEPLOY_HOOK: Optional[str] = None
+    # GCS bucket name for educational content (source of truth for Vertex AI + CF Pages)
+    GCS_CONTENT_BUCKET: Optional[str] = None
 
     # --- P2: Azure Compute (Backend) --- metadata only, not used at runtime ---
     # (Removed: AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, etc. - migrated to GCP)

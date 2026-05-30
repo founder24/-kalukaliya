@@ -127,6 +127,12 @@ async function main() {
     node(path.join(__dirname, "verify-required-ads.mjs"), [], { budgetMs: 30_000 }),
   );
 
+  // 2.5. Static data generation — fetch content from backend for CDN.
+  await record(
+    "static-data",
+    node(path.join(__dirname, "generate-static-data.mjs"), [], { budgetMs: 60_000 }),
+  );
+
   // 3. Client + SSR builds in parallel. They write to dist/ and
   //    dist-ssr/ respectively, no shared output.
   const clientStart = Date.now();
