@@ -533,16 +533,19 @@ async def chat_stream(
             user_id=user_id,
             request_message=sanitized_message,
         ):
-            # Internal sentinel carries the full response and actual model
-            if "__syrabit_stream_complete_7f3a9b2e__" in event:
-                # Strip SSE prefix if present
-                raw = event
-                if raw.startswith("data: "):
-                    raw = raw[6:].strip()
+            # Internal sentinel carries the full response and actual model.
+            # Parse JSON structurally to avoid substring collision with user content.
+            raw = event
+            if raw.startswith("data: "):
+                raw = raw[6:].strip()
+            try:
                 data = json.loads(raw)
-                full_response = data["full_response"]
-                actual_model = data["actual_model"]
-                continue
+                if isinstance(data, dict) and "__syrabit_stream_complete_7f3a9b2e__" in data:
+                    full_response = data["full_response"]
+                    actual_model = data["actual_model"]
+                    continue
+            except (json.JSONDecodeError, ValueError):
+                pass
             yield event
 
         # -- Final event --
