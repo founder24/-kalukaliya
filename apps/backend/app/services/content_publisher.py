@@ -12,6 +12,8 @@ from beanie import PydanticObjectId
 
 from app.config import settings
 from app.models.content import Chapter
+from app.services.indexnow import push_indexnow
+from app.services.wikidata import batch_lookup_wikidata
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +182,8 @@ class ContentPublisherService:
                             "is_topic_doc": "true",
                         }
                     )
+                    if topic.wikidata_uri:
+                        topic_struct.update({"wikidata_uri": topic.wikidata_uri})
                     topic_doc = discoveryengine_v1.Document(
                         id=topic_doc_id,
                         struct_data=topic_struct,
@@ -296,12 +300,39 @@ class ContentPublisherService:
         # 5. Trigger CF Pages rebuild (regenerates static HTML/JSON/XML from GCS)
         await self.trigger_pages_rebuild()
 
+        # 6. IndexNow - instant search engine notification
+        chapter_url = f"https://syrabit.ai/{chapter.slug}"
+        topic_urls = [
+            f"https://syrabit.ai/{chapter.slug}/topic/{t.topic_slug}"
+            for t in (chapter.published_topics or [])
+        ]
+        indexnow_result = await push_indexnow([chapter_url] + topic_urls)
+
+        # 7. Wikidata sameAs enrichment - resolve topic entities
+        wikidata_result = {}
+        if chapter.published_topics:
+            topic_titles = [t.title for t in chapter.published_topics]
+            wikidata_uris = await batch_lookup_wikidata(topic_titles)
+            # Store sameAs URIs on topic objects for frontend JSON-LD consumption
+            updated_topics = False
+            for topic in chapter.published_topics:
+                uri = wikidata_uris.get(topic.title)
+                if uri and not topic.wikidata_uri:
+                    topic.wikidata_uri = uri
+                    updated_topics = True
+            if updated_topics:
+                # Persist updated wikidata_uri fields to MongoDB
+                await chapter.save()
+                wikidata_result = {t: u for t, u in wikidata_uris.items() if u}
+
         return {
             "chapter_id": chapter_id,
             "status": "published",
             "gcs": gcs_result,
             "vertex_search": search_result,
             "cloudflare": cf_result,
+            "indexnow": indexnow_result,
+            "wikidata": wikidata_result,
         }
 
     async def regenerate_sitemap(self) -> str:
