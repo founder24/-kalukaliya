@@ -232,6 +232,45 @@ function _langFromLocale(loc) {
 }
 
 /**
+ * Map common educational topic titles to their Wikidata URIs for sameAs
+ * linkage on topic LearningResource nodes. Case-insensitive lookup.
+ * Returns the URI string or null if no mapping exists.
+ */
+const WIKIDATA_MAP = new Map([
+  ['osmosis', 'https://www.wikidata.org/wiki/Q178641'],
+  ['photosynthesis', 'https://www.wikidata.org/wiki/Q11982'],
+  ['mitosis', 'https://www.wikidata.org/wiki/Q177596'],
+  ['meiosis', 'https://www.wikidata.org/wiki/Q133948'],
+  ['dna', 'https://www.wikidata.org/wiki/Q7430'],
+  ['evolution', 'https://www.wikidata.org/wiki/Q1063'],
+  ['gravitation', 'https://www.wikidata.org/wiki/Q11412'],
+  ['newtons laws', 'https://www.wikidata.org/wiki/Q38433'],
+  ['thermodynamics', 'https://www.wikidata.org/wiki/Q11473'],
+  ['periodic table', 'https://www.wikidata.org/wiki/Q10693'],
+  ['chemical bonding', 'https://www.wikidata.org/wiki/Q178193'],
+  ['acids and bases', 'https://www.wikidata.org/wiki/Q11158'],
+  ['electrochemistry', 'https://www.wikidata.org/wiki/Q11464'],
+  ['magnetism', 'https://www.wikidata.org/wiki/Q11421'],
+  ['optics', 'https://www.wikidata.org/wiki/Q14620'],
+  ['calculus', 'https://www.wikidata.org/wiki/Q149972'],
+  ['probability', 'https://www.wikidata.org/wiki/Q9492'],
+  ['statistics', 'https://www.wikidata.org/wiki/Q12483'],
+  ['algebra', 'https://www.wikidata.org/wiki/Q3968'],
+  ['geometry', 'https://www.wikidata.org/wiki/Q8087'],
+  ['trigonometry', 'https://www.wikidata.org/wiki/Q8084'],
+  ['cell biology', 'https://www.wikidata.org/wiki/Q7868'],
+  ['genetics', 'https://www.wikidata.org/wiki/Q7162'],
+  ['ecology', 'https://www.wikidata.org/wiki/Q7150'],
+  ['respiration', 'https://www.wikidata.org/wiki/Q164778'],
+]);
+
+export function getWikidataUri(topicTitle) {
+  if (!topicTitle || typeof topicTitle !== 'string') return null;
+  const key = topicTitle.trim().toLowerCase();
+  return WIKIDATA_MAP.get(key) || null;
+}
+
+/**
  * Detect numbered steps in markdown / HTML content and emit HowTo schema.
  * Returns null if fewer than 2 steps look like genuine procedure steps.
  */
@@ -399,7 +438,7 @@ export function chapterSchema(data, url, basePath = '') {
     seenTopicSlugs.add(t.topic_slug);
     const topicAnchorUrl = `${url}#topic-${t.topic_slug}`;
     const definition = (t.definition || '').trim();
-    topicLearningResources.push({
+    const topicResource = {
       '@type': 'LearningResource',
       '@id': topicAnchorUrl,
       name: t.title,
@@ -420,12 +459,41 @@ export function chapterSchema(data, url, basePath = '') {
         cssSelector: [`#topic-${t.topic_slug} h2`, `#topic-${t.topic_slug} p:first-of-type`],
       },
       provider: { '@type': 'Organization', name: 'Syrabit.ai', url: SITE_ORIGIN },
-    });
+    };
+    // sameAs with Wikidata URI linkage — prefer explicit wikidata_uri from
+    // the backend topic data, fall back to the static mapping.
+    const wikidataUri = t.wikidata_uri || getWikidataUri(t.title);
+    if (wikidataUri) {
+      topicResource.sameAs = [wikidataUri];
+    }
+    topicLearningResources.push(topicResource);
     topicMentions.push({ '@type': 'Thing', name: t.title, url: topicAnchorUrl });
   }
   if (topicMentions.length > 0) {
     articleNode.mentions = topicMentions;
   }
+  // hasPart — reference each topic LearningResource by @id from the Article node
+  if (topicLearningResources.length > 0) {
+    articleNode.hasPart = topicLearningResources.map(t => ({ '@type': 'LearningResource', '@id': t['@id'] }));
+  }
+
+  // citation array — reference NCERT and board official curriculum
+  if (subjectName || boardName) {
+    articleNode.citation = [
+      { '@type': 'CreativeWork', name: 'NCERT Textbook - ' + subjectName, url: 'https://ncert.nic.in/', publisher: { '@type': 'Organization', name: 'NCERT' } },
+      { '@type': 'CreativeWork', name: (boardName || 'AHSEC') + ' Official Curriculum', url: 'https://ahsec.assam.gov.in/', publisher: { '@type': 'Organization', name: boardName || 'AHSEC' } },
+    ];
+  }
+
+  // sourceOrganization — the educational board that owns the curriculum
+  articleNode.sourceOrganization = {
+    '@type': 'Organization',
+    name: boardName || 'AHSEC',
+    url: boardName && boardName.toLowerCase().includes('seba') ? 'https://sebaonline.org/' : 'https://ahsec.assam.gov.in/',
+  };
+
+  // lastReviewed — signals review freshness to AI crawlers
+  if (dateModified) articleNode.lastReviewed = dateModified;
 
   const graph = [
     articleNode,
