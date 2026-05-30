@@ -223,6 +223,11 @@ def create_app() -> FastAPI:
         # Request ID header + logging
         response.headers["X-Request-ID"] = request_id
         response.headers["X-API-Version"] = app.version
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
         logger.info(
             "request_completed",
             extra={
@@ -296,10 +301,10 @@ def create_app() -> FastAPI:
     )
     app.include_router(seo.router, prefix="/api/v1/seo", tags=["SEO"])
     app.include_router(indexnow.router, prefix="/api/v1/indexnow", tags=["IndexNow"])
-    app.include_router(content.router, prefix="/api/v1/content", tags=["Content"])
     app.include_router(
         public_content.router, prefix="/api/v1/content", tags=["Public Content"]
     )
+    app.include_router(content.router, prefix="/api/v1/content", tags=["Content"])
     app.include_router(
         public_content.router, prefix="/api/content", tags=["Public Content Legacy"]
     )

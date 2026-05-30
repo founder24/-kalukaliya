@@ -74,14 +74,15 @@ async def handle_razorpay_webhook(request: Request):
         redis = get_redis()
         dedup_key = f"webhook_processed:{event_id}"
         existing = await redis.get(dedup_key)
-        if existing == "completed":
-            return {"status": "already_processed"}
-        if existing and existing.startswith("processing:"):
-            # Check if stuck (processing for > 5 min means previous attempt crashed)
+        if existing:
+            # "completed" or any legacy truthy value means already processed
+            if existing == "completed" or not existing.startswith("processing:"):
+                return {"status": "duplicate"}
+            # "processing:*" - check if stuck (> 5 min means previous attempt crashed)
             try:
                 started_at = float(existing.split(":")[1])
                 if time.time() - started_at < 300:  # Less than 5 minutes
-                    return {"status": "already_processing"}
+                    return {"status": "duplicate"}
             except (ValueError, IndexError):
                 pass
             # Stale processing entry - allow reprocessing

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SAFE_PATH_RE = re.compile(r"^[a-z0-9-]+$")
+SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9-]+$")
 
 # Cache-Control for CDN: 60s stale-while-revalidate, 1 hour max
 ISR_CACHE_HEADER = "public, max-age=60, s-maxage=3600, stale-while-revalidate=3600"

@@ -34,11 +34,15 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
     """
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
 
-    boards = await Board.find({"status": "active"}).to_list()
-    classes = await Class.find({"status": "active"}).to_list()
-    streams = await Stream.find({"status": "active"}).to_list()
-    subjects = await Subject.find({"status": "active"}).to_list()
-    chapters = await Chapter.find_all().to_list()
+    try:
+        boards = await Board.find({"status": "active"}).to_list()
+        classes = await Class.find({"status": "active"}).to_list()
+        streams = await Stream.find({"status": "active"}).to_list()
+        subjects = await Subject.find({"status": "active"}).to_list()
+        chapters = await Chapter.find_all().to_list()
+    except Exception as e:
+        logger.warning(f"Library bundle DB query failed (DB may not be ready): {e}")
+        return {"boards": []}
 
     # Index by parent ID for fast lookups
     classes_by_board: dict[str, list] = {}
