@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "fix",
   "description": "Address review issues: fix topic sitemap fragment URLs (Issue #2) and add FAQ generation deduplication gate (Issue #5).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/api/v1/seo.py, rewrite the sitemap_topics endpoint to query KnowledgeObject (like the chapters sitemap) instead of Chapter, and generate proper routable URLs without fragment identifiers. Use the format {BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes. Deduplicate by the full path key including topic.",
     "In apps/backend/app/services/content_generation.py, wrap the FAQ generation block with a check: only generate FAQ if chapter.faq_jsonld is falsy or has fewer than 2 entries."
@@ -19,5 +19,5 @@
     "Run: python -c \"import ast; ast.parse(open('apps/backend/app/services/content_generation.py').read())\" to validate syntax"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "Both fixes applied and verified. seo.py and content_generation.py pass AST validation. SEO test suite (4 tests) passes. Removed unused Chapter import from seo.py since topic sitemap now uses KnowledgeObject exclusively."
 }
