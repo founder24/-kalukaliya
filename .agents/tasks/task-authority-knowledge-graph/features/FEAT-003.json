@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Create public and admin API endpoints for TopicHub, then mount the routers in main.py. Also integrate TopicHub into the content publisher (Vertex Search indexing) and the chat service (RAG enhancement).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/app/api/v1/topics.py with a public APIRouter (no auth). Endpoints: (1) GET /topics/{topic_slug} - full TopicHub data by slug, with optional query param chapter_id to disambiguate. (2) GET /topics/{topic_slug}/mcqs - returns MCQs list. (3) GET /topics/{topic_slug}/pyqs - returns PYQs list. (4) GET /topics/{topic_slug}/related - returns knowledge graph neighbors via knowledge_graph_service.get_related_topics(). (5) GET /topics/{topic_slug}/study-path - returns prerequisite chain via knowledge_graph_service.get_prerequisite_chain(). All endpoints return 404 if TopicHub not found.",
     "Create apps/backend/app/api/v1/admin_topics.py with admin APIRouter. Use _validate_admin_session and _csrf_check from app.api.v1.admin. Endpoints: (1) POST /admin/topics/generate-hub - takes chapter_id and topic_slug, creates TopicHub from existing Topic in Chapter.published_topics, returns created hub. (2) POST /admin/topics/{hub_id}/generate-mcqs - calls authority_generator_service.generate_mcqs(). (3) POST /admin/topics/{hub_id}/generate-relations - calls authority_generator_service.generate_topic_relations() or knowledge_graph_service.auto_generate_relations(). (4) POST /admin/topics/{hub_id}/add-source - accepts TopicSource data and appends to the hub's sources list.",
@@ -25,5 +25,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.admin_topics import router; print(\"Admin topics router OK\")'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 201 tests pass. App imports cleanly. Both public and admin routers load without error. TopicHub indexing added to content_publisher.py with non-fatal error handling. Chat service enhanced with topic hub context hints."
 }
