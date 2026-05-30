@@ -272,7 +272,7 @@ class ChatService:
                 return
 
         # Emit the sentinel value so the router knows the model/response
-        yield f"data: {json.dumps({'__internal_complete': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
+        yield f"data: {json.dumps({'__syrabit_stream_complete_7f3a9b2e__': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
 
     # ------------------------------------------------------------------
     # Chat persistence (fire-and-forget)
@@ -287,6 +287,7 @@ class ChatService:
         target_model: str,
         latency_ms: int,
         context_chunks: list[dict],
+        detected_lang: str = "unknown",
     ) -> None:
         """Persist chat to MongoDB. Designed to be called via asyncio.create_task."""
         try:
@@ -344,7 +345,7 @@ class ChatService:
                 from app.services.dead_letter import store_dead_letter
 
                 await store_dead_letter(
-                    user_id, user_message, "unknown", str(retry_err)
+                    user_id, user_message, detected_lang, str(retry_err)
                 )
 
     # ------------------------------------------------------------------

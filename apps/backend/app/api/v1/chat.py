@@ -287,6 +287,7 @@ async def chat(
                     target_model=actual_model,
                     latency_ms=latency_ms,
                     context_chunks=context_chunks,
+                    detected_lang=detected_lang,
                 )
             )
             task.add_done_callback(_log_task_exception)
@@ -533,7 +534,7 @@ async def chat_stream(
             request_message=sanitized_message,
         ):
             # Internal sentinel carries the full response and actual model
-            if "__internal_complete" in event:
+            if "__syrabit_stream_complete_7f3a9b2e__" in event:
                 # Strip SSE prefix if present
                 raw = event
                 if raw.startswith("data: "):
@@ -583,6 +584,7 @@ async def chat_stream(
                 target_model=actual_model,
                 latency_ms=latency_ms,
                 context_chunks=context_chunks,
+                detected_lang=detected_lang,
             )
         )
         task.add_done_callback(_log_task_exception)
@@ -786,9 +788,11 @@ async def analyze_image(
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    if file.content_type == "image/svg+xml":
+    allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    if file.content_type not in allowed_types:
         raise HTTPException(
-            status_code=400, detail="SVG files are not supported for security reasons"
+            status_code=400,
+            detail="Unsupported image type. Allowed: JPEG, PNG, GIF, WebP",
         )
 
     image_bytes = await file.read()

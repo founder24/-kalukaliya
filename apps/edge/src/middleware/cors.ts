@@ -18,6 +18,7 @@ export function getCorsHeaders(origin: string): Record<string, string> {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-anon-id, traceparent',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
+    'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-Request-ID',
   };
 }
 

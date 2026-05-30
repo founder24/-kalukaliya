@@ -1,0 +1,70 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Comprehensive fullstack audit: identify and fix bugs, security issues, misconfigurations, dead code, performance problems, and architectural concerns across backend, edge worker, and frontend layers",
+  "status": "in_progress",
+  "steps": [
+    "BACKEND SECURITY ISSUES:",
+    "1. In apps/backend/app/api/v1/auth.py: The edge-trust bypass path has a legacy fallback that trusts X-User-ID without HMAC verification when X-Edge-Signature is absent. Log warning exists but this is still exploitable if EDGE_SHARED_SECRET leaks. Add a deprecation timeline and environment gate to block non-HMAC requests in production.",
+    "2. In apps/backend/app/config.py: The default JWT_SECRET 'dev-only-secret-not-for-production-use-32chars' is 47 chars but the production validator only checks for known placeholders and length >= 32. If someone sets a custom but weak secret, it passes. Consider adding entropy checking.",
+    "3. In apps/backend/app/core/security.py: sanitize_user_input() raises ValueError on injection patterns but the chat endpoint catches ValueError and returns 400 with str(e). This leaks the fact that injection was detected. Return a generic message instead.",
+    "4. In apps/backend/app/api/v1/chat.py: The /image endpoint accepts any image/* content type but only blocks SVG. Consider allowlisting safe types (jpeg, png, gif, webp) instead of blocklisting.",
+
+    "BACKEND BUGS AND CORRECTNESS:",
+    "5. In apps/backend/app/services/chat_service.py save_chat(): On retry failure, stores a dead letter with lang='unknown' instead of the actual detected language. Pass detected_lang through to save_chat or use a reasonable default.",
+    "6. In apps/backend/app/api/v1/chat.py stream endpoint: The __internal_complete sentinel is emitted as an SSE event but the event_stream generator filters it out via the 'if __internal_complete in event' check. However, this check does string containment on the raw SSE line which may match content if a user message contains '__internal_complete'. Use a more robust sentinel mechanism.",
+    "7. In apps/backend/app/core/circuit_breaker.py: The call() method holds _state_lock during the state check but releases it before executing func(). Between release and re-acquire for _on_success/_on_failure, another coroutine could modify state. This is acceptable for circuit breakers but document the design choice.",
+    "8. In apps/backend/app/api/v1/chat.py: The ChatRequest model limits message to 2000 chars via field_validator, but sanitize_user_input() independently truncates to 4000 chars. The validator runs first so the 4000 limit is unreachable dead code for this endpoint. Align the limits.",
+    "9. In apps/backend/app/services/ai/vertex_client.py: The _client httpx timeout is 10s total but streaming endpoints may need longer. Consider a separate timeout for streaming requests.",
+
+    "BACKEND PERFORMANCE:",
+    "10. In apps/backend/app/api/v1/chat.py: The non-streaming chat endpoint wraps _process_chat() in asyncio.wait_for(timeout=15.0) but also does parallel gather with RAG (0.8s timeout), history, and rate limit. If RAG times out at 0.8s, the outer 15s timeout is still running. This is correct but the 15s is generous - consider reducing to 10s.",
+    "11. In apps/backend/app/services/chat_service.py: load_conversation_history() queries up to 5 Chat documents sorted by -created_at, reverses, then flattens. Each Chat document could have many messages. Consider projecting only the messages field to reduce document transfer size.",
+    "12. In apps/backend/app/db/mongo.py: No index on dead_letters.user_id alone (only compound with timestamp). Admin queries filtering by user_id without timestamp range will be slow.",
+
+    "EDGE WORKER ISSUES:",
+    "13. In apps/edge/src/index.ts: The rate limit check clones the request and parses the body as JSON to extract lang. If the body is not valid JSON (e.g., multipart for image upload), it falls back to 'en'. This is correct but wasteful - the clone + parse happens on every POST to /chat paths even when rate limiting is disabled (no KV binding).",
+    "14. In apps/edge/src/middleware/rate-limit.ts: The read-then-write pattern for KV counters has eventual consistency issues documented in comments. However, the limit is hardcoded to 30 regardless of user tier. The edge cannot know the user's subscription tier (only backend knows). This means pro users get the same 30 req/hr burst limit as free users at the edge level.",
+    "15. In apps/edge/src/index.ts: The /health/full endpoint calls backend /health/deep WITHOUT the Google identity token (no Authorization header). If Cloud Run requires IAM auth, this call will fail with 403. Add getIdentityToken call for the /health/full backend request.",
+    "16. In apps/edge/src/routes/api-proxy.ts: Content-Length is deleted from forwarded headers. This is correct for chunked responses but for non-stream requests with a body, the backend may need Content-Length. The body is re-read as arrayBuffer so fetch() will recompute it, but document this.",
+    "17. In apps/edge/src/middleware/cors.ts: The CORS headers include 'Access-Control-Allow-Credentials: true' with a specific origin (not wildcard). This is correct. However, the x-anon-id header used by the frontend is in the Allow-Headers list but not in the exposed headers. Add Access-Control-Expose-Headers for rate limit headers (X-RateLimit-*).",
+
+    "FRONTEND ISSUES:",
+    "18. In apps/frontend/src/utils/api.jsx: The axios retry interceptor only retries GET requests (config.method.toLowerCase() === 'get'). POST requests to /chat that fail with 503 (backend unavailable) won't be retried. This is intentional for idempotency but the non-streaming /chat POST could benefit from retry since it's idempotent from the user's perspective.",
+    "19. In apps/frontend/src/utils/api.jsx: The 401 handler redirects to /admin/login only for admin routes. For regular user 401s (expired token), there's no automatic redirect or token refresh in the interceptor. The useAuthRefresh hook likely handles this, but the interceptor should coordinate.",
+    "20. In apps/frontend/src/utils/api.jsx: WORKER_API and API_BASE may resolve to the same URL (empty VITE_WORKER_API_URL). Content fetches use WORKER_API while auth uses API_BASE. In production both go through the edge worker at api.syrabit.ai. Verify VITE_BACKEND_URL is set correctly in Cloudflare Pages build.",
+    "21. In apps/frontend/vite.config.js: The mdToHtml() function in the bot render plugin has a regex replacement for ## that references $2 instead of $1: '.replace(/^## (.+)$/gm, '<h2>$2</h2>'.replace('$2', '$1'))'. This is a bug - the JS string replace happens at define-time, not regex-time. The actual regex replace will output '<h2>$1</h2>' which is correct by accident, but the code is confusing.",
+
+    "CROSS-CUTTING CONCERNS:",
+    "22. CORS mismatch: Edge ALLOWED_ORIGINS includes syrabit.ai, www.syrabit.ai, app.syrabit.ai. Backend ALLOWED_ORIGINS matches. But the edge CORS middleware falls back to syrabit.ai for unrecognized origins rather than rejecting. This means any origin gets a response with CORS headers set to syrabit.ai, which browsers will reject anyway. Document this behavior.",
+    "23. Health check auth gap: fetchBackendHealth() in the edge worker correctly adds the identity token for /health checks. But /health/full calls /health/deep without auth. Fix this inconsistency.",
+    "24. Rate limit architecture: Edge does 30 req/hr per language burst. Backend does 30 req/month total. The free tier RATE_LIMIT_FREE_TIER=30 means free users get 30 messages PER MONTH total. This is extremely restrictive - verify this is intentional. One message per day essentially.",
+    "25. In apps/backend/app/core/rate_limiter.py: This entire module is dead code (marked as LEGACY MODULE in the docstring). It's no longer instantiated anywhere. Consider removing it to reduce confusion.",
+    "26. In docker-compose.yml: The backend healthcheck uses python urllib to hit /health, but the backend container runs as appuser (non-root). Ensure python is in the PATH for appuser.",
+
+    "FIXES TO IMPLEMENT:",
+    "A. Fix the /health/full endpoint in edge worker to include identity token when calling backend /health/deep",
+    "B. Fix the __internal_complete sentinel in chat streaming to use a UUID-based sentinel that cannot appear in user content",
+    "C. Add Access-Control-Expose-Headers to CORS middleware for rate limit headers",
+    "D. Fix the image upload allowlist (use allowlist instead of blocklist for content types)",
+    "E. Fix dead letter language tracking in save_chat",
+    "F. Remove or clearly mark the dead code in apps/backend/app/core/rate_limiter.py"
+  ],
+  "acceptance_criteria": [
+    "Edge /health/full endpoint includes Authorization header when calling backend /health/deep",
+    "Chat streaming sentinel uses a mechanism that cannot collide with user content",
+    "CORS middleware exposes rate limit headers via Access-Control-Expose-Headers",
+    "Image upload endpoint allowlists safe content types instead of only blocking SVG",
+    "Dead letter entries include the correct detected language",
+    "Legacy rate_limiter.py is either removed or has a clear module-level deprecation notice that prevents accidental usage",
+    "All existing tests continue to pass after changes"
+  ],
+  "verification": [
+    "Run edge worker typecheck: cd apps/edge && npx tsc --noEmit",
+    "Run frontend build: cd apps/frontend && npx vite build",
+    "Run backend syntax check: cd apps/backend && python -c 'import app.main'",
+    "Run any available unit tests"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
