@@ -345,9 +345,9 @@ export function AppRoutes() {
       <Route path="/:board/:classSlug/:subjectSlug" element={<SubjectLandingPage />} />
 
       {/* ── Protected routes (require login) ── */}
-      <Route path="/chat"              element={<AuthGuard><ChatPage /></AuthGuard>} />
+      <Route path="/chat"              element={<ChatPage />} />
       <Route path="/read"              element={<AuthGuard><BrowsePage /></AuthGuard>} />
-      <Route path="/history"           element={<AuthGuard><HistoryPage /></AuthGuard>} />
+      <Route path="/history"           element={<HistoryPage />} />
       <Route path="/profile"           element={<AuthGuard><ProfilePage /></AuthGuard>} />
       <Route path="/profile/memories"  element={<AuthGuard><MyMemoriesPage /></AuthGuard>} />
 
