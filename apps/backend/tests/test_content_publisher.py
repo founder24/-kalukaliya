@@ -80,7 +80,12 @@ async def test_resolve_hierarchy_returns_full_chain():
 
 @pytest.mark.anyio
 async def test_resolve_hierarchy_handles_missing_subject():
-    """Test that _resolve_hierarchy handles None subject gracefully."""
+    """Test that _resolve_hierarchy handles None subject gracefully.
+
+    Note: subject_id is non-optional on the Chapter model in production, so
+    subject_id=None cannot occur with valid documents. This guard exists for
+    defensive programming and the test validates that robustness.
+    """
     chapter = _make_chapter(subject_id=None)
 
     service = ContentPublisherService()
@@ -118,6 +123,134 @@ async def test_resolve_hierarchy_handles_missing_stream():
     assert result["stream"] is None
     assert result["cls"] is None
     assert result["board"] is None
+
+
+@pytest.mark.anyio
+async def test_publish_skips_empty_hierarchy_segments():
+    """Verify hierarchy string filters out empty segments when ancestors are None."""
+    # Only subject is present; stream, cls, board are all None
+    subject = MagicMock(spec=Subject)
+    subject.name = "Biology"
+    subject.stream_id = None
+
+    chapter = _make_chapter()
+
+    service = ContentPublisherService()
+
+    captured_structs = []
+
+    from google.protobuf import struct_pb2
+
+    class FakeDocument:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "")
+            self.struct_data = kwargs.get("struct_data")
+            self.name = ""
+
+    class FakeUpdateRequest:
+        def __init__(self, **kwargs):
+            self.document = kwargs.get("document")
+            self.allow_missing = kwargs.get("allow_missing", False)
+
+    mock_discoveryengine = MagicMock()
+    mock_discoveryengine.Document = FakeDocument
+    mock_discoveryengine.UpdateDocumentRequest = FakeUpdateRequest
+
+    def capture_update(request):
+        struct_dict = dict(request.document.struct_data)
+        captured_structs.append(struct_dict)
+        return MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.branch_path.return_value = "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    mock_client.update_document = capture_update
+
+    import sys
+    with (
+        patch.object(service, "_get_vertex_client", return_value=mock_client),
+        patch.object(service, "_resolve_hierarchy", new_callable=AsyncMock, return_value={
+            "subject": subject, "stream": None, "cls": None, "board": None
+        }),
+        patch("app.services.content_publisher.settings") as mock_settings,
+        patch.dict(sys.modules, {"google.cloud.discoveryengine_v1": mock_discoveryengine, "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine)}),
+        patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=lambda fn, **kwargs: fn(**kwargs)),
+    ):
+        mock_settings.VERTEX_PROJECT_ID = "test-project"
+        mock_settings.GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"key": "val"}'
+        mock_settings.VERTEX_SEARCH_DATASTORE_ID = "test-ds"
+        mock_settings.VERTEX_SEARCH_LOCATION = "global"
+
+        result = await service.publish_to_vertex_search(chapter)
+
+    assert result["status"] == "uploaded"
+    chunk_struct = captured_structs[0]
+    # Should NOT have leading " > " or empty segments like " > > > Biology > Cell Biology"
+    assert chunk_struct["hierarchy"] == "Biology > Cell Biology"
+    assert " >  >" not in chunk_struct["hierarchy"]
+    assert chunk_struct["hierarchy"].startswith("Biology")
+
+    # Topic micro-doc hierarchy should also be clean
+    topic_structs = [s for s in captured_structs if s.get("is_topic_doc") == "true"]
+    assert topic_structs[0]["hierarchy"] == "Biology > Cell Biology > Osmosis"
+
+
+@pytest.mark.anyio
+async def test_publish_no_content_skips_topic_micro_docs():
+    """Verify topic micro-docs are NOT uploaded when content_en is empty."""
+    board, cls, stream, subject = _make_hierarchy()
+    chapter = _make_chapter()
+    chapter.content_en = ""  # Empty content
+
+    service = ContentPublisherService()
+
+    captured_structs = []
+
+    from google.protobuf import struct_pb2
+
+    class FakeDocument:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "")
+            self.struct_data = kwargs.get("struct_data")
+            self.name = ""
+
+    class FakeUpdateRequest:
+        def __init__(self, **kwargs):
+            self.document = kwargs.get("document")
+            self.allow_missing = kwargs.get("allow_missing", False)
+
+    mock_discoveryengine = MagicMock()
+    mock_discoveryengine.Document = FakeDocument
+    mock_discoveryengine.UpdateDocumentRequest = FakeUpdateRequest
+
+    def capture_update(request):
+        struct_dict = dict(request.document.struct_data)
+        captured_structs.append(struct_dict)
+        return MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.branch_path.return_value = "projects/p/locations/l/dataStores/ds/branches/default_branch"
+    mock_client.update_document = capture_update
+
+    import sys
+    with (
+        patch.object(service, "_get_vertex_client", return_value=mock_client),
+        patch.object(service, "_resolve_hierarchy", new_callable=AsyncMock, return_value={
+            "subject": subject, "stream": stream, "cls": cls, "board": board
+        }),
+        patch("app.services.content_publisher.settings") as mock_settings,
+        patch.dict(sys.modules, {"google.cloud.discoveryengine_v1": mock_discoveryengine, "google.cloud": MagicMock(discoveryengine_v1=mock_discoveryengine)}),
+        patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=lambda fn, **kwargs: fn(**kwargs)),
+    ):
+        mock_settings.VERTEX_PROJECT_ID = "test-project"
+        mock_settings.GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"key": "val"}'
+        mock_settings.VERTEX_SEARCH_DATASTORE_ID = "test-ds"
+        mock_settings.VERTEX_SEARCH_LOCATION = "global"
+
+        result = await service.publish_to_vertex_search(chapter)
+
+    # No documents uploaded, no topic micro-docs uploaded
+    assert result["status"] == "no_content"
+    assert len(captured_structs) == 0
 
 
 # ---- publish_to_vertex_search tests ----

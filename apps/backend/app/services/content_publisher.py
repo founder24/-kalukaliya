@@ -124,7 +124,15 @@ class ContentPublisherService:
                         "class_name": cls.name if cls else "",
                         "board_name": board.name if board else "",
                         "stream_name": stream.name if stream else "",
-                        "hierarchy": f"{board.name if board else ''} > {cls.name if cls else ''} > {stream.name if stream else ''} > {subject.name if subject else ''} > {chapter.title}",
+                        "hierarchy": " > ".join(
+                            seg for seg in [
+                                board.name if board else "",
+                                cls.name if cls else "",
+                                stream.name if stream else "",
+                                subject.name if subject else "",
+                                chapter.title,
+                            ] if seg
+                        ),
                     }
                 )
                 doc = discoveryengine_v1.Document(
@@ -142,39 +150,47 @@ class ContentPublisherService:
                     )
                     await asyncio.to_thread(client.update_document, request=request)
 
-            # Index each topic as a micro-document for precise matching
-            for topic in (chapter.published_topics or []):
-                topic_doc_id = f"{str(chapter.id)}_topic_{topic.id}"
-                topic_struct = struct_pb2.Struct()
-                topic_struct.update(
-                    {
-                        "chapter_id": str(chapter.id),
-                        "title": f"{topic.title} - {chapter.title}",
-                        "content": topic.definition
-                        or f"{topic.title} is a topic in {chapter.title} ({subject.name if subject else ''}, {cls.name if cls else ''}, {board.name if board else ''})",
-                        "topic_title": topic.title,
-                        "topic_slug": topic.topic_slug,
-                        "subject_name": subject.name if subject else "",
-                        "class_name": cls.name if cls else "",
-                        "board_name": board.name if board else "",
-                        "stream_name": stream.name if stream else "",
-                        "hierarchy": f"{board.name if board else ''} > {cls.name if cls else ''} > {stream.name if stream else ''} > {subject.name if subject else ''} > {chapter.title} > {topic.title}",
-                        "keywords": chapter.keywords or "",
-                        "is_topic_doc": "true",
-                    }
-                )
-                topic_doc = discoveryengine_v1.Document(
-                    id=topic_doc_id,
-                    struct_data=topic_struct,
-                )
-                topic_doc.name = f"{parent}/documents/{topic_doc.id}"
-                request = discoveryengine_v1.UpdateDocumentRequest(
-                    document=topic_doc,
-                    allow_missing=True,
-                )
-                await asyncio.to_thread(client.update_document, request=request)
+                # Index each topic as a micro-document for precise matching
+                for topic in (chapter.published_topics or []):
+                    topic_doc_id = f"{str(chapter.id)}_topic_{topic.id}"
+                    topic_struct = struct_pb2.Struct()
+                    topic_struct.update(
+                        {
+                            "chapter_id": str(chapter.id),
+                            "title": f"{topic.title} - {chapter.title}",
+                            "content": topic.definition
+                            or f"{topic.title} is a topic in {chapter.title} ({subject.name if subject else ''}, {cls.name if cls else ''}, {board.name if board else ''})",
+                            "topic_title": topic.title,
+                            "topic_slug": topic.topic_slug,
+                            "subject_name": subject.name if subject else "",
+                            "class_name": cls.name if cls else "",
+                            "board_name": board.name if board else "",
+                            "stream_name": stream.name if stream else "",
+                            "hierarchy": " > ".join(
+                                seg for seg in [
+                                    board.name if board else "",
+                                    cls.name if cls else "",
+                                    stream.name if stream else "",
+                                    subject.name if subject else "",
+                                    chapter.title,
+                                    topic.title,
+                                ] if seg
+                            ),
+                            "keywords": chapter.keywords or "",
+                            "is_topic_doc": "true",
+                        }
+                    )
+                    topic_doc = discoveryengine_v1.Document(
+                        id=topic_doc_id,
+                        struct_data=topic_struct,
+                    )
+                    topic_doc.name = f"{parent}/documents/{topic_doc.id}"
+                    request = discoveryengine_v1.UpdateDocumentRequest(
+                        document=topic_doc,
+                        allow_missing=True,
+                    )
+                    await asyncio.to_thread(client.update_document, request=request)
 
-            if documents:
                 return {
                     "status": "uploaded",
                     "chunks": len(documents),
