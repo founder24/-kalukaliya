@@ -12,7 +12,6 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 
 from app.models.knowledge import KnowledgeObject
-from app.models.content import Chapter
 
 logger = logging.getLogger(__name__)
 
@@ -236,43 +235,72 @@ async def sitemap_chapters():
 
 @router.get("/sitemap-topics.xml")
 async def sitemap_topics():
-    """Generate topic-level sitemap from published chapters with per-topic URLs."""
+    """Generate topic-level sitemap from published knowledge objects with topic metadata.
+
+    Uses KnowledgeObject (which has full board/class/subject/chapter hierarchy)
+    to produce proper routable URLs. Google does not process #fragment URLs in
+    sitemaps, so we use the chapter notes path instead.
+    """
     cached = _get_cached_sitemap("topics")
     if cached:
         return Response(content=cached, media_type="application/xml")
     try:
-        chapters = (
-            await Chapter.find({"status": "published"})
-            .project({
-                "slug": 1,
-                "published_topics": 1,
-                "updated_at": 1,
-                "subject_id": 1,
-            })
+        # Query KnowledgeObjects that have a topic field set
+        objects = (
+            await KnowledgeObject.find(
+                {"status": "published", "metadata.topic": {"$ne": None}}
+            )
+            .project(
+                {
+                    "metadata.board": 1,
+                    "metadata.class_level": 1,
+                    "metadata.subject": 1,
+                    "metadata.chapter": 1,
+                    "metadata.topic": 1,
+                    "updated_at": 1,
+                }
+            )
             .to_list()
         )
+
+        seen = set()
         urls = []
-        for ch in chapters:
-            updated = ch.get("updated_at")
+
+        for obj in objects:
+            meta = obj.get("metadata", {})
+            board = meta.get("board", "")
+            class_level = meta.get("class_level", "")
+            subject = meta.get("subject", "")
+            chapter = meta.get("chapter", "")
+            topic = meta.get("topic", "")
+
+            if not all([board, class_level, subject, chapter, topic]):
+                continue
+
+            key = f"{board}/{class_level}/{subject}/{chapter}/{topic}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            updated = obj.get("updated_at")
             lastmod = ""
             if updated:
                 if isinstance(updated, datetime):
                     lastmod = f"\n    <lastmod>{updated.strftime('%Y-%m-%d')}</lastmod>"
                 elif isinstance(updated, str):
                     lastmod = f"\n    <lastmod>{updated[:10]}</lastmod>"
-            for topic in (ch.get("published_topics") or []):
-                topic_slug = topic.get("topic_slug") if isinstance(topic, dict) else getattr(topic, "topic_slug", "")
-                if not topic_slug:
-                    continue
-                # Use chapter slug + topic anchor for deep-link
-                loc = f"{BASE_URL}/{ch.get('slug', '')}#topic-{topic_slug}"
-                urls.append(
-                    f"  <url>\n"
-                    f"    <loc>{loc}</loc>{lastmod}\n"
-                    f"    <changefreq>weekly</changefreq>\n"
-                    f"    <priority>0.6</priority>\n"
-                    f"  </url>"
-                )
+
+            # Use the chapter notes URL without fragment - Google ignores fragments
+            # in sitemaps but the page renders all topic content
+            loc = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes"
+            urls.append(
+                f"  <url>\n"
+                f"    <loc>{loc}</loc>{lastmod}\n"
+                f"    <changefreq>weekly</changefreq>\n"
+                f"    <priority>0.6</priority>\n"
+                f"  </url>"
+            )
+
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
