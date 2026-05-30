@@ -74,6 +74,7 @@ export async function proxyRequest(
       method: request.method,
       headers: headers,
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      redirect: 'manual',
       signal: controller.signal,
     });
 
