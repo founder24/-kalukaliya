@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Add comprehensive tests for the TopicHub model, knowledge graph service, authority generator service, and API endpoints. Tests must mock MongoDB/Beanie and Vertex AI calls.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/tests/test_topic_hub.py with tests covering: (1) TopicHub model creation and validation - verify all fields can be set and model_dump works. (2) TopicSource, TopicMCQ, TopicPYQ, TopicRelation sub-model validation. (3) Mock-based tests for knowledge_graph_service methods (get_related_topics, get_prerequisite_chain, get_topic_cluster) using unittest.mock.patch on TopicHub.find_one and TopicHub.find. (4) Mock-based tests for authority_generator_service.generate_mcqs mocking vertex_client.generate to return valid JSON. (5) API endpoint tests using FastAPI TestClient with mocked DB calls - test GET /api/v1/topics/{slug} returns 200 with hub data, returns 404 for missing slug. (6) Admin endpoint tests mocking _validate_admin_session.",
     "Follow the existing test pattern from tests/test_knowledge.py: use pytest fixtures, unittest.mock.AsyncMock for async methods, patch decorators.",
@@ -18,5 +18,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_topic_hub.py -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 25 tests pass. Beanie Document cannot be instantiated directly without init_beanie (CollectionWasNotInitialized), so model_dump test exercises sub-models instead. TopicHub.Settings.indexes has 4 entries (3 single-field + 1 compound). pytest-asyncio in AUTO mode handles async tests correctly."
 }
