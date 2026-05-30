@@ -63,10 +63,12 @@ export default function TopicAnswerCard({ topic, chapterUrl, fromChat = false })
         data-topic-answer-card
         data-topic-slug={slug}
         id={anchorId}
+        itemScope
+        itemType="https://schema.org/DefinedTerm"
         className={`my-6 rounded-2xl border border-violet-200 bg-violet-50/50 p-5 shadow-sm scroll-mt-24${fromChat ? ' topic-chat-flash' : ''}`}
       >
-        <h2 className="text-xl font-bold text-violet-900 mb-3">{topic.title}</h2>
-        <p className="text-gray-800 leading-relaxed mb-3">{topic.definition}</p>
+        <h2 className="text-xl font-bold text-violet-900 mb-3" itemProp="name">{topic.title}</h2>
+        <p className="text-gray-800 leading-relaxed mb-3" itemProp="description">{topic.definition}</p>
         <p className="text-gray-900 italic mb-2" data-attribution>
           {attribution}
         </p>
@@ -81,6 +83,7 @@ export default function TopicAnswerCard({ topic, chapterUrl, fromChat = false })
           </a>{' '}
           for more information.
         </p>
+        <meta itemProp="inDefinedTermSet" content={chapterUrl} />
       </section>
     </>
   );
