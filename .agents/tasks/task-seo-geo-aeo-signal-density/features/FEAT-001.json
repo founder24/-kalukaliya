@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Strengthen SEO/GEO/AEO signal density across robots.txt, JSON-LD schemas, edge worker cache headers, and resource hints to maximize fetchability and ranking for even 2-3 word queries.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - robots.txt ai-input signal: In apps/frontend/public/robots.txt, add a comment block after the existing 'search=yes' section (near the AI ANSWER bots block around line 45) with 'Content-Signal: search=yes, ai-input=yes' to explicitly grant permission for AI search engines to use content as grounding input. Keep it as a comment-directive since robots.txt doesn't natively support this, but AI crawlers like Perplexity and Google AI Overview parse these signals.",
     "Step 2 - Edge worker robots.ts: In apps/edge/src/routes/robots.ts, update the ROBOTS_TXT constant to align with the canonical frontend robots.txt. Add the same sitemap references and ai-input signal comment that exists in the frontend version.",
@@ -34,5 +34,5 @@
     "Validate jsonld.js chapterSchema output includes speakable and mainEntity by tracing the code"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 10 steps implemented and verified. 62/63 test files pass; 1 file (AdminHealth.credits.test.jsx) has 5 pre-existing failures unrelated to this change (verified by stashing changes and re-running). node_modules must be installed first (npm install in apps/frontend) before tests can run."
 }
