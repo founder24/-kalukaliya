@@ -15,6 +15,7 @@ import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
 import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
+import { getIdentityToken } from './utils/google-auth';
 
 // Cached health probe state (module-level)
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
@@ -157,7 +158,7 @@ export default {
             healthCache = { backendReachable, timestamp: now };
           } else {
             // Layer 3: Fresh backend fetch
-            backendReachable = await fetchBackendHealth(env.BACKEND_URL);
+            backendReachable = await fetchBackendHealth(env.BACKEND_URL, env);
             healthCache = { backendReachable, timestamp: now };
             // Store in KV for other PoPs (30s TTL)
             const kvPayload = JSON.stringify({ backend_reachable: backendReachable });
@@ -165,7 +166,7 @@ export default {
           }
         } catch {
           // KV read failed - fall back to direct fetch
-          backendReachable = await fetchBackendHealth(env.BACKEND_URL);
+          backendReachable = await fetchBackendHealth(env.BACKEND_URL, env);
           healthCache = { backendReachable, timestamp: now };
         }
       }
@@ -294,11 +295,16 @@ export default {
 };
 
 /** Fetch backend health with a 2s timeout. Returns true if backend responds with 2xx. */
-async function fetchBackendHealth(backendUrl: string): Promise<boolean> {
+async function fetchBackendHealth(backendUrl: string, env: Env): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`${backendUrl}/health`, { signal: controller.signal });
+    const headers: Record<string, string> = {};
+    const token = await getIdentityToken(env);
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${backendUrl}/health`, { signal: controller.signal, headers });
     clearTimeout(timeoutId);
     return res.ok;
   } catch {
