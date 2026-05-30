@@ -1,0 +1,30 @@
+{
+  "project_type": "Monorepo: Python FastAPI backend + React/Vite SPA frontend deployed to Cloudflare Pages",
+  "language": "Python (backend), JavaScript/React (frontend)",
+  "build_system": "pip-compile for backend deps (requirements.in -> requirements.txt), pnpm for frontend. Build orchestrator at apps/frontend/scripts/build.mjs. Cloudflare Pages builds run the frontend build script.",
+  "test_framework": "pytest with conftest.py for backend (apps/backend/tests/). vitest for frontend (apps/frontend/). No docker-based testing.",
+  "build_command": "cd apps/backend && pip install -r requirements.in (dev). cd apps/frontend && pnpm install && pnpm build:client",
+  "test_command": "cd apps/backend && python -m pytest tests/ (backend). cd apps/frontend && pnpm test (frontend).",
+  "verification_instructions": "1. Backend: pip install new deps, verify imports work. 2. Frontend: pnpm install, verify build succeeds. 3. Validate no import errors.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "Backend: cd apps/backend && pip install -r requirements.in. Frontend: cd apps/frontend && pnpm install.",
+  "environment_constraints": "OPEN_INTERNET - full network access. Python 3.11, Node.js 22, pnpm available. No running MongoDB or GCS so tests must be mocked/unit-level.",
+  "contribution_requirements": "Follow existing patterns: pydantic_settings for config, Beanie ODM for MongoDB models, React Query hooks for frontend data, singleton pattern for services.",
+  "key_patterns": "Backend services use singleton at module bottom (e.g. content_publisher_service = ContentPublisherService()). Config via pydantic_settings with Optional fields. Frontend fetchers in src/hooks/useContent.jsx. Prerender scripts in apps/frontend/scripts/ use _prerender-data.mjs shared fetch utility. GCS auth via settings.google_credentials property.",
+  "relevant_files": [
+    "apps/backend/app/config.py",
+    "apps/backend/app/services/content_publisher.py",
+    "apps/backend/app/services/content/__init__.py",
+    "apps/backend/app/services/content/pipeline.py",
+    "apps/backend/app/services/content/search_indexer.py",
+    "apps/backend/app/models/content.py",
+    "apps/backend/app/api/v1/public_content.py",
+    "apps/backend/requirements.in",
+    "apps/frontend/src/hooks/useContent.jsx",
+    "apps/frontend/scripts/_prerender-data.mjs",
+    "apps/frontend/scripts/build.mjs",
+    "apps/frontend/public/_routes.json",
+    "apps/frontend/package.json"
+  ],
+  "directory_structure": "apps/backend/app/ - FastAPI app (config.py, models/, services/, api/v1/). apps/backend/tests/ - pytest tests. apps/frontend/src/ - React SPA. apps/frontend/scripts/ - Build/prerender scripts. apps/frontend/public/ - Static assets and Cloudflare config."
+}

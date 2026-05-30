@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create build-time static data generator script, update frontend content fetchers for static-first pattern, and update _routes.json. This covers Steps 4, 5, and 8 from the implementation plan - all frontend changes.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 (Step 4): Create apps/frontend/scripts/generate-static-data.mjs - a Node.js script that runs at BUILD TIME on Cloudflare Pages. It should: (a) Read env vars: GCS_BUCKET, BUILD_BACKEND_URL (fallback), VITE_BACKEND_URL (fallback for backend URL). (b) Construct GCS public URL pattern: https://storage.googleapis.com/${GCS_BUCKET}/${path}. (c) Define an async function fetchFromGCSOrBackend(gcsPath, apiPath) that tries GCS first, falls back to backend API. (d) Generate and write these files to public/static/: library-bundle.json (from GCS static/library-bundle.json or API /api/content/library-bundle), library-bundle-slim.json (from GCS static/library-bundle-slim.json or API /api/content/library-bundle?slim=1), boards.json (extract boards array from library bundle), subjects.json (flatten all subjects from bundle). (e) Generate sitemaps and write to public/: sitemap-index.xml (referencing the other sitemaps), sitemap-static.xml (homepage, /library, /pricing, /login), sitemap-subjects.xml (one URL per subject using board/class/subject slug pattern), sitemap-chapters.xml (one URL per chapter slug). (f) Generate public/static/plans.json (stub: [{id: 'pro', name: 'Pro Monthly', price: 499, currency: 'INR'}]). (g) Use proper error handling - if GCS and API both fail, log warning and skip that file (don't break the build). (h) Make the script idempotent and safe to run multiple times. (i) Use mkdir -p equivalent (fs.mkdirSync recursive) for public/static/ directory.",
+    "Step 2 (Step 5): Update apps/frontend/src/hooks/useContent.jsx to use static-first fetching pattern. For these fetchers - fetchBoards, fetchLibraryBundle, fetchLibraryBundleSlim - wrap them so they first try fetching from /static/*.json (e.g., /static/boards.json, /static/library-bundle.json, /static/library-bundle-slim.json) and only fall back to the API if the static file is not available (404 or network error). Pattern: try { const res = await fetch('/static/X.json'); if (res.ok) return res.json(); } catch {} return apiClient().get('/content/X').then(r => r.data);",
+    "Step 3 (Step 8): Update apps/frontend/public/_routes.json to add to the exclude array: '/sitemap-index.xml', '/sitemap-static.xml', '/sitemap-subjects.xml', '/sitemap-chapters.xml', '/static/*'. These must bypass _worker.js to be served directly as static files."
+  ],
+  "acceptance_criteria": [
+    "apps/frontend/scripts/generate-static-data.mjs exists and is a valid Node.js ESM script",
+    "The script handles GCS_BUCKET env var and constructs proper GCS URLs",
+    "The script falls back to backend API when GCS is unavailable",
+    "The script writes library-bundle.json, library-bundle-slim.json, boards.json, subjects.json to public/static/",
+    "The script writes sitemap-index.xml, sitemap-static.xml, sitemap-subjects.xml, sitemap-chapters.xml to public/",
+    "apps/frontend/src/hooks/useContent.jsx fetchers try /static/*.json first, then fall back to API",
+    "apps/frontend/public/_routes.json exclude array contains /sitemap-index.xml, /sitemap-static.xml, /sitemap-subjects.xml, /sitemap-chapters.xml, /static/*",
+    "The _routes.json comment about sitemaps is updated or a new comment explains the static sitemap approach"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && node -c scripts/generate-static-data.mjs (verify syntax is valid)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && node -e \"import('./scripts/generate-static-data.mjs').catch(e => { if (e.message.includes('fetch')) { console.log('OK: script loaded, failed at runtime fetch as expected'); process.exit(0); } else { console.error(e); process.exit(1); } })\" (verify module loads)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && cat public/_routes.json | python3 -c 'import sys,json; d=json.load(sys.stdin); assert \"/static/*\" in d[\"exclude\"]; assert \"/sitemap-index.xml\" in d[\"exclude\"]; print(\"OK\")' (verify routes updated)",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && grep -c '/static/' src/hooks/useContent.jsx (verify static-first pattern is in use)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

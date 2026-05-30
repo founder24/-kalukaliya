@@ -1,0 +1,7 @@
+{
+  "task_id": "task-static-gen-gcs-content",
+  "task_description": "Implement full static generation with Vertex AI as content source of truth. Add GCS content store, update content publisher for dual-write, create build-time static data generator, update frontend fetchers for static-first pattern, and update Cloudflare routing.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

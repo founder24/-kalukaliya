@@ -6,8 +6,14 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/utils/api';
 
 // ── Raw fetchers ────────────────────────────────────────────────────────────
-const fetchBoards = () =>
-  apiClient().get('/content/boards').then((r) => r.data);
+
+const fetchBoards = async () => {
+  try {
+    const res = await fetch('/static/boards.json');
+    if (res.ok) return res.json();
+  } catch {}
+  return apiClient().get('/content/boards').then((r) => r.data);
+};
 
 const fetchClasses = () =>
   apiClient().get('/content/classes').then((r) => r.data);
@@ -18,11 +24,21 @@ const fetchStreams = () =>
 const fetchSubjects = () =>
   apiClient().get('/content/subjects').then((r) => r.data);
 
-const fetchLibraryBundle = () =>
-  apiClient().get('/content/library-bundle').then((r) => r.data);
+const fetchLibraryBundle = async () => {
+  try {
+    const res = await fetch('/static/library-bundle.json');
+    if (res.ok) return res.json();
+  } catch {}
+  return apiClient().get('/content/library-bundle').then((r) => r.data);
+};
 
-const fetchLibraryBundleSlim = () =>
-  apiClient().get('/content/library-bundle?slim=1').then((r) => r.data);
+const fetchLibraryBundleSlim = async () => {
+  try {
+    const res = await fetch('/static/library-bundle-slim.json');
+    if (res.ok) return res.json();
+  } catch {}
+  return apiClient().get('/content/library-bundle?slim=1').then((r) => r.data);
+};
 
 const fetchLibraryBundleBoot = (boardId) =>
   apiClient()
