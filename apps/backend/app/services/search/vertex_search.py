@@ -50,6 +50,10 @@ class VertexSearchService:
                 "Vertex AI Search not configured - RAG search will return empty results"
             )
 
+    def is_available(self) -> bool:
+        """Public check for whether the search service is initialized and ready."""
+        return self._initialized
+
     def _init_client(self):
         """Initialize the Discovery Engine SearchServiceClient."""
         from google.cloud import discoveryengine_v1

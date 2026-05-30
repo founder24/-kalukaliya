@@ -157,17 +157,7 @@ export default {
             healthCache = { backendReachable, timestamp: now };
           } else {
             // Layer 3: Fresh backend fetch
-            try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 2000);
-              const res = await fetch(`${env.BACKEND_URL}/health`, {
-                signal: controller.signal,
-              });
-              clearTimeout(timeoutId);
-              backendReachable = res.ok;
-            } catch {
-              backendReachable = false;
-            }
+            backendReachable = await fetchBackendHealth(env.BACKEND_URL);
             healthCache = { backendReachable, timestamp: now };
             // Store in KV for other PoPs (30s TTL)
             const kvPayload = JSON.stringify({ backend_reachable: backendReachable });
@@ -175,17 +165,7 @@ export default {
           }
         } catch {
           // KV read failed - fall back to direct fetch
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const res = await fetch(`${env.BACKEND_URL}/health`, {
-              signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            backendReachable = res.ok;
-          } catch {
-            backendReachable = false;
-          }
+          backendReachable = await fetchBackendHealth(env.BACKEND_URL);
           healthCache = { backendReachable, timestamp: now };
         }
       }
@@ -312,6 +292,19 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 };
+
+/** Fetch backend health with a 2s timeout. Returns true if backend responds with 2xx. */
+async function fetchBackendHealth(backendUrl: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`${backendUrl}/health`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 /** Add security headers to proxied responses. These are set at the edge to avoid duplication with Cloudflare's built-in headers. */
 function addSecurityHeaders(response: Response): Response {

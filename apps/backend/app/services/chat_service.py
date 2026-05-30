@@ -24,10 +24,6 @@ from app.services.search.vertex_search import search_service
 
 logger = logging.getLogger(__name__)
 
-# Cached flag: set to True/False on first call to retrieve_context.
-# Once determined, avoids repeated attribute lookups on every request.
-_rag_available: bool | None = None
-
 # Redis cache TTL for conversation history (30 minutes)
 _HISTORY_CACHE_TTL = 30 * 60
 
@@ -99,10 +95,7 @@ class ChatService:
     @staticmethod
     async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
-        global _rag_available
-        if _rag_available is None:
-            _rag_available = search_service._initialized
-        if not _rag_available:
+        if not search_service.is_available():
             return []
 
         try:
