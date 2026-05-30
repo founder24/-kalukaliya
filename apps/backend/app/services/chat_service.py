@@ -96,13 +96,13 @@ class ChatService:
     async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
         """Generate embedding and perform hybrid search for RAG context."""
         try:
-            from app.services.ai.embedder import generate_embedding
 
             async def _do_retrieval():
-                embedding = await generate_embedding(sanitized_message)
+                # HF-011: Pass raw text - Azure Search handles vectorization
+                # via VectorizableTextQuery internally
                 context_chunks = await search_service.search_context(
                     query=sanitized_message,
-                    text=embedding,
+                    text=sanitized_message,
                     user_tier=user_tier,
                     limit=settings.MAX_CONTEXT_DOCS,
                 )
@@ -269,13 +269,7 @@ class ChatService:
                 return
 
         # Emit the sentinel value so the router knows the model/response
-        yield json.dumps(
-            {
-                "__internal_complete": True,
-                "full_response": full_response,
-                "actual_model": actual_model,
-            }
-        )
+        yield f"data: {json.dumps({'__internal_complete': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
 
     # ------------------------------------------------------------------
     # Chat persistence (fire-and-forget)
@@ -317,7 +311,38 @@ class ChatService:
                 await ChatService._invalidate_history_cache(session_id)
 
         except Exception as e:
-            logger.error(f"Failed to save chat: {e}")
+            logger.error(f"Failed to save chat (attempt 1): {e}")
+            # Retry once
+            try:
+                from app.models.chat import Chat
+
+                chat_doc = Chat(
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                chat_doc.add_message(role="user", content=user_message)
+                chat_doc.add_message(
+                    role="assistant",
+                    content=assistant_response,
+                    model_used=target_model,
+                    latency_ms=latency_ms,
+                    rag_sources=[
+                        {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
+                        for c in context_chunks
+                    ],
+                )
+                await chat_doc.save()
+
+                if session_id:
+                    await ChatService._invalidate_history_cache(session_id)
+            except Exception as retry_err:
+                logger.error(f"Failed to save chat (attempt 2): {retry_err}")
+                # Store dead letter for later recovery
+                from app.services.dead_letter import store_dead_letter
+
+                await store_dead_letter(
+                    user_id, user_message, "unknown", str(retry_err)
+                )
 
     # ------------------------------------------------------------------
     # Conversation history (with Redis caching, 30-min TTL)
@@ -416,6 +441,10 @@ class ChatService:
     async def _invalidate_history_cache(session_id: str) -> None:
         """Invalidate all cached history entries for a session on new message save.
         Uses a Redis pipeline to batch all DELETEs in a single round-trip.
+
+        Note (HF-014): The hardcoded max_turns values (3, 5, 10, 15, 20) cover all
+        expected usage. The only production caller uses max_turns=5. If new callers
+        use non-standard values, add them here or switch to wildcard pattern deletion.
         """
         try:
             redis = get_redis()

@@ -203,7 +203,7 @@ def _verify_edge_hmac(request: Request, edge_secret: str) -> tuple[bool, str]:
 
     # Compute expected signature
     message = f"{timestamp_str}:{user_id}:{request.url.path}"
-    expected = hmac.new(
+    expected = hmac.HMAC(
         edge_secret.encode(), message.encode(), hashlib.sha256
     ).hexdigest()
 
@@ -285,9 +285,7 @@ async def get_current_user(
             raise
         except Exception as e:
             logger.error(f"Redis unavailable for token blacklist check: {e}")
-            raise HTTPException(
-                status_code=503, detail="Token validation service unavailable"
-            )
+            pass  # Fail-open: JWT is still cryptographically valid
 
         user = await User.get(user_id)
         if not user:
@@ -381,7 +379,8 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
 
         redis = get_redis()
         client_ip = (
-            request.headers.get("X-Real-IP")
+            request.headers.get("CF-Connecting-IP")
+            or request.headers.get("X-Real-IP")
             or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or (request.client.host if request.client else "unknown")
         )
@@ -402,7 +401,7 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
     except Exception as e:
         # Fail-closed: if Redis is unavailable, reject the request rather than
         # allowing unlimited unauthenticated attempts.
-        logger.warning(f"Rate limiting unavailable ({endpoint}): {e}")
+        logger.warning(f"Rate limiting unavailable ({endpoint}): {type(e).__name__}")
         raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
 
 
@@ -446,7 +445,9 @@ async def signup(request_body: SignupRequest, request: Request):
     except Exception as e:
         logger.warning(f"Welcome email failed for {request_body.email}: {e}")
 
-    logger.info(f"New user signed up: {request_body.email}")
+    logger.info(
+        f"New user signed up: {request_body.email[:3]}***@{request_body.email.split('@')[1]}"
+    )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -473,18 +474,22 @@ async def login(request_body: LoginRequest, request: Request):
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
-    logger.info(f"User logged in: {request_body.email}")
+    logger.info(
+        f"User logged in: {request_body.email[:3]}***@{request_body.email.split('@')[1]}"
+    )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(request: ForgotPasswordRequest):
+async def forgot_password(request_body: ForgotPasswordRequest, request: Request):
     """
     Request a password reset email.
     Always returns success (don't reveal whether email exists).
     """
+    await _check_rate_limit(request, "forgot_password", 3)
+
     try:
-        user = await User.find_one({"email": request.email})
+        user = await User.find_one({"email": request_body.email})
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
@@ -498,15 +503,17 @@ async def forgot_password(request: ForgotPasswordRequest):
         # Send reset email via Resend
         try:
             await send_password_reset_email(
-                email=request.email, reset_token=reset_token
+                email=request_body.email, reset_token=reset_token
             )
-            logger.info(f"Password reset email sent to {request.email}")
+            logger.info(f"Password reset email sent to {request_body.email}")
         except Exception as e:
-            logger.error(f"Failed to send password reset email to {request.email}: {e}")
+            logger.error(
+                f"Failed to send password reset email to {request_body.email}: {e}"
+            )
     else:
         # Don't reveal whether the email exists — log and return same response
         logger.info(
-            f"Password reset requested for non-existent/non-local email: {request.email}"
+            f"Password reset requested for non-existent/non-local email: {request_body.email}"
         )
 
     return MessageResponse(
@@ -578,6 +585,13 @@ async def reset_password(request: ResetPasswordRequest):
             detail="Password reset is not available for OAuth accounts. Please sign in with your OAuth provider.",
         )
 
+    # HF-003: Prevent password reuse
+    if user.verify_password(request.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from current password",
+        )
+
     # Update password
     user.hashed_password = User.hash_password(request.new_password)
     user.updated_at = datetime.now(timezone.utc)
@@ -614,25 +628,6 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         user_id = payload.get("sub")
         jti = payload.get("jti")
 
-        # Check if token has been revoked
-        if jti:
-            try:
-                from app.db.redis import get_redis
-
-                redis = get_redis()
-                revoked = await redis.get(f"revoked_refresh:{jti}")
-                if revoked:
-                    raise HTTPException(
-                        status_code=401, detail="Token has been revoked"
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Redis unavailable for token revocation check: {e}")
-                raise HTTPException(
-                    status_code=503, detail="Token validation service unavailable"
-                )
-
         user = await User.get(user_id)
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -641,20 +636,28 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         new_access_token = create_access_token(str(user.id))
         new_refresh_token = create_refresh_token(str(user.id))
 
-        # Revoke old refresh token jti
+        # Atomically claim the old token (SET NX ensures only one request succeeds)
         if jti:
             try:
                 from app.db.redis import get_redis
 
                 redis = get_redis()
-                await redis.set(
+                claimed = await redis.set(
                     f"revoked_refresh:{jti}",
                     "1",
                     ex=settings.REFRESH_TOKEN_EXPIRY_DAYS * 86400,
+                    nx=True,
                 )
+                if not claimed:
+                    raise HTTPException(
+                        status_code=401, detail="Token has been revoked"
+                    )
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error(
-                    f"Redis unavailable for refresh token revocation storage: {e}"
+                logger.error(f"Redis unavailable for refresh token revocation: {e}")
+                raise HTTPException(
+                    status_code=503, detail="Token validation service unavailable"
                 )
 
         return TokenResponse(

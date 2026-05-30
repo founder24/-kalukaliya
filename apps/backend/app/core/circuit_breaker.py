@@ -54,6 +54,14 @@ class CircuitBreaker:
         self._last_failure_time: Optional[float] = None
         self._half_open_calls = 0
 
+        # HF-101: asyncio.Lock for state transitions
+        import asyncio
+
+        self._state_lock = asyncio.Lock()
+
+        # HF-119: Rate limiting for state transition logs
+        self._last_state_log_time = 0.0
+
     @property
     def state(self) -> CircuitState:
         """Get current circuit state, checking for automatic transition from OPEN to HALF_OPEN"""
@@ -84,31 +92,42 @@ class CircuitBreaker:
         Raises:
             CircuitBreakerError: If circuit is open
         """
-        current_state = self.state
+        async with self._state_lock:
+            current_state = self.state
 
-        if current_state == CircuitState.OPEN:
-            logger.warning(
-                f"Circuit '{self.name}' is OPEN. Failing fast. "
-                f"Will retry after {self.reset_timeout}s"
-            )
-            raise CircuitBreakerError(
-                f"Service {self.name} is unavailable (circuit open)"
-            )
-
-        if current_state == CircuitState.HALF_OPEN:
-            if self._half_open_calls >= self.half_open_max_calls:
-                logger.warning(f"Circuit '{self.name}' HALF_OPEN max calls reached")
+            if current_state == CircuitState.OPEN:
+                now = time.time()
+                if now - self._last_state_log_time > 60:
+                    self._last_state_log_time = now
+                    logger.warning(
+                        f"Circuit '{self.name}' is OPEN. Failing fast. "
+                        f"Will retry after {self.reset_timeout}s"
+                    )
                 raise CircuitBreakerError(
-                    f"Service {self.name} is being tested (half-open limit reached)"
+                    f"Service {self.name} is unavailable (circuit open)"
                 )
-            self._half_open_calls += 1
+
+            if current_state == CircuitState.HALF_OPEN:
+                if self._half_open_calls >= self.half_open_max_calls:
+                    now = time.time()
+                    if now - self._last_state_log_time > 60:
+                        self._last_state_log_time = now
+                        logger.warning(
+                            f"Circuit '{self.name}' HALF_OPEN max calls reached"
+                        )
+                    raise CircuitBreakerError(
+                        f"Service {self.name} is being tested (half-open limit reached)"
+                    )
+                self._half_open_calls += 1
 
         try:
             result = await func(*args, **kwargs)
-            self._on_success()
+            async with self._state_lock:
+                self._on_success()
             return result
         except Exception:
-            self._on_failure()
+            async with self._state_lock:
+                self._on_failure()
             raise
 
     def _on_success(self):
@@ -116,7 +135,12 @@ class CircuitBreaker:
         if self._state == CircuitState.HALF_OPEN:
             self._success_count += 1
             if self._success_count >= self.success_threshold:
-                logger.info(f"Circuit '{self.name}' recovered. Transitioning to CLOSED")
+                now = time.time()
+                if now - self._last_state_log_time > 60:
+                    self._last_state_log_time = now
+                    logger.info(
+                        f"Circuit '{self.name}' recovered. Transitioning to CLOSED"
+                    )
                 self._state = CircuitState.CLOSED
                 self._failure_count = 0
                 self._success_count = 0
@@ -130,16 +154,22 @@ class CircuitBreaker:
         self._last_failure_time = time.time()
 
         if self._state == CircuitState.HALF_OPEN:
-            logger.warning(
-                f"Circuit '{self.name}' failed in HALF_OPEN. Transitioning back to OPEN"
-            )
+            now = time.time()
+            if now - self._last_state_log_time > 60:
+                self._last_state_log_time = now
+                logger.warning(
+                    f"Circuit '{self.name}' failed in HALF_OPEN. Transitioning back to OPEN"
+                )
             self._state = CircuitState.OPEN
             self._success_count = 0
         elif self._failure_count >= self.failure_threshold:
-            logger.warning(
-                f"Circuit '{self.name}' failure threshold reached ({self._failure_count}). "
-                f"Transitioning to OPEN"
-            )
+            now = time.time()
+            if now - self._last_state_log_time > 60:
+                self._last_state_log_time = now
+                logger.warning(
+                    f"Circuit '{self.name}' failure threshold reached ({self._failure_count}). "
+                    f"Transitioning to OPEN"
+                )
             self._state = CircuitState.OPEN
 
     def get_status(self) -> dict:

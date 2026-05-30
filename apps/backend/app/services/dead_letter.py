@@ -31,7 +31,7 @@ async def store_dead_letter(
 
         document = {
             "user_id": user_id,
-            "message": message,
+            "message": message[:200],
             "lang": lang,
             "error": error,
             "timestamp": datetime.now(timezone.utc),
@@ -67,6 +67,8 @@ async def list_dead_letters(
     total = await collection.count_documents(query)
     skip = (page - 1) * page_size
 
+    # Note (HF-067): skip/limit pagination is O(n) for deep pages. For production
+    # scale, switch to cursor-based pagination with {"timestamp": {"$lt": last_seen}}.
     cursor = collection.find(query).sort("timestamp", -1).skip(skip).limit(page_size)
     items = []
     async for doc in cursor:
@@ -100,6 +102,9 @@ async def replay_dead_letter(dead_letter_id: str) -> dict:
     # Refuse replay if max retries exceeded
     if doc.get("retry_count", 0) >= 3:
         raise ValueError("Dead letter has exceeded maximum retry attempts (3)")
+
+    # Note (HF-089): No exponential backoff between retries. Consider adding
+    # a check: reject replay if last_retry < 2^retry_count minutes ago.
 
     # Atomically mark as retrying with status precondition to prevent concurrent replays
     result = await collection.find_one_and_update(

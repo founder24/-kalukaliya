@@ -170,7 +170,7 @@ export default function ChatPage() {
     apiClient().get('/user/credits')
       .then((res) => {
         const c = res.data;
-        setCredits({ used: c.used ?? 0, limit: c.limit ?? null });
+        setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.monthly_limit ?? c.limit ?? null });
       })
       .catch(() => {});
   }, [authChecked, user, creditsRefreshKey]);

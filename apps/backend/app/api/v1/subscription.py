@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 import logging
 
@@ -27,8 +27,8 @@ async def get_subscription_status(user: User = Depends(get_current_user)):
         tier=user.subscription_tier,
         status=user.subscription_status,
         current_period_end=user.current_period_end.isoformat()
-        if user.current_period_end
-        else "",
+        if hasattr(user.current_period_end, "isoformat")
+        else str(user.current_period_end or ""),
         monthly_message_count=user.monthly_message_count,
         monthly_limit=settings.RATE_LIMIT_PRO_TIER
         if user.is_pro()
@@ -79,3 +79,35 @@ async def cancel_subscription(user: User = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Failed to cancel subscription: {e}")
         raise HTTPException(status_code=500, detail="Failed to cancel subscription")
+
+
+@router.post("/cron/downgrade-expired")
+async def downgrade_expired_subscriptions(request: Request):
+    """Cron endpoint to downgrade expired subscriptions. Protected by cron secret."""
+    cron_secret = request.headers.get("X-Cron-Secret")
+    if not cron_secret or cron_secret != settings.TRANSLATE_CRON_SECRET:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+
+    expired_users = await User.find(
+        {"cancel_at_period_end": True, "current_period_end": {"$lt": now}}
+    ).to_list()
+
+    downgraded = 0
+    for u in expired_users:
+        await u.update(
+            {
+                "$set": {
+                    "subscription_tier": "free",
+                    "subscription_status": "cancelled",
+                    "cancel_at_period_end": False,
+                }
+            }
+        )
+        downgraded += 1
+
+    logger.info(f"Downgraded {downgraded} expired subscriptions")
+    return {"status": "ok", "downgraded": downgraded}

@@ -2,11 +2,16 @@
 
 Monthly quota tracking only. Per-request burst rate limiting is handled
 by the Cloudflare Edge worker (apps/edge/src/middleware/rate-limit.ts).
+
+Architecture note (HF-026): Double rate limiting is intentional:
+- Edge: 30 req/hr per language (burst protection, fast rejection)
+- Backend: 30 req/month total for free tier (quota enforcement)
+The edge limit prevents burst abuse; the backend limit enforces billing quotas.
 """
 
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Request
@@ -51,7 +56,7 @@ async def check_rate_limit(
         # Track monthly quota
         current_count = await redis.incr(key)
         if current_count == 1:
-            next_month = datetime.now().replace(day=28) + timedelta(days=4)
+            next_month = datetime.now(timezone.utc).replace(day=28) + timedelta(days=4)
             expire_at = next_month.replace(day=1, hour=0, minute=0, second=0)
             ttl = int(expire_at.timestamp() - time.time())
             await redis.expire(key, ttl)

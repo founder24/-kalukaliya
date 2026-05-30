@@ -66,6 +66,9 @@ async def lifespan(app: FastAPI):
         await init_redis()
         logger.info("Redis initialized successfully")
     except Exception as e:
+        if settings.APP_ENV in ("production", "staging"):
+            logger.error(f"Redis initialization failed in production: {e}")
+            raise
         logger.warning(
             f"Redis initialization failed (expected in local dev without DB): {e}"
         )

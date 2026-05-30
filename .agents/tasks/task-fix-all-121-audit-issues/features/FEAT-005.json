@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address review findings: two-phase idempotency staleness check, circuit breaker state mutations under lock, monthly reset race condition, payment amount storage",
+  "status": "completed",
+  "steps": [
+    "1. In razorpay.py: Add import time at module level, store timestamp with processing state, add actual staleness check for processing entries",
+    "2. In circuit_breaker.py: Wrap _on_success() and _on_failure() calls in the call() method under self._state_lock",
+    "3. In chat.py: Change monthly reset check-then-update to use conditional MongoDB update with month precondition",
+    "4. In payments.py: Store amount in Redis at order creation, retrieve it in verify_payment to use in the payment record"
+  ],
+  "acceptance_criteria": [
+    "razorpay.py webhook idempotency stores timestamp with processing state and checks staleness",
+    "circuit_breaker.py call() method acquires _state_lock around _on_success() and _on_failure()",
+    "chat.py monthly reset uses conditional update with last_reset_date precondition",
+    "payments.py create_order stores amount in Redis, verify_payment retrieves it for the payment record",
+    "All modified Python files pass AST syntax check"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; import glob; [ast.parse(open(f).read()) for f in glob.glob('app/**/*.py', recursive=True)]\""
+  ],
+  "blocked_reason": null,
+  "findings": "All four review findings addressed. AST syntax check passes for all Python files. Idempotency now stores timestamp and checks 5-min staleness window. Circuit breaker state mutations are protected by asyncio.Lock. Monthly reset uses conditional find+update. Payment amount stored in Redis at order creation and retrieved during verification."
+}

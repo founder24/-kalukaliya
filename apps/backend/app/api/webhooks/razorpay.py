@@ -6,6 +6,8 @@ import hmac
 import json
 import logging
 import re
+import time
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +17,9 @@ router = APIRouter(tags=["Payments"])
 _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
 
 
-def calculate_next_billing_date() -> str:
+def calculate_next_billing_date() -> datetime:
     """Calculate next billing date (1 month from now)"""
-    from datetime import datetime, timedelta, timezone
-
-    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    return datetime.now(timezone.utc) + timedelta(days=30)
 
 
 def _validate_subscription_id(value) -> str:
@@ -36,6 +36,11 @@ async def handle_razorpay_webhook(request: Request):
     """
     if not settings.RAZORPAY_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="Webhook not configured")
+
+    # HF-025: Body size limit
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > 1_000_000:
+        raise HTTPException(status_code=413, detail="Payload too large")
 
     body = await request.body()
     signature = request.headers.get("X-Razorpay-Signature")
@@ -68,9 +73,19 @@ async def handle_razorpay_webhook(request: Request):
 
         redis = get_redis()
         dedup_key = f"webhook_processed:{event_id}"
-        was_new = await redis.set(dedup_key, "1", ex=604800, nx=True)
-        if not was_new:
+        existing = await redis.get(dedup_key)
+        if existing == "completed":
             return {"status": "already_processed"}
+        if existing and existing.startswith("processing:"):
+            # Check if stuck (processing for > 5 min means previous attempt crashed)
+            try:
+                started_at = float(existing.split(":")[1])
+                if time.time() - started_at < 300:  # Less than 5 minutes
+                    return {"status": "already_processing"}
+            except (ValueError, IndexError):
+                pass
+            # Stale processing entry - allow reprocessing
+        await redis.set(dedup_key, f"processing:{time.time()}", ex=3024000)
     except HTTPException:
         raise
     except Exception as e:
@@ -81,6 +96,11 @@ async def handle_razorpay_webhook(request: Request):
     if event.get("event") == "subscription.charged":
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
         amount = payload["payment"]["amount"]
+
+        # HF-028: Validate amount matches expected plan price
+        if amount < 29900:  # Minimum expected plan price in paise
+            logger.warning(f"Unexpected amount {amount} for subscription {sub_id}")
+            return {"status": "ignored", "reason": "amount_below_expected"}
 
         # Find User
         user = await User.find_one({"razorpay_subscription_id": sub_id})
@@ -124,5 +144,30 @@ async def handle_razorpay_webhook(request: Request):
         if user:
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
+
+    elif event.get("event") == "subscription.expired":
+        sub_id = _validate_subscription_id(payload["subscription"]["id"])
+        user = await User.find_one({"razorpay_subscription_id": sub_id})
+        if user:
+            await user.update(
+                {
+                    "$set": {
+                        "subscription_tier": "free",
+                        "subscription_status": "cancelled",
+                        "cancel_at_period_end": False,
+                    }
+                }
+            )
+        logger.info(f"Subscription expired, user downgraded: {sub_id}")
+
+    # Mark as completed
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        dedup_key = f"webhook_processed:{event_id}"
+        await redis.set(dedup_key, "completed", ex=3024000)
+    except Exception:
+        pass
 
     return {"status": "ok"}

@@ -1,7 +1,7 @@
 from beanie import Document
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -10,7 +10,7 @@ class Message(BaseModel):
 
     role: Literal["user", "assistant", "system"]
     content: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     model_used: Optional[str] = None
     latency_ms: Optional[int] = None
     thumbs_up: Optional[bool] = None
@@ -32,8 +32,8 @@ class Chat(Document):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: Optional[str] = None
     messages: List[dict] = []  # Embedded messages with RAG sources
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
         name = "chats"
@@ -41,6 +41,7 @@ class Chat(Document):
             [("user_id", 1), ("updated_at", -1)],
             [("session_id", 1)],
             [("updated_at", -1)],
+            [("session_id", 1), ("created_at", -1)],
         ]
 
     def add_message(
@@ -55,14 +56,14 @@ class Chat(Document):
         message = {
             "role": role,
             "content": content,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "model_used": model_used,
             "latency_ms": latency_ms,
             "rag_sources": rag_sources or [],
             "feedback": {"thumbs_up": None},
         }
         self.messages.append(message)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     async def generate_title(self, llm_client) -> Optional[str]:
         """Auto-generate chat title from first message"""

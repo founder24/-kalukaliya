@@ -25,43 +25,58 @@ async def init_mongo() -> None:
         logger.warning("MONGODB_URI not set — MongoDB disabled")
         return
 
-    try:
-        _client = AsyncIOMotorClient(
-            settings.MONGODB_URI,
-            maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
-            minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
-            serverSelectionTimeoutMS=5000,
-            connectTimeoutMS=10000,
-            socketTimeoutMS=45000,
-        )
+    import asyncio
 
-        # Initialize Beanie with document models
-        await init_beanie(
-            database=_client[settings.MONGODB_DB_NAME],
-            document_models=[
-                User,
-                Chat,
-                ChatFeedback,
-                KnowledgeObject,
-                Board,
-                Class,
-                Stream,
-                Subject,
-                Chapter,
-            ],
-        )
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            _client = AsyncIOMotorClient(
+                settings.MONGODB_URI,
+                maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
+                minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=10000,
+                socketTimeoutMS=45000,
+                heartbeatFrequencyMS=10000,
+            )
 
-        # Create indexes
-        await create_indexes()
+            # Initialize Beanie with document models
+            await init_beanie(
+                database=_client[settings.MONGODB_DB_NAME],
+                document_models=[
+                    User,
+                    Chat,
+                    ChatFeedback,
+                    KnowledgeObject,
+                    Board,
+                    Class,
+                    Stream,
+                    Subject,
+                    Chapter,
+                ],
+            )
 
-        # Run pending database migrations
-        db = _client[settings.MONGODB_DB_NAME]
-        await check_and_apply_migrations(db)
+            # Create indexes
+            await create_indexes()
 
-        logger.info("MongoDB connection initialized successfully")
-    except ConnectionFailure as e:
-        logger.error(f"Failed to connect to MongoDB: {e}")
-        raise
+            # Run pending database migrations
+            db = _client[settings.MONGODB_DB_NAME]
+            await check_and_apply_migrations(db)
+
+            logger.info("MongoDB connection initialized successfully")
+            return
+        except ConnectionFailure as e:
+            if attempt < max_retries - 1:
+                wait_time = 2**attempt
+                logger.warning(
+                    f"MongoDB connection attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
+                )
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(
+                    f"Failed to connect to MongoDB after {max_retries} attempts: {e}"
+                )
+                raise
 
 
 async def create_indexes() -> None:
@@ -72,10 +87,14 @@ async def create_indexes() -> None:
         return
 
     # Users collection indexes
-    await db.users.create_index([("email", ASCENDING)], unique=True)
-    await db.users.create_index(
-        [("subscription.razorpay_subscription_id", ASCENDING)], sparse=True
-    )
+    try:
+        await db.users.create_index([("email", ASCENDING)], unique=True)
+    except Exception as e:
+        if settings.APP_ENV in ("production", "staging"):
+            logger.error(f"FATAL: Failed to create email unique index: {e}")
+            raise
+        logger.warning(f"Email unique index creation failed (non-prod): {e}")
+    await db.users.create_index([("razorpay_subscription_id", ASCENDING)], sparse=True)
     await db.users.create_index([("profile.preferences.language", ASCENDING)])
     await db.users.create_index([("created_at", DESCENDING)])
 
@@ -93,6 +112,11 @@ async def create_indexes() -> None:
     )
     await db.dead_letters.create_index(
         [("status", ASCENDING), ("timestamp", DESCENDING)]
+    )
+
+    # Chat feedback TTL index (HF-038)
+    await db.chat_feedback.create_index(
+        [("timestamp", 1)], expireAfterSeconds=30 * 24 * 60 * 60
     )
 
     # Content hierarchy indexes

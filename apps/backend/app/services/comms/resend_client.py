@@ -16,6 +16,8 @@ _http_client: Optional[httpx.AsyncClient] = None
 RESEND_API_URL = "https://api.resend.com/emails"
 
 # Simple in-memory rate limiter: max 10 emails per minute per recipient
+# Note (HF-073): This rate limiter is in-memory only (per-instance). In a multi-pod
+# deployment, use Redis-based rate limiting to share state across instances.
 _EMAIL_RATE_LIMIT = 10
 _EMAIL_RATE_WINDOW = 60  # seconds
 _email_send_times: dict[str, list[float]] = defaultdict(list)

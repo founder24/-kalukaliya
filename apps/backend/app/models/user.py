@@ -11,13 +11,11 @@ class User(Document):
     email: Optional[EmailStr] = None
     hashed_password: Optional[str] = None
     auth_provider: Literal["local", "anonymous"] = "anonymous"
-    role: Optional[str] = None  # 'student', 'educator', 'staff', 'admin'
+    role: Optional[Literal["student", "educator", "staff", "admin"]] = None
 
     # Subscription
     subscription_tier: Literal["free", "pro"] = "free"
-    subscription_status: Literal["active", "past_due", "cancelled", "trialing"] = (
-        "active"
-    )
+    subscription_status: Literal["active", "past_due", "cancelled"] = "active"
     razorpay_subscription_id: Optional[str] = None
     razorpay_customer_id: Optional[str] = None
     current_period_start: Optional[datetime] = None
@@ -49,7 +47,7 @@ class User(Document):
         name = "users"
         indexes = [
             [("email", 1)],  # Unique index created in mongo.py
-            [("subscription.razorpay_subscription_id", 1)],
+            [("razorpay_subscription_id", 1)],
             [("preferred_language", 1)],
             [("created_at", -1)],
         ]

@@ -72,6 +72,15 @@ async def create_order(
         }
     )
 
+    # Store amount for later verification (resilient payment record)
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        await redis.set(f"order_amount:{order['id']}", str(amount), ex=86400)
+    except Exception:
+        pass
+
     return {"order_id": order["id"], "amount": amount, "currency": "INR"}
 
 
@@ -93,14 +102,48 @@ async def verify_payment(
     if not hmac.compare_digest(expected, body.razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
+    # Retrieve stored amount for payment record
+    payment_amount = None
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        stored_amount = await redis.get(f"order_amount:{body.razorpay_order_id}")
+        if stored_amount:
+            payment_amount = int(stored_amount)
+    except Exception:
+        pass
+
     await user.update(
         {
             "$set": {
                 "subscription_tier": "pro",
                 "subscription_status": "active",
+                "razorpay_subscription_id": body.razorpay_order_id,
             }
         }
     )
+
+    # HF-029: Record payment in payments collection
+    try:
+        from app.db.mongo import get_mongo_client
+        from datetime import datetime, timezone
+
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        await db.payments.insert_one(
+            {
+                "user_id": str(user.id),
+                "razorpay_order_id": body.razorpay_order_id,
+                "razorpay_payment_id": body.razorpay_payment_id,
+                "amount": payment_amount,
+                "status": "completed",
+                "type": "subscription",
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to record payment: {e}")
 
     logger.info("Payment verified, user upgraded", extra={"user_id": str(user.id)})
     return {"status": "success", "message": "Payment verified, plan upgraded to pro"}
@@ -139,6 +182,15 @@ async def create_credit_topup(
             },
         }
     )
+
+    # Store credits locally for verification resilience
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        await redis.set(f"credit_order:{order['id']}", str(body.credits), ex=86400)
+    except Exception:
+        pass  # Redis failure is non-fatal here
 
     return {
         "order_id": order["id"],
@@ -184,14 +236,27 @@ async def verify_credit_topup(
         )
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
-    # Fetch order to get credits from notes
-    import razorpay
+    # Try local Redis first (resilient to Razorpay API outage)
+    credits = 0
+    try:
+        from app.db.redis import get_redis
 
-    client = razorpay.Client(
-        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
-    )
-    order = client.order.fetch(body.razorpay_order_id)
-    credits = int(order.get("notes", {}).get("credits", 0))
+        redis = get_redis()
+        cached_credits = await redis.get(f"credit_order:{body.razorpay_order_id}")
+        if cached_credits:
+            credits = int(cached_credits)
+    except Exception:
+        pass
+
+    if not credits:
+        # Fallback to Razorpay API
+        import razorpay
+
+        client = razorpay.Client(
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+        )
+        order = client.order.fetch(body.razorpay_order_id)
+        credits = int(order.get("notes", {}).get("credits", 0))
 
     if credits <= 0:
         raise HTTPException(status_code=400, detail="Invalid credit amount in order")
