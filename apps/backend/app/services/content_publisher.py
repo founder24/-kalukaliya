@@ -22,6 +22,19 @@ class ContentPublisherService:
     def __init__(self):
         self._vertex_client = None
 
+    async def _resolve_hierarchy(self, chapter: Chapter) -> dict:
+        """Resolve full Board > Class > Stream > Subject hierarchy for a chapter."""
+        from app.models.content import Board, Class, Stream, Subject
+
+        subject = await Subject.get(chapter.subject_id) if chapter.subject_id else None
+        stream = (
+            await Stream.get(subject.stream_id) if subject and subject.stream_id else None
+        )
+        cls = await Class.get(stream.class_id) if stream and stream.class_id else None
+        board = await Board.get(cls.board_id) if cls and cls.board_id else None
+
+        return {"subject": subject, "stream": stream, "cls": cls, "board": board}
+
     def _get_vertex_client(self):
         """Lazily initialize and cache the DocumentServiceClient."""
         if self._vertex_client is None:
@@ -79,6 +92,13 @@ class ContentPublisherService:
             )
 
             chunks = self._chunk_content(chapter.content_en or "")
+
+            hierarchy = await self._resolve_hierarchy(chapter)
+            subject = hierarchy["subject"]
+            stream = hierarchy["stream"]
+            cls = hierarchy["cls"]
+            board = hierarchy["board"]
+
             documents = []
             for i, chunk in enumerate(chunks):
                 doc_id = f"{str(chapter.id)}_{i}"
@@ -92,6 +112,19 @@ class ContentPublisherService:
                         "chunk_index": i,
                         "meta_description": chapter.meta_description or "",
                         "keywords": chapter.keywords or "",
+                        "topics": ", ".join(
+                            t.title for t in (chapter.published_topics or [])
+                        ),
+                        "topic_definitions": "; ".join(
+                            f"{t.title}: {t.definition}"
+                            for t in (chapter.published_topics or [])
+                            if t.definition
+                        ),
+                        "subject_name": subject.name if subject else "",
+                        "class_name": cls.name if cls else "",
+                        "board_name": board.name if board else "",
+                        "stream_name": stream.name if stream else "",
+                        "hierarchy": f"{board.name if board else ''} > {cls.name if cls else ''} > {stream.name if stream else ''} > {subject.name if subject else ''} > {chapter.title}",
                     }
                 )
                 doc = discoveryengine_v1.Document(
@@ -108,7 +141,45 @@ class ContentPublisherService:
                         allow_missing=True,
                     )
                     await asyncio.to_thread(client.update_document, request=request)
-                return {"status": "uploaded", "chunks": len(documents)}
+
+            # Index each topic as a micro-document for precise matching
+            for topic in (chapter.published_topics or []):
+                topic_doc_id = f"{str(chapter.id)}_topic_{topic.id}"
+                topic_struct = struct_pb2.Struct()
+                topic_struct.update(
+                    {
+                        "chapter_id": str(chapter.id),
+                        "title": f"{topic.title} - {chapter.title}",
+                        "content": topic.definition
+                        or f"{topic.title} is a topic in {chapter.title} ({subject.name if subject else ''}, {cls.name if cls else ''}, {board.name if board else ''})",
+                        "topic_title": topic.title,
+                        "topic_slug": topic.topic_slug,
+                        "subject_name": subject.name if subject else "",
+                        "class_name": cls.name if cls else "",
+                        "board_name": board.name if board else "",
+                        "stream_name": stream.name if stream else "",
+                        "hierarchy": f"{board.name if board else ''} > {cls.name if cls else ''} > {stream.name if stream else ''} > {subject.name if subject else ''} > {chapter.title} > {topic.title}",
+                        "keywords": chapter.keywords or "",
+                        "is_topic_doc": "true",
+                    }
+                )
+                topic_doc = discoveryengine_v1.Document(
+                    id=topic_doc_id,
+                    struct_data=topic_struct,
+                )
+                topic_doc.name = f"{parent}/documents/{topic_doc.id}"
+                request = discoveryengine_v1.UpdateDocumentRequest(
+                    document=topic_doc,
+                    allow_missing=True,
+                )
+                await asyncio.to_thread(client.update_document, request=request)
+
+            if documents:
+                return {
+                    "status": "uploaded",
+                    "chunks": len(documents),
+                    "topic_docs": len(chapter.published_topics or []),
+                }
 
             return {"status": "no_content"}
         except ImportError:

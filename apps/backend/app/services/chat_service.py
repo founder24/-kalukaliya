@@ -161,7 +161,7 @@ class ChatService:
                 )
 
         context_text = "\n".join(
-            f"[{i + 1}] {chunk['title']}: {chunk['content']}"
+            f"[{i + 1}] {chunk['title']}{' (' + chunk['hierarchy'] + ')' if chunk.get('hierarchy') else ''}: {chunk['content']}"
             for i, chunk in enumerate(context_chunks)
         )
         return f"{lang_instruction}\n\nContext:\n{context_text}"
