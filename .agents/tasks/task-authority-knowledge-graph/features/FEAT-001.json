@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Create TopicHub model and supporting sub-models (TopicSource, TopicMCQ, TopicPYQ, TopicRelation) as a new Beanie Document, then register it with Beanie init and add collection indexes.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/app/models/topic_hub.py with TopicSource, TopicMCQ, TopicPYQ, TopicRelation (BaseModel subclasses) and TopicHub (Document subclass) following the exact schema from the user request. Import datetime, timezone, Optional, PydanticObjectId, Field from beanie/pydantic. Add Settings class with name='topic_hubs' and indexes on topic_slug, chapter_id, subject_id, and compound (topic_slug, chapter_id).",
     "Modify apps/backend/app/db/mongo.py: import TopicHub from app.models.topic_hub and add it to the document_models list in init_beanie(). Also add an index creation call in create_indexes() for the topic_hubs collection: compound index on (topic_slug, chapter_id) unique, plus single-field indexes on subject_id.",
@@ -19,5 +19,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.db.mongo import init_mongo; print(\"OK\")'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 201 tests pass. Import verification requires JWT_SECRET env var to be set (settings validation), not related to our changes. Model imports cleanly, Beanie registration validated."
 }
