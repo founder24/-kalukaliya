@@ -2,6 +2,7 @@ import httpx
 import json
 import asyncio
 import logging
+import re
 from typing import AsyncGenerator
 
 from app.config import settings
@@ -12,6 +13,12 @@ from app.core.circuit_breaker import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_think_block(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks from Sarvam model output."""
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    return cleaned.strip()
 
 
 class SarvamAIClient:
@@ -66,7 +73,7 @@ class SarvamAIClient:
                 return "\u09ae\u0987 \u0995\u09cb\u09a8\u09cb \u0989\u09a4\u09cd\u09a4\u09f0 \u09b8\u09c3\u09b7\u09cd\u099f\u09bf \u0995\u09f0\u09bf\u09ac \u09aa\u09f0\u09be \u09a8\u09be\u0987\u09b2\u09cb\u0964 \u0985\u09a8\u09c1\u0997\u09cd\u09f0\u09b9 \u0995\u09f0\u09bf \u09aa\u09c1\u09a8\u09f0 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09f0\u0995\u0964"
 
             result = await sarvam_circuit_breaker.call(_do_generate)
-            return result
+            return _strip_think_block(result)
         except CircuitBreakerError as e:
             raise RuntimeError(f"Sarvam AI unavailable: {e}")
         except httpx.HTTPStatusError as e:
@@ -89,6 +96,7 @@ class SarvamAIClient:
             data: [DONE]
 
         Yields text content deltas as they arrive.
+        Strips <think>...</think> reasoning blocks from output.
         """
         if not self.api_key:
             raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
@@ -111,6 +119,11 @@ class SarvamAIClient:
             "max_tokens": 2048,
             "stream": True,
         }
+
+        # State for stripping <think>...</think> blocks from streamed output
+        in_think_block = False
+        buffer = ""
+        think_started = False
 
         try:
             async with self._client.stream(
@@ -136,8 +149,37 @@ class SarvamAIClient:
                         continue
                     delta = choices[0].get("delta", {})
                     content = delta.get("content", "")
-                    if content:
-                        yield content
+                    if not content:
+                        continue
+
+                    # Handle think block stripping
+                    buffer += content
+
+                    # Check if we are entering a think block
+                    if not think_started and buffer.lstrip().startswith("<think>"):
+                        in_think_block = True
+                        think_started = True
+
+                    if in_think_block:
+                        # Check if think block has ended
+                        if "</think>" in buffer:
+                            # Strip out the think block and yield the rest
+                            after_think = buffer.split("</think>", 1)[1]
+                            buffer = ""
+                            in_think_block = False
+                            if after_think.strip():
+                                yield after_think
+                        # While in think block, don't yield anything
+                        continue
+
+                    # Not in a think block, yield content as it arrives
+                    buffer = ""
+                    yield content
+
+            # If there is remaining buffer content after stream ends (edge case)
+            if buffer and not in_think_block:
+                yield buffer
+
             sarvam_circuit_breaker._on_success()
         except Exception as e:
             sarvam_circuit_breaker._on_failure()

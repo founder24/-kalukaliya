@@ -59,16 +59,21 @@ class Settings(BaseSettings):
     RATE_LIMIT_PRO_TIER: int = 999999
 
     # --- P6: Vertex AI (Google) ---
+    # Option 1 (recommended): Path to service account key file
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
+    # Option 2 (legacy): Inline JSON string of service account key
     GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
+    # Option 3: Gemini API key (Generative Language API - bypasses Vertex AI SDK)
+    GEMINI_API_KEY: Optional[str] = None
     VERTEX_PROJECT_ID: Optional[str] = None
     VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash-lite"
+    VERTEX_GEMINI_MODEL: str = "gemini-2.5-flash"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
     # --- P7: Sarvam AI (Indic) ---
     SARVAM_API_KEY: Optional[str] = None
     SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
-    SARVAM_MODEL: str = "openhathi-7b"
+    SARVAM_MODEL: str = "sarvam-m"
 
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: Optional[str] = None
@@ -217,9 +222,36 @@ class Settings(BaseSettings):
 
     @property
     def google_credentials(self) -> dict:
-        if not self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
-            return {}
-        return json.loads(self.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+        """Load Google credentials from file path or inline JSON.
+
+        Priority:
+        1. GOOGLE_APPLICATION_CREDENTIALS (file path) - recommended, safer
+        2. GOOGLE_APPLICATION_CREDENTIALS_JSON (inline JSON) - legacy fallback
+        3. On Cloud Run with Workload Identity, neither is needed (uses ADC)
+        """
+        # Option 1: Load from file path
+        if self.GOOGLE_APPLICATION_CREDENTIALS:
+            import os
+
+            creds_path = os.path.expanduser(self.GOOGLE_APPLICATION_CREDENTIALS)
+            try:
+                with open(creds_path) as f:
+                    return json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load credentials from {creds_path}: {e}")
+                return {}
+
+        # Option 2: Inline JSON string
+        if self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            try:
+                return json.loads(self.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}"
+                )
+                return {}
+
+        return {}
 
 
 settings = Settings()

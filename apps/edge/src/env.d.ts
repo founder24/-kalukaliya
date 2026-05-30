@@ -47,6 +47,9 @@ interface Env {
   // Optional: override default 30s proxy timeout (milliseconds)
   PROXY_TIMEOUT_MS?: string;
 
+  // Optional: Google Service Account JSON key for Cloud Run authentication
+  GOOGLE_SA_KEY?: string;
+
   // ── Bindings ──
   R2_BUCKET: R2Bucket;
   RATE_LIMIT_KV: KVNamespace;

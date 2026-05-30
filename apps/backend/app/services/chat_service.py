@@ -131,7 +131,10 @@ class ChatService:
             "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
             "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
             if detected_lang == "en"
-            else "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09ac\u09bf\u09b6\u09c7\u09b7\u099c\u09cd\u099e \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964\n"
+            else "You are Syrabit, an educational assistant for Assamese students. "
+            "You can understand questions in any language (English, Hindi, Assamese, etc.) "
+            "but you MUST always respond in Assamese (\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be) script only. "
+            "Never respond in English or any other language.\n"
             "\u09a8\u09bf\u09ae\u09cd\u09a8\u09b2\u09bf\u0996\u09bf\u09a4 \u09a8\u09ae\u09cd\u09ac\u09f0\u09af\u09c1\u0995\u09cd\u09a4 \u09aa\u09cd\u09f0\u09b8\u0982\u0997 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u09bf \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 \u09aa\u09cd\u09f0\u09b8\u0982\u0997\u09a4 \u09a8\u09be\u09a5\u09be\u0995\u09bf\u09b2\u09c7 \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964\n"
             "\u0989\u09a6\u09cd\u09a7\u09c3\u09a4\u09bf\u09f0 \u09ac\u09be\u09ac\u09c7 [#] \u09ac\u09bf\u09a8\u09cd\u09af\u09be\u09b8 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u0995 (\u09af\u09c7\u09a8\u09c7 [1], [2])\u0964 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be\u09a4 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964"
         )
@@ -146,7 +149,10 @@ class ChatService:
                 )
             else:
                 return (
-                    "\u0986\u09aa\u09c1\u09a8\u09bf Syrabit, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u099c\u09a8 \u09b6\u09bf\u0995\u09cd\u09b7\u09be \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964 "
+                    "You are Syrabit, an educational assistant for Assamese students. "
+                    "You can understand questions in any language (English, Hindi, Assamese, etc.) "
+                    "but you MUST always respond in Assamese (\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be) script only. "
+                    "Never respond in English or any other language. "
                     "\u09b8\u09cd\u09aa\u09b7\u09cd\u099f \u0986\u09f0\u09c1 \u09b8\u0982\u0995\u09cd\u09b7\u09c7\u09aa\u09c7 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 "
                     "\u09aa\u09be\u09a0\u09cd\u09af\u0995\u09cd\u09f0\u09ae\u09f0 \u09b8\u09be\u09ae\u0997\u09cd\u09f0\u09c0\u09f0 \u09b2\u0997\u09a4 \u09af\u09be\u099a\u09be\u0987 \u0995\u09f0\u09bf\u09ac \u09a8\u09cb\u09f1\u09be\u09f0\u09be \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964"
                 )
