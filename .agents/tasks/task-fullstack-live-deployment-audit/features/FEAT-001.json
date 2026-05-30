@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Comprehensive full-stack live deployment audit of syrabit.ai - testing Cloudflare frontend, GCP backend, identifying all misconfigurations, and documenting findings in a detailed report",
+  "status": "in_progress",
+  "steps": [
+    "SECTION 1 - Live Frontend/Edge Testing: Use curl to test https://syrabit.ai for HTTP status, response headers (HSTS, CSP, X-Frame-Options, X-Content-Type-Options), SSL certificate details, and response time. Test www.syrabit.ai redirect behavior.",
+    "SECTION 2 - DNS and SSL Audit: Use dig/nslookup to check DNS resolution for syrabit.ai, www.syrabit.ai, api.syrabit.ai. Verify CNAME/A records point to Cloudflare. Check SSL certificate validity, issuer, and expiration with openssl s_client.",
+    "SECTION 3 - Cloudflare Edge Worker Testing: Test https://api.syrabit.ai/health endpoint. Test CORS preflight with OPTIONS request. Test security headers on API responses. Test /robots.txt endpoint. Test rate limiting headers. Test 404 handling and fallback behavior.",
+    "SECTION 4 - Backend Health and API Testing: Test the backend health endpoint through the edge proxy. Test /health/full for deep dependency checks. Test /api/v1/chat/stream with and without Turnstile token to verify bot protection enforcement. Test response to invalid JWT tokens.",
+    "SECTION 5 - Cloudflare Configuration Audit: Review wrangler.toml for misconfigurations (KV namespace IDs, R2 bucket bindings, environment settings, compatibility date). Check if BACKEND_URL secret override is properly documented. Verify production environment duplicates all bindings correctly.",
+    "SECTION 6 - GCP Backend Configuration Audit: Review Dockerfile for security best practices (non-root user, minimal image, no secrets baked in). Review clouddeploy.yaml for Cloud Run settings (min/max instances, memory, CPU, timeout, ingress). Review gunicorn_conf.py for production readiness. Check deploy-all.yml for proper secret management.",
+    "SECTION 7 - Security Audit: Review JWT implementation in edge worker (algorithm confusion, 'none' algorithm rejection, public path bypass). Review CORS whitelist for overly permissive origins. Check for SSRF protections in backend. Review HMAC signature implementation in api-proxy.ts. Check edge shared secret requirement. Audit Turnstile enforcement completeness.",
+    "SECTION 8 - Full-Stack Integration Audit: Verify frontend-to-edge-to-backend request flow consistency. Check environment variable consistency between .env.shared, wrangler.toml, and clouddeploy.yaml. Verify CI/CD pipeline completeness (deploy-all.yml) including rollback mechanism. Check for race conditions in KV-based rate limiting.",
+    "SECTION 9 - Performance and Reliability Audit: Test response times for key endpoints. Review circuit breaker implementation. Check streaming/SSE support in api-proxy.ts. Verify health check caching strategy in edge worker. Review timeout settings across the stack.",
+    "SECTION 10 - Write comprehensive audit report as FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md at the repository root, organized by severity (Critical, High, Medium, Low, Informational) with specific remediation recommendations for each finding."
+  ],
+  "acceptance_criteria": [
+    "FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md exists at repo root with all audit sections completed",
+    "Report includes live test results from curl commands against syrabit.ai and api.syrabit.ai",
+    "Report documents DNS resolution results",
+    "Report includes SSL certificate verification results",
+    "Report covers all Cloudflare Worker configuration findings from wrangler.toml review",
+    "Report covers GCP Cloud Run/Dockerfile configuration findings",
+    "Report includes security findings with severity ratings (Critical/High/Medium/Low/Info)",
+    "Report includes specific remediation recommendations for each finding",
+    "Report has an executive summary with total finding counts by severity"
+  ],
+  "verification": [
+    "Verify FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md exists and is non-empty: wc -l FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md",
+    "Verify report contains severity ratings: grep -c 'Critical\\|High\\|Medium\\|Low' FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md",
+    "Verify report contains live test evidence: grep -c 'curl\\|HTTP\\|200\\|301\\|403' FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
