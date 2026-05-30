@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Mail, Loader2, ArrowLeft, CheckCircle, Lock, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,6 @@ import axios from 'axios';
 import { LogoFull } from '@/components/Logo';
 import { API_BASE } from '@/utils/api';
 import { formatAuthError } from '@/lib/authErrors';
-import TurnstileWidget from '@/components/TurnstileWidget';
 
 export default function ResetPasswordPage() {
   const [email, setEmail] = useState('');
@@ -19,7 +18,6 @@ export default function ResetPasswordPage() {
   const [showPass, setShowPass] = useState(false);
   const [step, setStep] = useState('request');
   const [loading, setLoading] = useState(false);
-  const turnstileRef = useRef(null);
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
@@ -33,27 +31,16 @@ export default function ResetPasswordPage() {
   const handleRequest = async (e) => {
     e.preventDefault();
     setLoading(true);
-    // Task #404 — Turnstile token (empty when the widget is disabled,
-    // in which case the backend ``require_turnstile`` dependency is
-    // dormant too).
-    const turnstileToken = turnstileRef.current?.getToken?.() || '';
     try {
       await axios.post(
         `${API_BASE}/auth/forgot-password`,
         { email },
-        {
-          headers: turnstileToken
-            ? { 'x-turnstile-token': turnstileToken }
-            : {},
-        },
       );
       setStep('confirm');
       toast.success('Reset token sent! Check your email or ask admin.');
     } catch (err) {
       toast.error(formatAuthError(err, 'Request failed. Please try again.'));
     } finally {
-      // Tokens are one-shot per the Turnstile contract.
-      turnstileRef.current?.reset?.();
       setLoading(false);
     }
   };
@@ -106,7 +93,6 @@ export default function ResetPasswordPage() {
                     />
                   </div>
                 </div>
-                <TurnstileWidget ref={turnstileRef} action="reset-request" />
                 <Button
                   type="submit"
                   disabled={loading}

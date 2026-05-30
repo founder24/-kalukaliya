@@ -5,7 +5,6 @@ import worker from '../src/index';
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
-    CF_TURNSTILE_SECRET: 'test-turnstile-secret',
     BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
@@ -146,7 +145,7 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
   });
 
   it('JWT-protected endpoint without token gets passed through to backend', async () => {
-    const env = createMockEnv();
+    const env = createMockEnv({ ALLOWED_ORIGIN: 'http://localhost:3000' });
     const ctx = createMockCtx();
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: 'ok' }), {
@@ -183,26 +182,10 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-turnstile-token': 'valid-token',
         'User-Agent': 'Mozilla/5.0',
       },
       body: JSON.stringify({ message: 'hello', lang: 'en' }),
     });
-
-    // Mock turnstile verification
-    const mockFetchImpl = vi.fn(async (url: string | Request | URL) => {
-      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-      if (urlStr.includes('challenges.cloudflare.com')) {
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-      return new Response(JSON.stringify({ reply: 'hello' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', mockFetchImpl);
 
     const response = await worker.fetch(request, env, ctx);
 
@@ -211,10 +194,10 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
   });
 
   it('Rate-limited chat POST - blocked when over limit (returns 429)', async () => {
-    const windowKey = Math.floor(Date.now() / (60 * 60 * 1000));
     const store: Record<string, string> = {};
 
     const env = createMockEnv({
+      ALLOWED_ORIGIN: 'http://localhost:3000',
       RATE_LIMIT_KV: {
         get: vi.fn(async (key: string) => {
           // Return 30 (at limit) for any rate-limit key
@@ -227,14 +210,7 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     });
     const ctx = createMockCtx();
 
-    // Mock turnstile to return success
-    vi.stubGlobal('fetch', vi.fn(async (url: string | Request | URL) => {
-      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-      if (urlStr.includes('challenges.cloudflare.com')) {
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+    vi.stubGlobal('fetch', vi.fn(async () => {
       return new Response(JSON.stringify({ reply: 'hello' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -245,7 +221,6 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-turnstile-token': 'valid-token',
         'User-Agent': 'Mozilla/5.0',
       },
       body: JSON.stringify({ message: 'hello', lang: 'en' }),
@@ -264,14 +239,7 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     });
     const ctx = createMockCtx();
 
-    // Mock turnstile + backend
-    vi.stubGlobal('fetch', vi.fn(async (url: string | Request | URL) => {
-      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-      if (urlStr.includes('challenges.cloudflare.com')) {
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+    vi.stubGlobal('fetch', vi.fn(async () => {
       return new Response(JSON.stringify({ reply: 'hello' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -282,7 +250,6 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-turnstile-token': 'valid-token',
         'User-Agent': 'Mozilla/5.0',
       },
       body: JSON.stringify({ message: 'hello', lang: 'en' }),

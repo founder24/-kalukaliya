@@ -80,10 +80,6 @@ vi.mock('@/utils/api', () => ({
   getAnonId: vi.fn(() => 'anon-test-id'),
 }));
 
-vi.mock('@/hooks/useTurnstile', () => ({
-  useTurnstile: () => ({ token: null, reset: vi.fn(), ready: false, enabled: false }),
-}));
-
 vi.mock('@/utils/analytics', () => ({
   Analytics: { page: vi.fn(), event: vi.fn(), identify: vi.fn() },
 }));

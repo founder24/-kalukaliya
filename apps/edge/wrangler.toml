@@ -52,7 +52,6 @@ bucket_name = "syrabit-assets"
 
 # Secrets (set via: npx wrangler secret put <NAME> --env production):
 # - JWT_SECRET
-# - CF_TURNSTILE_SECRET
 # - BACKEND_URL
 
 [env.production.vars]

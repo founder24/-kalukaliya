@@ -4539,7 +4539,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             ))}
           </div>
           <p className="text-[11px] text-gray-400 mt-3 text-center">
-            Cloudflare Enterprise zone retained for WAF · Turnstile · mTLS · Zero Trust · Pages
+            Cloudflare Enterprise zone retained for WAF · mTLS · Zero Trust · Pages
             {' '}·{' '}
             <a href="/docs/infra/startup-credits-migration.md" className="underline hover:text-violet-600 transition-colors" target="_blank" rel="noopener noreferrer">
               View migration runbook →

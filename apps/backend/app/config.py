@@ -26,7 +26,6 @@ class Settings(BaseSettings):
     # --- P1: Cloudflare (Edge) — not used by backend at runtime ---
     CF_ACCOUNT_ID: Optional[str] = None
     CF_API_TOKEN: Optional[str] = None
-    CF_TURNSTILE_SECRET: Optional[str] = None
     CF_R2_BUCKET: str = "syrabit-assets"
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None

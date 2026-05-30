@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Loader2, User, CheckCircle, AlertCircle, BookOpen, Zap, GraduationCap } from 'lucide-react';
 import { usePublicStats } from '@/hooks/usePublicStats';
@@ -8,8 +8,6 @@ import { useAuth } from '@/context/AuthContext';
 import { formatAuthError } from '@/lib/authErrors';
 import { toast } from 'sonner';
 import { LogoFull } from '@/components/Logo';
-import TurnstileWidget from '@/components/TurnstileWidget';
-import { useTurnstileConfig } from '@/hooks/useTurnstile';
 
 
 const getPasswordStrength = (password) => {
@@ -50,10 +48,6 @@ export default function SignupPage() {
   const [emailConfirmationSent, setEmailConfirmationSent] = useState(false);
   const { signup } = useAuth();
   const navigate = useNavigate();
-  const turnstileRef = useRef(null);
-  const { enabled: turnstileEnabled } = useTurnstileConfig();
-  const [turnstileToken, setTurnstileToken] = useState('');
-  const submitBlocked = turnstileEnabled && !turnstileToken;
 
   const strength = getPasswordStrength(password);
   const passwordsMatch = confirmPassword && password === confirmPassword;
@@ -99,22 +93,9 @@ export default function SignupPage() {
       setError('Please provide consent for data processing under the DPDP Act');
       return;
     }
-    // Task #451 — when bot-protection is enabled but the widget has
-    // not yet minted a token, block at the page layer so we never
-    // dispatch the signup API call without proof-of-human. This is
-    // the pre-token gate that complements the backend's
-    // turnstile_required dependency.
-    if (submitBlocked) {
-      setError('Please complete the verification challenge before creating your account.');
-      return;
-    }
     setLoading(true);
-    // Task #404 — turnstile token captured via TurnstileWidget's
-    // onToken callback (empty when the widget is disabled / not
-    // rendered; backend dependency is dormant in that case so the
-    // request still succeeds).
     try {
-      const user = await signup(name, email, password, consentDpdp, turnstileToken);
+      const user = await signup(name, email, password, consentDpdp);
       toast.success('Account created! Welcome to Syrabit.ai!');
       const role = user?.role || '';
       if (role === 'staff' || role === 'admin') {
@@ -129,9 +110,6 @@ export default function SignupPage() {
       }
       setError(formatAuthError(err, 'Signup failed. Please try again.'));
     } finally {
-      // Tokens are one-shot per the Turnstile contract.
-      turnstileRef.current?.reset?.();
-      setTurnstileToken('');
       setLoading(false);
     }
   };
@@ -461,18 +439,10 @@ export default function SignupPage() {
                 </span>
               </div>
 
-              <TurnstileWidget
-                ref={turnstileRef}
-                action="signup"
-                onToken={setTurnstileToken}
-                onExpire={() => setTurnstileToken('')}
-                onError={() => setTurnstileToken('')}
-              />
-
               <button
                 type="submit"
-                disabled={loading || submitBlocked}
-                aria-disabled={loading || submitBlocked ? true : undefined}
+                disabled={loading}
+                aria-disabled={loading ? true : undefined}
                 className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-bold text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-60 btn-gradient"
                 data-testid="auth-submit-button"
               >
