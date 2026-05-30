@@ -26,6 +26,7 @@
     "/sitemap-static.xml",
     "/sitemap-subjects.xml",
     "/sitemap-chapters.xml",
+    "/sitemap-topics.xml",
     "/static/*"
   ]
 }

@@ -61,6 +61,10 @@
   Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
   Content-Type: application/rss+xml; charset=utf-8
 
+/api/v1/seo/feed.json
+  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Content-Type: application/feed+json; charset=utf-8
+
 /llms.txt
   Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
   Content-Type: text/plain; charset=utf-8
