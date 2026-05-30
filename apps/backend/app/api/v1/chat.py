@@ -540,7 +540,10 @@ async def chat_stream(
                 raw = raw[6:].strip()
             try:
                 data = json.loads(raw)
-                if isinstance(data, dict) and "__syrabit_stream_complete_7f3a9b2e__" in data:
+                if (
+                    isinstance(data, dict)
+                    and "__syrabit_stream_complete_7f3a9b2e__" in data
+                ):
                     full_response = data["full_response"]
                     actual_model = data["actual_model"]
                     continue
