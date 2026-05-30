@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     JWT_SECRET: str = "dev-only-secret-not-for-production-use-32chars"
     ADMIN_JWT_SECRET: Optional[str] = None
+
+    # --- Admin Bootstrap ---
+    # Set ADMIN_EMAIL + ADMIN_PASSWORD in Cloud Run env vars to auto-create the
+    # admin account on first startup. Subsequent restarts are safe (idempotent).
+    # Set ADMIN_FORCE_RESET=true to overwrite the password on every restart.
+    ADMIN_EMAIL: Optional[str] = None
+    ADMIN_PASSWORD: Optional[str] = None
+    ADMIN_FORCE_RESET: bool = False
     RESET_TOKEN_SECRET: Optional[str] = None
     JWT_ALGORITHM: str = "HS256"
     JWT_PRIVATE_KEY: Optional[str] = None  # PEM-encoded RSA private key for RS256

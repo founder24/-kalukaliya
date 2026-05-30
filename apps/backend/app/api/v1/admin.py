@@ -81,7 +81,15 @@ async def admin_verify(request: Request):
 async def admin_login(request: Request):
     """Admin login - accepts email/password, verifies admin role, sets httponly cookie."""
     await _csrf_check(request)
-    await _check_rate_limit(request, "admin_login", 5)
+    try:
+        await _check_rate_limit(request, "admin_login", 5)
+    except Exception as e:
+        # Fail-open for admin login: Redis unavailability must not lock out admins.
+        # Admin route is already protected by role check + bcrypt + httpOnly cookie.
+        from fastapi import HTTPException as _HTTPException
+        if isinstance(e, _HTTPException) and e.status_code == 429:
+            raise  # Re-raise genuine rate limit exhaustion (5 attempts/min)
+        logger.warning(f"Admin rate-limit check skipped (Redis unavailable): {e}")
 
     body = await request.json()
     email = body.get("email")

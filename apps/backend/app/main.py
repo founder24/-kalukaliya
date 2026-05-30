@@ -91,6 +91,36 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Vertex AI token warm-up failed: {e}")
 
+    # ── Admin Bootstrap ──────────────────────────────────────────────────────
+    # Creates or updates the admin user when ADMIN_EMAIL + ADMIN_PASSWORD are set.
+    # Safe to run on every restart — idempotent unless ADMIN_FORCE_RESET=true.
+    if settings.ADMIN_EMAIL and settings.ADMIN_PASSWORD:
+        try:
+            from app.models.user import User
+
+            existing = await User.find_one({"email": settings.ADMIN_EMAIL})
+            if existing:
+                update: dict = {"role": "admin", "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)}
+                if settings.ADMIN_FORCE_RESET:
+                    update["hashed_password"] = User.hash_password(settings.ADMIN_PASSWORD)
+                    logger.info(f"Admin password reset for: {settings.ADMIN_EMAIL}")
+                if existing.role != "admin":
+                    logger.info(f"Promoted existing user to admin: {settings.ADMIN_EMAIL}")
+                await existing.update({"$set": update})
+            else:
+                admin_user = User(
+                    email=settings.ADMIN_EMAIL,
+                    hashed_password=User.hash_password(settings.ADMIN_PASSWORD),
+                    role="admin",
+                    auth_provider="local",
+                    name="Admin",
+                )
+                await admin_user.insert()
+                logger.info(f"Admin user created: {settings.ADMIN_EMAIL}")
+        except Exception as e:
+            logger.warning(f"Admin bootstrap skipped (DB may not be ready): {e}")
+    # ─────────────────────────────────────────────────────────────────────────
+
     if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
         logger.warning(
             "WARNING: Using default JWT_SECRET. "
