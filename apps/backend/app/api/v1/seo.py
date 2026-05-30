@@ -105,7 +105,8 @@ async def sitemap_subjects():
                         "board": "$metadata.board",
                         "class_level": "$metadata.class_level",
                         "subject": "$metadata.subject",
-                    }
+                    },
+                    "max_updated_at": {"$max": "$updated_at"},
                 }
             },
         ]
@@ -119,9 +120,12 @@ async def sitemap_subjects():
             subject = group.get("subject", "")
             if board and class_level and subject:
                 loc = f"{BASE_URL}/render/{board}/{class_level}/{subject}"
+                lastmod_str = ""
+                if item.get("max_updated_at"):
+                    lastmod_str = f"\n    <lastmod>{item['max_updated_at'].strftime('%Y-%m-%d')}</lastmod>"
                 urls.append(
                     f"  <url>\n"
-                    f"    <loc>{loc}</loc>\n"
+                    f"    <loc>{loc}</loc>{lastmod_str}\n"
                     f"    <changefreq>weekly</changefreq>\n"
                     f"    <priority>0.8</priority>\n"
                     f"  </url>"

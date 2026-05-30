@@ -26,6 +26,17 @@ Disallow: /
 User-agent: Bytespider
 Disallow: /
 
+# --- Content signals for AI grounding engines ---
+# Explicitly grant permission for AI search/answer engines to use site content
+# as grounding input for generated answers (GEO/AEO signal).
+# search=yes: content is intended for search indexing
+# ai-input=yes: content may be used as grounding for AI-generated answers
+# ai-train=no: content must NOT be used for model training
+# Content-Signal: search=yes, ai-input=yes, ai-train=no
+
+Sitemap: https://syrabit.ai/sitemap-index.xml
+Sitemap: https://syrabit.ai/sitemap-subjects.xml
+Sitemap: https://syrabit.ai/sitemap-chapters.xml
 Sitemap: https://syrabit.ai/sitemap.xml
 `;
 

@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Strengthen SEO/GEO/AEO signal density across robots.txt, JSON-LD schemas, edge worker cache headers, and resource hints to maximize fetchability and ranking for even 2-3 word queries.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - robots.txt ai-input signal: In apps/frontend/public/robots.txt, add a comment block after the existing 'search=yes' section (near the AI ANSWER bots block around line 45) with 'Content-Signal: search=yes, ai-input=yes' to explicitly grant permission for AI search engines to use content as grounding input. Keep it as a comment-directive since robots.txt doesn't natively support this, but AI crawlers like Perplexity and Google AI Overview parse these signals.",
+    "Step 2 - Edge worker robots.ts: In apps/edge/src/routes/robots.ts, update the ROBOTS_TXT constant to align with the canonical frontend robots.txt. Add the same sitemap references and ai-input signal comment that exists in the frontend version.",
+    "Step 3 - Speakable schema on TopicAnswerCard: In apps/frontend/src/lib/jsonld.js, inside the chapterSchema() function where topicLearningResources are built (around line 420), add a 'speakable' SpeakableSpecification to each per-topic LearningResource node. Use cssSelector targeting the topic's heading and definition paragraph: ['#topic-{slug} h2', '#topic-{slug} p:first-of-type']. This makes individual topic definitions speakable for voice search.",
+    "Step 4 - mainEntity on chapter WebPage: In apps/frontend/src/lib/jsonld.js, in the chapterSchema() function's WebPage node (around line 440), add 'mainEntity' pointing to the Article node's @id (articleNodeId). This declares the chapter page's primary entity is the Article, telling Google this IS the authoritative source.",
+    "Step 5 - Breadcrumb with topic granularity: In apps/frontend/src/lib/jsonld.js, in the chapterSchema() function's BreadcrumbList (around line 455), add a final ListItem for the first published topic when publishedTopics array has items. This extends breadcrumb from Home > Board > Class > Subject > Chapter to include the first topic name.",
+    "Step 6 - Aggressive CDN cache headers for bot renders: In apps/frontend/public/_worker.js, in the botRender() function (around line 227), change the Cache-Control header from 'public, max-age=300, s-maxage=300' to 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600'. Also add 'X-Robots-Tag: all, max-snippet:-1, max-image-preview:large' header to the bot-rendered response. Similarly update the prerender snapshot response (around line 210 where X-Source: prerender is set) with the same aggressive cache and X-Robots-Tag headers.",
+    "Step 7 - Preconnect/DNS-prefetch hints in index.html: In apps/frontend/index.html, after the existing dns-prefetch for posthog (around line 105), add '<link rel=\"preconnect\" href=\"https://api.syrabit.ai\" crossorigin />' and '<link rel=\"dns-prefetch\" href=\"https://api.syrabit.ai\" />' to reduce API connection latency. The comment <!--BACKEND_PRECONNECT--> placeholder already exists - verify the Vite plugin handles this, and if not inject it directly.",
+    "Step 8 - Content page _headers for X-Robots-Tag: In apps/frontend/public/_headers, add an X-Robots-Tag header for content page paths. Under the existing /assamboard/* and /learn/* blocks, add 'X-Robots-Tag: all, max-snippet:-1, max-image-preview:large' to signal full indexability. Also add the same for /subject/* paths.",
+    "Step 9 - Sitemap lastmod enhancement: In apps/backend/app/api/v1/seo.py, in the sitemap_subjects() function, add lastmod and changefreq elements. Use an aggregation to get the max updated_at per subject group. Also ensure sitemap_chapters already has lastmod (it does - verified) but add changefreq=weekly tag where missing.",
+    "Step 10 - Title tag optimization: In apps/frontend/src/pages/ChapterPage.jsx, the PageMeta title already includes chapter + topic names (lines 1100-1110). Enhance the base title construction (around line 1088) to always append board + class when the title is short enough (under 60 chars), e.g. 'Thermodynamics - Physics AHSEC Class 12' pattern for exact-match ranking."
+  ],
+  "acceptance_criteria": [
+    "robots.txt contains 'ai-input=yes' content signal comment",
+    "Edge worker robots.ts has been aligned with sitemap references",
+    "Per-topic LearningResource nodes in chapterSchema() include speakable SpeakableSpecification",
+    "WebPage node in chapterSchema() includes mainEntity referencing the Article @id",
+    "BreadcrumbList in chapterSchema() includes topic-level breadcrumb when topics exist",
+    "Bot-rendered pages from _worker.js have Cache-Control with s-maxage=86400 and X-Robots-Tag: all",
+    "index.html has preconnect to api.syrabit.ai",
+    "_headers file includes X-Robots-Tag for content paths",
+    "sitemap_subjects() includes lastmod from DB aggregation",
+    "ChapterPage title includes board+class for exact-match keywords"
+  ],
+  "verification": [
+    "Run 'cd /projects/sandbox/-kalukaliya/apps/frontend && npx vitest run --passWithNoTests' to ensure no test regressions",
+    "Validate robots.txt contains the new ai-input signal by reading the file",
+    "Validate _worker.js contains updated cache headers by reading the bot-render section",
+    "Validate jsonld.js chapterSchema output includes speakable and mainEntity by tracing the code"
+  ],
+  "blocked_reason": null,
+  "findings": "All 10 steps implemented and verified. 62/63 test files pass; 1 file (AdminHealth.credits.test.jsx) has 5 pre-existing failures unrelated to this change (verified by stashing changes and re-running). node_modules must be installed first (npm install in apps/frontend) before tests can run."
+}
