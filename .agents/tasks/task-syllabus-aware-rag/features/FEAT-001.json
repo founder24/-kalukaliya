@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Enrich Vertex Search indexed documents with syllabus hierarchy metadata and topic micro-documents. Update content_publisher.py to resolve the full Board > Class > Stream > Subject hierarchy for each chapter, include topic titles/definitions in chunk metadata, and index each topic as its own micro-document. Update chat_service.py to include hierarchy info in the system prompt context format.",
+  "status": "completed",
+  "steps": [
+    "Add a private async method `_resolve_hierarchy(self, chapter: Chapter)` to ContentPublisherService in apps/backend/app/services/content_publisher.py that loads Subject, Stream, Class, and Board using Beanie `get()` lookups. Return a dict with keys: subject, stream, cls, board (or None for each if not found).",
+    "Modify `publish_to_vertex_search()` in apps/backend/app/services/content_publisher.py to call `_resolve_hierarchy()` at the top, then enrich each chunk's struct_data with: topics (comma-joined titles from chapter.published_topics), topic_definitions (semicolon-joined 'title: definition' pairs), subject_name, class_name, board_name, stream_name, and hierarchy string (board > class > stream > subject > chapter title).",
+    "After the existing chunk loop in `publish_to_vertex_search()`, add a second loop over chapter.published_topics that creates a micro-document for each topic with doc_id = f'{str(chapter.id)}_topic_{topic.id}', containing: chapter_id, title (f'{topic.title} - {chapter.title}'), content (topic.definition or fallback string), topic_title, topic_slug, subject_name, class_name, board_name, stream_name, hierarchy (with topic at end), keywords, and is_topic_doc='true'.",
+    "In apps/backend/app/services/chat_service.py, update the `build_system_prompt` method's context_text formatting to include hierarchy info: change the format from `f'[{i + 1}] {chunk[\"title\"]}: {chunk[\"content\"]}'` to `f'[{i + 1}] {chunk[\"title\"]} ({chunk.get(\"hierarchy\", \"\")}): {chunk[\"content\"]}'` - but only show the parenthesized hierarchy if the value is non-empty.",
+    "Add a test file apps/backend/tests/test_content_publisher.py with tests that verify: (a) _resolve_hierarchy returns correct values when all documents exist, (b) _resolve_hierarchy handles missing documents gracefully, (c) publish_to_vertex_search enriches chunks with hierarchy fields, (d) publish_to_vertex_search creates topic micro-documents, (e) the system prompt in chat_service includes hierarchy when available."
+  ],
+  "acceptance_criteria": [
+    "Running `python -m pytest tests/test_content_publisher.py -x -q` from apps/backend passes all new tests",
+    "The _resolve_hierarchy method loads Subject, Stream, Class, Board via Beanie get() and returns a dict",
+    "Each indexed chunk in publish_to_vertex_search includes topics, topic_definitions, subject_name, class_name, board_name, stream_name, hierarchy fields",
+    "Each topic in published_topics generates a micro-document with is_topic_doc='true'",
+    "The chat_service build_system_prompt includes hierarchy in the context line when available",
+    "Existing tests continue to pass"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_content_publisher.py -x -q",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_chat.py -x -q",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 199 existing tests continue to pass. The google-cloud-discoveryengine package is not installed in the test environment, so publish tests mock the imports using sys.modules patching with fake Document/UpdateRequest classes and real struct_pb2.Struct for data capture."
+}
