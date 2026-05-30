@@ -1,0 +1,110 @@
+You are deploying and auditing a fullstack monorepo called "Syrabit" (syrabit-monorepo v3.0.0).
+
+## Project Structure
+- **Backend**: FastAPI (Python 3.11+) at `apps/backend/` — runs on port 4000 (uvicorn)
+- **Frontend**: React 18 + Vite 7 + TailwindCSS at `apps/frontend/` — runs on port 25144
+- **Edge**: Cloudflare Worker at `apps/edge/` (NOT used for chat/AI — only edge shield/routing)
+- **Infra**: MongoDB 7, Redis 7 (with Upstash-compatible REST proxy via serverless-redis-http)
+- **Package Manager**: pnpm 10.26+ (workspace monorepo), Node >= 22
+- **Docker Compose**: defines mongo, redis, redis-rest, and backend services
+
+## AI/Chat Integration Rules
+- English language slot/chat: Google Vertex AI
+- Assamese language slot/chat: Sarvam AI
+- Do NOT use Cloudflare Worker AI for chat functionality
+
+## Step 1: Environment Setup
+1. Install Python 3.11+ dependencies: `cd apps/backend && pip install -r requirements.txt`
+2. Install Node dependencies: `pnpm install` (from root)
+3. Set up MongoDB (use Replit's built-in or a free Atlas cluster)
+4. Set up Redis (use Replit's KeyDB or Upstash free tier)
+5. Create `.env` at root with:
+   - MONGODB_URI=<connection string>
+   - UPSTASH_REDIS_REST_URL=<redis rest url>
+   - UPSTASH_REDIS_REST_TOKEN=<redis rest token>
+   - APP_ENV=development
+   - DEBUG=True
+   - VERTEX_AI credentials (for English chat)
+   - SARVAM_AI_API_KEY (for Assamese chat)
+
+## Step 2: Start Services
+1. Backend: `cd apps/backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 4000`
+2. Frontend: `cd apps/frontend && pnpm dev` (serves on port 25144, proxied to 0.0.0.0)
+3. Verify backend health: `curl http://localhost:4000/health`
+4. Verify frontend loads: open the Replit webview on port 25144
+
+## Step 3: Live Deployment Audit Checklist
+Run through each and report PASS/FAIL with details:
+
+### Backend API Audit
+- [ ] `/health` returns 200 OK
+- [ ] `/docs` (Swagger UI) loads and lists all endpoints
+- [ ] Authentication endpoints work (signup, login, token refresh)
+- [ ] MongoDB connection is alive (test a read operation)
+- [ ] Redis connection is alive (test cache set/get)
+- [ ] CORS headers allow frontend origin
+- [ ] Error responses return proper JSON (not stack traces)
+- [ ] Rate limiting is active on sensitive endpoints
+
+### Frontend Audit
+- [ ] Vite dev server starts without build errors
+- [ ] Homepage renders (check for React hydration errors in console)
+- [ ] API calls from frontend reach backend (check network tab)
+- [ ] Routing works (navigate between pages, no 404s)
+- [ ] Responsive design loads on mobile viewport
+- [ ] Web Vitals are acceptable (LCP < 2.5s, CLS < 0.1)
+
+### Chat/AI Integration Audit
+- [ ] English chat endpoint connects to Google Vertex AI (NOT Cloudflare Workers AI)
+- [ ] Assamese chat endpoint connects to Sarvam AI
+- [ ] Streaming responses work (SSE or WebSocket)
+- [ ] Error handling for AI service timeouts
+- [ ] Token/usage tracking is functional
+
+### Security Audit
+- [ ] No secrets/API keys in client-side bundle
+- [ ] Authentication tokens use httpOnly cookies or secure storage
+- [ ] Input sanitization on user-facing endpoints (DOMPurify on frontend)
+- [ ] HTTPS enforcement in production config
+- [ ] Dependency vulnerabilities: run `pnpm audit` and `pip audit` (or safety check)
+
+### Database & Persistence Audit
+- [ ] MongoDB indexes are defined for query-heavy collections
+- [ ] Beanie ODM models match the DB schema
+- [ ] Redis caching layer functions (cache hit/miss observable)
+- [ ] Data retention/TTL policies are configured
+
+### DevOps & Build Audit
+- [ ] `pnpm build:frontend` produces optimized output in `dist/`
+- [ ] SSR build (`build:ssr`) completes without errors
+- [ ] Docker build works: `docker build -t syrabit-backend ./apps/backend`
+- [ ] Environment variables are validated at startup (fail fast on missing)
+- [ ] Healthcheck endpoint is production-ready
+
+## Step 4: Generate Report
+Create a `REPLIT_DEPLOYMENT_AUDIT.md` file with:
+- Timestamp
+- Environment details (Node version, Python version, OS)
+- Each checklist item with PASS/FAIL and notes
+- Critical issues (blockers for production)
+- Warnings (non-blocking but should fix)
+- Recommendations for production hardening
+
+## Replit-Specific Config
+In `.replit` file, configure:
+```toml
+run = "bash -c 'cd apps/backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 4000 & cd apps/frontend && pnpm dev'"
+
+[nix]
+channel = "stable-24_05"
+
+[env]
+PORT = "25144"
+
+[[ports]]
+localPort = 4000
+externalPort = 4000
+
+[[ports]]
+localPort = 25144
+externalPort = 80
