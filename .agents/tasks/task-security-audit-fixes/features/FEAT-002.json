@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Add timeout wrapping and degraded status logic to /health/deep endpoint in the backend. Currently, slow probes (especially vertex_search warm_up) can make the entire deep health check timeout. Add asyncio.wait_for with 5s timeout to each probe, and implement degraded logic: only return 503 if core services (mongodb, redis) are down; if only non-critical services (vertex_search, vertex_ai) are unhealthy, return 200 with status 'degraded'.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/api/v1/health.py, add 'import asyncio' at the top",
     "Add a helper function '_safe_check(coro, timeout=5.0)' that wraps a coroutine with asyncio.wait_for. On TimeoutError, return {'status': 'unhealthy', 'error': 'timeout'}. On other exceptions, return {'status': 'unhealthy', 'error': str(e)}.",
@@ -23,5 +23,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/v1/health.py').read())\" to confirm syntax is valid"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 8 tests in test_endpoints_audit.py pass. Required installing many dependencies manually since requirements.txt uses hash-pinning that caused install failures. pytest-env plugin also needed for env vars in pytest.ini."
 }
