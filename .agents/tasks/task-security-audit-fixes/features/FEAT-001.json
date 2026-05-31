@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Add sensitive path blocking rules to _redirects and missing security headers to _headers. These are static file changes for Cloudflare Pages.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/frontend/public/_redirects, add a new comment block '# Block sensitive paths - return 404 for common attack vectors' BEFORE the existing trailing-slash rules, followed by rules for: /.env, /.env.*, /.git/*, /.htaccess, /.DS_Store, /.svn/*, /wp-admin, /wp-login.php, /server-status, /phpinfo.php, /web.config, /wrangler.toml, /package.json, /tsconfig.json, /Dockerfile, /docker-compose.yml, /.dockerignore. Each rule format: '/path /index.html 404'",
     "In apps/frontend/public/_headers, add six new headers to the existing /* block (after the existing Permissions-Policy line): X-XSS-Protection: 1; mode=block, X-DNS-Prefetch-Control: on, X-Download-Options: noopen, X-Permitted-Cross-Domain-Policies: none, Cross-Origin-Resource-Policy: same-origin, Cross-Origin-Embedder-Policy: credentialless"
@@ -17,5 +17,5 @@
     "Visually inspect _headers to confirm the /* block has all original headers plus the 6 new ones"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Static config files only - no build/test needed. Both files verified visually correct."
 }
