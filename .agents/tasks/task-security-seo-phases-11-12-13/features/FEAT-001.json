@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Install frontend dependencies to establish a working baseline for development and testing.",
+  "status": "completed",
+  "steps": [
+    "Run `npm install` in apps/frontend/ to install all dependencies",
+    "Run `npx vitest run --passWithNoTests` to confirm existing tests pass"
+  ],
+  "acceptance_criteria": [
+    "npm install completes without errors",
+    "vitest run completes (pass or passWithNoTests)"
+  ],
+  "verification": [
+    "Run `cd apps/frontend && npm install && npx vitest run --passWithNoTests`"
+  ],
+  "blocked_reason": null,
+  "findings": "npm install completed (882 packages, 0 vulnerabilities). vitest ran successfully: 62/63 test files passed, 579/584 tests passed. 5 pre-existing failures in AdminHealth.credits.test.jsx (tests look for azure-credit-panel data-testid which no longer renders under the Infrastructure tab - appears to be a UI refactor that moved the panel to a different tab). These failures are not caused by any changes in this task."
+}
