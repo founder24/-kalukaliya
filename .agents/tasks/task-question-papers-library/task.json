@@ -1,0 +1,14 @@
+{
+  "task_id": "task-question-papers-library",
+  "task_description": "Add Question Papers section to the library page - create MongoDB model for question paper metadata, backend API endpoint to serve them, and frontend components to display cards with links to R2-stored images",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "Frontend builds successfully with vite. Backend model imports correctly and endpoint is registered. QuestionPapersSection renders in LibraryPage via lazy loading. Review fixes applied: pagination, configurable URL, Show More button."
+  }
+}

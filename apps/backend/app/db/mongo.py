@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.chat import Chat
 from app.models.feedback import ChatFeedback
 from app.models.knowledge import KnowledgeObject
-from app.models.content import Board, Class, Stream, Subject, Chapter
+from app.models.content import Board, Class, Stream, Subject, Chapter, QuestionPaper
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
@@ -53,6 +53,7 @@ async def init_mongo() -> None:
                     Stream,
                     Subject,
                     Chapter,
+                    QuestionPaper,
                 ],
             )
 
@@ -134,6 +135,17 @@ async def create_indexes() -> None:
     await db.streams.create_index([("class_id", ASCENDING)])
     await db.subjects.create_index([("stream_id", ASCENDING)])
     await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
+
+    # Question papers indexes
+    await db.question_papers.create_index(
+        [
+            ("board", ASCENDING),
+            ("class_level", ASCENDING),
+            ("subject", ASCENDING),
+            ("year", ASCENDING),
+        ]
+    )
+    await db.question_papers.create_index([("status", ASCENDING)])
 
     logger.info("MongoDB indexes created/verified")
 

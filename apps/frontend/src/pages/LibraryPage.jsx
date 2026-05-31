@@ -23,6 +23,7 @@ import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSect
 
 const LazyCmsDocsSection = lazy(() => import('./library/CmsDocsSection'));
 const LazyCmsPostsGrid = lazy(() => import('./library/CmsPostsGrid'));
+const LazyQuestionPapersSection = lazy(() => import('./library/QuestionPapersSection'));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: /library and its /browser alias are intentionally AD-FREE in the
@@ -735,6 +736,11 @@ export default function LibraryPage() {
               )
             )}
           </div>
+          <LazyOnVisible>
+            <Suspense fallback={null}>
+              <LazyQuestionPapersSection />
+            </Suspense>
+          </LazyOnVisible>
           <LazyOnVisible>
             <Suspense fallback={null}>
               <LazyCmsDocsSection />
