@@ -9,6 +9,9 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -141,8 +144,9 @@ jobs:
             --region ${{ secrets.GCP_REGION }} \
             --format 'value(status.url)')
           echo "Polling ${SERVICE_URL}/health for up to 150 seconds..."
+          ID_TOKEN=$(gcloud auth print-identity-token --audiences="${SERVICE_URL}")
           for i in $(seq 1 30); do
-            if curl -sf "${SERVICE_URL}/health" --max-time 5; then
+            if curl -sf "${SERVICE_URL}/health" -H "Authorization: Bearer ${ID_TOKEN}" --max-time 5; then
               echo ""
               echo "Backend healthy after $((i * 5)) seconds"
               exit 0
@@ -215,7 +219,7 @@ jobs:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
