@@ -11,7 +11,7 @@ class User(Document):
     email: Optional[EmailStr] = None
     hashed_password: Optional[str] = None
     auth_provider: Literal["local", "anonymous"] = "anonymous"
-    role: Optional[Literal["student", "educator", "staff", "admin"]] = None
+    role: Optional[Literal["student", "educator", "staff", "admin"]] = "student"
 
     # Subscription
     subscription_tier: Literal["free", "pro"] = "free"

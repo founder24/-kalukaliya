@@ -22,6 +22,7 @@ const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(getToken);
   const [loading, setLoading] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
   const justAuthenticated = useRef(false);
@@ -46,6 +47,7 @@ export const AuthProvider = ({ children }) => {
           if (getRefreshToken()) {
             try {
               const newToken = await silentRefresh();
+              setToken(newToken);
               res = await axios.get(`${API_BASE}/users/me`, {
                 withCredentials: true,
                 headers: newToken ? { Authorization: `Bearer ${newToken}` } : {},
@@ -120,6 +122,7 @@ export const AuthProvider = ({ children }) => {
       const { access_token, refresh_token } = res.data;
       storeToken(access_token);
       storeRefreshToken(refresh_token);
+      setToken(access_token);
       // Fetch user profile immediately
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
@@ -147,6 +150,7 @@ export const AuthProvider = ({ children }) => {
       const { access_token, refresh_token } = res.data;
       storeToken(access_token);
       storeRefreshToken(refresh_token);
+      setToken(access_token);
       // Fetch user profile immediately
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
@@ -172,8 +176,11 @@ export const AuthProvider = ({ children }) => {
         { refresh_token: getRefreshToken() },
         { withCredentials: true, headers },
       );
-    } catch {}
+    } catch (err) {
+      try { Analytics.track('logout_backend_error', { status: err?.response?.status }); } catch {}
+    }
     clearTokens();
+    setToken(null);
     justAuthenticated.current = false;
     localStorage.removeItem('syrabit:onboarding');
     setUser(null);
@@ -191,7 +198,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{
       user,
-      token: getToken(),
+      token,
       loading,
       authChecked,
       login,
@@ -200,7 +207,7 @@ export const AuthProvider = ({ children }) => {
       refreshUser,
       updateUser,
       justAuthenticated,
-      authHeader: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+      authHeader: token ? { Authorization: `Bearer ${token}` } : {},
       API: API_BASE,
     }}>
       {children}

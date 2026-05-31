@@ -24,7 +24,7 @@ export const StaffGuard = ({ children }) => {
 
   if (!user) return <Navigate to="/login" replace />;
   const role = user.role || '';
-  if (role !== 'staff' && role !== 'admin' && !user.is_admin) {
+  if (role !== 'staff' && role !== 'admin') {
     return <Navigate to="/" replace />;
   }
 

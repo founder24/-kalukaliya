@@ -27,6 +27,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin"])
 
 
+def _get_admin_signing_key() -> tuple:
+    """Get the key and algorithm for signing admin JWTs."""
+    if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
+        return settings.JWT_PRIVATE_KEY, "RS256"
+    return settings.ADMIN_JWT_SECRET or settings.JWT_SECRET, "HS256"
+
+
+def _get_admin_verification_key() -> tuple:
+    """Get the key and algorithm for verifying admin JWTs."""
+    if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
+        return settings.JWT_PUBLIC_KEY, "RS256"
+    return settings.ADMIN_JWT_SECRET or settings.JWT_SECRET, "HS256"
+
+
 async def _csrf_check(request: Request):
     """Validate Origin/Referer for CSRF protection on admin endpoints."""
     if request.method in ("POST", "PUT", "DELETE"):
@@ -52,14 +66,11 @@ async def _validate_admin_session(request: Request) -> dict:
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             try:
-                if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
-                    verify_key = settings.JWT_PUBLIC_KEY
-                else:
-                    verify_key = settings.ADMIN_JWT_SECRET or settings.JWT_SECRET
+                verify_key, verify_alg = _get_admin_verification_key()
                 payload = jwt.decode(
                     token,
                     verify_key,
-                    algorithms=[settings.JWT_ALGORITHM],
+                    algorithms=[verify_alg],
                 )
                 # For Bearer tokens with type "admin", allow directly
                 if payload.get("type") == "admin" and payload.get("role") == "admin":
@@ -85,15 +96,11 @@ async def _validate_admin_session(request: Request) -> dict:
                 raise HTTPException(status_code=401, detail="Invalid or expired token")
         raise HTTPException(status_code=401, detail="No admin session")
     try:
-        # RS256 requires the public key for verification, not the private key
-        if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
-            verify_key = settings.JWT_PUBLIC_KEY
-        else:
-            verify_key = settings.ADMIN_JWT_SECRET or settings.JWT_SECRET
+        verify_key, verify_alg = _get_admin_verification_key()
         payload = jwt.decode(
             session_cookie,
             verify_key,
-            algorithms=[settings.JWT_ALGORITHM],
+            algorithms=[verify_alg],
         )
         if payload.get("type") != "admin" or payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -119,14 +126,11 @@ async def admin_login(request: Request):
     await _csrf_check(request)
     try:
         await _check_rate_limit(request, "admin_login", 5)
+    except HTTPException:
+        raise  # Re-raise 429 (rate limit) or 503 (Redis unavailable)
     except Exception as e:
-        # Fail-open for admin login: Redis unavailability must not lock out admins.
-        # Admin route is already protected by role check + bcrypt + httpOnly cookie.
-        from fastapi import HTTPException as _HTTPException
-
-        if isinstance(e, _HTTPException) and e.status_code == 429:
-            raise  # Re-raise genuine rate limit exhaustion (5 attempts/min)
-        logger.warning(f"Admin rate-limit check skipped (Redis unavailable): {e}")
+        logger.warning(f"Admin rate-limit check failed (Redis unavailable): {e}")
+        raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
 
     body = await request.json()
     email = body.get("email")
@@ -161,10 +165,11 @@ async def admin_login(request: Request):
         "role": "admin",
         "exp": expire,
     }
+    signing_key, signing_alg = _get_admin_signing_key()
     admin_token = jwt.encode(
         token_payload,
-        settings.ADMIN_JWT_SECRET or settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
+        signing_key,
+        algorithm=signing_alg,
     )
 
     response = JSONResponse(

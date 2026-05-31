@@ -1,27 +1,28 @@
 {
   "id": "FEAT-002",
   "type": "fix",
-  "description": "Add timeout wrapping and degraded status logic to /health/deep endpoint in the backend. Currently, slow probes (especially vertex_search warm_up) can make the entire deep health check timeout. Add asyncio.wait_for with 5s timeout to each probe, and implement degraded logic: only return 503 if core services (mongodb, redis) are down; if only non-critical services (vertex_search, vertex_ai) are unhealthy, return 200 with status 'degraded'.",
+  "description": "Fix all frontend security issues (M-1, M-2, M-3, L-2, L-3) across AuthContext.jsx, useAuthRefresh.js, StaffGuard.jsx, and AdminPage.jsx",
   "status": "completed",
   "steps": [
-    "In apps/backend/app/api/v1/health.py, add 'import asyncio' at the top",
-    "Add a helper function '_safe_check(coro, timeout=5.0)' that wraps a coroutine with asyncio.wait_for. On TimeoutError, return {'status': 'unhealthy', 'error': 'timeout'}. On other exceptions, return {'status': 'unhealthy', 'error': str(e)}.",
-    "In the deep_health_check function, replace the direct await calls with _safe_check wrappers: e.g. 'mongodb': await _safe_check(mongo_ping()), 'redis': await _safe_check(redis_ping()), etc.",
-    "Change the overall status logic: define CORE_SERVICES = {'mongodb', 'redis'} and NON_CRITICAL_SERVICES = {'vertex_search', 'vertex_ai'}. If any core service is unhealthy, return 503 with status 'unhealthy'. If only non-critical services are unhealthy, return 200 with status 'degraded'. If all healthy, return 200 with status 'healthy'.",
-    "Keep the response format compatible: still return {'status': ..., 'checks': {...}}"
+    "M-1: In apps/frontend/src/context/AuthContext.jsx, make authHeader reactive. Add a [token, setToken] = useState(getToken) state. Call setToken(access_token) inside login() and signup() after storeToken(). Call setToken(newToken) in fetchMe() after silentRefresh() succeeds. Call setToken(null) in logout() after clearTokens(). In the context value, change authHeader from getToken() ? { Authorization: `Bearer ${getToken()}` } : {} to token ? { Authorization: `Bearer ${token}` } : {}. Also expose token from state instead of getToken().",
+    "M-2: In apps/frontend/src/hooks/useAuthRefresh.js withRefresh function, remove the newToken argument from the second requestFn call. Change 'return await requestFn(newToken)' to 'return await requestFn()'. The caller must use getToken() internally after silentRefresh updates the stored token.",
+    "M-3: In apps/frontend/src/components/StaffGuard.jsx, remove '&& !user.is_admin' from the guard condition on line 27. The condition should just be: if (role !== 'staff' && role !== 'admin'). The is_admin field does not exist in the UserProfile schema so it is always undefined/falsy.",
+    "L-2: In apps/frontend/src/context/AuthContext.jsx logout function, add error handling to the catch block. Currently it's an empty catch {}. Change to: catch (err) { try { Analytics.track('logout_backend_error', { status: err?.response?.status }); } catch {} }. Analytics is already imported from '@/utils/analytics' at the top of the file.",
+    "L-3: In apps/frontend/src/pages/AdminPage.jsx, remove the adminToken state variable (line 160: const [adminToken, setAdminToken] = useState(null)). Instead, since the admin auth uses httponly cookies (withCredentials:true), replace all uses of adminToken with a simple boolean verified state. Rename setAdminToken(null) calls to setVerified(false) and setAdminToken('verified') to setVerified(true). Then pass withCredentials:true (which is already in the API utility functions) instead of token. Keep passing a dummy adminToken prop as a truthy value (e.g. 'cookie') to child components that check for it as a boolean gate -- OR better: since the existing code already sets adminToken to the string 'verified', just keep a verified boolean and pass verified ? 'cookie' : null to maintain backward compat. Actually reviewing the code more carefully: adminToken is set to 'verified' (a string) and passed to child components. Since this is used as a truthy check in children, the simplest fix is to remove the state entirely and derive it from verifying state. Replace [adminToken, setAdminToken] with a derived const: const adminToken = verifying ? null : 'cookie'. Remove all setAdminToken calls. The adminGetUnacknowledgedAlertCount and adminGetSettings calls already pass withCredentials:true via the api.jsx utility (adminHeaders returns {} when token is not a real JWT)."
   ],
   "acceptance_criteria": [
-    "Each health probe is wrapped with a 5-second asyncio timeout",
-    "A single slow probe no longer blocks the entire endpoint indefinitely",
-    "If only vertex_search or vertex_ai is unhealthy/timed out, HTTP 200 is returned with status 'degraded'",
-    "If mongodb or redis is unhealthy, HTTP 503 is returned with status 'unhealthy'",
-    "If all services are healthy, HTTP 200 is returned with status 'healthy'",
-    "Existing test test_health_deep_endpoint_accessible still passes (it checks status != 500)"
+    "AuthContext exposes a reactive authHeader that updates when token changes",
+    "withRefresh does not pass token argument to the retry requestFn call",
+    "StaffGuard does not reference user.is_admin",
+    "Logout catch block logs error via Analytics.track",
+    "AdminPage does not have useState for adminToken; derives it from verification state",
+    "All JSX files have no syntax errors (verified by vite build)"
   ],
   "verification": [
-    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_endpoints_audit.py -x -v to confirm health tests pass",
-    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/v1/health.py').read())\" to confirm syntax is valid"
+    "cd apps/frontend && npx --yes acorn --ecma2022 --module src/context/AuthContext.jsx",
+    "cd apps/frontend && npx --yes acorn --ecma2022 --module src/hooks/useAuthRefresh.js",
+    "cd apps/frontend && npx --yes acorn --ecma2022 --module src/components/StaffGuard.jsx"
   ],
   "blocked_reason": null,
-  "findings": "All 8 tests in test_endpoints_audit.py pass. Required installing many dependencies manually since requirements.txt uses hash-pinning that caused install failures. pytest-env plugin also needed for env vars in pytest.ini."
+  "findings": "All 5 fixes validated with @babel/parser (JSX-aware). acorn alone cannot parse JSX files. Used node -e with @babel/parser for syntax validation. node_modules was modified by npm install of @babel/parser but not committed."
 }
