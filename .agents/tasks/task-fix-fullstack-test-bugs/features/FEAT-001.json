@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix 6 bugs/warnings discovered by the fullstack layer test script",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Bug 1 - Circuit Breaker stuck OPEN (Layer 6): In apps/backend/app/core/circuit_breaker.py, the `get_status()` method (line 148) reads `self._state.value` directly without checking for the OPEN->HALF_OPEN transition that the `state` property performs. Fix: update `get_status()` to use `self.state` (the property) instead of `self._state` so the timeout-based reset is checked. Also add a `reset()` method to allow manual reset of the circuit breaker (useful for admin/health endpoints).",
     "Bug 2 - Content subject endpoint returns 500 (Layer 7.5): In apps/backend/app/api/v1/content.py, the `list_chapters()` endpoint uses Beanie's `.project()` with a raw dict. With Beanie 1.30, this returns raw MongoDB dicts containing `ObjectId` in the `_id` field, which FastAPI's JSON encoder cannot serialize. Fix: add `\"_id\": 0` to the projection dict to exclude the unserializable `_id` field. The projected fields (slug, title, description, metadata.*) are all JSON-serializable.",
@@ -29,5 +29,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1.conversations import _validate_anon_id; print('conversations import OK')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 6 bugs fixed. Made _validate_admin_session async which required updating all callers in admin_analytics.py, admin_content.py, admin_knowledge.py, and admin_security.py to use await. Could not fully import-test modules due to missing transitive deps (jinja2, etc.) in sandbox, but all 10 files pass AST syntax check and the circuit_breaker module imports and works correctly."
 }
