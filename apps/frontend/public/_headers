@@ -6,6 +6,12 @@
   Cross-Origin-Opener-Policy: same-origin
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=()
+  X-XSS-Protection: 1; mode=block
+  X-DNS-Prefetch-Control: on
+  X-Download-Options: noopen
+  X-Permitted-Cross-Domain-Policies: none
+  Cross-Origin-Resource-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
 
 # NOTE: `Link: rel=preload` headers for the critical JS/CSS chunks are NOT
 # listed here because Vite uses content-hash filenames that change every build.
